@@ -30,6 +30,7 @@ import {
 
 const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 const NOT_FOR_CLIENT = "subject_token azp and aud do not name this client";
+const ACTOR_NOT_FOR_CLIENT = "actor_token azp and aud do not name this client";
 
 /** The calling client: `resource-server`, a confidential client enabled for the exchange. */
 const client = (overrides: Partial<PublicClient> = {}): PublicClient => ({
@@ -231,25 +232,32 @@ describe("token exchange — allowExchangeOfTokensIssuedToOthers on the registra
 	});
 });
 
-describe("token exchange — the client binding beside an actor token", () => {
-	async function delegate(
-		subjectClaims: Record<string, unknown>,
-		registered: PublicClient = client(),
-	) {
-		const subject = await signSelfIssuedAccessToken(subjectClaims);
-		const actor = await signSelfIssuedAccessToken({ sub: "svc-a" });
-		return (
-			await buildGrant(registered).handle(
-				ctx({
-					subject_token: subject,
-					subject_token_type: ACCESS_TOKEN_TYPE,
-					actor_token: actor,
-					actor_token_type: ACCESS_TOKEN_TYPE,
-				}),
-			)
-		).result;
-	}
+/**
+ * An exchange of a subject token carrying `subjectClaims` with an actor token
+ * carrying `actorClaims`; by default the actor is `svc-a` and names the calling
+ * client in its `aud`.
+ */
+async function delegate(
+	subjectClaims: Record<string, unknown>,
+	registered: PublicClient = client(),
+	actorClaims: Record<string, unknown> = { aud: "resource-server" },
+	logger: ReturnType<typeof spyLogger> = spyLogger(),
+) {
+	const subject = await signSelfIssuedAccessToken(subjectClaims);
+	const actor = await signSelfIssuedAccessToken({ sub: "svc-a", ...actorClaims });
+	return (
+		await buildGrant(registered, logger).handle(
+			ctx({
+				subject_token: subject,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: actor,
+				actor_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		)
+	).result;
+}
 
+describe("token exchange — the client binding beside an actor token", () => {
 	it("delegates to the actor when the subject token names the calling client", async () => {
 		const result = await delegate({ aud: "resource-server" });
 		expect(result.status).toBe(200);
@@ -276,5 +284,125 @@ describe("token exchange — the client binding beside an actor token", () => {
 		);
 		expect(result.status).toBe(200);
 		expect(decodeJwt(tokensOf(result).access_token).act).toEqual({ sub: "svc-a" });
+	});
+
+	it("refuses a subject token naming another client before reading the actor token", async () => {
+		const result = await delegate({ aud: "other-api", azp: "web-app" }, client(), {
+			aud: "other-api",
+			azp: "web-app",
+		});
+		expect(result).toMatchObject({ status: 400, errorDescription: NOT_FOR_CLIENT });
+	});
+});
+
+describe("token exchange — the calling client must be named by the actor token", () => {
+	const subjectForClient = { aud: "resource-server", may_act: { sub: "svc-a" } };
+
+	it("accepts an actor token whose aud is the calling client, as a string", async () => {
+		const result = await delegate(subjectForClient, client(), {
+			aud: "resource-server",
+			azp: "web-app",
+		});
+		expect(result.status).toBe(200);
+		expect(decodeJwt(tokensOf(result).access_token).act).toEqual({ sub: "svc-a" });
+	});
+
+	it("accepts an actor token whose aud array contains the calling client", async () => {
+		const result = await delegate(subjectForClient, client(), {
+			aud: ["other-api", "resource-server"],
+			azp: "web-app",
+		});
+		expect(result.status).toBe(200);
+	});
+
+	it("accepts an actor token whose azp is the calling client", async () => {
+		const result = await delegate(subjectForClient, client(), {
+			aud: "other-api",
+			azp: "resource-server",
+		});
+		expect(result.status).toBe(200);
+	});
+
+	it("refuses an actor token whose aud and azp name another client, even one may_act names", async () => {
+		const logger = spyLogger();
+		const result = await delegate(
+			subjectForClient,
+			client(),
+			{ aud: "other-api", azp: "web-app" },
+			logger,
+		);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: ACTOR_NOT_FOR_CLIENT,
+		});
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ subject: "user-1", actor: "svc-a", clientId: "resource-server" },
+			"token_exchange_actor_not_for_client",
+		);
+	});
+
+	it("refuses an actor token whose aud array does not contain the calling client", async () => {
+		const result = await delegate(subjectForClient, client(), {
+			aud: ["other-api", "billing"],
+			azp: "web-app",
+		});
+		expect(result).toMatchObject({ status: 400, errorDescription: ACTOR_NOT_FOR_CLIENT });
+	});
+
+	it("refuses an actor token that carries neither aud nor azp", async () => {
+		const result = await delegate(subjectForClient, client(), {
+			aud: undefined,
+			azp: undefined,
+		});
+		expect(result).toMatchObject({ status: 400, errorDescription: ACTOR_NOT_FOR_CLIENT });
+	});
+
+	it("does not read an actor token's client_id claim as naming the calling client", async () => {
+		const result = await delegate(subjectForClient, client(), {
+			aud: "other-api",
+			azp: "web-app",
+			client_id: "resource-server",
+		});
+		expect(result).toMatchObject({ status: 400, errorDescription: ACTOR_NOT_FOR_CLIENT });
+	});
+
+	it("refuses an actor token naming another client when the subject token carries no may_act", async () => {
+		const result = await delegate({ aud: "resource-server" }, client(), {
+			aud: "other-api",
+			azp: "web-app",
+		});
+		expect(result).toMatchObject({ status: 400, errorDescription: ACTOR_NOT_FOR_CLIENT });
+	});
+
+	it("accepts an actor token naming another client when the registration sets allowExchangeOfTokensIssuedToOthers", async () => {
+		const result = await delegate(
+			subjectForClient,
+			client({ allowExchangeOfTokensIssuedToOthers: true }),
+			{ aud: "other-api", azp: "web-app" },
+		);
+		expect(result.status).toBe(200);
+		expect(decodeJwt(tokensOf(result).access_token).act).toEqual({ sub: "svc-a" });
+	});
+
+	it("reads only a strict true for the actor token too", async () => {
+		const result = await delegate(
+			subjectForClient,
+			client({ allowExchangeOfTokensIssuedToOthers: "true" as unknown as boolean }),
+			{ aud: "other-api", azp: "web-app" },
+		);
+		expect(result).toMatchObject({ status: 400, errorDescription: ACTOR_NOT_FOR_CLIENT });
+	});
+
+	it("does not relax may_act for an actor token naming another client under the opt-out", async () => {
+		const result = await delegate(
+			{ aud: "resource-server", may_act: { sub: "svc-b" } },
+			client({ allowExchangeOfTokensIssuedToOthers: true }),
+			{ aud: "other-api", azp: "web-app" },
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			errorDescription: "may_act_violation: actor not authorized by subject token",
+		});
 	});
 });

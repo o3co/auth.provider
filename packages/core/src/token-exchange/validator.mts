@@ -48,9 +48,9 @@ export interface ExchangeTokenValidator {
 	 * `context.role` (e.g. a stricter issuer allowlist for actors) but SHOULD
 	 * default to identical validation.
 	 *
-	 * For a subject token, return the `aud` and the `claims.azp` the token
-	 * carries: the grant reads them to check that the token names the calling
-	 * client (see {@link ValidatedToken}).
+	 * For a subject token and an actor token, return the `aud` and the
+	 * `claims.azp` the token carries: the grant reads them to check that the
+	 * token names the calling client (see {@link ValidatedToken}).
 	 */
 	validate(token: string, context: ExchangeTokenValidationContext): Promise<ValidatedToken | null>;
 }
@@ -65,12 +65,12 @@ export interface ExchangeTokenValidator {
  *   - `claims` (required, may be `{}`). `claims.azp`, the party the token
  *     was issued to, is read by the check described under `aud`.
  *   - `scope`: enables scope narrowing; absent means no declared scope.
- *   - `aud`: the token's audience. For a subject token, the grant reads it,
- *     with `claims.azp`, to check that the token names the calling client:
- *     the client's id is `claims.azp` or is in `aud`. A subject token whose
- *     answer carries neither is refused, unless the client's registration
- *     sets `allowExchangeOfTokensIssuedToOthers`. Also enables aud
- *     propagation for single-aud subjects.
+ *   - `aud`: the token's audience. For a subject token and an actor token,
+ *     the grant reads it, with `claims.azp`, to check that the token names
+ *     the calling client: the client's id is `claims.azp` or is in `aud`. A
+ *     token whose answer carries neither is refused, unless the client's
+ *     registration sets `allowExchangeOfTokensIssuedToOthers`. Also enables
+ *     aud propagation for single-aud subjects.
  *   - `familyId`: this provider's refresh-token family, for a token issued
  *     under one. Checked against the family store (refused when none is
  *     wired) and copied into the issued token, so a family revocation reaches

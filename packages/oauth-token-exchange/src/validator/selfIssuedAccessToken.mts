@@ -137,8 +137,9 @@ export function createSelfIssuedAccessTokenValidator(
 		): Promise<ValidatedToken | null> {
 			// The central verifier pins alg, iss, typ (at+jwt) and the signature; the typ pin
 			// closes token-type confusion. Audience is not pinned: the validation context
-			// deliberately carries no client identity (the grant authenticates the client
-			// and applies `may_act` and policy), so the verifier logs `jwt_verify_aud_skipped`.
+			// deliberately carries no client identity. The grant authenticates the client,
+			// holds the subject token and the actor token to naming it by `aud` or `azp`,
+			// and applies `may_act` and policy, so the verifier logs `jwt_verify_aud_skipped`.
 			let payload: Record<string, unknown>;
 			try {
 				const verified = await verifyJwt(token, keyStore, {

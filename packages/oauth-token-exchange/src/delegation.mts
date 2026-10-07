@@ -15,8 +15,9 @@
  */
 
 /**
- * Who may act for the subject: an actor the subject token's `may_act` names, within
- * the deepest actor chain allowed; with no actor token, the calling client under the
+ * Who may act for the subject: an actor whose token names the calling client, as the
+ * subject token must, and whom the subject token's `may_act` names, within the
+ * deepest actor chain allowed; with no actor token, the calling client under the
  * same `may_act`, so omitting the actor cannot opt out of it. A refusal is
  * `invalid_request` with one warn line.
  */
@@ -29,6 +30,7 @@ import type {
 } from "@o3co/auth-provider-core";
 import { countActorChainDepth, matchesMayAct, matchesMayActClient } from "./act.mjs";
 import { invalidRequest } from "./answers.mjs";
+import { actorCallerBindingRefusal } from "./callerBinding.mjs";
 
 /** What delegation reads: the logger, and the module's section for the chain depth. */
 type DelegationDependencies = Pick<GrantDependencies, "logger"> & {
@@ -43,6 +45,11 @@ export function delegationRefusal(
 	actorValidated: ValidatedToken | null,
 ): GrantHandlerResult | null {
 	if (actorValidated) {
+		// The actor token is held to the caller binding the subject token passed: a
+		// `may_act` naming the actor says who may act, not which client may present it.
+		const notForClient = actorCallerBindingRefusal(deps, client, subjectValidated, actorValidated);
+		if (notForClient) return notForClient;
+
 		const subjectMayAct = subjectValidated.claims.may_act;
 		if (
 			subjectMayAct !== undefined &&
