@@ -43,10 +43,10 @@ import {
 } from "./bundled-actions.fixture.mjs";
 import {
 	FACTORS,
-	factorRecord,
 	factorStoreHolding,
 	NO_FIRST_BINDING_MARK,
 	NOT_ENROLLED_FACTS,
+	openingFactorRecord,
 	resolverOver,
 	SEALING,
 	WITHOUT_MAIL,
@@ -165,7 +165,7 @@ describe("the mfa requirement over every bundled action, by the grade its packag
 					mode,
 					factors: resolverOver(factors.map(() => FACTORS.totp())),
 					factorStore: factorStoreHolding(
-						...(holds as readonly string[]).map((kind) => factorRecord("u-alice", kind)),
+						...(holds as readonly string[]).map((kind) => openingFactorRecord("u-alice", kind)),
 					),
 					transactions: createLoginTransactions({
 						store: createMemoryMfaTransactionStore(),

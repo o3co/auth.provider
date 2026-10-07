@@ -120,6 +120,16 @@ export const factorRecord = (subject: string, kind = "totp", id = "f-1"): MfaFac
 	data: "sealed",
 });
 
+/** One factor record of `kind` for `subject` whose data opens under {@link SEALING}: a factor a step-up can verify with now. */
+export const openingFactorRecord = (
+	subject: string,
+	kind = "totp",
+	id = "f-1",
+): MfaFactorRecord => ({
+	...factorRecord(subject, kind, id),
+	data: SEALING.sealFactorData({ subject, id, kind }, {}),
+});
+
 /** The one generation a {@link factorStoreHolding} store answers for a subject's records. */
 const HELD = "held" as StoreGeneration;
 

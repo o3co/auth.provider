@@ -671,13 +671,27 @@ describe("account management after an email-code sign-in: recent MFA asks for a 
 	});
 
 	it("answers 401 login_required, as unmet, where nothing the subject holds adds mfa: no recovery set, one never answered, or the recovery-code factor off", async () => {
+		/** A set whose codes are digests under a key the ring no longer holds: its data opens, its codes verify nothing. */
+		const keyGone = (shown: boolean) => ({
+			codes: [{ keyId: "k-retired-from-the-ring", digest: "AAAA" }],
+			generation: 0,
+			shown,
+		});
 		for (const [what, setup] of [
 			["no recovery set", { set: undefined, recovery: true }],
 			["a set never answered", { set: false, recovery: true }],
 			["the recovery-code factor off", { set: true, recovery: false }],
+			[
+				"a set never answered whose codes' key left the ring",
+				{ set: keyGone(false), recovery: true },
+			],
+			["a set answered whose codes' key left the ring", { set: keyGone(true), recovery: true }],
 		] as const) {
 			const built = await withEmailFactor({ totp: true, recovery: setup.recovery });
-			if (setup.set !== undefined) await seedRecoverySet(built.factorStore, setup.set);
+			if (typeof setup.set === "boolean") await seedRecoverySet(built.factorStore, setup.set);
+			else if (setup.set !== undefined) {
+				await seedFactor(built.factorStore, "recovery_code", setup.set);
+			}
 			const { agent, sid } = await signInWithEmail(built);
 
 			const begun = await enrollFromAccount(agent, "totp");
