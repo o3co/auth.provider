@@ -14,6 +14,27 @@
  * limitations under the License.
  */
 
+/**
+ * The `refresh_token` grant (RFC 6749 §6): redeems a refresh token issued to
+ * the authenticated client for a new access token and a rotated refresh
+ * token in the same family.
+ *
+ * What it keeps:
+ * - The presented token is the original grant, and its ceiling. Its scope
+ *   bounds the scope the request or the policy may narrow to, and its
+ *   effective audience (its `aud`, or the client id when it carries none)
+ *   bounds the audience a `resource` or the policy may narrow to (RFC 8707
+ *   §2.2). Each audience is also held to the client's registration.
+ * - Narrowing applies to the access token issued, never to the rotated
+ *   refresh token, which carries the original scope and audience. An
+ *   original audience the registration no longer holds is refused, never
+ *   re-issued.
+ * - Sender binding continues (DPoP, mTLS); the session is admitted and the
+ *   subject's revocation watermark read again before signing; the family
+ *   rotation is committed before anything is signed, and a replay revokes
+ *   the family.
+ */
+
 import { randomUUID } from "node:crypto";
 import {
 	type Admission,
