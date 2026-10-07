@@ -327,6 +327,7 @@ describe("a request no document fetch slot was free for", () => {
 			maxConcurrentFetches: 1,
 			timeoutMs: 5_000,
 			cacheMaxAgeMs: 1_000,
+			staleIfErrorMs: 300_000,
 			now: () => clock,
 			fetch: seam.fetch,
 		});
