@@ -1112,11 +1112,11 @@ fails drops it best-effort (`503`; a drop that fails there, or on that refusal,
 is one `federation_cleanup_failed` warn).
 
 This matters because the cookie is `SameSite=None` by necessity and
-accompanies any cross-site request to the auth host: if a refusal consumed the
-record, a third party could cancel a victim's in-flight login or link with one
-`<img>` tag or one auto-submitted form carrying a made-up `state`. Keeping the
+accompanies any cross-site request to the auth host, an `<img>` GET or an
+auto-submitted form included: a refusal leaves the record in place, so the
+login or link in progress still completes at its own callback. Keeping the
 transaction on a mismatch costs nothing: `state` is 128 bits from the CSPRNG,
-so unlimited guesses at it are worth no more than one.
+and any number of mismatches leaves a match no more likely.
 
 A `query` federation follows the same rule: it keeps its envelope in the
 session and retires it only on the path that *matched* `state`, because the

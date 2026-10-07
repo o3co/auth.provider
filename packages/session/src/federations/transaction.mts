@@ -133,10 +133,10 @@ export const mintFederationTransactionId = (): string => randomBytes(32).toStrin
  * that this browser started this flow, so only this host may be able to set
  * it. A browser refuses a `__Host-` cookie that carries `Domain`, lacks
  * `Secure` or has a `Path` other than `/`, so neither a sibling host under the
- * same parent domain nor a plain-HTTP hop can plant one. A `__Secure-` cookie
- * would not do: it may carry `Domain=<parent>`, so a sibling host could plant
- * a transaction id of its own choosing and have the callback complete that
- * flow in this browser.
+ * same parent domain nor a plain-HTTP hop can set one. A `__Secure-` cookie
+ * would not do: it may carry `Domain=<parent>`, so a sibling host could set
+ * a transaction id for this host, and the callback would complete the flow
+ * that id names in this browser.
  *
  * `Path=/` is what `__Host-` requires, so the federation's name, not the
  * callback path, keeps two federations' transactions apart: each has its own

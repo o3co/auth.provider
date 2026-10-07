@@ -86,7 +86,7 @@ describe("deriveFederationTransactionCookieName", () => {
 		}
 	});
 
-	it("swaps a __Secure- prefix for __Host-, so a sibling host cannot plant the cookie", () => {
+	it("swaps a __Secure- prefix for __Host-, so a sibling host cannot set the cookie", () => {
 		// A `__Secure-` cookie may carry `Domain=<parent>`: a sibling host
 		// could set it for this one. `__Host-` may not.
 		expect(deriveFederationTransactionCookieName("__Secure-app.sid", "apple")).toBe(

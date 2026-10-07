@@ -493,15 +493,15 @@ describe("the federation transaction cookie binds the callback to its browser", 
 
 /**
  * A `__Secure-` cookie may carry `Domain=<parent>`, so a sibling host could
- * set one for this host: an attacker there starts a flow of their own and
- * plants its transaction id in the victim's browser, then sends the victim to
- * the callback with the attacker's `state` and `code`. The callback reads only
- * the `__Host-` name, which no other host can set, so the planted id is never
- * read and the attacker's login is never completed in the victim's browser.
+ * set one for this host, naming a flow started in another browser, and a
+ * callback carrying that flow's `state` and `code` would complete it here.
+ * The callback reads only the `__Host-` name, which no other host can set, so
+ * a transaction id under any other name is never read and that flow is never
+ * completed in this browser.
  */
 describe("a transaction id this host did not set for this browser is refused", () => {
-	/** The attacker's own flow, started in the attacker's browser. */
-	const attackerFlow = async (harness: ReturnType<typeof buildApp>) => {
+	/** A flow started in another browser. */
+	const otherBrowserFlow = async (harness: ReturnType<typeof buildApp>) => {
 		const flow = await startFlow(harness);
 		if (flow.transactionId === undefined) throw new Error("no transaction issued");
 		return { ...flow, transactionId: flow.transactionId };
@@ -514,15 +514,15 @@ describe("a transaction id this host did not set for this browser is refused", (
 			`__Secure-${HARNESS_SESSION_COOKIE_NAME}.federation.apple`,
 		],
 		["a name without a prefix", `${HARNESS_SESSION_COOKIE_NAME}.federation.apple`],
-	])("ignores the attacker's transaction id under %s", async (_label, plantedName) => {
+	])("ignores another browser's transaction id under %s", async (_label, otherName) => {
 		const harness = buildApp();
-		const attacker = await attackerFlow(harness);
+		const other = await otherBrowserFlow(harness);
 
 		const res = await request(harness.app)
 			.post("/oauth/federation/apple/callback")
-			.set("Cookie", `${plantedName}=${encodeURIComponent(attacker.transactionId)}`)
+			.set("Cookie", `${otherName}=${encodeURIComponent(other.transactionId)}`)
 			.type("form")
-			.send({ state: attacker.state, code: "attacker-code" });
+			.send({ state: other.state, code: "other-code" });
 
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("invalid_session");
@@ -727,9 +727,9 @@ describe("POST /oauth/federation/:name/callback — surface", () => {
 
 /**
  * The transaction cookie is `SameSite=None` by necessity, so it accompanies
- * *any* cross-site request to the auth host, including one a third party
- * causes with an `<img>` tag or an auto-submitted form. If a refusal consumed
- * the transaction, one such request would delete the victim's in-flight flow.
+ * *any* cross-site request to the auth host, an `<img>` GET or an
+ * auto-submitted form included. A refusal leaves the transaction in place, so
+ * the flow in progress still completes at its own callback.
  * So a `form_post` federation refuses GET the way a `query` federation
  * refuses POST, and a callback carrying no `state`, or a wrong one, spends
  * nothing. See README, When a transaction is spent.
@@ -785,18 +785,18 @@ describe("a cross-site request cannot spend an in-flight transaction", () => {
 
 	it("leaves the transaction intact after a cross-site POST carrying a wrong state", async () => {
 		// An auto-submitting cross-site form with `state=wrong&code=x`: the
-		// victim's SameSite=None cookie rides it. Spending the transaction on
-		// the mismatch would cancel the victim's login, and the guess it would
-		// stop is worthless — `state` is 128 bits from the CSPRNG.
+		// SameSite=None cookie rides it. The mismatch is refused and spends
+		// nothing, so the login in progress still completes; `state` is 128
+		// bits from the CSPRNG, so keeping the transaction costs nothing.
 		const harness = buildApp();
 		const flow = await startFlow(harness);
 
-		const attack = await flow.post({ state: "wrong", code: "x" });
+		const refused = await flow.post({ state: "wrong", code: "x" });
 
-		expect(attack.status).toBe(400);
-		expect(attack.body.error).toBe("invalid_state");
+		expect(refused.status).toBe(400);
+		expect(refused.body.error).toBe("invalid_state");
 		expect(harness.records.size).toBe(1);
-		expect(clearedCookie(attack, HARNESS_TRANSACTION_COOKIE_NAME)).toBe(false);
+		expect(clearedCookie(refused, HARNESS_TRANSACTION_COOKIE_NAME)).toBe(false);
 
 		const genuine = await flow.post({ state: flow.state, code: "apple-code" });
 		expect(genuine.status).toBe(302);

@@ -160,10 +160,10 @@ export const consumeCallbackState = async (
 	// both modes: the `form_post` transaction cookie is `SameSite=None`, so
 	// it rides any cross-site request (an `<img>` GET or an auto-submitted
 	// form included), and a `query` federation's `SameSite=Lax` session
-	// cookie rides a top-level cross-site GET. If such a request could spend
-	// the state, any third party could cancel a victim's in-flight flow.
-	// Unlimited guesses at a 128-bit CSPRNG `state` are worth no more than
-	// one.
+	// cookie rides a top-level cross-site GET. Such a request leaves the
+	// state in place, so the flow in progress still completes. Any number of
+	// mismatches against a 128-bit CSPRNG `state` leaves a match no more
+	// likely.
 	if (typeof params.state !== "string" || params.state.length === 0) {
 		res.status(400).json({
 			error: "invalid_request",
