@@ -1762,10 +1762,13 @@ describe("POST /oauth/federation/:name/token", () => {
 								...baseFedTokens,
 								expiresAt: new Date(Date.now() - 1000),
 							}),
-							replaceIf: vi.fn(async () => {
-								vi.setSystemTime(Date.now() + 1);
-								return { outcome: "updated" as const, generation: "g-written" as StoreGeneration };
-							}),
+						});
+						// The double's own write, so its reads answer the generation it wrote.
+						const write = fedTokenStore.replaceIf;
+						fedTokenStore.replaceIf = vi.fn(async (...args: Parameters<typeof write>) => {
+							const answer = await write(...args);
+							vi.setSystemTime(Date.now() + 1);
+							return answer;
 						});
 						const refreshProvider = {
 							...federationBase("google"),
@@ -1783,6 +1786,9 @@ describe("POST /oauth/federation/:name/token", () => {
 						expect(fedTokenStore.replaceIf).toHaveBeenCalledTimes(1);
 						expect(res.status).toBe(503);
 						expect(res.body.error).toBe("temporarily_unavailable");
+						expect(res.body.error_description).toBe(
+							"the federation token has less than a second left; retry",
+						);
 						expect(auditSink.record).not.toHaveBeenCalledWith(
 							expect.objectContaining({ type: "federation.token.success" }),
 						);
