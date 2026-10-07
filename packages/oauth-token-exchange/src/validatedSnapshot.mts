@@ -20,7 +20,8 @@
  * and the minted token cannot see two values of one member.
  *
  * What is copied, at each level: the members the stages read by name, own or
- * inherited, whenever the answer has them (`in`), even with no value — the
+ * inherited, read whether or not `in` reports them, and kept whenever `in`
+ * reports them (even with no value) or the read answers a value — the
  * answer's `sub`, `scope`, `aud`, `familyId`, `sid`, `act`, `may_act` and
  * `claims`; of `claims`, `azp`, `exp`, `iss`, `cnf` and `may_act`; of `cnf`,
  * the confirmation members (`jkt`, `x5t#S256`); of each `may_act` entry, `sub`
@@ -28,7 +29,9 @@
  * every own enumerable key. So the copy holds every member a stage can read
  * off the answer, and is never looser than it. Where a stage reads a record
  * (the answer, `claims`, `cnf`, a `may_act` entry, `act`), an array is no
- * answer: an array's named members would not be copied.
+ * answer: an array's named members would not be copied. A `may_act` entry
+ * reporting neither `sub` nor `iss` to `in`, which delegation therefore
+ * matches with nothing, is copied as a value that matches nothing.
  *
  * Every member of an object is read at most once, however many paths reach
  * the object (an alias, a cycle): the reads are kept per object, and a copy
@@ -53,6 +56,11 @@ import {
 interface Reads {
 	/** Whether the position holds a record: an array there is no answer. */
 	readonly record: boolean;
+	/**
+	 * Whether its reader tests the named members with `in`: a record that
+	 * reports none of them is copied as one that matches nothing.
+	 */
+	readonly presence?: boolean;
 	readonly names: readonly string[];
 	readonly ownKeys: boolean;
 	readonly of: Readonly<Record<string, Reads>>;
@@ -63,7 +71,13 @@ interface Reads {
 const ANY: Reads = { record: false, names: [], ownKeys: true, of: {} };
 
 /** A `may_act` entry: `sub` and `iss`, read by name (`in` and access) by delegation. */
-const MAY_ACT_ENTRY: Reads = { record: true, names: ["sub", "iss"], ownKeys: true, of: {} };
+const MAY_ACT_ENTRY: Reads = {
+	record: true,
+	presence: true,
+	names: ["sub", "iss"],
+	ownKeys: true,
+	of: {},
+};
 /** A `may_act`: one entry, or an array of them. */
 const MAY_ACT: Reads = { ...MAY_ACT_ENTRY, record: false, each: MAY_ACT_ENTRY };
 /** A `cnf`: the members core's confirmation matcher reads. */
@@ -87,6 +101,13 @@ const ANSWER: Reads = {
 };
 
 const authentications = new WeakMap<ValidatedToken, VerifiedAuthentication>();
+
+/**
+ * The copy of a `may_act` entry that reports neither `sub` nor `iss`: not a
+ * record, so delegation matches no actor or client against it, as it matches
+ * none against the entry.
+ */
+const MATCHES_NOTHING: readonly never[] = Object.freeze([]);
 
 /** Thrown inside a copy where a record position holds an array: the answer is no answer. */
 class NotARecord extends Error {}
@@ -178,10 +199,20 @@ class Reader {
 			}
 			return Object.freeze(out);
 		}
+		if (reads.presence && reads.names.every((name) => !(name in value))) {
+			// Its reader finds none of the members it tests with `in`, so the record
+			// matches nothing, whatever a read by name answers: so does the copy.
+			byReads.set(reads, MATCHES_NOTHING);
+			return MATCHES_NOTHING;
+		}
 		const out: Record<string, unknown> = {};
 		byReads.set(reads, out);
 		const names = new Set<string>(reads.ownKeys ? this.ownKeys(value) : []);
-		for (const name of reads.names) if (name in value) names.add(name);
+		for (const name of reads.names) {
+			// Read whether or not `in` reports it: a stage reading the member by name
+			// sees what this read sees.
+			if (name in value || this.read(value, name) !== undefined) names.add(name);
+		}
 		for (const name of names) {
 			define(
 				out,
