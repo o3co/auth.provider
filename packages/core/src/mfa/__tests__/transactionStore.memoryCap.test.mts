@@ -451,9 +451,10 @@ describe("the MfaTransactionStore adapter factory — the memory adapter's cap",
 		expect(plain.maxEntries).toBe(DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES);
 	});
 
-	it("refuses a cap it cannot use, naming the key", async () => {
+	it("refuses a cap it cannot use, naming the key, and warns nothing for the store it did not build", async () => {
+		const logger = { ...quiet, warn: vi.fn() };
 		const factory = createMfaTransactionStoreFactory();
-		registerBuiltinMfaTransactionStores(factory, quiet);
+		registerBuiltinMfaTransactionStores(factory, logger);
 		for (const bad of [0, null, "lots"]) {
 			await expect(
 				factory.create({ type: "memory", maxEntries: bad }),
@@ -464,6 +465,7 @@ describe("the MfaTransactionStore adapter factory — the memory adapter's cap",
 				),
 			);
 		}
+		expect(logger.warn).not.toHaveBeenCalled();
 	});
 });
 
