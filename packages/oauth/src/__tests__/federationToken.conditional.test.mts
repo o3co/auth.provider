@@ -831,6 +831,20 @@ describe("federation token route — a record removed or replaced while the sess
 		};
 	};
 
+	/** The `reason` of every warn line named `event`, in order. */
+	const reasons = (r: Route, event: string): unknown[] =>
+		r.logger.warn.mock.calls
+			.filter(([, name]) => name === event)
+			.map(([fields]) => (fields as { reason?: unknown }).reason);
+	/** Exactly these lines of each event: a changed record is logged once, by what was discarded. */
+	const expectDiscarded = (
+		r: Route,
+		lines: { readonly refresh: readonly string[]; readonly serve: readonly string[] },
+	): void => {
+		expect(reasons(r, "federation_token_refresh_discarded")).toEqual(lines.refresh);
+		expect(reasons(r, "federation_token_serve_discarded")).toEqual(lines.serve);
+	};
+
 	const expectUnlinked = (r: Route, res: request.Response): void => {
 		expect(res.status).toBe(404);
 		expect(res.body.error).toBe("federation_not_linked");
@@ -844,6 +858,8 @@ describe("federation token route — a record removed or replaced while the sess
 
 			const res = await r.post();
 
+			expectDiscarded(r, { refresh: [], serve: ["record_gone"] });
+
 			expectUnlinked(r, res);
 			expect(await r.store.get(SID, NAME)).toBeNull();
 		});
@@ -853,6 +869,8 @@ describe("federation token route — a record removed or replaced while the sess
 			const r = await route({ seed: linkA(), duringLiveness: atLivenessRead(2, relinkTo(b)) });
 
 			const res = await r.post();
+
+			expectDiscarded(r, { refresh: [], serve: ["record_replaced"] });
 
 			expect(res.status).toBe(200);
 			expect(res.body.access_token).toBe("b-at");
@@ -864,6 +882,8 @@ describe("federation token route — a record removed or replaced while the sess
 			const r = await route({ seed: linkA() });
 
 			const res = await r.post();
+
+			expectDiscarded(r, { refresh: [], serve: [] });
 
 			expect(res.status).toBe(200);
 			expect(res.body.access_token).toBe("new-at");
@@ -885,6 +905,8 @@ describe("federation token route — a record removed or replaced while the sess
 
 				const res = await r.post();
 
+				expectDiscarded(r, { refresh: [], serve: ["record_gone"] });
+
 				expectUnlinked(r, res);
 				expect(await r.store.get(SID, NAME)).toBeNull();
 			},
@@ -903,6 +925,8 @@ describe("federation token route — a record removed or replaced while the sess
 			});
 
 			const res = await r.post();
+
+			expectDiscarded(r, { refresh: [], serve: ["record_replaced"] });
 
 			expect(res.status).toBe(200);
 			expect(res.body.access_token).toBe("b-at");
@@ -923,6 +947,8 @@ describe("federation token route — a record removed or replaced while the sess
 
 			const res = await r.post();
 
+			expectDiscarded(r, { refresh: ["record_replaced"], serve: ["record_gone"] });
+
 			expectUnlinked(r, res);
 			expect(await r.store.get(SID, NAME)).toBeNull();
 		});
@@ -939,6 +965,8 @@ describe("federation token route — a record removed or replaced while the sess
 			});
 
 			const res = await r.post();
+
+			expectDiscarded(r, { refresh: ["record_replaced"], serve: ["record_replaced"] });
 
 			expect(res.status).toBe(503);
 			expect(res.body.error_description).toBe(
@@ -957,6 +985,8 @@ describe("federation token route — a record removed or replaced while the sess
 
 			const res = await r.post();
 
+			expectDiscarded(r, { refresh: [], serve: ["record_gone"] });
+
 			expectUnlinked(r, res);
 			expect(r.refreshToken).not.toHaveBeenCalled();
 			expect(await r.store.get(SID, NAME)).toBeNull();
@@ -969,6 +999,8 @@ describe("federation token route — a record removed or replaced while the sess
 
 			const res = await r.post();
 
+			expectDiscarded(r, { refresh: [], serve: ["record_replaced"] });
+
 			expect(res.status).toBe(200);
 			expect(res.body.access_token).toBe("b-at");
 			expect(r.refreshToken).not.toHaveBeenCalled();
@@ -979,6 +1011,8 @@ describe("federation token route — a record removed or replaced while the sess
 			refreshedBeforeLock(r);
 
 			const res = await r.post();
+
+			expectDiscarded(r, { refresh: [], serve: [] });
 
 			expect(res.status).toBe(200);
 			expect(res.body.access_token).toBe("other-at");

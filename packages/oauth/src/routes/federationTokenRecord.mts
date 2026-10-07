@@ -79,9 +79,12 @@ export const answerIfChanged = async (
 };
 
 /**
- * Hands on what `serve` answers from `held` once the caller's session is live
- * and, read after that, the record is still at `held`'s generation. A record
- * gone meanwhile is answered as removed (`404`), one rewritten as a conflict.
+ * Hands on what `serve` answers from `held` only if the caller's session was
+ * live at its liveness read and the record was still at `held`'s generation
+ * at the confirming read that follows it. A close that commits between the
+ * two reads is not seen here; the close removes the stored tokens itself. A
+ * record gone by the confirming read is answered as removed (`404`), one
+ * rewritten as a conflict, each logged once as `federation_token_serve_discarded`.
  */
 export const serveHeld = async (
 	ctx: FederationTokenContext,
@@ -90,8 +93,23 @@ export const serveHeld = async (
 	serve: () => Promise<Response>,
 ): Promise<Response> => {
 	if (!(await checkSessionLive(ctx, caller))) return ctx.res;
-	const changed = await answerIfChanged(ctx, caller, held);
-	return changed ?? serve();
+	const found = await confirmHeld(ctx, caller, held);
+	if (found === "answered") return ctx.res;
+	if (found === "held") return serve();
+	logServeDiscarded(ctx, found);
+	return answerChangedRecord(ctx, caller, found);
+};
+
+/** The one line for a held token not handed on because its record changed before the answer. */
+const logServeDiscarded = (ctx: FederationTokenContext, outcome: "missing" | "conflict"): void => {
+	ctx.logger.warn(
+		{
+			federation: ctx.federation,
+			store: "federation_token",
+			reason: outcome === "missing" ? "record_gone" : "record_replaced",
+		},
+		"federation_token_serve_discarded",
+	);
 };
 
 /**
@@ -205,38 +223,52 @@ export const removeRecord = async (
 
 /**
  * The answer once a refresh's own result is dropped because the record is no
- * longer the one it was made from. `missing`: the user removed the link, so
- * nothing of it is handed on (`404`). `conflict`: the record was rewritten
- * (a relink, or another refresh), so the current record is answered as
- * stored if it is not due, the session is still live and, read after that,
- * the record is still the one read (`404` if it is gone by then); and `503`
- * if it is due or was rewritten again: the refresh is never repeated within
- * one request, and the client's retry refreshes it.
+ * longer the one it was made from, logged once as
+ * `federation_token_refresh_discarded`, then answered as
+ * {@link answerChangedRecord} answers.
  */
 export const answerDiscardedRefresh = async (
 	ctx: FederationTokenContext,
 	caller: FederationTokenCaller,
 	outcome: "missing" | "conflict",
 ): Promise<Response> => {
-	const { res, federation, logger } = ctx;
-	logger.warn(
+	ctx.logger.warn(
 		{
-			federation,
+			federation: ctx.federation,
 			store: "federation_token",
 			reason: outcome === "missing" ? "record_gone" : "record_replaced",
 		},
 		"federation_token_refresh_discarded",
 	);
+	return answerChangedRecord(ctx, caller, outcome);
+};
+
+/**
+ * The answer for a record that is no longer the one a token was held from.
+ * `missing`: the user removed the link, so nothing of it is handed on
+ * (`404`). `conflict`: the record was rewritten (a relink, or another
+ * refresh), so the current record is answered as stored if it is not due and
+ * {@link serveHeld} would hand it on; and `503` if it is due or was rewritten
+ * again: the refresh is never repeated within one request, and the client's
+ * retry refreshes it. A record gone or rewritten again by the confirming read
+ * is logged once as `federation_token_serve_discarded`.
+ */
+const answerChangedRecord = async (
+	ctx: FederationTokenContext,
+	caller: FederationTokenCaller,
+	outcome: "missing" | "conflict",
+): Promise<Response> => {
+	const { res } = ctx;
 	if (outcome === "missing") return answerUnlinkedRecord(ctx);
 	const current = await readRecord(ctx, caller, "get_after_conflict");
 	if (current === null) return res;
 	if (!refreshIsDue(ctx, current.value)) {
-		// After the upstream call: served only while the session is still live.
 		if (!(await checkSessionLive(ctx, caller))) return res;
 		const found = await confirmHeld(ctx, caller, current);
 		if (found === "answered") return res;
 		if (found === "held") return serveStored(ctx, caller, current);
-		if (found === "missing") return answerDiscardedRefresh(ctx, caller, "missing");
+		logServeDiscarded(ctx, found);
+		if (found === "missing") return answerUnlinkedRecord(ctx);
 	}
 	return res.status(503).json({
 		error: "temporarily_unavailable",

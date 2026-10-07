@@ -23,10 +23,11 @@
  * answer's lifetime is refused, as it did before it was due. Every write lands only on the record the
  * refresh was made from, and a stored token is answered only from it; a
  * refresh whose record was removed or rewritten meanwhile is dropped, never
- * written over what replaced it. No token is answered after the upstream call
- * unless the caller's session is still live when it is answered (a close that
- * committed meanwhile removes the stored tokens itself) and, read after that,
- * the record is still the one the token is held from (`serveHeld`).
+ * written over what replaced it. A token is answered after the upstream call
+ * only if the caller's session was live at its liveness read and the record
+ * was still the one the token is held from at the confirming read just
+ * before the answer (`serveHeld`). A close that commits between those two
+ * reads is handled by the close's own removal of the stored tokens.
  */
 
 import { canonicalScope, emitAuditEvent, loggableError } from "@o3co/auth-provider-core";
