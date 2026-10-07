@@ -175,7 +175,10 @@ export interface UserRepository {
 	 * grant that authenticates a subject and holds no `User` of its own (the
 	 * WebAuthn passkey grant), so that what the Store publishes about the user
 	 * (`emailVerified`) can be read. Optional; detected by
-	 * {@link supportsSubjectLookup}.
+	 * {@link supportsSubjectLookup}. For the passkey grant the subject is the
+	 * credential's user handle, which may be derived from the real id, so the
+	 * `User` answered may carry a different `id`; mapping the handle back to
+	 * its user is the repository's job.
 	 *
 	 * It MUST change nothing: no login recorded, no user created. Throws when
 	 * the backend cannot answer: a caller that gates on the answer treats a
