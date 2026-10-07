@@ -273,6 +273,37 @@ describe("createWebAuthnGrant — oauth.requireEmailVerified on", () => {
 		expect(fields.err).not.toBeInstanceOf(Error);
 	});
 
+	it("answers 503 when reading the user's emailVerified throws, logged as a store outage, with nothing registered or signed", async () => {
+		// An accessor-backed record (an ORM entity) whose field read reaches the backend.
+		class LazyUser {
+			readonly id = USER_ID;
+			readonly username = "alice";
+			get emailVerified(): boolean {
+				throw new Error("lazy load failed: secret");
+			}
+		}
+		const h = await arrange({
+			requireEmailVerified: true,
+			userRepository: { users: [new LazyUser() as User] },
+		});
+
+		const result = await h.run();
+
+		expect(result).toEqual({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "identity resolution unavailable",
+		});
+		expect(h.evaluate).not.toHaveBeenCalled();
+		expect(h.register).not.toHaveBeenCalled();
+		expect(h.sign).not.toHaveBeenCalled();
+		expect(h.logger.error).toHaveBeenCalledTimes(1);
+		const [fields, event] = h.logger.error.mock.calls[0] as [Record<string, unknown>, string];
+		expect(event).toBe("webauthn_grant_store_unavailable");
+		expect(fields).toMatchObject({ store: "user_repository", step: "read", clientId: CLIENT_ID });
+		expect(fields.err).not.toBeInstanceOf(Error);
+	});
+
 	it("reads no user when the sign-count update fails", async () => {
 		const h = await arrange({ requireEmailVerified: true });
 		h.deps.webauthnCredentialStore.updateSignCount.mockResolvedValueOnce(false);

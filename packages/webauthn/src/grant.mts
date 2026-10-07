@@ -385,13 +385,15 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// the token endpoint.
 			// ------------------------------------------------------------------
 			if (subjectLookup !== undefined) {
-				let user: Awaited<ReturnType<SupportsSubjectLookup["findBySubject"]>>;
+				// The field is read inside the `try`: an accessor-backed record can reach its
+				// backend on that read, and a throw there is the same outage.
+				let emailVerified: boolean;
 				try {
-					user = await subjectLookup.findBySubject(credential.userId);
+					emailVerified = isEmailVerified(await subjectLookup.findBySubject(credential.userId));
 				} catch (err) {
 					return storeUnavailable("user_repository", "read", clientId, err);
 				}
-				if (!isEmailVerified(user)) {
+				if (!emailVerified) {
 					return {
 						result: {
 							status: 400,
