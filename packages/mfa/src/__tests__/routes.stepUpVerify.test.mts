@@ -197,6 +197,31 @@ async function postAs(
 		.send(body);
 }
 
+/** `POST /session/logout` from a browser holding only the cookie session `cookie`, with a CSRF token fetched on it. */
+async function logoutAs(
+	app: Parameters<typeof login>[0],
+	cookie: string,
+): Promise<request.Response> {
+	const csrf = await request(app).get("/session/csrf").set("Cookie", cookie);
+	const csrfCookie = ([] as string[])
+		.concat(csrf.headers["set-cookie"] ?? [])
+		.map((line) => line.split(";")[0] as string)
+		.filter((pair) => !pair.startsWith("auth.session="));
+	return request(app)
+		.post("/session/logout")
+		.set("Cookie", [cookie, ...csrfCookie].join("; "))
+		.set(csrf.body.header_name as string, csrf.body.csrf_token as string);
+}
+
+/** Whether `res` expires the `auth.session` cookie. */
+const expiredSessionCookie = (res: request.Response): boolean =>
+	([] as string[])
+		.concat(res.headers["set-cookie"] ?? [])
+		.some(
+			(line) =>
+				line.startsWith("auth.session=;") && /Expires=Thu, 01 Jan 1970 00:00:00 GMT/.test(line),
+		);
+
 /** Whether the cookie session `cookie` names is admitted as a live signed-in session: a step-up it asks for is not refused 401. */
 const admitted = async (app: Parameters<typeof login>[0], cookie: string): Promise<boolean> =>
 	(await postAs(app, cookie, "/step-up", {})).status !== 401;
@@ -1028,9 +1053,13 @@ describe("the step-up's finish", () => {
 		});
 	});
 
-	it("records one of two step-ups finished at once from one cookie session: the other is 401, and its renewed cookie is not admitted", async () => {
-		const { app, sid, cookie, factorStore, userSessionStore, agent, transaction, totp } =
-			await opened();
+	/**
+	 * Two step-ups finished at once from one cookie session, the first held
+	 * at its factor write until the second has answered: both responses.
+	 */
+	async function finishedAtOnce() {
+		const booted = await opened();
+		const { app, cookie, factorStore, agent, transaction, totp } = booted;
 		const other = await seedTotp(factorStore);
 		const second = await openedStepUp(agent);
 		const update = factorStore.update.bind(factorStore);
@@ -1056,13 +1085,32 @@ describe("the step-up's finish", () => {
 			proof: totpCode(other.secret),
 		});
 		release();
-		const lost = await first;
+		return { ...booted, won, lost: await first };
+	}
+
+	it("records one of two step-ups finished at once from one cookie session: the other is 401, and its renewed cookie is not admitted", async () => {
+		const { app, sid, userSessionStore, won, lost } = await finishedAtOnce();
 
 		expect(won.status, JSON.stringify(won.body)).toBe(200);
 		expect(lost.status, JSON.stringify(lost.body)).toBe(401);
 		expect(await admitted(app, sessionCookie(won))).toBe(true);
 		expect(await admitted(app, sessionCookie(lost))).toBe(false);
 		expect((await stored(userSessionStore, sid)).amr).toEqual([PASSWORD_AMR, OTP_AMR, MFA_AMR]);
+	});
+
+	it("closes the session from either renewed cookie of two step-ups finished at once: logged out, neither cookie admitted after", async () => {
+		for (const from of ["won", "lost"] as const) {
+			const { app, sid, userSessionStore, won, lost } = await finishedAtOnce();
+			const cookie = sessionCookie(from === "won" ? won : lost);
+
+			const res = await logoutAs(app, cookie);
+
+			expect(res.status, `${from}: ${JSON.stringify(res.body)}`).toBe(200);
+			expect(expiredSessionCookie(res), from).toBe(true);
+			expect(await userSessionStore.get(sid), from).toBeNull();
+			expect(await admitted(app, sessionCookie(won)), from).toBe(false);
+			expect(await admitted(app, sessionCookie(lost)), from).toBe(false);
+		}
 	});
 
 	it("refuses the old cookie session even when a request held on it saves it back after the step-up", async () => {

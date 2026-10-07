@@ -16,8 +16,6 @@
 
 import {
 	type AppConfig,
-	admitSession,
-	cookieClaim,
 	createInMemoryUserSessionStore,
 	type DeploymentMode,
 	type Logger,
@@ -31,10 +29,7 @@ import { createTestCsrfTokenSigner, resolverForTests } from "@o3co/auth-provider
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import {
-	fakeSessionLifecycle,
-	openingLifecycleStore,
-} from "#/__tests__/_helpers/sessionLifecycle.mjs";
+import { fakeSessionLifecycle } from "#/__tests__/_helpers/sessionLifecycle.mjs";
 import { createCsrfProtection } from "#/csrf.mjs";
 import { createRouter } from "#/routes/Session.mjs";
 
@@ -1156,7 +1151,7 @@ describe("Session routes — POST /session/logout closes the session through the
 	});
 });
 
-describe("Session routes — POST /session/logout from a cookie session the record was renewed away from", () => {
+describe("Session routes — POST /session/logout from a cookie session the record was renewed away from: the session it names is closed", () => {
 	/** A record escalated with `nonce`, as a step-up's finish records it after renewing the cookie session. */
 	async function escalated(nonce: string) {
 		const store = createInMemoryUserSessionStore();
@@ -1187,35 +1182,23 @@ describe("Session routes — POST /session/logout from a cookie session the reco
 		user: { id: "u-1", username: "alice" },
 		...(renewalNonce === undefined ? {} : { renewalNonce }),
 	});
-	/** How admission reads the renewed browser's cookie session over `store`. */
-	const admitVictim = (store: UserSessionStore, nonce: string) =>
-		admitSession(
-			{
-				userSessionStore: store,
-				sessionLifecycleStore: openingLifecycleStore("u-1"),
-				subjectRevocation: undefined,
-				requirements: resolverForTests([], { actions: { "test.use": { grade: "use" } } }),
-				acrTable: {},
-				logger: undefined,
-				auditSink: undefined,
-			},
-			{ claim: cookieClaim({ session: signedIn(nonce) }), action: "test.use" },
-		);
-
-	it("a stale copy — no nonce, or another — destroys only its own cookie session: the renewed session stays live", async () => {
+	it("a stale copy — no nonce, or another — closes the session it names, as the renewed cookie session would", async () => {
 		const nonce = newRenewalNonce();
 		for (const stale of [undefined, newRenewalNonce()]) {
 			const store = await escalated(nonce);
+			const sessionLifecycle = fakeSessionLifecycle();
 			const { app, capturedSession } = buildApp({
 				userSessionStore: store,
-				sessionLifecycle: fakeSessionLifecycle(),
+				sessionLifecycle,
 				initialSession: signedIn(stale),
 			});
 			const res = await logoutRequest(app);
 			expect(res.status, String(stale)).toBe(200);
 			expect(res.body).toMatchObject({ message: "Logged out successfully" });
-			expect(await store.get("sid-1"), String(stale)).toMatchObject({ renewalNonce: nonce });
-			expect(await admitVictim(store, nonce), String(stale)).toMatchObject({ outcome: "admitted" });
+			expect(sessionLifecycle.close, String(stale)).toHaveBeenCalledExactlyOnceWith(
+				"sid-1",
+				"session_logout",
+			);
 			expect(capturedSession.current, String(stale)).not.toHaveProperty("isAuthenticated");
 			expect(capturedSession.current, String(stale)).not.toHaveProperty("sid");
 		}

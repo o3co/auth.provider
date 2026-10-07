@@ -650,8 +650,9 @@ What holds:
   lost: a consent `/authorize` parked, a federation-grant browser binding,
   and the session's other open MFA transactions. A flow in another tab starts
   again. A tab that still holds the old cookie is refused once the session is
-  escalated, and signs in again; its `POST /session/logout` ends only its own
-  cookie session, not the renewed one, but for one window
+  escalated, and signs in again; its `POST /session/logout` still closes the
+  session, as the renewed cookie's would: the nonce keeps an old copy off the
+  escalation, not from ending the session
   ([below](#what-post-sessionlogout-invalidates)).
 
 ### What `POST /session/logout` invalidates
@@ -671,23 +672,24 @@ The logout closes the session with `sessionLifecycle.close(sid, "session_logout"
 - A close that did not commit, or a lifecycle that threw — whatever the error, a `RangeError` included — answers `503 temporarily_unavailable` and keeps the express session for a retry. That includes a close whose commit found no live record (the session's end had passed on the store's clock) and whose work, run at once with no record to save it in, failed: a retry runs it again. It is logged once as `session_logout_store_unavailable` (error, `store: "session_lifecycle"`, `step: "close"`, `sid`), carrying the error's projection when the lifecycle rejected; any answer but `done` or `pending` is the same outage, with no error to project.
 - A step of the close work that fails is core's `session_close_item_failed` (warn, with the `item`), and the close stays pending; alert on `item: "delete_user_session"`.
 
-**A copy the record was renewed away from.** Before it invalidates anything,
-the logout asks core's `cookieRenewedAway`: when the record the cookie names
-carries a renewal nonce this cookie session does not hold — an old cookie, or
-a copy of it, from before a step-up renewed the session — the record is the
-renewed session's, so only this cookie session is destroyed and the answer is
-the same `200`. The renewed session stays live, except in one window. The
-logout reads the record and then closes the session, as two steps, and a
-step-up keeps the record's `sid` and rebinds it by its renewal nonce alone (the
-MFA ADR's D27). When a step-up records its nonce after the logout read the
-record and before the close commits, the logout acts on what it read and
-closes the session, escalated by then, although the cookie it came from is now
-a copy the record was renewed away from. The renewal nonce is written to the
-`UserSessionStore` and the close commits in the `SessionLifecycleStore`, so no
-single store write orders the two. This is accepted: the logout only ends the
-session, never extends or grants one, and the same cookie could have closed
-that session before the step-up. When the record cannot be read, that is
-logged as `logout_user_session_read_failed` and the logout answers
+**The session the cookie session names.** Before it invalidates anything,
+the logout reads the `UserSession` record the cookie session's `sid` names,
+and closes the session when the record is the cookie session's user's (its
+`sub` is the cookie session's `user.id`), whatever renewal nonce either holds.
+An old cookie, or a copy of it, from before a step-up renewed the session is
+not admitted anywhere (core's admission answers it `not_live`, `renewed`), but
+its logout closes the session as the renewed cookie's would: the nonce keeps a
+copy the record was renewed away from off the escalation, not from ending the
+session (the MFA ADR's D27). A record that is already gone is closed by its
+`sid`, as above, and the answer is `200`. A record of another subject — or a
+cookie session that names a `sid` and holds no user — is not closed: only the
+cookie session is destroyed, and the answer is
+`401 login_required` ("The cookie session does not hold the session it
+names"), so the client does not report a session as closed that was not; a
+retry from the same browser holds no cookie session and answers `200`. A login
+writes the `sid` and the user together, so this is not expected in practice.
+When the record cannot be read, that is logged as
+`logout_user_session_read_failed` and the logout answers
 `503 temporarily_unavailable`: it closes nothing and keeps the express session
 for a retry.
 

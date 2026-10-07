@@ -22,9 +22,10 @@
  * establishes, `establishSession` writes the session and a fresh CSRF token
  * is returned; if one interrupts, its ceremony is opened on a regenerated,
  * unauthenticated session and its `403` answered. A logout closes the
- * session through core's session lifecycle before destroying the cookie
- * session, unless the record was renewed away from this cookie session
- * (core's `cookieRenewedAway`), when only the cookie session is destroyed.
+ * session the cookie session names through core's session lifecycle before
+ * destroying the cookie session, whatever renewal nonce the cookie session
+ * holds; when the record it names is another subject's, only the cookie
+ * session is destroyed and the answer is `401`.
  * The session store module expires a destroyed cookie session's cookie.
  * Where a `UserSessionStore` is wired, the lifecycle is required beside it.
  */
@@ -38,8 +39,6 @@ import {
 	checkDeploymentMode,
 	checkResolver,
 	consoleLogger,
-	cookieClaim,
-	cookieRenewedAway,
 	createAttemptGuard,
 	type DeploymentMode,
 	emitAuditEvent,
@@ -77,6 +76,16 @@ import { LOGIN_ATTEMPT_TAG, readLoginAttemptSpec } from "../loginAttempts.mjs";
 import { createRedirectAllowlistValidator } from "../redirect-allowlist.mjs";
 
 const DEFAULT_SESSION_TTL_MS = 86400_000;
+
+/**
+ * What `POST /session/logout` answers, with `401`, when the cookie session's
+ * `sid` names a session of another subject: that session is not closed, and
+ * the cookie session is ended.
+ */
+const SESSION_NOT_HELD = Object.freeze({
+	error: "login_required",
+	error_description: "The cookie session does not hold the session it names",
+});
 
 /** A registered session requirement's name: the `store` an interruption's `open` failure is logged under. */
 type RequirementName = string;
@@ -456,14 +465,18 @@ export const createRouter = (
 			const rawSub = req.session.user?.id;
 			const sub = typeof rawSub === "string" && rawSub.length > 0 ? rawSub : undefined;
 
-			// A copy of a cookie session the record was renewed away from (a
-			// step-up moved it to another one) ends only itself: the record is
-			// the renewed session's. A read that fails is an outage: nothing is
-			// closed and the cookie session stays for a retry.
-			let renewedAway = false;
+			// The session the cookie names is closed when it is this cookie
+			// session's user's: a record of another subject is not this cookie
+			// session's to end. The renewal nonce is not compared: it keeps a
+			// copy the record was renewed away from off the escalation, not from
+			// ending the session. A record that is gone is closed by its sid, as
+			// any other. A read that fails is an outage: nothing is closed and
+			// the cookie session stays for a retry.
+			let namesOtherSubject = false;
 			if (sid && userSessionStore) {
 				try {
-					renewedAway = await cookieRenewedAway(userSessionStore, cookieClaim(req));
+					const record = await userSessionStore.get(sid);
+					namesOtherSubject = record != null && record.sub !== sub;
 				} catch (err) {
 					logger.error({ err: loggableError(err), sid }, "logout_user_session_read_failed");
 					return res.status(503).json(SESSION_STORE_UNAVAILABLE);
@@ -474,7 +487,7 @@ export const createRouter = (
 			// close that committed is the logout's success, its work left
 			// pending or not; one that did not keeps the cookie for a retry. A
 			// sessionless router has no record to close.
-			if (sid && !renewedAway && sessionLifecycle) {
+			if (sid && !namesOtherSubject && sessionLifecycle) {
 				const closed = await closeSession(sessionLifecycle, sid, sub, req);
 				if (!closed) return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 			}
@@ -498,6 +511,8 @@ export const createRouter = (
 				);
 				return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 			}
+			// The cookie session ended, but the session it named was not closed.
+			if (namesOtherSubject) return res.status(401).json(SESSION_NOT_HELD);
 			return res.status(200).json({ message: "Logged out successfully" });
 		});
 

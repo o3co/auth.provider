@@ -350,7 +350,7 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 		expect(bag.destroyed).toBe(true);
 	});
 
-	it("a cookie session the record was renewed away from closes nothing: the record is the renewed session's", async () => {
+	it("a cookie session the record was renewed away from closes the session all the same: the cookie session names it, for the same subject", async () => {
 		const userSessionStore = createInMemoryUserSessionStore();
 		await userSessionStore.create({
 			sid: SID,
@@ -382,75 +382,167 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 		const res = await logout(app);
 
 		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ message: "Logged out successfully" });
+		expect(sessionLifecycle.close).toHaveBeenCalledExactlyOnceWith(SID, "session_logout");
+		expect(bag.destroyed).toBe(true);
+	});
+
+	it("a cookie session whose sid names a record of another subject: that session is not closed, 401 login_required, and the cookie session ends", async () => {
+		const userSessionStore = await liveSessionStore();
+		const sessionLifecycle = fakeLifecycle();
+		const { sink, events } = recordingSink();
+		const { app, bag } = buildApp({
+			sessionLifecycle,
+			userSessionStore,
+			auditSink: sink,
+			bag: { user: { id: "u-2", username: "bob" } },
+		});
+
+		const res = await logout(app);
+
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({
+			error: "login_required",
+			error_description: "The cookie session does not hold the session it names",
+		});
 		expect(sessionLifecycle.close).not.toHaveBeenCalled();
+		expect(await userSessionStore.get(SID)).toMatchObject({ sid: SID, sub: "u-1" });
+		expect(events).toEqual([]);
+		expect(bag.destroyed).toBe(true);
+	});
+
+	it("a cookie session naming a sid with no user: the record is not closed, the same 401", async () => {
+		const userSessionStore = await liveSessionStore();
+		const sessionLifecycle = fakeLifecycle();
+		const { app, bag } = buildApp({ sessionLifecycle, userSessionStore, bag: { user: undefined } });
+
+		const res = await logout(app);
+
+		expect(res.status).toBe(401);
+		expect(res.body).toMatchObject({ error: "login_required" });
+		expect(sessionLifecycle.close).not.toHaveBeenCalled();
+		expect(bag.destroyed).toBe(true);
+	});
+
+	it("a record of another subject whose cookie session cannot be destroyed: 503, nothing closed, the cookie kept", async () => {
+		const sessionLifecycle = fakeLifecycle();
+		const { app } = buildApp({
+			sessionLifecycle,
+			userSessionStore: await liveSessionStore(),
+			bag: { user: { id: "u-2", username: "bob" } },
+			destroyError: new Error("cookie store down"),
+		});
+
+		const res = await logout(app);
+
+		expect(res.status).toBe(503);
+		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
+		expect(sessionLifecycle.close).not.toHaveBeenCalled();
+	});
+
+	it("a cookie session whose record is already gone closes by its sid and succeeds, as before", async () => {
+		const sessionLifecycle = fakeLifecycle();
+		const { app, bag } = buildApp({
+			sessionLifecycle,
+			userSessionStore: createInMemoryUserSessionStore(),
+		});
+
+		const res = await logout(app);
+
+		expect(res.status).toBe(200);
+		expect(sessionLifecycle.close).toHaveBeenCalledExactlyOnceWith(SID, "session_logout");
 		expect(bag.destroyed).toBe(true);
 	});
 });
 
 describe("POST /session/logout through the session lifecycle: what the close runs", () => {
-	it("revokes the session's families, tells its relying parties and deletes its user session", async () => {
-		const userSessionStore = createInMemoryUserSessionStore();
-		await userSessionStore.create({
-			sid: SID,
-			sub: "u-1",
-			authTime: new Date(),
-			expiresAt: new Date(Date.now() + HOUR),
-			claims: {},
-			amr: ["pwd"],
-			authentication: undefined,
-		});
-		const revocation = createRefreshTokenFamilyRevocation({
-			refreshTokenFamilyStore: createMemoryRefreshTokenFamilyStore(),
-			accessTokenHorizonMs: HOUR,
-		});
-		const notices: SessionCloseNotice[] = [];
-		const store = createInMemorySessionLifecycleStore();
-		const sessionLifecycle = createSessionLifecycle({
-			store,
-			userSessionStore,
-			refreshTokenFamilyRevocation: revocation,
-			federationTokenStore: {
-				kind: "memory",
-				removeBySid: vi.fn(async () => undefined),
-				delete: vi.fn(async () => undefined),
-			} as unknown as FederationTokenStore,
-			notifier: () => ({
-				notify: async (notice) => {
-					notices.push(notice);
-				},
-			}),
-			retainMs: HOUR,
-			logger: { warn: () => undefined, error: () => undefined },
-		});
-		const rp = {
-			clientId: "rp-1",
-			backchannelLogoutUri: "https://rp-1.example/logout",
-			backchannelLogoutSessionRequired: true,
-			frontchannelLogoutUri: undefined,
-			frontchannelLogoutSessionRequired: undefined,
-			registeredAt: new Date(),
-		};
-		const established = await userSessionStore.get(SID);
-		expect(
-			await sessionLifecycle.open(SID, {
+	it.each([
+		{ cookie: "the cookie session the record is bound to", renewedAway: false },
+		{ cookie: "a cookie session the record was renewed away from", renewedAway: true },
+	])(
+		"from $cookie: revokes the session's families, tells its relying parties and deletes its user session",
+		async ({ renewedAway }) => {
+			const userSessionStore = createInMemoryUserSessionStore();
+			await userSessionStore.create({
+				sid: SID,
 				sub: "u-1",
-				expiresAt: established?.expiresAt ?? new Date(0),
-			}),
-		).toEqual({ outcome: "opened" });
-		expect(await sessionLifecycle.join(SID, { rp, familyId: "fam-1" })).toEqual({
-			outcome: "joined",
-		});
-		const { app, bag } = buildApp({ sessionLifecycle, userSessionStore });
+				authTime: new Date(),
+				expiresAt: new Date(Date.now() + HOUR),
+				claims: {},
+				amr: ["pwd"],
+				authentication: {
+					primary: "pwd",
+					federation: undefined,
+					upstreamAmr: undefined,
+					mfaAt: undefined,
+				},
+			});
+			// A step-up renewed the cookie session: the record carries the renewed one's nonce.
+			const nonce = newRenewalNonce();
+			await userSessionStore.recordSecondFactor(SID, {
+				amr: ["otp", "mfa"],
+				at: new Date(),
+				renewalNonce: nonce,
+			});
+			const revocation = createRefreshTokenFamilyRevocation({
+				refreshTokenFamilyStore: createMemoryRefreshTokenFamilyStore(),
+				accessTokenHorizonMs: HOUR,
+			});
+			const notices: SessionCloseNotice[] = [];
+			const store = createInMemorySessionLifecycleStore();
+			const sessionLifecycle = createSessionLifecycle({
+				store,
+				userSessionStore,
+				refreshTokenFamilyRevocation: revocation,
+				federationTokenStore: {
+					kind: "memory",
+					removeBySid: vi.fn(async () => undefined),
+					delete: vi.fn(async () => undefined),
+				} as unknown as FederationTokenStore,
+				notifier: () => ({
+					notify: async (notice) => {
+						notices.push(notice);
+					},
+				}),
+				retainMs: HOUR,
+				logger: { warn: () => undefined, error: () => undefined },
+			});
+			const rp = {
+				clientId: "rp-1",
+				backchannelLogoutUri: "https://rp-1.example/logout",
+				backchannelLogoutSessionRequired: true,
+				frontchannelLogoutUri: undefined,
+				frontchannelLogoutSessionRequired: undefined,
+				registeredAt: new Date(),
+			};
+			const established = await userSessionStore.get(SID);
+			expect(
+				await sessionLifecycle.open(SID, {
+					sub: "u-1",
+					expiresAt: established?.expiresAt ?? new Date(0),
+				}),
+			).toEqual({ outcome: "opened" });
+			expect(await sessionLifecycle.join(SID, { rp, familyId: "fam-1" })).toEqual({
+				outcome: "joined",
+			});
+			const { app, bag } = buildApp({
+				sessionLifecycle,
+				userSessionStore,
+				bag: { renewalNonce: renewedAway ? newRenewalNonce() : nonce },
+			});
 
-		const res = await logout(app);
+			const res = await logout(app);
 
-		expect(res.status).toBe(200);
-		expect(await revocation.isFamilyRevoked("fam-1")).toBe(true);
-		expect(notices).toEqual([{ sid: SID, sub: "u-1", clientId: "rp-1", cause: "session_logout" }]);
-		expect(await userSessionStore.get(SID)).toBeNull();
-		expect(readVersionedSessionLifecycle(await store.read(SID))?.value.state).toBe("closed");
-		expect(bag.destroyed).toBe(true);
-	});
+			expect(res.status).toBe(200);
+			expect(await revocation.isFamilyRevoked("fam-1")).toBe(true);
+			expect(notices).toEqual([
+				{ sid: SID, sub: "u-1", clientId: "rp-1", cause: "session_logout" },
+			]);
+			expect(await userSessionStore.get(SID)).toBeNull();
+			expect(readVersionedSessionLifecycle(await store.read(SID))?.value.state).toBe("closed");
+			expect(bag.destroyed).toBe(true);
+		},
+	);
 });
 
 describe("where a user-session store is wired, core's session lifecycle is required", () => {
