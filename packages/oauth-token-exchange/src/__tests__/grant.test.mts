@@ -1219,6 +1219,12 @@ describe("createTokenExchangeGrant — audience inheritance", () => {
 		expect(decodeJwt(tokensOf(result).access_token).aud).toBe("client-a");
 	});
 
+	it("inherits a subject.aud that repeats one audience", async () => {
+		const result = await exchangeAs(["billing"], { aud: ["billing", "billing"] });
+		expect(result.status).toBe(200);
+		expect(decodeJwt(tokensOf(result).access_token).aud).toBe("billing");
+	});
+
 	it("refuses an omitted audience for a single-element-array subject.aud outside the allowlist", async () => {
 		// Same as the string case: no audience is within both ceilings.
 		const result = await exchangeAs([], { aud: ["a-api"] });
@@ -1308,7 +1314,11 @@ describe("createTokenExchangeGrant — audience inheritance", () => {
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
 		);
-		expect(result).toMatchObject({ status: 400, error: "invalid_target" });
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_target",
+			errorDescription: "audience_widening_not_allowed: client-a",
+		});
 	});
 
 	it("issues the audience a policy grants within both ceilings when the request names none", async () => {

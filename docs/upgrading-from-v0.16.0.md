@@ -840,16 +840,23 @@ The boot refusals you can meet, with their messages, are in
   still inherited, as before.
   A `resource` equal to the client's id is held to the same rule and is
   `400 invalid_target` / `requested_resources_not_in_audience`. A subject
-  token with no `aud` still defaults to the client's id, and a policy's
+  token with no `aud` is read as naming the client's id only when it is the
+  client's own (its `azp` is the client's id), and then still defaults to
+  it; a token of another client with no `aud` names no audience, so every
+  exchange of it is `400 invalid_target`, with or without an `audience`, and
+  `GrantPolicyRequest.originalAudience` is empty for it. A policy's
   `grantedAudience` replaces the default as before (#1602). A client
   registered with `allowExchangeOfTokensIssuedToOthers: true`, such as a
   gateway, is the one most often affected: it no longer receives a token for
-  its own id from a token issued to another client. **What to do:** grep for
+  its own id from a token issued to another client, whether that token names
+  an audience or none. **What to do:** grep for
   `token_exchange_audience_widening_rejected` against a staging copy. For a
   client it names, list the subject tokens' audience in the registration's
   `allowedAudiences` (an exchange naming no `audience` inherits a subject
   token's single audience the registration lists) or name it in `audience`,
-  or present a subject token whose `aud` contains the client's own id. See the
+  or present a subject token whose `aud` contains the client's own id. A
+  token of another client that names no audience cannot be exchanged; have
+  its issuer stamp an `aud`. See the
   [oauth-token-exchange README](../packages/oauth-token-exchange/README.md#security-notes),
   note 4.
 - **BREAKING: a refresh keeps the audience of the token it presents.** On
