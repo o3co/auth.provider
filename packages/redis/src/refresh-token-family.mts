@@ -266,7 +266,7 @@ export const redisRefreshTokenFamilyStoreBuilder: AdapterBuilder<RefreshTokenFam
 		keyPrefix?: string;
 		casRetryLimit?: number;
 	};
-	// Fail at boot rather than with a cryptic `TypeError` at the first Redis call.
+	// Reject at boot rather than fail with a cryptic `TypeError` at the first Redis call.
 	if (!c.client) {
 		throw new Error("redisRefreshTokenFamilyStoreBuilder: 'client' option is required");
 	}

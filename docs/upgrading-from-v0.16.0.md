@@ -634,7 +634,14 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   `provides-factory-failed` whose `cause` is a `RedisStoreEvictableError`
   (`reason` `access-token-denylist-evictable`,
   `subject-revocation-evictable` or `refresh-token-family-store-evictable`).
-  The remedy is the entry above's: set `maxmemory-policy noeviction`, or give
+  Their factories now ask the server at build time, so a server that cannot
+  answer at boot — not yet started, or unreachable — fails the boot with a
+  `provides-factory-failed` too (the driver's error as its `cause`), where
+  these stores used to build without asking. The standalone template ships
+  the refresh-token family store on Redis always and the access-token
+  denylist on Redis by default (`adapters.accessTokenDenylist = "redis"`), so
+  this applies to its default boot, with every other `adapters` selection
+  on memory: start Redis before the provider. The remedy is the entry above's: set `maxmemory-policy noeviction`, or give
   these stores a Redis of their own; where the server runs `noeviction` but
   will not say, `makeIoredisClients(io, { assumeNoEviction: true })` (in the
   standalone template, `REDIS_CLIENTS_ASSUME_NO_EVICTION=true`,

@@ -112,8 +112,8 @@ export const redisAccessTokenDenylistBuilder: AdapterBuilder<AccessTokenDenylist
 	_ctx,
 ) => {
 	const c = config as { client?: AccessTokenDenylistClient; keyPrefix?: string };
-	// Structural guard, mirroring `redisReplaySeenSetBuilder`: fail where the
-	// composition is assembled rather than on the first revocation attempt —
+	// Structural guard, mirroring `redisReplaySeenSetBuilder`: reject where the
+	// composition is assembled rather than fail on the first revocation attempt —
 	// which, for this particular adapter, would be during an incident.
 	if (!c.client) {
 		throw new Error("redisAccessTokenDenylistBuilder: 'client' option is required");

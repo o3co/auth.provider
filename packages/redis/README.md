@@ -140,7 +140,13 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   subject's watermark until the last credential it ends, a revoked family
   until the last access token it minted. A `volatile-*` or `allkeys-*`
   policy may evict that key early, and a revocation that is gone reads as
-  none. They pass the same [eviction gate](#the-eviction-gate).
+  none. They pass the same [eviction gate](#the-eviction-gate). The subject
+  session index does not: admission and token verification read the
+  subject's watermark, not the index. An entry an eviction drops from the
+  index leaves its session out of a credential change's cascade, so that
+  session is not closed through the session lifecycle, and its relying
+  parties' back-channel logout notice and the removal of its federation
+  tokens are skipped; `noeviction` keeps the index whole as well.
 
 ### The eviction gate
 

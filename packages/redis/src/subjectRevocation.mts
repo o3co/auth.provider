@@ -228,8 +228,8 @@ function buildRedisSubjectRevocation(
  * AdapterFactory builder for the Redis-backed `SubjectRevocation`, for
  * per-adapter granularity; the bundled `redisSessionStoresModule` covers the
  * common case. The default `keyPrefix` is the bundle's (`ss:rev:`), so
- * switching between the two keeps the keyspace. A missing `client` throws at
- * boot, as in every other builder here, rather than at the first command.
+ * switching between the two keeps the keyspace. A missing `client` rejects at
+ * boot rather than failing at the first command.
  */
 export const redisSubjectRevocationBuilder: AdapterBuilder<SubjectRevocation> = async (
 	config,

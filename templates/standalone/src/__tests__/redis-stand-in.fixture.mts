@@ -17,7 +17,10 @@
 /**
  * A TCP stand-in for a Redis server, for the tests that boot the template
  * against a socket and need no real server: it records what each connection
- * sends and answers as a server that runs `noeviction` does.
+ * sends and answers only what boot needs — the handshake (`HELLO` refused, so
+ * the client speaks RESP2), `INFO` reporting `maxmemory-policy noeviction`,
+ * and `+OK` to anything else. It stores nothing and is not a Redis for data:
+ * a test that reads or writes a store needs a real server.
  */
 
 import { once } from "node:events";
