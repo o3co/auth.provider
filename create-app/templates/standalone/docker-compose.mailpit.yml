@@ -1,0 +1,39 @@
+# Mailpit for the SMTP mail sender: a DEVELOPMENT overlay on
+# docker-compose.yml, for a run with MFA on (the template's default, or
+# MFA_MODE in .env) whose mail you can read.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.mailpit.yml up --build
+#
+# Write MFA_ENCRYPTION_KEY into .env first (openssl rand -base64 32): this run
+# reads its MFA key from it, not the development sample key.
+#
+# Mailpit keeps every mail the provider sends and delivers none; read them at
+# http://localhost:8025. Never use it in production, where
+# STANDARD_SMTP_MAIL_SENDER_* name a real relay. Leave every
+# STANDARD_SMTP_MAIL_SENDER_* unset in .env for this run, USER and PASSWORD
+# included: the overlay sets HOST, PORT, SECURE and FROM, not the credentials.
+#
+# The SMTP sender sends in plaintext (`none`) only to a loopback host, so
+# Mailpit shares the app container's network namespace and listens on its
+# localhost, and the app service publishes Mailpit's web UI. The configuration
+# is selected as `mailpit` (config/mailpit.conf, the development overlay
+# under another name), since under `development` the template installs the
+# sender that logs each code instead. Under that name the MFA stores may not
+# be kept in memory, so both are on the Redis docker-compose.yml runs.
+
+services:
+  app:
+    ports:
+      - "127.0.0.1:8025:8025"
+    environment:
+      CONFIG_ENV: mailpit
+      ADAPTERS_MFA_FACTOR_STORE: redis
+      ADAPTERS_MFA_TRANSACTION_STORE: redis
+      STANDARD_SMTP_MAIL_SENDER_HOST: localhost
+      STANDARD_SMTP_MAIL_SENDER_PORT: "1025"
+      STANDARD_SMTP_MAIL_SENDER_SECURE: none
+      STANDARD_SMTP_MAIL_SENDER_FROM: auth@example.com
+
+  mailpit:
+    image: axllent/mailpit:v1.31.3
+    network_mode: service:app

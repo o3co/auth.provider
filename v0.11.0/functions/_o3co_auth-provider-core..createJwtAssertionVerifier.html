@@ -1,0 +1,81 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="../"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>createJwtAssertionVerifier | auth.provider API</title><meta name="description" content="Documentation for auth.provider API"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="../assets/style.css"/><link rel="stylesheet" href="../assets/highlight.css"/><script defer src="../assets/main.js"></script><script async src="../assets/icons.js" id="tsd-icons-script"></script><script async src="../assets/search.js" id="tsd-search-script"></script><script async src="../assets/navigation.js" id="tsd-nav-script"></script><script async src="../assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
+<div class="tsd-toolbar-contents container"><a href="../index.html" class="title">auth.provider API</a>
+<div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/>
+<ul role="listbox" id="tsd-search-results"></ul>
+<div id="tsd-search-status" aria-live="polite" aria-atomic="true">
+<div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-menu"></use></svg></a></div></header>
+<div class="container container-main">
+<div class="col-content">
+<div class="tsd-page-title">
+<ul class="tsd-breadcrumb" aria-label="Breadcrumb">
+<li><a href="../modules/_o3co_auth-provider-core.html">@o3co/auth-provider-core</a></li>
+<li><a href="../modules/_o3co_auth-provider-core..html"></a></li>
+<li><a href="" aria-current="page">createJwtAssertionVerifier</a></li></ul>
+<h1>Function createJwtAssertionVerifier</h1></div>
+<section class="tsd-panel">
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="createjwtassertionverifier"><span class="tsd-kind-call-signature">createJwtAssertionVerifier</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">options</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/_o3co_auth-provider-core..JwtAssertionVerifierOptions.html" class="tsd-signature-type tsd-kind-interface">JwtAssertionVerifierOptions</a><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/_o3co_auth-provider-core..AssertionVerifier.html" class="tsd-signature-type tsd-kind-interface">AssertionVerifier</a><a href="#createjwtassertionverifier" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>The vendor-neutral <a href="../interfaces/_o3co_auth-provider-core..AssertionVerifier.html" class="tsd-kind-interface">AssertionVerifier</a>: a JWT signed by an authority
+this deployment trusts (#301).</p>
+<p>This is the RFC 7523 §3 shape — <code>iss</code>, <code>sub</code>, <code>aud</code>, <code>exp</code> checked against a
+configured key — and it ships because otherwise every deployment hand-rolls
+JWT verification for its device tokens, which is exactly where &quot;a bare
+identifier was accepted as a login&quot; comes from. Platform attestations (Apple
+DeviceCheck, Play Integrity) need a vendor call and are the operator's own
+implementation of the port.</p>
+<h2 id="what-it-refuses-and-why-each-one-is-here" class="tsd-anchor-link">What it refuses, and why each one is here<a href="#what-it-refuses-and-why-each-one-is-here" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ul>
+<li><strong>A bad signature, a wrong <code>iss</code>, a wrong <code>aud</code>, an expired assertion</strong> —
+<code>null</code>, i.e. not verified. <code>aud</code> in particular: an assertion addressed to
+another service is replayable here without it.</li>
+<li><strong>An assertion with no <code>exp</code></strong> — <code>null</code>. RFC 7523 §3 item 4 makes it
+mandatory, and jose does not: it validates <code>exp</code> only when present, so an
+assertion that omits it would otherwise be accepted for ever. There is
+no lifetime ceiling beyond <code>exp</code> itself (no <code>maxTokenAge</code>): the RFC gives
+the issuing authority that decision, and this verifier has no knob for
+second-guessing it.</li>
+<li><strong>Replay within <code>exp</code> is not detected here.</strong> RFC 7523 §3 item 7 lets
+an AS track <code>jti</code> to refuse a second presentation; this verifier does
+not, and neither does the grant that consumes it. An assertion is
+accepted as many times as it is presented until it expires, so an
+authority should mint short-lived assertions.</li>
+<li><strong>A claims set with no usable handle</strong> — <code>null</code>. A verified signature over
+a token naming nobody is not an authentication.</li>
+<li><strong><code>alg: none</code> and every unlisted algorithm</strong> — <code>algorithms</code> is required
+with no default, so a deployment names what it accepts rather than
+inheriting &quot;anything this key can verify&quot;.</li>
+</ul>
+<p>A verification that could not be <em>attempted</em> is not modelled here: this
+implementation is local and cannot fail that way. A vendor-backed verifier
+throws instead, and the grant answers <code>503</code>.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">options</span>: <a href="../interfaces/_o3co_auth-provider-core..JwtAssertionVerifierOptions.html" class="tsd-signature-type tsd-kind-interface">JwtAssertionVerifierOptions</a></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <a href="../interfaces/_o3co_auth-provider-core..AssertionVerifier.html" class="tsd-signature-type tsd-kind-interface">AssertionVerifier</a></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/d4671c1817ef172b598b09823fb96bf1fcbf1fb9/packages/core/src/assertions/jwtAssertionVerifier.mts#L112">packages/core/src/assertions/jwtAssertionVerifier.mts:112</a></li></ul></aside></div></li></ul></section></div>
+<div class="col-sidebar">
+<div class="page-menu">
+<div class="tsd-navigation settings">
+<details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>Settings</h3></summary>
+<div class="tsd-accordion-details">
+<div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span>
+<ul id="tsd-filter-options">
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div>
+<div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div>
+<details open class="tsd-accordion tsd-page-navigation"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>On This Page</h3></summary>
+<div class="tsd-accordion-details"><a href="#what-it-refuses-and-why-each-one-is-here"><span>What it refuses, and why each one is here</span></a></div></details></div>
+<div class="site-menu">
+<nav class="tsd-navigation"><a href="../modules.html">auth.provider API</a>
+<ul class="tsd-small-nested-navigation" id="tsd-nav-container">
+<li>Loading...</li></ul></nav></div></div></div><footer>
+<p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer>
+<div class="overlay"></div></body></html>

@@ -1,0 +1,294 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="../"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>@o3co/auth-provider-federation-oidc | auth.provider API</title><meta name="description" content="Documentation for auth.provider API"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="../assets/style.css"/><link rel="stylesheet" href="../assets/highlight.css"/><script defer src="../assets/main.js"></script><script async src="../assets/icons.js" id="tsd-icons-script"></script><script async src="../assets/search.js" id="tsd-search-script"></script><script async src="../assets/navigation.js" id="tsd-nav-script"></script><script async src="../assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
+<div class="tsd-toolbar-contents container"><a href="../index.html" class="title">auth.provider API</a>
+<div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/>
+<ul role="listbox" id="tsd-search-results"></ul>
+<div id="tsd-search-status" aria-live="polite" aria-atomic="true">
+<div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-menu"></use></svg></a></div></header>
+<div class="container container-main">
+<div class="col-content">
+<div class="tsd-page-title">
+<ul class="tsd-breadcrumb" aria-label="Breadcrumb">
+<li><a href="" aria-current="page">@o3co/auth-provider-federation-oidc</a></li></ul>
+<h1>Module @o3co/auth-provider-federation-oidc</h1></div>
+<section class="tsd-panel tsd-typography"><h1 id="o3coauth-provider-federation-oidc" class="tsd-anchor-link">@o3co/auth-provider-federation-oidc<a href="#o3coauth-provider-federation-oidc" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h1>
+<p>Generic OpenID Connect federation provider for <code>auth.provider</code>: any
+OIDC-compliant identity provider — Okta, Entra ID, Auth0, Keycloak, a
+customer's own tenant — from configuration alone, and as many instances as a
+deployment has issuers (#524).</p>
+<p>The <code>FederationProvider</code> contract lives in <code>@o3co/auth-provider-session</code>; the
+Google, GitHub and Apple packages implement it for one IdP each. This package
+implements it for every IdP that publishes an OpenID Connect discovery
+document, so adding an IdP is a config section, not a package.</p>
+<h2 id="usage" class="tsd-anchor-link">Usage<a href="#usage" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>Each instance is one module, made by <code>oidcFederationModule(&lt;name&gt;)</code>. Every
+instance reads its config from the shared <code>oidcFederationConfigs</code> slot, which
+the composition root fills — normally straight from the <code>federations</code> config
+section with <code>readOidcFederationConfigs</code>:</p>
+<pre><code class="ts"><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">createApp</span><span class="hl-1">, </span><span class="hl-6">defineModule</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-core&quot;</span><span class="hl-1">;</span><br/><span class="hl-5">import</span><span class="hl-1"> {</span><br/><span class="hl-1">  </span><span class="hl-6">oidcFederationModule</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-6">oidcFederationNames</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-6">readOidcFederationConfigs</span><span class="hl-1">,</span><br/><span class="hl-1">} </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-federation-oidc&quot;</span><span class="hl-1">;</span><br/><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">sessionModule</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-session&quot;</span><span class="hl-1">;</span><br/><br/><span class="hl-3">const</span><span class="hl-1"> </span><span class="hl-7">oidcConfigBridgeModule</span><span class="hl-1"> = </span><span class="hl-0">defineModule</span><span class="hl-1">({</span><br/><span class="hl-1">  </span><span class="hl-6">name:</span><span class="hl-1"> </span><span class="hl-2">&quot;oidc-federation-config&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-6">requires:</span><span class="hl-1"> [</span><span class="hl-2">&quot;config&quot;</span><span class="hl-1">] </span><span class="hl-5">as</span><span class="hl-1"> </span><span class="hl-3">const</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-6">provides:</span><span class="hl-1"> {</span><br/><span class="hl-1">    </span><span class="hl-0">oidcFederationConfigs</span><span class="hl-6">:</span><span class="hl-1"> ({ </span><span class="hl-6">config</span><span class="hl-1"> }) </span><span class="hl-3">=&gt;</span><span class="hl-1"> </span><span class="hl-0">readOidcFederationConfigs</span><span class="hl-1">(</span><span class="hl-6">config</span><span class="hl-1">.</span><span class="hl-6">federations</span><span class="hl-1">),</span><br/><span class="hl-1">  },</span><br/><span class="hl-1">});</span><br/><br/><span class="hl-3">const</span><span class="hl-1"> </span><span class="hl-7">handle</span><span class="hl-1"> = </span><span class="hl-5">await</span><span class="hl-1"> </span><span class="hl-0">createApp</span><span class="hl-1">({</span><br/><span class="hl-1">  </span><span class="hl-6">modules:</span><span class="hl-1"> [</span><br/><span class="hl-1">    </span><span class="hl-6">sessionModule</span><span class="hl-1">,</span><br/><span class="hl-1">    </span><span class="hl-6">oidcConfigBridgeModule</span><span class="hl-1">,</span><br/><span class="hl-1">    ...</span><span class="hl-0">oidcFederationNames</span><span class="hl-1">(</span><span class="hl-6">config</span><span class="hl-1">.</span><span class="hl-6">federations</span><span class="hl-1">).</span><span class="hl-0">map</span><span class="hl-1">((</span><span class="hl-6">name</span><span class="hl-1">) </span><span class="hl-3">=&gt;</span><span class="hl-1"> </span><span class="hl-0">oidcFederationModule</span><span class="hl-1">(</span><span class="hl-6">name</span><span class="hl-1">)),</span><br/><span class="hl-1">    </span><span class="hl-4">// ... composition-root modules supplying userRepository + the session stores</span><br/><span class="hl-1">  ],</span><br/><span class="hl-1">  </span><span class="hl-6">bootstrapComponents:</span><span class="hl-1"> { </span><span class="hl-6">config</span><span class="hl-1">, </span><span class="hl-6">pathResolver</span><span class="hl-1"> },</span><br/><span class="hl-1">});</span>
+</code><button type="button">Copy</button></pre>
+
+<p>The scaffold (<code>@o3co/create-auth-provider</code>) does exactly this in
+<code>src/buildModules.mts</code>, so a scaffolded deployment adds an IdP by editing
+<code>config/application.conf</code> alone.</p>
+<h3 id="configuration" class="tsd-anchor-link">Configuration<a href="#configuration" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>A <code>federations.&lt;name&gt;</code> section whose <code>type</code> is <code>oidc</code>. The section name is the
+federation name: the browser starts at <code>/session/oauth/federation/&lt;name&gt;</code>, the
+IdP sends it back to <code>callbackURL</code>, and the identity handed to the Store is
+<code>&lt;name&gt;:&lt;sub&gt;</code>.</p>
+<pre><code class="hocon">federations {
+  okta {
+    enabled = true
+    type = "oidc"
+    issuer = "https://dev-123.okta.com"
+    clientId = ${OKTA_CLIENT_ID}
+    clientSecret = ${OKTA_CLIENT_SECRET}
+    callbackURL = "https://auth.example.com/session/oauth/federation/okta/callback"
+    redirectAllowlist = ["https://app.example.com/welcome"]
+  }
+
+  keycloak {
+    enabled = true
+    type = "oidc"
+    issuer = "https://sso.example.com/realms/staff"
+    clientId = ${KEYCLOAK_CLIENT_ID}
+    privateKey = ${KEYCLOAK_PRIVATE_KEY_PEM}     # private_key_jwt
+    callbackURL = "https://auth.example.com/session/oauth/federation/keycloak/callback"
+    scopes = ["openid", "profile", "email", "groups"]
+  }
+}
+</code><button type="button">Copy</button></pre>
+
+<p>Two issuers, two sections, two callbacks — that is the whole of multi-IdP
+support. The nested shape (<code>okta { type = &quot;oidc&quot;, oidc { ... } }</code>) that
+<code>extractFederationSection</code> accepts works too.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>issuer</code></td>
+<td>yes</td>
+<td>Issuer identifier, exactly as the IdP writes it into <code>iss</code>. <code>https</code>; plain <code>http</code> only on a loopback host (local Keycloak).</td>
+</tr>
+<tr>
+<td><code>clientId</code></td>
+<td>yes</td>
+<td>Client identifier registered at the IdP.</td>
+</tr>
+<tr>
+<td><code>clientSecret</code></td>
+<td>one of</td>
+<td><code>client_secret_basic</code> (RFC 6749 §2.3.1). In code the value may be a resolver (<code>() =&gt; Promise&lt;string&gt;</code>), consulted on every token request, for secrets that rotate.</td>
+</tr>
+<tr>
+<td><code>privateKey</code></td>
+<td>one of</td>
+<td><code>private_key_jwt</code> (RFC 7523 / OIDC Core §9). A PEM-encoded PKCS#8 key, or <code>{ pem, kid?, alg? }</code>. The JWS algorithm is inferred from the key (RSA → RS256, P-256 → ES256, P-384 → ES384, P-521 → ES512, Ed25519 → EdDSA) unless <code>alg</code> says otherwise; <code>kid</code> goes in the assertion header.</td>
+</tr>
+<tr>
+<td><code>callbackURL</code></td>
+<td>yes</td>
+<td>Where the IdP sends the browser back. The session routes read it from the same section.</td>
+</tr>
+<tr>
+<td><code>scopes</code></td>
+<td>no</td>
+<td>Default <code>[&quot;openid&quot;, &quot;profile&quot;, &quot;email&quot;]</code>. <code>openid</code> is mandatory — without it there is no id_token — and its absence refuses boot.</td>
+</tr>
+<tr>
+<td><code>discovery</code></td>
+<td>no</td>
+<td>Default <code>true</code>. See below.</td>
+</tr>
+<tr>
+<td><code>endpoints</code></td>
+<td>no</td>
+<td><code>authorizationEndpoint</code>, <code>tokenEndpoint</code>, <code>jwksUri</code>, <code>userinfoEndpoint</code>, <code>endSessionEndpoint</code>. Applied over the discovered metadata; the first three are mandatory when <code>discovery = false</code>.</td>
+</tr>
+<tr>
+<td><code>idTokenSignedResponseAlg</code></td>
+<td>no</td>
+<td>Pin the id_token JWS algorithm. Otherwise the issuer's advertised <code>id_token_signing_alg_values_supported</code> is trusted; <code>none</code> and symmetric algorithms are never accepted against a JWKS.</td>
+</tr>
+<tr>
+<td><code>userInfo</code></td>
+<td>no</td>
+<td>Default: call UserInfo when the issuer publishes an endpoint. <code>false</code> builds the profile from the id_token alone; <code>true</code> refuses boot if there is no endpoint.</td>
+</tr>
+<tr>
+<td><code>clockToleranceSeconds</code></td>
+<td>no</td>
+<td>Skew tolerated on <code>exp</code> / <code>iat</code>. Default 30.</td>
+</tr>
+<tr>
+<td><code>redirectAllowlist</code>, <code>sessionDomain</code>, <code>authCallbackUrl</code>, <code>clientUrl</code></td>
+<td>no</td>
+<td>The <code>redirect_to</code> policy, as for every federation — see the session package README.</td>
+</tr>
+</tbody>
+</table>
+<p><code>fetch</code> (code only) replaces the fetch every upstream request goes through —
+for a proxy, or a test double.</p>
+<h3 id="what-happens-at-boot" class="tsd-anchor-link">What happens at boot<a href="#what-happens-at-boot" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Discovery. Each instance fetches <code>&lt;issuer&gt;/.well-known/openid-configuration</code>
+when the app boots, checks the document's <code>issuer</code> against the configured one,
+and keeps <code>authorization_endpoint</code>, <code>token_endpoint</code>, <code>jwks_uri</code>,
+<code>userinfo_endpoint</code> and <code>end_session_endpoint</code>. <strong>A failure is fatal</strong>: an
+unreachable issuer, a document naming another issuer, or one without a
+<code>jwks_uri</code> refuses boot with the federation's name in the error. There is no
+silent fallback to hand-typed endpoints — a deployment that wants those sets
+<code>discovery = false</code> and writes them under <code>endpoints</code>, and then no document is
+fetched at all.</p>
+<p>Boot also refuses a config with both <code>clientSecret</code> and <code>privateKey</code>, with
+neither, with a name that is not one URL path segment, or with a private key
+that cannot be parsed.</p>
+<h3 id="what-happens-at-login" class="tsd-anchor-link">What happens at login<a href="#what-happens-at-login" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ol>
+<li><strong>Authorization request</strong> — <code>authorization_code</code> with PKCE S256, <code>state</code>
+and <code>nonce</code>. All three are minted by the session routes per transaction and
+stored in the session; the provider refuses to build a request without a
+nonce (OIDC Core §3.1.3.7).</li>
+<li><strong>Code exchange</strong> — at <code>token_endpoint</code>, authenticated with the configured
+method, <code>redirect_uri</code> echoing the callback and <code>code_verifier</code> closing the
+PKCE loop.</li>
+<li><strong>ID token validation</strong> — signature against the issuer's JWKS (fetched by
+<code>kid</code>, cached, refetched when an unknown <code>kid</code> appears — but not within a
+minute of the last fetch, so an IdP that rotates keys must publish the new
+key before signing with it, which every IdP does); <code>iss</code> equal to the
+configured issuer; <code>aud</code> containing the client id and no untrusted extra
+audience; <code>exp</code> and <code>iat</code> within tolerance; <code>nonce</code> equal to the
+transaction's; <code>at_hash</code> recomputed from the access token when the claim is
+present (OIDC Core §3.3.2.11). A response without an id_token is refused.</li>
+<li><strong>UserInfo</strong> — when enabled, fetched with the access token and bound to the
+id_token's <code>sub</code>; a mismatch is refused. UserInfo values fill <code>email</code>,
+<code>emailVerified</code>, <code>name</code>, <code>picture</code> and <code>groups</code>, falling back to the
+id_token's claims. <code>email_verified</code> is normalised to a boolean (some IdPs
+send <code>&quot;true&quot;</code>); <code>groups</code> is carried only as a string array.</li>
+<li><strong>Identity</strong> — <code>sub</code> is opaque and stable per issuer; the profile is never
+keyed on <code>email</code>. The session routes hand <code>&lt;name&gt;:&lt;sub&gt;</code> to the Store
+exactly as they do for Google or GitHub. <strong>An identity the Store does not
+know is refused with <code>401 unknown_user</code></strong> — this package provisions nothing;
+the Store stays the source of truth for who exists.</li>
+</ol>
+<p>Any refusal in steps 2–4 surfaces from the callback as <code>502 exchange_failed</code>
+(the session routes' answer to an upstream exchange the provider refused) and
+never reaches the Store.</p>
+<h3 id="optional-capabilities" class="tsd-anchor-link">Optional capabilities<a href="#optional-capabilities" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul>
+<li><code>SupportsRefresh</code> — <code>refreshToken()</code> runs the <code>refresh_token</code> grant at the
+issuer.</li>
+<li><code>SupportsLogout</code> — present only when the issuer publishes an
+<code>end_session_endpoint</code> (or <code>endpoints.endSessionEndpoint</code> names one):
+RP-initiated logout with <code>id_token_hint</code>, <code>post_logout_redirect_uri</code> and
+<code>state</code>.</li>
+<li><code>SupportsClaimMapping</code> — <code>mapClaims()</code> promotes <code>email</code>, <code>emailVerified</code>,
+<code>name</code>, <code>picture</code> and <code>groups</code>; everything else stays namespaced under the
+federation per the claim precedence rules in the session package.</li>
+</ul>
+<h3 id="scaffold-environment-variables" class="tsd-anchor-link">Scaffold environment variables<a href="#scaffold-environment-variables" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>The scaffold ships one instance, <code>federations.oidc</code>, disabled by default:</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FEDERATIONS_OIDC_ENABLED</code></td>
+<td><code>false</code></td>
+<td>Enable the instance</td>
+</tr>
+<tr>
+<td><code>FEDERATIONS_OIDC_ISSUER</code></td>
+<td>—</td>
+<td>Issuer identifier</td>
+</tr>
+<tr>
+<td><code>FEDERATIONS_OIDC_CLIENT_ID</code></td>
+<td>—</td>
+<td>Client ID</td>
+</tr>
+<tr>
+<td><code>FEDERATIONS_OIDC_CLIENT_SECRET</code></td>
+<td>—</td>
+<td>Client secret (<code>client_secret_basic</code>)</td>
+</tr>
+<tr>
+<td><code>FEDERATIONS_OIDC_CALLBACK_URL</code></td>
+<td><code>http://localhost:3000/session/oauth/federation/oidc/callback</code></td>
+<td>Callback</td>
+</tr>
+</tbody>
+</table>
+<p>More instances are more sections in <code>config/application.conf</code>.</p>
+<h2 id="public-api" class="tsd-anchor-link">Public API<a href="#public-api" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ul>
+<li><code>createOidcProvider(name, config): Promise&lt;OidcProvider&gt;</code> — the provider
+itself; asynchronous because discovery happens here.</li>
+<li><code>oidcFederationModule(name): Module</code> — one const-Module per instance,
+requiring <code>oidcFederationConfigs</code> and contributing <code>federations.&lt;name&gt;</code> and
+<code>federationRedirectPolicies.&lt;name&gt;</code>.</li>
+<li><code>readOidcFederationConfigs(federations)</code> — the slot from a <code>federations</code>
+config section; refuses a malformed field by <code>federations.&lt;name&gt;.&lt;field&gt;</code>.</li>
+<li><code>oidcFederationNames(federations)</code> — the names of every enabled section of
+type <code>oidc</code>, sorted.</li>
+<li><code>OIDC_FEDERATION_TYPE</code> (<code>&quot;oidc&quot;</code>), <code>DEFAULT_OIDC_SCOPES</code>.</li>
+<li>Types: <code>OidcProviderConfig</code>, <code>OidcEndpointOverrides</code>, <code>OidcPrivateKey</code>,
+<code>OidcProvider</code>.</li>
+</ul>
+</section>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Interfaces"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="interfaces">Interfaces<a href="#interfaces" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="oidcendpointoverrides"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-federation-oidc.OidcEndpointOverrides.html">OidcEndpointOverrides</a><a href="#oidcendpointoverrides" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="oidcprivatekey"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-federation-oidc.OidcPrivateKey.html">OidcPrivateKey</a><a href="#oidcprivatekey" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="oidcproviderconfig"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-federation-oidc.OidcProviderConfig.html">OidcProviderConfig</a><a href="#oidcproviderconfig" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Type Aliases"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="type-aliases">Type Aliases<a href="#type-aliases" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="oidcprovider"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><a href="../types/_o3co_auth-provider-federation-oidc.OidcProvider.html">OidcProvider</a><a href="#oidcprovider" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Variables"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="variables">Variables<a href="#variables" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="default_oidc_scopes"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-federation-oidc.DEFAULT_OIDC_SCOPES.html">DEFAULT_OIDC_SCOPES</a><a href="#default_oidc_scopes" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="oidc_federation_type"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-federation-oidc.OIDC_FEDERATION_TYPE.html">OIDC_FEDERATION_TYPE</a><a href="#oidc_federation_type" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Functions"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="functions">Functions<a href="#functions" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="createoidcprovider"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-federation-oidc.createOidcProvider.html">createOidcProvider</a><a href="#createoidcprovider" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="oidcfederationmodule"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-federation-oidc.oidcFederationModule.html">oidcFederationModule</a><a href="#oidcfederationmodule" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="oidcfederationnames"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-federation-oidc.oidcFederationNames.html">oidcFederationNames</a><a href="#oidcfederationnames" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="readoidcfederationconfigs"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-federation-oidc.readOidcFederationConfigs.html">readOidcFederationConfigs</a><a href="#readoidcfederationconfigs" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details></div>
+<div class="col-sidebar">
+<div class="page-menu">
+<div class="tsd-navigation settings">
+<details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>Settings</h3></summary>
+<div class="tsd-accordion-details">
+<div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span>
+<ul id="tsd-filter-options">
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div>
+<div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div>
+<details open class="tsd-accordion tsd-page-navigation"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>On This Page</h3></summary>
+<div class="tsd-accordion-details"><a href="#o3coauth-provider-federation-oidc"><span>@o3co/auth-<wbr/>provider-<wbr/>federation-<wbr/>oidc</span></a>
+<ul>
+<li><a href="#usage"><span>Usage</span></a></li>
+<li>
+<ul>
+<li><a href="#configuration"><span>Configuration</span></a></li>
+<li><a href="#what-happens-at-boot"><span>What happens at boot</span></a></li>
+<li><a href="#what-happens-at-login"><span>What happens at login</span></a></li>
+<li><a href="#optional-capabilities"><span>Optional capabilities</span></a></li>
+<li><a href="#scaffold-environment-variables"><span>Scaffold environment variables</span></a></li></ul></li>
+<li><a href="#public-api"><span>Public <wbr/>API</span></a></li></ul>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Interfaces"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Interfaces</summary>
+<div><a href="#oidcendpointoverrides"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Oidc<wbr/>Endpoint<wbr/>Overrides</span></a><a href="#oidcprivatekey"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Oidc<wbr/>Private<wbr/>Key</span></a><a href="#oidcproviderconfig"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Oidc<wbr/>Provider<wbr/>Config</span></a></div></details>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Type Aliases"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Type Aliases</summary>
+<div><a href="#oidcprovider"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><span>Oidc<wbr/>Provider</span></a></div></details>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Variables"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Variables</summary>
+<div><a href="#default_oidc_scopes"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>DEFAULT_<wbr/>OIDC_<wbr/>SCOPES</span></a><a href="#oidc_federation_type"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>OIDC_<wbr/>FEDERATION_<wbr/>TYPE</span></a></div></details>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Functions"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Functions</summary>
+<div><a href="#createoidcprovider"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>create<wbr/>Oidc<wbr/>Provider</span></a><a href="#oidcfederationmodule"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>oidc<wbr/>Federation<wbr/>Module</span></a><a href="#oidcfederationnames"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>oidc<wbr/>Federation<wbr/>Names</span></a><a href="#readoidcfederationconfigs"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>read<wbr/>Oidc<wbr/>Federation<wbr/>Configs</span></a></div></details></div></details></div>
+<div class="site-menu">
+<nav class="tsd-navigation"><a href="../modules.html">auth.provider API</a>
+<ul class="tsd-small-nested-navigation" id="tsd-nav-container">
+<li>Loading...</li></ul></nav></div></div></div><footer>
+<p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer>
+<div class="overlay"></div></body></html>

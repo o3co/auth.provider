@@ -1,0 +1,622 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="../"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>MfaTransactionStore | auth.provider API</title><meta name="description" content="Documentation for auth.provider API"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="../assets/style.css"/><link rel="stylesheet" href="../assets/highlight.css"/><script defer src="../assets/main.js"></script><script async src="../assets/icons.js" id="tsd-icons-script"></script><script async src="../assets/search.js" id="tsd-search-script"></script><script async src="../assets/navigation.js" id="tsd-nav-script"></script><script async src="../assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
+<div class="tsd-toolbar-contents container"><a href="../index.html" class="title">auth.provider API</a>
+<div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/>
+<ul role="listbox" id="tsd-search-results"></ul>
+<div id="tsd-search-status" aria-live="polite" aria-atomic="true">
+<div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-menu"></use></svg></a></div></header>
+<div class="container container-main">
+<div class="col-content">
+<div class="tsd-page-title">
+<ul class="tsd-breadcrumb" aria-label="Breadcrumb">
+<li><a href="../modules/_o3co_auth-provider-core.html">@o3co/auth-provider-core</a></li>
+<li><a href="../modules/_o3co_auth-provider-core..html"></a></li>
+<li><a href="" aria-current="page">MfaTransactionStore</a></li></ul>
+<h1>Interface MfaTransactionStore</h1></div>
+<section class="tsd-panel tsd-comment">
+<div class="tsd-comment tsd-typography"><p>Where MFA transactions, the subject lock state and its authorized recovery,
+a subject's generation, lease and recovery-set floor, a session's
+account-email proof and a subject's first-binding mark are kept.</p>
+<p>Every operation is atomic on its own. A store that cannot answer throws:
+an outage is <code>503</code>, never a verdict on a proof.</p>
+</div></section>
+<div class="tsd-signature"><span class="tsd-signature-keyword">interface</span> <span class="tsd-kind-interface">MfaTransactionStore</span> <span class="tsd-signature-symbol">{</span><br/>    <a class="tsd-kind-property" href="#kind">kind</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#acquiresubjectlease-1">acquireSubjectLease</a><span class="tsd-signature-symbol">(</span><br/>        <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">request</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-core..MfaSubjectLeaseRequest.html" class="tsd-signature-type tsd-kind-interface">MfaSubjectLeaseRequest</a><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../types/_o3co_auth-provider-core..MfaSubjectLeaseAnswer.html" class="tsd-signature-type tsd-kind-type-alias">MfaSubjectLeaseAnswer</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#applysubjectrecovery-1">applySubjectRecovery</a><span class="tsd-signature-symbol">(</span><br/>        <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">application</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-core..MfaSubjectRecoveryApplication.html" class="tsd-signature-type tsd-kind-interface">MfaSubjectRecoveryApplication</a><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../types/_o3co_auth-provider-core..MfaSubjectRecoveryAnswer.html" class="tsd-signature-type tsd-kind-type-alias">MfaSubjectRecoveryAnswer</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#authorizesubjectrecovery-1">authorizeSubjectRecovery</a><span class="tsd-signature-symbol">(</span><br/>        <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">authorization</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-core..MfaSubjectRecoveryAuthorization.html" class="tsd-signature-type tsd-kind-interface">MfaSubjectRecoveryAuthorization</a><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#consume-1">consume</a><span class="tsd-signature-symbol">(</span><br/>        <span class="tsd-kind-parameter">id</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">expectedVersion</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="_o3co_auth-provider-core..MfaTransaction.html" class="tsd-signature-type tsd-kind-interface">MfaTransaction</a> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#consumeemailproofrequirement-1">consumeEmailProofRequirement</a><span class="tsd-signature-symbol">(</span><br/>        <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">consume</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-core..MfaEmailProofRequirementConsume.html" class="tsd-signature-type tsd-kind-interface">MfaEmailProofRequirementConsume</a><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../types/_o3co_auth-provider-core..MfaEmailProofRequirementConsumeAnswer.html" class="tsd-signature-type tsd-kind-type-alias">MfaEmailProofRequirementConsumeAnswer</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#create-1">create</a><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">tx</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-core..MfaTransaction.html" class="tsd-signature-type tsd-kind-interface">MfaTransaction</a><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#emailproofrequiredatnextbinding-1">emailProofRequiredAtNextBinding</a><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#firstbindingat-1">firstBindingAt</a><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">nowMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#get-1">get</a><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">id</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="_o3co_auth-provider-core..MfaTransaction.html" class="tsd-signature-type tsd-kind-interface">MfaTransaction</a> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#noteexemptsuccess-1">noteExemptSuccess</a><span class="tsd-signature-symbol">(</span><br/>        <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">nowMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">policy</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-core..MfaLockoutPolicy.html" class="tsd-signature-type tsd-kind-interface">MfaLockoutPolicy</a><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#notefirstbinding-1">noteFirstBinding</a><span class="tsd-signature-symbol">(</span><br/>        <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">atMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">untilMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#raiserecoverysetfloor-1">raiseRecoverySetFloor</a><span class="tsd-signature-symbol">(</span><br/>        <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">raise</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-core..MfaRecoverySetFloorRaise.html" class="tsd-signature-type tsd-kind-interface">MfaRecoverySetFloorRaise</a><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../types/_o3co_auth-provider-core..MfaRecoverySetFloorAnswer.html" class="tsd-signature-type tsd-kind-type-alias">MfaRecoverySetFloorAnswer</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#recordsessionemailproof-1">recordSessionEmailProof</a><span class="tsd-signature-symbol">(</span><br/>        <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">sid</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">provedAtMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">untilMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#recoverysetfloor-1">recoverySetFloor</a><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#releasesubjectlease-1">releaseSubjectLease</a><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">token</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#requireemailproofatnextbinding-1">requireEmailProofAtNextBinding</a><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#reserveattempt-1">reserveAttempt</a><span class="tsd-signature-symbol">(</span><br/>        <span class="tsd-kind-parameter">id</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">max</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">attempts</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span> <span class="tsd-kind-property">ok</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span> <span class="tsd-signature-symbol">}</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#reservesubjectattempt-1">reserveSubjectAttempt</a><span class="tsd-signature-symbol">(</span><br/>        <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">nowMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">policy</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-core..MfaLockoutPolicy.html" class="tsd-signature-type tsd-kind-interface">MfaLockoutPolicy</a><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../types/_o3co_auth-provider-core..MfaSubjectAttemptReservation.html" class="tsd-signature-type tsd-kind-type-alias">MfaSubjectAttemptReservation</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#sessionemailproofat-1">sessionEmailProofAt</a><span class="tsd-signature-symbol">(</span><br/>        <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">sid</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">nowMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#settlesubjectattempt-1">settleSubjectAttempt</a><span class="tsd-signature-symbol">(</span><br/>        <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">reservation</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">outcome</span><span class="tsd-signature-symbol">:</span> <a href="../types/_o3co_auth-provider-core..MfaSubjectAttemptOutcome.html" class="tsd-signature-type tsd-kind-type-alias">MfaSubjectAttemptOutcome</a><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#subjectgeneration-1">subjectGeneration</a><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#takechallenge-1">takeChallenge</a><span class="tsd-signature-symbol">(</span><br/>        <span class="tsd-kind-parameter">id</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">expectedVersion</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><br/>        <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-symbol">{</span><br/>            <span class="tsd-kind-property">expiresAtMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>            <span class="tsd-kind-property">factorId</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span><br/>            <span class="tsd-kind-property">kind</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span><br/>            <span class="tsd-kind-property">state</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span><br/>        <span class="tsd-signature-symbol">}</span><br/>        <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><br/>        <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">undefined</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-call-signature" href="#update-1">update</a><span class="tsd-signature-symbol">(</span><br/>        <span class="tsd-kind-parameter">id</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">expectedVersion</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/>        <span class="tsd-kind-parameter">patch</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-core..MfaTransactionPatch.html" class="tsd-signature-type tsd-kind-interface">MfaTransactionPatch</a><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="_o3co_auth-provider-core..MfaTransaction.html" class="tsd-signature-type tsd-kind-interface">MfaTransaction</a> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/><span class="tsd-signature-symbol">}</span></div>
+<section class="tsd-panel tsd-hierarchy" data-refl="11743">
+<h4>Hierarchy (<a href="../hierarchy.html#@o3co/auth-provider-core..MfaTransactionStore">View Summary</a>)</h4>
+<ul class="tsd-hierarchy">
+<li class="tsd-hierarchy-item"><span class="tsd-hierarchy-target">MfaTransactionStore</span>
+<ul class="tsd-hierarchy">
+<li class="tsd-hierarchy-item"><a href="_o3co_auth-provider-core..MemoryMfaTransactionStore.html" class="tsd-signature-type tsd-kind-interface">MemoryMfaTransactionStore</a></li></ul></li></ul></section><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1364">packages/core/src/mfa/transactionStore.mts:1364</a></li></ul></aside>
+<section class="tsd-panel-group tsd-index-group">
+<section class="tsd-panel tsd-index-panel">
+<details class="tsd-index-content tsd-accordion" open><summary class="tsd-accordion-summary tsd-index-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h5 class="tsd-index-heading uppercase">Index</h5></summary>
+<div class="tsd-accordion-details">
+<section class="tsd-index-section">
+<h3 class="tsd-index-heading tsd-anchor-link" id="properties">Properties<a href="#properties" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-index-list"><a href="#kind" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>kind</span></a>
+</div></section>
+<section class="tsd-index-section">
+<h3 class="tsd-index-heading tsd-anchor-link" id="methods">Methods<a href="#methods" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-index-list"><a href="#acquiresubjectlease" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>acquire<wbr/>Subject<wbr/>Lease</span></a>
+<a href="#applysubjectrecovery" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>apply<wbr/>Subject<wbr/>Recovery</span></a>
+<a href="#authorizesubjectrecovery" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>authorize<wbr/>Subject<wbr/>Recovery</span></a>
+<a href="#consume" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>consume</span></a>
+<a href="#consumeemailproofrequirement" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>consume<wbr/>Email<wbr/>Proof<wbr/>Requirement</span></a>
+<a href="#create" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>create</span></a>
+<a href="#emailproofrequiredatnextbinding" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>email<wbr/>Proof<wbr/>Required<wbr/>At<wbr/>Next<wbr/>Binding</span></a>
+<a href="#firstbindingat" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>first<wbr/>Binding<wbr/>At</span></a>
+<a href="#get" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>get</span></a>
+<a href="#noteexemptsuccess" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>note<wbr/>Exempt<wbr/>Success</span></a>
+<a href="#notefirstbinding" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>note<wbr/>First<wbr/>Binding</span></a>
+<a href="#raiserecoverysetfloor" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>raise<wbr/>Recovery<wbr/>Set<wbr/>Floor</span></a>
+<a href="#recordsessionemailproof" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>record<wbr/>Session<wbr/>Email<wbr/>Proof</span></a>
+<a href="#recoverysetfloor" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>recovery<wbr/>Set<wbr/>Floor</span></a>
+<a href="#releasesubjectlease" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>release<wbr/>Subject<wbr/>Lease</span></a>
+<a href="#requireemailproofatnextbinding" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>require<wbr/>Email<wbr/>Proof<wbr/>At<wbr/>Next<wbr/>Binding</span></a>
+<a href="#reserveattempt" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>reserve<wbr/>Attempt</span></a>
+<a href="#reservesubjectattempt" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>reserve<wbr/>Subject<wbr/>Attempt</span></a>
+<a href="#sessionemailproofat" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>session<wbr/>Email<wbr/>Proof<wbr/>At</span></a>
+<a href="#settlesubjectattempt" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>settle<wbr/>Subject<wbr/>Attempt</span></a>
+<a href="#subjectgeneration" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>subject<wbr/>Generation</span></a>
+<a href="#takechallenge" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>take<wbr/>Challenge</span></a>
+<a href="#update" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>update</span></a>
+</div></section></div></details></section></section>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Properties"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="properties-1">Properties<a href="#properties-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary>
+<section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="kind"><code class="tsd-tag">Readonly</code><span>kind</span><a href="#kind" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">kind</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span></div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1365">packages/core/src/mfa/transactionStore.mts:1365</a></li></ul></aside></section></section></details>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Methods"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="methods-1">Methods<a href="#methods-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary>
+<section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="acquiresubjectlease"><span>acquire<wbr/>Subject<wbr/>Lease</span><a href="#acquiresubjectlease" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="acquiresubjectlease-1"><span class="tsd-kind-call-signature">acquireSubjectLease</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">request</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-core..MfaSubjectLeaseRequest.html" class="tsd-signature-type tsd-kind-interface">MfaSubjectLeaseRequest</a><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../types/_o3co_auth-provider-core..MfaSubjectLeaseAnswer.html" class="tsd-signature-type tsd-kind-type-alias">MfaSubjectLeaseAnswer</a><span class="tsd-signature-symbol">&gt;</span><a href="#acquiresubjectlease-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>In one step: <code>stale</code> when <code>request.generation</code> is not the subject's
+generation; else <code>busy</code> while another holder's lease stands;
+else a lease standing <code>ttlMs</code> on the store's clock, under a fresh token.
+The generation moves only under the lease
+(<code>applySubjectRecovery</code>), so it stays the one acquired under until the
+lease ends. A <code>RangeError</code>, nothing held, for what
+<a href="../functions/_o3co_auth-provider-core..checkSubjectLeaseRequest.html" class="tsd-kind-function">checkSubjectLeaseRequest</a> refuses.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">subject</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">request</span>: <a href="_o3co_auth-provider-core..MfaSubjectLeaseRequest.html" class="tsd-signature-type tsd-kind-interface">MfaSubjectLeaseRequest</a></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../types/_o3co_auth-provider-core..MfaSubjectLeaseAnswer.html" class="tsd-signature-type tsd-kind-type-alias">MfaSubjectLeaseAnswer</a><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1576">packages/core/src/mfa/transactionStore.mts:1576</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="applysubjectrecovery"><span>apply<wbr/>Subject<wbr/>Recovery</span><a href="#applysubjectrecovery" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="applysubjectrecovery-1"><span class="tsd-kind-call-signature">applySubjectRecovery</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">application</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-core..MfaSubjectRecoveryApplication.html" class="tsd-signature-type tsd-kind-interface">MfaSubjectRecoveryApplication</a><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../types/_o3co_auth-provider-core..MfaSubjectRecoveryAnswer.html" class="tsd-signature-type tsd-kind-type-alias">MfaSubjectRecoveryAnswer</a><span class="tsd-signature-symbol">&gt;</span><a href="#applysubjectrecovery-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Applies the authorization in the slot for <code>application</code>'s operation and
+<code>sid</code>, in one step, refusing in this order:</p>
+<ul>
+<li><code>lease_not_held</code>: the subject's lease is not held under <code>leaseToken</code>.</li>
+<li><code>unauthorized</code>: the slot is empty, or its authorization has ended on
+the store's clock. A slot already applied answers <code>already_applied</code>,
+with the generation it was applied at. <code>expired</code>: it ends at or before
+<code>nowMs</code>.</li>
+<li><code>recover</code> only. <code>boundary_ahead</code>: <code>sessionsBoundaryMs</code> is later than
+<code>nowMs</code> plus <code>DEFAULT_CLOCK_SKEW_MS</code>. <code>not_revoked_since</code>: the week
+counts a failure dated up to <code>nowMs</code> (a reservation in flight is one) and
+<code>sessionsBoundaryMs</code> is absent or not later than the earliest such
+failure by more than <code>DEFAULT_CLOCK_SKEW_MS</code>, and no hard hold is
+lifted.</li>
+</ul>
+<p>A <code>recover</code> lifts the hard hold on a rebind: <code>guessableBoundSinceMs</code> is
+<code>null</code> or later than the hold's time by more than <code>DEFAULT_CLOCK_SKEW_MS</code>.
+Every answer, a refusal's included, carries that bound while the hold
+stands after the call (<code>rebindAfterMs</code>).
+No sessions boundary is asked for, and the run the hold counted ends
+with it, its backoff included: every attempt in it was against the
+replaced authenticators. The week stands unless the boundary gives it
+back. With the boundary, a <code>recover</code> ends the week's and the run's
+attempts dated up to <code>nowMs</code>; while the hard hold stands, the week's
+alone. A <code>reset</code> asks for neither: it ends the subject's lock state
+whole, the hard hold included, and every other authorization of the
+subject. A refusal changes nothing, and the authorization stays pending
+until it ends. Applied, the slot is marked applied (kept until it ends)
+and the subject's generation moves on by one. The email-proof
+requirement, the first-binding mark, session proofs and transactions
+are not lock state and stay. A <code>RangeError</code>, nothing changed, for what
+<a href="../functions/_o3co_auth-provider-core..checkSubjectRecoveryApplication.html" class="tsd-kind-function">checkSubjectRecoveryApplication</a> refuses.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">subject</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">application</span>: <a href="_o3co_auth-provider-core..MfaSubjectRecoveryApplication.html" class="tsd-signature-type tsd-kind-interface">MfaSubjectRecoveryApplication</a></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../types/_o3co_auth-provider-core..MfaSubjectRecoveryAnswer.html" class="tsd-signature-type tsd-kind-type-alias">MfaSubjectRecoveryAnswer</a><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1634">packages/core/src/mfa/transactionStore.mts:1634</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="authorizesubjectrecovery"><span>authorize<wbr/>Subject<wbr/>Recovery</span><a href="#authorizesubjectrecovery" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="authorizesubjectrecovery-1"><span class="tsd-kind-call-signature">authorizeSubjectRecovery</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">authorization</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-core..MfaSubjectRecoveryAuthorization.html" class="tsd-signature-type tsd-kind-interface">MfaSubjectRecoveryAuthorization</a><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><a href="#authorizesubjectrecovery-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Records <code>authorization</code> in the subject's slot for its operation and
+<code>sid</code>, replacing whatever the slot held, pending or applied. It touches
+no lock state, generation or lease. A <code>RangeError</code>, nothing recorded,
+for what <a href="../functions/_o3co_auth-provider-core..checkSubjectRecoveryAuthorization.html" class="tsd-kind-function">checkSubjectRecoveryAuthorization</a> refuses on the
+store's clock.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">subject</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">authorization</span>: <a href="_o3co_auth-provider-core..MfaSubjectRecoveryAuthorization.html" class="tsd-signature-type tsd-kind-interface">MfaSubjectRecoveryAuthorization</a></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1596">packages/core/src/mfa/transactionStore.mts:1596</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="consume"><span>consume</span><a href="#consume" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="consume-1"><span class="tsd-kind-call-signature">consume</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">id</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">expectedVersion</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="_o3co_auth-provider-core..MfaTransaction.html" class="tsd-signature-type tsd-kind-interface">MfaTransaction</a> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">&gt;</span><a href="#consume-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Atomic delete if still at <code>expectedVersion</code>: the one winner gets the transaction.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">id</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">expectedVersion</span>: <span class="tsd-signature-type">number</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="_o3co_auth-provider-core..MfaTransaction.html" class="tsd-signature-type tsd-kind-interface">MfaTransaction</a> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1423">packages/core/src/mfa/transactionStore.mts:1423</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="consumeemailproofrequirement"><span>consume<wbr/>Email<wbr/>Proof<wbr/>Requirement</span><a href="#consumeemailproofrequirement" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="consumeemailproofrequirement-1"><span class="tsd-kind-call-signature">consumeEmailProofRequirement</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">consume</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-core..MfaEmailProofRequirementConsume.html" class="tsd-signature-type tsd-kind-interface">MfaEmailProofRequirementConsume</a><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../types/_o3co_auth-provider-core..MfaEmailProofRequirementConsumeAnswer.html" class="tsd-signature-type tsd-kind-type-alias">MfaEmailProofRequirementConsumeAnswer</a><span class="tsd-signature-symbol">&gt;</span><a href="#consumeemailproofrequirement-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Atomic read-and-clear at the first binding, under the subject's lease
+held by <code>consume.leaseToken</code>: the lease checked and the requirement
+cleared in one atomic step, so a consume that lands after the lease
+ended — after a later reset set the requirement again — clears nothing.
+Answers <code>consumed</code> for the one caller that cleared it, <code>absent</code> when
+none was recorded or another cleared it first, and refuses
+<code>lease_not_held</code> without the lease. A <code>RangeError</code>, nothing cleared, for
+what <a href="../functions/_o3co_auth-provider-core..checkEmailProofRequirementConsume.html" class="tsd-kind-function">checkEmailProofRequirementConsume</a> refuses. Call it only
+after the email proof was verified and the first counting factor
+written, so a failed binding leaves the requirement standing. Keep it as
+durably as the factor store: a lost requirement lets a password holder
+bind without the proof.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">subject</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">consume</span>: <a href="_o3co_auth-provider-core..MfaEmailProofRequirementConsume.html" class="tsd-signature-type tsd-kind-interface">MfaEmailProofRequirementConsume</a></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../types/_o3co_auth-provider-core..MfaEmailProofRequirementConsumeAnswer.html" class="tsd-signature-type tsd-kind-type-alias">MfaEmailProofRequirementConsumeAnswer</a><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1500">packages/core/src/mfa/transactionStore.mts:1500</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="create"><span>create</span><a href="#create" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="create-1"><span class="tsd-kind-call-signature">create</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">tx</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-core..MfaTransaction.html" class="tsd-signature-type tsd-kind-interface">MfaTransaction</a><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><a href="#create-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Insert-only: a live id is refused. A <code>RangeError</code> for an <code>expiresAtMs</code> that
+is not a future instant, or a record <a href="../functions/_o3co_auth-provider-core..newMfaTransactionRecord.html" class="tsd-kind-function">newMfaTransactionRecord</a>
+refuses. No lifetime ceiling here: the coordinator derives <code>expiresAtMs</code>
+only from <code>mfa.transactionTtlSeconds</code>, which boot range-checks.</p>
+<p>The binding then holds at most <a href="../variables/_o3co_auth-provider-core..MFA_MAX_TRANSACTIONS_PER_BINDING.html" class="tsd-kind-variable">MFA_MAX_TRANSACTIONS_PER_BINDING</a>
+live transactions: when it already holds that many, <code>create</code> ends the
+one of them that expires first — its oldest, since every transaction
+lives the same <code>mfa.transactionTtlSeconds</code> — as a consume would, and
+never the one it creates; between two that expire at one instant, which
+goes is the store's choice. A consumed transaction, one its attempts
+ended and an expired one do not count, and no other binding's is ever
+ended. Replacing one this way is no new entry against a store's own
+cap. A store whose create and its binding's count are not one atomic
+step (the Redis adapter's, whose transactions sit on slots of their own)
+may hold more while creates are in flight, and settles at the cap once
+they have answered; only a step that failed leaves an excess, until it
+expires. Such a store may also reject a create after it has written the
+transaction (an outage at a later step): the transaction stands, unknown
+to the caller, until it expires.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">tx</span>: <a href="_o3co_auth-provider-core..MfaTransaction.html" class="tsd-signature-type tsd-kind-interface">MfaTransaction</a></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1389">packages/core/src/mfa/transactionStore.mts:1389</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="emailproofrequiredatnextbinding"><span>email<wbr/>Proof<wbr/>Required<wbr/>At<wbr/>Next<wbr/>Binding</span><a href="#emailproofrequiredatnextbinding" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="emailproofrequiredatnextbinding-1"><span class="tsd-kind-call-signature">emailProofRequiredAtNextBinding</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">&gt;</span><a href="#emailproofrequiredatnextbinding-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Whether the requirement is recorded for <code>subject</code>.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">subject</span>: <span class="tsd-signature-type">string</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1485">packages/core/src/mfa/transactionStore.mts:1485</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="firstbindingat"><span>first<wbr/>Binding<wbr/>At</span><a href="#firstbindingat" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="firstbindingat-1"><span class="tsd-kind-call-signature">firstBindingAt</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">nowMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">&gt;</span><a href="#firstbindingat-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>What <a href="../functions/_o3co_auth-provider-core..firstBindingAnswer.html" class="tsd-kind-function">firstBindingAnswer</a> answers of <code>subject</code>'s mark: <code>atMs</code>
+while the mark stands on the store's clock, else <code>null</code>. One clock
+decides its end, the store's: <code>nowMs</code> never ends a mark. The answer is
+never clamped to <code>nowMs</code>: an earlier answer would trust a session the
+mark distrusts. A <code>RangeError</code> for what <a href="../functions/_o3co_auth-provider-core..checkFirstBindingQuestion.html" class="tsd-kind-function">checkFirstBindingQuestion</a>
+refuses. A store that cannot read the mark it holds rejects: an absent
+mark trusts the session.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">subject</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">nowMs</span>: <span class="tsd-signature-type">number</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1555">packages/core/src/mfa/transactionStore.mts:1555</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="get"><span>get</span><a href="#get" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="get-1"><span class="tsd-kind-call-signature">get</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">id</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="_o3co_auth-provider-core..MfaTransaction.html" class="tsd-signature-type tsd-kind-interface">MfaTransaction</a> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">&gt;</span><a href="#get-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>The transaction, or <code>null</code> once it expired.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">id</span>: <span class="tsd-signature-type">string</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="_o3co_auth-provider-core..MfaTransaction.html" class="tsd-signature-type tsd-kind-interface">MfaTransaction</a> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1391">packages/core/src/mfa/transactionStore.mts:1391</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="noteexemptsuccess"><span>note<wbr/>Exempt<wbr/>Success</span><a href="#noteexemptsuccess" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="noteexemptsuccess-1"><span class="tsd-kind-call-signature">noteExemptSuccess</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">nowMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">policy</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-core..MfaLockoutPolicy.html" class="tsd-signature-type tsd-kind-interface">MfaLockoutPolicy</a><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><a href="#noteexemptsuccess-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>An exempt success (a recovery code, a WebAuthn assertion). Before the
+hard hold is fixed it ends the run up to <code>nowMs</code>, reservations in flight
+among them; an attempt reserved after <code>nowMs</code> always stays. A run already
+at <code>policy.hardLimit</code> or past it fixes the hold instead, as a reservation
+would. Once the hold is fixed it ends nothing, whether <code>nowMs</code> is before,
+at or after the last failure and whatever <code>hardLimit</code> it is handed. The
+week stands, and lets no attempt through. Call it only after the
+transaction holding the exempt proof was consumed. A <code>RangeError</code> for what
+<a href="../functions/_o3co_auth-provider-core..checkMfaLockoutPolicy.html" class="tsd-kind-function">checkMfaLockoutPolicy</a> refuses.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">subject</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">nowMs</span>: <span class="tsd-signature-type">number</span></span></li>
+<li><span><span class="tsd-kind-parameter">policy</span>: <a href="_o3co_auth-provider-core..MfaLockoutPolicy.html" class="tsd-signature-type tsd-kind-interface">MfaLockoutPolicy</a></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1474">packages/core/src/mfa/transactionStore.mts:1474</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="notefirstbinding"><span>note<wbr/>First<wbr/>Binding</span><a href="#notefirstbinding" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="notefirstbinding-1"><span class="tsd-kind-call-signature">noteFirstBinding</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">atMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">untilMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">&gt;</span><a href="#notefirstbinding-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Note that a first counting factor was bound for <code>subject</code>, or its
+witness marked, at <code>atMs</code>, standing until <code>untilMs</code> on the store's clock.
+The store keeps <a href="../functions/_o3co_auth-provider-core..laterFirstBindingMark.html" class="tsd-kind-function">laterFirstBindingMark</a> of the mark held and this
+one: the later <code>atMs</code> and the later <code>untilMs</code>, so no note moves a mark
+back or shortens it. An applied recovery leaves it. Answers what
+<a href="../functions/_o3co_auth-provider-core..firstBindingAnswer.html" class="tsd-kind-function">firstBindingAnswer</a> answers of the mark that stood before this
+note, on the same clock: its <code>atMs</code>, or <code>null</code> when none stood. The
+read and the write are one atomic step, so of notes in flight each
+answers the mark another left, and one at most answers <code>null</code>. A
+<code>RangeError</code>, nothing noted, for what <a href="../functions/_o3co_auth-provider-core..checkFirstBindingNote.html" class="tsd-kind-function">checkFirstBindingNote</a>
+refuses on the store's clock.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">subject</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">atMs</span>: <span class="tsd-signature-type">number</span></span></li>
+<li><span><span class="tsd-kind-parameter">untilMs</span>: <span class="tsd-signature-type">number</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1545">packages/core/src/mfa/transactionStore.mts:1545</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="raiserecoverysetfloor"><span>raise<wbr/>Recovery<wbr/>Set<wbr/>Floor</span><a href="#raiserecoverysetfloor" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="raiserecoverysetfloor-1"><span class="tsd-kind-call-signature">raiseRecoverySetFloor</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">raise</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-core..MfaRecoverySetFloorRaise.html" class="tsd-signature-type tsd-kind-interface">MfaRecoverySetFloorRaise</a><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../types/_o3co_auth-provider-core..MfaRecoverySetFloorAnswer.html" class="tsd-signature-type tsd-kind-type-alias">MfaRecoverySetFloorAnswer</a><span class="tsd-signature-symbol">&gt;</span><a href="#raiserecoverysetfloor-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Under the subject's lease held by <code>raise.leaseToken</code>, raises the
+subject's recovery-set floor to <code>raise.setGeneration</code> — a recovery-code
+set's generation, not the subject's — when it is higher, and answers
+the floor after; without the lease, refuses <code>lease_not_held</code>, raising
+nothing. Nothing lowers it: not a deleted set, a reset or a sweep. A
+<code>RangeError</code>, nothing raised, for what <a href="../functions/_o3co_auth-provider-core..checkRecoverySetFloorRaise.html" class="tsd-kind-function">checkRecoverySetFloorRaise</a>
+refuses.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">subject</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">raise</span>: <a href="_o3co_auth-provider-core..MfaRecoverySetFloorRaise.html" class="tsd-signature-type tsd-kind-interface">MfaRecoverySetFloorRaise</a></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../types/_o3co_auth-provider-core..MfaRecoverySetFloorAnswer.html" class="tsd-signature-type tsd-kind-type-alias">MfaRecoverySetFloorAnswer</a><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1650">packages/core/src/mfa/transactionStore.mts:1650</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="recordsessionemailproof"><span>record<wbr/>Session<wbr/>Email<wbr/>Proof</span><a href="#recordsessionemailproof" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="recordsessionemailproof-1"><span class="tsd-kind-call-signature">recordSessionEmailProof</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">sid</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">provedAtMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">untilMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><a href="#recordsessionemailproof-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Record the account-email proof (D24) given in the session <code>sid</code> of
+<code>subject</code> at <code>provedAtMs</code>, standing until <code>untilMs</code>; it replaces an
+earlier one for that session. A <code>RangeError</code>, nothing recorded, for what
+<a href="../functions/_o3co_auth-provider-core..checkSessionEmailProof.html" class="tsd-kind-function">checkSessionEmailProof</a> refuses on the store's clock.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">subject</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">sid</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">provedAtMs</span>: <span class="tsd-signature-type">number</span></span></li>
+<li><span><span class="tsd-kind-parameter">untilMs</span>: <span class="tsd-signature-type">number</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1513">packages/core/src/mfa/transactionStore.mts:1513</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="recoverysetfloor"><span>recovery<wbr/>Set<wbr/>Floor</span><a href="#recoverysetfloor" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="recoverysetfloor-1"><span class="tsd-kind-call-signature">recoverySetFloor</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">&gt;</span><a href="#recoverysetfloor-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>The subject's recovery-set floor, 0 when none was raised: a set of a
+lower set generation verifies no code. A <code>RangeError</code> for what
+<a href="../functions/_o3co_auth-provider-core..checkSubjectQuestion.html" class="tsd-kind-function">checkSubjectQuestion</a> refuses.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">subject</span>: <span class="tsd-signature-type">string</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1659">packages/core/src/mfa/transactionStore.mts:1659</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="releasesubjectlease"><span>release<wbr/>Subject<wbr/>Lease</span><a href="#releasesubjectlease" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="releasesubjectlease-1"><span class="tsd-kind-call-signature">releaseSubjectLease</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">token</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">&gt;</span><a href="#releasesubjectlease-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Ends the lease <code>token</code> holds: <code>true</code> when it still held it, so no other
+holder moved the generation while it stood; <code>false</code> when the lease had
+ended, or another holds it, which it leaves. A <code>RangeError</code> for what
+<a href="../functions/_o3co_auth-provider-core..checkSubjectLeaseRelease.html" class="tsd-kind-function">checkSubjectLeaseRelease</a> refuses.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">subject</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">token</span>: <span class="tsd-signature-type">string</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1586">packages/core/src/mfa/transactionStore.mts:1586</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="requireemailproofatnextbinding"><span>require<wbr/>Email<wbr/>Proof<wbr/>At<wbr/>Next<wbr/>Binding</span><a href="#requireemailproofatnextbinding" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="requireemailproofatnextbinding-1"><span class="tsd-kind-call-signature">requireEmailProofAtNextBinding</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><a href="#requireemailproofatnextbinding-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Record that <code>subject</code>'s next first binding requires the 80-bit email proof,
+whatever <code>mfa.enrollment.requireEmailProof</code> says (the operator reset's
+<code>requireEmailProof: true</code>). Idempotent. No expiry, and an applied
+recovery leaves it: the reset that clears the lock may not lift it.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">subject</span>: <span class="tsd-signature-type">string</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1483">packages/core/src/mfa/transactionStore.mts:1483</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="reserveattempt"><span>reserve<wbr/>Attempt</span><a href="#reserveattempt" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="reserveattempt-1"><span class="tsd-kind-call-signature">reserveAttempt</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">id</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">max</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">attempts</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span> <span class="tsd-kind-property">ok</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span> <span class="tsd-signature-symbol">}</span><span class="tsd-signature-symbol">&gt;</span><a href="#reserveattempt-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Atomic: <code>attempts</code> + 1, whatever the version. <code>ok</code> while within <code>max</code>; the
+reservation past <code>max</code>, or one the store cannot count (fails closed),
+deletes the transaction and answers <code>{ ok: false, attempts }</code> with the
+attempts already reserved. No live transaction: <code>{ ok: false, attempts: 0 }</code>.
+A <code>max</code> that is not a positive whole number is a <code>RangeError</code>.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">id</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">max</span>: <span class="tsd-signature-type">number</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">attempts</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span> <span class="tsd-kind-property">ok</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span> <span class="tsd-signature-symbol">}</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1412">packages/core/src/mfa/transactionStore.mts:1412</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="reservesubjectattempt"><span>reserve<wbr/>Subject<wbr/>Attempt</span><a href="#reservesubjectattempt" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="reservesubjectattempt-1"><span class="tsd-kind-call-signature">reserveSubjectAttempt</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">nowMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">policy</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-core..MfaLockoutPolicy.html" class="tsd-signature-type tsd-kind-interface">MfaLockoutPolicy</a><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../types/_o3co_auth-provider-core..MfaSubjectAttemptReservation.html" class="tsd-signature-type tsd-kind-type-alias">MfaSubjectAttemptReservation</a><span class="tsd-signature-symbol">&gt;</span><a href="#reservesubjectattempt-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Refuse while a hold applies at <code>nowMs</code> — the hard hold, the short
+backoff or the weekly budget, for every attempt alike — and otherwise
+count a pending failure, which stands until settled. A refusal records
+only that its episode began (<code>first</code>); an attempt let through ends the
+episode.</p>
+<p>The hard hold is fixed, in the same atomic step, the first time the
+run — reservations in flight counted — reaches <code>policy.hardLimit</code>: at
+the reservation that brings it there, which is let through, or at the
+first call that finds it there under a lower <code>hardLimit</code>. The store
+records its time as the later of that call's <code>nowMs</code> and the run's
+newest attempt, so no attempt of the run is dated after it. From then
+until an applied recovery lifts it every reservation is refused <code>hard</code>,
+whatever policy it is handed, and no settle, exempt success or sweep
+lifts it.
+The policy is read once, by <a href="../functions/_o3co_auth-provider-core..checkMfaLockoutPolicy.html" class="tsd-kind-function">checkMfaLockoutPolicy</a>, and its
+copy is what the call applies.
+Of reservations racing to the limit, the one that reaches it is let
+through and fixes the hold; those after it are refused <code>hard</code>.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">subject</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">nowMs</span>: <span class="tsd-signature-type">number</span></span></li>
+<li><span><span class="tsd-kind-parameter">policy</span>: <a href="_o3co_auth-provider-core..MfaLockoutPolicy.html" class="tsd-signature-type tsd-kind-interface">MfaLockoutPolicy</a></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../types/_o3co_auth-provider-core..MfaSubjectAttemptReservation.html" class="tsd-signature-type tsd-kind-type-alias">MfaSubjectAttemptReservation</a><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1446">packages/core/src/mfa/transactionStore.mts:1446</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="sessionemailproofat"><span>session<wbr/>Email<wbr/>Proof<wbr/>At</span><a href="#sessionemailproofat" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="sessionemailproofat-1"><span class="tsd-kind-call-signature">sessionEmailProofAt</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">sid</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">nowMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">&gt;</span><a href="#sessionemailproofat-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>What <a href="../functions/_o3co_auth-provider-core..sessionEmailProofAnswer.html" class="tsd-kind-function">sessionEmailProofAnswer</a> answers of the proof recorded for
+the session <code>sid</code> of <code>subject</code>, on the store's clock: when it was given,
+no later than <code>nowMs</code>, while it stands; else <code>null</code>. Another session's
+proof, or the same <code>sid</code> under another subject, never answers. A
+<code>RangeError</code> for what <a href="../functions/_o3co_auth-provider-core..checkSessionEmailProofQuestion.html" class="tsd-kind-function">checkSessionEmailProofQuestion</a> refuses.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">subject</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">sid</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">nowMs</span>: <span class="tsd-signature-type">number</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1526">packages/core/src/mfa/transactionStore.mts:1526</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="settlesubjectattempt"><span>settle<wbr/>Subject<wbr/>Attempt</span><a href="#settlesubjectattempt" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="settlesubjectattempt-1"><span class="tsd-kind-call-signature">settleSubjectAttempt</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">reservation</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">outcome</span><span class="tsd-signature-symbol">:</span> <a href="../types/_o3co_auth-provider-core..MfaSubjectAttemptOutcome.html" class="tsd-signature-type tsd-kind-type-alias">MfaSubjectAttemptOutcome</a><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><a href="#settlesubjectattempt-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Settle a reservation, once, under the subject that made it; settling one
+already settled, one never made, or one under another subject changes
+nothing. An outcome it does not know is a <code>RangeError</code>. A success or a
+void settled once the hard hold is fixed — for the reservation that
+fixed it included — lifts nothing of it.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">subject</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">reservation</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">outcome</span>: <a href="../types/_o3co_auth-provider-core..MfaSubjectAttemptOutcome.html" class="tsd-signature-type tsd-kind-type-alias">MfaSubjectAttemptOutcome</a></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1458">packages/core/src/mfa/transactionStore.mts:1458</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="subjectgeneration"><span>subject<wbr/>Generation</span><a href="#subjectgeneration" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="subjectgeneration-1"><span class="tsd-kind-call-signature">subjectGeneration</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">subject</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">&gt;</span><a href="#subjectgeneration-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>The subject's generation: 0 until a recovery or a reset is first
+applied, then one more for each. A writer captures it before the
+request that writes is admitted, or at the begin of the ceremony and
+carried with it, and acquires the lease under it. A <code>RangeError</code> for
+what <a href="../functions/_o3co_auth-provider-core..checkSubjectQuestion.html" class="tsd-kind-function">checkSubjectQuestion</a> refuses.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">subject</span>: <span class="tsd-signature-type">string</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1566">packages/core/src/mfa/transactionStore.mts:1566</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="takechallenge"><span>take<wbr/>Challenge</span><a href="#takechallenge" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="takechallenge-1"><span class="tsd-kind-call-signature">takeChallenge</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">id</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">expectedVersion</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><br/>    <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">expiresAtMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span> <span class="tsd-kind-property">factorId</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span> <span class="tsd-kind-property">kind</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span> <span class="tsd-kind-property">state</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span> <span class="tsd-signature-symbol">}</span><br/>    <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><br/>    <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">undefined</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">&gt;</span><a href="#takechallenge-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Atomic read-and-clear of the pending challenge, only at
+<code>expectedVersion</code>; the version stays where it was. <code>null</code> when there is
+none, the version moved, or the transaction is gone.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">id</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">expectedVersion</span>: <span class="tsd-signature-type">number</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><br/>    <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">expiresAtMs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span> <span class="tsd-kind-property">factorId</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span> <span class="tsd-kind-property">kind</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span> <span class="tsd-kind-property">state</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span> <span class="tsd-signature-symbol">}</span><br/>    <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><br/>    <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">undefined</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1421">packages/core/src/mfa/transactionStore.mts:1421</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="update"><span>update</span><a href="#update" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="update-1"><span class="tsd-kind-call-signature">update</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">id</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">expectedVersion</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">patch</span><span class="tsd-signature-symbol">:</span> <a href="_o3co_auth-provider-core..MfaTransactionPatch.html" class="tsd-signature-type tsd-kind-interface">MfaTransactionPatch</a><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="_o3co_auth-provider-core..MfaTransaction.html" class="tsd-signature-type tsd-kind-interface">MfaTransaction</a> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">&gt;</span><a href="#update-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Compare-and-set on <code>version</code>: applies <code>patch</code> (<a href="_o3co_auth-provider-core..MfaTransactionPatch.html" class="tsd-kind-interface">MfaTransactionPatch</a>)
+and bumps <code>version</code>, only if still at <code>expectedVersion</code>. Answers the
+transaction as written, or <code>null</code> when the version moved or it is gone. A
+value a field does not admit, or an <code>expectedVersion</code> of
+<code>Number.MAX_SAFE_INTEGER</code> (<code>checkMfaVersionAdvances</code>), is a <code>RangeError</code>
+whatever the version.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">id</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><span class="tsd-kind-parameter">expectedVersion</span>: <span class="tsd-signature-type">number</span></span></li>
+<li><span><span class="tsd-kind-parameter">patch</span>: <a href="_o3co_auth-provider-core..MfaTransactionPatch.html" class="tsd-signature-type tsd-kind-interface">MfaTransactionPatch</a></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="_o3co_auth-provider-core..MfaTransaction.html" class="tsd-signature-type tsd-kind-interface">MfaTransaction</a> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/5708b53e2843db65b2a4b2d1de025776be5f6ceb/packages/core/src/mfa/transactionStore.mts#L1400">packages/core/src/mfa/transactionStore.mts:1400</a></li></ul></aside></div></li></ul></section></section></details></div>
+<div class="col-sidebar">
+<div class="page-menu">
+<div class="tsd-navigation settings">
+<details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>Settings</h3></summary>
+<div class="tsd-accordion-details">
+<div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span>
+<ul id="tsd-filter-options">
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div>
+<div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div>
+<details open class="tsd-accordion tsd-page-navigation"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>On This Page</h3></summary>
+<div class="tsd-accordion-details">
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Properties"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Properties</summary>
+<div><a href="#kind"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>kind</span></a></div></details>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Methods"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Methods</summary>
+<div><a href="#acquiresubjectlease"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>acquire<wbr/>Subject<wbr/>Lease</span></a><a href="#applysubjectrecovery"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>apply<wbr/>Subject<wbr/>Recovery</span></a><a href="#authorizesubjectrecovery"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>authorize<wbr/>Subject<wbr/>Recovery</span></a><a href="#consume"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>consume</span></a><a href="#consumeemailproofrequirement"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>consume<wbr/>Email<wbr/>Proof<wbr/>Requirement</span></a><a href="#create"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>create</span></a><a href="#emailproofrequiredatnextbinding"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>email<wbr/>Proof<wbr/>Required<wbr/>At<wbr/>Next<wbr/>Binding</span></a><a href="#firstbindingat"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>first<wbr/>Binding<wbr/>At</span></a><a href="#get"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>get</span></a><a href="#noteexemptsuccess"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>note<wbr/>Exempt<wbr/>Success</span></a><a href="#notefirstbinding"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>note<wbr/>First<wbr/>Binding</span></a><a href="#raiserecoverysetfloor"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>raise<wbr/>Recovery<wbr/>Set<wbr/>Floor</span></a><a href="#recordsessionemailproof"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>record<wbr/>Session<wbr/>Email<wbr/>Proof</span></a><a href="#recoverysetfloor"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>recovery<wbr/>Set<wbr/>Floor</span></a><a href="#releasesubjectlease"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>release<wbr/>Subject<wbr/>Lease</span></a><a href="#requireemailproofatnextbinding"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>require<wbr/>Email<wbr/>Proof<wbr/>At<wbr/>Next<wbr/>Binding</span></a><a href="#reserveattempt"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>reserve<wbr/>Attempt</span></a><a href="#reservesubjectattempt"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>reserve<wbr/>Subject<wbr/>Attempt</span></a><a href="#sessionemailproofat"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>session<wbr/>Email<wbr/>Proof<wbr/>At</span></a><a href="#settlesubjectattempt"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>settle<wbr/>Subject<wbr/>Attempt</span></a><a href="#subjectgeneration"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>subject<wbr/>Generation</span></a><a href="#takechallenge"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>take<wbr/>Challenge</span></a><a href="#update"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>update</span></a></div></details></div></details></div>
+<div class="site-menu">
+<nav class="tsd-navigation"><a href="../modules.html">auth.provider API</a>
+<ul class="tsd-small-nested-navigation" id="tsd-nav-container">
+<li>Loading...</li></ul></nav></div></div></div><footer>
+<p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer>
+<div class="overlay"></div></body></html>

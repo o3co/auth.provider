@@ -1,0 +1,1 @@
+{"version":3,"file":"index.d.mts","sourceRoot":"","sources":["../src/index.mts"],"names":[],"mappings":"AAgBA,OAAO,EACN,iBAAiB,EACjB,wBAAwB,EACxB,yBAAyB,EACzB,KAAK,yBAAyB,GAC9B,MAAM,aAAa,CAAC;AACrB,OAAO,EAAE,mBAAmB,EAAE,MAAM,cAAc,CAAC;AAOnD,OAAO,EACN,KAAK,2CAA2C,EAChD,oCAAoC,GACpC,MAAM,uCAAuC,CAAC;AAC/C,YAAY,EACX,8BAA8B,EAC9B,sBAAsB,EACtB,cAAc,GACd,MAAM,uBAAuB,CAAC"}

@@ -1,0 +1,260 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/**
+ * Secrets at rest, over core's key-ring envelope (`sealWithKeyRing` /
+ * `openWithKeyRing`). Sealing happens only here, so no factor ever holds a key.
+ *
+ * - A factor's data is sealed under `o3co:mfa:factor` with its record (subject,
+ *   factor id, kind, each length-prefixed) as authenticated data, so data copied
+ *   to another subject, id or kind does not open. A ceremony's state (challenge,
+ *   pending enrollment) is bound to its transaction id and kind under a purpose of
+ *   its own, so neither opens as the other or as a factor's data.
+ * - Every binding or digest part must be well-formed text: UTF-8 writes a lone
+ *   surrogate as U+FFFD's bytes, which would make two bindings one.
+ * - A factor's data and state are plain JSON-shaped values: plain objects,
+ *   plain arrays, strings, finite numbers, booleans and `null`. What is sealed
+ *   is their copy (`copyFactorValue`, over core's `copyPlainJson`), each field
+ *   read once, an own getter's included, frozen; the coordinator takes that
+ *   copy where it reads a factor's answer and hands the same copy to
+ *   everything that acts on it.
+ *   Anything else — a class's instance, an Array subclass, a built-in, a
+ *   cycle, a read that throws — is one `RangeError` that quotes nothing, never
+ *   sealed in part.
+ * - Opening never throws: `unreadable` for anything no key would cure, and
+ *   `key_unavailable` (naming the key) when the sealing key has left the ring.
+ *   Callers answer both with a `503`, never "no factor" or a wrong code.
+ * - New seals use the ring's first key. Opening a factor's data sealed under
+ *   another key logs `mfa_factor_sealed_with_retired_key` once per key id, and a
+ *   stored digest compared under another key `mfa_digest_made_with_retired_key`,
+ *   so an operator counts both before retiring the key.
+ * - Keyed digests for codes compared but never recovered: HMAC-SHA-256 over the
+ *   kind and parts (length-prefixed), under a key derived by HKDF-SHA-256 (info
+ *   `o3co:mfa:digest`) so no key serves two algorithms; stored with the key id and
+ *   compared in constant time. A stored value that is not such a digest is a
+ *   `RangeError`: neither a missing key nor a wrong code.
+ */
+import { createHmac, hkdfSync } from "node:crypto";
+import { checkSealingKeyRing, consoleLogger, constantTimeStringEqual, copyPlainJson, isSealingKeyId, openWithKeyRing, sealWithKeyRing, } from "@o3co/auth-provider-core";
+/** The purpose a factor's data is sealed under. Fixed while any is at rest. */
+export const MFA_FACTOR_SEALING_PURPOSE = "o3co:mfa:factor";
+/** The purpose a pending challenge's state is sealed under. */
+export const MFA_CHALLENGE_SEALING_PURPOSE = "o3co:mfa:challenge";
+/** The purpose a pending enrollment's state is sealed under. */
+export const MFA_ENROLLMENT_SEALING_PURPOSE = "o3co:mfa:enrollment";
+/** The HKDF info a digest key is derived from a ring key with. */
+const DIGEST_KEY_INFO = "o3co:mfa:digest";
+const u32 = (value) => {
+    const out = Buffer.alloc(4);
+    out.writeUInt32BE(value);
+    return out;
+};
+/**
+ * Whether `part` is well-formed text: UTF-8 writes a lone surrogate as
+ * U+FFFD's bytes, so `"\uD800"`, `"\uDC00"` and `"\uFFFD"` would be one
+ * binding, and one digest.
+ */
+const isWellFormedText = (part) => typeof part === "string" && part.isWellFormed();
+/** Each part after its UTF-8 length, so no part can absorb its neighbour. Every part well-formed. */
+const lengthPrefixed = (parts) => Buffer.concat(parts.flatMap((part) => {
+    const bytes = Buffer.from(part, "utf8");
+    return [u32(bytes.length), bytes];
+}));
+/** A binding's parts, length-prefixed — or `undefined` when one is not non-empty, well-formed text. */
+const bindingRecord = (parts) => parts.every((part) => isWellFormedText(part) && part !== "")
+    ? lengthPrefixed(parts)
+    : undefined;
+const isJsonObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+/** What every refusal of a factor's data, state or response says: nothing of the value. */
+const NOT_PLAIN_VALUE = "a factor's data, state or response must be a plain JSON object of plain JSON values";
+const refuse = () => {
+    throw new RangeError(NOT_PLAIN_VALUE);
+};
+/**
+ * A factor's data, state or response as its plain JSON copy (core's
+ * `copyPlainJson`): each field read once, frozen at every depth, what is
+ * sealed or answered, and what the coordinator hands everything that acts on
+ * the value, so nothing acts on what was not taken. It must be an object, not
+ * a list. Anything else is a `RangeError` with one fixed text that quotes
+ * nothing of the value, so a value is sealed whole or not at all, never in part.
+ *
+ * Not core's `copyByName` (beside `readPlainFields`), which snapshots a
+ * record by the fields its type declares and so takes a record of any shape:
+ * a factor's data and state declare no fields, so nothing names what to read
+ * from a class's instance, and only a value JSON writes whole is taken.
+ */
+export function copyFactorValue(value) {
+    let object;
+    try {
+        object = isJsonObject(value);
+    }
+    catch {
+        // A revoked Proxy: `Array.isArray` throws on it.
+        object = false;
+    }
+    if (!object)
+        return refuse();
+    const taken = copyPlainJson(value);
+    if (!taken.ok)
+        return refuse();
+    return taken.copy;
+}
+/** `value`'s copy ({@link copyFactorValue}) as JSON text; writing it is inside the same refusal. */
+function factorValueText(value) {
+    const copy = copyFactorValue(value);
+    try {
+        return JSON.stringify(copy);
+    }
+    catch {
+        throw new RangeError(NOT_PLAIN_VALUE);
+    }
+}
+/** What a digest's refusal of its parts says. */
+const DIGEST_PARTS = "a digest is made over a list of well-formed strings";
+/** The shape of a stored digest's digest: base64url of an HMAC-SHA-256, unpadded. */
+const DIGEST_TEXT = /^[A-Za-z0-9_-]{43}$/;
+const factorPlacement = (binding) => ({
+    purpose: MFA_FACTOR_SEALING_PURPOSE,
+    record: bindingRecord([binding?.subject, binding?.id, binding?.kind]),
+});
+const statePlacement = (binding) => {
+    const use = binding?.use;
+    return {
+        purpose: use === "challenge"
+            ? MFA_CHALLENGE_SEALING_PURPOSE
+            : use === "enrollment"
+                ? MFA_ENROLLMENT_SEALING_PURPOSE
+                : "",
+        record: bindingRecord([binding?.transactionId, binding?.kind]),
+    };
+};
+/** A sealing over `ring`. A `RangeError` for a ring the envelope refuses, or an empty one. */
+export function createMfaSealing({ ring, logger = consoleLogger }) {
+    checkSealingKeyRing(ring, "the MFA key ring");
+    const first = ring[0];
+    if (first === undefined)
+        throw new RangeError("the MFA key ring has no key to seal with");
+    const keys = [...ring];
+    const retiredSaid = new Set();
+    const retiredDigestSaid = new Set();
+    const digestKeys = new Map();
+    const seal = (placement, value, what) => {
+        if (placement.record === undefined || placement.purpose === "") {
+            throw new RangeError(`${what} is sealed to a binding whose every part is non-empty, well-formed text`);
+        }
+        const text = factorValueText(value);
+        return sealWithKeyRing(text, keys, {
+            purpose: placement.purpose,
+            record: placement.record,
+        });
+    };
+    const open = (placement, sealed) => {
+        if (typeof sealed !== "string" || placement.record === undefined || placement.purpose === "") {
+            return { state: "unreadable" };
+        }
+        const opened = openWithKeyRing(sealed, keys, {
+            purpose: placement.purpose,
+            record: placement.record,
+        });
+        if (opened.state !== "ok")
+            return opened;
+        let value;
+        try {
+            value = JSON.parse(opened.value);
+        }
+        catch {
+            return { state: "unreadable" };
+        }
+        return isJsonObject(value)
+            ? { state: "ok", value, keyId: opened.keyId }
+            : { state: "unreadable" };
+    };
+    /** The HMAC key derived from a ring key, once per key. */
+    const digestKey = (entry) => {
+        let derived = digestKeys.get(entry.id);
+        if (derived === undefined) {
+            derived = Buffer.from(hkdfSync("sha256", entry.key, Buffer.alloc(0), DIGEST_KEY_INFO, 32));
+            digestKeys.set(entry.id, derived);
+        }
+        return derived;
+    };
+    /** What a digest is made over: the kind and the parts — `length` read once, each part once — length-prefixed. A `RangeError` for parts that are not a list of well-formed strings. */
+    const digestInput = (kind, parts) => {
+        const read = [];
+        try {
+            if (!Array.isArray(parts))
+                throw new RangeError(DIGEST_PARTS);
+            const length = parts.length;
+            for (let index = 0; index < length; index++) {
+                const part = parts[index];
+                if (!isWellFormedText(part))
+                    throw new RangeError(DIGEST_PARTS);
+                read.push(part);
+            }
+        }
+        catch {
+            // A part that is not text, or a read that throws: the same answer, quoting nothing.
+            throw new RangeError(DIGEST_PARTS);
+        }
+        return lengthPrefixed([kind, ...read]);
+    };
+    const mac = (entry, input) => createHmac("sha256", digestKey(entry)).update(input).digest("base64url");
+    return Object.freeze({
+        sealFactorData: (binding, data) => seal(factorPlacement(binding), data, "a factor's data"),
+        openFactorData(binding, sealed) {
+            const opened = open(factorPlacement(binding), sealed);
+            if (opened.state === "ok" && opened.keyId !== first.id && !retiredSaid.has(opened.keyId)) {
+                retiredSaid.add(opened.keyId);
+                logger.info({ keyId: opened.keyId }, "mfa_factor_sealed_with_retired_key");
+            }
+            return opened;
+        },
+        sealState: (binding, state) => seal(statePlacement(binding), state, "a ceremony's state"),
+        openState: (binding, sealed) => open(statePlacement(binding), sealed),
+        holdsKey: (keyId) => keys.some((entry) => entry.id === keyId),
+        digestsFor(kind) {
+            if (!isWellFormedText(kind) || kind === "") {
+                throw new RangeError("a digest is bound to a factor's kind, non-empty well-formed text");
+            }
+            return Object.freeze({
+                digest: (parts) => ({
+                    keyId: first.id,
+                    digest: mac(first, digestInput(kind, parts)),
+                }),
+                matchesDigest(parts, stored) {
+                    // Each field read once, by name. A record that is not a digest is neither a
+                    // missing key nor a wrong code: it is refused, quoting nothing.
+                    const { keyId, digest } = typeof stored === "object" && stored !== null
+                        ? stored
+                        : {};
+                    if (!isSealingKeyId(keyId) || typeof digest !== "string" || !DIGEST_TEXT.test(digest)) {
+                        throw new RangeError("a stored digest must be { keyId, digest } as digest made it");
+                    }
+                    const input = digestInput(kind, parts);
+                    const entry = keys.find((candidate) => candidate.id === keyId);
+                    if (entry === undefined)
+                        return "key_unavailable";
+                    // A stored digest names the key it was made under: that key is still needed,
+                    // whatever this comparison finds.
+                    if (entry.id !== first.id && !retiredDigestSaid.has(entry.id)) {
+                        retiredDigestSaid.add(entry.id);
+                        logger.info({ keyId: entry.id }, "mfa_digest_made_with_retired_key");
+                    }
+                    return constantTimeStringEqual(mac(entry, input), digest) ? "match" : "mismatch";
+                },
+            });
+        },
+    });
+}

@@ -1,0 +1,55 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/**
+ * What boot's own machinery reads of the oauth module's settings: the issuer
+ * the discovery document, the CORS table and a session requirement's page are
+ * built on. The token-binding dispatch policy is core's; boot reads it from
+ * the configuration with `resolveTokenBindingSettings`, the reader it fills
+ * the `tokenBindingSettings` slot with.
+ *
+ * The issuer is the `oauthTokenSettings` slot's when the composition holds it
+ * — the key is present, whatever a provider answered — otherwise the
+ * configuration's, since core runs in compositions without the oauth module.
+ * Without the oauth module no section schema parses `oauth {}`, so boot's
+ * stage-1 read of it refuses a configured issuer that is not canonical
+ * (`validate-manifests.mts`, `oauthIssuesWithoutItsModule`): every reader sees a
+ * canonical issuer, or none. The stage-1 checks read the configuration alone
+ * because no provider has run by then (`validate-manifests.mts`, the
+ * `grantPolicy` issuer check).
+ */
+import { isCanonicalIssuer } from "../issuer/canonical.mjs";
+import { checkOAuthTokenSettings } from "../token-settings/check.mjs";
+/**
+ * The issuer: the slot's when the composition holds it — the snapshot
+ * stage 3 put there (`token-settings-slot.mts`), already held to the
+ * contract and the configured lifetimes, read whole through
+ * `checkOAuthTokenSettings`, so a slot without a canonical issuer refuses
+ * rather than the configuration's being read beside it — else
+ * `oauth.jwt.issuer` as the configuration carries it, canonical where boot
+ * parsed it (held to `isCanonicalIssuer` here too, for a component map built
+ * by hand), and `undefined` with none: then no discovery document is served,
+ * the CORS table guards no discovery path (`browserFacingCorsRoutes`, handed
+ * this issuer alone), and a requirement's page is held to no issuer's
+ * origin.
+ */
+export function compositionIssuer(components) {
+    if (Object.hasOwn(components, "oauthTokenSettings")) {
+        return checkOAuthTokenSettings(components.oauthTokenSettings).issuer;
+    }
+    const configured = components.config
+        ?.oauth?.jwt?.issuer;
+    return isCanonicalIssuer(configured) ? configured : undefined;
+}

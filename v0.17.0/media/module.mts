@@ -1,0 +1,517 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import {
+	ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
+	AUDIT_SINK_ABSENCE_POLICY,
+	consoleLogger,
+	createOutboundFetch,
+	defineModule,
+	type Module,
+	type ProviderDeps,
+	readAccessTokenRevocationMode,
+	readAcrTable,
+	SUBJECT_REVOCATION_ABSENCE_POLICY,
+	stepUpReach,
+} from "@o3co/auth-provider-core";
+import express from "express";
+import { vouchableAcrValues } from "./acrValues.mjs";
+import { OAUTH_ROUTER_ADMISSION_ACTIONS } from "./admissionActions.mjs";
+import { createSessionCloseNotifier } from "./logout/sessionCloseNotifier.mjs";
+import { CLIENT_ASSERTION_ALGORITHMS } from "./middleware/clientAssertion.mjs";
+import { OAUTH_RATE_LIMIT_PREFIXES } from "./rateLimitPrefixes.mjs";
+import { createOAuthRouter } from "./routes.mjs";
+import { oauthSectionSchema } from "./section.mjs";
+import { oauthTokenSettingsFrom } from "./tokenSettings.mjs";
+
+export { oauthSectionSchema };
+
+/**
+ * The module's section, `oauth`, strict at every level (`./section.mts`), with
+ * the package's defaults: the consent page moved from `endpoints.consent.url`;
+ * the access-token default moved from `oauth.accessToken.expiresIn` to
+ * `oauth.accessToken.defaultExpiresIn`, its variable,
+ * `OAUTH_ACCESS_TOKEN_EXPIRES_IN`, renamed with it
+ * (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`); four keys removed, each
+ * refusing boot set to a value, since the behaviour it switched no longer
+ * exists — `oauth.refreshToken.legacyRtPolicy` (a refresh
+ * token lacking `jti` or `family_id` while family rotation is wired is always
+ * refused), `oauth.refreshToken.legacyTokenCompat` (no v0.4.x refresh-token
+ * shape is accepted), `oauth.authorize.allowUnmarkedClients` (`/authorize`
+ * refuses every client not marked `firstParty: true`) and
+ * `oauth.jwt.legacyTypAccept` (a token with no `typ` header is refused on
+ * every surface), the variables of the last two,
+ * `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS` and `OAUTH_JWT_LEGACY_TYP_ACCEPT`,
+ * refusing boot exported at all; and
+ * `ENDPOINTS_CONSENT_URL` and the Client ID Metadata Documents' `OAUTH_CIMD_*`
+ * variables renamed after their paths (`OAUTH_CONSENT_PAGE_URL`,
+ * `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_*`).
+ */
+const SECTION = {
+	schema: oauthSectionSchema,
+	reference: new URL("../config/reference.conf", import.meta.url),
+	relocatedFrom: {
+		"endpoints.consent.url": "consentPage.url",
+		"oauth.accessToken.expiresIn": "accessToken.defaultExpiresIn",
+		"oauth.refreshToken.legacyRtPolicy": null,
+		"oauth.refreshToken.legacyTokenCompat": null,
+		"oauth.authorize.allowUnmarkedClients": null,
+		"oauth.jwt.legacyTypAccept": null,
+	},
+	renamedVariables: {
+		ENDPOINTS_CONSENT_URL: "endpoints.consent.url",
+		OAUTH_ACCESS_TOKEN_EXPIRES_IN: "oauth.accessToken.expiresIn",
+		OAUTH_CIMD_ENABLED: "oauth.clientIdMetadataDocuments.enabled",
+		OAUTH_CIMD_ALLOWED_SCOPES: "oauth.clientIdMetadataDocuments.allowedScopes",
+		OAUTH_CIMD_ALLOWED_AUDIENCES: "oauth.clientIdMetadataDocuments.allowedAudiences",
+		OAUTH_CIMD_ALLOWED_HOSTS: "oauth.clientIdMetadataDocuments.allowedHosts",
+		OAUTH_CIMD_DENIED_HOSTS: "oauth.clientIdMetadataDocuments.deniedHosts",
+		OAUTH_CIMD_MAX_BYTES: "oauth.clientIdMetadataDocuments.maxBytes",
+		OAUTH_CIMD_TIMEOUT_MS: "oauth.clientIdMetadataDocuments.timeoutMs",
+		OAUTH_CIMD_CACHE_MAX_AGE_MS: "oauth.clientIdMetadataDocuments.cacheMaxAgeMs",
+		OAUTH_CIMD_MAX_CACHE_ENTRIES: "oauth.clientIdMetadataDocuments.maxCacheEntries",
+		OAUTH_CIMD_STALE_IF_ERROR_MS: "oauth.clientIdMetadataDocuments.staleIfErrorMs",
+		OAUTH_CIMD_NEGATIVE_CACHE_MS: "oauth.clientIdMetadataDocuments.negativeCacheMs",
+		OAUTH_CIMD_MAX_CONCURRENT_FETCHES: "oauth.clientIdMetadataDocuments.maxConcurrentFetches",
+		OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "oauth.authorize.allowUnmarkedClients",
+		OAUTH_JWT_LEGACY_TYP_ACCEPT: "oauth.jwt.legacyTypAccept",
+	},
+} as const;
+
+// Inline route factories, so their `deps` is typed from `defineModule`'s R / O
+// and the section; a typed const array would have to restate them. The factory
+// bridges `deps` to `createOAuthRouter`'s explicit options
+// (`registry: Pick<GrantHandlerResolver, "get">`,
+// `getFederationProviders: () => ...`).
+//
+// The type arguments are written out, though inference from `requires`,
+// `optional` and `provides` would give the same. Written, they infer nothing,
+// so the section schema and the provided keys `authoritative` is typed against
+// are written too.
+
+/**
+ * Declarative manifest for the OAuth 2.0 endpoint suite: one module value,
+ * `oauth`, which owns `oauth {}`. Every dependency flows through the typed DI
+ * graph (`requires` / `optional`), every `oauth.*` setting it reads comes
+ * from its own section (`deps.section`), and what it reads of the
+ * federations from core's `federationSettings` slot; it reads nothing else of
+ * the configuration.
+ *
+ * Contributes one route, "oauth-endpoints" at `/oauth`, and a
+ * `discoveryMetadata` slice (its issuer-relative endpoints and capability
+ * metadata); core's `assembleApp` aggregates every module's slice into the
+ * single `/.well-known/openid-configuration` document, mounted only when an
+ * issuer is configured.
+ *
+ * `grantPolicy.evaluate` gates `/oauth/token`, and
+ * `refreshTokenFamilyRevocation.isFamilyRevoked` is read by introspect,
+ * userinfo and the federation routes.
+ */
+export const oauthEndpointsModule: Module = defineModule<
+	| "federationSettings"
+	| "clientRepository"
+	| "keyStore"
+	| "grantHandlerResolver"
+	| "sessionRequirementResolver"
+	| "outboundPolicy",
+	| "codeRepository"
+	| "rateLimiter"
+	| "auditSink"
+	| "grantPolicy"
+	| "refreshTokenFamilyRevocation"
+	| "accessTokenDenylist"
+	| "subjectRevocation"
+	| "userSessionStore"
+	| "sessionLifecycleStore"
+	| "federationTokenStore"
+	| "sessionLifecycle"
+	| "consentStore"
+	| "pendingConsentStore"
+	| "federationProviders"
+	| "replaySeenSet"
+	| "loginEntry"
+	| "logger",
+	typeof oauthSectionSchema,
+	"oauthTokenSettings"
+>({
+	name: "oauth",
+	section: SECTION,
+	requires: [
+		"federationSettings", // core's view of core.federations: the acr table reads which installed federation trusts its upstream amr; every oauth.* setting is read from the section
+		"clientRepository",
+		"keyStore",
+		"grantHandlerResolver", // synthetic, auto-injected by boot planner
+		"sessionRequirementResolver", // every consumer of admission takes it (ADR 2026-09-28-session-admission); here it decides the acr drop, and /authorize and the consent step read their sessions through it
+		"outboundPolicy", // core's core.outbound: a client's jwksUri and back-channel logout URI are fetched under it
+	],
+	optional: [
+		"codeRepository", // where /authorize issues its codes; the router requires it with the authorization_code grant
+		"rateLimiter", // oauth routes degrade gracefully without
+		"auditSink", // no events emitted when absent
+		"grantPolicy", // gates POST /oauth/token; allow-all when absent
+		"refreshTokenFamilyRevocation", // the introspect, userinfo and federation routes' family-revocation check
+		"accessTokenDenylist", // RFC 7009 AT revocation; introspect + AT validation consult denylist when wired
+		"subjectRevocation", // per-subject AT watermark; the same surfaces consult it, so a credential change actually invalidates
+		"userSessionStore", // the user session store; with it the router requires sessionLifecycle
+		"sessionLifecycleStore", // the session lifecycle's record, which admission reads at /authorize and the consent step; required with a userSessionStore (the router refuses one without it)
+		"federationTokenStore", // federation-token routes
+		"sessionLifecycle", // core's session lifecycle, required with a userSessionStore (the router refuses one without it): /oauth/logout closes the session through it, and introspection, userinfo and the federation-token route ask it whether a session is live
+		"consentStore", // the consent step for clients that are not first-party; such clients are refused without it
+		"pendingConsentStore", // where the consent step parks a request; the memory consent module provides it with consentStore, and the router refuses one without the other
+		"federationProviders", // synthetic — boot planner injects ReadonlyMap from federation contributions
+		"replaySeenSet", // jti single-use for private_key_jwt client assertions; server_error on that path when absent
+		"loginEntry", // the login page /authorize sends a browser to, which the session module provides; required to serve /authorize
+		"logger", // structured logger; falls back to consoleLogger when absent
+	],
+	// Optional to wire, not optional to decide. `auditSink` absence must
+	// be declared in core.declaredAbsent; `accessTokenDenylist`
+	// absence with oauth.revocation.accessToken = "unsupported".
+	absencePolicies: {
+		subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
+		auditSink: AUDIT_SINK_ABSENCE_POLICY,
+		accessTokenDenylist: ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
+	},
+	// What other modules read of `oauth {}` — the issuer, the token
+	// lifetimes and the switches — resolved once from the section this
+	// module owns, and frozen. The readers outside this package take the
+	// slot instead of reading the section. The token-binding dispatch
+	// policy is not in it: it is core's, and core reads it itself.
+	provides: {
+		oauthTokenSettings: (deps) => oauthTokenSettingsFrom(deps.section),
+	},
+	// One source while this module is loaded. Its own code reads
+	// `oauth {}`, so an `overrideComponents` entry for the slot would split
+	// what the slot's readers see from what the module does; boot refuses
+	// it (`authoritative-component-overridden`). A composition without the
+	// module fills the slot itself.
+	authoritative: ["oauthTokenSettings"],
+	// Eager: core's own machinery — the discovery document's issuer, the
+	// CORS table's discovery paths, a requirement's step-up page — reads
+	// the slot beside the modules that require it, and core is no
+	// module the planner could activate the provider for. Filled whenever
+	// this module is installed.
+	lifecycle: { oauthTokenSettings: { eager: true } },
+	contributes: {
+		// What the router's /authorize and consent step admit.
+		admissionActions: OAUTH_ROUTER_ADMISSION_ACTIONS,
+		// How core's session lifecycle tells the relying parties of a closed
+		// session. A contribution, read when a close runs: this module is free
+		// to require the lifecycle without a cycle.
+		sessionCloseNotifiers: {
+			oauth: (deps) =>
+				createSessionCloseNotifier({
+					clientRepository: deps.clientRepository,
+					keyStore: deps.keyStore,
+					issuer: oauthTokenSettingsFrom(deps.section).issuer,
+					fetchImpl: createOutboundFetch({ policy: deps.outboundPolicy, source: "registration" }),
+					logger: deps.logger ?? consoleLogger,
+				}),
+		},
+		// The prefixes the endpoints limit under, claimed with no budget of
+		// their own: the limiter's `limits` entry or its default applies.
+		rateLimitBudgets: Object.fromEntries(
+			Object.values(OAUTH_RATE_LIMIT_PREFIXES).map((prefix) => [prefix, () => null]),
+		),
+		routes: [
+			// oauth-endpoints — always contributed.
+			async (deps) => {
+				// GrantHandlerResolver is what the synthetic key resolves to
+				// and what createOAuthRouter's `registry` param accepts —
+				// the type-level read-only projection that exposes
+				// `.get(grantType)`, which the router only consumes.
+				const registry = deps.grantHandlerResolver;
+				const { router } = await createOAuthRouter(express, {
+					registry,
+					section: deps.section,
+					federationSettings: deps.federationSettings,
+					outboundPolicy: deps.outboundPolicy,
+					clientRepository: deps.clientRepository,
+					codeRepository: deps.codeRepository,
+					keyStore: deps.keyStore,
+					rateLimiter: deps.rateLimiter,
+					auditSink: deps.auditSink,
+					grantPolicy: deps.grantPolicy,
+					refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
+					accessTokenDenylist: deps.accessTokenDenylist,
+					subjectRevocation: deps.subjectRevocation,
+					userSessionStore: deps.userSessionStore,
+					sessionLifecycleStore: deps.sessionLifecycleStore,
+					federationTokenStore: deps.federationTokenStore,
+					sessionLifecycle: deps.sessionLifecycle,
+					replaySeenSet: deps.replaySeenSet,
+					consentStore: deps.consentStore,
+					pendingConsentStore: deps.pendingConsentStore,
+					...(deps.loginEntry === undefined ? {} : { loginEntry: deps.loginEntry }),
+					logger: deps.logger ?? consoleLogger,
+					// Wraps the typed read to fit `getFederationProviders`. No
+					// cast: the slot and the parameter are the same
+					// `FederationProvider`.
+					getFederationProviders: () => deps.federationProviders,
+					requirements: deps.sessionRequirementResolver,
+				});
+				return { id: "oauth-endpoints", mountPath: "/oauth", handler: router };
+			},
+		],
+		// OIDC discovery contribution. Core's `assembleApp` merges it with every
+		// other module's `discoveryMetadata` into the single
+		// `/.well-known/openid-configuration` document, prefixing the
+		// issuer-relative endpoint paths and owning `issuer` +
+		// `id_token_signing_alg_values_supported`. Core emits the document only
+		// when an issuer is configured, so oauth contributes unconditionally.
+		//
+		// Metadata comes from the module that owns the mechanism. `jwks_uri` is
+		// core's jwksModule's, so keys can be published without the OAuth grant
+		// suite and the URI never drifts from the JWKS route (core/src/jwks/).
+		// `dpop_signing_alg_values_supported` (RFC 9449 §5.1) comes from
+		// `@o3co/auth-provider-dpop` and `tls_client_certificate_bound_access_tokens`
+		// (RFC 8705 §3.3) from `@o3co/auth-provider-mtls`, each read off the
+		// config the mechanism itself is constructed from.
+		discoveryMetadata: [
+			(
+				deps: ProviderDeps<
+					| "federationSettings"
+					| "clientRepository"
+					| "keyStore"
+					| "grantHandlerResolver"
+					| "sessionRequirementResolver",
+					| "codeRepository"
+					| "rateLimiter"
+					| "auditSink"
+					| "grantPolicy"
+					| "refreshTokenFamilyRevocation"
+					| "accessTokenDenylist"
+					| "subjectRevocation"
+					| "userSessionStore"
+					| "sessionLifecycle"
+					| "federationTokenStore"
+					| "federationProviders"
+					| "consentStore"
+					| "replaySeenSet"
+					| "logger",
+					typeof oauthSectionSchema
+				>,
+			) => {
+				// Logout discovery fields are advertised only where the router mounts
+				// logout: the user session store, core's session lifecycle that closes
+				// its sessions, and the stores the routes read. Issuer gating lives in
+				// core, so this is purely the store-presence check.
+				const logoutSupported =
+					!!deps.userSessionStore &&
+					!!deps.sessionLifecycle &&
+					!!deps.federationTokenStore &&
+					!!deps.refreshTokenFamilyRevocation;
+				// `POST /oauth/revoke` is always mounted, but "mounted" and "can
+				// revoke something" are different claims: it is advertised only
+				// when it can revoke anything, each arm at its real resolution rule.
+				//
+				// The refresh arm is pure wiring: `tryRevokeRefreshToken` returns
+				// immediately without a `refreshTokenFamilyRevocation`, and the
+				// access-token revocation mode never touches this path.
+				const revokesRefreshTokens = !!deps.refreshTokenFamilyRevocation;
+				// The access arm is wiring AND the declaration: `createRevokeRouter`
+				// resolves `opts.accessTokenRevocation ?? (denylist ? …)`, so an
+				// explicit `"unsupported"` turns the access path off however the
+				// composition is wired, and the endpoint answers
+				// `unsupported_token_type`. Reading the router's own
+				// `readAccessTokenRevocationMode` keeps the two from drifting. An
+				// undeclared key reports `undefined`, which core's boot validator
+				// and the router read as `"denylist"`, so only a literal
+				// `"unsupported"` disables this arm.
+				const revokesAccessTokens =
+					!!deps.accessTokenDenylist &&
+					readAccessTokenRevocationMode({ oauth: deps.section }) !== "unsupported";
+				// Either arm is enough: RFC 7009 §2.2.1 defines
+				// `unsupported_token_type` so an AS may revoke one token type and
+				// not the other, and withholding the URL would leave a client that
+				// revokes an RT at logout unable to revoke anything. With neither
+				// arm the endpoint still answers RFC 7009's mandatory 200 and
+				// nothing happens, so it stays unadvertised. Which token types it
+				// revokes is not advertised: RFC 7009 / RFC 8414 define no
+				// per-token-type metadata field.
+				const revocationSupported = revokesRefreshTokens || revokesAccessTokens;
+				// Client ID Metadata Documents: advertised only when on **and**
+				// completable. MCP clients select them on this flag plus `none` in
+				// token_endpoint_auth_methods_supported (below, unconditional). A
+				// document client is never first-party, so `/authorize` refuses it
+				// without a consent store.
+				// `private_key_jwt`: advertised only when it can be honoured. The
+				// verifier answers `500 server_error` when no `replaySeenSet` is
+				// wired rather than accept an unchecked `jti`, so without a store
+				// all three endpoints would refuse the method.
+				const clientAssertionSupported = deps.replaySeenSet !== undefined;
+				// The authorization endpoint, and what a client sends to it — the
+				// response type, PKCE, request_uri, acr_values — and a document
+				// client, which uses no other grant, exist only with the grant that
+				// redeems what `/authorize` issues. Read off the same resolver as
+				// `grant_types_supported`, as the router reads it to mount `/authorize`.
+				const authorizationEndpoint =
+					deps.grantHandlerResolver.get("authorization_code") !== undefined;
+				const cimdSupported =
+					authorizationEndpoint &&
+					deps.section.clientIdMetadataDocuments?.enabled === true &&
+					deps.consentStore !== undefined;
+				// RFC 8414 §2: an omitted `grant_types_supported` means
+				// `["authorization_code", "implicit"]`, which would advertise an
+				// implicit flow this AS does not implement. Read straight off the
+				// resolver `/oauth/token` dispatches against (also what
+				// `allowedGrantTypes` is checked against), so it cannot drift as a
+				// grant module is added, removed, or gated off by
+				// `oauth.grants.<name>.enabled`. Empty is still emitted: it says "no
+				// grant types", where omission would assert two.
+				const grantTypesSupported = [...deps.grantHandlerResolver.entries()].map(
+					([grantType]) => grantType,
+				);
+				// The entries `/authorize` answers from: the configured table less
+				// what nothing this composition installs can satisfy, computed as
+				// the router computes it (which says at boot what it dropped). None
+				// without `/authorize`.
+				const acrValuesSupported = !authorizationEndpoint
+					? []
+					: Object.keys(
+							vouchableAcrValues(
+								readAcrTable(deps.section.authorize?.acrValues),
+								deps.federationProviders,
+								deps.federationSettings,
+								stepUpReach(Array.from(deps.sessionRequirementResolver.entries(), ([, r]) => r)),
+							).table,
+						);
+				return {
+					// oauth owns the authorization-server surface, so it is the
+					// provider root: this is the explicit signal that core should
+					// synthesize + serve the discovery document (when an issuer is
+					// configured). Ancillary contributors (jwksModule's `jwks_uri`)
+					// leave it unset.
+					providerRoot: true,
+					endpoints: {
+						...(authorizationEndpoint ? { authorization_endpoint: "/oauth/authorize" } : {}),
+						token_endpoint: "/oauth/token",
+						userinfo_endpoint: "/oauth/userinfo",
+						introspection_endpoint: "/oauth/introspect",
+						...(revocationSupported ? { revocation_endpoint: "/oauth/revoke" } : {}),
+						...(logoutSupported ? { end_session_endpoint: "/oauth/logout" } : {}),
+					},
+					metadata: {
+						// RFC 8414 §2 requires the field; with no authorization
+						// endpoint it lists none.
+						response_types_supported: authorizationEndpoint ? ["code"] : [],
+						// RFC 8414 §2 defaults an omitted value to query and fragment;
+						// `/authorize` answers in the query only.
+						...(authorizationEndpoint ? { response_modes_supported: ["query"] } : {}),
+						// OIDC Discovery defaults this to **true** when omitted,
+						// which would claim `request_uri` support `/authorize`
+						// does not have: an RP that believed it had sent a signed
+						// request object would have the query string processed
+						// instead. `/authorize` also refuses the parameter with
+						// `request_uri_not_supported`. `request_parameter_supported`
+						// and `claims_parameter_supported` stay omitted: both
+						// default to `false`.
+						...(authorizationEndpoint ? { request_uri_parameter_supported: false } : {}),
+						// RFC 9207 §3: every authorization response carries `iss`
+						// (`routes/authorizationResponse.mts`); with no authorization
+						// endpoint there is none to carry it.
+						...(authorizationEndpoint
+							? { authorization_response_iss_parameter_supported: true }
+							: {}),
+						...(cimdSupported ? { client_id_metadata_document_supported: true } : {}),
+						subject_types_supported: ["public"],
+						// `groups` is supported by filterClaimsByScope (non-standard but opt-in)
+						scopes_supported: ["openid", "profile", "email", "groups"],
+						grant_types_supported: grantTypesSupported,
+						// `private_key_jwt` on every client-authenticated endpoint
+						// that can honour it, and the assertion algorithms it accepts
+						// (RFC 8414 §2). Only asymmetric ones — a shared secret is what
+						// the method avoids. The algorithm list travels with the method:
+						// advertising algorithms for a method that is not offered says
+						// nothing a client can act on.
+						token_endpoint_auth_methods_supported: [
+							"client_secret_basic",
+							"client_secret_post",
+							...(clientAssertionSupported ? ["private_key_jwt"] : []),
+							"none",
+						],
+						...(clientAssertionSupported
+							? {
+									token_endpoint_auth_signing_alg_values_supported: [
+										...CLIENT_ASSERTION_ALGORITHMS,
+									],
+								}
+							: {}),
+						// RFC 8414 §2: an omitted `*_endpoint_auth_methods_supported`
+						// means `["client_secret_basic"]`, which understates both
+						// endpoints. They differ from each other on purpose —
+						// `/oauth/introspect` builds its client-auth middleware WITHOUT
+						// `allowPublicClients` (RFC 7662 §2.1: a client_id is not a
+						// secret, so a public client must not be able to query token
+						// metadata), while `/oauth/revoke` sets it (RFC 7009 §2.1: a
+						// public client may revoke its own tokens).
+						introspection_endpoint_auth_methods_supported: [
+							"client_secret_basic",
+							"client_secret_post",
+							...(clientAssertionSupported ? ["private_key_jwt"] : []),
+						],
+						...(clientAssertionSupported
+							? {
+									introspection_endpoint_auth_signing_alg_values_supported: [
+										...CLIENT_ASSERTION_ALGORITHMS,
+									],
+								}
+							: {}),
+						...(revocationSupported
+							? {
+									revocation_endpoint_auth_methods_supported: [
+										"client_secret_basic",
+										"client_secret_post",
+										...(clientAssertionSupported ? ["private_key_jwt"] : []),
+										"none",
+									],
+									...(clientAssertionSupported
+										? {
+												revocation_endpoint_auth_signing_alg_values_supported: [
+													...CLIENT_ASSERTION_ALGORITHMS,
+												],
+											}
+										: {}),
+								}
+							: {}),
+						// S256 only: PKCE is mandatory for every authorization-code
+						// client, and `ResolvedPkceOptions.supportedMethods` is
+						// `["S256"]` with no operator knob that can widen it. `plain`,
+						// reachable only through a registration carrying
+						// `allowPlainPkce: true` (`pkceMethodsForClient`), stays out:
+						// this is server-wide metadata (RFC 8414 §2 / RFC 7636 §4.4)
+						// that every client reads as "I may use any of these", and the
+						// one client the operator named does not need discovery.
+						...(authorizationEndpoint ? { code_challenge_methods_supported: ["S256"] } : {}),
+						// The acr table's keys, when there is one — less the entries
+						// nothing installed can satisfy. Omitted
+						// otherwise — an RP that sends `acr_values` to a server with no
+						// table gets `unmet_authentication_requirements`, and the metadata
+						// says so.
+						...(acrValuesSupported.length > 0 ? { acr_values_supported: acrValuesSupported } : {}),
+						...(logoutSupported
+							? {
+									backchannel_logout_supported: true,
+									backchannel_logout_session_supported: true,
+									frontchannel_logout_supported: true,
+									frontchannel_logout_session_supported: true,
+								}
+							: {}),
+					},
+				};
+			},
+		],
+	},
+});

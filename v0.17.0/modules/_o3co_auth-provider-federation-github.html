@@ -1,0 +1,357 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="../"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>@o3co/auth-provider-federation-github | auth.provider API</title><meta name="description" content="Documentation for auth.provider API"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="../assets/style.css"/><link rel="stylesheet" href="../assets/highlight.css"/><script defer src="../assets/main.js"></script><script async src="../assets/icons.js" id="tsd-icons-script"></script><script async src="../assets/search.js" id="tsd-search-script"></script><script async src="../assets/navigation.js" id="tsd-nav-script"></script><script async src="../assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
+<div class="tsd-toolbar-contents container"><a href="../index.html" class="title">auth.provider API</a>
+<div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/>
+<ul role="listbox" id="tsd-search-results"></ul>
+<div id="tsd-search-status" aria-live="polite" aria-atomic="true">
+<div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-menu"></use></svg></a></div></header>
+<div class="container container-main">
+<div class="col-content">
+<div class="tsd-page-title">
+<ul class="tsd-breadcrumb" aria-label="Breadcrumb">
+<li><a href="" aria-current="page">@o3co/auth-provider-federation-github</a></li></ul>
+<h1>Module @o3co/auth-provider-federation-github</h1></div>
+<section class="tsd-panel tsd-typography"><h1 id="o3coauth-provider-federation-github" class="tsd-anchor-link">@o3co/auth-provider-federation-github<a href="#o3coauth-provider-federation-github" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h1>
+<p>Last updated: 2026-10-05</p>
+<p>GitHub federation provider for <code>auth.provider</code>: sign-in with a GitHub account
+through a GitHub OAuth App, with upstream logout and claim mapping.</p>
+<h2 id="responsibility" class="tsd-anchor-link">Responsibility<a href="#responsibility" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p><strong>Role.</strong> An adapter: it implements core's federation contract
+(<a href="../media/README-10.md"><code>core/src/federations</code></a>) for GitHub. It
+contributes the federation type <code>github</code>: core hands it each enabled
+<code>core.federations</code> entry of that type, and it builds one federation per entry,
+under the entry's name, registered for the session router with its redirect
+policy.</p>
+<p><strong>Owns:</strong> GitHub's endpoints, how a GitHub user becomes a profile (the <code>sub</code>, the
+e-mail choice, the scope translation), the logout URL, and the schema of a
+<code>github</code> entry's own keys (<a href="../media/entry-1.mts"><code>src/entry.mts</code></a>).</p>
+<p><strong>Does not own:</strong> the contract (core); the <code>core.federations</code> map, the keys
+core owns on every entry (<code>enabled</code>, <code>type</code>, <code>trustUpstreamAmr</code>,
+<code>callbackMeetsFreshness</code>, <code>callbackURL</code>) and the dispatch of an entry by its type (core's boot); the routes, <code>state</code> / PKCE verifier
+generation, the redirect-allowlist rules and claim precedence
+(<a href="_o3co_auth-provider-session.html"><code>@o3co/auth-provider-session</code></a>); who the user is (the
+Store); the logout routes that call this adapter
+(<a href="_o3co_auth-provider-oauth.html"><code>@o3co/auth-provider-oauth</code></a>).</p>
+<p><strong>Why a separate package.</strong> Each adapter is its own package so that a deployment
+installs only the IdPs it uses, and <code>openid-client</code> only with an adapter.
+GitHub OAuth Apps are not OpenID Connect — no id_token, no <code>nonce</code>, a numeric
+user <code>id</code> instead of <code>sub</code>, a comma-delimited <code>scope</code>, and the e-mail address behind a separate API —
+so <a href="_o3co_auth-provider-federation-oidc.html"><code>@o3co/auth-provider-federation-oidc</code></a>, which
+requires <code>openid</code> and an id_token, cannot stand in for it.</p>
+<h2 id="install" class="tsd-anchor-link">Install<a href="#install" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="sh"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">install</span><span class="hl-1"> </span><span class="hl-2">@o3co/auth-provider-federation-github</span><span class="hl-1"> </span><span class="hl-2">@o3co/auth-provider-core</span><span class="hl-1"> </span><span class="hl-2">@o3co/auth-provider-session</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Peer dependencies: <code>@o3co/auth-provider-core</code> and
+<code>@o3co/auth-provider-session</code>. The package depends on <code>openid-client</code> and
+<code>zod</code>.</p>
+<h2 id="usage" class="tsd-anchor-link">Usage<a href="#usage" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>One module, <code>githubFederationTypeModule()</code>
+(<a href="../media/type-module-1.mts"><code>src/type-module.mts</code></a>), handles every enabled
+<code>core.federations</code> entry whose <code>type</code> is <code>github</code>. It contributes
+<code>federationTypes.github</code>; core parses each such entry with the type's schema at
+boot and calls the module's factories with the entry's name, its
+<code>callbackURL</code> and its parsed keys, so the composition root fills no slot and
+writes no bridge. The module requires no dependency.</p>
+<pre><code class="ts"><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">createApp</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-core&quot;</span><span class="hl-1">;</span><br/><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">githubFederationTypeModule</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-federation-github&quot;</span><span class="hl-1">;</span><br/><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">sessionModule</span><span class="hl-1">, </span><span class="hl-6">sessionStoreModule</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-session&quot;</span><span class="hl-1">;</span><br/><br/><span class="hl-4">const</span><span class="hl-1"> </span><span class="hl-8">handle</span><span class="hl-1"> = </span><span class="hl-5">await</span><span class="hl-1"> </span><span class="hl-0">createApp</span><span class="hl-1">({</span><br/><span class="hl-1">  </span><span class="hl-6">modules:</span><span class="hl-1"> [</span><br/><span class="hl-1">    </span><span class="hl-6">sessionStoreModule</span><span class="hl-1">,</span><br/><span class="hl-1">    </span><span class="hl-6">sessionModule</span><span class="hl-1">,</span><br/><span class="hl-1">    </span><span class="hl-0">githubFederationTypeModule</span><span class="hl-1">(),</span><br/><span class="hl-1">    </span><span class="hl-3">// ... composition-root modules supplying userRepository and the session stores</span><br/><span class="hl-1">  ],</span><br/><span class="hl-1">  </span><span class="hl-6">bootstrapComponents:</span><span class="hl-1"> { </span><span class="hl-6">config</span><span class="hl-1">, </span><span class="hl-6">pathResolver</span><span class="hl-1"> },</span><br/><span class="hl-1">});</span>
+</code><button type="button">Copy</button></pre>
+
+<p><code>githubFederationTypeModule({ fetch })</code> sends every request to GitHub of every
+<code>github</code> entry — the token exchange, <code>/user</code> and <code>/user/emails</code> — through that
+fetch: a proxy, or a test double. Without it the global <code>fetch</code> is used.</p>
+<h3 id="configuration" class="tsd-anchor-link">Configuration<a href="#configuration" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<pre><code class="hocon">core.federations {
+  github {
+    enabled = true
+    type = "github"
+    clientId = ${GITHUB_CLIENT_ID}
+    clientSecret = ${GITHUB_CLIENT_SECRET}
+    callbackURL = "https://auth.example.com/session/oauth/federation/github/callback"
+    clientUrl = "https://app.example.com/"
+  }
+}
+</code><button type="button">Copy</button></pre>
+
+<p>The entry's name is the federation's: the <code>:name</code> segment of its routes and
+the prefix of the identity handed to the Store (<code>&lt;name&gt;:&lt;id&gt;</code>). Each entry is
+its own GitHub client, so two entries of type <code>github</code> — say <code>github-work</code> and
+<code>github-oss</code>, each with its own OAuth App and <code>callbackURL</code> — are two
+federations, and one GitHub user signs in to them as two identities.</p>
+<p>An entry is flat, and its schema is strict: the keys core owns (<code>enabled</code>,
+<code>type</code>, <code>trustUpstreamAmr</code>, <code>callbackMeetsFreshness</code>, <code>callbackURL</code>) and the keys
+below, nothing else.
+The schema is <code>githubEntrySchema</code> in <a href="../media/entry-1.mts"><code>src/entry.mts</code></a>. A key it
+does not name — a typo, or a nested <code>github { ... }</code> section — refuses boot with <code>config-validation-failed</code> at <code>core.federations.&lt;name&gt;</code>,
+naming the key; a missing or malformed key is refused at
+<code>core.federations.&lt;name&gt;.&lt;field&gt;</code>. A refusal names the key, never its value. A
+key written <code>null</code> counts as absent. An absent key means what the table says,
+read by the provider and the redirect policy; the schema fills in no default.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>clientId</code></td>
+<td>yes</td>
+<td>The OAuth App's client ID.</td>
+</tr>
+<tr>
+<td><code>clientSecret</code></td>
+<td>yes</td>
+<td>The OAuth App's client secret, sent in the token request body (<code>client_secret_post</code>).</td>
+</tr>
+<tr>
+<td><code>callbackURL</code></td>
+<td>yes</td>
+<td>Where GitHub sends the browser back; the OAuth App's callback URL. A key core owns: boot requires it of every entry it dispatches, and the session routes read it from the same entry.</td>
+</tr>
+<tr>
+<td><code>clientUrl</code></td>
+<td>in practice</td>
+<td>Where the browser lands after a login whose start carried no <code>redirect_to</code>. Without it such a login ends in <code>500 misconfiguration</code> after the session has been saved — so it is needed unless every start carries a <code>redirect_to</code> and <code>authCallbackUrl</code> is set.</td>
+</tr>
+<tr>
+<td><code>redirectAllowlist</code>, <code>authCallbackUrl</code>, <code>sessionDomain</code></td>
+<td>no</td>
+<td>The <code>redirect_to</code> policy, as for every federation — see the <a href="_o3co_auth-provider-session.html#redirect-allowlists">session package's redirect rules</a>. A start that carries <code>redirect_to</code> needs both an allowlist entry for it and <code>authCallbackUrl</code>, or it is refused (<code>400</code>) or ends in <code>500 misconfiguration</code>.</td>
+</tr>
+<tr>
+<td><code>endSessionEndpoint</code></td>
+<td>no</td>
+<td>Replaces GitHub's logout — see <a href="#refresh-and-logout">Refresh and logout</a>.</td>
+</tr>
+</tbody>
+</table>
+<p><code>fetch</code> is not an entry key: it is the type module's option (above), and a
+<code>GithubProviderConfig</code> field for <code>createGithubProvider</code>.</p>
+<p><code>createGithubProvider</code> throws at boot when <code>clientId</code>, <code>clientSecret</code> or
+<code>callbackURL</code> is missing.</p>
+<h2 id="what-a-login-does" class="tsd-anchor-link">What a login does<a href="#what-a-login-does" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ul>
+<li><strong>Authorization request:</strong> scope <code>read:user user:email</code> and PKCE S256. The
+<code>nonce</code> the session router mints is ignored — GitHub issues no id_token to bind
+it to. A freshness ask (<code>prompt=login</code>, <code>max_age</code>) is ignored too: GitHub's
+OAuth authorization has no <code>prompt=login</code> and no <code>max_age</code> (its <code>prompt</code>
+takes only <code>select_account</code>), and with no id_token there is no <code>auth_time</code>,
+so the profile never carries <code>authTime</code>.</li>
+<li><strong>Code exchange:</strong> at GitHub's token endpoint, the client secret in the
+request body (<code>client_secret_post</code>, <code>openid-client</code>'s default), with the PKCE
+verifier.</li>
+<li><strong>The callback's <code>iss</code> is checked when it is sent (RFC 9207).</strong> The library is
+configured with GitHub's authorization server's issuer,
+<code>https://github.com/login/oauth</code>, as its published metadata names it, and the
+exchange URL is built with core's <code>callbackUrlForExchange</code>, so a callback whose
+<code>iss</code> names another issuer is refused before any token request. A callback
+without <code>iss</code> is accepted. The profile's <code>issuer</code> label stays
+<code>https://github.com</code>: it is part of the identity a linked account is keyed by.</li>
+<li><strong>The user</strong> is <code>GET https://api.github.com/user</code>, with no subject binding
+(there is no id_token <code>sub</code> to bind to). It is GitHub's REST API, not an
+OpenID Connect UserInfo endpoint — it answers a numeric <code>id</code> and no <code>sub</code> — so
+the adapter fetches it as a protected resource and reads the answer itself,
+rather than through <code>openid-client</code>'s UserInfo handling, which requires a
+<code>sub</code>. Both <code>/user</code> and <code>/user/emails</code> are asked for
+<code>application/vnd.github+json</code> at REST API version <code>2022-11-28</code>
+(<code>X-GitHub-Api-Version</code>), the schema the <code>sub</code> rule reads <code>id</code> against.
+GitHub supports a version for at least 24 months after its successor ships
+(2022-11-28's successor shipped 2026-03-10), so revisit the pin before
+2028-03: once GitHub retires it, every login fails. A
+non-2xx answer, a body that is not JSON, or a user object with neither a
+usable <code>sub</code> nor a usable <code>id</code> fails the exchange, and the login answers
+<code>502 exchange_failed</code>.</li>
+<li><strong>The e-mail</strong> always comes from <code>GET /user/emails</code>, never from <code>/user</code>: the
+primary verified address, else the first verified one, else none. A row that
+is not an object is skipped. A failed <code>/user/emails</code> request is read as &quot;no
+address&quot; and does not fail the login.</li>
+</ul>
+<p>What <code>exchangeCode</code> returns:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>issuer</code></td>
+<td><code>https://github.com</code></td>
+</tr>
+<tr>
+<td><code>sub</code></td>
+<td>a non-empty string <code>sub</code> when the user object carries one; otherwise its <code>id</code> — a positive safe integer (<code>Number.isSafeInteger</code>, above 0) as a decimal string, or a string of decimal digits with no sign and no leading zero as it is. Any other <code>id</code> fails the exchange like a missing one: GitHub sends an int64 integer, and one outside the safe-integer range after <code>Response.json()</code>, where a parsed number no longer names one id — above 2^53 − 1, where two ids parse as the same number, or <code>1e400</code>, which parses as <code>Infinity</code> — would sign two GitHub users in as one <code>&lt;name&gt;:&lt;id&gt;</code></td>
+</tr>
+<tr>
+<td><code>email</code>, <code>emailVerified</code></td>
+<td>the chosen address and <code>true</code>, or both absent</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td><code>/user</code>'s <code>name</code>, when a string</td>
+</tr>
+<tr>
+<td><code>picture</code></td>
+<td><code>/user</code>'s <code>avatar_url</code>, when a string</td>
+</tr>
+<tr>
+<td><code>accessToken</code></td>
+<td>as GitHub issued it</td>
+</tr>
+<tr>
+<td><code>refreshToken</code></td>
+<td>always absent — the adapter has no refresh, so one that a GitHub App's expiring user token comes with is not kept</td>
+</tr>
+<tr>
+<td><code>scope</code></td>
+<td>GitHub's comma-delimited <code>scope</code> rewritten as the space-delimited list the rest of the system reads (RFC 6749 §3.3); absent when GitHub sent none. A <code>scope</code> that is not a string is refused by <code>openid-client</code> before the adapter sees it, and the login answers <code>502 exchange_failed</code></td>
+</tr>
+<tr>
+<td><code>expiresAt</code></td>
+<td>when <code>openid-client</code> handed the answer over + <code>expiresIn</code> when GitHub sends one; <strong><code>null</code> when it does not</strong> (OAuth App tokens), which <code>oauth</code>'s <code>POST /oauth/federation/:name/token</code> reads as &quot;do not refresh; reuse the stored token&quot;</td>
+</tr>
+<tr>
+<td><code>expiresIn</code></td>
+<td><code>expires_in</code> as <code>openid-client</code> read it (it applies <code>parseFloat</code>), <code>null</code> when none</td>
+</tr>
+<tr>
+<td><code>tokenType</code></td>
+<td><code>token_type</code> as <code>openid-client</code> reports it (lower-cased <code>bearer</code>), recorded by the session router verbatim</td>
+</tr>
+<tr>
+<td><code>idToken</code></td>
+<td>always absent — GitHub issues none, so one in its token answer was added on the way and is not kept</td>
+</tr>
+</tbody>
+</table>
+<p><code>mapClaims</code> maps <code>email</code>, <code>emailVerified</code>, <code>name</code> and <code>picture</code>; the session
+package promotes only <code>email</code>, <code>name</code> and <code>picture</code>, and only where the local
+record is silent.</p>
+<h3 id="freshness-and-an-mfa-first-binding" class="tsd-anchor-link">Freshness: <code>prompt=login</code>, <code>max_age</code> and an MFA first binding<a href="#freshness-and-an-mfa-first-binding" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p><code>/authorize</code>'s <code>prompt=login</code> and <code>max_age</code>, and the MFA module's first
+binding (a recent primary), judge a federated session by when the upstream
+last authenticated the user. GitHub reports no such time. With
+<code>core.federations.&lt;name&gt;.callbackMeetsFreshness</code> at its default <code>false</code>, a
+GitHub session therefore never meets <code>prompt=login</code> or <code>max_age</code> (a client
+asking for them gets <code>login_required</code>) and never binds a first factor
+(<code>mfa.manage</code>, a first passkey or linked identity) — the user is sent to log
+in again every time. To use them with GitHub, set
+<code>core.federations.&lt;name&gt;.callbackMeetsFreshness = true</code>: the callback itself
+then counts as the authentication, which is the behaviour before 0.17.0.</p>
+<h2 id="refresh-and-logout" class="tsd-anchor-link">Refresh and logout<a href="#refresh-and-logout" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ul>
+<li><strong>No refresh.</strong> The provider does not implement <code>SupportsRefresh</code>, so <code>oauth</code>'s
+federation token route cannot refresh a GitHub token.</li>
+<li><strong><code>endSession()</code></strong> (<code>SupportsLogout</code>, called by <code>oauth</code>'s logout routes): with
+<code>endSessionEndpoint</code> configured, that URL with <code>id_token_hint</code>,
+<code>post_logout_redirect_uri</code> and <code>state</code>; otherwise <code>postLogoutRedirectUri</code>, and without one
+<code>https://github.com/logout</code>, with <code>state</code>. An unparsable URL throws; the
+message names the field and quotes no value it was handed.
+Redirecting straight to <code>postLogoutRedirectUri</code> is safe because the caller
+hands only a URI it has matched against the client's registered
+<code>postLogoutRedirectUris</code>, or none — core's <code>EndSessionRequest</code> states the
+rule, and <code>oauth</code>'s logout routes keep it. A composition that calls
+<code>endSession()</code> itself must do the same.</li>
+</ul>
+<h2 id="public-api" class="tsd-anchor-link">Public API<a href="#public-api" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>Exported from <a href=""><code>src/index.mts</code></a>:</p>
+<ul>
+<li><code>githubFederationTypeModule</code> (<a href="../media/type-module-1.mts"><code>src/type-module.mts</code></a>) —
+the Module contributing <code>federationTypes.github</code>, with its options
+<code>GithubFederationTypeModuleOptions</code>.</li>
+<li><code>GITHUB_FEDERATION_TYPE</code> (<code>&quot;github&quot;</code>, <a href="../media/type-module-1.mts"><code>src/type-module.mts</code></a>).</li>
+<li><code>createGithubProvider(config)</code> (<a href="../media/github.mts"><code>src/github.mts</code></a>) — the
+provider for the federation <code>github</code>.</li>
+<li>Types: <code>GithubEntry</code> (<a href="../media/entry-1.mts"><code>src/entry.mts</code></a>), an entry's own keys
+as the schema answers them; <a href="../media/github.mts"><code>GithubProviderConfig</code></a>,
+<code>GithubProvider</code> (<a href="../media/github.mts"><code>src/github.mts</code></a>).</li>
+</ul>
+<h2 id="tests" class="tsd-anchor-link">Tests<a href="#tests" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>Nothing mocks <code>openid-client</code>. The provider tests run the real library against
+a fake GitHub (<a href="../media/fake-github.mts"><code>fake-github.mts</code></a>) handed to the
+provider as <code>config.fetch</code>, which answers with GitHub's own bodies and records
+every request; the global <code>fetch</code> is a tripwire that throws. It
+enforces the two points where the library's defaults decide success: the token
+endpoint answers form-encoded unless <code>Accept</code> asks for JSON, and the REST API
+refuses a request without a <code>User-Agent</code>. <code>Authorization</code> and the API version
+are pinned by the tests' assertions instead.</p>
+<table>
+<thead>
+<tr>
+<th>Test file</th>
+<th>Pins</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="../media/github.test.mts"><code>github.test.mts</code></a></td>
+<td>the authorization request, the token request (PKCE verifier, <code>client_secret_post</code>), the callback's <code>iss</code> (GitHub's accepted, another refused before the token request, none accepted), the profile's issuer label, the REST headers, the e-mail choice, malformed rows and a failed <code>/user/emails</code>, the scope rules, <code>expiresAt</code>, <code>expiresIn</code> and <code>tokenType</code>, no refresh, <code>mapClaims</code>, <code>endSession</code>, and that <code>config.fetch</code> carries every request</td>
+</tr>
+<tr>
+<td><a href="../media/github.user.test.mts"><code>github.user.test.mts</code></a></td>
+<td>how <code>/user</code> becomes the <code>sub</code>: GitHub's numeric <code>id</code> without a <code>sub</code>, the <code>sub</code> and <code>id</code> rules, and the refusals (a non-2xx answer, a body that is not JSON, no <code>id</code>, or one that is not a positive safe integer or a canonical digit string)</td>
+</tr>
+<tr>
+<td><a href="../media/fake-github.test.mts"><code>fake-github.test.mts</code></a></td>
+<td>the fake itself: form-encoded token answers, the <code>User-Agent</code> refusal, and that the adapter's requests satisfy both</td>
+</tr>
+<tr>
+<td><a href="../media/github-type-module.test.mts"><code>github-type-module.test.mts</code></a></td>
+<td>the type module through <code>createApp</code>: one provider and policy per entry, a login through the session routes under the entry's name, the strict, flat schema, that a refusal never quotes the client secret, the <code>fetch</code> option, and that every key of the entry reaches the provider and its redirect policy</td>
+</tr>
+</tbody>
+</table>
+</section>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Interfaces"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="interfaces">Interfaces<a href="#interfaces" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="githubfederationtypemoduleoptions"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-federation-github.GithubFederationTypeModuleOptions.html">GithubFederationTypeModuleOptions</a><a href="#githubfederationtypemoduleoptions" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="githubproviderconfig"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-federation-github.GithubProviderConfig.html">GithubProviderConfig</a><a href="#githubproviderconfig" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Type Aliases"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="type-aliases">Type Aliases<a href="#type-aliases" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="githubentry"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><a href="../types/_o3co_auth-provider-federation-github.GithubEntry.html">GithubEntry</a><a href="#githubentry" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="githubprovider"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><a href="../types/_o3co_auth-provider-federation-github.GithubProvider.html">GithubProvider</a><a href="#githubprovider" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Variables"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="variables">Variables<a href="#variables" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="github_federation_type"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-federation-github.GITHUB_FEDERATION_TYPE.html">GITHUB_FEDERATION_TYPE</a><a href="#github_federation_type" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Functions"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="functions">Functions<a href="#functions" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="creategithubprovider"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-federation-github.createGithubProvider.html">createGithubProvider</a><a href="#creategithubprovider" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="githubfederationtypemodule"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-federation-github.githubFederationTypeModule.html">githubFederationTypeModule</a><a href="#githubfederationtypemodule" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details></div>
+<div class="col-sidebar">
+<div class="page-menu">
+<div class="tsd-navigation settings">
+<details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>Settings</h3></summary>
+<div class="tsd-accordion-details">
+<div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span>
+<ul id="tsd-filter-options">
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div>
+<div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div>
+<details open class="tsd-accordion tsd-page-navigation"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>On This Page</h3></summary>
+<div class="tsd-accordion-details"><a href="#o3coauth-provider-federation-github"><span>@o3co/auth-<wbr/>provider-<wbr/>federation-<wbr/>github</span></a>
+<ul>
+<li><a href="#responsibility"><span>Responsibility</span></a></li>
+<li><a href="#install"><span>Install</span></a></li>
+<li><a href="#usage"><span>Usage</span></a></li>
+<li>
+<ul>
+<li><a href="#configuration"><span>Configuration</span></a></li></ul></li>
+<li><a href="#what-a-login-does"><span>What a login does</span></a></li>
+<li>
+<ul>
+<li><a href="#freshness-and-an-mfa-first-binding"><span>Freshness: ,  and an <wbr/>MFA first binding</span></a></li></ul></li>
+<li><a href="#refresh-and-logout"><span>Refresh and logout</span></a></li>
+<li><a href="#public-api"><span>Public <wbr/>API</span></a></li>
+<li><a href="#tests"><span>Tests</span></a></li></ul>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Interfaces"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Interfaces</summary>
+<div><a href="#githubfederationtypemoduleoptions"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Github<wbr/>Federation<wbr/>Type<wbr/>Module<wbr/>Options</span></a><a href="#githubproviderconfig"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Github<wbr/>Provider<wbr/>Config</span></a></div></details>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Type Aliases"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Type Aliases</summary>
+<div><a href="#githubentry"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><span>Github<wbr/>Entry</span></a><a href="#githubprovider"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><span>Github<wbr/>Provider</span></a></div></details>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Variables"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Variables</summary>
+<div><a href="#github_federation_type"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>GITHUB_<wbr/>FEDERATION_<wbr/>TYPE</span></a></div></details>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Functions"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Functions</summary>
+<div><a href="#creategithubprovider"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>create<wbr/>Github<wbr/>Provider</span></a><a href="#githubfederationtypemodule"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>github<wbr/>Federation<wbr/>Type<wbr/>Module</span></a></div></details></div></details></div>
+<div class="site-menu">
+<nav class="tsd-navigation"><a href="../modules.html">auth.provider API</a>
+<ul class="tsd-small-nested-navigation" id="tsd-nav-container">
+<li>Loading...</li></ul></nav></div></div></div><footer>
+<p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer>
+<div class="overlay"></div></body></html>

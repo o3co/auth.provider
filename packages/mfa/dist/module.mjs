@@ -1,0 +1,471 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/**
+ * `mfaModule` and `mfaModules`: what a composition installs to turn MFA on
+ * (installed is on).
+ *
+ * Requires core's three MFA ports (the name `mfa` is accepted only from a
+ * module bound to them), `userSessionStore`, `sessionRequirementResolver`,
+ * `csrfGuard` (every MFA POST runs it), `loginCompletion` (a verified second
+ * factor finishes the login through it) and `deploymentMode` (the development
+ * sample key is refused under `multi`, so a mode read as absent must not lift
+ * that); reads `rateLimiter` — what limits the routes, which pass every
+ * request through without one — `auditSink` and `subjectRevocation` (each
+ * absence declared; the routes' admission of a signed-in session, and every
+ * use of a login's transaction, reads the boundary), `logger`,
+ * `mailSender` — where the account-email proof and a factor's codes go — and
+ * `userRepository`, for the enrollment witness's write alone
+ * (`markMfaEnrolled`). Nothing it keeps forks per replica.
+ *
+ * Reads its own section, `mfa` — the mode, its settings and the step-up
+ * page, `mfa.page.url` — and the deployment mode from the `deploymentMode`
+ * slot. The page's old path, `endpoints.mfa.url`, refuses the boot naming
+ * the new one, and so does `ENDPOINTS_MFA_URL` set, whether or not
+ * `MFA_PAGE_URL` is. `mfa.rateLimit` is removed: setting it refuses the boot.
+ *
+ * Contributes `sessionRequirements.mfa`. Its factory refuses the boot when
+ * `mfa.mode` is `off` or unset, when no `sessionLifecycleStore` is wired beside
+ * the user-session store (core's session lifecycle is required where one is
+ * wired), when the package's settings are unusable (naming
+ * the key), when `mfa.page.url` is unset, or when
+ * `mfa.enrollment.requireEmailProof` is `always` and no `mailSender` is wired —
+ * nobody could give the proof, so nobody could bind (the MFA ADR's D20). It
+ * builds the key ring's sealing once per boot (so
+ * `mfa_factor_sealed_with_retired_key` is logged once per key id) and keeps it,
+ * with the requirement core issues `mfa.step_up` to and the enrollment
+ * witness, for the same boot's routes (`mfaBootState`). It warns once each:
+ * when the development sample key is in use; when the user-session store
+ * cannot record a step-up (`mfa_step_up_unsupported`), admission's view then
+ * saying no second factor can be recorded on any session, so the requirement
+ * sends it to log in instead; when `when-mail` meets no
+ * `mailSender`, so a first binding asks no proof
+ * (`mfa_first_binding_without_email_proof`); and when the directory cannot
+ * write the witness (`mfa_enrollment_witness_unwritable`).
+ *
+ * Claims the `mfa` prefix every `/session/mfa` POST limits under, with no
+ * budget of its own: the wired limiter's `limits` and `defaultLimit` decide.
+ *
+ * Contributes `mfa.manage`, graded `credential_change`, as the admission
+ * action its routes admit a signed-in session's enrollment, rename or removal
+ * for, and `mfa.view`, graded `use`, for the list of its factors.
+ *
+ * Provides `mfaSubjectLeases`, authoritative: the subject's lease owner over
+ * the MFA transaction store, built by this module from `mfa.storeTimeoutMs`
+ * (`factorSet.mts`) — its routes build theirs from the same settings, so every
+ * writer holds a lease of the same rules — and the one `mfaResetModule`
+ * requires: the operator reset is available only where this module is
+ * installed.
+ *
+ * Contributes the MFA routes (`routes.mts`) at `/session/mfa`, after the
+ * session middleware. Their factory runs after every factor has registered,
+ * so it checks the installed factors (`checkInstalledFactors`) first, and
+ * the resolver holds `mfa.manage` (core's `checkResolver`). Without
+ * `subjectRevocation` the subject's own release can lift the hard hold on a
+ * rebind but never give the week or the backoff back early: said once at
+ * warn (`mfa_lock_release_unavailable`).
+ */
+import { AUDIT_SINK_ABSENCE_POLICY, checkResolver, consoleLogger, createRateLimitGuard, defineModule, isHintToken, issuedRemediationActions, loggableError, SUBJECT_REVOCATION_ABSENCE_POLICY, supportsSecondFactorUpdate, } from "@o3co/auth-provider-core";
+import { MFA_ADMISSION_ACTIONS } from "./admissionActions.mjs";
+import { mfaSectionSchema, readMfaSettings } from "./config.mjs";
+import { createMfaCoordinator } from "./coordinator.mjs";
+import { mfaEmailFactorModule } from "./email/module.mjs";
+import { boundedRecoverySetFloor, createMfaFactorSet, createMfaSubjectLeases, } from "./factorSet.mjs";
+import { createFirstBindingMark } from "./firstBindingMark.mjs";
+import { createMfaSubjectLock } from "./lock.mjs";
+import { createMfaLockRecovery } from "./lockRecovery.mjs";
+import { mailFailureOf } from "./mail.mjs";
+import { mfaRecoveryCodeFactorModule } from "./recovery/module.mjs";
+import { createMfaRequirement } from "./requirement.mjs";
+import { createMfaRouter, requireSessionLifecycleStore } from "./routes.mjs";
+import { createMfaSealing } from "./sealing.mjs";
+import { mfaTotpFactorModule } from "./totp/module.mjs";
+import { createLoginTransactions } from "./transactions.mjs";
+import { createMfaEnrollmentWitness } from "./witness.mjs";
+/** The id of the MFA routes' contribution: what another route orders itself against. */
+export const MFA_ROUTES_ID = "mfa-routes";
+/** Where the MFA routes are mounted. */
+const MFA_ROUTES_MOUNT_PATH = "/session/mfa";
+/**
+ * The key prefix every `/session/mfa` POST limits under on the wired limiter
+ * (`mfa:ip:<ip>`), which the module claims with no budget. No `:`.
+ */
+export const MFA_RATE_LIMIT_PREFIX = "mfa";
+/**
+ * Each boot's state, keyed by that boot's `mfaFactorResolver`. Relies on core
+ * handing the same projection object to both factories of a boot and a new one
+ * to every boot (`prepareSyntheticProjections` in core's
+ * `boot/apply-contributions.mts`); `module.test.mts` pins both.
+ */
+const bootStates = new WeakMap();
+/**
+ * What the MFA module built in the boot whose `mfaFactorResolver` is
+ * `factors`. Throws when that boot built none: the requirement's factory
+ * runs before any route factory, so a route asking for it is in a boot
+ * without the module.
+ */
+export function mfaBootState(factors) {
+    const state = bootStates.get(factors);
+    if (state === undefined) {
+        throw new Error("the MFA module built nothing in this boot: install mfaModule");
+    }
+    return state;
+}
+/**
+ * `mfa.mode = "required"` with no counting factor enabled: the `cause` of the
+ * boot's refusal, with its reason.
+ */
+export class MfaNoCountingFactorError extends RangeError {
+    reason = "mfa-no-counting-factor";
+    /**
+     * `enabledKinds`: the enabled factors, none counting, already admitted by core's
+     * hint grammar. The module cannot tell which factor modules are installed, so the
+     * message names the TOTP key only conditionally.
+     */
+    constructor(enabledKinds) {
+        const enabled = enabledKinds.length === 0
+            ? "no factor is enabled"
+            : `the enabled factors (${enabledKinds.join(", ")}) do not count`;
+        super(`mfa.mode is "required", but ${enabled}, so nobody could meet the requirement: enable an installed counting factor through its module's \`enabled\` key — for the TOTP factor, when mfaTotpFactorModule is installed, mfa-totp-factor.enabled (MFA_TOTP_FACTOR_ENABLED) — or set mfa.mode = "optional"`);
+        this.name = "MfaNoCountingFactorError";
+    }
+}
+/**
+ * An enabled factor whose kind core's hint grammar refuses: a first
+ * binding's answer lists the kinds (`hints.enrollable`), and core would
+ * refuse that answer at every such login. The `cause` of the boot's
+ * refusal; `JSON.stringify` quotes the kind, whatever it holds.
+ */
+export class MfaFactorKindUnhintableError extends RangeError {
+    reason = "mfa-factor-kind-unhintable";
+    constructor(kind) {
+        super(`the MFA factor of kind ${JSON.stringify(kind)} cannot be offered: a first binding's hints.enrollable names each kind, and core admits a hint only of the form ^[a-z][a-z0-9_-]{0,63}$ — contribute the factor under such a kind`);
+        this.name = "MfaFactorKindUnhintableError";
+    }
+}
+/**
+ * The most kinds a hint list carries: core's cap on a hint's list
+ * (`HINT_LIST_MAX` in `session-admission/interruption-answer.mts`, which core does not
+ * export; `module.test.mts` holds the two to each other).
+ */
+const HINT_LIST_MAX = 16;
+/**
+ * More enabled counting factors than a hint list carries: a first binding's
+ * `hints.enrollable` would list them all, and core would refuse that answer
+ * at every such login. The `cause` of the boot's refusal.
+ */
+export class MfaTooManyFactorsError extends RangeError {
+    reason = "mfa-too-many-factors";
+    constructor(count) {
+        super(`${count} counting MFA factors are enabled, and a first binding's hints.enrollable lists at most ${HINT_LIST_MAX}, as core admits a hint list of no more: enable ${HINT_LIST_MAX} or fewer`);
+        this.name = "MfaTooManyFactorsError";
+    }
+}
+/**
+ * What the requirement needs of the installed factors, checked once they
+ * have all registered: every kind one a hint can carry, no more counting
+ * factors than a hint list carries, and — under `required` — at least one.
+ */
+function checkInstalledFactors(factors, mode) {
+    const installed = [...factors.entries()];
+    for (const [kind] of installed) {
+        if (!isHintToken(kind))
+            throw new MfaFactorKindUnhintableError(kind);
+    }
+    const counting = installed.filter(([, factor]) => factor.counting).length;
+    if (counting > HINT_LIST_MAX)
+        throw new MfaTooManyFactorsError(counting);
+    if (mode === "required" && counting === 0) {
+        throw new MfaNoCountingFactorError(installed.map(([kind]) => kind));
+    }
+}
+/** The page a step-up starts on: `mfa.page.url`, which the package's reference.conf defaults. */
+function stepUpPageOf(section) {
+    const url = section?.page?.url;
+    if (typeof url !== "string" || url.length === 0) {
+        throw new RangeError("mfa.page.url is not set: the MFA page a step-up starts on (MFA_PAGE_URL; the package's reference.conf ships /mfa)");
+    }
+    return { url, params: {} };
+}
+/**
+ * The guard every MFA POST runs: the wired `rateLimiter` under the `mfa`
+ * prefix, its 429 and its outage policy core's; without one, every request
+ * passes.
+ */
+function mfaFloodGuard(options) {
+    const { rateLimiter, logger, auditSink } = options;
+    if (rateLimiter === undefined)
+        return (_req, _res, next) => next();
+    return createRateLimitGuard({
+        limiter: rateLimiter,
+        tag: MFA_RATE_LIMIT_PREFIX,
+        logger,
+        ...(auditSink === undefined ? {} : { auditSink }),
+    });
+}
+/**
+ * The MFA module (see this file's header): the `mfa` session requirement and
+ * the MFA routes' mount. `options.environment` reaches the development
+ * sample key's refusal.
+ */
+export function mfaModule(options = {}) {
+    return defineModule({
+        name: "mfa",
+        // The module's own section, read at its name. Its schema holds the mode
+        // to its three values and the page to its shape before any factory
+        // runs; the requirement's factory reads the settings (`readMfaSettings`)
+        // and the page (`stepUpPageOf`), and what those refuse stays the
+        // factory's failure.
+        section: {
+            schema: mfaSectionSchema,
+            reference: new URL("../config/reference.conf", import.meta.url),
+            relocatedFrom: { "endpoints.mfa.url": "page.url", "mfa.rateLimit": null },
+            renamedVariables: { ENDPOINTS_MFA_URL: "endpoints.mfa.url" },
+        },
+        requires: [
+            "mfaFactorResolver",
+            "mfaFactorStore",
+            "mfaTransactionStore",
+            "userSessionStore",
+            "sessionRequirementResolver",
+            "csrfGuard",
+            "loginCompletion",
+            "deploymentMode",
+        ],
+        optional: [
+            "rateLimiter",
+            "auditSink",
+            "subjectRevocation",
+            "sessionLifecycleStore",
+            "logger",
+            "mailSender",
+            "userRepository",
+        ],
+        absencePolicies: {
+            auditSink: AUDIT_SINK_ABSENCE_POLICY,
+            subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
+        },
+        // Its readers hold it as this module's own, built from its section: no composition substitutes it.
+        authoritative: ["mfaSubjectLeases"],
+        provides: {
+            mfaSubjectLeases: (deps) => createMfaSubjectLeases({
+                store: deps.mfaTransactionStore,
+                storeTimeoutMs: readMfaSettings(deps.section, {
+                    ...options,
+                    deploymentMode: deps.deploymentMode,
+                }).storeTimeoutMs,
+            }),
+        },
+        contributes: {
+            admissionActions: MFA_ADMISSION_ACTIONS,
+            rateLimitBudgets: { [MFA_RATE_LIMIT_PREFIX]: () => null },
+            sessionRequirements: {
+                mfa: (deps) => {
+                    const mode = deps.section?.mode ?? "off";
+                    if (mode === "off") {
+                        throw new RangeError('mfa.mode is "off" (or unset) while the MFA module is installed: remove the MFA module, or set mfa.mode to "required" or "optional"');
+                    }
+                    requireSessionLifecycleStore(deps);
+                    const settings = readMfaSettings(deps.section, {
+                        ...options,
+                        deploymentMode: deps.deploymentMode,
+                    });
+                    const stepUpPage = stepUpPageOf(deps.section);
+                    const logger = deps.logger ?? consoleLogger;
+                    if (settings.developmentSampleKeyAccepted) {
+                        logger.warn({ setting: "mfa.encryptionKeys", variable: "MFA_ENCRYPTION_KEY" }, "mfa_development_sample_key_in_use");
+                    }
+                    // A session store that cannot record a step-up is warned about once; admission's
+                    // view then says so of every session, and the requirement sends it to log in.
+                    if (!supportsSecondFactorUpdate(deps.userSessionStore)) {
+                        logger.warn({ store: "userSessionStore", kind: deps.userSessionStore.kind }, "mfa_step_up_unsupported");
+                    }
+                    // D20: under "always" nobody could give the proof without a sender, so
+                    // nobody could bind; under "when-mail" a first binding goes without it.
+                    const { requireEmailProof } = settings.enrollment;
+                    const mailWired = deps.mailSender !== undefined;
+                    if (requireEmailProof === "always" && !mailWired) {
+                        throw new RangeError('mfa.enrollment.requireEmailProof is "always" and no mail sender is wired: nobody could give the account-email proof, so nobody could bind a factor — wire a mail sender, or set mfa.enrollment.requireEmailProof (MFA_ENROLLMENT_REQUIRE_EMAIL_PROOF) to "when-mail" or "never"');
+                    }
+                    if (requireEmailProof === "when-mail" && !mailWired) {
+                        logger.warn({ setting: "mfa.enrollment.requireEmailProof", value: requireEmailProof }, "mfa_first_binding_without_email_proof");
+                    }
+                    // A directory that cannot write the witness leaves D12's defence to
+                    // what the Store answers on authenticate: said once.
+                    const witness = createMfaEnrollmentWitness(deps.userRepository);
+                    if (!witness.writable) {
+                        logger.warn({ slot: "userRepository" }, "mfa_enrollment_witness_unwritable");
+                    }
+                    const sealing = createMfaSealing({ ring: settings.encryptionKeys, logger });
+                    const firstBindingMark = createFirstBindingMark({
+                        manageMaxAgeSeconds: settings.manage.maxAgeSeconds,
+                        transactionTtlSeconds: settings.transactionTtlSeconds,
+                        storeTimeoutMs: settings.storeTimeoutMs,
+                    });
+                    const requirement = createMfaRequirement({
+                        mode,
+                        factors: deps.mfaFactorResolver,
+                        factorStore: deps.mfaFactorStore,
+                        transactions: createLoginTransactions({
+                            store: deps.mfaTransactionStore,
+                            ttlSeconds: settings.transactionTtlSeconds,
+                        }),
+                        stepUpPage,
+                        recentMfaMaxAgeSeconds: settings.manage.maxAgeSeconds,
+                        logger,
+                        auditSink: deps.auditSink,
+                        firstBinding: { requireEmailProof, mailWired },
+                        emailProofRequiredAtNextBinding: (subject) => deps.mfaTransactionStore.emailProofRequiredAtNextBinding(subject),
+                        sessionEmailProofAt: (subject, sid, nowMs) => deps.mfaTransactionStore.sessionEmailProofAt(subject, sid, nowMs),
+                        firstBindingAt: (subject, nowMs) => deps.mfaTransactionStore.firstBindingAt(subject, nowMs),
+                        firstBindingMark,
+                        recoverySetFloor: boundedRecoverySetFloor(deps.mfaTransactionStore, settings.storeTimeoutMs),
+                        sealing,
+                    });
+                    bootStates.set(deps.mfaFactorResolver, {
+                        mode,
+                        settings,
+                        sealing,
+                        requirement,
+                        witness,
+                        firstBindingMark,
+                        logger,
+                    });
+                    return requirement;
+                },
+            },
+            routes: [
+                (deps) => {
+                    const { mode, settings, sealing, requirement, witness, firstBindingMark, logger } = mfaBootState(deps.mfaFactorResolver);
+                    checkInstalledFactors(deps.mfaFactorResolver, mode);
+                    // The subject's records as read, and the writes the witness follows: one per boot.
+                    const factorSet = createMfaFactorSet({
+                        factors: deps.mfaFactorResolver,
+                        factorStore: deps.mfaFactorStore,
+                        witness,
+                        sealing,
+                        logger,
+                        leases: createMfaSubjectLeases({
+                            store: deps.mfaTransactionStore,
+                            storeTimeoutMs: settings.storeTimeoutMs,
+                        }),
+                    });
+                    const requirements = checkResolver(deps.sessionRequirementResolver, "mfaModule", Object.keys(MFA_ADMISSION_ACTIONS));
+                    // The authorized-recovery entry: an exempt verification mints, the subject's release applies.
+                    const lockRecovery = createMfaLockRecovery({
+                        store: deps.mfaTransactionStore,
+                        factorSet,
+                        factors: deps.mfaFactorResolver,
+                        ...(deps.subjectRevocation === undefined
+                            ? {}
+                            : { subjectRevocation: deps.subjectRevocation }),
+                        manageMaxAgeMs: settings.manage.maxAgeSeconds * 1000,
+                    });
+                    if (deps.subjectRevocation === undefined) {
+                        logger.warn({ slot: "subjectRevocation" }, "mfa_lock_release_unavailable");
+                    }
+                    const stepUp = issuedRemediationActions(requirement)?.step_up;
+                    if (stepUp === undefined) {
+                        throw new Error("core issued the mfa requirement no mfa.step_up remediation");
+                    }
+                    // The session store's step-up capability, read once: what records an escalation.
+                    const secondFactorStore = supportsSecondFactorUpdate(deps.userSessionStore)
+                        ? deps.userSessionStore
+                        : undefined;
+                    return {
+                        id: MFA_ROUTES_ID,
+                        mountPath: MFA_ROUTES_MOUNT_PATH,
+                        after: ["session-middleware"],
+                        handler: createMfaRouter({
+                            coordinator: createMfaCoordinator({
+                                factors: deps.mfaFactorResolver,
+                                factorStore: deps.mfaFactorStore,
+                                transactions: deps.mfaTransactionStore,
+                                sealing,
+                                maxAttemptsPerTransaction: settings.maxAttemptsPerTransaction,
+                                lock: createMfaSubjectLock({
+                                    store: deps.mfaTransactionStore,
+                                    policy: settings.lockout,
+                                    // The answer stands; the attempt left pending counts as a failure.
+                                    unsettled: ({ subject, kind, step, outcome, cause }) => logger.warn({ sub: subject, kind, step, outcome, err: loggableError(cause) }, "mfa_subject_lock_unsettled"),
+                                }),
+                                mode,
+                                mailSender: deps.mailSender,
+                                witness,
+                                factorSet,
+                                transactionTtlSeconds: settings.transactionTtlSeconds,
+                                maxFactorsPerSubject: settings.maxFactorsPerSubject,
+                                requireEmailProof: settings.enrollment.requireEmailProof,
+                                sessionProofSeconds: settings.manage.maxAgeSeconds,
+                                firstBindingMark,
+                                ...(deps.subjectRevocation === undefined
+                                    ? {}
+                                    : { subjectRevocation: deps.subjectRevocation }),
+                                // The record is judged a duplicate of none; the factor's failure by its name and code alone.
+                                identityFailed: (kind, cause) => logger.warn({ kind, err: mailFailureOf(cause) }, "mfa_factor_identity_unavailable"),
+                            }),
+                            admission: {
+                                userSessionStore: deps.userSessionStore,
+                                subjectRevocation: deps.subjectRevocation,
+                                sessionLifecycleStore: deps.sessionLifecycleStore,
+                                requirements,
+                                acrTable: {},
+                                logger,
+                                auditSink: deps.auditSink,
+                            },
+                            stepUp,
+                            loginCompletion: deps.loginCompletion,
+                            secondFactorStore,
+                            csrfGuard: deps.csrfGuard,
+                            floodGuard: mfaFloodGuard({
+                                rateLimiter: deps.rateLimiter,
+                                logger,
+                                auditSink: deps.auditSink,
+                            }),
+                            logger,
+                            auditSink: deps.auditSink,
+                            management: {
+                                factors: deps.mfaFactorResolver,
+                                factorStore: deps.mfaFactorStore,
+                                factorSet,
+                                sealing,
+                                mode,
+                            },
+                            lockRecovery,
+                            recoveryCodes: {
+                                maxFactorsPerSubject: settings.maxFactorsPerSubject,
+                                firstBindingAt: (subject, nowMs) => deps.mfaTransactionStore.firstBindingAt(subject, nowMs),
+                                firstBindingMark,
+                            },
+                        }),
+                    };
+                },
+            ],
+        },
+    });
+}
+/**
+ * What a composition lists to install MFA: the TOTP factor's module, the
+ * recovery-code factor's, the email factor's (off by default), and the MFA
+ * module.
+ */
+export function mfaModules(options = {}) {
+    return [
+        mfaTotpFactorModule,
+        mfaRecoveryCodeFactorModule,
+        mfaEmailFactorModule,
+        mfaModule(options),
+    ];
+}

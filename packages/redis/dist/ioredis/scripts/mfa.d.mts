@@ -1,0 +1,25 @@
+export declare const MFA_FACTOR_UPDATE: import("./define.mjs").CachedScript;
+export declare const MFA_FACTOR_LIST_VERSIONED: import("./define.mjs").CachedScript;
+export declare const MFA_FACTOR_CREATE_IF: import("./define.mjs").CachedScript;
+export declare const MFA_FACTOR_REMOVE_IF: import("./define.mjs").CachedScript;
+export declare const MFA_FACTOR_REMOVE_ALL: import("./define.mjs").CachedScript;
+export declare const MFA_TX_CREATE: import("./define.mjs").CachedScript;
+export declare const MFA_TX_UPDATE: import("./define.mjs").CachedScript;
+export declare const MFA_TX_RESERVE_ATTEMPT: import("./define.mjs").CachedScript;
+export declare const MFA_TX_TAKE_CHALLENGE: import("./define.mjs").CachedScript;
+export declare const MFA_TX_CONSUME: import("./define.mjs").CachedScript;
+export declare const MFA_TX_EVICT: import("./define.mjs").CachedScript;
+export declare const MFA_BINDING_INDEX: import("./define.mjs").CachedScript;
+export declare const MFA_BINDING_UNINDEX: import("./define.mjs").CachedScript;
+export declare const MFA_SUBJECT_RESERVE: import("./define.mjs").CachedScript;
+export declare const MFA_SUBJECT_SETTLE: import("./define.mjs").CachedScript;
+export declare const MFA_SUBJECT_EXEMPT: import("./define.mjs").CachedScript;
+export declare const MFA_FIRST_BINDING_NOTE: import("./define.mjs").CachedScript;
+export declare const MFA_FIRST_BINDING_READ: import("./define.mjs").CachedScript;
+export declare const MFA_SUBJECT_LEASE_ACQUIRE: import("./define.mjs").CachedScript;
+export declare const MFA_SUBJECT_LEASE_RELEASE: import("./define.mjs").CachedScript;
+export declare const MFA_SUBJECT_RECOVERY_AUTHORIZE: import("./define.mjs").CachedScript;
+export declare const MFA_SUBJECT_RECOVERY_APPLY: import("./define.mjs").CachedScript;
+export declare const MFA_RECOVERY_SET_FLOOR_RAISE: import("./define.mjs").CachedScript;
+export declare const MFA_EMAIL_PROOF_CONSUME: import("./define.mjs").CachedScript;
+//# sourceMappingURL=mfa.d.mts.map

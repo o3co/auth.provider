@@ -1,0 +1,261 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="./"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>auth.provider API</title><meta name="description" content="Documentation for auth.provider API"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="assets/style.css"/><link rel="stylesheet" href="assets/highlight.css"/><script defer src="assets/main.js"></script><script async src="assets/icons.js" id="tsd-icons-script"></script><script async src="assets/search.js" id="tsd-search-script"></script><script async src="assets/navigation.js" id="tsd-nav-script"></script><script async src="assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar"><div class="tsd-toolbar-contents container"><a href="index.html" class="title">auth.provider API</a><div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/><ul role="listbox" id="tsd-search-results"></ul><div id="tsd-search-status" aria-live="polite" aria-atomic="true"><div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="assets/icons.svg#icon-menu"></use></svg></a></div></header><div class="container container-main"><div class="col-content"><div class="tsd-page-title"><h1>auth.provider API</h1></div><div class="tsd-panel tsd-typography"><h1 id="authprovider" class="tsd-anchor-link">auth.provider<a href="#authprovider" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h1>
+<p><a href="https://github.com/o3co/auth.provider/actions/workflows/ci.yml"><img src="https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+<a href="https://www.npmjs.com/package/@o3co/auth-provider-core"><img src="https://img.shields.io/npm/v/@o3co/auth-provider-core" alt="npm"></a>
+<a href="https://codecov.io/gh/o3co/auth.provider"><img src="https://codecov.io/gh/o3co/auth.provider/graph/badge.svg" alt="codecov"></a>
+<a href="https://o3co.github.io/auth.provider/"><img src="https://img.shields.io/badge/docs-API-blue" alt="API Docs"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License"></a></p>
+<p>OAuth 2.0 provider with DID (Decentralized Identifier) authentication. Issue JWTs from traditional login flows or DID-based cryptographic proof — same token format, same introspection endpoint, same downstream verification.</p>
+<h2 id="did-authentication" class="tsd-anchor-link">DID Authentication<a href="#did-authentication" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>DID authentication lets clients prove identity using cryptographic key pairs tied to a <a href="https://www.w3.org/TR/did-core/">Decentralized Identifier</a>, without passwords or pre-shared secrets. The server resolves the client's DID Document, extracts the public key, and verifies the signature.</p>
+<pre><code class="text">Client                              auth.provider
+  │                                      │
+  │  POST /oauth/token                   │
+  │  grant_type=did                      │
+  │  did=did:example:org:abc123          │
+  │  message={&quot;did&quot;:&quot;...&quot;,&quot;nonce&quot;:&quot;...&quot;}  │
+  │  signature=&lt;Ed25519 signature&gt;       │
+  │ ──────────────────────────────────►  │
+  │                                      │  1. Resolve DID Document
+  │                                      │  2. Extract public key
+  │                                      │  3. Verify signature
+  │                                      │  4. Issue JWT
+  │  ◄──────────────────────────────────  │
+  │  { access_token: &quot;eyJ...&quot;, ... }     │
+</code><button type="button">Copy</button></pre>
+
+<p>The <code>DidDocumentResolver</code> interface is pluggable — implement it for your DID method (<code>did:web</code>, <code>did:key</code>, <code>did:ion</code>, or any custom method) and inject it at startup.</p>
+<h3 id="supported-signature-algorithms" class="tsd-anchor-link">Supported signature algorithms<a href="#supported-signature-algorithms" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>Algorithm</th>
+<th>Format</th>
+<th>Library</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ed25519_raw</code> (default)</td>
+<td>Raw Ed25519 signature + message</td>
+<td><code>@noble/ed25519</code></td>
+</tr>
+<tr>
+<td><code>ed25519_jws</code></td>
+<td>Compact JWS with <code>alg=EdDSA</code></td>
+<td><code>jose</code></td>
+</tr>
+<tr>
+<td><code>es256_jws</code></td>
+<td>Compact JWS with <code>alg=ES256</code></td>
+<td><code>jose</code></td>
+</tr>
+<tr>
+<td><code>es256k_jws</code></td>
+<td>Compact JWS with <code>alg=ES256K</code></td>
+<td><code>jose</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="features" class="tsd-anchor-link">Features<a href="#features" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ul>
+<li><strong>DID authentication grant</strong> — Pluggable <code>DidDocumentResolver</code> interface, signature verification from DID Document public keys</li>
+<li><strong>Modular composition</strong> — Pick only the modules you need. DID-only? Skip session, federation, authorization code entirely.</li>
+<li><strong>JWT algorithm selection</strong> — HS256, RS256, ES256, EdDSA. JWKS endpoint (<code>/.well-known/jwks.json</code>) for asymmetric algorithms.</li>
+<li><strong>OAuth 2.0 compliance</strong> — Authorization code flow with PKCE (RFC 7636), token introspection (RFC 7662), refresh tokens</li>
+<li><strong>Session authentication</strong> — Passport.js local strategy + OAuth federation (Google, GitHub, and custom providers via <code>FederationProviderFactory</code>)</li>
+<li><strong>Rate limiting</strong> — Per-endpoint configurable limits</li>
+<li><strong>HOCON configuration</strong> — Type-safe config with Zod validation and environment variable overrides</li>
+</ul>
+<h2 id="quick-start" class="tsd-anchor-link">Quick Start<a href="#quick-start" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="bash"><span class="hl-0">npx</span><span class="hl-1"> </span><span class="hl-2">create-o3co-auth-provider</span><span class="hl-1"> </span><span class="hl-2">my-auth-app</span><br/><span class="hl-0">cd</span><span class="hl-1"> </span><span class="hl-2">my-auth-app</span><br/><span class="hl-0">pnpm</span><span class="hl-1"> </span><span class="hl-2">install</span><br/><span class="hl-0">pnpm</span><span class="hl-1"> </span><span class="hl-2">build</span>
+</code><button type="button">Copy</button></pre>
+
+<p>For a DID-only deployment (no session, no federation):</p>
+<pre><code class="typescript"><span class="hl-3">import</span><span class="hl-1"> </span><span class="hl-4">express</span><span class="hl-1"> </span><span class="hl-3">from</span><span class="hl-1"> </span><span class="hl-2">&quot;express&quot;</span><span class="hl-1">;</span><br/><span class="hl-3">import</span><span class="hl-1"> { </span><span class="hl-4">parseFile</span><span class="hl-1">, </span><span class="hl-4">validate</span><span class="hl-1"> } </span><span class="hl-3">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/ts.hocon&quot;</span><span class="hl-1">;</span><br/><span class="hl-3">import</span><span class="hl-1"> {</span><br/><span class="hl-1">  </span><span class="hl-4">AppConfigSchema</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-4">createApp</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-4">createKeyStoreFactory</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-4">registerBuiltinKeyStores</span><span class="hl-1">,</span><br/><span class="hl-1">} </span><span class="hl-3">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-core&quot;</span><span class="hl-1">;</span><br/><span class="hl-3">import</span><span class="hl-1"> { </span><span class="hl-4">oauthDidModule</span><span class="hl-1"> } </span><span class="hl-3">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-did&quot;</span><span class="hl-1">;</span><br/><span class="hl-3">import</span><span class="hl-1"> { </span><span class="hl-4">oauthModule</span><span class="hl-1"> } </span><span class="hl-3">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-oauth&quot;</span><span class="hl-1">;</span><br/><br/><span class="hl-5">// Load &amp; validate HOCON config (see packages/core/config/application.conf</span><br/><span class="hl-5">// for the nested oauth.jwt.signingKey shape).</span><br/><span class="hl-6">const</span><span class="hl-1"> </span><span class="hl-7">config</span><span class="hl-1"> = </span><span class="hl-0">validate</span><span class="hl-1">(</span><span class="hl-0">parseFile</span><span class="hl-1">(</span><span class="hl-2">&quot;./config/application.conf&quot;</span><span class="hl-1">), </span><span class="hl-4">AppConfigSchema</span><span class="hl-1">);</span><br/><br/><span class="hl-5">// flatten() normalises the nested adapter sub-section to { type, ...fields }.</span><br/><span class="hl-5">// Accepts both `type` (repositories.*, session.storage) and `provider`</span><br/><span class="hl-5">// (oauth.jwt.signingKey) selectors. See packages/core/README.md for the</span><br/><span class="hl-5">// full helper definition.</span><br/><span class="hl-6">const</span><span class="hl-1"> </span><span class="hl-0">flatten</span><span class="hl-1"> = (</span><span class="hl-4">section</span><span class="hl-1">: { </span><span class="hl-4">type</span><span class="hl-1">?: </span><span class="hl-8">string</span><span class="hl-1">; </span><span class="hl-4">provider</span><span class="hl-1">?: </span><span class="hl-8">string</span><span class="hl-1"> } &amp; </span><span class="hl-8">Record</span><span class="hl-1">&lt;</span><span class="hl-8">string</span><span class="hl-1">, </span><span class="hl-8">unknown</span><span class="hl-1">&gt;) </span><span class="hl-6">=&gt;</span><span class="hl-1"> {</span><br/><span class="hl-1">  </span><span class="hl-6">const</span><span class="hl-1"> </span><span class="hl-7">selector</span><span class="hl-1"> = </span><span class="hl-4">section</span><span class="hl-1">.</span><span class="hl-4">type</span><span class="hl-1"> ?? </span><span class="hl-4">section</span><span class="hl-1">.</span><span class="hl-4">provider</span><span class="hl-1">;</span><br/><span class="hl-1">  </span><span class="hl-3">if</span><span class="hl-1"> (</span><span class="hl-6">typeof</span><span class="hl-1"> </span><span class="hl-4">selector</span><span class="hl-1"> !== </span><span class="hl-2">&quot;string&quot;</span><span class="hl-1">) </span><span class="hl-3">throw</span><span class="hl-1"> </span><span class="hl-6">new</span><span class="hl-1"> </span><span class="hl-0">TypeError</span><span class="hl-1">(</span><span class="hl-2">&quot;missing selector&quot;</span><span class="hl-1">);</span><br/><span class="hl-1">  </span><span class="hl-6">const</span><span class="hl-1"> </span><span class="hl-7">sub</span><span class="hl-1"> = </span><span class="hl-4">section</span><span class="hl-1">[</span><span class="hl-4">selector</span><span class="hl-1">];</span><br/><span class="hl-1">  </span><span class="hl-3">return</span><span class="hl-1"> {</span><br/><span class="hl-1">    </span><span class="hl-4">type:</span><span class="hl-1"> </span><span class="hl-4">selector</span><span class="hl-1">,</span><br/><span class="hl-1">    ...(</span><span class="hl-6">typeof</span><span class="hl-1"> </span><span class="hl-4">sub</span><span class="hl-1"> === </span><span class="hl-2">&quot;object&quot;</span><span class="hl-1"> &amp;&amp; </span><span class="hl-4">sub</span><span class="hl-1"> !== </span><span class="hl-6">null</span><span class="hl-1"> &amp;&amp; !</span><span class="hl-4">Array</span><span class="hl-1">.</span><span class="hl-0">isArray</span><span class="hl-1">(</span><span class="hl-4">sub</span><span class="hl-1">)</span><br/><span class="hl-1">      ? (</span><span class="hl-4">sub</span><span class="hl-1"> </span><span class="hl-3">as</span><span class="hl-1"> </span><span class="hl-8">Record</span><span class="hl-1">&lt;</span><span class="hl-8">string</span><span class="hl-1">, </span><span class="hl-8">unknown</span><span class="hl-1">&gt;)</span><br/><span class="hl-1">      : {}),</span><br/><span class="hl-1">  };</span><br/><span class="hl-1">};</span><br/><br/><span class="hl-6">const</span><span class="hl-1"> </span><span class="hl-7">keyStoreFactory</span><span class="hl-1"> = </span><span class="hl-0">createKeyStoreFactory</span><span class="hl-1">();</span><br/><span class="hl-0">registerBuiltinKeyStores</span><span class="hl-1">(</span><span class="hl-4">keyStoreFactory</span><span class="hl-1">);</span><br/><span class="hl-6">const</span><span class="hl-1"> </span><span class="hl-7">keyStore</span><span class="hl-1"> = </span><span class="hl-3">await</span><span class="hl-1"> </span><span class="hl-4">keyStoreFactory</span><span class="hl-1">.</span><span class="hl-0">create</span><span class="hl-1">(</span><span class="hl-0">flatten</span><span class="hl-1">(</span><span class="hl-4">config</span><span class="hl-1">.</span><span class="hl-4">oauth</span><span class="hl-1">.</span><span class="hl-4">jwt</span><span class="hl-1">.</span><span class="hl-4">signingKey</span><span class="hl-1">));</span><br/><br/><span class="hl-5">// ... wire up clientRepository / codeRepository / myDidResolver ...</span><br/><br/><span class="hl-6">const</span><span class="hl-1"> { </span><span class="hl-7">init</span><span class="hl-1">, </span><span class="hl-7">router</span><span class="hl-1"> } = </span><span class="hl-0">createApp</span><span class="hl-1">({</span><br/><span class="hl-1">  </span><span class="hl-4">express</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-4">config</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-4">keyStore</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-4">modules:</span><span class="hl-1"> [</span><br/><span class="hl-1">    </span><span class="hl-0">oauthModule</span><span class="hl-1">({ </span><span class="hl-4">clientRepository</span><span class="hl-1">, </span><span class="hl-4">codeRepository</span><span class="hl-1"> }),</span><br/><span class="hl-1">    </span><span class="hl-0">oauthDidModule</span><span class="hl-1">({ </span><span class="hl-4">resolver:</span><span class="hl-1"> </span><span class="hl-4">myDidResolver</span><span class="hl-1"> }),</span><br/><span class="hl-1">  ],</span><br/><span class="hl-1">});</span><br/><br/><span class="hl-3">await</span><span class="hl-1"> </span><span class="hl-0">init</span><span class="hl-1">();</span>
+</code><button type="button">Copy</button></pre>
+
+<h2 id="architecture" class="tsd-anchor-link">Architecture<a href="#architecture" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="text">┌─────────────────────────────────────────────────┐
+│                 Composition Root                 │
+│     (standalone template or your own app)        │
+├─────────┬───────────┬───────────┬───────────────┤
+│  oauth  │  session  │    did    │  foundation   │
+│ /oauth  │ /session  │ DID grant │ Redis, HTTP   │
+│ routes  │  routes   │  handler  │  adapters     │
+├─────────┴───────────┴───────────┴───────────────┤
+│                      core                        │
+│  GrantRegistry · KeyStore · Repositories · Config│
+└─────────────────────────────────────────────────┘
+</code><button type="button">Copy</button></pre>
+
+<ul>
+<li><strong>core</strong> — Interfaces, config schemas, token service, app factory. Always required.</li>
+<li><strong>oauth</strong> — OAuth routes (<code>/oauth/token</code>, <code>/oauth/authorize</code>, <code>/oauth/introspect</code>). Required for any token issuance.</li>
+<li><strong>did</strong> — DID authentication grant. Optional — only needed if you use DID-based auth.</li>
+<li><strong>session</strong> — Session login + OAuth federation (Google, GitHub, extensible). Optional — skip for API-only deployments.</li>
+<li><strong>foundation</strong> — Production repository adapters (Redis code store, HTTP user lookup). Optional.</li>
+</ul>
+<h2 id="packages" class="tsd-anchor-link">Packages<a href="#packages" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<table>
+<thead>
+<tr>
+<th>Package</th>
+<th>npm</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="media/core"><code>packages/core</code></a></td>
+<td><code>@o3co/auth-provider-core</code></td>
+<td>Grant registry, token service, repository interfaces, config schemas</td>
+</tr>
+<tr>
+<td><a href="media/did"><code>packages/did</code></a></td>
+<td><code>@o3co/auth-provider-did</code></td>
+<td>DID authentication grant with pluggable resolver</td>
+</tr>
+<tr>
+<td><a href="media/oauth"><code>packages/oauth</code></a></td>
+<td><code>@o3co/auth-provider-oauth</code></td>
+<td>OAuth routes: <code>/oauth/token</code>, <code>/oauth/authorize</code>, <code>/oauth/introspect</code></td>
+</tr>
+<tr>
+<td><a href="media/session"><code>packages/session</code></a></td>
+<td><code>@o3co/auth-provider-session</code></td>
+<td>Session routes, Passport.js, OAuth federation (Google, GitHub, extensible)</td>
+</tr>
+<tr>
+<td><a href="media/foundation"><code>packages/foundation</code></a></td>
+<td><code>@o3co/auth-provider-foundation</code></td>
+<td>Redis code store, HTTP user/client repositories</td>
+</tr>
+<tr>
+<td><a href="media/standalone"><code>templates/standalone</code></a></td>
+<td>—</td>
+<td>Deployable server template (composition root)</td>
+</tr>
+<tr>
+<td><a href="media/create-app"><code>create-app</code></a></td>
+<td><code>create-o3co-auth-provider</code></td>
+<td>CLI scaffolder</td>
+</tr>
+</tbody>
+</table>
+<h2 id="endpoints" class="tsd-anchor-link">Endpoints<a href="#endpoints" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Module</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /oauth/token</code></td>
+<td>oauth</td>
+<td>Token issuance (session, authorization code, DID, refresh)</td>
+</tr>
+<tr>
+<td><code>GET /oauth/authorize</code></td>
+<td>oauth</td>
+<td>Authorization code flow (PKCE)</td>
+</tr>
+<tr>
+<td><code>POST /oauth/introspect</code></td>
+<td>oauth</td>
+<td>Token introspection (RFC 7662)</td>
+</tr>
+<tr>
+<td><code>GET /.well-known/jwks.json</code></td>
+<td>core</td>
+<td>JWKS endpoint (asymmetric algorithms only)</td>
+</tr>
+<tr>
+<td><code>POST /session/login</code></td>
+<td>session</td>
+<td>Local authentication</td>
+</tr>
+<tr>
+<td><code>POST /session/logout</code></td>
+<td>session</td>
+<td>Session destruction</td>
+</tr>
+<tr>
+<td><code>GET /_healthcheck</code></td>
+<td>core</td>
+<td>Health check</td>
+</tr>
+</tbody>
+</table>
+<h2 id="configuration" class="tsd-anchor-link">Configuration<a href="#configuration" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>HOCON config file with environment variable overrides. The config schema depends on which modules are registered:</p>
+<p><strong>Core (always required):</strong></p>
+<pre><code class="hocon">http { port = 3000 }
+oauth {
+  jwt {
+    issuer = ${?OAUTH_JWT_ISSUER}
+    signingKey {
+      provider = "local"           # "local" is the only built-in; extend via KeyStoreFactory
+      local {
+        algorithm = "HS256"        # HS256 | RS256 | ES256 | EdDSA
+        secret = ${?OAUTH_JWT_SECRET}
+        # For asymmetric: privateKey/privateKeyPath + publicKey/publicKeyPath
+      }
+    }
+  }
+  accessToken { expiresIn = 3600 }
+  refreshToken { expiresIn = 86400 }
+}
+</code><button type="button">Copy</button></pre>
+
+<p><strong>DID grant (when <code>oauthDidModule</code> is registered):</strong></p>
+<pre><code class="hocon">oauth.grants.did {
+  enabled = true
+  algorithm = "ed25519_raw"   # ed25519_raw | ed25519_jws | es256_jws | es256k_jws
+  messageMaxAgeSec = 300
+}
+</code><button type="button">Copy</button></pre>
+
+<p><strong>Authorization code grant (when <code>oauthAuthorizationModule</code> is registered):</strong></p>
+<pre><code class="hocon">oauth.grants.authorization {
+  pkce {
+    requireS256 = false   # Set to true to reject plain code_challenge_method (S256 only)
+    requireS256 = ${?OAUTH_GRANTS_AUTHORIZATION_PKCE_REQUIRE_S256}
+  }
+}
+</code><button type="button">Copy</button></pre>
+
+<p><strong>Session (when <code>sessionModule</code> is registered):</strong></p>
+<pre><code class="hocon">session { secret = ${SESSION_SECRET} }
+
+# Shorthand: key name = provider type (google, github, or any registered custom type)
+federations {
+  google {
+    enabled = false
+    # clientId, clientSecret, callbackURL — required when enabled = true
+  }
+  # github { enabled = false }
+}
+</code><button type="button">Copy</button></pre>
+
+<p>See <a href="media/application.conf"><code>templates/standalone/config/application.conf</code></a> for a complete example.</p>
+<h2 id="development" class="tsd-anchor-link">Development<a href="#development" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="bash"><span class="hl-0">pnpm</span><span class="hl-1"> </span><span class="hl-2">install</span><br/><span class="hl-0">pnpm</span><span class="hl-1"> </span><span class="hl-6">-r</span><span class="hl-1"> </span><span class="hl-2">build</span><span class="hl-1">     </span><span class="hl-5"># build all packages</span><br/><span class="hl-0">pnpm</span><span class="hl-1"> </span><span class="hl-6">-r</span><span class="hl-1"> </span><span class="hl-2">test</span><span class="hl-1">      </span><span class="hl-5"># test all packages</span>
+</code><button type="button">Copy</button></pre>
+
+<h2 id="docker" class="tsd-anchor-link">Docker<a href="#docker" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="bash"><span class="hl-0">npx</span><span class="hl-1"> </span><span class="hl-2">create-o3co-auth-provider</span><span class="hl-1"> </span><span class="hl-2">my-auth-app</span><br/><span class="hl-0">cd</span><span class="hl-1"> </span><span class="hl-2">my-auth-app</span><br/><span class="hl-0">docker</span><span class="hl-1"> </span><span class="hl-2">build</span><span class="hl-1"> </span><span class="hl-6">-t</span><span class="hl-1"> </span><span class="hl-2">my-auth</span><span class="hl-1"> </span><span class="hl-2">.</span>
+</code><button type="button">Copy</button></pre>
+
+<h2 id="related-projects" class="tsd-anchor-link">Related Projects<a href="#related-projects" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ul>
+<li><a href="https://github.com/o3co/auth.policy-verifier">auth.policy-verifier</a> — ABAC policy engine for authorization decisions</li>
+<li><a href="https://github.com/o3co/auth.proxy">auth.proxy</a> — Token validation reverse proxy</li>
+<li><a href="https://github.com/o3co/grpc.authz">grpc.authz</a> — gRPC authorization middleware (calls auth.provider for introspection, auth.policy-verifier for authorization)</li>
+<li><a href="https://github.com/o3co/auth">auth</a> — Architecture docs and E2E tests</li>
+</ul>
+<h2 id="license" class="tsd-anchor-link">License<a href="#license" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>Apache License 2.0 — Copyright 2026 1o1 Co. Ltd.</p>
+</div></div><div class="col-sidebar"><div class="page-menu"><div class="tsd-navigation settings"><details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="assets/icons.svg#icon-chevronDown"></use></svg><h3>Settings</h3></summary><div class="tsd-accordion-details"><div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span><ul id="tsd-filter-options"><li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li><li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li><li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div><div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div><details open class="tsd-accordion tsd-page-navigation"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="assets/icons.svg#icon-chevronDown"></use></svg><h3>On This Page</h3></summary><div class="tsd-accordion-details"><a href="#authprovider"><span>auth.provider</span></a><ul><li><a href="#did-authentication"><span>DID <wbr/>Authentication</span></a></li><li><ul><li><a href="#supported-signature-algorithms"><span>Supported signature algorithms</span></a></li></ul></li><li><a href="#features"><span>Features</span></a></li><li><a href="#quick-start"><span>Quick <wbr/>Start</span></a></li><li><a href="#architecture"><span>Architecture</span></a></li><li><a href="#packages"><span>Packages</span></a></li><li><a href="#endpoints"><span>Endpoints</span></a></li><li><a href="#configuration"><span>Configuration</span></a></li><li><a href="#development"><span>Development</span></a></li><li><a href="#docker"><span>Docker</span></a></li><li><a href="#related-projects"><span>Related <wbr/>Projects</span></a></li><li><a href="#license"><span>License</span></a></li></ul></div></details></div><div class="site-menu"><nav class="tsd-navigation"><a href="modules.html">auth.provider API</a><ul class="tsd-small-nested-navigation" id="tsd-nav-container"><li>Loading...</li></ul></nav></div></div></div><footer><p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer><div class="overlay"></div></body></html>

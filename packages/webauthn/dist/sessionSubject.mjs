@@ -1,0 +1,200 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/**
+ * `webauthnSessionSubjectModule`: sets `req.webauthnSubject`, which both
+ * registration routes require, from the browser's cookie session, admitted as
+ * `webauthn.register` (graded `credential_change`: a passkey is a new way
+ * into the account), once the request body has arrived. What it needs,
+ * where it runs and what each admission outcome answers are in the README,
+ * "Registering from a browser session"; see also ADR
+ * 2026-09-28-session-admission.
+ */
+import { AUDIT_SINK_ABSENCE_POLICY, admitSession, checkResolver, consoleLogger, cookieClaim, defineModule, describeAdmissionOutage, loggableError, SUBJECT_REVOCATION_ABSENCE_POLICY, } from "@o3co/auth-provider-core";
+import express from "express";
+import { wholeBody } from "./internal/jsonBody.mjs";
+/** The id of the module's one route. */
+export const WEBAUTHN_SESSION_SUBJECT_ROUTE_ID = "webauthn-session-subject";
+/** What registering from a session admits: a passkey is a new way into the account. */
+export const SESSION_SUBJECT_ADMISSION_ACTIONS = Object.freeze({
+    "webauthn.register": Object.freeze({ grade: "credential_change" }),
+});
+/** The registration routes ask admission for no `acr_values`: the table it selects against is empty. */
+const NO_ACR_TABLE = Object.freeze({});
+const isOptionalString = (value) => value === undefined || typeof value === "string";
+/** The subject `answer` is, copied to its three fields, or `undefined` when it is not one. */
+function subjectOf(answer) {
+    if (typeof answer !== "object" || answer === null)
+        return undefined;
+    const { userId, userName, userDisplayName } = answer;
+    if (typeof userId !== "string" || userId.length === 0)
+        return undefined;
+    if (!isOptionalString(userName) || !isOptionalString(userDisplayName))
+        return undefined;
+    return {
+        userId,
+        ...(userName === undefined ? {} : { userName }),
+        ...(userDisplayName === undefined ? {} : { userDisplayName }),
+    };
+}
+const refuseInvalidSubject = (res) => {
+    res.status(500).json({
+        error: "server_error",
+        error_description: "subjectFor did not answer a WebAuthn subject",
+    });
+};
+/**
+ * The module: requires the resolver and the user-session store, and core's
+ * session lifecycle port (`sessionLifecycleStore`) beside the store; takes
+ * `subjectRevocation`, `auditSink` and `logger` when they are wired, the
+ * first two under their shared absence policies. Throws a `TypeError` when
+ * `subjectFor` is not a function, and its route factory a `RangeError` for a
+ * resolver missing or not the planner's (core's `checkResolver`), and an
+ * `Error` for a missing lifecycle port.
+ */
+export function webauthnSessionSubjectModule(options) {
+    if (typeof options !== "object" || options === null || typeof options.subjectFor !== "function") {
+        throw new TypeError("webauthnSessionSubjectModule: subjectFor must be a function mapping a UserSession to a WebAuthnSubject");
+    }
+    const { subjectFor } = options;
+    return defineModule({
+        name: "webauthn-session-subject",
+        requires: ["sessionRequirementResolver", "userSessionStore"],
+        // `sessionLifecycleStore`: the lifecycle port admission reads after a
+        // live record; a session closing or closed registers nothing. Required
+        // beside the user-session store: the route factory refuses without it.
+        optional: ["subjectRevocation", "sessionLifecycleStore", "auditSink", "logger"],
+        // Optional to wire, not optional to decide — the same constants every
+        // module attaches to these keys, which the declared-absence check
+        // requires to agree.
+        absencePolicies: {
+            subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
+            auditSink: AUDIT_SINK_ABSENCE_POLICY,
+        },
+        contributes: {
+            admissionActions: SESSION_SUBJECT_ADMISSION_ACTIONS,
+            routes: [
+                (deps) => {
+                    // Refused here, when the route is built — a missing resolver, one
+                    // the planner did not build, or webauthn.register unregistered —
+                    // not on the first request.
+                    const requirements = checkResolver(deps.sessionRequirementResolver, "webauthnSessionSubjectModule", Object.keys(SESSION_SUBJECT_ADMISSION_ACTIONS));
+                    if (deps.sessionLifecycleStore === undefined) {
+                        throw new Error("webauthn-session-subject: userSessionStore is wired, but sessionLifecycleStore is " +
+                            "not. Where a user-session store is wired, core's session lifecycle is required: " +
+                            "registering from a browser session admits it through its lifecycle record. Wire " +
+                            "core's session lifecycle: a session-store module that fills sessionLifecycleStore " +
+                            "(memorySessionStoresModule or redisSessionStoresModule) and sessionLifecycleModule.");
+                    }
+                    const logger = deps.logger ?? consoleLogger;
+                    const admitRegistration = async (req, res, next) => {
+                        const admission = await admitSession({
+                            userSessionStore: deps.userSessionStore,
+                            subjectRevocation: deps.subjectRevocation,
+                            sessionLifecycleStore: deps.sessionLifecycleStore,
+                            requirements,
+                            acrTable: NO_ACR_TABLE,
+                            logger,
+                            auditSink: deps.auditSink,
+                        }, {
+                            // express-session's `req.session`, read without its type package.
+                            claim: cookieClaim(req),
+                            action: "webauthn.register",
+                        });
+                        if (admission.outcome === "unavailable") {
+                            res.status(503).json({
+                                error: "temporarily_unavailable",
+                                error_description: describeAdmissionOutage(admission.store),
+                            });
+                            return;
+                        }
+                        if (admission.outcome === "step_up") {
+                            res.status(403).json({
+                                error: "step_up_required",
+                                error_description: "Registering a passkey requires a step-up first",
+                                requirement: admission.requirement,
+                                // Where the step-up starts, as registered — resolved then on
+                                // the issuer, not on the account page's origin. No return
+                                // parameter: the account page knows where it comes back to.
+                                page: admission.page.href,
+                            });
+                            return;
+                        }
+                        // Not signed in: this module has nothing to say, and a subject an
+                        // earlier middleware set — a bearer-token bridge — stands.
+                        if (admission.outcome === "unauthenticated") {
+                            next();
+                            return;
+                        }
+                        // A cookie session that is not live, is revoked, or a requirement
+                        // does not admit: no subject — one an earlier middleware set is
+                        // cleared, so a dead session registers nothing — and the
+                        // registration route answers its own 401.
+                        if (admission.outcome !== "admitted" || admission.session === null) {
+                            delete req.webauthnSubject;
+                            next();
+                            return;
+                        }
+                        let subject;
+                        try {
+                            // The answer is read inside the try: a field that throws when
+                            // it is read is the mapper's failure, as a throw of its own is.
+                            subject = subjectOf(subjectFor(admission.session));
+                        }
+                        catch (err) {
+                            // The deployment's mapper failed: its fault, not the user's.
+                            logger.error({ reason: "threw", err: loggableError(err) }, "webauthn_session_subject_invalid");
+                            refuseInvalidSubject(res);
+                            return;
+                        }
+                        if (subject === undefined) {
+                            // Said without the answer: what it carries may be the very
+                            // identifier the handle must not be.
+                            logger.error({ reason: "shape" }, "webauthn_session_subject_invalid");
+                            refuseInvalidSubject(res);
+                            return;
+                        }
+                        req.webauthnSubject = subject;
+                        next();
+                    };
+                    // The two registration POSTs, matched as the routes match them:
+                    // each route is a router core mounts on its path that answers
+                    // `post("/")`, so admission is a router on the same path answering
+                    // the same `post("/")`. Every request a registration route handles
+                    // is admitted first, and nothing else beneath the path reads a
+                    // session or a body through it. The session is admitted once the
+                    // body has arrived, with the routes' own parser and limit: a
+                    // session that closes while the body is still arriving registers
+                    // nothing, and the routes' parser leaves the parsed body as it is.
+                    // Any other body is read to its end too, within the same limit,
+                    // and refused before admission when it has bytes.
+                    const router = express.Router();
+                    for (const path of ["/options", "/verify"]) {
+                        const route = express.Router();
+                        route.post("/", ...wholeBody(), admitRegistration);
+                        router.use(path, route);
+                    }
+                    return {
+                        id: WEBAUTHN_SESSION_SUBJECT_ROUTE_ID,
+                        mountPath: "/oauth/webauthn/registration",
+                        after: ["session-middleware"],
+                        before: ["webauthn-registration-options", "webauthn-registration-verify"],
+                        handler: router,
+                    };
+                },
+            ],
+        },
+    });
+}

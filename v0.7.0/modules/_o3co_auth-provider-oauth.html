@@ -1,0 +1,322 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="../"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>@o3co/auth-provider-oauth | auth.provider API</title><meta name="description" content="Documentation for auth.provider API"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="../assets/style.css"/><link rel="stylesheet" href="../assets/highlight.css"/><script defer src="../assets/main.js"></script><script async src="../assets/icons.js" id="tsd-icons-script"></script><script async src="../assets/search.js" id="tsd-search-script"></script><script async src="../assets/navigation.js" id="tsd-nav-script"></script><script async src="../assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar"><div class="tsd-toolbar-contents container"><a href="../index.html" class="title">auth.provider API</a><div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/><ul role="listbox" id="tsd-search-results"></ul><div id="tsd-search-status" aria-live="polite" aria-atomic="true"><div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-menu"></use></svg></a></div></header><div class="container container-main"><div class="col-content"><div class="tsd-page-title"><ul class="tsd-breadcrumb" aria-label="Breadcrumb"><li><a href="" aria-current="page">@o3co/auth-provider-oauth</a></li></ul><h1>Module @o3co/auth-provider-oauth</h1></div><section class="tsd-panel tsd-typography"><h1 id="o3coauth-provider-oauth" class="tsd-anchor-link">@o3co/auth-provider-oauth<a href="#o3coauth-provider-oauth" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h1>
+<p>OAuth 2.0 routes module for <a href="../">auth.provider</a>.</p>
+<p>Mounts <code>POST /oauth/token</code>, <code>POST /oauth/introspect</code>, and <code>GET /oauth/authorize</code> onto an Express app. Implements a registry-based grant dispatch model so additional grant types can be plugged in without modifying this package.</p>
+<h2 id="install" class="tsd-anchor-link">Install<a href="#install" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>This package is <strong>private</strong> — it is not published to npm and is only available within the <code>auth.provider</code> monorepo.</p>
+<pre><code class="jsonc"><span class="hl-4">// packages/*/package.json</span><br/><span class="hl-1">{</span><br/><span class="hl-1">  </span><span class="hl-10">&quot;dependencies&quot;</span><span class="hl-1">: {</span><br/><span class="hl-1">    </span><span class="hl-10">&quot;@o3co/auth-provider-oauth&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;workspace:*&quot;</span><br/><span class="hl-1">  }</span><br/><span class="hl-1">}</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Peer dependencies (install separately in the workspace root):</p>
+<pre><code><span class="hl-6">express</span><span class="hl-1">@^</span><span class="hl-9">5.0</span><span class="hl-1">.</span><span class="hl-9">0</span>
+</code><button>Copy</button></pre>
+
+<h2 id="public-api" class="tsd-anchor-link">Public API<a href="#public-api" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<h3 id="_" class="tsd-anchor-link"><code>oauthModule</code><a href="#_" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<pre><code class="typescript"><span class="hl-3">function</span><span class="hl-1"> </span><span class="hl-0">oauthModule</span><span class="hl-1">(</span><span class="hl-6">params</span><span class="hl-1">: {</span><br/><span class="hl-1">  </span><span class="hl-6">clientRepository</span><span class="hl-1">: </span><span class="hl-8">ClientRepository</span><span class="hl-1">;</span><br/><span class="hl-1">  </span><span class="hl-6">codeRepository</span><span class="hl-1">: </span><span class="hl-8">CodeRepository</span><span class="hl-1">;</span><br/><span class="hl-1">  </span><span class="hl-6">express</span><span class="hl-1">?: </span><span class="hl-8">ExpressLike</span><span class="hl-1">;</span><br/><span class="hl-1">}): </span><span class="hl-8">Module</span><span class="hl-1">;</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Top-level module. Registers <code>oauthSessionModule</code> and <code>oauthAuthorizationModule</code> as sub-modules and mounts the OAuth router at <code>/oauth</code>. Use this as the single entry point unless you need to mount the sub-modules individually.</p>
+<p>Routes mounted:</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td>/oauth/token</td>
+<td>Token endpoint — dispatches by <code>grant_type</code></td>
+</tr>
+<tr>
+<td>POST</td>
+<td>/oauth/introspect</td>
+<td>Token introspection (RFC 7662)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td>/oauth/authorize</td>
+<td>Authorization endpoint — PKCE auth code flow</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3 id="_-1" class="tsd-anchor-link"><code>oauthSessionModule</code><a href="#_-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<pre><code class="typescript"><span class="hl-3">function</span><span class="hl-1"> </span><span class="hl-0">oauthSessionModule</span><span class="hl-1">(</span><span class="hl-6">params</span><span class="hl-1">: {</span><br/><span class="hl-1">  </span><span class="hl-6">clientRepository</span><span class="hl-1">: </span><span class="hl-8">ClientRepository</span><span class="hl-1">;</span><br/><span class="hl-1">}): </span><span class="hl-8">Module</span><span class="hl-1">;</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Registers the <code>&quot;session&quot;</code> grant type in the grant registry. Activation is gated on <code>config.oauth.grants.session.enabled</code>. Use this sub-module directly when you need to compose the grant registry manually.</p>
+<hr>
+<h3 id="_-2" class="tsd-anchor-link"><code>oauthAuthorizationModule</code><a href="#_-2" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<pre><code class="typescript"><span class="hl-3">function</span><span class="hl-1"> </span><span class="hl-0">oauthAuthorizationModule</span><span class="hl-1">(</span><span class="hl-6">params</span><span class="hl-1">: {</span><br/><span class="hl-1">  </span><span class="hl-6">codeRepository</span><span class="hl-1">: </span><span class="hl-8">CodeRepository</span><span class="hl-1">;</span><br/><span class="hl-1">}): </span><span class="hl-8">Module</span><span class="hl-1">;</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Registers the <code>&quot;authorization_code&quot;</code> and <code>&quot;refresh_token&quot;</code> grant types in the grant registry. Use this sub-module directly when composing the grant registry manually.</p>
+<hr>
+<h3 id="_-3" class="tsd-anchor-link"><code>createOAuthRouter</code><a href="#_-3" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<pre><code class="typescript"><span class="hl-3">function</span><span class="hl-1"> </span><span class="hl-0">createOAuthRouter</span><span class="hl-1">(</span><br/><span class="hl-1">  </span><span class="hl-6">express</span><span class="hl-1">: </span><span class="hl-8">ExpressLike</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-6">options</span><span class="hl-1">: {</span><br/><span class="hl-1">    </span><span class="hl-6">registry</span><span class="hl-1">: </span><span class="hl-8">GrantHandlerResolver</span><span class="hl-1">;</span><br/><span class="hl-1">    </span><span class="hl-6">config</span><span class="hl-1">: </span><span class="hl-8">AppConfig</span><span class="hl-1">;</span><br/><span class="hl-1">    </span><span class="hl-6">clientRepository</span><span class="hl-1">: </span><span class="hl-8">ClientRepository</span><span class="hl-1">;</span><br/><span class="hl-1">    </span><span class="hl-6">codeRepository</span><span class="hl-1">: </span><span class="hl-8">CodeRepository</span><span class="hl-1">;</span><br/><span class="hl-1">    </span><span class="hl-6">keyStore</span><span class="hl-1">: </span><span class="hl-8">KeyStore</span><span class="hl-1">;</span><br/><span class="hl-1">  }</span><br/><span class="hl-1">): </span><span class="hl-8">Promise</span><span class="hl-1">&lt;{ </span><span class="hl-6">router</span><span class="hl-1">: </span><span class="hl-8">Router</span><span class="hl-1">; </span><span class="hl-6">registry</span><span class="hl-1">: </span><span class="hl-8">GrantHandlerResolver</span><span class="hl-1"> }&gt;;</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Low-level factory. Creates the Express router and the fully-configured grant registry. Called internally by <code>oauthModule</code>; use directly when you need access to the registry instance after construction. Client authentication at <code>/oauth/introspect</code> is handled by <code>createClientAuthMiddleware(clientRepository)</code> — no Passport dependency required.</p>
+<h2 id="usage-example" class="tsd-anchor-link">Usage Example<a href="#usage-example" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="typescript"><span class="hl-5">import</span><span class="hl-1"> </span><span class="hl-6">express</span><span class="hl-1"> </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;express&quot;</span><span class="hl-1">;</span><br/><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">createApp</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-core&quot;</span><span class="hl-1">;</span><br/><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">oauthModule</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-oauth&quot;</span><span class="hl-1">;</span><br/><br/><span class="hl-3">const</span><span class="hl-1"> </span><span class="hl-7">handle</span><span class="hl-1"> = </span><span class="hl-5">await</span><span class="hl-1"> </span><span class="hl-0">createApp</span><span class="hl-1">({</span><br/><span class="hl-1">  </span><span class="hl-6">modules:</span><span class="hl-1"> [</span><br/><span class="hl-1">    </span><span class="hl-4">// composition-root modules that provide clientRepository, codeRepository,</span><br/><span class="hl-1">    </span><span class="hl-4">// keyStore, and grant handlers go here</span><br/><span class="hl-1">    </span><span class="hl-0">oauthModule</span><span class="hl-1">({ </span><span class="hl-6">config</span><span class="hl-1"> }),</span><br/><span class="hl-1">  ],</span><br/><span class="hl-1">  </span><span class="hl-6">bootstrapComponents:</span><span class="hl-1"> { </span><span class="hl-6">config</span><span class="hl-1">, </span><span class="hl-6">pathResolver:</span><span class="hl-1"> </span><span class="hl-5">import</span><span class="hl-1">.</span><span class="hl-6">meta</span><span class="hl-1">.</span><span class="hl-6">resolve</span><span class="hl-1"> },</span><br/><span class="hl-1">});</span><br/><br/><span class="hl-3">const</span><span class="hl-1"> </span><span class="hl-7">server</span><span class="hl-1"> = </span><span class="hl-0">express</span><span class="hl-1">();</span><br/><span class="hl-6">server</span><span class="hl-1">.</span><span class="hl-0">use</span><span class="hl-1">(</span><span class="hl-6">handle</span><span class="hl-1">.</span><span class="hl-6">router</span><span class="hl-1">);</span><br/><span class="hl-6">server</span><span class="hl-1">.</span><span class="hl-0">listen</span><span class="hl-1">(</span><span class="hl-6">config</span><span class="hl-1">.</span><span class="hl-6">http</span><span class="hl-1">.</span><span class="hl-6">port</span><span class="hl-1">);</span><br/><br/><span class="hl-5">await</span><span class="hl-1"> </span><span class="hl-6">handle</span><span class="hl-1">.</span><span class="hl-0">dispose</span><span class="hl-1">();</span>
+</code><button type="button">Copy</button></pre>
+
+<h2 id="todo-f-4-changes" class="tsd-anchor-link">TODO-F-4 changes<a href="#todo-f-4-changes" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<h3 id="grant-id_token-issuance" class="tsd-anchor-link"><code>authorization_code</code> grant — id_token issuance<a href="#grant-id_token-issuance" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>When the <code>openid</code> scope is included in the granted scopes and a <code>UserSessionStore</code> is wired, the <code>authorization_code</code> grant issues an <code>id_token</code> alongside the access token and refresh token. The <code>id_token</code> is a signed JWT built by <code>generateIdToken</code> (from <code>@o3co/auth-provider-core</code>) and appended to the token response as the <code>id_token</code> field.</p>
+<p>Conditions for id_token issuance:</p>
+<ul>
+<li><code>openid</code> must appear in the granted scopes (set by <code>GrantPolicyHook</code> at <code>/oauth/authorize</code> time)</li>
+<li><code>AppOptions.userSessionStore</code> must be wired (session is the source of truth for user claims)</li>
+<li>The code record must contain <code>sid</code> (written by login/federation wiring at authorize time)</li>
+<li><code>AppOptions.config.oauth.jwt.issuer</code> must be set (prevents emitting a noncompliant <code>iss: &quot;&quot;</code> claim)</li>
+</ul>
+<p>When any condition is not met, <code>id_token</code> is omitted from the response — the token endpoint still returns <code>access_token</code> and <code>refresh_token</code> normally.</p>
+<p>Claim composition of the issued <code>id_token</code>:</p>
+<ul>
+<li><code>iss</code>, <code>sub</code>, <code>aud</code>, <code>exp</code>, <code>iat</code>, <code>jti</code>, <code>auth_time</code>, <code>sid</code>, <code>azp</code> — OIDC Core §2 standard claims</li>
+<li><code>nonce</code> — reflected verbatim from the code record when present (OIDC Core §3.1.3.7)</li>
+<li>scope-filtered user claims (see claim mapping table below)</li>
+</ul>
+<h3 id="-oidc-core-§53" class="tsd-anchor-link"><code>/oauth/userinfo</code> — OIDC Core §5.3<a href="#-oidc-core-§53" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<pre><code class="http">GET /oauth/userinfo
+Authorization: Bearer <access_token>
+</code><button type="button">Copy</button></pre>
+
+<p>Returns scope-filtered claims sourced from the durable <code>UserSession</code>. The endpoint is mounted by <code>oauthModule</code> alongside the existing <code>/oauth/token</code>, <code>/oauth/introspect</code>, and <code>/oauth/authorize</code> routes.</p>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>Response</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Missing / invalid Bearer token</td>
+<td><code>401</code> with <code>WWW-Authenticate: Bearer realm=&quot;userinfo&quot;</code></td>
+</tr>
+<tr>
+<td>Invalid JWT signature</td>
+<td><code>401 invalid_token</code></td>
+</tr>
+<tr>
+<td><code>family_id</code> claim revoked (F-3 cascade)</td>
+<td><code>401 invalid_token</code></td>
+</tr>
+<tr>
+<td>Session not found or store error</td>
+<td><code>401 invalid_token</code> (fail-closed)</td>
+</tr>
+<tr>
+<td>No <code>userSessionStore</code> wired or no <code>sid</code> claim</td>
+<td><code>200 { sub }</code> (sub only, no durable claims)</td>
+</tr>
+<tr>
+<td>Session active</td>
+<td><code>200 { sub, ...scope-filtered claims }</code></td>
+</tr>
+</tbody>
+</table>
+<p>All responses set <code>Cache-Control: no-store</code> and <code>Pragma: no-cache</code> (RFC 6750 §5.3).</p>
+<p>Scope-to-claim mapping (OIDC Core §5.4 standard scopes):</p>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>Emitted claims</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>openid</code></td>
+<td><em>(governs id_token issuance; <code>sub</code> always included in userinfo response)</em></td>
+</tr>
+<tr>
+<td><code>profile</code></td>
+<td><code>name</code>, <code>picture</code></td>
+</tr>
+<tr>
+<td><code>email</code></td>
+<td><code>email</code>, <code>email_verified</code></td>
+</tr>
+<tr>
+<td><code>groups</code></td>
+<td><code>groups</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="todo-f-3-changes" class="tsd-anchor-link">TODO-F-3 changes<a href="#todo-f-3-changes" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ul>
+<li><strong><code>/oauth/introspect</code> cascading revoke.</strong> When the access token carries a <code>family_id</code> claim and <code>AppOptions.refreshTokenStore</code> is wired, the introspect endpoint calls <code>RefreshTokenStore.isFamilyRevoked(familyId)</code> before returning an active response. If the family is revoked or the store is unreachable, the response is <code>{ active: false }</code> (fail-closed, per RFC 7009 §2.1 SHOULD). Tokens minted before F-3 that lack a <code>family_id</code> claim bypass this check and are validated by signature only.</li>
+<li><strong><code>family_id</code> + <code>sid</code> data claims.</strong> Both <code>access_token</code> and <code>refresh_token</code> minted by the <code>authorization_code</code> and <code>refresh_token</code> grants carry <code>family_id</code> (token family for cascading revoke) and <code>sid</code> (session ID, when the code record contains it) as JWT claims.</li>
+<li><strong><code>authorization_code</code> grant — <code>sid</code> requirement.</strong> The grant reads <code>sid</code> from the <code>CodeData</code> record. Deployments must have the F-2/F-3 login wiring in place (local login or federation callback writing <code>sid</code> onto the code) for the <code>sid</code> claim to be present in issued tokens.</li>
+<li><strong><code>refresh_token</code> grant — session validation.</strong> When <code>AppOptions.userSessionStore</code> is wired and the refresh token carries a <code>sid</code> claim, the grant calls <code>userSessionStore.get(sid)</code> to verify the session is still active. A missing session returns <code>400 invalid_grant</code>; a store error returns <code>503 temporarily_unavailable</code>.</li>
+</ul>
+<h2 id="todo-f-5-changes-logout-endpoints" class="tsd-anchor-link">TODO-F-5 changes — Logout endpoints<a href="#todo-f-5-changes-logout-endpoints" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>The OAuth module exposes two logout-related routes when wired with <code>userSessionStore</code>, <code>federationTokenStore</code>, <code>refreshTokenStore</code>, and <code>oauth.jwt.issuer</code>:</p>
+<h3 id="post-oauthlogout" class="tsd-anchor-link">POST /oauth/logout<a href="#post-oauthlogout" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>OIDC RP-Initiated Logout 1.0 <code>end_session_endpoint</code>. Accepts <code>application/x-www-form-urlencoded</code>:</p>
+<ul>
+<li><code>id_token_hint</code> (required) — signed id_token from this provider; <code>sid</code> claim identifies the session</li>
+<li><code>post_logout_redirect_uri</code> (optional) — must match one of <code>client.postLogoutRedirectUris</code> exactly</li>
+<li><code>state</code> (optional) — round-tripped when redirecting to <code>post_logout_redirect_uri</code></li>
+</ul>
+<p>Flow: verifies <code>id_token_hint</code> → loads session → broadcasts OIDC Back-Channel Logout 1.0 <code>logout_token</code> to every RP with <code>backchannelLogoutUri</code> → executes store cascade (refresh-family revoke, federation-token delete, session delete) → responds with one of:</p>
+<ul>
+<li><code>text/html</code> page with <code>&lt;iframe&gt;</code> per RP with <code>frontchannelLogoutUri</code> (when <code>Accept: text/html</code> wins q-weighted negotiation)</li>
+<li><code>303</code> to first-federation IdP end-session URL (when that federation's provider implements <code>SupportsLogout</code>)</li>
+<li><code>303</code> to <code>post_logout_redirect_uri</code> (when it matches the client's allowlist)</li>
+<li><code>200 {&quot;logged_out&quot;: true}</code> (fallback)</li>
+</ul>
+<p>Cascade failure returns <code>503 {&quot;error&quot;: &quot;temporarily_unavailable&quot;}</code>. The cascade order is fixed per the spec: step 1 (refresh-family revoke) and step 3 (session delete) fail hard; step 2 (federation-token delete) is best-effort and logs a warning on failure without aborting the cascade.</p>
+<h3 id="post-oauthfederationnamelogout" class="tsd-anchor-link">POST /oauth/federation/:name/logout<a href="#post-oauthfederationnamelogout" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Provider-scoped federation disconnect. Authorization: <code>Bearer &lt;access_token&gt;</code> with <code>typ: at+jwt</code>. Optional body: <code>post_logout_redirect_uri</code>, <code>state</code>.</p>
+<p>Flow: verifies access_token → checks family not revoked → loads session → verifies federation is linked → deletes federation token → removes federation from session → if the provider implements <code>SupportsLogout</code>, redirects to the IdP end-session URL; otherwise returns <code>200 {&quot;disconnected&quot;: true}</code>.</p>
+<p>If the IdP end-session call throws, local state is already cleared; the response is <code>200 {&quot;disconnected&quot;: true}</code> and an audit event <code>federation.logout.idp_unreachable</code> is emitted for operator visibility.</p>
+<p>Returns <code>404 {&quot;error&quot;: &quot;federation_not_linked&quot;}</code> when the named federation is not in the session.</p>
+<h3 id="discovery-metadata" class="tsd-anchor-link">Discovery metadata<a href="#discovery-metadata" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p><code>GET /.well-known/openid-configuration</code> now advertises:</p>
+<ul>
+<li><code>end_session_endpoint</code></li>
+<li><code>backchannel_logout_supported: true</code></li>
+<li><code>backchannel_logout_session_supported: true</code> — <code>logout_token</code> includes <code>sid</code> by default</li>
+<li><code>frontchannel_logout_supported: true</code></li>
+<li><code>frontchannel_logout_session_supported: true</code> — front-channel iframe URL includes <code>sid</code> by default</li>
+</ul>
+<p>The <code>session_supported</code> defaults of <code>true</code> intentionally deviate from OIDC Back-Channel Logout 1.0 §2.2 (spec default: <code>false</code>). Clients that require the spec-default behavior must set <code>backchannelLogoutSessionRequired: false</code> or <code>frontchannelLogoutSessionRequired: false</code> on their client record.</p>
+<h3 id="client-record-logout-metadata" class="tsd-anchor-link">Client record logout metadata<a href="#client-record-logout-metadata" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Each <code>Client</code> supports five optional fields for logout behavior:</p>
+<ul>
+<li><code>postLogoutRedirectUris?: string[]</code> — allowlist for <code>POST /oauth/logout</code>'s <code>post_logout_redirect_uri</code></li>
+<li><code>backchannelLogoutUri?: string</code> — receives <code>logout_token</code> POST</li>
+<li><code>backchannelLogoutSessionRequired?: boolean</code> — default <code>true</code>; set <code>false</code> to exclude <code>sid</code> from <code>logout_token</code></li>
+<li><code>frontchannelLogoutUri?: string</code> — iframe src target</li>
+<li><code>frontchannelLogoutSessionRequired?: boolean</code> — default <code>true</code>; set <code>false</code> to exclude <code>sid</code> from iframe URL</li>
+</ul>
+<h2 id="todo-f-6-changes-federation-token-endpoint" class="tsd-anchor-link">TODO-F-6 changes — Federation token endpoint<a href="#todo-f-6-changes-federation-token-endpoint" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p><code>POST /oauth/federation/:name/token</code> retrieves the upstream IdP access_token for the caller's session, so consumers can make server-side API calls to Google Calendar / GitHub API / etc. on the user's behalf.</p>
+<h3 id="authentication" class="tsd-anchor-link">Authentication<a href="#authentication" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul>
+<li>Bearer access_token minted by this auth.provider instance (<code>typ: at+jwt</code>).</li>
+<li>The token's <code>azp</code> claim identifies the client; the client record MUST opt in via <code>allowedAzpForFederationToken: true</code> (see below).</li>
+</ul>
+<h3 id="flow" class="tsd-anchor-link">Flow<a href="#flow" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ol>
+<li>Verify the Bearer access_token.</li>
+<li>Deny if the family_id is revoked or the session no longer exists.</li>
+<li>Deny unless <code>client.allowedAzpForFederationToken === true</code>.</li>
+<li>Deny unless the federation is linked to the session.</li>
+<li>Return the cached upstream access_token if it has &gt; 30 seconds of validity remaining.</li>
+<li>Otherwise, refresh it:
+<ul>
+<li>Acquire an advisory lock (when <code>FederationTokenStore</code> implements <code>SupportsLock</code>) to prevent concurrent refresh fan-out.</li>
+<li>Re-read after the lock — another waiter may have refreshed during the wait.</li>
+<li>Call <code>provider.refreshToken(refreshToken)</code>; persist the result.</li>
+<li>Release the lock.</li>
+</ul>
+</li>
+</ol>
+<h3 id="response" class="tsd-anchor-link">Response<a href="#response" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<pre><code class="json"><span class="hl-1">{</span><br/><span class="hl-1">  </span><span class="hl-10">&quot;access_token&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;&lt;upstream-IdP-access-token&gt;&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-10">&quot;token_type&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;Bearer&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-10">&quot;expires_in&quot;</span><span class="hl-1">: </span><span class="hl-9">3600</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-10">&quot;scope&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;&lt;if-available&gt;&quot;</span><br/><span class="hl-1">}</span>
+</code><button type="button">Copy</button></pre>
+
+<h3 id="error-responses" class="tsd-anchor-link">Error responses<a href="#error-responses" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Error</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>401</td>
+<td><code>invalid_token</code></td>
+<td>Bearer missing, invalid, wrong type (not <code>at+jwt</code>), or family revoked</td>
+</tr>
+<tr>
+<td>403</td>
+<td><code>forbidden</code></td>
+<td>Client not opted in via <code>allowedAzpForFederationToken</code></td>
+</tr>
+<tr>
+<td>404</td>
+<td><code>federation_not_linked</code></td>
+<td>The named federation isn't linked to this session</td>
+</tr>
+<tr>
+<td>410</td>
+<td><code>refresh_token_absent</code></td>
+<td>Stored tokens have no refresh_token (upstream didn't return one at login, or post-lock re-read found a record without one)</td>
+</tr>
+<tr>
+<td>410</td>
+<td><code>re_authentication_required</code></td>
+<td>IdP returned <code>invalid_grant</code> / <code>invalid_token</code> — session federation is cleared; user must re-authenticate with the IdP</td>
+</tr>
+<tr>
+<td>429</td>
+<td><code>rate_limited</code></td>
+<td>Upstream IdP rate limit exceeded (<code>status: 429</code> or <code>error: &quot;too_many_requests&quot;</code>); retry later</td>
+</tr>
+<tr>
+<td>500</td>
+<td><code>refresh_failed</code></td>
+<td>Generic / unclassified error from the IdP refresh path; SIEM should group on the <code>details.reason</code> audit field</td>
+</tr>
+<tr>
+<td>503</td>
+<td><code>refresh_not_supported</code></td>
+<td>Provider doesn't implement <code>SupportsRefresh</code></td>
+</tr>
+<tr>
+<td>503</td>
+<td><code>lock_timeout</code></td>
+<td>Advisory lock could not be acquired within the wait window</td>
+</tr>
+<tr>
+<td>503</td>
+<td><code>temporarily_unavailable</code></td>
+<td>Store outage, IdP 5xx, or upstream network failure (ECONNREFUSED / ENOTFOUND / ETIMEDOUT — including codes wrapped on <code>error.cause.code</code> of a fetch TypeError)</td>
+</tr>
+</tbody>
+</table>
+<p>All error responses set <code>Cache-Control: no-store</code> and <code>Pragma: no-cache</code>. 401 responses include <code>WWW-Authenticate: Bearer error=&quot;invalid_token&quot;</code> per RFC 6750.</p>
+<h3 id="opt-in" class="tsd-anchor-link">Opt-in: <code>allowedAzpForFederationToken</code><a href="#opt-in" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Each <code>Client</code> carries an optional <code>allowedAzpForFederationToken: boolean</code> flag. Default is <code>false</code> — clients do NOT get federation-token access automatically. Operators explicitly opt in for clients that need it:</p>
+<pre><code class="yaml"><span class="hl-11">clients</span><span class="hl-1">:</span><br/><span class="hl-1">  - </span><span class="hl-11">clientId</span><span class="hl-1">: </span><span class="hl-12">my-backend-api</span><br/><span class="hl-1">    </span><span class="hl-11">clientSecret</span><span class="hl-1">: </span><span class="hl-9">...</span><br/><span class="hl-1">    </span><span class="hl-11">allowedRedirectUris</span><span class="hl-1">: [</span><span class="hl-9">...</span><span class="hl-1">]</span><br/><span class="hl-1">    </span><span class="hl-11">allowedScopes</span><span class="hl-1">: [</span><span class="hl-12">openid</span><span class="hl-1">, </span><span class="hl-12">profile</span><span class="hl-1">, </span><span class="hl-12">email</span><span class="hl-1">]</span><br/><span class="hl-1">    </span><span class="hl-11">allowedAzpForFederationToken</span><span class="hl-1">: </span><span class="hl-3">true</span><span class="hl-1">  </span><span class="hl-4"># explicit opt-in</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Rationale: federation access_tokens grant access to the user's external resources (Google Drive, GitHub API, etc.). Deny-by-default prevents accidental exposure when a generic OAuth client registration only needs auth.</p>
+<h3 id="audit-events" class="tsd-anchor-link">Audit events<a href="#audit-events" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>The following audit events fire on this endpoint:</p>
+<ul>
+<li><code>federation.token.success</code> — on token issuance (details include <code>refreshed: boolean</code> to distinguish cache hits from refresh path)</li>
+<li><code>federation.token.forbidden</code> — on 403 (client not opted in)</li>
+<li><code>federation.token.family_revoked</code> — on 401 via revoked family</li>
+<li><code>federation.token.refresh_failed</code> — on provider.refreshToken throwing with an unclassified error. SF-13 (v0.5.1): <code>details.reason</code> carries the classifier enum (<code>&quot;invalid_grant&quot; | &quot;rate_limited&quot; | &quot;network&quot; | &quot;unknown&quot;</code>); SIEM rules should group on this field. Pre-v0.5.1 the detail field was <code>details.error: &lt;raw message&gt;</code> — migrate dashboards.</li>
+<li><code>federation.token.reauthentication_required</code> — on <code>invalid_grant</code> or <code>invalid_token</code> from IdP</li>
+</ul>
+<h2 id="migrating-from-v03x-to-v040" class="tsd-anchor-link">Migrating from v0.3.x to v0.4.0<a href="#migrating-from-v03x-to-v040" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>v0.4.0 removes passport from this package. The <code>/oauth/introspect</code> endpoint now uses <code>createClientAuthMiddleware(clientRepository)</code> — a self-hosted RFC 6749 §2.3.1 HTTP Basic + form-encoded client-auth middleware.</p>
+<h3 id="breaking-changes" class="tsd-anchor-link">Breaking changes<a href="#breaking-changes" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ol>
+<li><strong><code>createOAuthRouter</code> signature</strong>: the <code>passport</code> option is dropped. Pass <code>clientRepository: ClientRepository</code> directly. <code>oauthModule({ config })</code> receives repositories through module <code>requires</code> from composition-root providers.</li>
+<li><strong><code>/introspect</code> error response</strong>: follows RFC 6749 §5.2 shape <code>{ error, error_description }</code>.</li>
+<li><strong><code>req.oauthClient</code></strong> (typed as <code>PublicClient | undefined</code>) is attached to the express <code>Request</code> by <code>createClientAuthMiddleware</code>. Consumers composing this middleware onto their own routes can read it directly — types come via global Express namespace augmentation.</li>
+</ol>
+<h3 id="for-consumers" class="tsd-anchor-link">For consumers<a href="#for-consumers" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>If you consume <code>@o3co/auth-provider-oauth</code> via its public API (<code>oauthModule</code>, <code>createOAuthRouter</code>), no code changes beyond updating your config are required — the module internally wires the new middleware.</p>
+<p>If you extend or replace the middleware for custom client-auth schemes, import <code>createClientAuthMiddleware</code> from <code>@o3co/auth-provider-oauth</code> as a reference, or write a drop-in replacement that attaches a compatible <code>PublicClient</code> to <code>req.oauthClient</code>.</p>
+<h2 id="see-also" class="tsd-anchor-link">See Also<a href="#see-also" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ul>
+<li><a href="_o3co_auth-provider-session.html"><code>@o3co/auth-provider-session</code></a> — session login / federation routes</li>
+<li><a href="_o3co_auth-provider-core.html"><code>@o3co/auth-provider-core</code></a> — shared types (<code>Module</code>, <code>GrantHandlerResolver</code>, <code>ClientRepository</code>, <code>CodeRepository</code>, <code>KeyStore</code>)</li>
+</ul>
+</section><details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Interfaces"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg><h2>Interfaces</h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="broadcastbackchannellogoutoptions"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-oauth.BroadcastBackchannelLogoutOptions.html">BroadcastBackchannelLogoutOptions</a><a href="#broadcastbackchannellogoutoptions" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="broadcastrp"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-oauth.BroadcastRP.html">BroadcastRP</a><a href="#broadcastrp" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="cascadelogoutoptions"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-oauth.CascadeLogoutOptions.html">CascadeLogoutOptions</a><a href="#cascadelogoutoptions" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="frontchannelrp"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-oauth.FrontchannelRP.html">FrontchannelRP</a><a href="#frontchannelrp" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="renderfrontchannellogouthtmloptions"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-oauth.RenderFrontchannelLogoutHtmlOptions.html">RenderFrontchannelLogoutHtmlOptions</a><a href="#renderfrontchannellogouthtmloptions" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details><details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Type Aliases"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg><h2>Type Aliases</h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="cascadelogoutresult"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><a href="../types/_o3co_auth-provider-oauth.CascadeLogoutResult.html">CascadeLogoutResult</a><a href="#cascadelogoutresult" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details><details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Functions"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg><h2>Functions</h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="broadcastbackchannellogout"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-oauth.broadcastBackchannelLogout.html">broadcastBackchannelLogout</a><a href="#broadcastbackchannellogout" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="cascadelogout"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-oauth.cascadeLogout.html">cascadeLogout</a><a href="#cascadelogout" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="createclientauthmiddleware"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-oauth.createClientAuthMiddleware.html">createClientAuthMiddleware</a><a href="#createclientauthmiddleware" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="createoauthrouter"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-oauth.createOAuthRouter.html">createOAuthRouter</a><a href="#createoauthrouter" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="oauthauthorizationmodule"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-oauth.oauthAuthorizationModule.html">oauthAuthorizationModule</a><a href="#oauthauthorizationmodule" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="oauthmodule"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-oauth.oauthModule.html">oauthModule</a><a href="#oauthmodule" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="oauthsessionmodule"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-oauth.oauthSessionModule.html">oauthSessionModule</a><a href="#oauthsessionmodule" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="renderfrontchannellogouthtml"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-oauth.renderFrontchannelLogoutHtml.html">renderFrontchannelLogoutHtml</a><a href="#renderfrontchannellogouthtml" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details></div><div class="col-sidebar"><div class="page-menu"><div class="tsd-navigation settings"><details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg><h3>Settings</h3></summary><div class="tsd-accordion-details"><div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span><ul id="tsd-filter-options"><li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li><li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li><li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div><div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div><details open class="tsd-accordion tsd-page-navigation"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg><h3>On This Page</h3></summary><div class="tsd-accordion-details"><a href="#o3coauth-provider-oauth"><span>@o3co/auth-<wbr/>provider-<wbr/>oauth</span></a><ul><li><a href="#install"><span>Install</span></a></li><li><a href="#public-api"><span>Public <wbr/>API</span></a></li><li><ul><li><a href="#_"><span></span></a></li><li><a href="#_-1"><span></span></a></li><li><a href="#_-2"><span></span></a></li><li><a href="#_-3"><span></span></a></li></ul></li><li><a href="#usage-example"><span>Usage <wbr/>Example</span></a></li><li><a href="#todo-f-4-changes"><span>TODO-<wbr/>F-<wbr/>4 changes</span></a></li><li><ul><li><a href="#grant-id_token-issuance"><span> grant — id_<wbr/>token issuance</span></a></li><li><a href="#-oidc-core-§53"><span> — <wbr/>OIDC <wbr/>Core §5.3</span></a></li></ul></li><li><a href="#todo-f-3-changes"><span>TODO-<wbr/>F-<wbr/>3 changes</span></a></li><li><a href="#todo-f-5-changes-logout-endpoints"><span>TODO-<wbr/>F-<wbr/>5 changes — <wbr/>Logout endpoints</span></a></li><li><ul><li><a href="#post-oauthlogout"><span>POST /oauth/logout</span></a></li><li><a href="#post-oauthfederationnamelogout"><span>POST /oauth/federation/:name/logout</span></a></li><li><a href="#discovery-metadata"><span>Discovery metadata</span></a></li><li><a href="#client-record-logout-metadata"><span>Client record logout metadata</span></a></li></ul></li><li><a href="#todo-f-6-changes-federation-token-endpoint"><span>TODO-<wbr/>F-<wbr/>6 changes — <wbr/>Federation token endpoint</span></a></li><li><ul><li><a href="#authentication"><span>Authentication</span></a></li><li><a href="#flow"><span>Flow</span></a></li><li><a href="#response"><span>Response</span></a></li><li><a href="#error-responses"><span>Error responses</span></a></li><li><a href="#opt-in"><span>Opt-<wbr/>in: </span></a></li><li><a href="#audit-events"><span>Audit events</span></a></li></ul></li><li><a href="#migrating-from-v03x-to-v040"><span>Migrating from v0.3.x to v0.4.0</span></a></li><li><ul><li><a href="#breaking-changes"><span>Breaking changes</span></a></li><li><a href="#for-consumers"><span>For consumers</span></a></li></ul></li><li><a href="#see-also"><span>See <wbr/>Also</span></a></li></ul><details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Interfaces"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Interfaces</summary><div><a href="#broadcastbackchannellogoutoptions"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Broadcast<wbr/>Backchannel<wbr/>Logout<wbr/>Options</span></a><a href="#broadcastrp"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Broadcast<wbr/>RP</span></a><a href="#cascadelogoutoptions"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Cascade<wbr/>Logout<wbr/>Options</span></a><a href="#frontchannelrp"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Frontchannel<wbr/>RP</span></a><a href="#renderfrontchannellogouthtmloptions"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Render<wbr/>Frontchannel<wbr/>Logout<wbr/>Html<wbr/>Options</span></a></div></details><details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Type Aliases"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Type Aliases</summary><div><a href="#cascadelogoutresult"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><span>Cascade<wbr/>Logout<wbr/>Result</span></a></div></details><details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Functions"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Functions</summary><div><a href="#broadcastbackchannellogout"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>broadcast<wbr/>Backchannel<wbr/>Logout</span></a><a href="#cascadelogout"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>cascade<wbr/>Logout</span></a><a href="#createclientauthmiddleware"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>create<wbr/>Client<wbr/>Auth<wbr/>Middleware</span></a><a href="#createoauthrouter"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>create<wbr/>O<wbr/>Auth<wbr/>Router</span></a><a href="#oauthauthorizationmodule"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>oauth<wbr/>Authorization<wbr/>Module</span></a><a href="#oauthmodule"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>oauth<wbr/>Module</span></a><a href="#oauthsessionmodule"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>oauth<wbr/>Session<wbr/>Module</span></a><a href="#renderfrontchannellogouthtml"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>render<wbr/>Frontchannel<wbr/>Logout<wbr/>Html</span></a></div></details></div></details></div><div class="site-menu"><nav class="tsd-navigation"><a href="../modules.html">auth.provider API</a><ul class="tsd-small-nested-navigation" id="tsd-nav-container"><li>Loading...</li></ul></nav></div></div></div><footer><p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer><div class="overlay"></div></body></html>

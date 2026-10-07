@@ -1,0 +1,110 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="../"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>createRegistryAssertionVerifier | auth.provider API</title><meta name="description" content="Documentation for auth.provider API"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="../assets/style.css"/><link rel="stylesheet" href="../assets/highlight.css"/><script defer src="../assets/main.js"></script><script async src="../assets/icons.js" id="tsd-icons-script"></script><script async src="../assets/search.js" id="tsd-search-script"></script><script async src="../assets/navigation.js" id="tsd-nav-script"></script><script async src="../assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
+<div class="tsd-toolbar-contents container"><a href="../index.html" class="title">auth.provider API</a>
+<div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/>
+<ul role="listbox" id="tsd-search-results"></ul>
+<div id="tsd-search-status" aria-live="polite" aria-atomic="true">
+<div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-menu"></use></svg></a></div></header>
+<div class="container container-main">
+<div class="col-content">
+<div class="tsd-page-title">
+<ul class="tsd-breadcrumb" aria-label="Breadcrumb">
+<li><a href="../modules/_o3co_auth-provider-core.html">@o3co/auth-provider-core</a></li>
+<li><a href="../modules/_o3co_auth-provider-core..html"></a></li>
+<li><a href="" aria-current="page">createRegistryAssertionVerifier</a></li></ul>
+<h1>Function createRegistryAssertionVerifier</h1></div>
+<section class="tsd-panel">
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="createregistryassertionverifier"><span class="tsd-kind-call-signature">createRegistryAssertionVerifier</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">options</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/_o3co_auth-provider-core..RegistryAssertionVerifierOptions.html" class="tsd-signature-type tsd-kind-interface">RegistryAssertionVerifierOptions</a><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/_o3co_auth-provider-core..AssertionVerifier.html" class="tsd-signature-type tsd-kind-interface">AssertionVerifier</a><a href="#createregistryassertionverifier" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>The <a href="../interfaces/_o3co_auth-provider-core..AssertionVerifier.html" class="tsd-kind-interface">AssertionVerifier</a> over a trust registry (#525): &quot;we trust these
+N issuers, each with their own keys and terms&quot;, where
+<code>createJwtAssertionVerifier</code> was &quot;this one key, this one issuer&quot;.</p>
+<h2 id="order-of-checks-and-why" class="tsd-anchor-link">Order of checks, and why<a href="#order-of-checks-and-why" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ol>
+<li>Decode the claims without verifying, read <code>iss</code>, and look it up. An
+issuer nobody registered is refused <strong>before any signature work</strong>: no
+key is fetched, no signature is checked. This is what keeps an
+unregistered issuer from costing a JWKS fetch per probe, and what makes
+&quot;signed by A, claiming to be B&quot; fail on B's keys rather than A's.</li>
+<li>The entry must not have expired, and the presenting client must be one
+the entry admits (<code>allowedClients</code>; an unauthenticated presenter passes
+only when the entry names no list).</li>
+<li>Signature, <code>iss</code>, <code>aud</code>, <code>exp</code> (mandatory, RFC 7523 §3 item 4), <code>nbf</code> /
+<code>iat</code> when present, against the entry's keys and algorithms — and each of
+the three a NumericDate (core's <code>jwt/numericDate.mts</code>): jose checks only
+that it is a number, so <code>exp: 1e400</code> (Infinity) would otherwise verify as
+an assertion that never expires and reach the ID-JAG replay record,
+whose store refuses an infinite lifetime with a <code>RangeError</code> the grant
+answers <code>503</code>. A malformed date is the assertion's fault: <code>null</code>.</li>
+<li><code>sub</code> must be one the entry admits (<code>allowedSubjects</code>), and the handle
+reader must find a handle.</li>
+<li>The result carries the entry's ceilings: the scope claim intersected
+with <code>allowedScopes</code>, and <code>allowedAudiences</code> as the audience ceiling —
+and the assertion's own, <code>exp</code> as <code>expiresAt</code>, which caps the issued
+token's lifetime (auth.proxy#90).</li>
+</ol>
+<h2 id="the-id-jag-profile-526" class="tsd-anchor-link">The ID-JAG profile (#526)<a href="#the-id-jag-profile-526" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>An entry with <code>profile: &quot;id-jag&quot;</code> accepts the Identity Assertion JWT
+Authorization Grant (draft-ietf-oauth-identity-assertion-authz-grant) —
+what an enterprise IdP mints for a client so a resource's authorization
+server can issue it a token. On top of the checks above, in step 3 and
+after it:</p>
+<ul>
+<li>the JWT header <code>typ</code> MUST be <code>oauth-id-jag+jwt</code> (§3, RFC 8725 §3.11);</li>
+<li><code>aud</code> MUST be this server's issuer identifier — <code>issuerIdentifier</code>,
+never the token endpoint URL — as one string or a one-element array;</li>
+<li><code>client_id</code> MUST name the client that authenticated at the token
+endpoint; an unauthenticated presenter is refused — client
+authentication is required for this grant;</li>
+<li><code>jti</code>, <code>iat</code> and <code>sub</code> are required, and each <code>jti</code> is accepted <strong>once</strong>
+for the assertion's lifetime, recorded in <code>replaySeenSet</code> per issuer; a
+<code>jti</code> longer than <code>MAX_JTI_LENGTH</code> (256) is refused before it is recorded,
+and so is an assertion with a lifetime of more than
+<code>MAX_ASSERTION_LIFETIME_SECONDS</code> past now (plus the entry's clock
+tolerance, as every other time check here allows), or an <code>iat</code> more than
+that old (<code>lifetime.mts</code>, the ceiling <code>private_key_jwt</code> holds a client
+assertion to) — logged as such (<code>logger</code>);</li>
+<li><code>scope</code> and <code>resource</code> travel as claims, not request parameters: the
+scope ceiling is the claim intersected with <code>allowedScopes</code>, and the
+audience ceiling is the <code>resource</code> claim intersected with
+<code>allowedAudiences</code> (a resource the entry does not admit is refused). The
+grant then bounds both by the client's registration.</li>
+<li>the handle is <code>&lt;iss&gt;#&lt;sub&gt;</code> (or <code>&lt;iss&gt;#&lt;tenant&gt;#&lt;sub&gt;</code>): <code>sub</code> is unique
+only within its issuer, and resolving it to a local principal stays
+with the Store — an unlinked one is refused there.</li>
+</ul>
+<p>Every refusal is the same <code>null</code>. Distinguishing them would let a caller
+probe for which issuers are registered or which subjects are admitted —
+the reason goes to the server's log only (<code>logger</code>).
+Replay within <code>exp</code> is detected for ID-JAG only; a plain RFC 7523 issuer
+should mint short-lived assertions.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">options</span>: <a href="../interfaces/_o3co_auth-provider-core..RegistryAssertionVerifierOptions.html" class="tsd-signature-type tsd-kind-interface">RegistryAssertionVerifierOptions</a></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <a href="../interfaces/_o3co_auth-provider-core..AssertionVerifier.html" class="tsd-signature-type tsd-kind-interface">AssertionVerifier</a></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/81a4474f69231c8b1da244b39f2b43cd4f08c129/packages/core/src/assertions/registryAssertionVerifier.mts#L241">packages/core/src/assertions/registryAssertionVerifier.mts:241</a></li></ul></aside></div></li></ul></section></div>
+<div class="col-sidebar">
+<div class="page-menu">
+<div class="tsd-navigation settings">
+<details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>Settings</h3></summary>
+<div class="tsd-accordion-details">
+<div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span>
+<ul id="tsd-filter-options">
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div>
+<div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div>
+<details open class="tsd-accordion tsd-page-navigation"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>On This Page</h3></summary>
+<div class="tsd-accordion-details"><a href="#order-of-checks-and-why"><span>Order of checks, and why</span></a><a href="#the-id-jag-profile-526"><span>The <wbr/>ID-<wbr/>JAG profile (#526)</span></a></div></details></div>
+<div class="site-menu">
+<nav class="tsd-navigation"><a href="../modules.html">auth.provider API</a>
+<ul class="tsd-small-nested-navigation" id="tsd-nav-container">
+<li>Loading...</li></ul></nav></div></div></div><footer>
+<p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer>
+<div class="overlay"></div></body></html>

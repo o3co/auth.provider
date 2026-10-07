@@ -1,0 +1,52 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/**
+ * The name a deployment selected its configuration by (`CONFIG_ENV`,
+ * `NODE_ENV`, or a name a composition root passes), as a guard on a
+ * development-only thing reads it: trimmed and in lower case, so
+ * "Production" or "production\n" names production as surely; and
+ * production or staging whichever of the names consulted says so, none
+ * lifting another's; and development or test only when every name set says
+ * so and at least one is set.
+ */
+/** The names that make a deployment one no development-only thing may run in. */
+const PRODUCTION_NAMES = new Set(["production", "staging"]);
+/** The names a development-only thing may run under. */
+const DEVELOPMENT_NAMES = new Set(["development", "test"]);
+/** `name` trimmed and in lower case, or `undefined` for a value that is no name or an empty one. */
+export function readEnvironmentName(name) {
+    if (typeof name !== "string")
+        return undefined;
+    const read = name.trim().toLowerCase();
+    return read === "" ? undefined : read;
+}
+/** The first of `names` that reads as production or staging, or `undefined` when none does. */
+export function productionEnvironmentIn(names) {
+    for (const name of names) {
+        const read = readEnvironmentName(name);
+        if (read !== undefined && PRODUCTION_NAMES.has(read))
+            return read;
+    }
+    return undefined;
+}
+/**
+ * Whether `names` name a development or test environment: at least one of
+ * them reads as a name, and every one that does reads as development or test.
+ */
+export function isDevelopmentEnvironment(names) {
+    const read = names.map(readEnvironmentName).filter((name) => name !== undefined);
+    return read.length > 0 && read.every((name) => DEVELOPMENT_NAMES.has(name));
+}

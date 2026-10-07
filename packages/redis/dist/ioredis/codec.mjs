@@ -1,0 +1,48 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/**
+ * `HGETALL`'s flat `[field, value, …]` reply — as a script returns it — as
+ * the hash's fields. Anything but a list is no fields. The one reading of
+ * that reply, shared by every store here that has a script answer a hash.
+ */
+export const hashFields = (flat) => {
+    const pairs = Array.isArray(flat) ? flat : [];
+    const fields = {};
+    for (let i = 0; i + 1 < pairs.length; i += 2) {
+        fields[pairs[i]] = pairs[i + 1];
+    }
+    return fields;
+};
+/** `HGETALL`'s flat `[field, value, …]` reply as the record's fields. */
+export const deviceCodeRecordOf = (flat) => hashFields(flat);
+/**
+ * A number as a Redis argument, rounded to an integer. Plain digits for a magnitude below 1e21;
+ * at or above it `toFixed` gives exponent form, and a non-finite value is spelled out.
+ */
+export const fgNumber = (value) => Number.isFinite(value) ? value.toFixed(0) : String(value);
+/** `HGETALL`'s flat `[field, value, …]` reply as the record's fields. */
+export const fgFields = (flat) => hashFields(flat);
+/**
+ * A write's reply: `[1, fields]` when it happened, `[0]` when it was refused.
+ * Absence and a failed precondition are the same answer on purpose: the
+ * record may change again before the caller looks, so the port re-reads.
+ */
+export const fgWritten = (reply) => {
+    if (!Array.isArray(reply) || reply[0] !== 1)
+        return null;
+    return fgFields(reply[1]);
+};
+export const fgiText = (reply) => typeof reply === "string" ? reply : null;

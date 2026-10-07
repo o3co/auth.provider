@@ -1,0 +1,79 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="../"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>browserFacingCorsRoutes | auth.provider API</title><meta name="description" content="Documentation for auth.provider API"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="../assets/style.css"/><link rel="stylesheet" href="../assets/highlight.css"/><script defer src="../assets/main.js"></script><script async src="../assets/icons.js" id="tsd-icons-script"></script><script async src="../assets/search.js" id="tsd-search-script"></script><script async src="../assets/navigation.js" id="tsd-nav-script"></script><script async src="../assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
+<div class="tsd-toolbar-contents container"><a href="../index.html" class="title">auth.provider API</a>
+<div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/>
+<ul role="listbox" id="tsd-search-results"></ul>
+<div id="tsd-search-status" aria-live="polite" aria-atomic="true">
+<div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-menu"></use></svg></a></div></header>
+<div class="container container-main">
+<div class="col-content">
+<div class="tsd-page-title">
+<ul class="tsd-breadcrumb" aria-label="Breadcrumb">
+<li><a href="../modules/_o3co_auth-provider-core.html">@o3co/auth-provider-core</a></li>
+<li><a href="../modules/_o3co_auth-provider-core..html"></a></li>
+<li><a href="" aria-current="page">browserFacingCorsRoutes</a></li></ul>
+<h1>Function browserFacingCorsRoutes</h1></div>
+<section class="tsd-panel">
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="browserfacingcorsroutes"><span class="tsd-kind-call-signature">browserFacingCorsRoutes</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">config</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">oauth</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">jwt</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">jwksPath</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">unknown</span> <span class="tsd-signature-symbol">}</span> <span class="tsd-signature-symbol">}</span> <span class="tsd-signature-symbol">}</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-keyword">readonly</span> <a href="../interfaces/_o3co_auth-provider-core..CorsRoute.html" class="tsd-signature-type tsd-kind-interface">CorsRoute</a><span class="tsd-signature-symbol">[]</span><a href="#browserfacingcorsroutes" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>The endpoints CORS is enabled on, for a given config.</p>
+<p><strong>On the list</strong>, because a browser has a legitimate reason to call each one
+from a page served by another origin:</p>
+<ul>
+<li><code>POST /oauth/token</code> — the PKCE code exchange and refresh. Without this
+one nothing else matters; it is the call an SPA cannot avoid.</li>
+<li><code>GET|POST /oauth/userinfo</code> — OIDC Core §5.3 defines both methods.</li>
+<li><code>POST /oauth/revoke</code> — RFC 7009 §2.1 lets a public client revoke its own
+tokens, which is exactly what an SPA does on sign-out.</li>
+<li><code>GET /.well-known/openid-configuration</code> and the JWKS document — public,
+unauthenticated, cacheable metadata that a browser-based client library
+fetches to discover the endpoints above. The JWKS path is resolved
+through <a href="_o3co_auth-provider-core..resolveJwksPath.html" class="tsd-kind-function">resolveJwksPath</a>, the same single source the route
+registration and the advertised <code>jwks_uri</code> use, so the three cannot
+drift.</li>
+</ul>
+<p><strong>Deliberately off the list:</strong></p>
+<ul>
+<li><code>POST /oauth/introspect</code> is server-to-server. RFC 7662 §2.1 requires the
+caller to authenticate, and this provider already refuses public
+clients there, so a browser could never use it — enabling CORS on it
+would only advertise a surface no legitimate browser client has.</li>
+<li><code>GET /oauth/authorize</code> is a top-level navigation, not a <code>fetch</code>. CORS
+has no bearing on where a browser is allowed to navigate, so a header
+there would grant nothing and imply something false about the endpoint.</li>
+<li><code>/session/*</code> is cookie-backed by construction and covered by the CSRF
+policy at <code>session.csrf.trustedOrigins</code>, which answers the different
+question (&quot;may this origin make me change state&quot;) that #272 split apart
+from this one.</li>
+</ul>
+<p>NOTE: the <code>/oauth/*</code> paths are coupled to the bundled <code>oauthModule</code>'s
+mountPath, the same coupling the <code>/oauth/token</code> middleware mounts in
+<code>boot/assemble-app.mts</code> already carry. A downstream that re-mounts the OAuth
+router elsewhere must build its own table.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">config</span>: <span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">oauth</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">jwt</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">jwksPath</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">unknown</span> <span class="tsd-signature-symbol">}</span> <span class="tsd-signature-symbol">}</span> <span class="tsd-signature-symbol">}</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-keyword">readonly</span> <a href="../interfaces/_o3co_auth-provider-core..CorsRoute.html" class="tsd-signature-type tsd-kind-interface">CorsRoute</a><span class="tsd-signature-symbol">[]</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/19ce4c7f11c7747a93068b7679fc4436aa40e398/packages/core/src/middleware/cors.mts#L146">packages/core/src/middleware/cors.mts:146</a></li></ul></aside></div></li></ul></section></div>
+<div class="col-sidebar">
+<div class="page-menu">
+<div class="tsd-navigation settings">
+<details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>Settings</h3></summary>
+<div class="tsd-accordion-details">
+<div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span>
+<ul id="tsd-filter-options">
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div>
+<div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div></div>
+<div class="site-menu">
+<nav class="tsd-navigation"><a href="../modules.html">auth.provider API</a>
+<ul class="tsd-small-nested-navigation" id="tsd-nav-container">
+<li>Loading...</li></ul></nav></div></div></div><footer>
+<p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer>
+<div class="overlay"></div></body></html>

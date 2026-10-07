@@ -1,0 +1,1 @@
+export declare const LIB_VERSION = "12.1.0";

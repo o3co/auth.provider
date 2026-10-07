@@ -1,0 +1,76 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="../"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>federationTokenSnapshot | auth.provider API</title><meta name="description" content="Documentation for auth.provider API"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="../assets/style.css"/><link rel="stylesheet" href="../assets/highlight.css"/><script defer src="../assets/main.js"></script><script async src="../assets/icons.js" id="tsd-icons-script"></script><script async src="../assets/search.js" id="tsd-search-script"></script><script async src="../assets/navigation.js" id="tsd-nav-script"></script><script async src="../assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
+<div class="tsd-toolbar-contents container"><a href="../index.html" class="title">auth.provider API</a>
+<div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/>
+<ul role="listbox" id="tsd-search-results"></ul>
+<div id="tsd-search-status" aria-live="polite" aria-atomic="true">
+<div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-menu"></use></svg></a></div></header>
+<div class="container container-main">
+<div class="col-content">
+<div class="tsd-page-title">
+<ul class="tsd-breadcrumb" aria-label="Breadcrumb">
+<li><a href="../modules/_o3co_auth-provider-core.html">@o3co/auth-provider-core</a></li>
+<li><a href="../modules/_o3co_auth-provider-core..html"></a></li>
+<li><a href="" aria-current="page">federationTokenSnapshot</a></li></ul>
+<h1>Function federationTokenSnapshot</h1></div>
+<section class="tsd-panel">
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="federationtokensnapshot"><span class="tsd-kind-call-signature">federationTokenSnapshot</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">response</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/_o3co_auth-provider-core..FederationTokenResponse.html" class="tsd-signature-type tsd-kind-interface">FederationTokenResponse</a><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">obtainedAt</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <a href="../types/_o3co_auth-provider-core..FederationTokenSnapshot.html" class="tsd-signature-type tsd-kind-type-alias">FederationTokenSnapshot</a><a href="#federationtokensnapshot" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Read a token response the way every adapter does.</p>
+<ul>
+<li><strong>Lifetime.</strong> <code>expires_in</code> as the adapter's library read it — the
+snapshot sees only the library's answer, so <code>&quot;1000seconds&quot;</code> has already
+become 1000 — and <code>expiresAt</code> dated from <code>obtainedAt</code>: when the library
+handed the answer over, after it verified any id_token (a JWKS fetch
+included), and before the adapter calls UserInfo or anything else. The
+delegated reader in <code>federation-oidc</code> reads the raw body and the arrival
+time instead, and refuses a lifetime that is not a number: a grant's
+eligibility judges the lifetime a token was issued with against an
+operator's maximum (#593, D5), where a login's expiry only says when a
+refresh is due. An absent <code>expires_in</code> is <code>null</code> on both fields: the
+upstream stated no lifetime, and one is not invented for it.
+<code>FederationProfile.expiresAt</code> asks each adapter for that decision so the
+route layer never invents a fallback expiry; an adapter that assumed an
+hour was inventing one in its place. It is also what
+<code>POST /oauth/federation/:name/token</code> already stores for a refresh that
+states nothing.</li>
+<li><strong>Scope.</strong> Present exactly when the response carried one, an empty one
+included, and <code>&quot;&quot;</code> for one that is not a string: the session route reads
+an absent scope as &quot;as requested&quot; (RFC 6749 §3.3), so an answer that
+named nothing usable must not flatten into silence (#647). The bundled
+adapters' library refuses a non-string scope first; this holds for any
+other caller.</li>
+<li><strong>Refresh token and id_token</strong> only when they are non-empty strings; an
+empty one is not a credential.</li>
+<li><strong>Token type</strong> as the library reported it, which is what
+<code>POST /oauth/federation/:name/token</code> judges before it hands a token on
+(#645).</li>
+</ul>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">response</span>: <a href="../interfaces/_o3co_auth-provider-core..FederationTokenResponse.html" class="tsd-signature-type tsd-kind-interface">FederationTokenResponse</a></span></li>
+<li><span><span class="tsd-kind-parameter">obtainedAt</span>: <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol"> = ...</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <a href="../types/_o3co_auth-provider-core..FederationTokenSnapshot.html" class="tsd-signature-type tsd-kind-type-alias">FederationTokenSnapshot</a></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/81a4474f69231c8b1da244b39f2b43cd4f08c129/packages/core/src/federations/token-snapshot.mts#L94">packages/core/src/federations/token-snapshot.mts:94</a></li></ul></aside></div></li></ul></section></div>
+<div class="col-sidebar">
+<div class="page-menu">
+<div class="tsd-navigation settings">
+<details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>Settings</h3></summary>
+<div class="tsd-accordion-details">
+<div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span>
+<ul id="tsd-filter-options">
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div>
+<div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div></div>
+<div class="site-menu">
+<nav class="tsd-navigation"><a href="../modules.html">auth.provider API</a>
+<ul class="tsd-small-nested-navigation" id="tsd-nav-container">
+<li>Loading...</li></ul></nav></div></div></div><footer>
+<p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer>
+<div class="overlay"></div></body></html>

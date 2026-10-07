@@ -1,0 +1,1 @@
+{"version":3,"file":"configPath.d.mts","sourceRoot":"","sources":["../src/configPath.mts"],"names":[],"mappings":"AAkBA,MAAM,WAAW,mBAAmB;IACnC,QAAQ,CAAC,mBAAmB,EAAE,MAAM,CAAC;IACrC,QAAQ,CAAC,WAAW,EAAE,MAAM,CAAC;CAC7B;AAED,wBAAgB,kBAAkB,CAAC,aAAa,EAAE,MAAM,EAAE,GAAG,EAAE,MAAM,GAAG,mBAAmB,CAa1F"}

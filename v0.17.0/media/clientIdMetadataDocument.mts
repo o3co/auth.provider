@@ -1,0 +1,752 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * Client ID Metadata Documents (draft-ietf-oauth-client-id-metadata-document):
+ * a client identifies itself with an `https` URL, and the JSON document at
+ * that URL is its registration. This module fetches, validates and caches
+ * such documents and returns a `PublicClient` (auth method `none`, PKCE S256,
+ * never first-party, so consent always applies).
+ *
+ * Before any fetch: an id that is not a document URL, or whose host fails the
+ * operator's `allowedHosts`/`deniedHosts` (core's host-list grammar), is "not
+ * a client" (`null`).
+ *
+ * The fetch is core's outbound fetch for a URL a request names, under
+ * `core.outbound`: every address the host resolves to must be outside the
+ * special-use ranges, the connection goes to the address that was checked, no
+ * redirect is followed (the draft forbids it), and it has a deadline and a
+ * byte cap. A refusal by that policy is a rejected document; any other
+ * failure is the exchange failing. Only `200` with JSON is a document.
+ *
+ * `token_endpoint_auth_method` must be `none`: shared secrets are forbidden by
+ * the draft, and `private_key_jwt` would take its keys from the same
+ * attacker-authored document, authenticating the document, not the client.
+ * Scopes are intersected with `allowedScopes`; audiences are the operator's
+ * alone — a document says who the client is, never what it may reach. A
+ * pre-registered client with the same id wins.
+ *
+ * The registered clients are read through core's client-record boundary, and
+ * a document is resolved only when it answers that no client is registered
+ * under the id. A registration the boundary refuses rejects the lookup with
+ * core's refusal, never replaced by a document; a repository that cannot
+ * answer is an outage, never answered from the document cache. A document
+ * client never crosses the boundary: it is this module's own, built and
+ * validated here.
+ */
+
+import { isIP } from "node:net";
+import {
+	auditErrorText,
+	type ClientRepository,
+	checkRedirectUri,
+	createOutboundFetch,
+	describeRedirectUriRejection,
+	type HostPattern,
+	isLoopbackHostname,
+	isOutboundRefusal,
+	type Logger,
+	loggableError,
+	matchesHostList,
+	type OutboundPolicy,
+	type PublicClient,
+	parseScopeTokens,
+	readHostEntry,
+	validatedClientRepository,
+} from "@o3co/auth-provider-core";
+
+export interface ClientIdMetadataDocumentOptions {
+	/** Scopes any such client may obtain — the ceiling its document's `scope` is intersected with. Empty admits none. */
+	readonly allowedScopes: readonly string[];
+	/** Audiences (resource servers) any such client may mint for. Empty admits only the client id. */
+	readonly allowedAudiences: readonly string[];
+	/**
+	 * Hosts a document may live on: exact, or a `.suffix` for a domain and its
+	 * subdomains, read as core's `readHostEntry` reads one (an entry it cannot
+	 * read refuses construction). Empty admits any public host.
+	 */
+	readonly allowedHosts?: readonly string[];
+	/** Hosts refused even when allowed above; same forms. */
+	readonly deniedHosts?: readonly string[];
+	/** Byte cap on the document. Default 5120, the draft's recommendation; `core.outbound.maxResponseBytes` is its ceiling. */
+	readonly maxBytes?: number;
+	/** Fetch deadline. Default 5000 ms; `core.outbound.timeoutMs` is its ceiling. */
+	readonly timeoutMs?: number;
+	/**
+	 * Core's `outboundPolicy` slot (`core.outbound`), which the document
+	 * fetch is held to. Required: building the resolver without one is a
+	 * `TypeError`, so the operator's section is never skipped by accident.
+	 */
+	readonly outboundPolicy: OutboundPolicy;
+	/** Upper bound on how long a valid document is served from cache. Default 10 minutes. */
+	readonly cacheMaxAgeMs?: number;
+	/** Bound on remembered documents. Default {@link DEFAULT_CIMD_MAX_CACHE_ENTRIES}. */
+	readonly maxCacheEntries?: number;
+	/**
+	 * How long past its expiry a cached registration may still be served
+	 * after a revalidation that failed for a reason that is not the
+	 * document's. Default {@link DEFAULT_CIMD_STALE_IF_ERROR_MS}: none.
+	 */
+	readonly staleIfErrorMs?: number;
+	/**
+	 * How long a refusal is remembered, so the same id is not fetched again
+	 * on every request. Default {@link DEFAULT_CIMD_NEGATIVE_CACHE_MS}.
+	 */
+	readonly negativeCacheMs?: number;
+	/**
+	 * How many documents may be in flight at once, across every client id.
+	 * Default {@link DEFAULT_CIMD_MAX_CONCURRENT_FETCHES}.
+	 */
+	readonly maxConcurrentFetches?: number;
+	readonly logger?: Logger;
+	/**
+	 * Test seam: replaces the document fetch, and with it core's outbound
+	 * policy (the destination checks, the deadline and the byte cap).
+	 */
+	readonly fetch?: typeof fetch;
+	/** Test seam. */
+	readonly now?: () => number;
+}
+
+export const DEFAULT_CIMD_MAX_BYTES = 5 * 1024;
+/**
+ * How many documents the resolver remembers at once. An unauthenticated
+ * caller chooses the keys — any URL that serves a valid document is a
+ * `client_id` — so the map is bounded, like the CRL and OCSP caches.
+ */
+export const DEFAULT_CIMD_MAX_CACHE_ENTRIES = 256;
+export const DEFAULT_CIMD_TIMEOUT_MS = 5_000;
+export const DEFAULT_CIMD_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
+
+/** The grant types a document may claim; anything else is dropped, `authorization_code` is required. */
+const SUPPORTED_GRANT_TYPES: ReadonlySet<string> = new Set(["authorization_code", "refresh_token"]);
+
+/**
+ * Whether `clientId` has the shape of a Client ID Metadata Document URL
+ * (draft §3.1): `https`, a path, no fragment, no credentials, no dot segments,
+ * no query string, and a host that is a name rather than an address.
+ *
+ * Shape only — the host policy and the resolution check are the resolver's.
+ * Exported so `/authorize` and the token endpoint can tell "not a client at
+ * all" from "a document URL we could not honour" in their logs.
+ */
+export function isClientIdMetadataDocumentUrl(clientId: string): boolean {
+	let url: URL;
+	try {
+		url = new URL(clientId);
+	} catch {
+		return false;
+	}
+	if (url.protocol !== "https:") return false;
+	if (url.href !== clientId) return false; // not in canonical form: the document's client_id could never equal it
+	if (url.pathname === "" || url.pathname === "/") return false;
+	if (url.hash !== "" || clientId.endsWith("#")) return false;
+	if (url.username !== "" || url.password !== "") return false;
+	if (url.search !== "" || clientId.endsWith("?")) return false;
+	if (url.pathname.split("/").some((segment) => segment === "." || segment === "..")) return false;
+	if (isIP(url.hostname) !== 0 || url.hostname.startsWith("[")) return false;
+	// A trailing dot (the DNS root) survives canonicalisation and names the
+	// same host as the undotted spelling: one host, one client id. Refused
+	// rather than normalised: a document must echo its client id exactly.
+	if (url.hostname.endsWith(".")) return false;
+	if (isLoopbackHostname(url.hostname)) return false;
+	return true;
+}
+
+/** `entries` read as core's host-list grammar; a `TypeError` naming `list` for an entry it cannot read. */
+const hostPatterns = (
+	entries: readonly string[] | undefined,
+	list: "allowedHosts" | "deniedHosts",
+): readonly HostPattern[] =>
+	(entries ?? []).map((entry, index) => {
+		const pattern = readHostEntry(entry);
+		if (pattern === undefined) {
+			throw new TypeError(
+				`Client ID Metadata Documents: ${list}[${index}] must be a host name, with a leading \`.\` to cover a domain and every subdomain of it`,
+			);
+		}
+		return pattern;
+	});
+
+/**
+ * How long a cached registration outlives a revalidation that failed for a
+ * reason that is not the document's (DNS, 5xx, 429, timeout). Zero: an
+ * expired document is honoured only once a fetch succeeds again, since a
+ * stale one keeps the redirect allowlist the document may since have
+ * changed. An operator who prefers riding out the client host's outage sets
+ * a window. A rejected document is evicted immediately either way.
+ */
+export const DEFAULT_CIMD_STALE_IF_ERROR_MS = 0;
+
+/**
+ * How long a refusal is remembered. Without it, every distinct URL-shaped
+ * `client_id` costs a DNS lookup, TLS handshake and GET per request, which an
+ * unauthenticated caller can aim at a tarpit or a third party. Short, so a
+ * client that fixes its document is not locked out for long.
+ */
+export const DEFAULT_CIMD_NEGATIVE_CACHE_MS = 60 * 1000;
+
+/**
+ * How many documents may be fetched at once across every client id, so the
+ * outbound cost of unauthenticated requests is bounded however many ids a
+ * caller invents.
+ */
+export const DEFAULT_CIMD_MAX_CONCURRENT_FETCHES = 8;
+
+/**
+ * How many requests may wait for a document fetch slot, as a multiple of
+ * the slots. Fixed, not configured.
+ */
+const CIMD_SLOT_QUEUE_FACTOR = 4;
+
+interface CacheEntry {
+	readonly client: PublicClient;
+	readonly etag: string | undefined;
+	readonly expiresAt: number;
+	/**
+	 * The instant past which this registration is not served at all, however
+	 * long the outage lasts — one stale window from when it was last
+	 * successfully fetched, not one per failed revalidation.
+	 */
+	readonly staleDeadline: number;
+}
+
+/**
+ * The `max-age` a `Cache-Control` header grants, or `undefined` when it grants
+ * none (`no-store`, `no-cache`, or absent). `private` is fine: this server is
+ * the one client of the document.
+ */
+const maxAgeMsOf = (cacheControl: string | null): number | undefined => {
+	if (cacheControl === null) return undefined;
+	const directives = cacheControl.split(",").map((d) => d.trim().toLowerCase());
+	if (directives.includes("no-store") || directives.includes("no-cache")) return 0;
+	const maxAge = directives.find((d) => d.startsWith("max-age="));
+	if (maxAge === undefined) return undefined;
+	const seconds = Number(maxAge.slice("max-age=".length));
+	return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined;
+};
+
+class DocumentRejected extends Error {}
+
+/**
+ * No document fetch slot for the request: the queue for one was full, or
+ * none came free within the fetch deadline. This server's own capacity, not
+ * a verdict on the id, so it is never remembered as a refusal.
+ */
+class FetchSlotUnavailable extends Error {
+	override readonly name = "FetchSlotUnavailable";
+}
+
+/**
+ * Whether `projected` is core's outbound fetch giving up at its deadline,
+ * read from the projection `loggableError` makes of it (its name and its
+ * `reason` code). A deadline cannot be told from this process's own
+ * resolutions being saturated, so it is not a verdict on the id either.
+ */
+const isOutboundDeadline = (projected: { readonly name: string; readonly reason?: string }) =>
+	projected.name === "OutboundFetchError" && projected.reason === "timeout";
+
+const asStringArray = (value: unknown, field: string): readonly string[] => {
+	if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) {
+		throw new DocumentRejected(`${field} must be an array of strings`);
+	}
+	return value as readonly string[];
+};
+
+/** Turn a validated document into the registration the server runs on. */
+function toClient(
+	clientId: string,
+	doc: Record<string, unknown>,
+	opts: ClientIdMetadataDocumentOptions,
+): PublicClient {
+	if (doc.client_id !== clientId) {
+		throw new DocumentRejected("client_id in the document does not match its URL");
+	}
+	if ("client_secret" in doc || "client_secret_expires_at" in doc) {
+		throw new DocumentRejected("a Client ID Metadata Document must not carry a client_secret");
+	}
+	const method = doc.token_endpoint_auth_method;
+	if (method !== undefined && method !== "none") {
+		throw new DocumentRejected(
+			method === "private_key_jwt"
+				? "private_key_jwt is not allowed for a Client ID Metadata Document: its keys would come from the same document that names them"
+				: // The document's author wrote it: quoted as the Content-Type is.
+					`token_endpoint_auth_method '${auditErrorText(typeof method === "string" ? method : JSON.stringify(method))}' is not allowed for a Client ID Metadata Document`,
+		);
+	}
+	const redirectUris = asStringArray(doc.redirect_uris, "redirect_uris");
+	if (redirectUris.length === 0) throw new DocumentRejected("redirect_uris must not be empty");
+	for (const uri of redirectUris) {
+		const rejection = checkRedirectUri(uri);
+		if (rejection !== null) {
+			throw new DocumentRejected(
+				`redirect_uris entry '${auditErrorText(uri)}' is not acceptable: ${describeRedirectUriRejection(rejection)}`,
+			);
+		}
+	}
+	const grantTypes =
+		doc.grant_types === undefined
+			? ["authorization_code"]
+			: asStringArray(doc.grant_types, "grant_types");
+	if (!grantTypes.includes("authorization_code")) {
+		throw new DocumentRejected("grant_types must include authorization_code");
+	}
+	if (doc.response_types !== undefined) {
+		if (!asStringArray(doc.response_types, "response_types").includes("code")) {
+			throw new DocumentRejected("response_types must include code");
+		}
+	}
+	// The consent page shows this, and a document client is by definition one
+	// the deployment did not register: a blank name would put an unnamed
+	// third party in front of the user.
+	if (typeof doc.client_name !== "string" || doc.client_name.trim().length === 0) {
+		throw new DocumentRejected("client_name is required and must be a non-empty string");
+	}
+	if (doc.client_uri !== undefined) {
+		let uri: URL | null = null;
+		try {
+			uri = typeof doc.client_uri === "string" ? new URL(doc.client_uri) : null;
+		} catch {
+			uri = null;
+		}
+		if (uri === null || uri.protocol !== "https:") {
+			throw new DocumentRejected("client_uri must be an https URL");
+		}
+	}
+	// RFC 7591 §2 `scope`, by RFC 6749 §3.3's grammar. A third party's
+	// document is read tolerantly (`parseScopeTokens`), as an upstream's answer
+	// is: what it names is intersected with the operator's ceiling below, so a
+	// scope it names but spells with a tab is not lost, and one that names no
+	// scope-token claims nothing rather than reading as absent.
+	const claimedScopes =
+		doc.scope === undefined
+			? undefined
+			: typeof doc.scope === "string"
+				? parseScopeTokens(doc.scope)
+				: (() => {
+						throw new DocumentRejected("scope must be a space-delimited string");
+					})();
+	const allowedScopes =
+		claimedScopes === undefined
+			? [...opts.allowedScopes]
+			: claimedScopes.filter((s) => opts.allowedScopes.includes(s));
+	const name = typeof doc.client_name === "string" ? doc.client_name.trim().slice(0, 200) : "";
+
+	const client: PublicClient = {
+		clientId,
+		tokenEndpointAuthMethod: "none",
+		allowedRedirectUris: [...redirectUris],
+		allowedScopes,
+		allowedAudiences: [...opts.allowedAudiences],
+		allowedGrantTypes: grantTypes.filter((g) => SUPPORTED_GRANT_TYPES.has(g)),
+		firstParty: false,
+		...(name.length > 0 ? { clientName: name } : {}),
+		...(typeof doc.client_uri === "string" ? { clientUri: doc.client_uri } : {}),
+	};
+	documentClients.add(client);
+	return client;
+}
+
+/**
+ * The clients this module built from a document. A `WeakSet` rather than a
+ * field on `PublicClient`: provenance is this server's fact, not something a
+ * repository — or a document — can claim by setting a property.
+ */
+const documentClients = new WeakSet<PublicClient>();
+
+/**
+ * Whether `client` was resolved from a Client ID Metadata Document, as opposed
+ * to a pre-registered client whose id merely looks like a URL
+ * (`withClientIdMetadataDocuments` answers those from the inner repository
+ * first). For a document client, the host its `client_id` names is the one
+ * fact about it this server verified; its `client_name` is the document
+ * author's claim.
+ */
+export function isClientIdMetadataDocumentClient(client: PublicClient | null | undefined): boolean {
+	return client != null && documentClients.has(client);
+}
+
+/** Each capping already said, per policy: said once, at the first construction that logs it. */
+const cappedLimitsSaid = new WeakMap<OutboundPolicy, Set<string>>();
+
+/**
+ * Core's outbound fetch for a document URL, with this resolver's deadline and
+ * cap. `core.outbound`'s are ceilings over them; one above its ceiling is said
+ * (`cimd_limit_capped`), with the value in effect, once per policy and
+ * capping.
+ */
+function outboundDocumentFetch(
+	policy: OutboundPolicy,
+	timeoutMs: number,
+	maxBytes: number,
+	logger: Logger | undefined,
+): typeof fetch {
+	const documentFetch = createOutboundFetch({
+		policy,
+		source: "request",
+		timeoutMs,
+		maxResponseBytes: maxBytes,
+	});
+	const limits = [
+		...(timeoutMs > policy.timeoutMs
+			? [
+					{
+						key: "oauth.clientIdMetadataDocuments.timeoutMs",
+						value: timeoutMs,
+						ceiling: "core.outbound.timeoutMs",
+						effective: policy.timeoutMs,
+					},
+				]
+			: []),
+		...(maxBytes > policy.maxResponseBytes
+			? [
+					{
+						key: "oauth.clientIdMetadataDocuments.maxBytes",
+						value: maxBytes,
+						ceiling: "core.outbound.maxResponseBytes",
+						effective: policy.maxResponseBytes,
+					},
+				]
+			: []),
+	];
+	if (limits.length > 0 && logger !== undefined) {
+		const capping = JSON.stringify(limits);
+		const said = cappedLimitsSaid.get(policy) ?? new Set<string>();
+		if (!said.has(capping)) {
+			logger.warn({ limits }, "cimd_limit_capped");
+			said.add(capping);
+			cappedLimitsSaid.set(policy, said);
+		}
+	}
+	return documentFetch;
+}
+
+export interface ClientIdMetadataDocumentResolver {
+	/** The registration the document at `clientId` describes, or `null` when there is none to honour. */
+	resolve(clientId: string): Promise<PublicClient | null>;
+}
+
+export function createClientIdMetadataDocumentResolver(
+	opts: ClientIdMetadataDocumentOptions,
+): ClientIdMetadataDocumentResolver {
+	const now = opts.now ?? Date.now;
+	const maxBytes = opts.maxBytes ?? DEFAULT_CIMD_MAX_BYTES;
+	const timeoutMs = opts.timeoutMs ?? DEFAULT_CIMD_TIMEOUT_MS;
+	const allowedHosts = hostPatterns(opts.allowedHosts, "allowedHosts");
+	const deniedHosts = hostPatterns(opts.deniedHosts, "deniedHosts");
+	if (typeof opts.outboundPolicy !== "object" || opts.outboundPolicy === null) {
+		throw new TypeError(
+			"Client ID Metadata Documents: outboundPolicy is required; core.outbound governs the document fetch",
+		);
+	}
+	// Built once, here: a `core.outbound` it refuses fails construction, not a request.
+	const fetchImpl =
+		opts.fetch ?? outboundDocumentFetch(opts.outboundPolicy, timeoutMs, maxBytes, opts.logger);
+	const cacheMaxAgeMs = opts.cacheMaxAgeMs ?? DEFAULT_CIMD_CACHE_MAX_AGE_MS;
+	const logger = opts.logger;
+	const maxCacheEntries = opts.maxCacheEntries ?? DEFAULT_CIMD_MAX_CACHE_ENTRIES;
+	const staleIfErrorMs = opts.staleIfErrorMs ?? DEFAULT_CIMD_STALE_IF_ERROR_MS;
+	const negativeCacheMs = opts.negativeCacheMs ?? DEFAULT_CIMD_NEGATIVE_CACHE_MS;
+	const maxConcurrentFetches = opts.maxConcurrentFetches ?? DEFAULT_CIMD_MAX_CONCURRENT_FETCHES;
+	/** Refused client ids, with the instant each refusal expires. */
+	const refusals = new Map<string, number>();
+	/**
+	 * Slots for an in-flight fetch. A released slot is handed straight to the
+	 * longest waiter. At most {@link CIMD_SLOT_QUEUE_FACTOR} times the slots
+	 * may wait, each no longer than the fetch's own deadline: a request past
+	 * either is a fetch that failed, so neither the queue nor the requests in
+	 * it grow without bound. A `Set` keeps arrival order and drops a waiter
+	 * that gave up in constant time.
+	 */
+	let inFlightFetches = 0;
+	const waiting = new Set<() => void>();
+	const maxWaitingFetches = maxConcurrentFetches * CIMD_SLOT_QUEUE_FACTOR;
+	const slotWaitMs = Math.min(timeoutMs, opts.outboundPolicy.timeoutMs);
+	const releaseSlot = (): void => {
+		const next = waiting.values().next();
+		if (next.done === true) {
+			inFlightFetches -= 1;
+			return;
+		}
+		waiting.delete(next.value);
+		next.value();
+	};
+	const acquireSlot = (): Promise<void> => {
+		if (inFlightFetches < maxConcurrentFetches) {
+			inFlightFetches += 1;
+			return Promise.resolve();
+		}
+		if (waiting.size >= maxWaitingFetches) {
+			return Promise.reject(
+				new FetchSlotUnavailable("every document fetch slot is taken and its queue is full"),
+			);
+		}
+		return new Promise<void>((resolve, reject) => {
+			const timer = setTimeout(() => {
+				waiting.delete(granted);
+				reject(
+					new FetchSlotUnavailable("no document fetch slot came free within the fetch deadline"),
+				);
+			}, slotWaitMs);
+			const granted = () => {
+				clearTimeout(timer);
+				resolve();
+			};
+			waiting.add(granted);
+		});
+	};
+	const withSlot = async <T,>(job: () => Promise<T>): Promise<T> => {
+		await acquireSlot();
+		try {
+			return await job();
+		} finally {
+			releaseSlot();
+		}
+	};
+	const cache = new Map<string, CacheEntry>();
+	/**
+	 * Bounded because an unauthenticated caller chooses the keys. Evicts the
+	 * oldest insertion: the bound caps memory, it does not maximise hits.
+	 */
+	const remember = (clientId: string, entry: CacheEntry): void => {
+		if (cache.size >= maxCacheEntries && !cache.has(clientId)) {
+			const oldest = cache.keys().next();
+			if (!oldest.done) cache.delete(oldest.value);
+		}
+		cache.set(clientId, entry);
+	};
+
+	/** A refusal, bounded like the document cache: the caller chooses these keys too. */
+	const rememberRefusal = (clientId: string): void => {
+		if (refusals.size >= maxCacheEntries && !refusals.has(clientId)) {
+			const oldest = refusals.keys().next();
+			if (!oldest.done) refusals.delete(oldest.value);
+		}
+		refusals.set(clientId, now() + negativeCacheMs);
+	};
+	const inFlight = new Map<string, Promise<PublicClient | null>>();
+
+	const hostAllowed = (hostname: string): boolean => {
+		try {
+			if (matchesHostList(deniedHosts, hostname)) return false;
+			return allowedHosts.length === 0 || matchesHostList(allowedHosts, hostname);
+		} catch {
+			return false; // a host the grammar cannot read is on no list
+		}
+	};
+
+	const fetchDocument = async (clientId: string, cached: CacheEntry | undefined) => {
+		let res: Response;
+		try {
+			res = await fetchImpl(clientId, {
+				method: "GET",
+				headers: {
+					accept: "application/json",
+					...(cached?.etag !== undefined ? { "if-none-match": cached.etag } : {}),
+				},
+			});
+		} catch (err) {
+			// The policy refusing the destination or the answer is a verdict on
+			// this id; anything else is the exchange failing. The refusal travels
+			// as the cause, whose `reason` code the log line keeps.
+			if (isOutboundRefusal(err)) {
+				throw new DocumentRejected("core.outbound refused the document's destination or answer", {
+					cause: err,
+				});
+			}
+			throw err;
+		}
+		if (res.status === 304 && cached !== undefined) {
+			await res.body?.cancel().catch(() => undefined);
+			return {
+				client: cached.client,
+				etag: cached.etag,
+				cacheControl: res.headers.get("cache-control"),
+			};
+		}
+		if (res.status !== 200) {
+			await res.body?.cancel().catch(() => undefined);
+			// Any other status is a verdict on the document (a refusal); a 5xx
+			// or 429 is the client's server failing to answer, which
+			// `staleIfErrorMs` rides out instead of evicting a validated registration.
+			const transient = res.status >= 500 || res.status === 429;
+			const message = `document fetch answered ${res.status}`;
+			throw transient ? new Error(message) : new DocumentRejected(message);
+		}
+		const contentType = res.headers.get("content-type") ?? "";
+		if (!/json/i.test(contentType)) {
+			await res.body?.cancel().catch(() => undefined);
+			// The client's server wrote the header: quoted sanitised and capped,
+			// since the message is what the log keeps as `reason`.
+			throw new DocumentRejected(
+				`document is not JSON (Content-Type: ${contentType === "" ? "absent" : auditErrorText(contentType)})`,
+			);
+		}
+		const text = await res.text();
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(text);
+		} catch {
+			throw new DocumentRejected("document is not valid JSON");
+		}
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+			throw new DocumentRejected("document is not a JSON object");
+		}
+		return {
+			client: toClient(clientId, parsed as Record<string, unknown>, opts),
+			etag: res.headers.get("etag") ?? undefined,
+			cacheControl: res.headers.get("cache-control"),
+		};
+	};
+
+	const resolveUncached = async (clientId: string): Promise<PublicClient | null> => {
+		const cached = cache.get(clientId);
+		try {
+			const { client, etag, cacheControl } = await withSlot(() => fetchDocument(clientId, cached));
+			const granted = maxAgeMsOf(cacheControl);
+			const ttl = Math.min(granted ?? cacheMaxAgeMs, cacheMaxAgeMs);
+			if (ttl > 0) {
+				remember(clientId, {
+					client,
+					etag,
+					expiresAt: now() + ttl,
+					staleDeadline: now() + ttl + staleIfErrorMs,
+				});
+			} else cache.delete(clientId);
+			refusals.delete(clientId);
+			return client;
+		} catch (err) {
+			const rejected = err instanceof DocumentRejected;
+			// The rejection's own text, or a fetch failure's projection: never a
+			// thrown value as it came (loggableError). `err` beside it carries
+			// what `reason` cannot — a fetch failure's cause code.
+			const projected = loggableError(err);
+			logger?.warn(
+				{
+					clientId: auditErrorText(clientId),
+					reason: projected.detail ?? projected.name,
+					err: projected,
+				},
+				rejected ? "cimd_document_rejected" : "cimd_document_fetch_failed",
+			);
+			if (rejected) {
+				// The document, not the network: this client stopped being a
+				// client, so what was remembered of it goes now.
+				cache.delete(clientId);
+			} else if (cached !== undefined && staleIfErrorMs > 0) {
+				// An outage is not a verdict on the client: serve the validated
+				// registration for a bounded window. `expiresAt` moves so the next
+				// request retries; only a success extends `staleDeadline`.
+				const staleUntil = Math.min(now() + staleIfErrorMs, cached.staleDeadline);
+				if (staleUntil > now()) {
+					remember(clientId, { ...cached, expiresAt: staleUntil });
+					return cached.client;
+				}
+				cache.delete(clientId);
+			} else {
+				cache.delete(clientId);
+			}
+			// This server's capacity, or a deadline that cannot be told from it,
+			// is no verdict on the id, so it is not remembered: the next
+			// request for the id fetches again.
+			const capacity = err instanceof FetchSlotUnavailable || isOutboundDeadline(projected);
+			if (negativeCacheMs > 0 && !capacity) rememberRefusal(clientId);
+			return null;
+		}
+	};
+
+	return {
+		async resolve(clientId) {
+			if (!isClientIdMetadataDocumentUrl(clientId)) return null;
+			if (!hostAllowed(new URL(clientId).hostname)) {
+				logger?.warn({ clientId: auditErrorText(clientId) }, "cimd_host_not_allowed");
+				return null;
+			}
+			const cached = cache.get(clientId);
+			if (cached !== undefined && cached.expiresAt > now()) return cached.client;
+			const refusedUntil = refusals.get(clientId);
+			if (refusedUntil !== undefined) {
+				if (refusedUntil > now()) return null;
+				refusals.delete(clientId);
+			}
+			const pending = inFlight.get(clientId);
+			if (pending !== undefined) return pending;
+			const job = resolveUncached(clientId).finally(() => inFlight.delete(clientId));
+			inFlight.set(clientId, job);
+			return job;
+		},
+	};
+}
+
+/** The repositories {@link withClientIdMetadataDocuments} built. */
+const documentFallbacks = new WeakSet<ClientRepository>();
+
+/**
+ * Whether `repository` is a fallback {@link withClientIdMetadataDocuments}
+ * built: by identity, so not one behind a forwarder or from another loaded
+ * copy of this package.
+ */
+export function isClientIdMetadataDocumentFallback(repository: ClientRepository): boolean {
+	return documentFallbacks.has(repository);
+}
+
+/**
+ * A {@link ClientRepository} that answers pre-registered clients from `inner`
+ * first and Client ID Metadata Documents second.
+ *
+ * `inner` is read through core's client-record boundary
+ * (`validatedClientRepository`, a no-op when it already is one), on every
+ * lookup, before the document cache or the refusal memo is consulted:
+ *
+ * - A registered client: the boundary's validated copy.
+ * - No client registered under the id: the document, resolved as
+ *   {@link createClientIdMetadataDocumentResolver} does.
+ * - A rejection is let through as it is, never answered with a document,
+ *   from the cache or its stale window: the repository's outage, or core's
+ *   refusal of a registration (`isClientRecordRefused`), whether this
+ *   fallback's boundary refused it or one `inner` reads through did.
+ *
+ * `authenticate` is `inner`'s alone, through the boundary: a document never
+ * carries a secret.
+ *
+ * Built only by the router, once, over the repository it is handed, from
+ * `oauth.clientIdMetadataDocuments`, with its logger; the package entry does
+ * not export it. A refused registration is warned by the boundary `inner`
+ * already is when it is one (the slot's, through the composition's logger),
+ * else through `logger`; only a boundary this builds without a logger says
+ * nothing of it, as the resolver says nothing of a refused document.
+ */
+export function withClientIdMetadataDocuments(
+	inner: ClientRepository,
+	opts: ClientIdMetadataDocumentOptions,
+): ClientRepository {
+	// Read only when `inner` is not already a boundary. Without a logger it
+	// says nothing, as the resolver says nothing of a refused document; core's
+	// own default would write to the console.
+	const registered = validatedClientRepository(inner, {
+		logger: opts.logger ?? { warn: () => {} },
+	});
+	const resolver = createClientIdMetadataDocumentResolver(opts);
+	const fallback: ClientRepository = {
+		// The boundary rejects a refused registration, so only an absent one
+		// reaches the document.
+		findById: async (clientId) =>
+			(await registered.findById(clientId)) ?? resolver.resolve(clientId),
+		authenticate: (clientId, secret) => registered.authenticate(clientId, secret),
+	};
+	documentFallbacks.add(fallback);
+	return fallback;
+}

@@ -1,0 +1,424 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/**
+ * The establishment vocabulary as it is checked and copied: a
+ * `PrimaryAuthentication` as core's builders make it, the additions a
+ * completing requirement presents, and the `PrimaryContinuation` a
+ * requirement persists and presents to `resumePrimary`, a serialisable DTO
+ * with every instant as epoch milliseconds, built, checked and rehydrated
+ * here. `admitPrimary`, `resumePrimary` and `MfaTransactionStore.create` all
+ * read through these checks.
+ *
+ * Each check answers a frozen deep copy that shares nothing with the
+ * caller's object; a value the contract does not admit is a `RangeError`
+ * naming what is wrong and quoting nothing but an `amr` value's marker.
+ *
+ * A primary's `user` is a plain snapshot of the fields `User` declares, each
+ * read by name once (`readUserSnapshot`), and its `enrollmentFacts` are derived here from
+ * that snapshot, as it is checked and as it is rehydrated, and never read
+ * from what a caller hands in; a continuation carries none, and its holder
+ * reads them through `enrollmentFactsOfContinuation`, the same derivation.
+ * Its `claims` are read once by `readLoginClaims` (`copyClaims`): each
+ * declared claim by name, of its declared type, and each custom claim as
+ * its JSON form.
+ */
+import { EMAIL_OTP_AMR, FEDERATED_AMR, MFA_AMR, PASSWORD_AMR, } from "../grants/authenticationClaims.mjs";
+import { normaliseMailAddress } from "../mail/address.mjs";
+import { readMfaEnrollmentWitness } from "../repositories/UserRepository.mjs";
+import { readUserSnapshot } from "../repositories/userSnapshot.mjs";
+import { SECOND_FACTOR_AMR } from "./acr.mjs";
+import { readLoginClaims } from "./login-claims.mjs";
+const isPlainObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+const isNonEmptyString = (value) => typeof value === "string" && value.length > 0;
+const isValidDate = (value) => value instanceof Date && !Number.isNaN(value.getTime());
+const isStringList = (value) => Array.isArray(value) && value.every((entry) => typeof entry === "string");
+/** An instant as a continuation carries it: epoch milliseconds, a safe integer at or after the epoch. */
+const isEpochMs = (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+/**
+ * `user` as `readUserSnapshot` reads it — the fields `User` declares, each
+ * read by name once — or refused, quoting nothing of it.
+ */
+function userSnapshot(user, refuse) {
+    const reading = readUserSnapshot(user);
+    if (reading.ok)
+        return reading.snapshot;
+    switch (reading.refused) {
+        case "not_an_object":
+            return refuse("user must be an object");
+        case "id":
+            return refuse("user.id must be a non-empty string");
+        case "not_plain_data":
+            return refuse(`user.${reading.field} must be plain data: a string, a finite number, a boolean, null, or a list or plain object of those`);
+    }
+}
+/**
+ * What `email` says of a first binding: `none` when it is absent, `null` or
+ * empty; `address` when `normaliseMailAddress` reads one address; else
+ * `unreadable`.
+ */
+function mailAddressFactOf(email) {
+    if (email === undefined || email === null || email === "")
+        return "none";
+    return normaliseMailAddress(email) === undefined ? "unreadable" : "address";
+}
+/**
+ * What a session records of its login's `user` for a first binding: the
+ * witness as `readMfaEnrollmentWitness` reads it, and what its `email` is
+ * (`mailAddressFactOf`) — never the address. Frozen.
+ */
+export function enrollmentFactsOf(user) {
+    return Object.freeze({
+        witness: readMfaEnrollmentWitness(user),
+        mailAddress: mailAddressFactOf(user.email),
+    });
+}
+/**
+ * `claims` — the session record's `claims` to be — as `readLoginClaims`
+ * reads them: each declared claim by name, of its declared type; each
+ * custom claim as its JSON form, one that cannot be taken dropped (the
+ * caller holding a logger warns of it). Refused as a `RangeError`, quoting
+ * nothing of them.
+ */
+function copyClaims(claims, refuse) {
+    const reading = readLoginClaims(claims);
+    if (reading.ok)
+        return reading.claims;
+    switch (reading.refused) {
+        case "not_an_object":
+            return refuse("claims must be an object");
+        case "declared_claim":
+            return refuse(`claims.${reading.claim} must be ${reading.as} or absent`);
+    }
+}
+function copyAuthentication(value, refuse) {
+    if (!isPlainObject(value))
+        return refuse("recorded.authentication must be an object");
+    if (!isNonEmptyString(value.primary)) {
+        refuse("recorded.authentication.primary must be a non-empty string");
+    }
+    if (value.federation !== undefined && typeof value.federation !== "string") {
+        refuse("recorded.authentication.federation must be a string or absent");
+    }
+    if (value.upstreamAmr !== undefined && !isStringList(value.upstreamAmr)) {
+        refuse("recorded.authentication.upstreamAmr must be a list of strings or absent");
+    }
+    // A primary is what a login path records before any second factor: one
+    // that already says when a second factor was verified was rebuilt by hand.
+    if (value.mfaAt !== undefined)
+        refuse("a primary authentication records no mfaAt");
+    // Only a federation has an upstream; a password login's continuation, the
+    // one a requirement persists, therefore never carries an instant here.
+    const upstreamAuthTime = value.upstreamAuthTime;
+    if (upstreamAuthTime !== undefined) {
+        if (value.primary === PASSWORD_AMR) {
+            refuse("a password primary records no upstreamAuthTime");
+        }
+        if (upstreamAuthTime !== null && !isValidDate(upstreamAuthTime)) {
+            refuse("recorded.authentication.upstreamAuthTime must be a valid date, null or absent");
+        }
+    }
+    return Object.freeze({
+        primary: value.primary,
+        federation: value.federation,
+        upstreamAmr: value.upstreamAmr === undefined
+            ? undefined
+            : Object.freeze([...value.upstreamAmr]),
+        mfaAt: undefined,
+        ...(upstreamAuthTime === undefined
+            ? {}
+            : {
+                upstreamAuthTime: upstreamAuthTime === null ? null : new Date(upstreamAuthTime.getTime()),
+            }),
+    });
+}
+function copyRecorded(value, refuse) {
+    if (!isPlainObject(value))
+        return refuse("recorded must be an object");
+    if (!isStringList(value.amr) || value.amr.length === 0 || !value.amr.every(isNonEmptyString)) {
+        refuse("recorded.amr must be a non-empty list of non-empty strings");
+    }
+    const authentication = copyAuthentication(value.authentication, refuse);
+    const amr = value.amr;
+    // A password login records `pwd` alone; a second-factor value beside it
+    // is what a step-up adds, never what a route hands in. A federated login
+    // may carry what a trusted IdP asserted.
+    if (authentication.primary === PASSWORD_AMR &&
+        amr.some((entry) => SECOND_FACTOR_AMR.has(entry))) {
+        refuse("a password primary's amr holds no second-factor value");
+    }
+    return Object.freeze({ amr: Object.freeze([...amr]), authentication });
+}
+/** The fields a primary and its DTO share, checked and copied; `authTime` is the caller's to add, and the facts a primary's. */
+function copyPrimaryFields(value, refuse) {
+    if (!isNonEmptyString(value.subject))
+        refuse("subject must be a non-empty string");
+    const user = userSnapshot(value.user, refuse);
+    // What reads the session's user back (`cookieClaim`, `cookieSessionUser`)
+    // takes its `id` for the subject.
+    if (user.id !== value.subject)
+        refuse("user.id must be the subject");
+    const claims = copyClaims(value.claims, refuse);
+    const recorded = copyRecorded(value.recorded, refuse);
+    if (value.redirectTo !== undefined && typeof value.redirectTo !== "string") {
+        refuse("redirectTo must be a string or absent");
+    }
+    if (!isPlainObject(value.request))
+        return refuse("request must be an object");
+    const { ip, userAgent } = value.request;
+    if (ip !== undefined && typeof ip !== "string")
+        refuse("request.ip must be a string or absent");
+    if (userAgent !== undefined && typeof userAgent !== "string") {
+        refuse("request.userAgent must be a string or absent");
+    }
+    return {
+        subject: value.subject,
+        user,
+        claims,
+        recorded,
+        redirectTo: value.redirectTo,
+        request: Object.freeze({
+            ...(ip === undefined ? {} : { ip: ip }),
+            ...(userAgent === undefined ? {} : { userAgent: userAgent }),
+        }),
+    };
+}
+/**
+ * `value` as a `PrimaryAuthentication` core's builders make: `recorded` has
+ * a non-empty `amr`, no `mfaAt`, and no second-factor value beside a
+ * password primary; `user` is read into its snapshot (`userSnapshot`) and
+ * `claims` read by `readLoginClaims` (`copyClaims`). A frozen deep copy, its `enrollmentFacts`
+ * derived from the snapshot.
+ */
+export function checkPrimaryAuthentication(value) {
+    const refuse = (what) => {
+        throw new RangeError(`PrimaryAuthentication: ${what}`);
+    };
+    if (!isPlainObject(value))
+        return refuse("must be an object");
+    const fields = copyPrimaryFields(value, refuse);
+    if (!isValidDate(value.authTime))
+        refuse("authTime must be a valid date");
+    return Object.freeze({
+        ...fields,
+        enrollmentFacts: enrollmentFactsOf(fields.user),
+        authTime: new Date(value.authTime.getTime()),
+    });
+}
+/** `value` as a `PrimaryAuthenticationDto`: the same, with `authTimeMs` epoch milliseconds. A frozen deep copy. */
+function checkPrimaryAuthenticationDto(value) {
+    const refuse = (what) => {
+        throw new RangeError(`PrimaryContinuation: primary ${what}`);
+    };
+    if (!isPlainObject(value))
+        return refuse("must be an object");
+    const fields = copyPrimaryFields(value, refuse);
+    if (!isEpochMs(value.authTimeMs))
+        refuse("authTimeMs must be epoch milliseconds");
+    return Object.freeze({ ...fields, authTimeMs: value.authTimeMs });
+}
+/** A primary rehydrated from its DTO: `authTime` a `Date` at `authTimeMs`, `enrollmentFacts` derived from its `user`. Frozen. */
+export function primaryFromDto(dto) {
+    const { authTimeMs, ...fields } = dto;
+    return Object.freeze({
+        ...fields,
+        enrollmentFacts: enrollmentFactsOf(fields.user),
+        authTime: new Date(authTimeMs),
+    });
+}
+/**
+ * The enrollment facts of the login `continuation` carries, derived from its
+ * `user` exactly as its rehydration derives them: for the requirement that
+ * holds it and decides a first binding before resuming the login. Facts the
+ * continuation carries are not read. A continuation `checkPrimaryContinuation`
+ * cannot read is a `RangeError`, as it is for `resumePrimary`.
+ */
+export function enrollmentFactsOfContinuation(continuation) {
+    const primary = primaryFromDto(checkPrimaryContinuation(continuation).primary);
+    return primary.enrollmentFacts;
+}
+/**
+ * What `requirement` may add as it completes: an `amr` of non-empty strings,
+ * none a primary's marker, `mfa` never alone; `mfaAt` never beside an empty
+ * `amr`. A second factor from the second-factor authority alone, and from it
+ * a verified one (`checkSecondFactor`). A frozen copy.
+ */
+export function checkPrimaryAdditions(requirement, value) {
+    const refuse = (what) => {
+        throw new RangeError(`requirement "${requirement.name}" adds ${what}`);
+    };
+    if (!isPlainObject(value))
+        return refuse("something that is not an object");
+    const amr = checkAddedAmr(value, refuse);
+    if (value.mfaAt !== undefined && !isValidDate(value.mfaAt)) {
+        refuse("an mfaAt that is not a valid date");
+    }
+    const hasMfaAt = value.mfaAt !== undefined;
+    if (requirement.secondFactorAuthority === true) {
+        if (!addsSecondFactor(amr, hasMfaAt)) {
+            refuse("no second factor: a completion by the second-factor authority is a verified second factor");
+        }
+    }
+    else {
+        if (amr.some((entry) => SECOND_FACTOR_AMR.has(entry))) {
+            refuse("a second-factor amr value, which only the second-factor authority may add");
+        }
+        if (hasMfaAt)
+            refuse("an mfaAt, which only the second-factor authority may add");
+    }
+    checkSecondFactor(amr, hasMfaAt, refuse);
+    return Object.freeze({
+        amr,
+        ...(value.mfaAt === undefined ? {} : { mfaAt: new Date(value.mfaAt.getTime()) }),
+    });
+}
+/** Whether an addition carries a second factor: a second-factor `amr` value, or `mfaAt`. */
+const addsSecondFactor = (amr, hasMfaAt) => hasMfaAt || amr.some((entry) => SECOND_FACTOR_AMR.has(entry));
+/**
+ * A second factor added, whoever adds it, is a verified one: a second-factor
+ * `amr` value of the factor's own (not `mfa`), `mfa` beside it (only the
+ * email code may leave it out, the MFA ADR's D14), and `mfaAt`; an `mfaAt`
+ * beside an empty `amr` verified nothing.
+ */
+function checkSecondFactor(amr, hasMfaAt, refuse) {
+    if (amr.length === 0 && hasMfaAt) {
+        refuse("an mfaAt beside an empty amr: a completion that adds no value verified no second factor");
+    }
+    if (!addsSecondFactor(amr, hasMfaAt))
+        return;
+    const factorValues = amr.filter((entry) => entry !== MFA_AMR);
+    if (!factorValues.some((entry) => SECOND_FACTOR_AMR.has(entry))) {
+        refuse("no second factor's own amr value: a second factor added is a verified one");
+    }
+    if (!amr.includes(MFA_AMR) && !factorValues.every((entry) => entry === EMAIL_OTP_AMR)) {
+        refuse(`no "${MFA_AMR}" beside a factor that adds it: only the email code's may leave it out`);
+    }
+    if (!hasMfaAt)
+        refuse("no mfaAt: a second factor added says when it was verified");
+}
+/** The `amr` rules every addition is held to, whoever adds it, in both forms. */
+function checkAddedAmr(value, refuse) {
+    const amr = value.amr;
+    // Empty is allowed: a requirement that reaches nothing completes its
+    // ceremony adding no value.
+    if (!isStringList(amr) || !amr.every(isNonEmptyString)) {
+        refuse("an amr that is not a list of non-empty strings");
+    }
+    const values = amr;
+    for (const entry of values) {
+        if (entry === PASSWORD_AMR || entry === FEDERATED_AMR) {
+            refuse(`"${entry}", which marks a primary authentication`);
+        }
+    }
+    if (values.length > 0 && values.every((entry) => entry === MFA_AMR)) {
+        refuse(`"${MFA_AMR}" alone, which comes beside a factor's own amr values`);
+    }
+    return Object.freeze([...values]);
+}
+/**
+ * `value` as a `PrimaryAdditionsDto` read back from a continuation: the `amr`
+ * rules, `mfaAtMs` epoch milliseconds, and a second factor added a verified
+ * one. Whether `requirement` may add one is `resumePrimary`'s to check.
+ */
+function checkPrimaryAdditionsDto(requirement, value) {
+    const refuse = (what) => {
+        throw new RangeError(`requirement "${requirement}" adds ${what}`);
+    };
+    if (!isPlainObject(value))
+        return refuse("something that is not an object");
+    const amr = checkAddedAmr(value, refuse);
+    if (value.mfaAtMs !== undefined && !isEpochMs(value.mfaAtMs)) {
+        refuse("an mfaAtMs that is not epoch milliseconds");
+    }
+    checkSecondFactor(amr, value.mfaAtMs !== undefined, refuse);
+    return Object.freeze({
+        amr,
+        ...(value.mfaAtMs === undefined ? {} : { mfaAtMs: value.mfaAtMs }),
+    });
+}
+/** Additions rehydrated from their DTO: `mfaAt` a `Date` at `mfaAtMs`. Frozen. */
+export function additionsFromDto(dto) {
+    return Object.freeze({
+        amr: Object.freeze([...dto.amr]),
+        ...(dto.mfaAtMs === undefined ? {} : { mfaAt: new Date(dto.mfaAtMs) }),
+    });
+}
+function copyCompleted(value, refuse) {
+    if (!isPlainObject(value))
+        return refuse("done holds an entry that is not an object");
+    if (!isNonEmptyString(value.requirement)) {
+        refuse("done holds an entry whose requirement is not a non-empty string");
+    }
+    return Object.freeze({
+        requirement: value.requirement,
+        adds: checkPrimaryAdditionsDto(value.requirement, value.adds),
+    });
+}
+/**
+ * `value` as a `PrimaryContinuation`: a primary DTO and `done`, the
+ * completed requirements with what each added — a second factor a verified
+ * one, added by one entry at most — no name twice, every instant epoch
+ * milliseconds. A frozen deep copy: what a requirement's record holds and
+ * what `resumePrimary` reads back. Which requirement declares the
+ * second-factor authority it does not know: `resumePrimary` checks that.
+ */
+export function checkPrimaryContinuation(value) {
+    const refuse = (what) => {
+        throw new RangeError(`PrimaryContinuation: ${what}`);
+    };
+    if (!isPlainObject(value))
+        return refuse("must be an object");
+    const primary = checkPrimaryAuthenticationDto(value.primary);
+    if (!Array.isArray(value.done))
+        return refuse("done must be a list");
+    const done = value.done.map((entry) => copyCompleted(entry, refuse));
+    const names = new Set(done.map((entry) => entry.requirement));
+    if (names.size !== done.length)
+        refuse("done names a requirement twice");
+    // One requirement may add a second factor, and a name completes once.
+    const adding = done.filter((entry) => addsSecondFactor(entry.adds.amr, entry.adds.mfaAtMs !== undefined));
+    if (adding.length > 1) {
+        refuse("done holds more than one completion that adds a second factor: only the second-factor authority adds one, and it completes once");
+    }
+    const interruptedBy = value.interruptedBy;
+    if (!isNonEmptyString(interruptedBy)) {
+        refuse("interruptedBy must name the requirement whose ceremony it waits on");
+    }
+    return Object.freeze({
+        primary,
+        done: Object.freeze(done),
+        interruptedBy: interruptedBy,
+    });
+}
+/**
+ * The continuation admission answers an interruption with: the primary as
+ * the route built it — without its `enrollmentFacts`, which a rehydration
+ * derives again — and every completed requirement's additions, as the
+ * serialisable DTO. Frozen.
+ */
+export function continuationOf(primary, done, interruptedBy) {
+    const { authTime, enrollmentFacts: _derivedAgain, ...fields } = primary;
+    return Object.freeze({
+        interruptedBy,
+        primary: Object.freeze({ ...fields, authTimeMs: authTime.getTime() }),
+        done: Object.freeze(done.map((entry) => Object.freeze({
+            requirement: entry.requirement,
+            adds: Object.freeze({
+                amr: Object.freeze([...entry.adds.amr]),
+                ...(entry.adds.mfaAt === undefined ? {} : { mfaAtMs: entry.adds.mfaAt.getTime() }),
+            }),
+        }))),
+    });
+}

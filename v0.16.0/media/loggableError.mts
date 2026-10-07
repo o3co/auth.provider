@@ -1,0 +1,739 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * `loggableError`: what a log line may carry of an error that came out of a
+ * library or a store talking to another system — an allowlist of fields,
+ * never the error. An error built from a parsed upstream response carries
+ * whatever that response said: an OAuth library puts the token answer it
+ * refused on the cause chain, a JSON parser quotes the text it could not
+ * parse, a Redis reply echoes the command it refused, and ioredis puts that
+ * command's arguments — a token record, for a store write under
+ * `allow-plaintext` — on the error. What the projection does, exactly:
+ *
+ * - It is plain data, and what a logger is handed is what the line carries.
+ *   It has no `message`: a serializer takes a value with a string `message`
+ *   for an Error and rewrites it — pino's err serializer folds each `cause`
+ *   into one message and stack and writes none of the cause's fields, and
+ *   writes the name over `type`. Every such serializer (pino's `err` and
+ *   `errWithCause` among them) hands anything else through untouched, so
+ *   under pino's defaults, the standalone template's logger, `consoleLogger`
+ *   or any other, every field below reaches the line, at every level.
+ * - `detail`: the error's message, capped at 256 characters, with the
+ *   known quoting shapes removed — `detail` (RFC 7807's name for an
+ *   occurrence's human-readable explanation) rather than `message`, for the
+ *   reason above. A SyntaxError's message is dropped (V8's JSON.parse and
+ *   body-parser quote the input); only ` at position N` survives, as
+ *   `position`, N at most ten digits and none from a longer number. A
+ *   YAMLException's is dropped whole (js-yaml quotes the lines around the
+ *   fault). Redis's `, with args beginning with: …` is cut from any
+ *   message. Other text a
+ *   peer wrote into a message is kept — the projection cannot tell it from
+ *   this process's own — but on one line: every character that breaks a
+ *   line or reorders it on screen ({@link lineSafeText}: C0, DEL, C1,
+ *   U+2028/U+2029, the directional marks, the bidi embedding, override and
+ *   isolate controls) is
+ *   replaced by `?`. `"`, `\` and any other character stay.
+ * - `error_description`: the one peer-written string kept on purpose — an
+ *   operator needs "Token has been expired or revoked." — and only its first
+ *   line (split on CRLF or LF), when that line is within RFC 6749 §5.2's
+ *   character set (`%x20-21 / %x23-5B / %x5D-7E`), cut at the start of the
+ *   space-delimited word that holds its first run of twenty or more
+ *   characters from `[A-Za-z0-9._~+/=-]`, and trimmed; omitted when nothing
+ *   is left; capped at 256.
+ * - `stack`: the frames, never the header. The stack must start with the
+ *   whole header V8 writes — `name: message`, Node's `name [code]:
+ *   message`, and for an empty message also `name` or `name [code]` — ending its
+ *   line, and the header is dropped; a stack that does not (a message
+ *   rewritten after V8 formatted it, a message that is not a string) gives
+ *   no stack. After it, the unbroken run of lines starting with four spaces
+ *   and `at ` is kept (it ends at the first line that is not one); the
+ *   first ten, joined by `\n`, then cut at 2048 characters. Absent when no
+ *   frame is left or `stack` cannot be read. See `framesOf` for what can
+ *   still pass for a frame.
+ * - Also kept: `name`; a string or numeric `code`; an integer `status`; a
+ *   string `type`; an `error` within §5.2's set; `response: { status,
+ *   contentType }` for a Response on the cause or on `response`; and the
+ *   Error causes, the same way, three deep. Every string is on one line —
+ *   the filter `detail` gets — and capped at 256 (the stack at 2048), a cut
+ *   never falling inside a surrogate pair.
+ * - Closed-set fields a store's or a client's error records, kept because
+ *   their shape cannot hold free text: an own `reason` that is a code —
+ *   lowercase words joined by `_` or `-`, at most 64 characters
+ *   (`unreachable`, `expired-at-issue`) — and an own `<word>Status` field
+ *   holding an HTTP status, 100–599, at most four of them (`storeStatus`: an
+ *   upstream's answer an error records beside its own `status`, which
+ *   Express reads as this server's).
+ * - An AggregateError's members (any error's `errors` array): of its first
+ *   {@link LOGGED_AGGREGATE_MAX_ERRORS}, the Errors, projected as causes are
+ *   and within the same three levels, as `aggregateErrors` — the name pino
+ *   writes a raw AggregateError's members under, so one query finds both —
+ *   and how many members are not among them, as `aggregateErrorsOmitted`.
+ *   Neither field when none of those five is an Error.
+ * - The command a store's error answered, by name alone: `command: { name }`
+ *   from ioredis's `command: { name, args }` when the name is a token of at
+ *   most 32 letters, digits and `_`, or two joined by one `.` (a module's
+ *   `JSON.SET`) — which Redis command failed, and never
+ *   its arguments. Kept at ioredis's own path, so a query on
+ *   `err.command.name` reads a raw and a projected line alike.
+ * - A budget for the line: at most {@link LOGGED_MAX_PROJECTIONS}
+ *   projections, the error and its causes and members together, taken
+ *   nearest first (breadth first: the error's own cause and members before
+ *   any of theirs). Every cut shows, whether the budget or the depth limit
+ *   made it: a member left out counts in `aggregateErrorsOmitted`, and a
+ *   cause left out leaves `causeOmitted: true`.
+ * - Never kept: a cause or a member that is not an Error, any other field
+ *   (a command's `args`, `body`, `buffer`), and anything of a thrown value that is
+ *   not an Error but its `typeof`, as `thrown`.
+ * - Printed whole: each projection carries a non-enumerable
+ *   `util.inspect.custom` that prints it {@link LOGGED_PRINT_DEPTH} levels
+ *   deep rather than Node's default two, so `consoleLogger` (and anything
+ *   else that inspects it) shows its causes and members instead of
+ *   `[Object]`. Only a projection is printed so — any other object a caller
+ *   logs keeps Node's default depth. The hook is a symbol, so JSON, pino and
+ *   a spy never see it, and the projection is still not error-like.
+ * - It never throws: an error from another realm counts; a throwing getter
+ *   drops its field; a value the Error check cannot inspect reads as a
+ *   non-Error.
+ *
+ * No state.
+ */
+
+import { type InspectOptions, inspect } from "node:util";
+
+/**
+ * The fields of an error a log line carries, and its Error causes the same
+ * way: a plain object, with no `message`, so that no serializer takes it for
+ * an Error and rewrites it — the line carries exactly these fields.
+ */
+export interface LoggableError {
+	/** The error's `name`; `"NonError"` for a thrown value that is not an Error. */
+	readonly name: string;
+	/**
+	 * The error's message, on one line (see {@link lineSafeText}). Absent for a
+	 * SyntaxError or a YAMLException, which quote their input; a Redis reply's
+	 * echoed arguments are cut. Not `message`, which would make a serializer
+	 * take the projection for an Error.
+	 */
+	readonly detail?: string;
+	/** A SyntaxError's `position N`, read out of its message. */
+	readonly position?: number;
+	/** A library's error code, e.g. openid-client's `OAUTH_INVALID_RESPONSE`. */
+	readonly code?: string | number;
+	/** The HTTP status the error records, e.g. an OAuth refusal's or body-parser's. */
+	readonly status?: number;
+	/** A string `type`, e.g. body-parser's `entity.too.large`. */
+	readonly type?: string;
+	/** The upstream's OAuth `error` code (RFC 6749 §5.2), e.g. `invalid_grant`. */
+	readonly error?: string;
+	/**
+	 * The upstream's `error_description`: its first line, when that line is
+	 * within RFC 6749 §5.2's character set, cut at the start of the word that
+	 * holds its first run of twenty token characters, and trimmed. The one
+	 * peer-written string kept on purpose.
+	 */
+	readonly error_description?: string;
+	/** A Response the library put on the error — its cause, or its own `response`. */
+	readonly response?: { readonly status: number; readonly contentType?: string };
+	/**
+	 * The stack's frames and nothing of its header: at most
+	 * {@link LOGGED_STACK_MAX_FRAMES} `    at …` lines, joined by `\n` and cut
+	 * at {@link LOGGED_STACK_MAX_LENGTH} characters. Absent when there are
+	 * none, when `stack` cannot be read, or when it does not start with the
+	 * header V8 writes for the error's name, code and message.
+	 */
+	readonly stack?: string;
+	readonly cause?: LoggableError;
+	/**
+	 * `true` when the error has an Error cause the projection left out: past
+	 * the depth limit, or past {@link LOGGED_MAX_PROJECTIONS}.
+	 */
+	readonly causeOmitted?: true;
+	/**
+	 * An own `reason` that is a code — lowercase words joined by `_` or `-`,
+	 * at most 64 characters — e.g. a Store transport failure's `unreachable`.
+	 */
+	readonly reason?: string;
+	/**
+	 * The command a store's error answered, by name alone — ioredis's
+	 * `command.name` (`set`, `evalsha`, `hello`) when it is a bounded token —
+	 * never its `args`.
+	 */
+	readonly command?: { readonly name: string };
+	/**
+	 * An AggregateError's members: of its first
+	 * {@link LOGGED_AGGREGATE_MAX_ERRORS}, the Errors, projected the same way.
+	 */
+	readonly aggregateErrors?: readonly LoggableError[];
+	/**
+	 * How many of the members are not in `aggregateErrors`: past the first
+	 * five, not an Error, past the depth limit, or left out by
+	 * {@link LOGGED_MAX_PROJECTIONS}.
+	 */
+	readonly aggregateErrorsOmitted?: number;
+	/** For a thrown value that is not an Error: its `typeof`, and nothing of its content. */
+	readonly thrown?: string;
+	/**
+	 * An own `<word>Status` field holding an HTTP status (100–599), at most
+	 * four: an upstream's answer an error records beside its own `status`,
+	 * e.g. a Store refusal's `storeStatus`.
+	 */
+	readonly [statusField: `${string}Status`]: number | undefined;
+}
+
+/** The longest string any field keeps. */
+export const LOGGED_STRING_MAX_LENGTH = 256;
+
+/** How many causes (or AggregateError members) deep the projection follows; a cycle ends here too. */
+const MAX_CAUSE_DEPTH = 3;
+
+/** The most AggregateError members the projection looks at, at each level. */
+export const LOGGED_AGGREGATE_MAX_ERRORS = 5;
+
+/**
+ * How many levels deep `util.inspect` prints a projection: past the deepest
+ * it nests — three levels of causes or AggregateError members (a member is
+ * two, the array and its element) and a `response` or `command` in the last.
+ */
+export const LOGGED_PRINT_DEPTH = 8;
+
+/**
+ * The projection's own `util.inspect.custom`: print it
+ * {@link LOGGED_PRINT_DEPTH} levels deep. A copy of its fields is printed, so
+ * the hook does not call itself.
+ */
+function printWhole(
+	this: object,
+	_depth: number,
+	options: InspectOptions,
+	print: typeof inspect,
+): string {
+	return print({ ...this }, { ...options, depth: LOGGED_PRINT_DEPTH });
+}
+
+/**
+ * `draft`, branded: a non-enumerable `util.inspect.custom` that prints it
+ * whole. Invisible to `JSON.stringify`, to pino and to `Object.keys`, and it
+ * adds no `message`, so no serializer takes the projection for an Error.
+ */
+const printedWhole = <T extends object>(draft: T): T =>
+	Object.defineProperty(draft, inspect.custom, { value: printWhole, enumerable: false });
+
+/**
+ * The most projections one line holds: the error, its causes and its
+ * members, all levels together. Each is capped — every string at 256
+ * characters, the stack at 2048 — so a line stays under about 64 KB.
+ */
+export const LOGGED_MAX_PROJECTIONS = 16;
+
+/**
+ * A `reason` that is a code: lowercase words joined by `_` or `-`. No space,
+ * capital or digit, so no sentence, number or token fits; at most
+ * {@link REASON_MAX_LENGTH} characters.
+ */
+const REASON_CODE = /^[a-z]+(?:[_-][a-z]+)*$/;
+const REASON_MAX_LENGTH = 64;
+
+/**
+ * Whether `value` is a `reason` a log line may carry: a code — lowercase
+ * words joined by `_` or `-`, at most 64 characters. The projection's own
+ * rule, for a line that reads a `reason` off something other than an error.
+ */
+export const isLoggableReason = (value: unknown): value is string =>
+	typeof value === "string" && value.length <= REASON_MAX_LENGTH && REASON_CODE.test(value);
+
+/** A field that records an HTTP status beside `status`: `storeStatus`, `upstreamStatus`. */
+const STATUS_FIELD = /^[a-z][A-Za-z]{0,31}Status$/;
+
+/** The most `<word>Status` fields the projection keeps. */
+const MAX_STATUS_FIELDS = 4;
+
+/**
+ * A command's name — `set`, `evalsha`, `hello`, or a module's `JSON.SET`,
+ * `FT.SEARCH`: a token, and at most one more after a dot — and nothing that
+ * could be an argument.
+ */
+const COMMAND_NAME = /^[a-z][a-z0-9_]{0,31}(?:\.[a-z][a-z0-9_]{0,31})?$/i;
+
+/**
+ * Every character that breaks a line or reorders it on screen: C0 (the line
+ * breaks, tab, ESC), DEL, C1 (NEL, CSI), the Unicode line and paragraph
+ * separators, the directional marks (U+200E, U+200F, U+061C), and the bidi
+ * embedding, override (U+202A–U+202E) and isolate (U+2066–U+2069) controls.
+ */
+const LINE_UNSAFE =
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: the control characters are what is matched, to be replaced.
+	/[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+
+/** `text` with every {@link LINE_UNSAFE} character replaced by `?`, one per code unit. */
+const oneLine = (text: string): string => text.replace(LINE_UNSAFE, "?");
+
+/**
+ * `text` cut to at most `length` code units, never between the halves of a
+ * surrogate pair: a high surrogate whose low half would fall past the limit
+ * is cut too, so the result may be one unit shorter.
+ */
+const cutAt = (text: string, length: number): string => {
+	if (text.length <= length) return text;
+	const last = text.charCodeAt(length - 1);
+	return text.slice(0, last >= 0xd800 && last <= 0xdbff ? length - 1 : length);
+};
+
+/** The shortest `maxLength` {@link lineSafeText} takes: one character and the cut's `...`. */
+const LINE_SAFE_MIN_LENGTH = 4;
+
+/**
+ * Text a peer wrote, as a log line carries it: on one line — every character
+ * that breaks a line or reorders it on screen (C0, DEL, C1, U+2028/U+2029,
+ * the directional marks, the bidi embedding, override and isolate controls)
+ * replaced by `?` — and cut at `maxLength` characters (256 by default), the
+ * cut marked with `...` and never falling inside a surrogate pair. A
+ * `maxLength` that is not an integer of at least 4 — room for one character
+ * and the mark — is a RangeError.
+ * The filter `loggableError` applies to a message, for a package that logs
+ * peer text that is not an error's: a certificate's subject, a URL a
+ * certificate names, a responder's Content-Type. Not RFC 6749's set
+ * (`auditErrorText`): a non-ASCII name, `"` and `\` stay legible. A value
+ * that is not a string answers `undefined`.
+ */
+export function lineSafeText(text: string, maxLength?: number): string;
+export function lineSafeText(text: unknown, maxLength?: number): string | undefined;
+export function lineSafeText(
+	text: unknown,
+	maxLength: number = LOGGED_STRING_MAX_LENGTH,
+): string | undefined {
+	if (!Number.isInteger(maxLength) || maxLength < LINE_SAFE_MIN_LENGTH) {
+		throw new RangeError(
+			`lineSafeText: maxLength must be an integer of at least ${LINE_SAFE_MIN_LENGTH} (got ${maxLength})`,
+		);
+	}
+	if (typeof text !== "string") return undefined;
+	const safe = oneLine(text);
+	return safe.length <= maxLength ? safe : `${cutAt(safe, maxLength - 3)}...`;
+}
+
+/** RFC 6749 §5.2: `error` and `error_description` are `%x20-21 / %x23-5B / %x5D-7E`. */
+const OAUTH_ERROR_TEXT = /^[\x20\x21\x23-\x5B\x5D-\x7E]+$/;
+
+/**
+ * Twenty or more characters that could be a token (base64url, base64, a
+ * JWT's segments, a hex string). An IdP that echoes the credential it refused
+ * — legacy Spring Security's "Invalid refresh token: <the token>" — writes
+ * one; a sentence does not.
+ */
+const TOKEN_RUN = /[A-Za-z0-9._~+/=-]{20,}/;
+
+/**
+ * An upstream's `error_description`: its first line — Azure AD puts a Trace
+ * ID, a Correlation ID and a timestamp on CRLF-separated lines after the
+ * AADSTS one — when that line is within RFC 6749 §5.2's character set, cut
+ * at the start of the word that holds its first token-shaped run, and
+ * trimmed. The word goes whole, so no part of the token and no fragment of
+ * the word is left: "Invalid refresh token: <the token>" (or "…: abc:<the
+ * token>") keeps "Invalid refresh token:", AADSTS700016 keeps "Application
+ * with identifier", a redirect URI named by Azure AD or Okta goes with its
+ * `https:`. §5.2's set has no tab, so a word ends at a space. Omitted when
+ * nothing is left. The one peer-written string the projection keeps,
+ * because an operator needs it to tell a revoked grant from a broken client.
+ */
+const descriptionOf = (value: unknown): string | undefined => {
+	if (typeof value !== "string") return undefined;
+	const firstLine = value.replace(/\r?\n[\s\S]*$/, "");
+	if (!OAUTH_ERROR_TEXT.test(firstLine)) return undefined;
+	const run = TOKEN_RUN.exec(firstLine);
+	const wordStart = run === null ? firstLine.length : firstLine.lastIndexOf(" ", run.index) + 1;
+	const kept = firstLine.slice(0, wordStart).trim();
+	return kept === "" ? undefined : capped(kept);
+};
+
+/**
+ * Redis quotes the leading arguments of a command it refused after this, in
+ * the server's own text — so whichever client carries it: redis-errors'
+ * ReplyError (ioredis), node-redis's ErrorReply (named plain "Error").
+ */
+const REDIS_ECHOED_ARGS = /, with args beginning with:[\s\S]*$/;
+
+/**
+ * The errors whose message quotes the input they could not parse, and is
+ * dropped whole: a SyntaxError (V8's JSON.parse and body-parser quote the
+ * input) and js-yaml's YAMLException (a snippet of the lines around the
+ * fault — a clients file's secrets, when a host's own module parses one).
+ */
+const QUOTES_ITS_INPUT: ReadonlySet<string> = new Set(["SyntaxError", "YAMLException"]);
+
+/**
+ * An error's message by the projection's rules, before `detail`'s cap:
+ * nothing for an error that quotes its input ({@link QUOTES_ITS_INPUT}) or
+ * for a message that is not a string; Redis's echoed arguments cut.
+ */
+const messageText = (name: string, message: unknown): string | undefined =>
+	typeof message !== "string" || QUOTES_ITS_INPUT.has(name)
+		? undefined
+		: message.replace(REDIS_ECHOED_ARGS, "");
+
+/** A V8 stack frame line. */
+const FRAME = /^ {4}at /;
+
+/** The most stack frames the projection keeps. */
+export const LOGGED_STACK_MAX_FRAMES = 10;
+
+/** The longest `stack` the projection keeps, frames joined; the cut may fall mid-frame. */
+export const LOGGED_STACK_MAX_LENGTH = 2048;
+
+/** A SyntaxError's offset, and nothing else of its message; a longer number is no offset. */
+const SYNTAX_POSITION = / at position (\d{1,10})(?!\d)/;
+
+/** A string field as the projection keeps it: one line, and cut at 256 outside any surrogate pair. */
+const capped = (value: string): string => cutAt(oneLine(value), LOGGED_STRING_MAX_LENGTH);
+
+/**
+ * `target[key]`, read so that the read cannot throw: `{ value }`, or `null`
+ * when it threw — a getter, a Proxy's trap. The projection is handed
+ * whatever was thrown, and must not throw while asking about it.
+ */
+export const guardedRead = (target: object, key: string): { readonly value: unknown } | null => {
+	try {
+		return { value: (target as Record<string, unknown>)[key] };
+	} catch {
+		return null;
+	}
+};
+
+/** One property, or `undefined` when reading it threw: that field is left out. */
+const read = (target: object, key: string): unknown => guardedRead(target, key)?.value;
+
+/**
+ * An Error from this realm or another (`node:vm`, a worker's structured
+ * clone). `Error.isError` where the runtime has it (Node 24+); on Node 22 the
+ * fallback asks the value for its prototype and its tag, which a Proxy may
+ * answer by throwing — any throw reads as "not an Error".
+ */
+const isError = (value: unknown): value is object => {
+	try {
+		const brand = (Error as { isError?: (candidate: unknown) => boolean }).isError;
+		if (typeof brand === "function") return brand(value);
+		return (
+			value instanceof Error ||
+			(typeof value === "object" &&
+				value !== null &&
+				Object.prototype.toString.call(value) === "[object Error]")
+		);
+	} catch {
+		return false;
+	}
+};
+
+/**
+ * Where the header written for `name`, a string `code` and `message` ends in
+ * `stack` — `name: message` or `name [code]: message`, and for an empty
+ * message also `name` or `name [code]` — when the stack starts with it and it
+ * ends its line; `-1` otherwise. V8 and Node write an empty message's header
+ * as the name alone; a source-map formatter (source-map-support, vitest's)
+ * writes `name: ` — both are the header.
+ */
+const headerEnd = (stack: string, name: string, code: unknown, message: string): number => {
+	const names = typeof code === "string" ? [name, `${name} [${code}]`] : [name];
+	for (const named of names) {
+		for (const header of message === "" ? [`${named}: `, named] : [`${named}: ${message}`]) {
+			const next = stack.charAt(header.length);
+			if (stack.startsWith(header) && (next === "" || next === "\n")) return header.length;
+		}
+	}
+	return -1;
+};
+
+/**
+ * The frames of an error's `stack`, and nothing of the header ahead of them
+ * — pinned by the `stack` vectors in `__tests__/loggableError.test.mts`:
+ *
+ * 1. `stack` or `message` not a string (or its read threw): no stack.
+ * 2. The header is what V8 writes from the error's `name` (a non-string one
+ *    compares as `"Error"`), a string `code` and `message`: `name:
+ *    message`, or Node's `name [code]: message`; for an empty message, also
+ *    `name` or `name [code]`. The stack must start with one of them, and
+ *    the header must end its line (a line break or the end of the stack
+ *    follows it). The message is the untrusted part: matched whole, from
+ *    the start, a message line shaped like a frame goes with the header —
+ *    never counted in lines. A stack that starts otherwise (the message
+ *    rewritten after V8 formatted the stack, which it does on the first
+ *    read of `stack`, to text found inside the name, part-way along the
+ *    header's line, or nowhere in it) means no stack, because the header can
+ *    no longer be told from the frames.
+ * 3. After the header, the unbroken run of `    at ` lines starting at the
+ *    first such line is kept, and it ends at the first line that is not one
+ *    — so a section appended after the frames ("Caused by: …") is not kept,
+ *    frame-shaped lines in it included.
+ * 4. The first {@link LOGGED_STACK_MAX_FRAMES} of the run, joined by `\n`,
+ *    then cut at {@link LOGGED_STACK_MAX_LENGTH} characters. No frame: no
+ *    stack.
+ *
+ * What the text cannot show, and so could still pass for frames:
+ * - a message rewritten, after the stack was formatted, to a leading part
+ *   of itself that ends at one of its own line breaks: the header V8 would
+ *   write for the new message, and the old message's later lines follow it
+ *   — its `    at `-shaped lines, if any, read as frames;
+ * - a `stack` assigned by hand with a frame-shaped line that carries data:
+ *   it is a frame by every test this can make.
+ */
+const framesOf = (
+	stack: unknown,
+	name: unknown,
+	code: unknown,
+	message: unknown,
+): string | undefined => {
+	if (typeof stack !== "string" || typeof message !== "string") return undefined;
+	const end = headerEnd(stack, typeof name === "string" ? name : "Error", code, message);
+	if (end < 0) return undefined;
+	// The header ends its line: the frames are on the lines after it.
+	const lines = stack.slice(end).split("\n").slice(1);
+	const first = lines.findIndex((line) => FRAME.test(line));
+	if (first < 0) return undefined;
+	const frames: string[] = [];
+	for (const line of lines.slice(first)) {
+		if (!FRAME.test(line) || frames.length === LOGGED_STACK_MAX_FRAMES) break;
+		frames.push(line);
+	}
+	return cutAt(frames.join("\n"), LOGGED_STACK_MAX_LENGTH);
+};
+
+/**
+ * `{ name }` of the command a store's error answered — ioredis's `command:
+ * { name, args }` — when `command` is an object whose `name` is a bounded
+ * token; never its `args`. A `command` that is a string (execa's shell line)
+ * or whose name could hold anything else gives nothing.
+ */
+const commandOf = (err: object): { readonly name: string } | undefined => {
+	const command = read(err, "command");
+	if (typeof command !== "object" || command === null) return undefined;
+	const name = read(command, "name");
+	return typeof name === "string" && COMMAND_NAME.test(name) ? { name } : undefined;
+};
+
+/** An own `reason` that is a code; `undefined` for anything else, or when asking throws. */
+const reasonOf = (err: object): string | undefined => {
+	try {
+		if (!Object.hasOwn(err, "reason")) return undefined;
+	} catch {
+		return undefined;
+	}
+	const reason = read(err, "reason");
+	return isLoggableReason(reason) ? reason : undefined;
+};
+
+/**
+ * The error's own `<word>Status` fields that hold an HTTP status, in key
+ * order, at most {@link MAX_STATUS_FIELDS}. Nothing when the keys cannot be
+ * listed (a Proxy's trap).
+ */
+const statusFieldsOf = (err: object): Record<string, number> => {
+	let keys: string[];
+	try {
+		keys = Object.keys(err);
+	} catch {
+		return {};
+	}
+	const kept: Record<string, number> = {};
+	let count = 0;
+	for (const key of keys) {
+		if (count === MAX_STATUS_FIELDS) break;
+		if (!STATUS_FIELD.test(key)) continue;
+		const value = read(err, key);
+		if (typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599) {
+			kept[key] = value;
+			count++;
+		}
+	}
+	return kept;
+};
+
+/**
+ * An AggregateError's member candidates: of its first
+ * {@link LOGGED_AGGREGATE_MAX_ERRORS} members, the Errors, and how many
+ * members it has. `null` for an `errors` that is not an array or cannot be
+ * read (a revoked Proxy throws even to `Array.isArray`), and when none of
+ * those members is an Error — a validation library's `errors` of plain issue
+ * objects.
+ */
+const membersOf = (err: object): { readonly errors: object[]; readonly total: number } | null => {
+	const errors = read(err, "errors");
+	let total: unknown;
+	try {
+		if (!Array.isArray(errors)) return null;
+		total = errors.length;
+	} catch {
+		return null;
+	}
+	if (typeof total !== "number" || !Number.isInteger(total) || total < 0) return null;
+	const candidates: object[] = [];
+	for (let index = 0; index < Math.min(total, LOGGED_AGGREGATE_MAX_ERRORS); index++) {
+		const member = read(errors as object, String(index));
+		if (isError(member)) candidates.push(member);
+	}
+	return candidates.length === 0 ? null : { errors: candidates, total };
+};
+
+/** A fetch `Response`, read structurally so that one from another realm counts too. */
+const responseFields = (value: unknown): LoggableError["response"] | undefined => {
+	if (typeof value !== "object" || value === null) return undefined;
+	const status = read(value, "status");
+	const headers = read(value, "headers");
+	if (typeof status !== "number" || !Number.isInteger(status)) return undefined;
+	if (typeof headers !== "object" || headers === null) return undefined;
+	const get = read(headers, "get");
+	if (typeof get !== "function") return undefined;
+	let contentType: unknown;
+	try {
+		contentType = get.call(headers, "content-type");
+	} catch {
+		contentType = undefined;
+	}
+	return {
+		status,
+		...(typeof contentType === "string" ? { contentType: capped(contentType) } : {}),
+	};
+};
+
+/**
+ * The text `detail` is cut from: `err`'s message by the projection's rules —
+ * nothing for a SyntaxError or a YAMLException, a message that is not a
+ * string or a value that is not an Error; a Redis reply's echoed arguments
+ * cut; on one line ({@link lineSafeText}'s filter) — without the
+ * 256-character cap. For a message read once and whole rather than a log
+ * field: a boot failure's, whose advice often runs past 256 characters
+ * (`boot/failure-summary.mts`).
+ */
+export function uncappedDetail(err: unknown): string | undefined {
+	if (!isError(err)) return undefined;
+	const rawName = read(err, "name");
+	const text = messageText(typeof rawName === "string" ? rawName : "Error", read(err, "message"));
+	return text === undefined ? undefined : oneLine(text);
+}
+
+/**
+ * Project an error onto the fields a log line may carry — the rules are the
+ * file header's.
+ *
+ * A logger that prints the whole error writes what its peer said to the
+ * log. Before this projection both shipped paths did so for a store error:
+ * pino's err serializer copies every enumerable property of an error —
+ * ioredis's `command.args` included — and `consoleLogger` hands the error to
+ * `console.*`, whose inspection prints them. A deployment chooses its logger,
+ * so a call site that logs a library's or a store's error hands the logger
+ * this instead of the error, and every logger writes it as it is. It never
+ * throws.
+ */
+export function loggableError(err: unknown): LoggableError {
+	const root = fieldsOf(err);
+	// Breadth first, so the budget goes to the error's own cause and members
+	// before any of theirs. Each entry is an Error already projected, whose
+	// cause and members are still to be attached.
+	const pending: Array<{ readonly err: unknown; readonly depth: number; readonly into: Draft }> = [
+		{ err, depth: 0, into: root },
+	];
+	let left = LOGGED_MAX_PROJECTIONS - 1;
+	for (let next = 0; next < pending.length; next++) {
+		const { err: node, depth, into } = pending[next] as (typeof pending)[number];
+		if (!isError(node)) continue;
+		// Past the depth limit a child is cut as one past the budget is — and
+		// marked the same way, so every cut shows.
+		const room = depth < MAX_CAUSE_DEPTH;
+		const cause = read(node, "cause");
+		if (isError(cause)) {
+			if (room && left > 0) {
+				left--;
+				into.cause = fieldsOf(cause);
+				pending.push({ err: cause, depth: depth + 1, into: into.cause });
+			} else {
+				into.causeOmitted = true;
+			}
+		}
+		const members = membersOf(node);
+		if (members !== null) {
+			const kept: Draft[] = [];
+			for (const member of members.errors) {
+				if (!room || left === 0) break;
+				left--;
+				const projected = fieldsOf(member);
+				kept.push(projected);
+				pending.push({ err: member, depth: depth + 1, into: projected });
+			}
+			if (kept.length > 0) into.aggregateErrors = kept;
+			if (members.total > kept.length) into.aggregateErrorsOmitted = members.total - kept.length;
+		}
+	}
+	return root;
+}
+
+/** A projection under construction: its cause and members are attached after its own fields. */
+type Draft = {
+	-readonly [K in keyof LoggableError]: K extends "cause"
+		? Draft | undefined
+		: K extends "aggregateErrors"
+			? Draft[] | undefined
+			: LoggableError[K];
+};
+
+/** The error's own fields — everything but its cause and members, which `loggableError` attaches. */
+function fieldsOf(err: unknown): Draft {
+	return printedWhole(ownFieldsOf(err));
+}
+
+function ownFieldsOf(err: unknown): Draft {
+	if (!isError(err)) {
+		return { name: "NonError", thrown: err === null ? "null" : typeof err };
+	}
+	const rawName = read(err, "name");
+	const name = typeof rawName === "string" ? capped(rawName) : "Error";
+	const rawMessage = read(err, "message");
+	const code = read(err, "code");
+	const status = read(err, "status");
+	const type = read(err, "type");
+	const error = read(err, "error");
+	const errorDescription = descriptionOf(read(err, "error_description"));
+	const cause = read(err, "cause");
+	const response = responseFields(cause) ?? responseFields(read(err, "response"));
+	const stack = framesOf(read(err, "stack"), rawName, code, rawMessage);
+	const reason = reasonOf(err);
+	const command = commandOf(err);
+
+	const text = messageText(name, rawMessage);
+	const detail = text === undefined ? undefined : capped(text);
+	let position: number | undefined;
+	if (typeof rawMessage === "string" && name === "SyntaxError") {
+		const at = SYNTAX_POSITION.exec(rawMessage);
+		position = at ? Number(at[1]) : undefined;
+	}
+
+	return {
+		name,
+		...(detail !== undefined ? { detail } : {}),
+		...(position !== undefined ? { position } : {}),
+		...(typeof code === "string"
+			? { code: capped(code) }
+			: typeof code === "number" && Number.isFinite(code)
+				? { code }
+				: {}),
+		...(typeof status === "number" && Number.isInteger(status) ? { status } : {}),
+		...statusFieldsOf(err),
+		...(reason !== undefined ? { reason } : {}),
+		...(command !== undefined ? { command } : {}),
+		...(typeof type === "string" ? { type: capped(type) } : {}),
+		...(typeof error === "string" && OAUTH_ERROR_TEXT.test(error) ? { error: capped(error) } : {}),
+		...(errorDescription !== undefined ? { error_description: errorDescription } : {}),
+		...(response !== undefined ? { response } : {}),
+		...(stack !== undefined ? { stack } : {}),
+	};
+}

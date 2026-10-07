@@ -1,0 +1,1159 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/**
+ * The coordinator: a login's second-factor ceremony, and an enrollment or an
+ * account-email proof in a signed-in session, over the MFA stores, the key
+ * ring and the installed factors — reading the transaction, issuing a
+ * factor's challenge, verifying a proof — answered as outcomes the routes map
+ * to HTTP. See README, "The routes", and ADR
+ * 2026-09-25-multi-factor-authentication, F1, F2, F4 and D8.
+ *
+ * - Every operation starts with the bound read (`getBoundMfaTransaction`), and
+ *   after it calls only operations that carry the version it read, and
+ *   `reserveAttempt` once it held. A transaction bound to anything else,
+ *   spent, expired, neither a login's nor an `enroll` or `step_up` one of
+ *   the session the call was admitted in — its `sid` and subject — reads as
+ *   unknown, and spends nothing. An `enroll` transaction verifies the
+ *   account-email proof alone.
+ * - A login's transaction is held to its subject's sessions boundary
+ *   (`revokedBefore`) at every bound read: a continuation authenticated at or
+ *   before it, the revocation skew allowed, is `revoked` and spends nothing;
+ *   a boundary that cannot be read is an outage; none wired, none is read.
+ *   The step-up reads only its session's `enroll` and `step_up`
+ *   transactions, so it never reads a login's boundary. The boundary is read once per call: a
+ *   revocation landing during that call can still let it bind.
+ * - The step-up of a subject with no record that may count opens, or uses,
+ *   an `enroll` transaction owing the account-email proof (`stepUp.mts`); a verified proof
+ *   on one is recorded for its session alone, standing
+ *   `mfa.manage.maxAgeSeconds`. The step-up of a subject holding one opens,
+ *   or uses, a `step_up` transaction, opened only where admission's view says
+ *   a second factor can be recorded on the session
+ *   (`MfaCeremonySession.secondFactorRecordable`).
+ * - A verification reserves its attempt before the proof is checked, consumes
+ *   the transaction before the factor moves on, and on a lost compare-and-set
+ *   reads the factor again and checks the proof again: a code used twice at
+ *   once succeeds once, and a lost race never spends a factor's state.
+ * - Between the two, the subject lock (`lock.mts`): a guessable proof
+ *   reserves one of its subject's attempts after the transaction's, and a
+ *   hold refuses it unchecked. The attempt is settled once the verification
+ *   ends: `success` once the factor was written, `void` for a right proof
+ *   that completed nothing, and a failure otherwise — a refusal, an outage
+ *   or a factor that throws before a verdict. An exempt proof records its
+ *   success once the factor was written. A right proof whose factor answers
+ *   data that cannot be sealed (`copyFactorValue`), the data it was handed
+ *   included, is `void` too — the factor's bug never counts against the
+ *   subject — and is answered `503` before anything is consumed: the
+ *   transaction kept and still usable, its attempt counted at the
+ *   reservation, the factor's data as it was.
+ * - A recovery code's verification reads the subject's recovery-set floor
+ *   before its attempt is reserved, and again once the code is spent: a set
+ *   the recovery-code rule refuses (`recoverySetRefusal`) — below the floor —
+ *   is an invalid code, refused unchecked before, its transaction spent
+ *   after; a digest whose key left the ring is unreadable, naming the key.
+ * - A store that cannot answer, a factor whose data does not open, and a
+ *   factor that throws are outages: never a wrong code, never "no factor".
+ * - `factor_id: "account-email"` names the account-email proof (`proof.mts`)
+ *   on a transaction that owes it; a first binding is `enrollment.mts`'s.
+ *   Both are handed the coordinator's reads and writes as the kit; what the
+ *   three share is `ceremony.mts`'s contract.
+ * - Under `required`, a login's factor that does not count, for a subject
+ *   with no counting factor it can use, completes no login: what the login
+ *   reopens for — or why not — is settled before the transaction's attempt is
+ *   reserved (`reopen.mts`), and settled again after a lost compare-and-set
+ *   round; once the transaction is consumed and the proof spent, the login is
+ *   reopened for a binding. A login transaction opened for a binding
+ *   verifies no factor.
+ * - A verified proof on a session's `step_up` transaction is answered
+ *   `stepped_up`, naming the session and what the proof adds, dated by the
+ *   verification's time: the caller records it on the session. The factor's
+ *   mailed code goes to the session's own address.
+ * - A verified counting factor marks the enrollment witness of a login — or
+ *   a step-up's session — whose `User` does not carry it (D12), after noting the subject's first-binding
+ *   mark (`firstBindingMark.mts`): a note that fails leaves the witness
+ *   unmarked, so no session's recorded witness goes stale unmarked; a
+ *   directory that cannot write the witness gets no note. Neither failure
+ *   fails the login (`reconcileWitness`). The mark is `factorSet.mts`'s,
+ *   held to the subject's generation read before the proof is checked: it
+ *   reads the records first, and clears the witness again when the records
+ *   read after it hold none that may count.
+ * - A factor is handed its records opened and digests under the ring; it
+ *   never sees a key, a store, a transaction or the mail sender. A code it
+ *   asks to be mailed goes through `sendMfaMail` (`mail.mts`), to the
+ *   login's address, and the digest of that address is kept with the pending
+ *   challenge and handed back to the verification. The page is answered the
+ *   factor's response with where the code went, masked (`sent_to`), and how
+ *   long it lives (`expires_in`), as kept.
+ * - What a record can do is `factorState.mts`'s one reading: what a
+ *   transaction offers (`isOffered`) and what is usable are that file's.
+ * - A refusal carries the factor id the factor named only when it is one of
+ *   the subject's factors of the kind verified: nothing else reaches the audit.
+ *   Another is dropped and flagged, never quoted.
+ * - A factor's answer — a challenge's, a verification's — is read once, field
+ *   by field, however the factor holds it (a getter, a class's instance), and
+ *   only what was read is used. The state, data and response in it are taken
+ *   as their plain copy (`copyFactorValue`) where the answer is read, and that
+ *   one copy is what `amrFor`, the recovery-code rules, the seal and the page
+ *   act on; one that is not plain JSON-shaped is the factor's failure
+ *   (`503`), the stored data left as it was. A mail it asks for is read there
+ *   too (`copyAskedMail`). A verification is a success only when its `ok` is
+ *   `true` and a refusal only when it is `false` with a reason its type
+ *   names: anything else is the factor's failure. What `amrFor` answers is
+ *   copied once, and only the copy is checked and used.
+ * - A factor's `identity` is read as a non-empty string or none; one that
+ *   throws is none — the record a duplicate of none — and is said through
+ *   `identityFailed`.
+ */
+import { claimCoveredByRevocationBoundary, DEFAULT_CLOCK_SKEW_MS, DEFAULT_SUBJECT_REVOCATION_SKEW_MS, getBoundMfaTransaction, isConsumedMfaTransaction, isMfaFactorUpdateWritten, MFA_AMR, readMfaAttemptReservation, readSessionEmailProof, } from "@o3co/auth-provider-core";
+import { OUTSIDE_CONTRACT, outage, UNKNOWN_FACTOR, UNKNOWN_TRANSACTION, } from "./ceremony.mjs";
+import { createMfaEnrollment } from "./enrollment.mjs";
+import { holdsCountingFactor, holdsUsableIn, isOffered, readFactorRecord, } from "./factorState.mjs";
+import { readFirstBindingMark } from "./firstBindingMark.mjs";
+import { exemptKindsHeld } from "./lock.mjs";
+import { copyAskedMail, keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail, } from "./mail.mjs";
+import { ACCOUNT_EMAIL_FACTOR_ID, createAccountEmailProof } from "./proof.mjs";
+import { isRecoveryCodeFactor, recoveryCodesLeft, recoverySetRefusal } from "./recovery/factor.mjs";
+import { createLoginReopen } from "./reopen.mjs";
+import { copyFactorValue } from "./sealing.mjs";
+import { createMfaStepUp } from "./stepUp.mjs";
+import { openEnrollTransaction, openLoginBinding, openStepUpTransaction } from "./transactions.mjs";
+import { reconciles, reconcilesSession } from "./witness.mjs";
+/** A transaction id as the login makes one: 32 bytes, base64url. */
+const TRANSACTION_ID = /^[A-Za-z0-9_-]{43}$/;
+/** How many times a verification writes a factor whose compare-and-set it keeps losing. */
+const ADVANCE_ROUNDS = 3;
+/** Whether `written`, what a transaction's `update` answered other than `null`, is `tx` at its next version. */
+const isWrittenAt = (written, tx) => {
+    try {
+        if (typeof written !== "object" || written === null)
+            return false;
+        const { id, version } = written;
+        return id === tx.id && version === tx.version + 1;
+    }
+    catch {
+        return false;
+    }
+};
+/**
+ * What a factor's `amrFor` answered, copied once: the copy when it names at
+ * least one value and only values the factor declares, else `undefined`. Only
+ * the copy is checked and acted on; a read that throws is thrown.
+ */
+const declaredAmrOf = (factor, amr) => {
+    if (!Array.isArray(amr))
+        return undefined;
+    const copy = [...amr];
+    return copy.length > 0 &&
+        copy.every((value) => typeof value === "string" && factor.amrValues.includes(value))
+        ? copy
+        : undefined;
+};
+/** The reasons a verification may refuse with: any other is the factor's failure. */
+const VERIFICATION_REFUSALS = {
+    invalid: true,
+    expired: true,
+    replayed: true,
+    malformed: true,
+    sign_count_regression: true,
+};
+/** The coordinator over `options` (see this file's header). */
+export function createMfaCoordinator(options) {
+    const { factors, factorStore, transactions, sealing, maxAttemptsPerTransaction, lock, mode, mailSender, witness, factorSet, transactionTtlSeconds, maxFactorsPerSubject, requireEmailProof, sessionProofSeconds, firstBindingMark, subjectRevocation, identityFailed, } = options;
+    const now = options.now ?? (() => Date.now());
+    /**
+     * Whether `tx`, a login's, was authenticated at or before its subject's
+     * sessions boundary, the revocation skew allowed, in whole seconds as
+     * `verifyJwt` compares `auth_time` — a login without a continuation is,
+     * under any boundary; a boundary that cannot be read, or a time that
+     * cannot be compared, is the boundary's outage.
+     */
+    const pastSessionsBoundary = async (tx) => {
+        if (subjectRevocation === undefined)
+            return false;
+        try {
+            const boundary = await subjectRevocation.revokedBefore(tx.subject);
+            if (boundary === null)
+                return false;
+            if (!(boundary instanceof Date)) {
+                throw new TypeError("the sessions boundary is neither a date nor null");
+            }
+            // A login transaction without a continuation cannot show it began after the boundary.
+            const authTimeMs = tx.continuation?.primary.authTimeMs;
+            return (authTimeMs === undefined ||
+                claimCoveredByRevocationBoundary(Math.floor(authTimeMs / 1000), boundary, DEFAULT_SUBJECT_REVOCATION_SKEW_MS));
+        }
+        catch (cause) {
+            return outage("revocation_boundary", "revokedBefore", cause);
+        }
+    };
+    /**
+     * The transaction `call` names, bound to its binding: a login's, held to
+     * its subject's sessions boundary, or an `enroll` or `step_up` one
+     * recording the `sid` and subject of the session the call was admitted
+     * in; `null` when there is none to use.
+     */
+    const bound = async (call) => {
+        const tx = await boundRead(call);
+        if (tx === null || "outcome" in tx)
+            return tx;
+        if (tx.purpose === "login") {
+            const past = await pastSessionsBoundary(tx);
+            if (past === false)
+                return tx;
+            return past === true ? { outcome: "revoked", subject: tx.subject } : past;
+        }
+        return inSession(tx, call);
+    };
+    /** An `enroll` or `step_up` transaction of the session `call` was admitted in — its `sid` and subject — else none. */
+    const inSession = (tx, call) => {
+        const session = call.session;
+        return (tx.purpose === "enroll" || tx.purpose === "step_up") &&
+            session !== undefined &&
+            tx.sid === session.sid &&
+            tx.subject === session.subject
+            ? tx
+            : null;
+    };
+    /** The transaction `call` names, bound to its binding, whatever its purpose; `null` for none. */
+    const boundRead = async (call) => {
+        const id = call.transactionId;
+        if (id === undefined || !TRANSACTION_ID.test(id))
+            return null;
+        let tx;
+        try {
+            tx = await getBoundMfaTransaction(transactions, id, call.binding);
+        }
+        catch (cause) {
+            return outage("mfa_transaction", "get", cause);
+        }
+        return tx;
+    };
+    /** Every record of `subject`, oldest first; an outage is never "none". */
+    const recordsOf = async (subject) => {
+        try {
+            return await factorSet.list(subject);
+        }
+        catch (cause) {
+            return outage("mfa_factor", "list", cause);
+        }
+    };
+    /** The record `factorId` names among `records`, when an installed factor verifies its kind. */
+    const named = (records, factorId) => {
+        if (typeof factorId !== "string")
+            return undefined;
+        const record = records.find((candidate) => candidate.id === factorId);
+        const factor = record === undefined ? undefined : factors.get(record.kind);
+        return record === undefined || factor === undefined ? undefined : { record, factor };
+    };
+    /** Whether the subject `read` holds a usable record (`factorState.mts`) — one that counts, when `options.counting` asks it. */
+    const holdsUsable = (read) => holdsUsableIn(read);
+    /** `subject`'s records read for a judgment over them (`factorSet.readSubject`); an outage is never "none". */
+    const readSubject = async (subject) => {
+        try {
+            return await factorSet.readSubject(subject);
+        }
+        catch (cause) {
+            return outage("mfa_factor", "list", cause);
+        }
+    };
+    /**
+     * `subject`'s recovery-set floor, for a verification of `factor` that is a
+     * recovery-code factor — read fail-closed: one that cannot be read is the
+     * verification's outage; `undefined` for any other factor, which reads none.
+     */
+    const floorForVerification = async (subject, factor) => {
+        if (!isRecoveryCodeFactor(factor))
+            return undefined;
+        try {
+            return await factorSet.recoverySetFloor(subject);
+        }
+        catch (cause) {
+            return outage("mfa_transaction", "recoverySetFloor", cause);
+        }
+    };
+    /**
+     * The named record and every record of its kind, opened for `subject`: the
+     * named one must open, and pass the recovery-code rule (`recoverySetRefusal`)
+     * under `floor`, the subject's recovery-set floor when one was read — a
+     * set below it is `retired`, a digest whose key left the ring unreadable
+     * naming that key; another that does not open is left out.
+     */
+    const openKind = (subject, record, records, floor = undefined) => {
+        const open = (candidate) => sealing.openFactorData({ subject, id: candidate.id, kind: candidate.kind }, candidate.data);
+        const enrolled = (candidate, data) => ({
+            id: candidate.id,
+            label: candidate.label,
+            createdAt: candidate.createdAt,
+            lastUsedAt: candidate.lastUsedAt,
+            data,
+        });
+        const opened = open(record);
+        if (opened.state !== "ok") {
+            return {
+                outcome: "unreadable",
+                kind: record.kind,
+                factorId: record.id,
+                state: opened.state,
+                ...(opened.state === "key_unavailable" ? { keyId: opened.keyId } : {}),
+            };
+        }
+        const factor = factors.get(record.kind);
+        const refusal = factor === undefined || floor === undefined
+            ? undefined
+            : recoverySetRefusal(factor, opened.value, { floor, holdsKey: sealing.holdsKey });
+        if (refusal?.reason === "retired")
+            return { outcome: "retired" };
+        if (refusal?.reason === "key_unavailable") {
+            return {
+                outcome: "unreadable",
+                kind: record.kind,
+                factorId: record.id,
+                state: "key_unavailable",
+                keyId: refusal.keyId,
+            };
+        }
+        const self = enrolled(record, opened.value);
+        const all = records
+            .filter((candidate) => candidate.kind === record.kind)
+            .flatMap((candidate) => {
+            if (candidate === record)
+                return [self];
+            const other = open(candidate);
+            return other.state === "ok" ? [enrolled(candidate, other.value)] : [];
+        });
+        return { named: self, all };
+    };
+    /**
+     * The state a verification of `factor` is handed: the pending challenge
+     * for this factor, taken — or read, for a factor that keeps it across
+     * attempts — and opened, with the digest of the address its code went to;
+     * none when there is none, it is another factor's, or it has expired. Kept
+     * state that does not open is unreadable.
+     */
+    const challengeState = async (tx, factor, record, nowMs) => {
+        if (factor.challenge === undefined)
+            return { state: undefined };
+        let pending;
+        if (factor.reusableChallenge === true) {
+            pending = tx.challenge;
+        }
+        else {
+            try {
+                pending = await transactions.takeChallenge(tx.id, tx.version);
+            }
+            catch (cause) {
+                return outage("mfa_transaction", "takeChallenge", cause);
+            }
+        }
+        if (pending === null ||
+            pending === undefined ||
+            pending.factorId !== record.id ||
+            pending.kind !== record.kind ||
+            pending.expiresAtMs <= nowMs) {
+            return { state: undefined };
+        }
+        const opened = sealing.openState({ transactionId: tx.id, kind: record.kind, use: "challenge" }, pending.state);
+        const kept = opened.state === "ok" ? readKeptState(opened.value) : undefined;
+        if (kept !== undefined) {
+            return {
+                state: kept.state,
+                ...(kept.addressDigest === undefined ? {} : { addressDigest: kept.addressDigest }),
+            };
+        }
+        // Kept state that does not open is an outage, never an absent challenge.
+        return {
+            outcome: "unreadable",
+            kind: record.kind,
+            factorId: record.id,
+            state: "challenge",
+            ...(opened.state === "key_unavailable" ? { keyId: opened.keyId } : {}),
+        };
+    };
+    /**
+     * One of `tx`'s attempts reserved, after the bound read held: the
+     * attempts left; `exhausted` past the limit, which the store answers by
+     * deleting the transaction; unknown when none was reserved.
+     */
+    const reserve = async (tx) => {
+        let answered;
+        try {
+            answered = await transactions.reserveAttempt(tx.id, maxAttemptsPerTransaction);
+        }
+        catch (cause) {
+            return outage("mfa_transaction", "reserveAttempt", cause);
+        }
+        const reservation = readMfaAttemptReservation(answered, maxAttemptsPerTransaction);
+        if (reservation === undefined) {
+            return outage("mfa_transaction", "reserveAttempt", OUTSIDE_CONTRACT);
+        }
+        if (!reservation.ok) {
+            // Past the limit the store deleted the transaction; with none reserved, it was gone.
+            return reservation.attempts > 0 ? { outcome: "exhausted" } : UNKNOWN_TRANSACTION;
+        }
+        return { attemptsRemaining: Math.max(0, maxAttemptsPerTransaction - reservation.attempts) };
+    };
+    /** `tx` consumed at the version read: the record as the store answered it; `spent` when another consumed it first. */
+    const consume = async (tx) => {
+        let consumed;
+        try {
+            consumed = await transactions.consume(tx.id, tx.version);
+        }
+        catch (cause) {
+            return outage("mfa_transaction", "consume", cause);
+        }
+        if (consumed === null)
+            return { outcome: "spent" };
+        if (!isConsumedMfaTransaction(consumed, tx)) {
+            return outage("mfa_transaction", "consume", OUTSIDE_CONTRACT);
+        }
+        return consumed;
+    };
+    /** `patch` written at `tx`'s version: the transaction the store answered, its id and next version checked; else why not. */
+    const write = async (tx, patch) => {
+        let written;
+        try {
+            written = await transactions.update(tx.id, tx.version, patch);
+        }
+        catch (cause) {
+            return outage("mfa_transaction", "update", cause);
+        }
+        if (written === null)
+            return UNKNOWN_TRANSACTION;
+        if (!isWrittenAt(written, tx))
+            return outage("mfa_transaction", "update", OUTSIDE_CONTRACT);
+        return { written: written };
+    };
+    /**
+     * `subject`'s first-binding mark noted, standing its lifetime, with the
+     * mark that stood before it as the store answered it in the same step
+     * (`earlierAtMs`, `null` for none); the outage otherwise, an answer the
+     * port does not promise among it. Dated by the clock read just before the
+     * note, not the request's start: a request that stalled must not date the
+     * mark early.
+     */
+    const noteFirstBinding = async (subject) => {
+        const atMs = now();
+        try {
+            const earlierAtMs = readFirstBindingMark(await transactions.noteFirstBinding(subject, atMs, atMs + firstBindingMark.lifetimeMs), atMs);
+            return { atMs, earlierAtMs };
+        }
+        catch (cause) {
+            return outage("mfa_transaction", "noteFirstBinding", cause);
+        }
+    };
+    /**
+     * The refusal of an authentication at `authTimeMs` a mark at `markAtMs`
+     * distrusts, judged at `nowMs`, until a sign-in after `keptAtMs` — the
+     * mark the store keeps, `markAtMs` unless a later note moved it — is
+     * trusted; else `undefined`.
+     */
+    const distrustedBy = (subject, authTimeMs, markAtMs, nowMs, keptAtMs = markAtMs) => markAtMs !== null && firstBindingMark.distrusts(authTimeMs, markAtMs)
+        ? {
+            outcome: "first_binding_distrusted",
+            subject,
+            retryAfterMs: firstBindingMark.retryAfterMs(keptAtMs ?? markAtMs, nowMs),
+        }
+        : undefined;
+    const kit = {
+        factors,
+        factorStore,
+        sealing,
+        mailSender,
+        witness,
+        factorSet,
+        now,
+        maxFactorsPerSubject,
+        requireEmailProof,
+        bound,
+        openEnrollment: async (call, session, shape) => {
+            try {
+                return await openEnrollTransaction(transactions, {
+                    sessionId: call.binding.id,
+                    sid: session.sid,
+                    subject: session.subject,
+                    enrollment: shape.enrollment,
+                    emailProof: shape.emailProof,
+                    nowMs: now(),
+                    ttlSeconds: transactionTtlSeconds,
+                });
+            }
+            catch (cause) {
+                return outage("mfa_transaction", "create", cause);
+            }
+        },
+        openStepUp: async (call, session, acrValues) => {
+            try {
+                return await openStepUpTransaction(transactions, {
+                    sessionId: call.binding.id,
+                    sid: session.sid,
+                    subject: session.subject,
+                    acrValues,
+                    nowMs: now(),
+                    ttlSeconds: transactionTtlSeconds,
+                });
+            }
+            catch (cause) {
+                return outage("mfa_transaction", "create", cause);
+            }
+        },
+        holdsUsable,
+        readSubject,
+        openLoginBinding: async (binding, continuation, shape) => {
+            try {
+                return await openLoginBinding(transactions, {
+                    binding,
+                    continuation,
+                    ...shape,
+                    nowMs: now(),
+                    ttlSeconds: transactionTtlSeconds,
+                });
+            }
+            catch (cause) {
+                return outage("mfa_transaction", "create", cause);
+            }
+        },
+        provedInSession: async (subject, sid) => {
+            const nowMs = now();
+            let answer;
+            try {
+                answer = await transactions.sessionEmailProofAt(subject, sid, nowMs);
+            }
+            catch (cause) {
+                return outage("mfa_transaction", "sessionEmailProofAt", cause);
+            }
+            const proved = readSessionEmailProof(answer, nowMs);
+            if (proved === undefined) {
+                return outage("mfa_transaction", "sessionEmailProofAt", OUTSIDE_CONTRACT);
+            }
+            // One given longer ago than its window and the clock skew is none, whatever the store answered.
+            return (proved !== null && proved >= nowMs - sessionProofSeconds * 1000 - DEFAULT_CLOCK_SKEW_MS);
+        },
+        recordSessionProof: async (subject, sid, provedAtMs) => {
+            try {
+                await transactions.recordSessionEmailProof(subject, sid, provedAtMs, provedAtMs + sessionProofSeconds * 1000);
+                return undefined;
+            }
+            catch (cause) {
+                return outage("mfa_transaction", "recordSessionEmailProof", cause);
+            }
+        },
+        boundInSession: async (call) => {
+            const tx = await boundRead(call);
+            return tx === null || "outcome" in tx ? tx : inSession(tx, call);
+        },
+        firstBindingDistrust: async (subject, authTimeMs) => {
+            const nowMs = now();
+            let mark;
+            try {
+                mark = readFirstBindingMark(await transactions.firstBindingAt(subject, nowMs), nowMs);
+            }
+            catch (cause) {
+                return outage("mfa_transaction", "firstBindingAt", cause);
+            }
+            return distrustedBy(subject, authTimeMs, mark, nowMs);
+        },
+        noteFirstBinding: async (subject, authTimeMs) => {
+            const noted = await noteFirstBinding(subject);
+            if ("outcome" in noted)
+                return noted;
+            // Judged on the mark that stood before; waited out from the later of it and
+            // this note's, which the store keeps.
+            return distrustedBy(subject, authTimeMs, noted.earlierAtMs, noted.atMs, noted.earlierAtMs === null ? null : Math.max(noted.earlierAtMs, noted.atMs));
+        },
+        reconcileWitness: async (subject, started) => {
+            // A directory that cannot write the witness leaves no session stale: no mark is due.
+            if (!witness.writable)
+                return {
+                    witness: await factorSet.markEnrolled(started, subject),
+                    firstBindingUnnoted: undefined,
+                };
+            // The mark that stood before is not judged here: the factor verified is no first binding.
+            const noted = await noteFirstBinding(subject);
+            return "outcome" in noted
+                ? { witness: undefined, firstBindingUnnoted: noted }
+                : {
+                    witness: await factorSet.markEnrolled(started, subject),
+                    firstBindingUnnoted: undefined,
+                };
+        },
+        recordsOf,
+        reserve,
+        consume,
+        write,
+        clear: async (written, field) => !("outcome" in (await write(written, { [field]: null }))),
+        emailProofRequired: async (subject) => {
+            let flagged;
+            try {
+                flagged = await transactions.emailProofRequiredAtNextBinding(subject);
+            }
+            catch (cause) {
+                return outage("mfa_transaction", "emailProofRequiredAtNextBinding", cause);
+            }
+            return typeof flagged === "boolean"
+                ? flagged
+                : outage("mfa_transaction", "emailProofRequiredAtNextBinding", OUTSIDE_CONTRACT);
+        },
+        declaredAmr: (factor, data) => {
+            try {
+                return declaredAmrOf(factor, factor.amrFor(data));
+            }
+            catch {
+                return undefined;
+            }
+        },
+        identityOf: (factor, data) => {
+            try {
+                const identity = factor.identity?.(data);
+                return typeof identity === "string" && identity !== "" ? identity : undefined;
+            }
+            catch (cause) {
+                identityFailed?.(factor.kind, cause);
+                return undefined;
+            }
+        },
+    };
+    const enrollment = createMfaEnrollment(kit);
+    const proof = createAccountEmailProof(kit);
+    const stepUp = createMfaStepUp(kit);
+    const reopen = createLoginReopen(kit);
+    return {
+        async describe(call) {
+            const nowMs = now();
+            const tx = await bound(call);
+            if (tx === null)
+                return UNKNOWN_TRANSACTION;
+            if ("outcome" in tx)
+                return tx;
+            // An enroll transaction verifies the account-email proof alone: it lists no factor.
+            // A retired recovery set is not offered (`readSubjectRecords`).
+            const reading = tx.purpose === "enroll" ? undefined : await readSubject(tx.subject);
+            if (reading !== undefined && "outcome" in reading)
+                return reading;
+            const listed = (reading?.records ?? []).flatMap((record) => {
+                if (reading === undefined)
+                    return [];
+                const read = readFactorRecord(reading.context, tx.subject, record);
+                if (!isOffered(read))
+                    return [];
+                let hint;
+                if (read.state === "usable") {
+                    try {
+                        hint = read.factor.describe(read.data).hint;
+                    }
+                    catch {
+                        hint = undefined;
+                    }
+                }
+                return [
+                    {
+                        id: record.id,
+                        kind: record.kind,
+                        ...(typeof record.label === "string" ? { label: record.label } : {}),
+                        ...(typeof hint === "string" ? { hint } : {}),
+                    },
+                ];
+            });
+            return {
+                outcome: "described",
+                view: {
+                    purpose: tx.purpose,
+                    factors: listed,
+                    enrollment: tx.enrollment,
+                    emailProof: tx.emailProof === "required",
+                    expiresIn: Math.max(1, Math.ceil((tx.expiresAtMs - nowMs) / 1000)),
+                    attemptsRemaining: Math.max(0, maxAttemptsPerTransaction - tx.attempts),
+                },
+            };
+        },
+        async challenge(call) {
+            const nowMs = now();
+            const tx = await bound(call);
+            if (tx === null)
+                return UNKNOWN_TRANSACTION;
+            if ("outcome" in tx)
+                return tx;
+            if (tx.purpose === "enroll") {
+                return call.factorId === ACCOUNT_EMAIL_FACTOR_ID
+                    ? proof.challenge(tx, call.session?.user)
+                    : UNKNOWN_FACTOR;
+            }
+            if (call.factorId === ACCOUNT_EMAIL_FACTOR_ID) {
+                return proof.challenge(tx, tx.continuation?.primary.user);
+            }
+            const records = await recordsOf(tx.subject);
+            if ("outcome" in records)
+                return records;
+            const found = named(records, call.factorId);
+            if (found === undefined)
+                return UNKNOWN_FACTOR;
+            const { record, factor } = found;
+            if (factor.challenge === undefined)
+                return { outcome: "none" };
+            const opened = openKind(tx.subject, record, records);
+            // No floor is read here: no set is retired.
+            if ("outcome" in opened)
+                return opened.outcome === "retired" ? UNKNOWN_FACTOR : opened;
+            const failed = (cause) => ({
+                outcome: "challenge_failed",
+                kind: record.kind,
+                factorId: record.id,
+                cause,
+            });
+            let issued;
+            try {
+                const answer = await factor.challenge({
+                    subject: tx.subject,
+                    transactionId: tx.id,
+                    nowMs,
+                    request: call.request,
+                    digests: sealing.digestsFor(record.kind),
+                    factor: opened.named,
+                    factors: opened.all,
+                });
+                // The factor's answer, each field read once, however it holds them; its
+                // state as the plain copy that is sealed, its response as the plain copy
+                // the page is answered (`copyFactorValue`).
+                const state = answer?.state;
+                issued = {
+                    state: state === undefined ? undefined : copyFactorValue(state),
+                    response: copyFactorValue(answer?.response),
+                    mail: copyAskedMail(answer?.mail),
+                };
+            }
+            catch (cause) {
+                return failed(cause);
+            }
+            const about = {
+                subject: tx.subject,
+                kind: record.kind,
+                purpose: tx.purpose,
+            };
+            const sent = {
+                outcome: "sent",
+                response: issued.response,
+                ...about,
+            };
+            /** The pending challenge, sealed with the address's digest when a code went out, living until `expiresAtMs`. */
+            const pending = (addressDigest, expiresAtMs) => ({
+                factorId: record.id,
+                kind: record.kind,
+                state: sealing.sealState({ transactionId: tx.id, kind: record.kind, use: "challenge" }, keptState({ state: issued.state, addressDigest })),
+                expiresAtMs,
+            });
+            if (issued.mail !== undefined) {
+                const mailed = await sendMfaMail({
+                    sender: mailSender,
+                    mail: issued.mail,
+                    purpose: "login_code",
+                    subject: tx.subject,
+                    // A step-up's code goes to the session's own address; the bound read held the session to it.
+                    address: tx.purpose === "step_up"
+                        ? call.session?.user.email
+                        : tx.continuation?.primary.user.email,
+                    nowMs,
+                    notAfterMs: tx.expiresAtMs,
+                    digests: sealing.digestsFor(record.kind),
+                    keep: async (addressDigest, expiresAtMs) => {
+                        let challenge;
+                        try {
+                            challenge = pending(addressDigest, expiresAtMs);
+                        }
+                        catch (cause) {
+                            return { kept: false, refusal: failed(cause) };
+                        }
+                        const kept = await write(tx, { challenge });
+                        if ("outcome" in kept)
+                            return { kept: false, refusal: kept };
+                        return { kept: true, clear: () => kit.clear(kept.written, "challenge") };
+                    },
+                });
+                switch (mailed.outcome) {
+                    case "sent":
+                        // Where the code went and how long it lives, as kept: never the factor's to say.
+                        return {
+                            ...sent,
+                            response: { ...sent.response, ...mailedAnswer(mailed, nowMs) },
+                        };
+                    case "not_kept":
+                        return mailed.refusal;
+                    case "address_mismatch":
+                        return { outcome: "address_mismatch", ...about };
+                    case "key_unavailable":
+                        return {
+                            outcome: "unreadable",
+                            kind: record.kind,
+                            factorId: record.id,
+                            state: "key_unavailable",
+                            keyId: mailed.keyId,
+                        };
+                    case "refused_at_limit":
+                    case "no_sender":
+                    case "unavailable":
+                        return mailRefusalOf(mailed, "login_code", record.kind);
+                    case "malformed":
+                    case "no_address":
+                        return failed(new TypeError("the factor's challenge asked for a mail that is not a login code"));
+                    default:
+                        return mailed;
+                }
+            }
+            // The challenge lives no longer than its transaction; one without state
+            // clears a pending one, which answered an earlier challenge.
+            let patch;
+            try {
+                patch =
+                    issued.state !== undefined
+                        ? { challenge: pending(undefined, tx.expiresAtMs) }
+                        : tx.challenge !== undefined
+                            ? { challenge: null }
+                            : undefined;
+            }
+            catch (cause) {
+                return failed(cause);
+            }
+            if (patch !== undefined) {
+                const written = await write(tx, patch);
+                if ("outcome" in written)
+                    return written;
+            }
+            return sent;
+        },
+        async verify(call) {
+            const nowMs = now();
+            const tx = await bound(call);
+            if (tx === null)
+                return UNKNOWN_TRANSACTION;
+            if ("outcome" in tx)
+                return tx;
+            if (call.factorId === ACCOUNT_EMAIL_FACTOR_ID)
+                return proof.verify(call, tx);
+            // A transaction opened for a binding binds; it verifies no other factor.
+            if (tx.purpose === "enroll" || tx.enrollment !== "none")
+                return UNKNOWN_FACTOR;
+            let records = await recordsOf(tx.subject);
+            if ("outcome" in records)
+                return records;
+            const found = named(records, call.factorId);
+            if (found === undefined)
+                return UNKNOWN_FACTOR;
+            const { factor } = found;
+            let { record } = found;
+            const about = {
+                subject: tx.subject,
+                kind: record.kind,
+                purpose: tx.purpose,
+            };
+            const refused = (reason, attemptsRemaining, concerns = {}) => ({
+                outcome: "refused",
+                reason,
+                attemptsRemaining,
+                ...concerns,
+                ...about,
+            });
+            const unreadable = (cause) => ({
+                outcome: "unreadable",
+                kind: record.kind,
+                factorId: record.id,
+                state: "verification",
+                cause,
+            });
+            // The factor must open, and a recovery-code set pass its rule under the
+            // subject's recovery-set floor, before an attempt is spent on it: an
+            // outage spends nothing, and a retired set is refused unchecked.
+            const floor = await floorForVerification(tx.subject, factor);
+            if (typeof floor === "object")
+                return floor;
+            const retired = () => refused("invalid", Math.max(0, maxAttemptsPerTransaction - tx.attempts));
+            let opened = openKind(tx.subject, record, records, floor);
+            if ("outcome" in opened)
+                return opened.outcome === "retired" ? retired() : opened;
+            /**
+             * F3: under `required`, a login's factor that does not count completes
+             * no login for a subject left with no counting factor it can use over
+             * `current`; what the login reopens for, or why not, is settled before
+             * anything more is spent (`reopen.mts`).
+             */
+            const planOver = (current) => mode === "required" &&
+                tx.purpose === "login" &&
+                !factor.counting &&
+                !holdsCountingFactor({ factors, sealing }, tx.subject, current)
+                ? reopen.plan(tx, current)
+                : undefined;
+            let reopening = await planOver(records);
+            if (reopening !== undefined && "outcome" in reopening) {
+                return reopening.outcome === "unavailable" ? reopening : { ...reopening, ...about };
+            }
+            // A reconciliation's mark, where one could follow, is held to the subject's generation as it was before the proof is checked.
+            const markDue = tx.purpose === "step_up"
+                ? reconcilesSession(factor, call.session?.witness)
+                : reconciles(factor, tx.continuation?.primary.user);
+            const started = markDue ? await factorSet.begin(tx.subject, "mark") : undefined;
+            const reserved = await reserve(tx);
+            if ("outcome" in reserved) {
+                return reserved.outcome === "exhausted" ? refused("exhausted", 0) : reserved;
+            }
+            const { attemptsRemaining } = reserved;
+            const entered = await lock.enter(tx.subject, factor, nowMs);
+            if (entered.outcome === "unavailable")
+                return entered;
+            if (entered.outcome === "locked") {
+                const { outcome: _, ...hold } = entered;
+                return {
+                    outcome: "locked",
+                    ...hold,
+                    exemptKinds: exemptKindsHeld({ records, factors }),
+                    attemptsRemaining,
+                    binding: record.binding,
+                    ...about,
+                };
+            }
+            // How the subject's attempt settles: a failure until the proof verifies.
+            let settled = "failure";
+            // Whether a right proof's factor answered data that cannot be sealed: its
+            // bug, never the subject's, so the attempt settles `void`.
+            let dataRefused = false;
+            try {
+                const pending = await challengeState(tx, factor, record, nowMs);
+                if ("outcome" in pending)
+                    return pending;
+                /**
+                 * The proof checked against the factor as `opened` holds it, and what
+                 * the verification adds: non-empty, and only what the factor declares.
+                 */
+                const check = async () => {
+                    if ("outcome" in opened) {
+                        return opened.outcome === "retired" ? { reason: "invalid" } : opened;
+                    }
+                    const { named: self, all } = opened;
+                    let result;
+                    try {
+                        const answer = await factor.verify({
+                            subject: tx.subject,
+                            transactionId: tx.id,
+                            nowMs,
+                            request: call.request,
+                            digests: sealing.digestsFor(record.kind),
+                            factor: self,
+                            factors: all,
+                            state: pending.state,
+                            ...(pending.addressDigest === undefined
+                                ? {}
+                                : { addressDigest: pending.addressDigest }),
+                            proof: call.proof,
+                        });
+                        // The factor's answer, each field read once, however it holds them: a
+                        // read that throws, an `ok` neither `true` nor `false`, or a refusal's
+                        // reason outside the contract's, is the factor's failure, as a throw of
+                        // its own.
+                        const ok = answer.ok;
+                        if (ok === true) {
+                            const { factorId, next } = answer;
+                            result = { ok: true, factorId, next };
+                        }
+                        else if (ok === false) {
+                            const { reason, factorId } = answer;
+                            if (typeof reason !== "string" || !Object.hasOwn(VERIFICATION_REFUSALS, reason)) {
+                                throw new TypeError("the factor's verification refused with a reason it may not");
+                            }
+                            result = { ok: false, reason, factorId };
+                        }
+                        else {
+                            throw new TypeError("the factor's verification answered an ok that is not a boolean");
+                        }
+                    }
+                    catch (cause) {
+                        return unreadable(cause);
+                    }
+                    if (!result.ok) {
+                        const { reason, factorId } = result;
+                        if (factorId === undefined)
+                            return { reason };
+                        const concerned = all.find((candidate) => candidate.id === factorId);
+                        return concerned === undefined
+                            ? { reason, factorIdDropped: true }
+                            : { reason, factorId: concerned.id };
+                    }
+                    const { factorId } = result;
+                    const verified = all.find((candidate) => candidate.id === factorId);
+                    if (verified === undefined) {
+                        return unreadable(new TypeError("the factor verified a factor id the subject does not hold"));
+                    }
+                    // The data after this use as the plain copy that is sealed
+                    // (`copyFactorValue`), and that everything after acts on: the answered
+                    // `next`, or — none answered — the data the factor was handed, taken once.
+                    let next;
+                    try {
+                        next = copyFactorValue(result.next === undefined ? verified.data : result.next);
+                    }
+                    catch (cause) {
+                        dataRefused = true;
+                        return unreadable(cause);
+                    }
+                    let amr;
+                    try {
+                        amr = declaredAmrOf(factor, factor.amrFor(next));
+                    }
+                    catch (cause) {
+                        return unreadable(cause);
+                    }
+                    if (amr === undefined) {
+                        return unreadable(new TypeError("the factor's amrFor answered values it does not declare"));
+                    }
+                    return { verified, next, added: amr };
+                };
+                let checked = await check();
+                if ("outcome" in checked) {
+                    // Right, and the factor's data refused: the transaction kept, the attempt
+                    // counted at its reservation, the subject's attempt void.
+                    if (dataRefused)
+                        settled = "void";
+                    return checked;
+                }
+                if ("reason" in checked) {
+                    const { reason, ...concerns } = checked;
+                    return refused(reason, attemptsRemaining, concerns);
+                }
+                // Right: from here a proof that completes nothing never counts.
+                settled = "void";
+                // Consumed before the factor moves on: a lost race spends the
+                // transaction, never the factor's state.
+                const consumed = await consume(tx);
+                if ("outcome" in consumed)
+                    return consumed;
+                for (let round = 1;; round++) {
+                    const { verified, next } = checked;
+                    const target = records.find((candidate) => candidate.id === verified.id);
+                    if (target === undefined)
+                        return refused("invalid", 0);
+                    let data;
+                    try {
+                        // Re-sealed under the ring's first key at every use.
+                        data = sealing.sealFactorData({ subject: tx.subject, id: target.id, kind: target.kind }, next);
+                    }
+                    catch (cause) {
+                        return unreadable(cause);
+                    }
+                    let written;
+                    try {
+                        written = await factorStore.update(tx.subject, target.id, target.version, {
+                            data,
+                            label: target.label,
+                            lastUsedAt: new Date(nowMs),
+                        });
+                    }
+                    catch (cause) {
+                        return outage("mfa_factor", "update", cause);
+                    }
+                    if (written !== null) {
+                        if (!isMfaFactorUpdateWritten(written, {
+                            subject: tx.subject,
+                            id: target.id,
+                            expectedVersion: target.version,
+                            next: { data },
+                        })) {
+                            return outage("mfa_factor", "update", OUTSIDE_CONTRACT);
+                        }
+                        settled = "success";
+                        break;
+                    }
+                    if (round === ADVANCE_ROUNDS) {
+                        return outage("mfa_factor", "update", new Error(`the factor's compare-and-set was lost ${ADVANCE_ROUNDS} times`));
+                    }
+                    // Lost: read the factor again and check the proof again against it.
+                    records = await recordsOf(tx.subject);
+                    if ("outcome" in records)
+                        return records;
+                    const again = records.find((candidate) => candidate.id === record.id);
+                    if (again === undefined)
+                        return refused("invalid", 0);
+                    record = again;
+                    opened = openKind(tx.subject, record, records, floor);
+                    // A set retired since is refused as the proof would be: the transaction is spent.
+                    if ("outcome" in opened) {
+                        return opened.outcome === "retired" ? refused("invalid", 0) : opened;
+                    }
+                    checked = await check();
+                    if ("outcome" in checked)
+                        return checked;
+                    if ("reason" in checked) {
+                        const { reason, ...concerns } = checked;
+                        return refused(reason, 0, concerns);
+                    }
+                    // The records moved: what the proof completes is settled again over them.
+                    reopening = await planOver(records);
+                    if (reopening !== undefined && "outcome" in reopening) {
+                        return reopening.outcome === "unavailable" ? reopening : { ...reopening, ...about };
+                    }
+                }
+                // The floor read again once the spend is written: a regeneration that
+                // raised it meanwhile has retired this set, and its answer may be out.
+                if (floor !== undefined) {
+                    const again = await floorForVerification(tx.subject, factor);
+                    if (typeof again === "object") {
+                        settled = "void";
+                        return again;
+                    }
+                    const retiredSince = recoverySetRefusal(factor, checked.next, {
+                        floor: again ?? floor,
+                        holdsKey: sealing.holdsKey,
+                    });
+                    if (retiredSince?.reason === "retired") {
+                        settled = "void";
+                        return refused("invalid", 0);
+                    }
+                }
+                if (reopening !== undefined) {
+                    const recoveryCodesRemaining = recoveryCodesLeft(factor, checked.next);
+                    const answer = await reopen.open(consumed, reopening);
+                    return "outcome" in answer
+                        ? { outcome: "binding_not_reopened", outage: answer, recoveryCodesRemaining, ...about }
+                        : { outcome: "binding_reopened", answer, recoveryCodesRemaining, ...about };
+                }
+                // D12: a counting factor verified for a `User` that does not say it
+                // enrolled — the login's, or the one the session recorded — marks it,
+                // so a mark that failed heals here.
+                const reconciled = (tx.purpose === "step_up"
+                    ? reconcilesSession(factor, call.session?.witness)
+                    : reconciles(factor, consumed.continuation?.primary.user))
+                    ? await kit.reconcileWitness(tx.subject, started)
+                    : undefined;
+                const verified = {
+                    adds: {
+                        amr: [...new Set([...checked.added, ...(factor.addsMfa ? [MFA_AMR] : [])])],
+                        mfaAt: new Date(nowMs),
+                    },
+                    witness: reconciled?.witness,
+                    firstBindingUnnoted: reconciled?.firstBindingUnnoted,
+                    recoveryCodesRemaining: recoveryCodesLeft(factor, checked.next),
+                    ...about,
+                };
+                // A step-up's session is escalated by the caller; a login is resumed by it.
+                if (tx.purpose === "step_up") {
+                    // The bound read held its sid to the session's: one without is none to escalate.
+                    return tx.sid === undefined
+                        ? UNKNOWN_TRANSACTION
+                        : { outcome: "stepped_up", sid: tx.sid, ...verified };
+                }
+                return { outcome: "verified", continuation: consumed.continuation, ...verified };
+            }
+            finally {
+                await entered.settle(settled);
+            }
+        },
+        beginEnrollment: (call) => enrollment.begin(call),
+        completeEnrollment: (call) => enrollment.complete(call),
+        stepUp: (call) => stepUp.open(call),
+    };
+}

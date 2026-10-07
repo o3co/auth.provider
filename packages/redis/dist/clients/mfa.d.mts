@@ -1,0 +1,468 @@
+/**
+ * The MFA stores' clients: the enrolled factors, one hash per subject; the transactions, a
+ * subject's lock state, the email-proof requirement, a session's proof and a subject's
+ * first-binding mark.
+ */
+import type { MfaLockoutPolicy, MfaSubjectAttemptOutcome, MfaSubjectHold, MfaSubjectRecoveryOperation } from "@o3co/auth-provider-core";
+import type { RedisDurability } from "./durability.mjs";
+/**
+ * What an update writes over a factor record's version and its mutable part,
+ * each as the text the record keeps.
+ */
+export interface MfaFactorRecordUpdateInput {
+    /** The version the record must still be at, as decimal text. */
+    readonly expectedVersion: string;
+    /** The version it is at afterwards, as decimal text. */
+    readonly nextVersion: string;
+    /** The new mutable part: one line of JSON. */
+    readonly mutable: string;
+}
+/**
+ * What every membership write of a factor set carries: the generation it
+ * leaves the set at, and the deadline past which it writes nothing.
+ */
+export interface MfaFactorSetWriteInput {
+    /** The set's new generation, minted by the adapter: written as the `~g` field. */
+    readonly next: string;
+    /**
+     * Epoch milliseconds, on the app's clock at issue plus the adapter's write
+     * timeout. A write that reaches the server when its clock (`TIME`), to the
+     * millisecond, is at or past this answers `late` and writes nothing, however it got there late: queued
+     * while the connection was down, sent again after a reconnect, or held by
+     * a stalled server. `late` says only that this copy wrote nothing: another
+     * copy may have committed, or may still commit within W (the write
+     * timeout plus {@link MfaFactorSetWriteInput.clockSkewMs}) on a server whose
+     * clock lags by that skew, so the adapter rejects it with the outcome
+     * unknown.
+     */
+    readonly deadlineMs: number;
+    /**
+     * A key of its own for this write, on the set's hash tag, that keeps the
+     * write's answer until `clockSkewMs` past its deadline. A copy of the
+     * write sent again (the driver resends a command whose reply a dropped
+     * connection lost) finds it, answers what the first copy answered, and
+     * writes nothing.
+     */
+    readonly replayKey: string;
+    /**
+     * The clock skew the adapter allows between servers' clocks: the replay
+     * key outlives the deadline by it, so a copy that a server whose clock
+     * lags the one that kept the key (after a failover or a slot migration)
+     * still finds it before it would judge the copy on time.
+     */
+    readonly clockSkewMs: number;
+}
+/** A membership write that may leave the set empty: how long its tombstone is kept. */
+export interface MfaFactorSetEmptyingWriteInput extends MfaFactorSetWriteInput {
+    /** Milliseconds a set this write leaves empty is kept as its tombstone (`PEXPIRE`). */
+    readonly tombstoneMs: number;
+}
+/** A conditional create: the generation the set must still be at, `null` for an absent set. */
+export interface MfaFactorSetCreateIfInput extends MfaFactorSetWriteInput {
+    readonly expected: string | null;
+}
+/** A conditional removal: the generation the set must still be at. */
+export interface MfaFactorSetRemoveIfInput extends MfaFactorSetEmptyingWriteInput {
+    readonly expected: string;
+}
+/**
+ * Backing client for the `MfaFactorStore` adapter (ADR
+ * 2026-09-25-multi-factor-authentication): one hash per subject, a field
+ * per factor, and the set's generation under the reserved field `~g`, which
+ * no factor's field can be (a factor's field is base64url, which has no
+ * `~`).
+ *
+ * A factor's value is three lines — `<version>\n<fixed>\n<mutable>` — where
+ * `<version>` is decimal text and `<fixed>` and `<mutable>` are one line of
+ * JSON each (`JSON.stringify` never writes a raw line feed). The split lets
+ * `update` be one indivisible step that never decodes the JSON: it compares
+ * the version as text, keeps the fixed part byte for byte, and writes the
+ * new version and mutable part beside it. A script that decoded and
+ * re-encoded the record would change it (`cjson` writes an empty array as
+ * `{}`), so none does. Every operation touches the one key it is handed, so
+ * this client needs no hash tag to run on Cluster.
+ *
+ * Every membership write — `createIf`, `removeIf` and `removeAll` — is one
+ * indivisible step that first answers a copy of a write
+ * already applied with that write's answer (its `replayKey`), then refuses a
+ * write at or past its deadline (`late`), then checks, then writes the fields and
+ * `~g` = `next`, and keeps its answer under `replayKey` until `clockSkewMs`
+ * past its deadline. `removeIf`, the reset and `listVersioned` run on a
+ * full server (`allow-oom`): they write only `~g`, the replay key and an
+ * expiry, and a factor must stay removable when nothing can be enrolled.
+ * A write that leaves the hash holding `~g` alone (an emptied set, its
+ * tombstone) sets the key to expire `tombstoneMs` later; one that leaves it
+ * holding a factor takes the expiry off. A key without `~g` that holds
+ * factors was written before the set had a generation: a conditional write
+ * against it answers `conflict`, and `listVersioned` gives it one.
+ */
+export interface MfaFactorStoreClient {
+    /** Every field of the hash at `key` and its value (`HGETALL`); `{}` when there is none. */
+    list(key: string): Promise<Readonly<Record<string, string>>>;
+    /**
+     * Every field of the hash at `key` and its value, `~g` among them, from one
+     * snapshot; `{}` when there is none. A hash without `~g` is given `mint` as
+     * its generation in the same step, its expiry kept. Read on the primary: a
+     * read-only replica refuses it.
+     */
+    listVersioned(key: string, mint: string): Promise<Readonly<Record<string, string>>>;
+    /**
+     * Write `value` under `field` only while the set is at `input.expected`
+     * (`null`: while there is no key) and does not hold `field`.
+     */
+    createIf(key: string, field: string, value: string, input: MfaFactorSetCreateIfInput): Promise<"created" | "conflict" | "late">;
+    /**
+     * Remove `field` only while the set is at `input.expected`: `missing` for
+     * no key, or no such field at `expected`; `conflict` for another
+     * generation, or none. The generation is checked before the field.
+     */
+    removeIf(key: string, field: string, input: MfaFactorSetRemoveIfInput): Promise<"removed" | "missing" | "conflict" | "late">;
+    /**
+     * Atomically: while the value under `field` is at `input.expectedVersion`,
+     * replace its version and mutable part, keep its fixed part, and resolve
+     * the value as written; `null` when the field is absent, at another
+     * version, or not three lines. Keeps `~g` and the key's expiry.
+     */
+    update(key: string, field: string, input: MfaFactorRecordUpdateInput): Promise<string | null>;
+    /** Remove every field, and leave the set's tombstone at `input.next`, the key made when absent. */
+    removeAll(key: string, input: MfaFactorSetEmptyingWriteInput): Promise<"removed" | "late">;
+    /**
+     * What the server says about keeping what it is written. A reply
+     * that refuses a question leaves that part unread; any other reply error,
+     * and a server that cannot be asked at all, rejects.
+     */
+    durability(): Promise<RedisDurability>;
+}
+/** What an update writes, as the transaction's hash keeps it. */
+export interface MfaTransactionUpdateInput {
+    /** The version the transaction must still be at, as decimal text. */
+    readonly expectedVersion: string;
+    /**
+     * The value its `incarnation` field must still hold: the random value
+     * `create` wrote, so a transaction consumed and created again under the
+     * same id, at the same version, is never written with a patch that was
+     * checked against the one before it.
+     */
+    readonly incarnation: string;
+    /** Fields to write, and the text each is written as. */
+    readonly set: Readonly<Record<string, string>>;
+    /** Fields to remove. */
+    readonly clear: readonly string[];
+}
+/**
+ * What a reservation past `max` removed with the transaction: the `index` and `incarnation`
+ * fields it held, as text, for the store to take it out of its binding's index.
+ */
+export interface MfaRemovedTransaction {
+    readonly index: string;
+    readonly incarnation: string;
+}
+/**
+ * A subject's keys. Each carries the subject's hash tag: every operation on
+ * them is one command or one script on one Cluster slot.
+ */
+export interface MfaSubjectKeys {
+    /**
+     * HASH: `seq`, the order counter; `r:<id>` → `<seq>|<atMs>` for each
+     * attempt in the consecutive run; `p:<id>` → `<seq>` for each reservation
+     * not yet settled; `held` → `1` while an episode of refusals is under way.
+     * A field of any other kind is ignored.
+     */
+    readonly lock: string;
+    /** ZSET: the attempts the rolling week counts, each scored by its time. */
+    readonly week: string;
+    /**
+     * HASH: `g`, the subject's generation, and `floor`, its recovery-set floor,
+     * each as decimal text (absent is `0`);
+     * `a:<operation>:<sid>` → `p|<expiresAtMs>|<recoveryId>` for each
+     * authorization pending, `a|<generation>|<expiresAtMs>|<recoveryId>` once applied.
+     */
+    readonly recovery: string;
+    /** STRING: the lease holder's token, expiring at the lease's end on the server's clock. */
+    readonly lease: string;
+}
+export interface AcquireMfaSubjectLeaseInput {
+    /** The token the lease is written with when it is free. */
+    readonly token: string;
+    readonly ttlMs: number;
+    /** The generation the writer captured. */
+    readonly generation: number;
+}
+export interface AuthorizeMfaSubjectRecoveryInput {
+    /** The recovery hash's field for the authorization's operation and sid. */
+    readonly field: string;
+    readonly recoveryId: string;
+    readonly expiresAtMs: number;
+    /** How far ahead of the server's clock its end may lie. */
+    readonly maxAheadMs: number;
+}
+/** What an authorize answers: written, or refused on the server's clock, which it names. */
+export type AuthorizeMfaSubjectRecoveryReply = {
+    readonly authorized: true;
+} | {
+    readonly authorized: false;
+    readonly serverNowMs: number;
+};
+/** The keys a consume of the email-proof requirement touches, under the subject's hash tag. */
+export interface MfaEmailProofKeys {
+    /** STRING: the email-proof requirement, with no TTL. */
+    readonly proof: string;
+    /** STRING: the subject's lease, as {@link MfaSubjectKeys.lease}. */
+    readonly lease: string;
+}
+/** What a consume answers: nothing removed without the lease; else whether this call removed the requirement. */
+export type ConsumeMfaEmailProofReply = {
+    readonly held: false;
+} | {
+    readonly held: true;
+    readonly removed: boolean;
+};
+export interface RaiseMfaRecoverySetFloorInput {
+    /** A recovery-code set's generation, not the subject's. */
+    readonly setGeneration: number;
+    readonly leaseToken: string;
+}
+/** What a floor raise answers: the floor after it, as the hash keeps it, or nothing raised without the lease. */
+export type RaiseMfaRecoverySetFloorReply = {
+    readonly raised: true;
+    readonly floor: string;
+} | {
+    readonly raised: false;
+};
+export interface ApplyMfaSubjectRecoveryInput {
+    readonly operation: MfaSubjectRecoveryOperation;
+    /** The recovery hash's field for the operation and sid. */
+    readonly field: string;
+    readonly nowMs: number;
+    readonly leaseToken: string;
+    readonly sessionsBoundaryMs: number | undefined;
+    /** A recover's earliest guessable record's time, or `null` when none remains; a reset's `undefined`. */
+    readonly guessableBoundSinceMs: number | null | undefined;
+    /** The clock skew allowed between the caller's times (`DEFAULT_CLOCK_SKEW_MS`). */
+    readonly clockSkewMs: number;
+}
+/**
+ * What the apply script answers, each part as its text: `refused, reason, hard, rebindAfter`;
+ * `already, recoveryId, generation, hard, rebindAfter`; or
+ * `applied, recoveryId, generation, week, run, liftedHard, hard, rebindAfter`, each flag `1` or
+ * `0`. `hard` is whether the hard hold stands after the call and `rebindAfter`, while it does,
+ * from when a rebind counts — the port's `rebindAfterMs`, as canonical decimal text — empty
+ * while it does not. The adapter reads it into the port's answer; a reply without
+ * `rebindAfter` is an outage.
+ */
+export type ApplyMfaSubjectRecoveryReply = readonly string[];
+/** What an acquire answers, as the port's `acquireSubjectLease` but for the token, which the caller made. */
+export type AcquireMfaSubjectLeaseReply = {
+    readonly outcome: "acquired";
+} | {
+    readonly outcome: "busy";
+    readonly retryAfterMs: number;
+} | {
+    readonly outcome: "stale";
+};
+export interface ReserveMfaSubjectAttemptInput {
+    /** The caller's time, which every hold is judged on. */
+    readonly nowMs: number;
+    readonly policy: MfaLockoutPolicy;
+    /** The id the attempt is recorded under when it is let through. */
+    readonly reservation: string;
+}
+export type ReserveMfaSubjectAttemptReply = {
+    readonly ok: true;
+} | {
+    readonly ok: false;
+    readonly hold: MfaSubjectHold;
+    /** Milliseconds from `nowMs` until an attempt may be reserved; `null` for the hard hold. */
+    readonly retryAfterMs: number | null;
+    /** Whether this refusal begins an episode, as the port's `first`. */
+    readonly first: boolean;
+};
+export interface NoteMfaExemptSuccessInput {
+    /** The time of the exempt success: before the hard hold is fixed, the attempts up to it end. */
+    readonly nowMs: number;
+    /** The lockout policy; a run already at or past its `hardLimit` fixes the hard hold instead. */
+    readonly policy: MfaLockoutPolicy;
+}
+/** A subject's first-binding mark to note; the server's clock judges it. */
+export interface NoteMfaFirstBindingInput {
+    readonly atMs: number;
+    readonly untilMs: number;
+    /** How far either side of the server's clock a mark's time may lie (`DEFAULT_CLOCK_SKEW_MS`). */
+    readonly skewMs: number;
+    /** The longest a held mark may stand past its time and still be one (`MFA_CLOCK_SKEW_ALLOWANCE_MS`). */
+    readonly longestMs: number;
+}
+/**
+ * What stood before a note: a mark whose end was after the server's clock, by its time; none
+ * (or one ended); or a value that was not a mark, or a key of another type, which the note
+ * replaced.
+ */
+export type MfaFirstBindingEarlier = {
+    readonly atMs: number;
+} | null | "unreadable";
+/** What a note answers: kept, with what stood before it, or refused on the server's clock, which it names. */
+export type NoteMfaFirstBindingReply = {
+    readonly noted: true;
+    readonly earlier: MfaFirstBindingEarlier;
+} | {
+    readonly noted: false;
+    readonly serverNowMs: number;
+};
+/** A subject's first-binding mark as read, with the server's clock at the read. */
+export interface MfaFirstBindingRead {
+    /** The key's value; `null` when there is none. */
+    readonly value: string | null;
+    readonly serverNowMs: number;
+}
+/**
+ * Backing client for the `MfaTransactionStore` adapter (ADR
+ * 2026-09-25-multi-factor-authentication): the transactions, the subject
+ * lock state and its recovery, the lease, the email-proof requirement, a
+ * session's proof and a subject's first-binding mark.
+ *
+ * Semantic operations: every one the port calls atomic is a read, a decision
+ * and a write, which Redis makes one step only as a script (see
+ * `makeIoredisClients`). The operations here read a transaction's `version`,
+ * `incarnation`, `index`, `attempts`, `challenge` and `expiresAtMs` fields by
+ * name, and never decode its `record`.
+ *
+ * A binding's index is a sorted set of its own, one member per transaction
+ * scored by the transaction's `expiresAtMs`. It shares no hash tag with the
+ * transactions, so it and they change in separate steps. The client offers
+ * one atomic primitive per step — `indexTransaction`, `unindexTransaction`,
+ * `evictTransaction` — and holds no policy: the store decides the cap, which
+ * transaction goes, the order of the steps and what a failed one costs. It
+ * adds a member after the transaction is written, ends what the index removed
+ * through `evictTransaction`, and removes a member after the transaction is
+ * gone (told which by `reserveAttempt`'s `removed`). While creates are in
+ * flight a binding may hold more than the cap; only a step that failed leaves
+ * an excess, until it expires.
+ *
+ * The subject state's decisions — backoff, weekly budget and hard limit —
+ * are the port's rules, judged on the caller's `nowMs`;
+ * what is reclaimed is judged on the server's clock, never later than a day
+ * after it stops counting (`MFA_CLOCK_SKEW_ALLOWANCE_MS`). A stored value an
+ * operation cannot read is refused with an error, never read as a state that
+ * holds nothing.
+ */
+export interface MfaTransactionStoreClient {
+    /**
+     * Write the transaction's `fields` into the hash at `key`, and its deadline
+     * (`PEXPIREAT deadlineMs`), only while no live one is there. Resolves
+     * whether it wrote.
+     */
+    create(key: string, fields: Readonly<Record<string, string>>, deadlineMs: number): Promise<boolean>;
+    /** Every field of the hash at `key` (`HGETALL`); `{}` when there is none. */
+    read(key: string): Promise<Readonly<Record<string, string>>>;
+    /**
+     * Atomically: while the transaction is at `expectedVersion` and its
+     * incarnation, write `set`, remove `clear`, add one to `version`, and
+     * resolve every field as written; `null` otherwise. The deadline stays.
+     */
+    update(key: string, input: MfaTransactionUpdateInput): Promise<Readonly<Record<string, string>> | null>;
+    /**
+     * Atomically: `attempts` + 1 while that is within `max`; past it — or on
+     * a count that is not a number — the transaction is deleted and the
+     * attempts it had are answered with `ok: false`. No transaction, or one
+     * gone at `nowMs` — at or past the deadline its `expiresAtMs` field holds
+     * as decimal text, or holding none that is a finite number — is
+     * `{ ok: false, attempts: 0 }`, spending nothing: the store's clock is the
+     * transaction's, whatever the server's says, and the key is left to its
+     * deadline on the server's. A reservation that deleted the transaction
+     * answers, as `removed`, the `index` and `incarnation` it held, when it
+     * held both, so the store can take it out of its binding's index; one that
+     * deleted nothing, or a transaction holding neither, answers no `removed`.
+     * A client that never answers it leaves each such member to count until
+     * its transaction's expiry.
+     */
+    reserveAttempt(key: string, max: number, nowMs: number): Promise<{
+        readonly ok: boolean;
+        readonly attempts: number;
+        readonly removed?: MfaRemovedTransaction;
+    }>;
+    /**
+     * Atomically: the `challenge` field, removed, while the version is
+     * `expectedVersion` and the transaction is not gone at `nowMs` (as
+     * `reserveAttempt` judges it); `null` otherwise, taking nothing.
+     */
+    takeChallenge(key: string, expectedVersion: string, nowMs: number): Promise<string | null>;
+    /** Atomically: every field, and the hash deleted, while the version is `expectedVersion`; `null` otherwise. */
+    consume(key: string, expectedVersion: string): Promise<Readonly<Record<string, string>> | null>;
+    /**
+     * Atomically, on the binding's index at `key`: while it holds `max` members or more, remove
+     * those with the soonest `expiresAtMs` until one fewer remain; then add `member` scored by
+     * `expiresAtMs` — never among those removed — and set the key to expire at the latest it
+     * holds, rounded up (`PEXPIREAT`). Resolves the members removed.
+     */
+    indexTransaction(key: string, member: string, expiresAtMs: number, max: number): Promise<readonly string[]>;
+    /**
+     * Atomically: remove `member` from the binding's index at `key`, and set the key to expire at
+     * the latest `expiresAtMs` left, rounded up; the last member gone, the key goes. Idempotent.
+     */
+    unindexTransaction(key: string, member: string): Promise<void>;
+    /**
+     * Atomically: delete the transaction at `key` only while its `incarnation` field is
+     * `incarnation`. Resolves whether it deleted.
+     */
+    evictTransaction(key: string, incarnation: string): Promise<boolean>;
+    /** The port's `reserveSubjectAttempt`, one script over both keys. */
+    reserveSubjectAttempt(keys: MfaSubjectKeys, input: ReserveMfaSubjectAttemptInput): Promise<ReserveMfaSubjectAttemptReply>;
+    /** The port's `settleSubjectAttempt`, one script over both keys; a reservation not in flight changes nothing. */
+    settleSubjectAttempt(keys: MfaSubjectKeys, reservation: string, outcome: MfaSubjectAttemptOutcome): Promise<void>;
+    /** The port's `noteExemptSuccess`, one script over both keys. */
+    noteExemptSuccess(keys: MfaSubjectKeys, input: NoteMfaExemptSuccessInput): Promise<void>;
+    /** Record the email-proof requirement at `key`, with no TTL. Idempotent. */
+    requireEmailProof(key: string): Promise<void>;
+    /** Whether the requirement is recorded at `key`. */
+    emailProofRequired(key: string): Promise<boolean>;
+    /**
+     * Atomically, while the lease at `keys.lease` holds `leaseToken`: remove the requirement at
+     * `keys.proof` and resolve whether this call removed it; otherwise remove nothing.
+     */
+    consumeEmailProof(keys: MfaEmailProofKeys, leaseToken: string): Promise<ConsumeMfaEmailProofReply>;
+    /** Write a session's email proof `value` at `key`, replacing any, expiring `ttlMs` from when the server takes it (`SET … PX`). */
+    recordSessionEmailProof(key: string, value: string, ttlMs: number): Promise<void>;
+    /** The session's email proof at `key` (`GET`); `null` when there is none. */
+    sessionEmailProof(key: string): Promise<string | null>;
+    /**
+     * Atomically, on the server's clock: refuse a mark whose `untilMs` is not after it or
+     * whose `atMs` lies further from it than `input.skewMs`, writing nothing; otherwise write
+     * the later `atMs` and the later `untilMs` of the mark held, while it stands, and this
+     * one, expiring at that `untilMs` (`SET … PXAT`). A held mark is judged on its shape
+     * alone, never on where its time sits on the server's clock; a held value that is not a
+     * mark (`input.longestMs` bounding how long one stands), or a key of another type, is
+     * replaced. A note kept answers what stood before it, read in the same step.
+     */
+    noteFirstBinding(key: string, input: NoteMfaFirstBindingInput): Promise<NoteMfaFirstBindingReply>;
+    /** The subject's first-binding mark at `key`, and the server's clock, in one step. */
+    firstBindingMark(key: string): Promise<MfaFirstBindingRead>;
+    /** The recovery hash's `g` field (`HGET`); `null` when there is none. */
+    subjectGeneration(keys: MfaSubjectKeys): Promise<string | null>;
+    /**
+     * Atomically: `stale` when `input.generation` is not the recovery hash's `g`
+     * (absent is `0`); else `busy`, with the lease's time left, while one stands; else the lease
+     * written with `input.token` for `input.ttlMs` (`SET NX PX`).
+     */
+    acquireSubjectLease(keys: MfaSubjectKeys, input: AcquireMfaSubjectLeaseInput): Promise<AcquireMfaSubjectLeaseReply>;
+    /** Atomically: delete the lease while it holds `token`; resolves whether it did. One at its last millisecond has lapsed (`false`); one holding it with no deadline rejects, nothing deleted. */
+    releaseSubjectLease(keys: MfaSubjectKeys, token: string): Promise<boolean>;
+    /**
+     * Atomically, on the server's clock: refuse an authorization whose end is not after it or
+     * lies further ahead than `input.maxAheadMs`, writing nothing; otherwise drop the
+     * authorizations ended on it and write this one, pending, over whatever its field held.
+     */
+    authorizeSubjectRecovery(keys: MfaSubjectKeys, input: AuthorizeMfaSubjectRecoveryInput): Promise<AuthorizeMfaSubjectRecoveryReply>;
+    /** The recovery hash's `floor` field (`HGET`); `null` when there is none. */
+    recoverySetFloor(keys: MfaSubjectKeys): Promise<string | null>;
+    /**
+     * Atomically, while the lease holds `input.leaseToken`: raise the recovery hash's `floor` to
+     * `input.setGeneration` — a recovery-code set's generation, not the subject's — when it is
+     * higher, and resolve the floor after, as decimal text; otherwise write nothing.
+     */
+    raiseRecoverySetFloor(keys: MfaSubjectKeys, input: RaiseMfaRecoverySetFloorInput): Promise<RaiseMfaRecoverySetFloorReply>;
+    /** The port's `applySubjectRecovery`, one script over the four keys, its reply as text; one that is not a list of text rejects. */
+    applySubjectRecovery(keys: MfaSubjectKeys, input: ApplyMfaSubjectRecoveryInput): Promise<ApplyMfaSubjectRecoveryReply>;
+    /** As `MfaFactorStoreClient.durability`: the requirement must be kept as the factors are. */
+    durability(): Promise<RedisDurability>;
+}
+//# sourceMappingURL=mfa.d.mts.map

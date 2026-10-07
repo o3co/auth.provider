@@ -1,0 +1,58 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/**
+ * `@o3co/auth-provider-foundation/testing`: what a test uses to configure
+ * this package's modules. Test code imports it; production code never does.
+ */
+import { FOUNDATION_MFA_FACTOR_STORE_SECTION, } from "../mfa/section.mjs";
+const URL_KEYS = ["listUrl", "createUrl", "updateUrl", "deleteUrl"];
+/** The Store URLs the `"http"` user adapter's builder reads (`registerBuiltinAdapters`). */
+const USER_REPOSITORY_URL_KEYS = [
+    "authenticateUrl",
+    "authenticateByTokenUrl",
+    "linkFederatedIdentityUrl",
+    "findSubjectByFederatedIdentityUrl",
+    "markMfaEnrolledUrl",
+];
+/**
+ * The `foundation-mfa-factor-store` section as a configuration fragment to
+ * lay over a test's configuration: the four URLs `urls` holds — a fake
+ * Store's `urls` included, its other endpoints left behind — and `extra`
+ * as given.
+ */
+export function foundationMfaFactorStoreConfig(urls, extra = {}) {
+    const section = {};
+    for (const key of URL_KEYS) {
+        if (urls[key] !== undefined)
+            section[key] = urls[key];
+    }
+    return { [FOUNDATION_MFA_FACTOR_STORE_SECTION]: { ...section, ...extra } };
+}
+/**
+ * The user repository's `http` block, as the `"http"` builder reads it: the
+ * Store URLs `urls` holds — a fake Store's `urls` included, its MFA factor
+ * endpoints left behind — and `extra` as given. A test hands it to the
+ * `"http"` builder, or to `foundationMfaFactorStoreModule` as its
+ * `storeTransport`.
+ */
+export function foundationUserRepositoryHttpConfig(urls, extra = {}) {
+    const block = {};
+    for (const key of USER_REPOSITORY_URL_KEYS) {
+        if (urls[key] !== undefined)
+            block[key] = urls[key];
+    }
+    return { ...block, ...extra };
+}

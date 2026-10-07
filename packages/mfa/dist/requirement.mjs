@@ -1,0 +1,455 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/**
+ * The `mfa` session requirement: what MFA means to every consumer of a session,
+ * through core's admission, reached through `sessionRequirements.mfa` only. It
+ * declares the second-factor authority; the name `mfa` is this package's own.
+ *
+ * `reach` (the enabled factors' `amrValues`, plus `mfa` when one `addsMfa`) is
+ * read once, after every factor has registered, and kept: boot refuses it unless
+ * it equals what core recomputes from the same factors, and the requirement's own
+ * verdicts read the same snapshot, so the two never disagree.
+ *
+ * `admit` decides by the mode and the action's grade, never its name
+ * (`RECORD_RULES`). A token is judged on its own `amr` (`admitToken`) under
+ * `required`, whatever the grade, and met under `optional`. A session a cookie,
+ * code or link carries is held, under `required`, to its record's baseline,
+ * except that an action graded `grants_nothing` is met on any live record;
+ * under `optional` it is met. The baseline steps a password session without a
+ * second factor up only when its subject may hold a counting factor to step
+ * up with; without one it sends the session to log in, where the login's
+ * first binding is made. A second factor's step-up is answered only where
+ * admission's view says one can be recorded on the session
+ * (`SessionView.secondFactorRecordable`, decided by core over the store and
+ * the record); elsewhere the session is sent to log in, where the login
+ * records it. An action graded `credential_change` changes the
+ * ways into the account — adds one, or renames or removes a factor — and is
+ * held to recent MFA (`isRecentMfa`: a second factor verified lately, in a
+ * session whose vouched `amr` holds `mfa`; a session without it is stepped
+ * up only toward a record that can add it, `unmet` otherwise) over a primary the
+ * baseline knows — under `required` on top of the baseline, so it is never
+ * looser than `use`: the subject's factor records say whether it may hold a
+ * counting factor — a record of a kind no installed factor declares
+ * non-counting counts — and a list that cannot answer throws.
+ *
+ * For a subject that holds none, the action is a first binding (D12, D24):
+ * the view's recorded facts are read — none recorded sends the session to
+ * log in; a witness `enrolled` or malformed sends a password session to log
+ * in, whose own read of the `User` records a real loss, and is recorded and
+ * thrown for any other primary, a federated login having no such read —
+ * then a recent primary (core's `authenticationFreshness`: `authTime`, or for
+ * a federated login the earlier of that and the upstream's recorded
+ * authentication once the federation callback records it, never recent when
+ * the upstream showed no time; a second factor does not stand in for it), then the subject's first-binding mark
+ * (`firstBindingMark.mts`), read against when the session was established: a
+ * session it distrusts, whose recorded witness may predate the subject's
+ * enrollment, is sent to log in — said at info — and a mark that cannot be
+ * read throws;
+ * then the one gate, whose proof is the one given in that session and
+ * still standing (`MfaTransactionStore.sessionEmailProofAt`, read no older
+ * than `mfa.manage.maxAgeSeconds` and the clock skew). A proof nobody can
+ * give steps the session up and never admits it.
+ *
+ * `admitPrimary` interrupts a password login for a second factor when the subject
+ * holds a record it asks for one over (`factorState.mts`): a record it cannot use is
+ * never "none", a recovery set with no code left is, and a `list` that cannot
+ * answer throws, which admission answers `unavailable`. When no
+ * record that may count stands, the login's `User` must not say the subject
+ * enrolled: a witness `true` or malformed is recorded and thrown, under either
+ * mode (D12). With none it asks over, `optional` establishes and `required` interrupts
+ * for a first binding offering the counting factors the user may enroll, the
+ * account-email proof first where the one gate (`firstBinding.mts`) asks for
+ * it. Other primaries establish without a read: the baseline applies after
+ * `pwd` only.
+ *
+ * Every method is a closure: core calls them on a registered copy, and the
+ * contract suite on a spread of the object.
+ */
+import { authenticationFreshness, DEFAULT_CLOCK_SKEW_MS, emitAuditEvent, FEDERATED_AMR, MFA_AMR, PASSWORD_AMR, readMfaEnrollmentWitness, readSessionEmailProof, SECOND_FACTOR_AMR, } from "@o3co/auth-provider-core";
+import { readFactorList } from "./factorList.mjs";
+import { asksForSecondFactor, mayAddMfaIn, readSubjectRecords } from "./factorState.mjs";
+import { countingKinds, enrollableKinds, firstBindingGate, mayCount, } from "./firstBinding.mjs";
+import { readFirstBindingMark } from "./firstBindingMark.mjs";
+import { MfaEnrollmentStateInconsistentError } from "./witness.mjs";
+/** The name the requirement is registered under: `sessionRequirements.mfa`. */
+export const MFA_REQUIREMENT_NAME = "mfa";
+/** The remediation the MFA page's step-up call (`POST /session/mfa/step-up`) admits with. */
+const MFA_STEP_UP_REMEDIATION = `${MFA_REQUIREMENT_NAME}.step_up`;
+/** The hint keys a first binding's answer carries. */
+const MFA_HINT_KEYS = ["enrollable", "email_proof"];
+/**
+ * Whether `at` is at most `maxAgeMs` before `nowMs`. A time up to
+ * `DEFAULT_CLOCK_SKEW_MS` ahead — another replica's clock — reads as now; one
+ * further ahead, or one that is not a valid date, is not recent.
+ */
+function withinWindow(at, maxAgeMs, nowMs) {
+    const atMs = at instanceof Date ? at.getTime() : Number.NaN;
+    if (!Number.isFinite(atMs) || !Number.isFinite(nowMs) || !Number.isFinite(maxAgeMs)) {
+        return false;
+    }
+    if (atMs - nowMs > DEFAULT_CLOCK_SKEW_MS)
+        return false;
+    return nowMs - Math.min(atMs, nowMs) <= maxAgeMs;
+}
+/**
+ * Whether `session` has recent MFA at `nowMs`: a second factor verified
+ * within `maxAgeSeconds` (`mfa.manage.maxAgeSeconds`) in a session whose
+ * vouched `amr` holds `mfa` — an email code, which adds none by default,
+ * does not give it to a session signed in with it — or, when `subject` holds
+ * no counting factor, a primary that recent. The window's edge is recent.
+ */
+export function isRecentMfa(session, subject, maxAgeSeconds, nowMs) {
+    const maxAgeMs = maxAgeSeconds * 1_000;
+    if (session.holdsMfa && withinWindow(session.mfaAt, maxAgeMs, nowMs))
+        return true;
+    return !subject.holdsCountingFactor && withinWindow(session.authTime, maxAgeMs, nowMs);
+}
+const MET = Object.freeze({ outcome: "met" });
+const REAUTHENTICATE = Object.freeze({ outcome: "reauthenticate" });
+const UNMET = Object.freeze({ outcome: "unmet" });
+/** A session that comes back from the step-up still unmet is sent to log in again. */
+const STEP_UP = Object.freeze({
+    outcome: "step_up",
+    whenStillUnmet: "reauthenticate",
+});
+/**
+ * The rule by mode and grade — the session-admission ADR's D6 table,
+ * exhaustive over core's grades. An action that grants nothing is met, so a
+ * user can refuse a phished device request without a step-up; one that adds a
+ * way into the account needs recent MFA, and under `required` the baseline
+ * first; core never asks about a remediation.
+ */
+const RECORD_RULES = {
+    optional: {
+        use: "met",
+        grants_nothing: "met",
+        credential_change: "recent",
+        remediation: "met",
+    },
+    required: {
+        use: "baseline",
+        grants_nothing: "live",
+        credential_change: "baseline+recent",
+        remediation: "baseline",
+    },
+};
+/** The `amr` values a step-up through the installed factors can add: each one's `amrValues`, and `mfa` when one adds it. */
+function reachOf(factors) {
+    const reach = new Set();
+    for (const [, factor] of factors.entries()) {
+        for (const value of factor.amrValues)
+            reach.add(value);
+        if (factor.addsMfa)
+            reach.add(MFA_AMR);
+    }
+    return reach;
+}
+/** The `mfa` requirement over `options` (see this file's header). */
+export function createMfaRequirement(options) {
+    const { mode, factors, factorStore, transactions, stepUpPage, recentMfaMaxAgeSeconds, logger, auditSink, firstBinding, emailProofRequiredAtNextBinding, sessionEmailProofAt, firstBindingAt, firstBindingMark, sealing, } = options;
+    /**
+     * The reach of the first read (boot's, after every factor registered), kept:
+     * core seals that read and merges with it at every request, so the verdicts here
+     * must read the same.
+     */
+    let reachRead;
+    const reach = () => {
+        reachRead ??= reachOf(factors);
+        return reachRead;
+    };
+    /**
+     * A token, judged on its own `amr`; the record beside it is only the live view.
+     * Federated is met; a factor's own second-factor value is met whatever the
+     * primary (the WebAuthn grant's `["hwk"]` has none); a password alone is unmet;
+     * anything else (no `amr`, an unknown value, `mfa` alone) is sent to log in
+     * again. `mfa` names no factor, so it meets nothing by itself.
+     */
+    const admitToken = ({ authentication }) => {
+        const primary = authentication?.authentication?.primary;
+        if (primary === FEDERATED_AMR)
+            return MET;
+        const amr = authentication?.amr ?? [];
+        if (amr.some((value) => value !== MFA_AMR && SECOND_FACTOR_AMR.has(value)))
+            return MET;
+        return primary === PASSWORD_AMR ? UNMET : REAUTHENTICATE;
+    };
+    /** The subject's factor records (`readFactorList`); a store that cannot answer, or answers anything but a list of records, throws. */
+    const listRecords = async (subject) => readFactorList(await factorStore.list(subject));
+    const mayHoldCountingFactor = async (subject) => (await listRecords(subject)).some((record) => mayCount(factors, record));
+    /**
+     * A witness that says the subject enrolled, or says nothing readable,
+     * while no record that may count stands: an outage — recorded, then
+     * thrown — never a first binding (D12).
+     */
+    const inconsistent = (subject, witness, details, request = {}) => {
+        emitAuditEvent(auditSink, {
+            timestamp: new Date(),
+            type: "mfa.enrollment_state_inconsistent",
+            subject,
+            ip: request.ip,
+            userAgent: request.userAgent,
+            details: { ...details, witness },
+        });
+        throw new MfaEnrollmentStateInconsistentError(witness);
+    };
+    /** The witness the login's `User` carries, read when no record that may count stands. */
+    const checkWitness = (primary) => {
+        const witness = readMfaEnrollmentWitness(primary.user);
+        if (witness !== "not_enrolled") {
+            inconsistent(primary.subject, witness, { purpose: "login" }, primary.request);
+        }
+    };
+    /** D25's flag for `subject`; one that cannot be read, or reads other than a boolean, throws. */
+    const flagged = async (subject) => {
+        const flag = await emailProofRequiredAtNextBinding(subject);
+        if (typeof flag !== "boolean") {
+            throw new TypeError("MfaTransactionStore.emailProofRequiredAtNextBinding answered something that is not a boolean");
+        }
+        return flag;
+    };
+    /**
+     * The one gate over `subject`'s first binding, the account's address as
+     * core read it at login: a proof asked that nobody can give is said — the
+     * subject and why, never the address.
+     */
+    const gateFor = async (subject, mailAddress) => {
+        const gate = firstBindingGate({
+            requireEmailProof: firstBinding.requireEmailProof,
+            mailWired: firstBinding.mailWired,
+            mailAddress,
+            requiredAtNextBinding: await flagged(subject),
+        });
+        if (gate.outcome === "unprovable") {
+            logger.warn({ sub: subject, reason: gate.reason }, "mfa_email_proof_unprovable");
+        }
+        return gate;
+    };
+    /**
+     * Whether the account-email proof given in the session `sid` of `subject`
+     * stands at `nowMs`: one given longer ago than the window and the clock
+     * skew is none, whatever the store answered; an answer the port does not
+     * promise throws.
+     */
+    const provedInSession = async (subject, sid, nowMs) => {
+        const proved = readSessionEmailProof(await sessionEmailProofAt(subject, sid, nowMs), nowMs);
+        if (proved === undefined) {
+            throw new TypeError("MfaTransactionStore.sessionEmailProofAt answered something that is not a time or null");
+        }
+        return (proved !== null && proved >= nowMs - recentMfaMaxAgeSeconds * 1_000 - DEFAULT_CLOCK_SKEW_MS);
+    };
+    /**
+     * Where a second factor would meet the rule over `session`: a step-up;
+     * `unmet` when no factor could finish one; a new login when admission
+     * found none could be recorded on it (`secondFactorRecordable`; anything
+     * but `true` is read as `false`, failing closed).
+     */
+    const stepUp = (session) => {
+        if (reach().size === 0)
+            return UNMET;
+        return session.secondFactorRecordable === true ? STEP_UP : REAUTHENTICATE;
+    };
+    /**
+     * The baseline over `session`'s record: a federation, or a second factor
+     * after a password. A password session without one is stepped up only
+     * when its subject may hold a counting factor to step up with; otherwise
+     * it logs in again, and the login binds its first factor.
+     */
+    const baseline = async (session, recorded) => {
+        if (recorded?.primary === FEDERATED_AMR)
+            return MET;
+        if (recorded?.primary !== PASSWORD_AMR)
+            return REAUTHENTICATE;
+        if (recorded.mfaAt !== undefined)
+            return MET;
+        const verdict = stepUp(session);
+        if (verdict.outcome !== "step_up")
+            return verdict;
+        return (await mayHoldCountingFactor(session.sub)) ? verdict : REAUTHENTICATE;
+    };
+    /** Whether `freshness` is a recent primary at `nowMs`: within `mfa.manage.maxAgeSeconds`. */
+    const recentPrimary = (freshness, nowMs) => freshness !== undefined &&
+        isRecentMfa({ authTime: freshness, mfaAt: undefined, holdsMfa: false }, { holdsCountingFactor: false }, recentMfaMaxAgeSeconds, nowMs);
+    /**
+     * A first binding in `session`, whose subject holds no record that may
+     * count: what the session recorded of its login's `User` — none is a new
+     * login; a witness other than `not_enrolled` is a new login for a
+     * password session, and recorded and thrown for any other — then a recent primary, read over the
+     * session's freshness (`authenticationFreshness`: for a federated login, the earlier of the
+     * callback and the upstream's authentication, none when the upstream showed no time), then
+     * the subject's first-binding mark, read against when the session was established —
+     * a session it distrusts is a new login — then the gate, a proof asked
+     * for admitted only while one given in this session stands.
+     */
+    const firstBindingIn = async (session, recorded, action, nowMs) => {
+        const { primary } = recorded;
+        const facts = session.enrollmentFacts;
+        if (facts === undefined)
+            return REAUTHENTICATE;
+        if (facts.witness !== "not_enrolled") {
+            // A password login's admitPrimary reads the User afresh and records a real loss;
+            // a federated login never runs it, so any other session records it here.
+            if (primary === PASSWORD_AMR)
+                return REAUTHENTICATE;
+            inconsistent(session.sub, facts.witness, { purpose: "session", action: action.name });
+        }
+        if (!recentPrimary(authenticationFreshness(session.authTime, recorded), nowMs)) {
+            // Said only where the upstream is why: the callback alone was recent.
+            const reason = recorded.upstreamAuthTime === null
+                ? "upstream_unknown"
+                : recorded.upstreamAuthTime !== undefined && recentPrimary(session.authTime, nowMs)
+                    ? "upstream_stale"
+                    : undefined;
+            if (reason !== undefined) {
+                logger.info({ sub: session.sub, action: action.name, reason }, "mfa_first_binding_upstream_not_recent");
+            }
+            return REAUTHENTICATE;
+        }
+        const mark = readFirstBindingMark(await firstBindingAt(session.sub, nowMs), nowMs);
+        if (firstBindingMark.distrusts(session.authTime.getTime(), mark)) {
+            logger.info({ sub: session.sub, action: action.name }, "mfa_first_binding_distrusted");
+            return REAUTHENTICATE;
+        }
+        const gate = await gateFor(session.sub, facts.mailAddress);
+        if (gate.outcome === "bind")
+            return MET;
+        if (gate.outcome === "unprovable")
+            return STEP_UP;
+        return (await provedInSession(session.sub, session.sid, nowMs)) ? MET : STEP_UP;
+    };
+    /**
+     * Recent MFA over a record whose primary the baseline knows, and the
+     * `amr` admission vouches for on it; a subject with no counting factor is
+     * a first binding. Without it, a session that lacks `mfa` is stepped up
+     * only when the subject holds a record a step-up could add `mfa` with
+     * (`mayAddMfaIn`), and is unmet otherwise, as where no factor could
+     * finish a step-up.
+     */
+    const recent = async (session, recorded, vouched, action, nowMs) => {
+        if (recorded?.primary !== PASSWORD_AMR && recorded?.primary !== FEDERATED_AMR) {
+            return REAUTHENTICATE;
+        }
+        if (!(await mayHoldCountingFactor(session.sub))) {
+            return firstBindingIn(session, recorded, action, nowMs);
+        }
+        const holdsMfa = vouched.includes(MFA_AMR);
+        const recentMfa = isRecentMfa({ authTime: session.authTime, mfaAt: recorded.mfaAt, holdsMfa }, { holdsCountingFactor: true }, recentMfaMaxAgeSeconds, nowMs);
+        if (recentMfa)
+            return MET;
+        return towardMfa(session, holdsMfa, stepUp(session));
+    };
+    /**
+     * `verdict` for a `credential_change` action, held to what can meet it: a
+     * step-up of a session without `mfa` only when its subject holds a record
+     * a step-up could add `mfa` with now (`mayAddMfaIn`), `unmet` otherwise.
+     */
+    const towardMfa = async (session, holdsMfa, verdict) => {
+        if (verdict.outcome !== "step_up" || holdsMfa)
+            return verdict;
+        const held = await readSubjectRecords({ factors, sealing }, session.sub, {
+            list: listRecords,
+            recoverySetFloor: options.recoverySetFloor,
+            logger,
+        });
+        return mayAddMfaIn(held, session.enrollmentFacts?.mailAddress) ? verdict : UNMET;
+    };
+    /** A session a cookie, a code or a link carries, held over its record to the rule its mode and grade name. */
+    const admitRecord = async ({ session, authentication, action, now, }) => {
+        const rule = RECORD_RULES[mode][action.grade];
+        if (rule === "met")
+            return MET;
+        if (session === null)
+            return REAUTHENTICATE;
+        const recorded = authentication?.authentication;
+        const vouched = authentication?.amr ?? [];
+        switch (rule) {
+            case "live":
+                return MET;
+            case "baseline":
+                return baseline(session, recorded);
+            case "recent":
+                return recent(session, recorded, vouched, action, now.getTime());
+            case "baseline+recent": {
+                const verdict = await baseline(session, recorded);
+                return verdict.outcome === "met"
+                    ? recent(session, recorded, vouched, action, now.getTime())
+                    : towardMfa(session, vouched.includes(MFA_AMR), verdict);
+            }
+            default:
+                throw new TypeError(`no record rule named ${rule}`);
+        }
+    };
+    /**
+     * Whether the account-email proof comes before `primary`'s first binding:
+     * the gate over the login's address fact (core's reading, in its
+     * enrollment facts). One nobody can give is asked for too — the binding
+     * is refused, never skipped.
+     */
+    const proofAsked = async (primary) => (await gateFor(primary.subject, primary.enrollmentFacts.mailAddress)).outcome !== "bind";
+    /** The interruption that opens the login's transaction with `interruption`'s answer. */
+    const interrupt = (interruption) => ({
+        open: (sessionId, continuation) => transactions.open(sessionId, continuation, interruption),
+    });
+    /**
+     * The counting factors `user` may enroll, in registration order: what a
+     * first binding offers. When every one refuses this user, nothing can be
+     * bound: said at warn, each time, with the kinds alone — never the subject.
+     */
+    const enrollableFor = (user) => {
+        const enrollable = enrollableKinds(factors, user);
+        if (enrollable.length === 0) {
+            logger.warn({ kinds: countingKinds(factors) }, "mfa_enrollment_nothing_enrollable");
+        }
+        return enrollable;
+    };
+    return {
+        name: MFA_REQUIREMENT_NAME,
+        secondFactorAuthority: true,
+        get reach() {
+            return reach();
+        },
+        stepUpPage,
+        remediations: [MFA_STEP_UP_REMEDIATION],
+        hintKeys: [...MFA_HINT_KEYS],
+        admit: async (input) => {
+            if (input.carrier === "token")
+                return mode === "optional" ? MET : admitToken(input);
+            return admitRecord(input);
+        },
+        admitPrimary: async (primary) => {
+            if (primary.recorded.authentication.primary !== PASSWORD_AMR)
+                return "establish";
+            // Read as every judgment over the records reads them: a retired set asks for nothing.
+            const { context, records } = await readSubjectRecords({ factors, sealing }, primary.subject, {
+                list: listRecords,
+                recoverySetFloor: options.recoverySetFloor,
+                logger,
+            });
+            if (!records.some((record) => mayCount(factors, record)))
+                checkWitness(primary);
+            if (records.some((record) => asksForSecondFactor(context, primary.subject, record))) {
+                return interrupt({ error: "mfa_required" });
+            }
+            if (mode === "optional")
+                return "establish";
+            const emailProof = await proofAsked(primary);
+            return interrupt({
+                error: "mfa_enrollment_required",
+                enrollable: enrollableFor(primary.user),
+                emailProof,
+            });
+        },
+    };
+}

@@ -1,0 +1,1086 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="../"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>@o3co/auth-provider-session | auth.provider API</title><meta name="description" content="Documentation for auth.provider API"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="../assets/style.css"/><link rel="stylesheet" href="../assets/highlight.css"/><script defer src="../assets/main.js"></script><script async src="../assets/icons.js" id="tsd-icons-script"></script><script async src="../assets/search.js" id="tsd-search-script"></script><script async src="../assets/navigation.js" id="tsd-nav-script"></script><script async src="../assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
+<div class="tsd-toolbar-contents container"><a href="../index.html" class="title">auth.provider API</a>
+<div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/>
+<ul role="listbox" id="tsd-search-results"></ul>
+<div id="tsd-search-status" aria-live="polite" aria-atomic="true">
+<div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-menu"></use></svg></a></div></header>
+<div class="container container-main">
+<div class="col-content">
+<div class="tsd-page-title">
+<ul class="tsd-breadcrumb" aria-label="Breadcrumb">
+<li><a href="" aria-current="page">@o3co/auth-provider-session</a></li></ul>
+<h1>Module @o3co/auth-provider-session</h1></div>
+<section class="tsd-panel tsd-typography"><h1 id="o3coauth-provider-session" class="tsd-anchor-link">@o3co/auth-provider-session<a href="#o3coauth-provider-session" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h1>
+<p>Last updated: 2026-09-25</p>
+<p>Browser login, logout and upstream-IdP federation routes for
+<a href="../">auth.provider</a>, the redirect policy every federation adapter
+package contributes beside its provider, and the express-session store those
+routes — and every other route that reads <code>req.session</code> — run over.</p>
+<h2 id="responsibility" class="tsd-anchor-link">Responsibility<a href="#responsibility" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p><strong>Role.</strong> The browser-facing half of authentication. Core owns the ports this
+package uses (<code>UserRepository</code>, <code>UserSessionStore</code>, <code>FederationTokenStore</code>,
+<code>SessionFederationIndex</code>, and the federation adapter contract) and implements no
+route; this package is the driver of those ports for a browser. It has three
+responsibilities:</p>
+<ol>
+<li><strong>The <code>/session</code> routes</strong> — <code>sessionModule</code>: password login, logout, the CSRF
+token route, and the federation start and callback routes. They turn a
+password check or an upstream IdP's answer into a <code>UserSession</code> record and an
+authenticated express session, and undo it at logout.</li>
+<li><strong>The federation-adapter toolkit</strong> — what an adapter package imports from
+the router it plugs into: <code>createFederationRedirectPolicy</code> and the allowlist
+rules it is built from, and <code>extractFederationSection</code>. The helpers an
+adapter builds its upstream requests with — <code>codeChallenge</code>,
+<code>callbackUrlForExchange</code>, <code>FederationClientSecret</code> / <code>resolveClientSecret</code> —
+are core's.</li>
+<li><strong>The browser session store</strong> — <code>sessionStoreModule</code> / <code>sessionStoreModuleFor</code>
+and <code>createSessionStoreFactory</code> / <code>registerBuiltinSessionStores</code>: the
+express-session middleware, its cookie and its store (memory, or Redis through
+<code>connect-redis</code>).</li>
+</ol>
+<p><strong>Owns:</strong></p>
+<ul>
+<li>the <code>/session</code> routes and their answers; the CSRF policy for them
+(<code>session.csrf.*</code>, and the exported guard <code>@o3co/auth-provider-device-grant</code>
+reuses); the login rate-limit guard's wiring (<code>rateLimit.login</code>); the redirect
+allowlists (<code>session.redirectAllowlist</code>, <code>federations.&lt;name&gt;.redirectAllowlist</code>);</li>
+<li>how a federation is driven: <code>state</code>, PKCE and <code>nonce</code>, the <code>form_post</code>
+transaction and its cookie, claim precedence, the <code>amr</code> a login records, and
+what a callback writes to the stores;</li>
+<li>the <code>federationRedirectPolicies</code> contribution kind and the
+<code>federationRedirectPolicyResolver</code> slot it declares on core
+(<a href="../media/contributes.mts"><code>src/federations/contributes.mts</code></a>), and
+<a href="../media/types-7.mts"><code>FederationResult</code></a>;</li>
+<li>the express-session middleware, its cookie and its store (<code>session.*</code>,
+<code>session.storage.*</code>).</li>
+</ul>
+<p><strong>Does not own:</strong></p>
+<ul>
+<li>the federation adapter contract — <code>FederationProvider</code>, <code>FederationProfile</code>
+and the capabilities — and the pure helpers adapters build their requests
+with (<code>codeChallenge</code>, <code>callbackUrlForExchange</code>, <code>resolveClientSecret</code>), which
+are core's (<a href="../media/README-8.md"><code>core/src/federations</code></a>);</li>
+<li>any adapter: <a href="_o3co_auth-provider-federation-google.html"><code>federation-google</code></a>,
+<a href="_o3co_auth-provider-federation-github.html"><code>federation-github</code></a>,
+<a href="_o3co_auth-provider-federation-apple.html"><code>federation-apple</code></a>,
+<a href="_o3co_auth-provider-federation-oidc.html"><code>federation-oidc</code></a>;</li>
+<li>the stores it writes (core ports; memory adapters in core, Redis ones in
+<a href="../media/README-10.md"><code>@o3co/auth-provider-redis</code></a>) and who a user is (the
+Store behind <code>UserRepository</code>, e.g.
+<a href="_o3co_auth-provider-foundation.html"><code>@o3co/auth-provider-foundation</code></a>);</li>
+<li>token issuance, <code>POST /oauth/logout</code>'s cascade, upstream logout
+(<code>SupportsLogout</code>) and federation token refresh (<code>SupportsRefresh</code>) —
+<a href="_o3co_auth-provider-oauth.html"><code>@o3co/auth-provider-oauth</code></a>;</li>
+<li>delegated authorization (<code>SupportsDelegatedAuthorization</code>) —
+<a href="../media/README-9.md"><code>@o3co/auth-provider-federation-grants</code></a>;</li>
+<li>any HTML: the login page and the account page are the deployment's.</li>
+</ul>
+<p><strong>Why a separate package.</strong> From core: core is the contract every package
+depends on and implements no route, and a deployment that issues tokens without
+a browser login (client credentials, token exchange) installs no route it does
+not use. From <code>@o3co/auth-provider-oauth</code>: the two are siblings over core and
+neither imports the other, so a deployment can install either without the
+other's routes — though <code>oauth</code>'s <code>/authorize</code> reads <code>req.session</code>, so a
+deployment that uses it mounts an express-session middleware, normally this
+package's store module. What the split costs is stated in
+<a href="#what-post-sessionlogout-invalidates">What <code>POST /session/logout</code> invalidates</a>.</p>
+<p><strong>Why the three live together.</strong> Each of the other two exists for the routes.</p>
+<ul>
+<li>The toolkit: the redirect policy is a contribution kind this package declares
+and its router consumes, and <code>extractFederationSection</code> reads the config shape
+the router reads callback URLs from. Both are the router's, which is why
+every adapter package takes this package as a peer dependency. The pure
+request helpers are not here: the router uses none of them, so they live in
+core beside the contract that tells adapters to use them.</li>
+<li>The store: it is what <code>req.session</code> is, and the routes here are what write it;
+the federation router also keeps <code>form_post</code> transactions in it. It is a
+module of its own, apart from <code>sessionModule</code>, because other packages read
+<code>req.session</code> without these routes — <code>oauth</code>'s <code>/authorize</code>, consent and
+logout, <code>device-grant</code>'s verification page, <code>federation-grants</code>' browser
+routes — so a deployment with a login of its own installs the store alone.</li>
+</ul>
+<p><strong>Source layout.</strong> <a href="../media/routes-1"><code>src/routes/</code></a> holds the two routers;
+<a href="../media/federations"><code>src/federations/</code></a> the toolkit and the router's federation
+parts (claim precedence, consented scope, the transaction store, the redirect
+policy); <a href="../media/modules"><code>src/modules/</code></a> and <a href="../media/store"><code>src/store/</code></a> the
+browser session store; <a href="../media/internal"><code>src/internal/</code></a> cookie reading and the
+claims read off a <code>User</code>; <a href="../media/csrf.mts"><code>src/csrf.mts</code></a> the CSRF rule; and
+<a href="../media/redirect-allowlist.mts"><code>src/redirect-allowlist.mts</code></a> the allowlist rule
+the login and federation routes share. What each file does is in its header
+comment.</p>
+<h2 id="install" class="tsd-anchor-link">Install<a href="#install" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="sh"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">install</span><span class="hl-1"> </span><span class="hl-2">@o3co/auth-provider-session</span><span class="hl-1"> </span><span class="hl-2">@o3co/auth-provider-core</span><span class="hl-1"> </span><span class="hl-2">express</span><span class="hl-1"> </span><span class="hl-2">express-session</span><br/><span class="hl-3"># and, for session.storage.type = &quot;redis&quot; (the default in core&#39;s reference.conf):</span><br/><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">install</span><span class="hl-1"> </span><span class="hl-2">redis@^6.2.1</span><span class="hl-1"> </span><span class="hl-2">connect-redis@^10.0.0</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Peer dependencies: <code>@o3co/auth-provider-core</code>, <code>express@^5.0.0</code> and
+<code>express-session@^1.17.0</code>. Optional peer dependencies: <code>redis@^6.2.1</code> and
+<code>connect-redis@^10.0.0</code>, the Redis session store's libraries. The package has
+no dependencies of its own.</p>
+<p>Core is a peer because this package augments it (the
+<code>federationRedirectPolicies</code> contribution kind and its slot), and an
+augmentation reaches only the copy of core it resolves: as a peer, that is
+your composition's one copy. A deployment on <code>session.storage.type = &quot;memory&quot;</code>
+installs neither Redis library; nothing imports them until the Redis store is
+built. On <code>&quot;redis&quot;</code> — the default — install both: with either missing, boot
+fails naming it and the install command.</p>
+<h2 id="composition" class="tsd-anchor-link">Composition<a href="#composition" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="ts"><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">createApp</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-core&quot;</span><span class="hl-1">;</span><br/><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">sessionModule</span><span class="hl-1">, </span><span class="hl-6">sessionStoreModuleFor</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-session&quot;</span><span class="hl-1">;</span><br/><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">googleFederationModule</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-federation-google&quot;</span><span class="hl-1">;</span><br/><br/><span class="hl-4">const</span><span class="hl-1"> </span><span class="hl-7">handle</span><span class="hl-1"> = </span><span class="hl-5">await</span><span class="hl-1"> </span><span class="hl-0">createApp</span><span class="hl-1">({</span><br/><span class="hl-1">  </span><span class="hl-6">modules:</span><span class="hl-1"> [</span><br/><span class="hl-1">    </span><span class="hl-0">sessionStoreModuleFor</span><span class="hl-1">(</span><span class="hl-6">config</span><span class="hl-1">), </span><span class="hl-3">// first, so every module after it can read req.session</span><br/><span class="hl-1">    </span><span class="hl-6">sessionModule</span><span class="hl-1">,                 </span><span class="hl-3">// a const Module, not a factory</span><br/><span class="hl-1">    </span><span class="hl-6">googleFederationModule</span><span class="hl-1">,        </span><span class="hl-3">// contributes federations.google + federationRedirectPolicies.google</span><br/><span class="hl-1">    </span><span class="hl-3">// ... modules providing userRepository, userSessionStore, federationTokenStore,</span><br/><span class="hl-1">    </span><span class="hl-3">//     sessionFederationIndex and googleFederationConfig</span><br/><span class="hl-1">  ],</span><br/><span class="hl-1">  </span><span class="hl-6">bootstrapComponents:</span><span class="hl-1"> { </span><span class="hl-6">config</span><span class="hl-1">, </span><span class="hl-6">pathResolver</span><span class="hl-1"> },</span><br/><span class="hl-1">});</span>
+</code><button type="button">Copy</button></pre>
+
+<p>The standalone template's
+<a href="../media/buildModules.mts"><code>buildModules.mts</code></a> is the
+complete composition.</p>
+<h2 id="browser-session-store" class="tsd-anchor-link">Browser session store<a href="#browser-session-store" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p><code>sessionStoreModuleFor(config)</code> — or the static <code>sessionStoreModule</code> — contributes
+one route, <code>session-middleware</code>, mounted at <code>/</code>: express-session with its cookie
+built from <code>session.*</code> (<code>HttpOnly</code>, <code>Path=/</code>, <code>session.secure</code>,
+<code>session.sameSite</code>, <code>session.domain</code>, <code>Max-Age</code> = <code>session.maxAge</code>) and its store
+built from <code>session.storage.*</code>. Every <code>req.session</code> in a deployment is this one.
+Defaults and environment variables are in
+<a href="../media/reference.conf"><code>reference.conf</code></a>; <code>session.storage.type</code> is
+<code>redis</code> by default, <code>memory</code> is the alternative, and any other value fails boot.</p>
+<p>What holds:</p>
+<ul>
+<li><strong>Mount order is list order, except where a route names this one.</strong> The
+route declares no <code>before</code> / <code>after</code>, because naming a route a deployment may
+not include (an <code>oauth</code>-only deployment has no <code>sessionModule</code>) fails boot
+with <code>route-order-target-missing</code>. So list it <strong>ahead of every module that
+reads <code>req.session</code></strong>; a module listed before it reads no session, and
+nothing checks that at boot. The standalone template lists it first. The
+exception is the other direction: when federation grants are enabled, their
+browser route declares <code>after: [&quot;session-middleware&quot;]</code>, so it mounts after
+this route wherever either is listed, and a composition without a route of
+that id fails boot with <code>route-order-target-missing</code>.</li>
+<li><strong>A <code>__Host-</code> cookie name needs <code>session.secure = true</code> and
+<code>session.domain = null</code></strong>, or boot fails. <code>__Host-auth.session</code> is the default
+name.</li>
+<li><strong><code>memory</code> is refused under <code>deployment.mode = &quot;multi&quot;</code>.</strong> express-session's
+<code>MemoryStore</code> forks per replica: a login served by one replica is unknown to
+the others, logout clears only the replica it lands on, and a restart loses
+every session. <code>sessionStoreModuleFor(config)</code> reads the storage type and
+declares the module replica-unsafe when it is <code>memory</code>, so core's
+replica-safety guard refuses it at boot by name with the other offenders,
+warns when <code>deployment.mode</code> is unset, and says nothing under <code>&quot;single&quot;</code>. The
+static <code>sessionStoreModule</code> cannot know the type, so the guard cannot name it;
+its route factory refuses the same combination when it runs
+(<code>replica-unsafe-adapter</code>) and never warns. Prefer <code>sessionStoreModuleFor</code>
+wherever the config is in hand.</li>
+<li><strong>The Redis store opens its own connection.</strong> A <code>redis</code> (node-redis) client to
+<code>session.storage.redis.url</code> (with <code>password</code> when set), under <code>connect-redis</code>'s
+<code>RedisStore</code>. With a readiness registrar wired it registers the probe
+<code>session-store</code> (a <code>PING</code>), so a replica that has lost Redis stops receiving
+traffic; with a lifecycle registrar wired, <code>AppHandle.dispose()</code> quits the
+client. Client <code>error</code> events are logged as <code>session_store_redis_error</code>
+rather than crashing the process; reconnecting is node-redis's job. A missing
+<code>url</code> fails boot, and so does a missing <code>redis</code> or <code>connect-redis</code> package
+(see <a href="#install">Install</a>).</li>
+<li><strong>Federation transactions share the store</strong>, under the <code>fedtx:</code> key prefix —
+see <a href="#the-transaction-cookie">the transaction cookie</a>.</li>
+<li><strong>A store that cannot answer is an outage, not a <code>500</code>.</strong> When the store
+cannot load a request's session (it is unreachable, or times out) the
+request is answered <code>503 temporarily_unavailable</code> before any route runs; when it cannot save a session, or refresh its expiry, after the
+route answered, that answer stands. Either way it is logged once at error
+level as <code>session_middleware_store_unavailable</code> (<code>store: &quot;cookie_session&quot;</code>,
+<code>step</code>: <code>load</code> or <code>save</code>, the error's projection) and goes no further —
+express-session would have handed it to <code>next(err)</code>, the terminal handler's
+<code>500</code> before the route, Express's final handler after it
+(<a href="../media/cookieSession.mts"><code>src/internal/cookieSession.mts</code></a>). This
+package's routes save the session themselves before they answer where it
+matters — the login and the federation start and callback — so a failed save
+there is their own <code>503</code>, and a route that answers a cookie-store outage drops
+the request's session so express-session does not write to the failing store
+again as the response ends.</li>
+<li><strong>A record that cannot be read is absent, not an outage.</strong> A record the Redis
+store answers with but that is not JSON, or not a session record (a plain
+object, not an array, whose <code>cookie</code> is a plain object too), is read as no
+session: express-session starts a
+fresh one for the request. It is logged once per read as a warn,
+<code>session_cookie_record_unreadable</code> (<code>store: &quot;cookie_session&quot;</code>), without the
+record's text. The record is not deleted and the browser keeps its cookie —
+a fresh, unmodified session sets no new one — so every request from that
+browser reads it again and logs again, until the user signs in (which sets a
+new cookie) or the record's TTL passes: a stream of these warns from one
+browser is one record. Answered as an outage it would instead have failed
+every one of those requests. A <code>form_post</code> transaction (<code>fedtx:</code>) or an oauth
+re-authentication ask (<code>reauth:</code>) in the same store is read the same way:
+absent, so the callback answers <code>400 invalid_session</code> or <code>/authorize</code> asks
+again (<a href="../media/factory-3.mts"><code>src/store/factory.mts</code></a>).</li>
+</ul>
+<p><strong>Not <code>@o3co/auth-provider-redis</code>.</strong> That package's <code>UserSessionStore</code> holds the
+<code>UserSession</code> record behind a <code>sid</code> — what introspection, <code>/userinfo</code> and
+<code>/authorize</code> resolve — and its other adapters hold other core ports, through
+clients that package's modules create. This store holds express-session's own
+records: what this package's routes keep in the session (<code>isAuthenticated</code>,
+<code>user</code>, <code>sid</code>, the login's <code>redirectTo</code>, a <code>query</code> federation's in-flight
+envelope), what other packages keep there (<code>oauth</code> declares <code>client</code> and
+<code>code</code>), and the <code>fedtx:</code> federation transactions. They are different records
+over different connections, configured separately.</p>
+<p><strong>Another store.</strong> The module registers only <code>memory</code> and <code>redis</code>. A composition
+that needs another express-session <code>Store</code> builds the middleware itself —
+<code>createSessionStoreFactory(ctx)</code>, <code>registerBuiltinSessionStores(factory)</code>,
+<code>factory.register(&quot;&lt;type&gt;&quot;, builder)</code> (<a href="../media/factory-3.mts"><code>src/store/factory.mts</code></a>)
+— mounts it first, and does not install the module. If it enables federation
+grants, it contributes that middleware as a route with the id
+<code>session-middleware</code>, or boot fails as above.</p>
+<h2 id="routes" class="tsd-anchor-link">Routes<a href="#routes" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p><code>sessionModule</code> contributes two routers, both mounted at <code>/session</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/session/csrf</code></td>
+<td>Issue a double-submit CSRF token</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/session/login</code></td>
+<td>Password login</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/session/logout</code></td>
+<td>End the browser session — see <a href="#what-post-sessionlogout-invalidates">what it invalidates</a></td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/session/oauth/federation/:name</code></td>
+<td>Start a federation (<code>?redirect_to=</code>, <code>?link=1</code>)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/session/oauth/federation/:name/callback</code></td>
+<td>Callback of a <code>query</code> federation; <code>405</code> (<code>Allow: POST</code>) for a <code>form_post</code> one</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/session/oauth/federation/:name/callback</code></td>
+<td>Callback of a <code>form_post</code> federation; <code>405</code> (<code>Allow: GET</code>) for a <code>query</code> one</td>
+</tr>
+</tbody>
+</table>
+<p><code>:name</code> is the federation's name; a name no module contributed is <code>404</code>.</p>
+<p>The manifest (<a href="../media/module-2.mts"><code>src/module.mts</code></a>):</p>
+<ul>
+<li><code>requires</code>: <code>config</code>, <code>userRepository</code>, <code>userSessionStore</code>,
+<code>federationTokenStore</code>, <code>sessionFederationIndex</code>, and the synthetic
+<code>federationProviders</code> and <code>federationRedirectPolicyResolver</code>, which the boot
+planner builds from per-federation modules' <code>federations.&lt;name&gt;</code> and
+<code>federationRedirectPolicies.&lt;name&gt;</code> contributions. <code>sessionRPRegistry</code> and
+<code>sessionFamilyIndex</code>, the other two session stores, are <code>oauth</code>'s.</li>
+<li><code>optional</code>: <code>logger</code>, <code>rateLimiter</code>, <code>auditSink</code>, <code>subjectSessionIndex</code>.
+<code>auditSink</code> unwired must be declared with <code>audit.sink.type = &quot;none&quot;</code>, and
+<code>subjectSessionIndex</code> unwired with <code>oauth.revocation.subject = &quot;unsupported&quot;</code>,
+or boot refuses.</li>
+</ul>
+<h3 id="password-login" class="tsd-anchor-link">Password login<a href="#password-login" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p><code>POST /session/login</code> takes <code>username</code> and <code>password</code> (JSON or form).</p>
+<ul>
+<li><code>400 invalid_request</code> when either is missing; <code>401 invalid_credentials</code> when
+<code>UserRepository.authenticate</code> answers <code>null</code>; <code>503 temporarily_unavailable</code>
+when a store the login needs cannot answer — the <code>UserRepository</code> throws,
+the <code>UserSession</code> write throws, or the express session cannot be
+regenerated (its store failed to destroy the old record) or saved. Each is
+logged once at error level as <code>login_store_unavailable</code>, with <code>store</code>
+(<code>user_repository</code>, <code>user_session</code>, <code>cookie_session</code>), <code>step</code>
+(<code>authenticate</code>, <code>create</code>, <code>regenerate</code>, <code>save</code>) and the error's projection,
+never the username. After a failed regeneration or save the <code>UserSession</code>
+and its subject-index entry are rolled back best-effort; a rollback step
+that fails is one <code>login_cleanup_failed</code> warn.</li>
+<li>On success it creates a <code>UserSession</code> (<code>amr: [&quot;pwd&quot;]</code>, lifetime
+<code>session.maxAge</code>), records it in <code>subjectSessionIndex</code> when that is wired,
+regenerates the express session and saves it, and answers <code>200</code> with a fresh
+CSRF cookie. The save comes before the answer: a store that cannot save it is
+<code>503</code>, not a <code>200</code> for a session the next request would not find.</li>
+<li><code>redirect_to</code>, when sent, must be on <code>session.redirectAllowlist</code> (see
+<a href="#redirect-allowlists">Redirect allowlists</a>) and is stored as
+<code>req.session.redirectTo</code>; nothing in this package redirects to it.</li>
+<li>The brute-force guard runs on the shared <code>rateLimiter</code> (prefix <code>login</code>, keyed
+by client IP) with <code>rateLimit.login</code>'s window and limit, answering <code>429</code> when
+it denies and following <code>rateLimit.failMode</code> when the limiter fails. With no
+<code>rateLimiter</code> wired the route falls back to a per-process limiter: boot is
+refused under <code>deployment.mode = &quot;multi&quot;</code>, a <code>login_rate_limiter_not_shared</code>
+warning is logged when the mode is unset, and nothing is said under
+<code>&quot;single&quot;</code>.</li>
+</ul>
+<h3 id="what-invalidates" class="tsd-anchor-link">What <code>POST /session/logout</code> invalidates<a href="#what-invalidates" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>This provider has <strong>two</strong> logout endpoints and they do not invalidate the same
+things. Pick by what the session holds.</p>
+<p><code>POST /session/logout</code> — the browser's own logout, and the one a BFF /
+<code>auth.proxy</code> injection topology calls. It answers <code>200 {&quot;message&quot;: &quot;Logged out successfully&quot;}</code> and invalidates:</p>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>the express session</td>
+<td>destroyed</td>
+</tr>
+<tr>
+<td>the <code>UserSession</code> record for the session's <code>sid</code></td>
+<td>deleted — this is what makes <code>/oauth/introspect</code> report <code>active: false</code> and <code>/oauth/userinfo</code> refuse a token minted by the <code>session</code> grant</td>
+</tr>
+<tr>
+<td>the <code>subjectSessionIndex</code> entry</td>
+<td>removed, so <code>revokeAllForSubject</code> stops enumerating a dead <code>sid</code></td>
+</tr>
+<tr>
+<td><code>federationTokenStore</code> + <code>sessionFederationIndex</code> entries for the <code>sid</code></td>
+<td>removed, so upstream-IdP tokens are not left at rest</td>
+</tr>
+<tr>
+<td><strong>refresh-token families bound to the <code>sid</code></strong></td>
+<td><strong>not revoked</strong></td>
+</tr>
+</tbody>
+</table>
+<p>That last row is the one to read twice. A browser that logged in here and then
+completed an <code>/authorize</code> → <code>authorization_code</code> flow holds a refresh token
+whose family this endpoint does <strong>not</strong> revoke; the refresh token keeps working
+until it expires. Use <code>POST /oauth/logout</code> with an <code>id_token_hint</code> for that
+session — it runs the full cascade (refresh-family revoke, RP registry,
+federation, session delete) and ends the browser session too.</p>
+<p>The boundary is structural: the cascade
+(<code>packages/oauth/src/logout/cascadeLogout.mts</code>) needs
+<code>refreshTokenFamilyRevocation</code>, <code>sessionFamilyIndex</code> and <code>sessionRPRegistry</code>,
+which this module declares none of, and <code>@o3co/auth-provider-session</code> does not
+import <code>@o3co/auth-provider-oauth</code> — they are siblings over core.</p>
+<p>The <code>session</code> grant issues no refresh token, so a deployment whose tokens all
+come from that grant has no family to revoke and <code>/session/logout</code> is
+sufficient on its own.</p>
+<p><strong>Failure modes.</strong> Every records step in the table above is best-effort and
+logged, never propagated: an outage of those stores must not turn a logout
+into a <code>5xx</code> that leaves the user holding a live cookie. The <code>UserSession</code> delete runs <strong>first</strong>, before the
+express session is destroyed and before the best-effort hygiene, so a
+federation-store outage cannot prevent the invalidation that matters. Failures
+are logged as <code>logout_user_session_delete_failed</code>,
+<code>logout_subject_session_index_remove_failed</code>,
+<code>logout_federation_token_remove_failed</code> and
+<code>logout_session_federation_index_remove_failed</code> — alert on the first. The one
+exception is the express session itself: if destroying it fails — the cookie
+store's outage — the user is not logged out, so the response is
+<code>503 temporarily_unavailable</code>, logged once at error level as
+<code>session_logout_store_unavailable</code> (<code>store: &quot;cookie_session&quot;</code>, <code>step: &quot;destroy&quot;</code>, the <code>sid</code>), and the client retries; by then the records are
+already gone, so <code>/authorize</code> refuses the surviving cookie on its own account. A session carrying no <code>sid</code> has no records to invalidate
+and only the express session is destroyed.</p>
+<h3 id="csrf-on-the-state-changing-routes" class="tsd-anchor-link">CSRF on the state-changing routes<a href="#csrf-on-the-state-changing-routes" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p><code>POST /session/login</code> and <code>POST /session/logout</code> accept a request that carries
+<strong>either</strong> a same-origin (or explicitly trusted) <code>Origin</code> / <code>Referer</code>, <strong>or</strong> a
+valid double-submit CSRF token. A request carrying neither is rejected with
+<code>403 access_denied</code>.</p>
+<ul>
+<li><strong>Browsers</strong> need nothing extra: the browser sets <code>Origin</code> on a same-origin
+<code>fetch</code> / form post, and that satisfies the check on its own.</li>
+<li><strong>Header-less clients</strong> (curl, server-side agents, test harnesses) call
+<code>GET /session/csrf</code>, which sets a JS-readable <code>&lt;session.name&gt;.csrf</code> cookie
+and returns the same value as <code>csrf_token</code>. Send both back: the cookie plus
+either an <code>x-csrf-token</code> header or a <code>csrf_token</code> form field.</li>
+<li>A <strong>foreign</strong> <code>Origin</code> is rejected even when a token is present, since it is
+positive evidence of a cross-site request.</li>
+<li>A successful login returns a <strong>fresh</strong> CSRF cookie, so the follow-up logout
+needs no extra round trip.</li>
+</ul>
+<p>The token is a signed, stateless HMAC over a random nonce and an expiry
+(<code>session.csrf.ttlSeconds</code>), keyed by an HKDF expansion of <code>session.secret</code> — a
+subdomain able to write the parent-domain cookie still cannot forge one.
+Cross-origin login UIs list their origin on <code>session.csrf.trustedOrigins</code>;
+<code>cors.allowedOrigins</code> grants no CSRF trust.</p>
+<p><code>checkRequestOrigin</code>, <code>createCsrfProtection</code>, <code>createCsrfProtectionFromConfig</code>,
+<code>createCsrfGuard</code> and <code>createCsrfIssueHandler</code> are exported
+(<a href="../media/csrf.mts"><code>src/csrf.mts</code></a>) for compositions that mount their own login
+page or protect their own routes; <code>@o3co/auth-provider-device-grant</code> guards its
+verification page with them.</p>
+<h3 id="what-a-session-records-about-the-authentication" class="tsd-anchor-link">What a session records about the authentication<a href="#what-a-session-records-about-the-authentication" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Every session carries <code>authTime</code> and <code>amr</code> — RFC 8176 values naming how the user
+authenticated — so <code>/authorize</code> can honour <code>max_age</code>, <code>prompt=login</code> and
+<code>acr_values</code>, and the id_token can say <code>auth_time</code>, <code>amr</code> and <code>acr</code> (the whole
+picture is in the <a href="_o3co_auth-provider-oauth.html">oauth package README</a>):</p>
+<table>
+<thead>
+<tr>
+<th>login path</th>
+<th><code>amr</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /session/login</code></td>
+<td><code>[&quot;pwd&quot;]</code></td>
+</tr>
+<tr>
+<td>federation callback</td>
+<td>the upstream IdP's <code>amr</code> when the provider surfaces it on the profile (<code>profile.amr</code>, a string array), plus <code>fed</code> — the deployment-defined marker for &quot;through a federation&quot;, exported as <code>FEDERATED_AMR</code>. RFC 8176 has no value for it, and OIDC Core leaves <code>amr</code> values to the deployment.</td>
+</tr>
+<tr>
+<td>a resumed MFA login (<code>POST /auth/mfa/verify</code>, composed by the deployment)</td>
+<td>whatever the deployment's resume handler records: the first factor's value plus <code>mfa</code>, and the factor's own (<code>otp</code>, …). <code>CreateUserSessionInput.amr</code> is the seam.</td>
+</tr>
+<tr>
+<td>account linking (<code>?link=1</code>)</td>
+<td>unchanged — a link is not a login</td>
+</tr>
+</tbody>
+</table>
+<p>Re-authentication is a <em>new</em> session: <code>POST /session/login</code> and the federation
+callback always create one with a fresh <code>authTime</code>, which is what <code>max_age</code> and
+<code>prompt=login</code> measure. A login page that bounces an already-authenticated
+browser straight back to <code>/authorize</code> is answered <code>login_required</code> there, not
+looped.</p>
+<h3 id="account-linking-across-federations-482" class="tsd-anchor-link">Account linking across federations (#482)<a href="#account-linking-across-federations-482" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>A federated identity is <code>&lt;provider&gt;:&lt;sub&gt;</code> — the federation's name and the IdP's opaque, stable subject — and that string is what the callback hands to <code>UserRepository.authenticateByToken</code>. <strong>The Store decides who that is.</strong> The session package never links by e-mail: the same person signing in with Google on the web and with Apple on iOS is two identities, and whether they are one account is the Store's record, not an inference from an address an IdP asserted.</p>
+<p>An account gains a second identity through an explicit, authenticated action:</p>
+<ol>
+<li>The browser already holds a session (<code>isAuthenticated</code>, a live <code>UserSession</code>).</li>
+<li>It starts the federation with <code>?link=1</code>: <code>GET /session/oauth/federation/&lt;name&gt;?link=1</code>, <strong>from a link or a form on the deployment's own pages</strong>. The start is a GET and the session cookie is <code>SameSite=Lax</code>, so without a check any page could send a signed-in user there, and paired with a login CSRF at the IdP the attacker's identity would be linked to the victim's account. The start therefore needs positive evidence: <code>Sec-Fetch-Site: same-origin</code>, or <code>none</code> (a typed URL or bookmark). <code>cross-site</code> is refused. <code>same-site</code> is not enough on its own — it covers every host on the registrable domain, including a user-controlled <code>blog.example.com</code> — so it, and a request with no <code>Sec-Fetch-Site</code> (an older browser), must name this origin or one on <code>session.csrf.trustedOrigins</code> in its <code>Referer</code>; a missing <code>Referer</code> is refused, because the navigating page picks its own referrer policy. An account page on a sibling host is therefore listed in <code>session.csrf.trustedOrigins</code>, and must not send <code>Referrer-Policy: no-referrer</code>. A refusal is <code>403 link_requires_trusted_origin</code>. Without an authenticated session it is <code>401 login_required</code>; when the Store's repository does not implement <code>linkFederatedIdentity</code>, <code>400 link_unsupported</code> — all before the browser is sent anywhere.</li>
+<li>On the callback, after <code>state</code>, PKCE and <code>nonce</code> are checked exactly as for a login, the identity is resolved:
+<ul>
+<li><strong>nobody</strong> → <code>userRepository.linkFederatedIdentity(currentUserId, { provider, sub, token, claims })</code>. <code>ok</code> links it; the Store's <code>refused</code> is <code>403 link_refused</code>, its <code>conflict</code> is <code>409 identity_conflict</code>, each with the Store's <code>description</code> when it gives one, sent within RFC 6749's characters (<code>?</code> for any other).</li>
+<li><strong>another account</strong> → <code>409 identity_conflict</code>; the Store is not asked. Linking never merges accounts.</li>
+<li><strong>this account</strong> → nothing to link; the callback proceeds.</li>
+</ul>
+</li>
+<li>The federation is attached to the <strong>live</strong> session — <code>sessionFederationIndex</code> and <code>federationTokenStore</code> under the current <code>sid</code> — and the browser is redirected as after a login. No new <code>UserSession</code> is minted and the express session is not regenerated: a link is not a login, and the session's claims envelope is unchanged (the next login through the new provider builds one the usual way).</li>
+</ol>
+<p>The transaction records the session that asked (<code>link: { sid }</code>), and the callback links to <em>that</em> session's account. A <code>form_post</code> federation's callback is a cross-site POST the application session cookie (<code>SameSite=Lax</code>) does not accompany, so the record is what binds it — Sign in with Apple links exactly as a <code>query</code> federation does — and a browser that presents a different authenticated session at the callback is refused <code>401 login_required</code>: the identity is never linked to whichever session the browser holds now. If attaching to the live session fails after the Store has linked, the half-attached federation is removed from the session best-effort (one the session already carried is left as it was, and nothing is removed when the session's federation list could not be read at all) and the callback answers <code>503</code>; the Store's link stands, and the next login through that federation lands on the account. Every store the link needs that cannot answer — the session read, the Store's <code>linkFederatedIdentity</code>, the index read or write, the token attach — is <code>503 temporarily_unavailable</code>, logged once at error level as <code>federation_link_store_unavailable</code> with <code>store</code>, <code>step</code>, the linking <code>sid</code> and the error's projection; a rollback step that fails is one <code>federation_cleanup_failed</code> warn.</p>
+<p>Without <code>link=1</code>, an authenticated session that completes a federation whose identity the Store does not know is <code>401 unknown_user</code>. <strong>There is no implicit linking</strong> — a session cookie plus a stray identity is the login-CSRF shape, and <code>link=1</code> on an authenticated session is what makes the action the user's.</p>
+<p>Two audit events: <code>federation.identity.linked</code> and <code>federation.identity.link_refused</code> (<code>details.reason</code>: <code>conflict</code> or <code>refused</code>), both with <code>subject</code> = the account.</p>
+<p><strong>What a Store must check before it links.</strong> The seam receives <code>claims</code> as the provider mapped them — the IdP's assertions, nothing more:</p>
+<ul>
+<li><strong>Never bind on an e-mail alone.</strong> An address the IdP did not verify (<code>emailVerified !== true</code> — <a href="#emailverified-is-a-boolean-whatever-the-idp-sent">absent is not <code>false</code>, and a string is absent</a>), a relay address (Apple's <code>@privaterelay.appleid.com</code>, surfaced as <code>isPrivateEmail</code>), or an IdP that lets a user change their address must never be matched against an existing account. The classic account takeover is exactly that match.</li>
+<li>The link request is already authenticated — that is what <code>link=1</code> on a live session guarantees — so a matching address is not what authorises the link; the session is. A Store may still refuse: one identity per provider per account, a maximum re-authentication age, a verified address required on the new identity.</li>
+<li><code>sub</code> is opaque and stable per issuer. Store <code>&lt;provider&gt;:&lt;sub&gt;</code> verbatim; never derive an identity from <code>email</code>.</li>
+</ul>
+<p><code>@o3co/auth-provider-foundation</code>'s <code>HttpUserRepository</code> implements the seam when <code>linkFederatedIdentityUrl</code> is configured (<code>CLIENT_USER_LINK_FEDERATED_IDENTITY_URL</code>): see <a href="_o3co_auth-provider-foundation.html">its README</a> for the wire contract. Core's in-memory repository links in memory only — development, not persistence.</p>
+<h2 id="driving-a-federation-adapter" class="tsd-anchor-link">Driving a federation adapter<a href="#driving-a-federation-adapter" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>The adapter contract — <code>FederationProvider</code>, <code>FederationProfile</code>, the optional
+capabilities and their guards, the response-mode vocabulary — is defined and
+documented in core: <a href="../media/README-8.md"><code>core/src/federations/README.md</code></a>,
+with the definitions in <a href="../media/types-8.mts"><code>types.mts</code></a> and
+<a href="../media/response-mode.mts"><code>response-mode.mts</code></a>. Import those
+names from <code>@o3co/auth-provider-core</code>; this package does not re-export them.
+This section is what the session router does with an adapter.</p>
+<p>Of the contract, the router drives <code>buildAuthorizationUrl</code>, <code>exchangeCode</code>,
+<code>responseMode</code> and <code>SupportsClaimMapping</code>. The other capabilities are driven
+elsewhere: <code>SupportsLogout</code> by <code>oauth</code>'s <code>/oauth/logout</code> and
+<code>POST /oauth/federation/:name/logout</code>, <code>SupportsRefresh</code> by <code>oauth</code>'s
+<code>POST /oauth/federation/:name/token</code>, and <code>SupportsDelegatedAuthorization</code> by
+<code>federation-grants</code>.</p>
+<h3 id="the-start-leg" class="tsd-anchor-link">The start leg<a href="#the-start-leg" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p><code>GET /session/oauth/federation/:name</code> mints <code>state</code> (128 bits), a PKCE
+<code>codeVerifier</code> and a <code>nonce</code> (128 bits) for every federation, whether or not its
+IdP uses a nonce, and persists them — with <code>redirect_to</code> and the link intent —
+<strong>before</strong> redirecting: in the express session for a <code>query</code> federation, in a
+<a href="#the-transaction-cookie">federation transaction</a> for a <code>form_post</code> one. A store
+that cannot persist them is <code>503 temporarily_unavailable</code> and redirects nobody,
+logged once at error level as <code>federation_start_store_unavailable</code> (<code>store</code>:
+<code>cookie_session</code> or <code>federation_transaction</code>). A <code>form_post</code> federation with no
+express-session store on the request, or whose callback URL has no path, is the
+composition's fault: <code>500 misconfiguration</code>. Every composition fault these
+routes meet — that one, a provider with no callback URL, one with no redirect
+policy — is logged once at error level as <code>federation_misconfigured</code> with the
+<code>reason</code> (<code>no_session_store</code>, <code>no_callback_path</code>, <code>no_callback_url</code>,
+<code>no_redirect_policy</code>). The
+<code>redirect_uri</code> handed to <code>buildAuthorizationUrl</code> is the federation's
+<code>callbackURL</code> from config. For a <code>form_post</code> federation the router appends
+<code>response_mode=form_post</code> to the URL the adapter returned; for a <code>query</code> one the
+URL is exactly what the adapter returned.</p>
+<h3 id="what-the-callback-does-with-the-profile" class="tsd-anchor-link">What the callback does with the profile<a href="#what-the-callback-does-with-the-profile" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ol>
+<li>
+<p><strong>The adapter sees <code>callbackParams</code></strong> — the callback's string parameters
+minus <code>code</code> and <code>state</code>, which the router has already bound. They are
+relayed through the user agent and unsigned; an adapter forwards the RFC 9207
+<code>iss</code> from them through core's <code>callbackUrlForExchange</code>.</p>
+</li>
+<li>
+<p><strong><code>exchangeCode</code> throwing is <code>502 exchange_failed</code>.</strong> Every refusal inside an
+adapter — a wrong <code>iss</code>, a bad id_token, a UserInfo mismatch — surfaces this
+way and never reaches the Store. A profile without <code>sub</code> is
+<code>400 invalid_profile</code>. The warning, <code>federation_callback_exchange_failed</code>
+(the provider bound on the line), carries core's <code>loggableError(err)</code>,
+never the error itself: an OAuth
+library puts the token response it refused, access and refresh token
+included, on the error's cause chain, and a logger that serialises the
+whole error would write them out. Every other failure these routes log —
+a store's, a repository's, express-session's — is projected the same way
+(a Redis store's error carries the refused command's arguments; under
+<code>allow-plaintext</code>, a token record).</p>
+</li>
+<li>
+<p><strong>The Store resolves the identity.</strong> <code>&lt;name&gt;:&lt;sub&gt;</code> goes to
+<code>UserRepository.authenticateByToken</code>; a throw is <code>503 temporarily_unavailable</code>,
+<code>null</code> is <code>401 unknown_user</code> (unless the start asked to link).</p>
+</li>
+<li>
+<p><strong>Claims</strong> are the local <code>User</code>'s, merged with <code>mapClaims</code> under
+<a href="#claim-precedence-local-wins-federated-is-namespaced">claim precedence</a>; <code>amr</code>
+is <code>profile.amr</code> plus <code>fed</code>.</p>
+</li>
+<li>
+<p><strong>The session</strong> is a new <code>UserSession</code> (lifetime <code>session.maxAge</code>), a
+<code>subjectSessionIndex</code> entry when that is wired, a <code>sessionFederationIndex</code>
+entry, and a regenerated express session. Any store the callback cannot do
+without that fails — the Store's lookup, the <code>UserSession</code> or
+<code>sessionFederationIndex</code> write, regenerating or saving the express session,
+attaching the tokens below, and before all of them retiring the ephemeral
+state (see <a href="#when-a-transaction-is-spent">When a transaction is spent</a>) — is
+<code>503 temporarily_unavailable</code>, logged once at error level as
+<code>federation_callback_store_unavailable</code> with <code>store</code>, <code>step</code> and the error's
+projection. What was written is rolled back best-effort, in reverse order;
+a rollback step that fails is one <code>federation_cleanup_failed</code> warn. A
+<code>subjectSessionIndex</code> write that fails is logged
+(<code>subject_session_index_write_failed</code>) and the login proceeds.</p>
+</li>
+<li>
+<p><strong>Tokens</strong> are attached to <code>federationTokenStore</code> under the new <code>sid</code> only
+when the profile carries an <code>accessToken</code>:</p>
+<ul>
+<li><code>accessToken</code>, <code>refreshToken</code>, <code>idToken</code> and <code>expiresAt</code> as the adapter
+returned them — <code>expiresAt: null</code> is stored as <code>null</code> (&quot;do not refresh&quot;),
+and the router never invents an expiry;</li>
+<li><code>scope</code> and <code>grantedScope</code>: <code>profile.scope</code> when the adapter returned one
+(an empty or unusable string names nothing), otherwise the provider's
+requested <code>scope</code> — RFC 6749 §3.3 reads an absent answer as &quot;as requested&quot;
+(<a href="../media/consented-scope.mts"><code>src/federations/consented-scope.mts</code></a>);</li>
+<li><code>tokenType</code>: <code>profile.tokenType</code> verbatim, <code>&quot;&quot;</code> when it is not a string,
+<code>undefined</code> when the adapter returned none (<code>oauth</code> reads that as <code>Bearer</code>).</li>
+</ul>
+<p><code>profile.expiresIn</code> is not read here.</p>
+</li>
+<li>
+<p><strong>The redirect</strong> is the federation's redirect policy's
+<code>resolveCallbackRedirect</code>. The default policy answers its <code>authCallbackUrl</code>
+with <code>redirect_to</code> appended when the start carried one, otherwise its
+<code>clientUrl</code>.</p>
+</li>
+</ol>
+<h3 id="response-modes-and" class="tsd-anchor-link">Response modes: <code>query</code> and <code>form_post</code><a href="#response-modes-and" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Most IdPs redirect the browser back with the authorization response in the
+query string. Sign in with Apple does not: whenever the requested <code>scope</code>
+includes <code>name</code> or <code>email</code>, Apple <strong>POSTs</strong> an
+<code>application/x-www-form-urlencoded</code> body to the callback. A provider declares
+this with <code>responseMode: &quot;form_post&quot;</code> (absent means <code>query</code>), and the
+declaration changes three things in the router and nothing in the adapter:</p>
+<ol>
+<li><strong>The start route appends <code>response_mode=form_post</code>.</strong> The parameter is
+written once, in the router, rather than in every adapter.</li>
+<li><strong><code>POST /session/oauth/federation/&lt;name&gt;/callback</code> accepts the form body.</strong> It
+is the same handler as the GET callback over a different parameter source:
+same envelope lookup, same <code>state</code> comparison, same retire-before-any-async-work
+reuse prevention, same PKCE verifier and nonce read from the stored envelope
+rather than from the request, same rollback. <strong>Each response mode accepts
+exactly one method</strong>: a <code>query</code> federation answers a POST with
+<code>405 method_not_allowed</code> (<code>Allow: GET</code>), so no <code>query</code> federation has a POST
+surface, and a <code>form_post</code> federation answers a GET with
+<code>405 method_not_allowed</code> (<code>Allow: POST</code>) before its transaction cookie is
+read, so a third party's <code>&lt;img src=&quot;.../callback&quot;&gt;</code> cannot reach the flow.</li>
+<li><strong>That federation's ephemeral state lives in a federation transaction</strong>, with
+a cookie of its own, instead of in the session.</li>
+</ol>
+<h4 id="the-transaction-cookie" class="tsd-anchor-link">The transaction cookie<a href="#the-transaction-cookie" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h4>
+<p>A <code>form_post</code> callback arrives as a <strong>cross-site POST</strong> from the IdP's origin,
+and a <code>SameSite=Lax</code> cookie — the deployment default, and the right default — is
+not sent on one, so a callback relying on the session cookie would arrive with
+no <code>state</code> to compare and no PKCE verifier. The flow needs <em>a</em> cookie that
+survives a cross-site POST; it must not be the session cookie. The start route is
+unauthenticated and a <code>SameSite=Lax</code> cookie <strong>is</strong> sent on a top-level GET, so
+anything the start leg changed about the session cookie would be changeable by
+any third party who could make a browser follow a link there — permanently,
+because express-session serialises <code>req.session.cookie</code> into the store and
+rebuilds it from there on every later request.</p>
+<p>So the cross-site part has its own cookie and its own record:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>cookie name</td>
+<td><code>__Secure-&lt;session.name, minus any prefix&gt;.federation</code> — e.g. <code>__Host-auth.session</code> and <code>auth.session</code> both give <code>__Secure-auth.session.federation</code></td>
+</tr>
+<tr>
+<td>attributes</td>
+<td><code>HttpOnly; Secure; SameSite=None</code>, <code>Path</code> scoped to that provider's callback URL, <code>Max-Age</code> = the transaction lifetime (10 minutes)</td>
+</tr>
+<tr>
+<td>contents</td>
+<td>an opaque 256-bit id, and nothing else</td>
+</tr>
+<tr>
+<td>record</td>
+<td><code>state</code>, <code>codeVerifier</code>, <code>nonce</code>, <code>redirectTo</code>, the link intent and the provider name, in the express-session store under a <code>fedtx:</code> key prefix</td>
+</tr>
+</tbody>
+</table>
+<p>The name is derived from <code>session.name</code> the way the CSRF cookie's is. The prefix
+is the one deviation, and it is applied <strong>unconditionally</strong>: <code>__Secure-</code> rather
+than <code>__Host-</code> because <code>__Host-</code> requires <code>Path=/</code> and this cookie is
+path-scoped to the callback, so a <code>__Host-</code> name would be dropped by every
+browser; and unconditionally because this cookie is <code>SameSite=None</code> and
+therefore always <code>Secure</code> (browsers drop a <code>SameSite=None</code> cookie that is not).
+A deployment with a <code>form_post</code> federation therefore serves the callback over
+HTTPS — which Apple requires of its return URL anyway.</p>
+<p><strong>The application session cookie keeps the attributes the deployment
+configured</strong>, on every session, whether or not it ever started a <code>form_post</code>
+federation; <code>session.sameSite</code> is never touched.</p>
+<p>The transaction binds the callback to the browser that started it. The <code>state</code>
+comparison still runs; the transaction cookie is an addition to it, never a
+replacement. A caller who presents a stolen <code>state</code> without the matching
+transaction cookie is refused (<code>400 invalid_session</code>) before <code>state</code> is read.</p>
+<p>If no express-session store is reachable on the request — the store module is
+missing or mounted after <code>sessionModule</code> — a <code>form_post</code> start answers
+<code>500 misconfiguration</code> instead of starting a flow it could not finish.</p>
+<p>An abandoned flow leaves only the short-lived cookie, and the record expires with
+it: the expiry is written into the record as <code>cookie.expires</code>, which is what
+<code>MemoryStore</code> reaps on read and what <code>connect-redis</code> turns into the key's <code>EX</code>.</p>
+<h4 id="every-host-on-the-auth-hosts-registrable-domain-is-inside-the-trust-boundary" class="tsd-anchor-link">Every host on the auth host's registrable domain is inside the trust boundary<a href="#every-host-on-the-auth-hosts-registrable-domain-is-inside-the-trust-boundary" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h4>
+<p><code>__Host-</code> is what pins a cookie to exactly one host; <code>__Secure-</code> only requires
+HTTPS. The transaction cookie is issued host-only (no <code>Domain</code> attribute), but
+its <code>__Secure-</code> name does not stop another host from setting a cookie of the
+same name with a <code>Domain</code> that covers the auth host, and the browser sends that
+one to the callback too. So the transaction cookie is the one place a
+<code>form_post</code> flow is weaker than the session cookie, which is <code>__Host-</code> by
+default — host-only, and checked as such at boot.</p>
+<ul>
+<li><strong>What an attacker needs:</strong> control of any host that can set a cookie for the
+auth host — for <code>auth.example.com</code>, any host under its registrable domain
+<code>example.com</code>: <code>blog.example.com</code>, a forgotten staging host, a dangling DNS
+record, XSS on a lower-trust app next door, a shared-hosting neighbour.
+Nothing from this deployment: no session, no <code>state</code>, no account.</li>
+<li><strong>What it gets them:</strong> from that host they set <code>__Secure-&lt;name&gt;.federation</code>
+with <code>Domain=example.com</code> in a victim's browser, start their own federation
+flow, plant <em>their</em> transaction id, and auto-submit
+<em>their</em> <code>state</code> and <code>code</code> to the callback. The victim's browser ends up
+logged into the <strong>attacker's</strong> federated account, and whatever the victim does
+next is recorded against it. It does not read the victim's session, expose
+credentials or reach the victim's own account — identity confusion, not
+account takeover.</li>
+<li><strong>Why signing the cookie would not help:</strong> the attacker's transaction is
+genuinely theirs, so anything the server would accept as its own issuance is
+something they legitimately hold. It is inherent to a path-scoped cookie.</li>
+<li><strong>What to do:</strong> treat every host under the auth host's registrable domain —
+every <code>*.example.com</code> for <code>auth.example.com</code> — as inside the deployment's trust
+boundary, and run no untrusted or lower-trust content on any of them.
+<code>session.domain = null</code> (the <code>__Host-</code> default) protects the session cookie,
+not the transaction cookie; it does nothing against this. That is the rule the
+signed CSRF token exists to survive on the login routes; here there is no
+session to bind to, so the rule is the whole mitigation.</li>
+</ul>
+<h4 id="when-a-transaction-is-spent" class="tsd-anchor-link">When a transaction is spent<a href="#when-a-transaction-is-spent" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h4>
+<p>Both the record and the cookie are dropped on every callback exit that
+<strong>judged</strong> the transaction — success, <code>invalid_state</code>, <code>exchange_failed</code>,
+<code>unknown_user</code> alike — and are deliberately <em>not</em> dropped by a refusal that
+judged nothing. The rule: <strong>a refusal spends the transaction when the request
+made a claim about it, and leaves it alone when it made none.</strong> A <code>state</code> is
+that claim. A callback carrying no <code>state</code> — checked once the record has resolved to this provider — claims nothing and costs nothing
+(<code>400 invalid_request</code>, record untouched); a GET is refused with <code>405</code> before
+the cookie is read. A <em>wrong</em> <code>state</code> is an attempt on this transaction, and it
+still spends it, so a guess gets no second try; so does a transaction id that
+resolves to no record or to another provider's (<code>400 invalid_session</code>), and a
+store read that fails spends it best-effort (<code>503</code>; a spend that fails there, or
+on a refusal, is one <code>federation_cleanup_failed</code> warn). The distinction matters because
+the cookie is <code>SameSite=None</code> by necessity and accompanies any cross-site
+request to the callback path: if every refusal consumed the record, a third
+party could destroy a victim's in-flight login with one <code>&lt;img&gt;</code> tag.</p>
+<p>That rule is <code>form_post</code>-only. A <code>query</code> federation keeps its envelope in the
+session and retires it only on the path that <em>matched</em> <code>state</code>, so a wrong
+<code>state</code> leaves the envelope in place — because the session cookie is
+<code>SameSite=Lax</code> and <strong>is</strong> sent on a top-level cross-site GET, so spending the
+envelope on a mismatch would give a third party the same availability attack.
+The guess it would defend against is not a real one: <code>state</code> is 128 bits from
+the CSPRNG. Only the &quot;no <code>state</code>&quot; rule is shared by both modes.</p>
+<h4 id="what-single-use-guarantees" class="tsd-anchor-link">What &quot;single use&quot; guarantees<a href="#what-single-use-guarantees" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h4>
+<p>Retiring the record is a <code>get</code> followed by a <code>destroy</code>, two round trips. The
+express-session <code>Store</code> API is <code>get</code> / <code>set</code> / <code>destroy</code>: there is no
+compare-and-delete on it, and no atomic read-and-consume can be composed from
+the three.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Guaranteed</strong></td>
+<td>A callback arriving <em>after</em> an earlier one completed its delete finds no record and is refused. That covers the replay this is for: a <code>code</code> and <code>state</code> lifted from a proxy log, the back button, a retried request.</td>
+</tr>
+<tr>
+<td><strong>Not guaranteed</strong></td>
+<td>Callbacks that <em>overlap</em>. Two that both read the record before either deletes it both pass the <code>state</code> comparison and both reach <code>exchangeCode</code>. <code>MemoryStore</code> answers synchronously and happens to serialise them; a store with network latency does not.</td>
+</tr>
+<tr>
+<td><strong>What bounds the overlap</strong></td>
+<td>The IdP. An authorization code is single-use at the IdP, racing callbacks necessarily carry the same one, and at most one exchange succeeds however many get that far — the rest get <code>502 exchange_failed</code>. PKCE binds that exchange to the verifier held in the record.</td>
+</tr>
+</tbody>
+</table>
+<p>If the record cannot be deleted at all, the callback stops with <code>503 temporarily_unavailable</code> rather than exchanging the code. This is weaker than <code>DeviceCodeStore</code>, which <em>is</em> an
+atomic read-and-consume: that store owns its adapter and can push the consume
+into one Redis round trip, while a federation transaction shares the session
+store rather than adding a component slot every deployment would have to
+configure — for a property the IdP already provides.
+<a href="../media/Federation.transactionConcurrency.test.mts"><code>Federation.transactionConcurrency.test.mts</code></a>
+pins both halves of the table.</p>
+<p>A <code>query</code> federation is untouched by all of this: its callback is a same-site
+top-level GET, its envelope stays in <code>req.session.federation</code>, and its
+authorization URL is exactly what its adapter produced.</p>
+<h3 id="claim-precedence-local-wins-federated-is-namespaced" class="tsd-anchor-link">Claim precedence: local wins, federated is namespaced<a href="#claim-precedence-local-wins-federated-is-namespaced" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>What <code>mapClaims</code> returns is an <strong>assertion by an upstream IdP</strong>, not a fact about
+this deployment. The callback never merges it into the session's claims envelope
+wholesale; it applies one rule
+(<a href="../media/claim-precedence.mts"><code>src/federations/claim-precedence.mts</code></a>,
+exported as <code>mergeFederatedClaims</code>):</p>
+<ul>
+<li><strong>The local record is authoritative.</strong> Any claim read off the <code>User</code>
+(<code>email</code>, <code>emailVerified</code>, <code>name</code>, <code>picture</code>, <code>groups</code>) stands; a federated
+value never replaces it.</li>
+<li><strong>Three claims may fill a gap</strong> — <code>email</code>, <code>name</code>, <code>picture</code>
+(<code>PROMOTABLE_FEDERATED_CLAIMS</code>) — only where the local record left the field
+absent, and only when the federated value is a string.</li>
+<li><strong>Everything else is namespaced</strong> under <code>claims.federated[&lt;providerName&gt;]</code>,
+verbatim and complete — including values that were also promoted and values
+that lost to a local claim.</li>
+</ul>
+<p>So an IdP cannot contribute <code>groups</code> (nor a <code>roles</code> / <code>scope</code> / <code>permissions</code> an
+adapter invents): those reach <code>claims.federated[&lt;providerName&gt;]</code> and nothing
+else. <code>filterClaimsByScope</code> never emits provider-specific claims, so nothing
+under the namespace can appear in an id_token or <code>/userinfo</code> response by
+accident.</p>
+<p><strong>The <code>federated</code> claim is optional — read it with a presence check.</strong> It is
+written only when the provider mapped at least one claim, so it is absent on a
+session whose provider implements no <code>SupportsClaimMapping</code>, and on one whose
+<code>mapClaims</code> returned <code>{}</code> or a non-object. The provider key is likewise not
+guaranteed: a session carries the one provider that authenticated it. Use
+<code>claims.federated?.[name]?.groups</code>, never <code>claims.federated[name].groups</code>.</p>
+<p><code>emailVerified</code> is not promotable. It is Store-owned state that
+<code>oauth.requireEmailVerified</code> can read as a gate on token issuance, and an
+upstream IdP verifies an address <em>it</em> controls — the <code>provider:sub</code> linkage
+never forces that to be the local account's address. A deployment that wants to
+act on the assertion reads <code>claims.federated?.[&lt;providerName&gt;]?.emailVerified</code>
+and publishes the result on the <code>User</code>.</p>
+<pre><code class="ts"><span class="hl-3">// user: { id, username, email: &quot;alice@corp.example&quot;, groups: [&quot;staff&quot;] }</span><br/><span class="hl-3">// mapClaims → { email: &quot;alice@gmail.example&quot;, picture: &quot;https://…&quot;, groups: [&quot;admin&quot;] }</span><br/><span class="hl-1">{</span><br/><span class="hl-1">  </span><span class="hl-10">email</span><span class="hl-1">: </span><span class="hl-2">&quot;alice@corp.example&quot;</span><span class="hl-1">,          </span><span class="hl-3">// local wins</span><br/><span class="hl-1">  </span><span class="hl-10">groups</span><span class="hl-1">: [</span><span class="hl-2">&quot;staff&quot;</span><span class="hl-1">],                    </span><span class="hl-3">// federated groups cannot reach here</span><br/><span class="hl-1">  </span><span class="hl-10">picture</span><span class="hl-1">: </span><span class="hl-2">&quot;https://…&quot;</span><span class="hl-1">,                 </span><span class="hl-3">// gap filled</span><br/><span class="hl-1">  </span><span class="hl-10">federated</span><span class="hl-1">: {</span><br/><span class="hl-1">    </span><span class="hl-10">google</span><span class="hl-1">: { </span><span class="hl-10">email</span><span class="hl-1">: </span><span class="hl-2">&quot;alice@gmail.example&quot;</span><span class="hl-1">, </span><span class="hl-10">picture</span><span class="hl-1">: </span><span class="hl-2">&quot;https://…&quot;</span><span class="hl-1">, </span><span class="hl-10">groups</span><span class="hl-1">: [</span><span class="hl-2">&quot;admin&quot;</span><span class="hl-1">] },</span><br/><span class="hl-1">  },</span><br/><span class="hl-1">}</span>
+</code><button type="button">Copy</button></pre>
+
+<h4 id="is-a-boolean-whatever-the-idp-sent" class="tsd-anchor-link"><code>emailVerified</code> is a boolean, whatever the IdP sent<a href="#is-a-boolean-whatever-the-idp-sent" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h4>
+<p><code>MappedClaims.emailVerified</code> is <code>boolean | undefined</code>, and normalising to it is
+the <strong>adapter's</strong> job — the merge does not coerce, and nothing downstream does
+either. Sign in with Apple sends <code>email_verified</code> as the <em>string</em> <code>&quot;true&quot;</code> on
+some responses; <code>Boolean(&quot;false&quot;)</code> is <code>true</code>, so an adapter that coerces reports
+an unverified address as verified. Read <code>&quot;true&quot;</code> / <code>&quot;false&quot;</code> to their booleans
+and treat every other shape as <strong>absent</strong> — absence is not <code>false</code>. A
+non-boolean that does reach <code>mapClaims</code>'s output is not promoted, but it <em>is</em>
+recorded verbatim under <code>claims.federated[&lt;providerName&gt;]</code>, where a deployment
+reading it as a gate would be reading a string.</p>
+<h3 id="configuring-federations" class="tsd-anchor-link">Configuring federations<a href="#configuring-federations" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p><code>federations.&lt;name&gt;</code> names a federation; <code>extractFederationSection</code>
+(<a href="../media/extract-federation-section.mts"><code>src/federations/extract-federation-section.mts</code></a>)
+normalises a section for the module that reads it. Three shapes are accepted:</p>
+<pre><code class="hocon">federations {
+  # Shorthand: the key names the type (here "google").
+  google {
+    enabled = true
+    clientId = ${FEDERATIONS_GOOGLE_CLIENT_ID}
+    clientSecret = ${FEDERATIONS_GOOGLE_CLIENT_SECRET}
+    callbackURL = "https://auth.example.com/session/oauth/federation/google/callback"
+    clientUrl = "https://app.example.com/"
+  }
+
+  # Flat with an explicit type.
+  okta {
+    enabled = true
+    type = "oidc"
+    issuer = "https://dev-123.okta.com"
+    # …
+  }
+
+  # Nested: the credentials under a sub-section named by the type.
+  keycloak {
+    enabled = true
+    type = "oidc"
+    oidc {
+      issuer = "https://sso.example.com/realms/staff"
+      # …
+    }
+  }
+}
+</code><button type="button">Copy</button></pre>
+
+<p>A nested section that also sets <code>clientId</code>, <code>clientSecret</code> or <code>callbackURL</code> at
+its top level fails boot; any other top-level field is kept beside the
+sub-section, and one the sub-section also sets is overridden by it. A section
+without <code>enabled = true</code> is ignored. The Google, GitHub and Apple
+modules are single-tenant — each registers its provider under a fixed name
+(<code>google</code>, <code>github</code>, <code>apple</code>) — so a deployment has at most one of each;
+<code>type = &quot;oidc&quot;</code> sections
+(<a href="_o3co_auth-provider-federation-oidc.html"><code>@o3co/auth-provider-federation-oidc</code></a>) are one
+federation per section.</p>
+<p>Boot rules:</p>
+<ul>
+<li>Every enabled section must have a <code>callbackURL</code>, or <code>sessionModule</code> fails boot.
+The federation router hands exactly that value to the adapter as <code>redirect_uri</code>.</li>
+<li>Every <code>federations.&lt;name&gt;</code> contribution must be paired with a
+<code>federationRedirectPolicies.&lt;name&gt;</code> one and vice versa, or boot fails with
+<code>federation-redirect-policy-unpaired</code>.</li>
+<li><code>sessionModule</code> does not cross-check config against contributions. A
+federation enabled in config that no module contributes boots, and its routes
+answer <code>404</code>; a federation contributed without an enabled section has no
+callback URL, and its start answers <code>500 misconfiguration</code>. A composition that
+wants either to fail boot adds the check itself.</li>
+</ul>
+<h3 id="redirect-allowlists" class="tsd-anchor-link">Redirect allowlists<a href="#redirect-allowlists" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p><code>GET /session/oauth/federation/:name?redirect_to=…</code> and <code>POST /session/login</code>'s
+<code>redirect_to</code> name where the browser goes afterwards. Every value either may name
+has to be listed: <code>federations.&lt;name&gt;.redirectAllowlist</code> for a federation (read
+by its redirect policy), <code>session.redirectAllowlist</code> for the login.</p>
+<pre><code class="hocon">federations {
+  google {
+    enabled = true
+    # …credentials…
+
+    redirectAllowlist = [
+      "https://app.example.com/welcome"
+      "https://app.example.com/account/linked"
+      "http://localhost:5173/welcome"      # local dev front-end
+    ]
+
+    sessionDomain    = ".example.com"
+    authCallbackUrl  = "https://app.example.com/auth/callback"
+    clientUrl        = "https://app.example.com/"
+  }
+}
+</code><button type="button">Copy</button></pre>
+
+<p>The rule, shared by both lists
+(<a href="../media/redirect-allowlist.mts"><code>src/redirect-allowlist.mts</code></a>):</p>
+<ul>
+<li><strong>Matching is exact.</strong> Scheme, host, port, path, query and fragment all
+count. Only case, the default port, <code>..</code> segments and percent-encoding are
+normalized away. There is no wildcard, prefix or subdomain matching — an
+entry does not admit its own siblings, and a target that carries dynamic
+query parameters cannot be listed as a family. Make it a fixed path and carry
+the variable part in the session.</li>
+<li><strong>An absent or empty list refuses every <code>redirect_to</code></strong>, with
+<code>400 invalid_redirect</code>. That is the right setting for a deployment that does
+not use the parameter; it is not a way to allow everything.</li>
+<li><strong><code>https</code> is required, except on loopback.</strong> <code>localhost</code>, <code>127.0.0.0/8</code> and
+<code>[::1]</code> may use <code>http://</code>, which is what lets a local development front-end
+and a native client's loopback listener work without a certificate. The port
+is still matched, so list the port the client binds — RFC 8252 §7.3's
+port-agnostic loopback comparison is not implemented here.</li>
+<li><strong>A cookie domain, when set, constrains the list itself.</strong> Every non-loopback
+entry must be inside <code>sessionDomain</code> (federation) or <code>session.domain</code> (login),
+checked when the policy is built, so an entry outside it fails boot rather
+than sitting in the config looking effective. Unset a federation's
+<code>sessionDomain</code> if a cross-domain redirect target is genuinely intended.</li>
+</ul>
+<p><code>authCallbackUrl</code> and <code>clientUrl</code> are read by <code>resolveCallbackRedirect</code>, not by
+the allowlist: the former is the bridge page a <code>redirect_to</code> is handed to, the
+latter the fallback for a callback whose start carried none. A callback that
+needs one of them and finds it unset is answered <code>500 misconfiguration</code> — after
+the session has been saved — and logged once at error level as
+<code>redirect_policy_server_fault</code>, as every <code>5xx</code> a policy answers is. So every federation needs <code>clientUrl</code> unless every
+start carries a <code>redirect_to</code>, and a start that carries one needs
+<code>authCallbackUrl</code>.</p>
+<p><code>FederationRedirectPolicy</code> (<a href="../media/redirect-policy.mts"><code>src/federations/redirect-policy.mts</code></a>)
+is the replacement point: a module may contribute its own policy for a
+federation, and must fail closed. <code>createFederationRedirectPolicy</code> is the
+default; <code>checkRedirectShape</code>, <code>createRedirectAllowlistValidator</code>,
+<code>describeRedirectRejection</code> and <code>isLoopbackHostname</code> are exported so a custom
+policy reuses the same rules and rejection vocabulary. The policy's methods
+answer with a <a href="../media/types-7.mts"><code>FederationResult</code></a>: <code>ok</code> with a value,
+or a status, an OAuth error code and a description to send. The route sends the
+status as given and the code and description through core's <code>errorEnvelope</code>,
+which holds them to RFC 6749's characters (printable ASCII without <code>&quot;</code> and <code>\</code>):
+a description character outside them goes out as <code>?</code>. A malformed code goes
+out as <code>invalid_request</code> under a 4xx — the refusal is still the client's, and
+<code>400 server_error</code> would contradict itself — logged as
+<code>redirect_policy_error_malformed</code>, and as <code>server_error</code> under any other
+status. <code>describeRedirectRejection</code>'s text is already inside them. A <code>5xx</code> is
+not a verdict on the client but the policy saying the server cannot answer, so
+it is also logged once at error level as <code>redirect_policy_server_fault</code>, with
+the status and the policy's code and description sanitised and capped (and the
+provider at the start leg); a <code>4xx</code> is not logged
+(<a href="src/internal/refusalEnvelope.mts"><code>src/internal/refusalEnvelope.mts</code></a>).</p>
+<h3 id="writing-an-adapter" class="tsd-anchor-link">Writing an adapter<a href="#writing-an-adapter" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>For an IdP that publishes an OpenID Connect discovery document, write no code:
+a <code>type = &quot;oidc&quot;</code> section of
+<a href="_o3co_auth-provider-federation-oidc.html"><code>@o3co/auth-provider-federation-oidc</code></a> is the
+adapter. Otherwise an adapter is a module that contributes both
+<code>federations.&lt;name&gt;</code> (the <code>FederationProvider</code>) and
+<code>federationRedirectPolicies.&lt;name&gt;</code>, with its config on a typed <code>ComponentMap</code>
+slot that a small bridge module fills from <code>extractFederationSection</code>:</p>
+<pre><code class="ts"><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">defineModule</span><span class="hl-1">, </span><span class="hl-5">type</span><span class="hl-1"> </span><span class="hl-6">FederationProvider</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-core&quot;</span><span class="hl-1">;</span><br/><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">createFederationRedirectPolicy</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-session&quot;</span><span class="hl-1">;</span><br/><br/><span class="hl-4">declare</span><span class="hl-1"> </span><span class="hl-4">module</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-core&quot;</span><span class="hl-1"> {</span><br/><span class="hl-1">  </span><span class="hl-4">interface</span><span class="hl-1"> </span><span class="hl-8">ComponentMap</span><span class="hl-1"> {</span><br/><span class="hl-1">    </span><span class="hl-4">readonly</span><span class="hl-1"> </span><span class="hl-6">exampleFederationConfig</span><span class="hl-1">?: </span><span class="hl-8">ExampleConfig</span><span class="hl-1">;</span><br/><span class="hl-1">  }</span><br/><span class="hl-1">}</span><br/><br/><span class="hl-5">export</span><span class="hl-1"> </span><span class="hl-4">const</span><span class="hl-1"> </span><span class="hl-7">exampleFederationModule</span><span class="hl-1"> = </span><span class="hl-0">defineModule</span><span class="hl-1">({</span><br/><span class="hl-1">  </span><span class="hl-6">name:</span><span class="hl-1"> </span><span class="hl-2">&quot;federation:example&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-6">requires:</span><span class="hl-1"> [</span><span class="hl-2">&quot;exampleFederationConfig&quot;</span><span class="hl-1">] </span><span class="hl-5">as</span><span class="hl-1"> </span><span class="hl-4">const</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-6">contributes:</span><span class="hl-1"> {</span><br/><span class="hl-1">    </span><span class="hl-6">federations:</span><span class="hl-1"> {</span><br/><span class="hl-1">      </span><span class="hl-0">example</span><span class="hl-6">:</span><span class="hl-1"> (</span><span class="hl-6">deps</span><span class="hl-1">): </span><span class="hl-8">FederationProvider</span><span class="hl-1"> </span><span class="hl-4">=&gt;</span><span class="hl-1"> </span><span class="hl-0">createExampleProvider</span><span class="hl-1">(</span><span class="hl-6">deps</span><span class="hl-1">.</span><span class="hl-6">exampleFederationConfig</span><span class="hl-1">),</span><br/><span class="hl-1">    },</span><br/><span class="hl-1">    </span><span class="hl-6">federationRedirectPolicies:</span><span class="hl-1"> {</span><br/><span class="hl-1">      </span><span class="hl-0">example</span><span class="hl-6">:</span><span class="hl-1"> (</span><span class="hl-6">deps</span><span class="hl-1">) </span><span class="hl-4">=&gt;</span><span class="hl-1"> </span><span class="hl-0">createFederationRedirectPolicy</span><span class="hl-1">(</span><span class="hl-6">deps</span><span class="hl-1">.</span><span class="hl-6">exampleFederationConfig</span><span class="hl-1">),</span><br/><span class="hl-1">    },</span><br/><span class="hl-1">  },</span><br/><span class="hl-1">});</span>
+</code><button type="button">Copy</button></pre>
+
+<p>The contract's own rules are in <a href="../media/README-8.md">core's README</a>
+and the doc comments of <a href="../media/types-8.mts"><code>types.mts</code></a>. What
+core gives the provider half, exported from <code>@o3co/auth-provider-core</code>:</p>
+<ul>
+<li><code>codeChallenge(codeVerifier)</code> — the S256 challenge for the verifier the router
+minted (<a href="../media/pkce.mts"><code>pkce.mts</code></a>).</li>
+<li><code>callbackUrlForExchange({ redirectUri, code, callbackParams })</code> — the URL to
+hand an OAuth library for the code exchange: <code>code</code>, the RFC 9207 <code>iss</code> when
+the callback carried one, and nothing else from the bag. Rebuilding the URL
+from <code>code</code> alone drops <code>iss</code>, so the mix-up check never runs and every login
+fails against an issuer that advertises
+<code>authorization_response_iss_parameter_supported</code>. Configure the library with
+the issuer the IdP actually publishes, or the comparison refuses every login
+(<a href="../media/callback-url.mts"><code>callback-url.mts</code></a>).</li>
+<li><code>FederationClientSecret</code> / <code>resolveClientSecret</code> — a <code>client_secret</code> that is a
+string or a resolver (<code>() =&gt; string | Promise&lt;string&gt;</code>). The adapter calls
+<code>resolveClientSecret</code> on every token request, and it caches nothing, so an
+adapter whose secret rotates (Apple's ES256 JWT) owns its caching. An empty or non-string result is refused
+locally rather than posted upstream
+(<a href="../media/client-secret-1.mts"><code>client-secret.mts</code></a>).</li>
+<li><code>federationTokenSnapshot(tokens, obtainedAt)</code> — the one reading of a token
+response for a profile or a refresh: <code>expiresIn</code> as the library read it and
+<code>expiresAt</code> from it, <code>null</code> on both when no lifetime was sent, <code>tokenType</code>,
+<code>scope</code> present exactly when sent
+(<a href="../media/token-snapshot.mts"><code>token-snapshot.mts</code></a>).</li>
+</ul>
+<p>The bundled adapters are the worked examples — for instance
+<a href="../media/google.mts"><code>google.mts</code></a> in <code>federation-google</code>.</p>
+<h2 id="tests-that-pin-these-rules" class="tsd-anchor-link">Tests that pin these rules<a href="#tests-that-pin-these-rules" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<table>
+<thead>
+<tr>
+<th>Test file</th>
+<th>Pins</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="../media/module.test-1.mts"><code>src/__tests__/module.test.mts</code></a></td>
+<td>the manifest's slots and absence policies, the two routers at <code>/session</code>, and the <code>callbackURL</code> boot rule</td>
+</tr>
+<tr>
+<td><a href="../media/sessionStoreModule.test.mts"><code>src/__tests__/sessionStoreModule.test.mts</code></a></td>
+<td>the middleware route at <code>/</code>, the cookie name, the <code>__Host-</code> rule, and the replica-safety declaration and refusal</td>
+</tr>
+<tr>
+<td><a href="../media/factory.test.mts"><code>src/store/__tests__/factory.test.mts</code></a></td>
+<td>the two built-in stores, the <code>session-store</code> readiness probe, and the Redis client's error listener</td>
+</tr>
+<tr>
+<td><a href="../media/cookieSessionStore.test.mts"><code>src/__tests__/cookieSessionStore.test.mts</code></a></td>
+<td>the cookie-session store failing under the real express-session and connect-redis: the middleware's <code>503</code> and its one line, and a route's outage answered once with the session not written again</td>
+</tr>
+<tr>
+<td><a href="../media/csrf.test.mts"><code>src/__tests__/csrf.test.mts</code></a></td>
+<td>the signed token, the origin check and the guard's acceptance rule</td>
+</tr>
+<tr>
+<td><a href="../media/Session.test.mts"><code>src/routes/__tests__/Session.test.mts</code></a>, <a href="../media/loginRateLimit.test.mts"><code>loginRateLimit.test.mts</code></a></td>
+<td>login, what logout invalidates and that a store outage does not stop the <code>UserSession</code> delete, the outage answers and their one log line, and the login rate-limit guard</td>
+</tr>
+<tr>
+<td><a href="../media/Federation.test.mts"><code>src/routes/__tests__/Federation.test.mts</code></a></td>
+<td>the start and callback legs, account linking, the store writes and their rollback, the outage answers and their log lines, <code>amr</code></td>
+</tr>
+<tr>
+<td><a href="../media/Federation.formPost.test.mts"><code>Federation.formPost.test.mts</code></a>, <a href="../media/Federation.applicationCookie.test.mts"><code>Federation.applicationCookie.test.mts</code></a>, <a href="../media/Federation.transactionFailures.test.mts"><code>Federation.transactionFailures.test.mts</code></a>, <a href="../media/Federation.transactionConcurrency.test.mts"><code>Federation.transactionConcurrency.test.mts</code></a></td>
+<td>response modes, the transaction cookie, the untouched session cookie, the transaction's failure paths and what single use guarantees</td>
+</tr>
+<tr>
+<td><a href="../media/__tests__"><code>src/federations/__tests__/</code></a></td>
+<td>the toolkit and the router's federation parts; the request helpers are pinned in core (<a href="../media/__tests__-1"><code>core/src/federations/__tests__/</code></a>)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="see-also" class="tsd-anchor-link">See also<a href="#see-also" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ul>
+<li><a href="_o3co_auth-provider-core.html"><code>@o3co/auth-provider-core</code></a> — the ports this package drives,
+and the <a href="../media/README-8.md">federation adapter contract</a></li>
+<li><a href="_o3co_auth-provider-oauth.html"><code>@o3co/auth-provider-oauth</code></a> — token issuance, <code>/oauth/logout</code>,
+and the federation token and logout routes</li>
+<li><a href="../media/README-10.md"><code>@o3co/auth-provider-redis</code></a> — Redis adapters for the session
+stores (<code>UserSessionStore</code> and the rest), distinct from the browser session store
+above</li>
+</ul>
+</section>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Interfaces"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="interfaces">Interfaces<a href="#interfaces" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="csrfcookieattributes"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-session.CsrfCookieAttributes.html">CsrfCookieAttributes</a><a href="#csrfcookieattributes" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="csrfguardoptions"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-session.CsrfGuardOptions.html">CsrfGuardOptions</a><a href="#csrfguardoptions" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="csrfprotection"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-session.CsrfProtection.html">CsrfProtection</a><a href="#csrfprotection" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="csrfprotectionoptions"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-session.CsrfProtectionOptions.html">CsrfProtectionOptions</a><a href="#csrfprotectionoptions" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="federatedclaimsnamespace"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-session.FederatedClaimsNamespace.html">FederatedClaimsNamespace</a><a href="#federatedclaimsnamespace" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="federationredirectpolicy"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-session.FederationRedirectPolicy.html">FederationRedirectPolicy</a><a href="#federationredirectpolicy" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="federationtransactionenvelope"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-session.FederationTransactionEnvelope.html">FederationTransactionEnvelope</a><a href="#federationtransactionenvelope" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="federationtransactionsessionstore"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-session.FederationTransactionSessionStore.html">FederationTransactionSessionStore</a><a href="#federationtransactionsessionstore" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="federationtransactionstore"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-session.FederationTransactionStore.html">FederationTransactionStore</a><a href="#federationtransactionstore" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="redirectallowlistoptions"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-session.RedirectAllowlistOptions.html">RedirectAllowlistOptions</a><a href="#redirectallowlistoptions" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="redirectallowlistvalidator"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-session.RedirectAllowlistValidator.html">RedirectAllowlistValidator</a><a href="#redirectallowlistvalidator" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="redirectconfig"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-session.RedirectConfig.html">RedirectConfig</a><a href="#redirectconfig" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="sessioncsrfconfigslice"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-session.SessionCsrfConfigSlice.html">SessionCsrfConfigSlice</a><a href="#sessioncsrfconfigslice" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="sessionstoremoduleconfig"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-session.SessionStoreModuleConfig.html">SessionStoreModuleConfig</a><a href="#sessionstoremoduleconfig" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Type Aliases"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="type-aliases">Type Aliases<a href="#type-aliases" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="csrforiginverdict"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><a href="../types/_o3co_auth-provider-session.CsrfOriginVerdict.html">CsrfOriginVerdict</a><a href="#csrforiginverdict" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="csrftokenverdict"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><a href="../types/_o3co_auth-provider-session.CsrfTokenVerdict.html">CsrfTokenVerdict</a><a href="#csrftokenverdict" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="federationredirectpolicyconfig"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><a href="../types/_o3co_auth-provider-session.FederationRedirectPolicyConfig.html">FederationRedirectPolicyConfig</a><a href="#federationredirectpolicyconfig" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="federationredirectpolicyfactory"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><a href="../types/_o3co_auth-provider-session.FederationRedirectPolicyFactory.html">FederationRedirectPolicyFactory</a><a href="#federationredirectpolicyfactory" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="federationresult"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><a href="../types/_o3co_auth-provider-session.FederationResult.html">FederationResult</a><a href="#federationresult" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="redirectrejection"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><a href="../types/_o3co_auth-provider-session.RedirectRejection.html">RedirectRejection</a><a href="#redirectrejection" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="sessionstorefactory"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><a href="../types/_o3co_auth-provider-session.SessionStoreFactory.html">SessionStoreFactory</a><a href="#sessionstorefactory" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Variables"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="variables">Variables<a href="#variables" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="default_csrf_body_field"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-session.DEFAULT_CSRF_BODY_FIELD.html">DEFAULT_CSRF_BODY_FIELD</a><a href="#default_csrf_body_field" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="default_csrf_cookie_name"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-session.DEFAULT_CSRF_COOKIE_NAME.html">DEFAULT_CSRF_COOKIE_NAME</a><a href="#default_csrf_cookie_name" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="default_csrf_header_name"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-session.DEFAULT_CSRF_HEADER_NAME.html">DEFAULT_CSRF_HEADER_NAME</a><a href="#default_csrf_header_name" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="default_csrf_ttl_seconds"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-session.DEFAULT_CSRF_TTL_SECONDS.html">DEFAULT_CSRF_TTL_SECONDS</a><a href="#default_csrf_ttl_seconds" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="default_federation_transaction_ttl_ms"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-session.DEFAULT_FEDERATION_TRANSACTION_TTL_MS.html">DEFAULT_FEDERATION_TRANSACTION_TTL_MS</a><a href="#default_federation_transaction_ttl_ms" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="federated_amr"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-session.FEDERATED_AMR.html">FEDERATED_AMR</a><a href="#federated_amr" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="federated_claims_key"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-session.FEDERATED_CLAIMS_KEY.html">FEDERATED_CLAIMS_KEY</a><a href="#federated_claims_key" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="federation_transaction_cookie_suffix"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-session.FEDERATION_TRANSACTION_COOKIE_SUFFIX.html">FEDERATION_TRANSACTION_COOKIE_SUFFIX</a><a href="#federation_transaction_cookie_suffix" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="federation_transaction_key_prefix"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-session.FEDERATION_TRANSACTION_KEY_PREFIX.html">FEDERATION_TRANSACTION_KEY_PREFIX</a><a href="#federation_transaction_key_prefix" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="max_csrf_ttl_seconds"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-session.MAX_CSRF_TTL_SECONDS.html">MAX_CSRF_TTL_SECONDS</a><a href="#max_csrf_ttl_seconds" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="max_redirect_url_length"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-session.MAX_REDIRECT_URL_LENGTH.html">MAX_REDIRECT_URL_LENGTH</a><a href="#max_redirect_url_length" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="promotable_federated_claims"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-session.PROMOTABLE_FEDERATED_CLAIMS.html">PROMOTABLE_FEDERATED_CLAIMS</a><a href="#promotable_federated_claims" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="sessionmodule"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-session.sessionModule.html">sessionModule</a><a href="#sessionmodule" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="sessionstoremodule"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-session.sessionStoreModule.html">sessionStoreModule</a><a href="#sessionstoremodule" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Functions"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="functions">Functions<a href="#functions" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="checkredirectshape"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.checkRedirectShape.html">checkRedirectShape</a><a href="#checkredirectshape" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="checkrequestorigin"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.checkRequestOrigin.html">checkRequestOrigin</a><a href="#checkrequestorigin" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="createcsrfguard"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.createCsrfGuard.html">createCsrfGuard</a><a href="#createcsrfguard" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="createcsrfissuehandler"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.createCsrfIssueHandler.html">createCsrfIssueHandler</a><a href="#createcsrfissuehandler" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="createcsrfprotection"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.createCsrfProtection.html">createCsrfProtection</a><a href="#createcsrfprotection" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="createcsrfprotectionfromconfig"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.createCsrfProtectionFromConfig.html">createCsrfProtectionFromConfig</a><a href="#createcsrfprotectionfromconfig" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="createfederationredirectpolicy"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.createFederationRedirectPolicy.html">createFederationRedirectPolicy</a><a href="#createfederationredirectpolicy" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="createfederationtransactionstore"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.createFederationTransactionStore.html">createFederationTransactionStore</a><a href="#createfederationtransactionstore" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="createredirectallowlistvalidator"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.createRedirectAllowlistValidator.html">createRedirectAllowlistValidator</a><a href="#createredirectallowlistvalidator" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="createsessionstorefactory"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.createSessionStoreFactory.html">createSessionStoreFactory</a><a href="#createsessionstorefactory" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="derivefederationtransactioncookiename"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.deriveFederationTransactionCookieName.html">deriveFederationTransactionCookieName</a><a href="#derivefederationtransactioncookiename" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="describeredirectrejection"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.describeRedirectRejection.html">describeRedirectRejection</a><a href="#describeredirectrejection" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="extractfederationsection"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.extractFederationSection.html">extractFederationSection</a><a href="#extractfederationsection" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="isloopbackhostname"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.isLoopbackHostname.html">isLoopbackHostname</a><a href="#isloopbackhostname" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="mergefederatedclaims"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.mergeFederatedClaims.html">mergeFederatedClaims</a><a href="#mergefederatedclaims" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="mintfederationtransactionid"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.mintFederationTransactionId.html">mintFederationTransactionId</a><a href="#mintfederationtransactionid" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="registerbuiltinsessionstores"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.registerBuiltinSessionStores.html">registerBuiltinSessionStores</a><a href="#registerbuiltinsessionstores" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="resolvecallbackredirect"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.resolveCallbackRedirect.html">resolveCallbackRedirect</a><a href="#resolvecallbackredirect" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="sessionstoremodulefor"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-session.sessionStoreModuleFor.html">sessionStoreModuleFor</a><a href="#sessionstoremodulefor" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details></div>
+<div class="col-sidebar">
+<div class="page-menu">
+<div class="tsd-navigation settings">
+<details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>Settings</h3></summary>
+<div class="tsd-accordion-details">
+<div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span>
+<ul id="tsd-filter-options">
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div>
+<div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div>
+<details open class="tsd-accordion tsd-page-navigation"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>On This Page</h3></summary>
+<div class="tsd-accordion-details"><a href="#o3coauth-provider-session"><span>@o3co/auth-<wbr/>provider-<wbr/>session</span></a>
+<ul>
+<li><a href="#responsibility"><span>Responsibility</span></a></li>
+<li><a href="#install"><span>Install</span></a></li>
+<li><a href="#composition"><span>Composition</span></a></li>
+<li><a href="#browser-session-store"><span>Browser session store</span></a></li>
+<li><a href="#routes"><span>Routes</span></a></li>
+<li>
+<ul>
+<li><a href="#password-login"><span>Password login</span></a></li>
+<li><a href="#what-invalidates"><span>What  invalidates</span></a></li>
+<li><a href="#csrf-on-the-state-changing-routes"><span>CSRF on the state-<wbr/>changing routes</span></a></li>
+<li><a href="#what-a-session-records-about-the-authentication"><span>What a session records about the authentication</span></a></li>
+<li><a href="#account-linking-across-federations-482"><span>Account linking across federations (#482)</span></a></li></ul></li>
+<li><a href="#driving-a-federation-adapter"><span>Driving a federation adapter</span></a></li>
+<li>
+<ul>
+<li><a href="#the-start-leg"><span>The start leg</span></a></li>
+<li><a href="#what-the-callback-does-with-the-profile"><span>What the callback does with the profile</span></a></li>
+<li><a href="#response-modes-and"><span>Response modes:  and </span></a></li>
+<li>
+<ul>
+<li><a href="#the-transaction-cookie"><span>The transaction cookie</span></a></li>
+<li><a href="#every-host-on-the-auth-hosts-registrable-domain-is-inside-the-trust-boundary"><span>Every host on the auth host&#39;s registrable domain is inside the trust boundary</span></a></li>
+<li><a href="#when-a-transaction-is-spent"><span>When a transaction is spent</span></a></li>
+<li><a href="#what-single-use-guarantees"><span>What &quot;single use&quot; guarantees</span></a></li></ul></li>
+<li><a href="#claim-precedence-local-wins-federated-is-namespaced"><span>Claim precedence: local wins, federated is namespaced</span></a></li>
+<li>
+<ul>
+<li><a href="#is-a-boolean-whatever-the-idp-sent"><span> is a boolean, whatever the <wbr/>Id<wbr/>P sent</span></a></li></ul></li>
+<li><a href="#configuring-federations"><span>Configuring federations</span></a></li>
+<li><a href="#redirect-allowlists"><span>Redirect allowlists</span></a></li>
+<li><a href="#writing-an-adapter"><span>Writing an adapter</span></a></li></ul></li>
+<li><a href="#tests-that-pin-these-rules"><span>Tests that pin these rules</span></a></li>
+<li><a href="#see-also"><span>See also</span></a></li></ul>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Interfaces"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Interfaces</summary>
+<div><a href="#csrfcookieattributes"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Csrf<wbr/>Cookie<wbr/>Attributes</span></a><a href="#csrfguardoptions"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Csrf<wbr/>Guard<wbr/>Options</span></a><a href="#csrfprotection"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Csrf<wbr/>Protection</span></a><a href="#csrfprotectionoptions"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Csrf<wbr/>Protection<wbr/>Options</span></a><a href="#federatedclaimsnamespace"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Federated<wbr/>Claims<wbr/>Namespace</span></a><a href="#federationredirectpolicy"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Federation<wbr/>Redirect<wbr/>Policy</span></a><a href="#federationtransactionenvelope"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Federation<wbr/>Transaction<wbr/>Envelope</span></a><a href="#federationtransactionsessionstore"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Federation<wbr/>Transaction<wbr/>Session<wbr/>Store</span></a><a href="#federationtransactionstore"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Federation<wbr/>Transaction<wbr/>Store</span></a><a href="#redirectallowlistoptions"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Redirect<wbr/>Allowlist<wbr/>Options</span></a><a href="#redirectallowlistvalidator"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Redirect<wbr/>Allowlist<wbr/>Validator</span></a><a href="#redirectconfig"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Redirect<wbr/>Config</span></a><a href="#sessioncsrfconfigslice"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Session<wbr/>Csrf<wbr/>Config<wbr/>Slice</span></a><a href="#sessionstoremoduleconfig"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Session<wbr/>Store<wbr/>Module<wbr/>Config</span></a></div></details>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Type Aliases"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Type Aliases</summary>
+<div><a href="#csrforiginverdict"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><span>Csrf<wbr/>Origin<wbr/>Verdict</span></a><a href="#csrftokenverdict"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><span>Csrf<wbr/>Token<wbr/>Verdict</span></a><a href="#federationredirectpolicyconfig"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><span>Federation<wbr/>Redirect<wbr/>Policy<wbr/>Config</span></a><a href="#federationredirectpolicyfactory"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><span>Federation<wbr/>Redirect<wbr/>Policy<wbr/>Factory</span></a><a href="#federationresult"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><span>Federation<wbr/>Result</span></a><a href="#redirectrejection"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><span>Redirect<wbr/>Rejection</span></a><a href="#sessionstorefactory"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><span>Session<wbr/>Store<wbr/>Factory</span></a></div></details>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Variables"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Variables</summary>
+<div><a href="#default_csrf_body_field"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>DEFAULT_<wbr/>CSRF_<wbr/>BODY_<wbr/>FIELD</span></a><a href="#default_csrf_cookie_name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>DEFAULT_<wbr/>CSRF_<wbr/>COOKIE_<wbr/>NAME</span></a><a href="#default_csrf_header_name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>DEFAULT_<wbr/>CSRF_<wbr/>HEADER_<wbr/>NAME</span></a><a href="#default_csrf_ttl_seconds"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>DEFAULT_<wbr/>CSRF_<wbr/>TTL_<wbr/>SECONDS</span></a><a href="#default_federation_transaction_ttl_ms"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>DEFAULT_<wbr/>FEDERATION_<wbr/>TRANSACTION_<wbr/>TTL_<wbr/>MS</span></a><a href="#federated_amr"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>FEDERATED_<wbr/>AMR</span></a><a href="#federated_claims_key"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>FEDERATED_<wbr/>CLAIMS_<wbr/>KEY</span></a><a href="#federation_transaction_cookie_suffix"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>FEDERATION_<wbr/>TRANSACTION_<wbr/>COOKIE_<wbr/>SUFFIX</span></a><a href="#federation_transaction_key_prefix"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>FEDERATION_<wbr/>TRANSACTION_<wbr/>KEY_<wbr/>PREFIX</span></a><a href="#max_csrf_ttl_seconds"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>MAX_<wbr/>CSRF_<wbr/>TTL_<wbr/>SECONDS</span></a><a href="#max_redirect_url_length"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>MAX_<wbr/>REDIRECT_<wbr/>URL_<wbr/>LENGTH</span></a><a href="#promotable_federated_claims"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>PROMOTABLE_<wbr/>FEDERATED_<wbr/>CLAIMS</span></a><a href="#sessionmodule"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>session<wbr/>Module</span></a><a href="#sessionstoremodule"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>session<wbr/>Store<wbr/>Module</span></a></div></details>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Functions"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Functions</summary>
+<div><a href="#checkredirectshape"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>check<wbr/>Redirect<wbr/>Shape</span></a><a href="#checkrequestorigin"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>check<wbr/>Request<wbr/>Origin</span></a><a href="#createcsrfguard"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>create<wbr/>Csrf<wbr/>Guard</span></a><a href="#createcsrfissuehandler"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>create<wbr/>Csrf<wbr/>Issue<wbr/>Handler</span></a><a href="#createcsrfprotection"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>create<wbr/>Csrf<wbr/>Protection</span></a><a href="#createcsrfprotectionfromconfig"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>create<wbr/>Csrf<wbr/>Protection<wbr/>From<wbr/>Config</span></a><a href="#createfederationredirectpolicy"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>create<wbr/>Federation<wbr/>Redirect<wbr/>Policy</span></a><a href="#createfederationtransactionstore"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>create<wbr/>Federation<wbr/>Transaction<wbr/>Store</span></a><a href="#createredirectallowlistvalidator"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>create<wbr/>Redirect<wbr/>Allowlist<wbr/>Validator</span></a><a href="#createsessionstorefactory"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>create<wbr/>Session<wbr/>Store<wbr/>Factory</span></a><a href="#derivefederationtransactioncookiename"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>derive<wbr/>Federation<wbr/>Transaction<wbr/>Cookie<wbr/>Name</span></a><a href="#describeredirectrejection"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>describe<wbr/>Redirect<wbr/>Rejection</span></a><a href="#extractfederationsection"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>extract<wbr/>Federation<wbr/>Section</span></a><a href="#isloopbackhostname"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>is<wbr/>Loopback<wbr/>Hostname</span></a><a href="#mergefederatedclaims"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>merge<wbr/>Federated<wbr/>Claims</span></a><a href="#mintfederationtransactionid"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>mint<wbr/>Federation<wbr/>Transaction<wbr/>Id</span></a><a href="#registerbuiltinsessionstores"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>register<wbr/>Builtin<wbr/>Session<wbr/>Stores</span></a><a href="#resolvecallbackredirect"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>resolve<wbr/>Callback<wbr/>Redirect</span></a><a href="#sessionstoremodulefor"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>session<wbr/>Store<wbr/>Module<wbr/>For</span></a></div></details></div></details></div>
+<div class="site-menu">
+<nav class="tsd-navigation"><a href="../modules.html">auth.provider API</a>
+<ul class="tsd-small-nested-navigation" id="tsd-nav-container">
+<li>Loading...</li></ul></nav></div></div></div><footer>
+<p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer>
+<div class="overlay"></div></body></html>

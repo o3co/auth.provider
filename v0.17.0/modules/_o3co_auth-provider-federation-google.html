@@ -1,0 +1,430 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="../"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>@o3co/auth-provider-federation-google | auth.provider API</title><meta name="description" content="Documentation for auth.provider API"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="../assets/style.css"/><link rel="stylesheet" href="../assets/highlight.css"/><script defer src="../assets/main.js"></script><script async src="../assets/icons.js" id="tsd-icons-script"></script><script async src="../assets/search.js" id="tsd-search-script"></script><script async src="../assets/navigation.js" id="tsd-nav-script"></script><script async src="../assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
+<div class="tsd-toolbar-contents container"><a href="../index.html" class="title">auth.provider API</a>
+<div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/>
+<ul role="listbox" id="tsd-search-results"></ul>
+<div id="tsd-search-status" aria-live="polite" aria-atomic="true">
+<div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-menu"></use></svg></a></div></header>
+<div class="container container-main">
+<div class="col-content">
+<div class="tsd-page-title">
+<ul class="tsd-breadcrumb" aria-label="Breadcrumb">
+<li><a href="" aria-current="page">@o3co/auth-provider-federation-google</a></li></ul>
+<h1>Module @o3co/auth-provider-federation-google</h1></div>
+<section class="tsd-panel tsd-typography"><h1 id="o3coauth-provider-federation-google" class="tsd-anchor-link">@o3co/auth-provider-federation-google<a href="#o3coauth-provider-federation-google" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h1>
+<p>Last updated: 2026-10-05</p>
+<p>Google federation provider for <code>auth.provider</code>: sign-in with a Google account
+through Google's OpenID Connect endpoints, with token refresh, upstream logout
+and claim mapping.</p>
+<h2 id="responsibility" class="tsd-anchor-link">Responsibility<a href="#responsibility" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p><strong>Role.</strong> An adapter: it implements core's federation contract
+(<a href="../media/README-10.md"><code>core/src/federations</code></a>) for Google. It
+contributes the federation type <code>google</code>: core hands it each enabled
+<code>core.federations</code> entry of that type, and it builds one federation per entry,
+under the entry's name, registered for the session router with its redirect
+policy.</p>
+<p><strong>Owns:</strong> Google's endpoints and issuer (written into the adapter, not
+discovered), how the id_token and UserInfo are verified, which parameters the
+authorization request carries, what a Google login profile, a refresh and a
+logout URL contain, and the schema of a <code>google</code> entry's own keys
+(<a href="../media/entry-2.mts"><code>src/entry.mts</code></a>).</p>
+<p><strong>Does not own:</strong> the contract (core); the <code>core.federations</code> map, the keys
+core owns on every entry (<code>enabled</code>, <code>type</code>, <code>trustUpstreamAmr</code>,
+<code>callbackMeetsFreshness</code>, <code>callbackURL</code>) and the dispatch of an entry by its type (core's boot); the routes, <code>state</code> / PKCE verifier /
+<code>nonce</code> generation, the redirect-allowlist rules and claim precedence
+(<a href="_o3co_auth-provider-session.html"><code>@o3co/auth-provider-session</code></a>); who the user is (the
+Store); the refresh and logout routes that call this adapter
+(<a href="_o3co_auth-provider-oauth.html"><code>@o3co/auth-provider-oauth</code></a>).</p>
+<p><strong>Why a separate package.</strong> Each adapter is its own package so that a deployment
+installs only the IdPs it uses, and <code>openid-client</code> only with one of them. Why
+Google is not a <code>type = &quot;oidc&quot;</code> section of
+<a href="_o3co_auth-provider-federation-oidc.html"><code>@o3co/auth-provider-federation-oidc</code></a>: this
+adapter does four things the generic one does not — it sends
+<code>access_type=offline</code> and <code>prompt=consent</code> at login, what Google requires before
+it issues a refresh token (below); it carries Google's <code>hd</code> (Workspace domain) claim through to
+the profile and <code>mapClaims</code>; it requires the RFC 9207 <code>iss</code> without fetching
+Google's discovery document; and without an <code>endSessionEndpoint</code> it still
+offers logout, redirecting to <code>postLogoutRedirectUri</code> or to Google's own logout
+URL, where the generic adapter offers logout only when an end-session endpoint
+is discovered or configured. The generic adapter already verifies what this one
+verifies.</p>
+<p>Nor is this adapter a preset built on the generic one. That was weighed and
+declined: it would make this package depend on <code>federation-oidc</code>; the generic
+provider is built asynchronously (discovery, key import) while
+<code>createGoogleProvider</code> is synchronous, so it would have to be split; it would
+need four new options for the four differences above; and it would change how
+this adapter authenticates to Google (<code>client_secret_post</code> today, the generic
+adapter's <code>client_secret_basic</code>). What the two did share — the PKCE
+challenge, the code-exchange URL, the reading of the token response — is
+core's toolkit, used by both, so little duplication is left to remove.</p>
+<h2 id="install" class="tsd-anchor-link">Install<a href="#install" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="sh"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">install</span><span class="hl-1"> </span><span class="hl-2">@o3co/auth-provider-federation-google</span><span class="hl-1"> </span><span class="hl-2">@o3co/auth-provider-core</span><span class="hl-1"> </span><span class="hl-2">@o3co/auth-provider-session</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Peer dependencies: <code>@o3co/auth-provider-core</code> and
+<code>@o3co/auth-provider-session</code>. The package depends on <code>openid-client</code> and
+<code>zod</code>.</p>
+<h2 id="usage" class="tsd-anchor-link">Usage<a href="#usage" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>One module, <code>googleFederationTypeModule()</code>
+(<a href="../media/type-module-2.mts"><code>src/type-module.mts</code></a>), handles every enabled
+<code>core.federations</code> entry whose <code>type</code> is <code>google</code>. It contributes
+<code>federationTypes.google</code>; core parses each such entry with the type's schema
+at boot and calls the module's factories with the entry's name, its
+<code>callbackURL</code> and its parsed keys, so the composition root fills no slot. The
+module requires no dependency.</p>
+<pre><code class="ts"><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">createApp</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-core&quot;</span><span class="hl-1">;</span><br/><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">googleFederationTypeModule</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-federation-google&quot;</span><span class="hl-1">;</span><br/><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">sessionModule</span><span class="hl-1">, </span><span class="hl-6">sessionStoreModule</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-session&quot;</span><span class="hl-1">;</span><br/><br/><span class="hl-4">const</span><span class="hl-1"> </span><span class="hl-8">handle</span><span class="hl-1"> = </span><span class="hl-5">await</span><span class="hl-1"> </span><span class="hl-0">createApp</span><span class="hl-1">({</span><br/><span class="hl-1">  </span><span class="hl-6">modules:</span><span class="hl-1"> [</span><br/><span class="hl-1">    </span><span class="hl-6">sessionStoreModule</span><span class="hl-1">,</span><br/><span class="hl-1">    </span><span class="hl-6">sessionModule</span><span class="hl-1">,</span><br/><span class="hl-1">    </span><span class="hl-0">googleFederationTypeModule</span><span class="hl-1">(),</span><br/><span class="hl-1">    </span><span class="hl-3">// ... composition-root modules supplying userRepository and the session stores</span><br/><span class="hl-1">  ],</span><br/><span class="hl-1">  </span><span class="hl-6">bootstrapComponents:</span><span class="hl-1"> { </span><span class="hl-6">config</span><span class="hl-1">, </span><span class="hl-6">pathResolver</span><span class="hl-1"> },</span><br/><span class="hl-1">});</span>
+</code><button type="button">Copy</button></pre>
+
+<p><code>googleFederationTypeModule({ fetch })</code> sends every request to Google of every
+<code>google</code> entry — token, UserInfo, JWKS — through that fetch: a proxy, or a
+test double. Without it the global <code>fetch</code> is used. Its module name is
+<code>federation-google-type</code>.</p>
+<h3 id="configuration" class="tsd-anchor-link">Configuration<a href="#configuration" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<pre><code class="hocon">core.federations {
+  google {
+    enabled = true
+    type = "google"
+    clientId = ${?CORE_FEDERATIONS_GOOGLE_CLIENT_ID}
+    clientSecret = ${?CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET}
+    callbackURL = "https://auth.example.com/session/oauth/federation/google/callback"
+    clientUrl = "https://app.example.com/"
+  }
+}
+</code><button type="button">Copy</button></pre>
+
+<p>The entry's name is the federation's: the <code>:name</code> segment of
+<code>/session/oauth/federation/:name</code>, the key its upstream tokens are stored
+under, and the prefix of the identity handed to the Store (<code>&lt;name&gt;:&lt;sub&gt;</code>).
+Two entries of type <code>google</code> — two Google clients, say one per OAuth consent
+screen — are two federations side by side, each under its own name.</p>
+<p>An entry is flat, and its schema is strict: the keys core owns (<code>enabled</code>,
+<code>type</code>, <code>trustUpstreamAmr</code>, <code>callbackMeetsFreshness</code>, <code>callbackURL</code>) and the keys
+below, nothing else.
+The schema is <code>googleEntrySchema</code> in <a href="../media/entry-2.mts"><code>src/entry.mts</code></a>. A key it
+does not name — a typo, or a nested <code>google { ... }</code> section — refuses boot with <code>config-validation-failed</code> at <code>core.federations.&lt;name&gt;</code>,
+naming the key; a missing or malformed key is refused at
+<code>core.federations.&lt;name&gt;.&lt;field&gt;</code>. No refusal quotes the value it refuses, so a
+misplaced <code>clientSecret</code> does not reach the log. A key written <code>null</code> counts as
+absent. An absent key means what the table says, read by the provider and the
+redirect policy; the schema fills in no default.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>clientId</code></td>
+<td>yes</td>
+<td>The OAuth client ID Google issued.</td>
+</tr>
+<tr>
+<td><code>clientSecret</code></td>
+<td>yes</td>
+<td>Its client secret, sent in the token request's body (<code>client_secret_post</code>).</td>
+</tr>
+<tr>
+<td><code>callbackURL</code></td>
+<td>yes</td>
+<td>Where Google sends the browser back. A key core owns: boot requires it of every entry it dispatches, and the session routes read it from the same entry.</td>
+</tr>
+<tr>
+<td><code>clientUrl</code></td>
+<td>in practice</td>
+<td>Where the browser lands after a login whose start carried no <code>redirect_to</code>. Without it such a login ends in <code>500 misconfiguration</code> after the session has been saved — so it is needed unless every start carries a <code>redirect_to</code> and <code>authCallbackUrl</code> is set.</td>
+</tr>
+<tr>
+<td><code>redirectAllowlist</code>, <code>authCallbackUrl</code>, <code>sessionDomain</code></td>
+<td>no</td>
+<td>The <code>redirect_to</code> policy, as for every federation — see the <a href="_o3co_auth-provider-session.html#redirect-allowlists">session package README</a>. A start that carries <code>redirect_to</code> needs both an allowlist entry for it and <code>authCallbackUrl</code>, or it is refused (<code>400</code>) or ends in <code>500 misconfiguration</code>.</td>
+</tr>
+<tr>
+<td><code>accessType</code></td>
+<td>no</td>
+<td><code>&quot;offline&quot;</code> (absent means this) or <code>&quot;online&quot;</code>: whether sign-in asks Google for a refresh token — <a href="#refresh-tokens-and-the-consent-screen">below</a>.</td>
+</tr>
+<tr>
+<td><code>requireAuthorizationResponseIss</code></td>
+<td>no</td>
+<td>Absent means <code>true</code>: a callback without the RFC 9207 <code>iss</code> is refused — <a href="#the-callbacks-iss-rfc-9207">below</a>. Also takes <code>&quot;true&quot;</code>, <code>&quot;false&quot;</code>, <code>&quot;1&quot;</code> and <code>&quot;0&quot;</code> (trimmed, any case), as an environment variable writes them; an empty string is refused.</td>
+</tr>
+<tr>
+<td><code>endSessionEndpoint</code></td>
+<td>no</td>
+<td>An upstream end-session URL for logout; Google publishes none — <a href="#refresh-and-logout">below</a>.</td>
+</tr>
+</tbody>
+</table>
+<p><code>fetch</code> is not an entry key: it is the type module's option (above), and a
+<code>GoogleProviderConfig</code> field for <code>createGoogleProvider</code>. Nor is <code>jwksUri</code>: where Google's signing keys are fetched from is not the
+configuration's to move. It stays a <code>GoogleProviderConfig</code> field.</p>
+<h2 id="what-a-login-does" class="tsd-anchor-link">What a login does<a href="#what-a-login-does" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ul>
+<li><strong>Authorization request:</strong> scope <code>openid profile email</code>, PKCE S256,
+<code>access_type=offline</code> with <code>prompt=consent</code> (see below), and the <code>nonce</code> the
+session router minted. There is no request without a nonce:
+<code>buildAuthorizationUrl</code> and <code>exchangeCode</code> both throw when it is missing.
+A freshness ask (<code>prompt=login</code>, <code>max_age</code>) is <strong>not forwarded</strong>: Google's
+OpenID Connect documentation lists <code>prompt</code> values <code>none</code>, <code>consent</code> and
+<code>select_account</code> only, and no <code>max_age</code> parameter. The request is the same
+with or without one.</li>
+<li><strong>Code exchange:</strong> at Google's token endpoint, the client secret in the
+request body (<code>client_secret_post</code>, <code>openid-client</code>'s default), with the PKCE
+verifier. The callback's <code>iss</code> is checked first (below). The id_token's signature is
+verified against Google's JWKS with <code>RS256</code> pinned, and its <code>nonce</code> against the
+session's; a response without an id_token is refused.</li>
+<li><strong>UserInfo</strong> is fetched and bound to the id_token's <code>sub</code>; an id_token without
+a <code>sub</code>, or a UserInfo answer for another subject, is refused. Any refusal
+reaches the browser as the session router's <code>502 exchange_failed</code>.</li>
+</ul>
+<p>What <code>exchangeCode</code> returns:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>issuer</code></td>
+<td><code>https://accounts.google.com</code></td>
+</tr>
+<tr>
+<td><code>sub</code></td>
+<td>Google's account ID, from UserInfo (bound to the id_token's)</td>
+</tr>
+<tr>
+<td><code>email</code>, <code>name</code>, <code>picture</code></td>
+<td>from UserInfo, when strings</td>
+</tr>
+<tr>
+<td><code>emailVerified</code></td>
+<td>UserInfo's <code>email_verified</code> when it is a boolean; otherwise absent</td>
+</tr>
+<tr>
+<td><code>hd</code></td>
+<td>the Workspace domain, when UserInfo carries it — recorded, not enforced (below)</td>
+</tr>
+<tr>
+<td><code>accessToken</code>, <code>idToken</code>, <code>refreshToken</code></td>
+<td>as Google issued them; <code>idToken</code> and <code>refreshToken</code> only when non-empty strings</td>
+</tr>
+<tr>
+<td><code>scope</code></td>
+<td>Google's <code>scope</code> as sent; absent when Google sent none. A <code>scope</code> that is not a string is refused by <code>openid-client</code> before the adapter sees it, and the login answers <code>502 exchange_failed</code></td>
+</tr>
+<tr>
+<td><code>expiresAt</code></td>
+<td>when <code>openid-client</code> handed the answer over (after it verified the id_token, a JWKS fetch included) + <code>expiresIn</code>; <strong><code>null</code> when Google sent no <code>expires_in</code></strong> (Google documents it on every token response), which <code>oauth</code>'s <code>POST /oauth/federation/:name/token</code> reads as &quot;do not refresh; reuse the stored token&quot;</td>
+</tr>
+<tr>
+<td><code>expiresIn</code></td>
+<td><code>expires_in</code> as <code>openid-client</code> read it — it applies <code>parseFloat</code>, so <code>&quot;1000seconds&quot;</code> is 1000 — or <code>null</code> when Google sent none</td>
+</tr>
+<tr>
+<td><code>tokenType</code></td>
+<td><code>token_type</code> as <code>openid-client</code> reports it (lower-cased <code>bearer</code>), recorded by the session router verbatim</td>
+</tr>
+<tr>
+<td><code>authTime</code></td>
+<td>the verified id_token's <code>auth_time</code> as a <code>Date</code>, when Google sent one; absent otherwise (Google sends it only when it is requested and enabled for the client, and this adapter does not request it). Never read from UserInfo. A fraction is floored to its second; one that is not a non-negative number, or lies further ahead than the clock skew tolerated between hosts, fails the exchange</td>
+</tr>
+</tbody>
+</table>
+<p><code>mapClaims</code> maps <code>email</code>, <code>emailVerified</code>, <code>name</code>, <code>picture</code> and <code>hd</code>; the session
+package promotes only <code>email</code>, <code>name</code> and <code>picture</code>, and only where the local
+record is silent. <strong><code>hd</code> is not enforced:</strong> nothing here refuses an account from
+another domain, and the claim lands only in <code>claims.federated.&lt;name&gt;</code>. A
+Workspace-domain restriction belongs in the Store, which decides who
+<code>&lt;name&gt;:&lt;sub&gt;</code> is.</p>
+<h3 id="freshness-and-an-mfa-first-binding" class="tsd-anchor-link">Freshness: <code>prompt=login</code>, <code>max_age</code> and an MFA first binding<a href="#freshness-and-an-mfa-first-binding" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p><code>/authorize</code>'s <code>prompt=login</code> and <code>max_age</code>, and the MFA module's first
+binding (a recent primary), judge a federated session by when the upstream
+last authenticated the user. Google sends <code>auth_time</code> only when the
+authorization request asks for it through the <code>claims</code> parameter
+(<code>{&quot;id_token&quot;:{&quot;auth_time&quot;:{&quot;essential&quot;:true}}}</code>) and the claim is enabled in
+the client's settings. This adapter does not send that parameter, so a Google
+login reports none. With
+<code>core.federations.&lt;name&gt;.callbackMeetsFreshness</code> at its default <code>false</code>, such a
+session meets no <code>prompt=login</code> or <code>max_age</code> (<code>login_required</code>) and binds no
+first factor: the user is sent to log in again each time. <strong>To use <code>prompt=login</code>, <code>max_age</code> or an MFA
+first binding with Google, set <code>core.federations.&lt;name&gt;.callbackMeetsFreshness = true</code>:</strong> the callback itself then counts as the authentication, which is the
+behaviour before 0.17.0.</p>
+<h3 id="refresh-tokens-and-the-consent-screen" class="tsd-anchor-link">Refresh tokens and the consent screen<a href="#refresh-tokens-and-the-consent-screen" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Google issues a refresh token only when the user is shown its consent screen,
+and without <code>prompt</code> it shows that screen only the first time an app asks.
+Upstream tokens are stored per session, so a user's second session would have
+no refresh token, and <code>oauth</code>'s <code>POST /oauth/federation/:name/token</code> would
+answer <code>410 refresh_token_absent</code> once the access token expired. So with
+<code>accessType: &quot;offline&quot;</code> — the default in <code>GoogleProviderConfig</code> — every
+sign-in sends <code>access_type=offline</code> <strong>and</strong> <code>prompt=consent</code>:</p>
+<ul>
+<li><strong>Every sign-in shows Google's consent screen</strong>, and every session gets a
+refresh token.</li>
+<li><strong>Every sign-in mints a refresh token.</strong> Google keeps at most 100 per Google
+account per client ID and silently invalidates the oldest when a new one is
+issued, so a user with more than 100 live sessions loses refresh on the
+oldest.</li>
+</ul>
+<p><code>accessType: &quot;online&quot;</code> sends neither parameter: no consent screen after the
+first sign-in, and no refresh token at all — for a deployment that uses Google
+to sign in and never refreshes Google's access token through the federation
+token route (it answers <code>410 refresh_token_absent</code> once that token expires).
+In code, only an omitted field means the default: any other value, <code>null</code>
+included, is refused at construction (an entry's <code>null</code> reads as absent
+first). The standalone template's entry binds
+<code>accessType</code> to <code>CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE</code>, and the type module
+reads it.</p>
+<p>Keeping an earlier session's refresh token for the same <code>&lt;name&gt;:&lt;sub&gt;</code> is not
+done: it would need a credential store that outlives sessions.</p>
+<h3 id="the-callbacks-rfc-9207" class="tsd-anchor-link">The callback's <code>iss</code> (RFC 9207)<a href="#the-callbacks-rfc-9207" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Google's discovery document advertises
+<code>authorization_response_iss_parameter_supported</code>, and its OpenID Connect
+reference says of the authorization response's <code>iss</code>: &quot;Per RFC 9207, this
+parameter is always returned and set to <code>https://accounts.google.com</code>&quot;. So this
+provider compares the callback's <code>iss</code> with Google's issuer, as an exact
+string, and <strong>refuses a callback that carries none</strong>. Both refusals happen
+before the code is spent at the token endpoint.</p>
+<p>The server metadata here is written by hand, not discovered, so a deployment
+could not otherwise react if Google ever stopped sending the parameter.
+<code>requireAuthorizationResponseIss: false</code> in <code>GoogleProviderConfig</code> is the way
+out: it permits a missing <code>iss</code> and nothing else. One that is sent and is not
+Google's is refused either way. An entry's schema reads the string spellings
+of an environment variable (above). In code <strong>it must be a boolean</strong>: an
+environment override arrives as the string <code>&quot;false&quot;</code>, which is truthy, so
+<code>createGoogleProvider</code> refuses anything that is not a boolean instead of
+quietly keeping the requirement on.</p>
+<p>If every Google login starts answering <code>502 exchange_failed</code> with the log cause
+<code>response parameter &quot;iss&quot; (issuer) missing</code>, either Google stopped sending the
+parameter or something between Google and this server drops it: a gateway with
+a query-parameter allowlist, or a front end that relays only <code>code</code> and
+<code>state</code> to <code>callbackURL</code>. Let <code>iss</code> through; the switch above is the stopgap.</p>
+<h2 id="refresh-and-logout" class="tsd-anchor-link">Refresh and logout<a href="#refresh-and-logout" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ul>
+<li><strong><code>refreshToken()</code></strong> (<code>SupportsRefresh</code>, called by <code>oauth</code>'s
+<code>POST /oauth/federation/:name/token</code>) runs the <code>refresh_token</code> grant and
+returns the token fields of the table above by the same rules —
+<code>accessToken</code>, <code>refreshToken</code> when rotated, <code>idToken</code>, <code>scope</code>, <code>expiresAt</code>,
+<code>expiresIn</code> and <code>tokenType</code> (a non-string <code>scope</code> fails the refresh). It
+returns no <code>issuer</code> or <code>sub</code> — the caller keeps the stored identity.</li>
+<li><strong><code>endSession()</code></strong> (<code>SupportsLogout</code>, called by <code>oauth</code>'s logout routes):
+Google publishes no <code>end_session_endpoint</code>. With <code>endSessionEndpoint</code>
+configured, that URL with <code>id_token_hint</code>, <code>post_logout_redirect_uri</code> and
+<code>state</code>; otherwise <code>postLogoutRedirectUri</code>, and without one
+<code>https://accounts.google.com/Logout</code>, with <code>state</code>. An unparsable URL throws;
+the message names the field and quotes no value it was handed.
+Redirecting straight to <code>postLogoutRedirectUri</code> is safe because the caller
+hands only a URI it has matched against the client's registered
+<code>postLogoutRedirectUris</code>, or none — core's <code>EndSessionRequest</code> states the
+rule, and <code>oauth</code>'s logout routes keep it. A composition that calls
+<code>endSession()</code> itself must do the same.</li>
+</ul>
+<h2 id="public-api" class="tsd-anchor-link">Public API<a href="#public-api" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>Exported from <a href=""><code>src/index.mts</code></a>:</p>
+<ul>
+<li><code>googleFederationTypeModule</code> (<a href="../media/type-module-2.mts"><code>src/type-module.mts</code></a>) —
+the Module contributing <code>federationTypes.google</code>, with its options
+<code>GoogleFederationTypeModuleOptions</code>.</li>
+<li><code>GOOGLE_FEDERATION_TYPE</code> (<code>&quot;google&quot;</code>, <a href="../media/type-module-2.mts"><code>src/type-module.mts</code></a>).</li>
+<li><code>createGoogleProvider(config)</code> (<a href="../media/google.mts"><code>src/google.mts</code></a>) — the
+provider, named <code>google</code>.</li>
+<li>Types: <code>GoogleEntry</code> (<a href="../media/entry-2.mts"><code>src/entry.mts</code></a>), an entry's own keys
+as the schema answers them; <a href="../media/google.mts"><code>GoogleProviderConfig</code></a>,
+<code>GoogleProvider</code>.</li>
+</ul>
+<h2 id="tests" class="tsd-anchor-link">Tests<a href="#tests" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<table>
+<thead>
+<tr>
+<th>Test file</th>
+<th>Pins</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="../media/google.test.mts"><code>google.test.mts</code></a></td>
+<td>the authorization request, the nonce requirement, the UserInfo <code>sub</code> binding, the profile, refresh and <code>mapClaims</code></td>
+</tr>
+<tr>
+<td><a href="../media/google.end-session.test.mts"><code>google.end-session.test.mts</code></a></td>
+<td><code>endSession</code>: a configured endpoint, the handed <code>postLogoutRedirectUri</code>, Google's logout page, and a refusal that quotes nothing it was handed</td>
+</tr>
+<tr>
+<td><a href="../media/google.consent.test.mts"><code>google.consent.test.mts</code></a></td>
+<td>that a returning user's sign-in yields a refresh token, <code>prompt=consent</code> beside <code>access_type=offline</code>, and <code>accessType</code></td>
+</tr>
+<tr>
+<td><a href="../media/google.signature.test.mts"><code>google.signature.test.mts</code></a></td>
+<td>that the id_token's signature is verified against the JWKS</td>
+</tr>
+<tr>
+<td><a href="../media/google.token-snapshot.test.mts"><code>google.token-snapshot.test.mts</code></a></td>
+<td>the lifetime, <code>expiresIn</code> and <code>tokenType</code> a login and a refresh report, with and without <code>expires_in</code>, and that a non-string <code>scope</code> is refused by the library</td>
+</tr>
+<tr>
+<td><a href="../media/google.issuer-parameter.test.mts"><code>google.issuer-parameter.test.mts</code></a></td>
+<td>the RFC 9207 <code>iss</code> check and <code>requireAuthorizationResponseIss</code></td>
+</tr>
+<tr>
+<td><a href="../media/google-type-module.test.mts"><code>google-type-module.test.mts</code></a></td>
+<td>the type module through <code>createApp</code>: one provider and policy per entry, a login through the session routes, the strict, flat schema, refusals that quote no secret, the <code>fetch</code> option, and each entry key reaching the provider or the redirect policy</td>
+</tr>
+</tbody>
+</table>
+</section>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Interfaces"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="interfaces">Interfaces<a href="#interfaces" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="googlefederationtypemoduleoptions"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-federation-google.GoogleFederationTypeModuleOptions.html">GoogleFederationTypeModuleOptions</a><a href="#googlefederationtypemoduleoptions" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="googleproviderconfig"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-federation-google.GoogleProviderConfig.html">GoogleProviderConfig</a><a href="#googleproviderconfig" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Type Aliases"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="type-aliases">Type Aliases<a href="#type-aliases" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="googleentry"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><a href="../types/_o3co_auth-provider-federation-google.GoogleEntry.html">GoogleEntry</a><a href="#googleentry" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="googleprovider"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><a href="../types/_o3co_auth-provider-federation-google.GoogleProvider.html">GoogleProvider</a><a href="#googleprovider" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Variables"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="variables">Variables<a href="#variables" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="google_federation_type"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-federation-google.GOOGLE_FEDERATION_TYPE.html">GOOGLE_FEDERATION_TYPE</a><a href="#google_federation_type" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Functions"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="functions">Functions<a href="#functions" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="creategoogleprovider"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-federation-google.createGoogleProvider.html">createGoogleProvider</a><a href="#creategoogleprovider" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="googlefederationtypemodule"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-federation-google.googleFederationTypeModule.html">googleFederationTypeModule</a><a href="#googlefederationtypemodule" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details></div>
+<div class="col-sidebar">
+<div class="page-menu">
+<div class="tsd-navigation settings">
+<details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>Settings</h3></summary>
+<div class="tsd-accordion-details">
+<div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span>
+<ul id="tsd-filter-options">
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div>
+<div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div>
+<details open class="tsd-accordion tsd-page-navigation"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>On This Page</h3></summary>
+<div class="tsd-accordion-details"><a href="#o3coauth-provider-federation-google"><span>@o3co/auth-<wbr/>provider-<wbr/>federation-<wbr/>google</span></a>
+<ul>
+<li><a href="#responsibility"><span>Responsibility</span></a></li>
+<li><a href="#install"><span>Install</span></a></li>
+<li><a href="#usage"><span>Usage</span></a></li>
+<li>
+<ul>
+<li><a href="#configuration"><span>Configuration</span></a></li></ul></li>
+<li><a href="#what-a-login-does"><span>What a login does</span></a></li>
+<li>
+<ul>
+<li><a href="#freshness-and-an-mfa-first-binding"><span>Freshness: ,  and an <wbr/>MFA first binding</span></a></li>
+<li><a href="#refresh-tokens-and-the-consent-screen"><span>Refresh tokens and the consent screen</span></a></li>
+<li><a href="#the-callbacks-rfc-9207"><span>The callback&#39;s  (<wbr/>RFC 9207)</span></a></li></ul></li>
+<li><a href="#refresh-and-logout"><span>Refresh and logout</span></a></li>
+<li><a href="#public-api"><span>Public <wbr/>API</span></a></li>
+<li><a href="#tests"><span>Tests</span></a></li></ul>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Interfaces"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Interfaces</summary>
+<div><a href="#googlefederationtypemoduleoptions"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Google<wbr/>Federation<wbr/>Type<wbr/>Module<wbr/>Options</span></a><a href="#googleproviderconfig"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Google<wbr/>Provider<wbr/>Config</span></a></div></details>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Type Aliases"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Type Aliases</summary>
+<div><a href="#googleentry"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><span>Google<wbr/>Entry</span></a><a href="#googleprovider"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><span>Google<wbr/>Provider</span></a></div></details>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Variables"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Variables</summary>
+<div><a href="#google_federation_type"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>GOOGLE_<wbr/>FEDERATION_<wbr/>TYPE</span></a></div></details>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Functions"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Functions</summary>
+<div><a href="#creategoogleprovider"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>create<wbr/>Google<wbr/>Provider</span></a><a href="#googlefederationtypemodule"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>google<wbr/>Federation<wbr/>Type<wbr/>Module</span></a></div></details></div></details></div>
+<div class="site-menu">
+<nav class="tsd-navigation"><a href="../modules.html">auth.provider API</a>
+<ul class="tsd-small-nested-navigation" id="tsd-nav-container">
+<li>Loading...</li></ul></nav></div></div></div><footer>
+<p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer>
+<div class="overlay"></div></body></html>

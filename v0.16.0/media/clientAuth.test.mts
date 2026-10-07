@@ -1,0 +1,861 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import { randomUUID } from "node:crypto";
+import {
+	type ClientRepository,
+	createMemoryReplaySeenSet,
+	type PublicClient,
+	type TokenEndpointAuthMethod,
+} from "@o3co/auth-provider-core";
+import express from "express";
+import { exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
+import request from "supertest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import { JWT_BEARER_CLIENT_ASSERTION_TYPE } from "../clientAssertion.mjs";
+import { createClientAuthMiddleware } from "../clientAuth.mjs";
+
+interface FakeClient {
+	clientId: string;
+	tokenEndpointAuthMethod: TokenEndpointAuthMethod;
+	clientSecret?: string;
+	jwks?: { keys: JWK[] };
+}
+
+const buildPublicClient = (c: FakeClient): PublicClient => ({
+	clientId: c.clientId,
+	tokenEndpointAuthMethod: c.tokenEndpointAuthMethod,
+	allowedRedirectUris: [],
+	allowedScopes: [],
+	...(c.jwks ? { jwks: c.jwks } : {}),
+});
+
+/**
+ * Test repository that supports both confidential (basic / post) and public
+ * (`"none"`) clients. After D-6, `clientAuthMw` calls `findById` to obtain the
+ * configured `tokenEndpointAuthMethod`, then `authenticate` for confidential
+ * clients only — so tests must populate both methods consistently.
+ */
+const fakeRepo = (clients: FakeClient[]): ClientRepository => {
+	const byId = new Map(clients.map((c) => [c.clientId, c]));
+	return {
+		findById: async (clientId) => {
+			const c = byId.get(clientId);
+			return c ? buildPublicClient(c) : null;
+		},
+		authenticate: async (clientId, secret) => {
+			const c = byId.get(clientId);
+			if (!c) return null;
+			if (c.tokenEndpointAuthMethod === "none") return null;
+			if (c.clientSecret !== secret) return null;
+			return buildPublicClient(c);
+		},
+	};
+};
+
+const basicConfidential = (clientId: string, secret: string): FakeClient => ({
+	clientId,
+	tokenEndpointAuthMethod: "client_secret_basic",
+	clientSecret: secret,
+});
+
+const postConfidential = (clientId: string, secret: string): FakeClient => ({
+	clientId,
+	tokenEndpointAuthMethod: "client_secret_post",
+	clientSecret: secret,
+});
+
+const publicClient = (clientId: string): FakeClient => ({
+	clientId,
+	tokenEndpointAuthMethod: "none",
+});
+
+describe("createClientAuthMiddleware (D-6 PB-2)", () => {
+	describe("group B-1..B-9 — confidential + public client paths", () => {
+		it("B-1: no credentials at all → 401 invalid_client + WWW-Authenticate", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post("/test", createClientAuthMiddleware(fakeRepo([])), (_req, res) => res.end());
+			const res = await request(app).post("/test").type("form").send({});
+			expect(res.status).toBe(401);
+			expect(res.headers["www-authenticate"]).toMatch(/^Basic realm=/);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.error_description).toBe("Client authentication is required");
+		});
+
+		it("B-2: valid Basic for a client_secret_basic client → next() with req.oauthClient set", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([basicConfidential("alice", "s3cret")])),
+				(req, res) => {
+					res.json({
+						client: req.oauthClient?.clientId,
+						method: req.oauthClient?.tokenEndpointAuthMethod,
+					});
+				},
+			);
+			const basic = Buffer.from("alice:s3cret").toString("base64");
+			const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
+			expect(res.status).toBe(200);
+			expect(res.body.client).toBe("alice");
+			expect(res.body.method).toBe("client_secret_basic");
+		});
+
+		it("B-3: wrong secret in Basic → 401 invalid_client + WWW-Authenticate", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([basicConfidential("alice", "s3cret")])),
+				(_req, res) => res.end(),
+			);
+			const basic = Buffer.from("alice:wrong").toString("base64");
+			const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
+			expect(res.status).toBe(401);
+			expect(res.headers["www-authenticate"]).toMatch(/^Basic realm=/);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.error_description).toBe("Invalid client credentials");
+		});
+
+		it("B-4: malformed Basic (no colon) → 401 invalid_client + WWW-Authenticate", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([basicConfidential("alice", "s3cret")])),
+				(_req, res) => res.end(),
+			);
+			const malformed = Buffer.from("nocolon").toString("base64");
+			const res = await request(app).post("/test").set("Authorization", `Basic ${malformed}`);
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.error_description).toBe("Malformed client credentials");
+		});
+
+		it("B-5: form-encoded credentials for client_secret_post client → next()", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([postConfidential("alice", "s3cret")])),
+				(req, res) => res.json({ client: req.oauthClient?.clientId }),
+			);
+			const res = await request(app)
+				.post("/test")
+				.type("form")
+				.send({ client_id: "alice", client_secret: "s3cret" });
+			expect(res.status).toBe(200);
+			expect(res.body.client).toBe("alice");
+		});
+
+		it("B-6: public client supplies only client_id in body → next() with public method (when allowPublicClients=true)", async () => {
+			// `/oauth/token` admits public clients (PKCE/S256 enforces authenticity
+			// at `/oauth/authorize`). Other routes leave `allowPublicClients` at
+			// the default `false` and would reject — see the dedicated P1 group.
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([publicClient("spa")]), { allowPublicClients: true }),
+				(req, res) => {
+					res.json({
+						client: req.oauthClient?.clientId,
+						method: req.oauthClient?.tokenEndpointAuthMethod,
+					});
+				},
+			);
+			const res = await request(app).post("/test").type("form").send({ client_id: "spa" });
+			expect(res.status).toBe(200);
+			expect(res.body.client).toBe("spa");
+			expect(res.body.method).toBe("none");
+		});
+
+		it("B-7: confidential client called with body client_id only (no secret) → 401, no WWW-Authenticate (body attempt)", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([basicConfidential("alice", "s3cret")])),
+				(_req, res) => res.end(),
+			);
+			const res = await request(app).post("/test").type("form").send({ client_id: "alice" });
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+			// Body-only attempt → no Basic challenge in response.
+			expect(res.headers["www-authenticate"]).toBeUndefined();
+		});
+
+		it("B-8: unknown client → 401 invalid_client", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post("/test", createClientAuthMiddleware(fakeRepo([])), (_req, res) => res.end());
+			const res = await request(app).post("/test").type("form").send({ client_id: "ghost" });
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.error_description).toBe("Unknown client");
+		});
+
+		it("B-9: Basic auth + body matching client_id (no body secret) → next() with Basic credentials used", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([basicConfidential("alice", "s3cret")])),
+				(req, res) => res.json({ client: req.oauthClient?.clientId }),
+			);
+			const basic = Buffer.from("alice:s3cret").toString("base64");
+			const res = await request(app)
+				.post("/test")
+				.set("Authorization", `Basic ${basic}`)
+				.type("form")
+				.send({ client_id: "alice" });
+			expect(res.status).toBe(200);
+			expect(res.body.client).toBe("alice");
+		});
+	});
+
+	describe("Codex M4 — Basic+body conflict detection (B-10)", () => {
+		it("B-10a: Basic alice + body eve → 401 client_id mismatch", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(
+					fakeRepo([basicConfidential("alice", "s3cret"), basicConfidential("eve", "pwned")]),
+				),
+				(_req, res) => res.end(),
+			);
+			const basic = Buffer.from("alice:s3cret").toString("base64");
+			const res = await request(app)
+				.post("/test")
+				.set("Authorization", `Basic ${basic}`)
+				.type("form")
+				.send({ client_id: "eve", client_secret: "pwned" });
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.error_description).toBe("client_id mismatch between Basic header and body");
+		});
+
+		it("B-10b: Basic alice:s3cret + body alice:wrong → 401 client_secret mismatch", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([basicConfidential("alice", "s3cret")])),
+				(_req, res) => res.end(),
+			);
+			const basic = Buffer.from("alice:s3cret").toString("base64");
+			const res = await request(app)
+				.post("/test")
+				.set("Authorization", `Basic ${basic}`)
+				.type("form")
+				.send({ client_id: "alice", client_secret: "wrong" });
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.error_description).toBe(
+				"client_secret mismatch between Basic header and body",
+			);
+		});
+	});
+
+	describe("Codex M1 — per-method enforcement (B-method-1, B-method-2)", () => {
+		it("B-method-1: client configured 'client_secret_basic' rejects body credentials", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([basicConfidential("alice", "s3cret")])),
+				(_req, res) => res.end(),
+			);
+			const res = await request(app)
+				.post("/test")
+				.type("form")
+				.send({ client_id: "alice", client_secret: "s3cret" });
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.error_description).toMatch(/tokenEndpointAuthMethod mismatch/);
+		});
+
+		it("B-method-2: client configured 'client_secret_post' rejects HTTP Basic credentials", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([postConfidential("alice", "s3cret")])),
+				(_req, res) => res.end(),
+			);
+			const basic = Buffer.from("alice:s3cret").toString("base64");
+			const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.error_description).toMatch(/tokenEndpointAuthMethod mismatch/);
+			expect(res.headers["www-authenticate"]).toMatch(/^Basic realm=/);
+		});
+
+		it("B-method-3: confidential client called as if public (no secret) → mismatch", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([basicConfidential("confidential-rp", "s3cret")])),
+				(_req, res) => res.end(),
+			);
+			const res = await request(app)
+				.post("/test")
+				.type("form")
+				.send({ client_id: "confidential-rp" });
+			expect(res.status).toBe(401);
+			expect(res.body.error_description).toMatch(/Client authentication is required/);
+		});
+	});
+
+	describe("repository fail-closed", () => {
+		it("returns 503 fail-closed when findById throws — an outage, no store detail leaked", async () => {
+			const throwingRepo: ClientRepository = {
+				findById: async () => {
+					throw new Error("store unavailable");
+				},
+				authenticate: async () => null,
+			};
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post("/test", createClientAuthMiddleware(throwingRepo), (_req, res) => res.end());
+			const basic = Buffer.from("alice:s3cret").toString("base64");
+			const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "client repository unavailable",
+			});
+			expect(res.headers["www-authenticate"]).toBeUndefined();
+			expect(JSON.stringify(res.body)).not.toContain("store unavailable");
+		});
+
+		it("returns 503 fail-closed when authenticate throws — an outage, no store detail leaked", async () => {
+			const throwingRepo: ClientRepository = {
+				findById: async (id) =>
+					id === "alice" ? buildPublicClient(basicConfidential("alice", "s3cret")) : null,
+				authenticate: async () => {
+					throw new Error("store unavailable");
+				},
+			};
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post("/test", createClientAuthMiddleware(throwingRepo), (_req, res) => res.end());
+			const basic = Buffer.from("alice:s3cret").toString("base64");
+			const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+			expect(JSON.stringify(res.body)).not.toContain("store unavailable");
+		});
+
+		it("body-path: returns 503 fail-closed when authenticate throws — no WWW-Authenticate", async () => {
+			// Confidential client_secret_post + authenticate throws → rejectPlain
+			// (no Basic challenge — the caller never tried Basic).
+			const throwingRepo: ClientRepository = {
+				findById: async (id) =>
+					id === "alice" ? buildPublicClient(postConfidential("alice", "s3cret")) : null,
+				authenticate: async () => {
+					throw new Error("store unavailable");
+				},
+			};
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post("/test", createClientAuthMiddleware(throwingRepo), (_req, res) => res.end());
+			const res = await request(app)
+				.post("/test")
+				.type("form")
+				.send({ client_id: "alice", client_secret: "s3cret" });
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+			// An outage carries no Basic challenge.
+			expect(res.headers["www-authenticate"]).toBeUndefined();
+		});
+
+		it("body-path: returns 401 Invalid client credentials when authenticate returns null", async () => {
+			// Confidential client_secret_post + wrong secret → authenticate
+			// returns null → rejectPlain "Invalid client credentials".
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([postConfidential("alice", "s3cret")])),
+				(_req, res) => res.end(),
+			);
+			const res = await request(app)
+				.post("/test")
+				.type("form")
+				.send({ client_id: "alice", client_secret: "wrong" });
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.error_description).toBe("Invalid client credentials");
+			expect(res.headers["www-authenticate"]).toBeUndefined();
+		});
+
+		it("body-path: returns 503 fail-closed when findById throws — no WWW-Authenticate", async () => {
+			// Body-only client_id + findById throws → rejectPlain. The Basic-path
+			// version (line 266) is covered above; this exercises the matching
+			// rejectPlain branch when no Authorization header was supplied.
+			const throwingRepo: ClientRepository = {
+				findById: async () => {
+					throw new Error("store unavailable");
+				},
+				authenticate: async () => null,
+			};
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post("/test", createClientAuthMiddleware(throwingRepo), (_req, res) => res.end());
+			const res = await request(app)
+				.post("/test")
+				.type("form")
+				.send({ client_id: "alice", client_secret: "s3cret" });
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+			expect(res.headers["www-authenticate"]).toBeUndefined();
+			expect(JSON.stringify(res.body)).not.toContain("store unavailable");
+		});
+
+		it("Basic header + unknown client → 401 Invalid client credentials with WWW-Authenticate", async () => {
+			// Basic auth used with a client_id that the repository does not know.
+			// Per RFC 6749 §5.2, Basic-attempt failures must include the Basic
+			// challenge; the description ("Invalid client credentials") is
+			// indistinguishable from "wrong secret" so an attacker cannot enumerate
+			// valid client_ids by message.
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post("/test", createClientAuthMiddleware(fakeRepo([])), (_req, res) => res.end());
+			const basic = Buffer.from("ghost:s3cret").toString("base64");
+			const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.error_description).toBe("Invalid client credentials");
+			expect(res.headers["www-authenticate"]).toMatch(/^Basic realm=/);
+		});
+	});
+
+	describe("Basic header parsing edge cases", () => {
+		it("returns 401 when Basic credentials have empty secret (alice:)", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			// alice has tokenEndpointAuthMethod=basic but no secret matches "" — the
+			// authenticate path returns null; per-method gate accepts the basic
+			// transport since it was attempted.
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([basicConfidential("alice", "")])),
+				(_req, res) => res.end(),
+			);
+			const basic = Buffer.from("alice:").toString("base64");
+			const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+		});
+
+		it("splits on first colon only — secret may contain colons", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			const repo = fakeRepo([basicConfidential("a", "b:c:d")]);
+			const authSpy = vi.spyOn(repo, "authenticate");
+			app.post("/test", createClientAuthMiddleware(repo), (req, res) => {
+				res.json({ client: req.oauthClient?.clientId });
+			});
+			const basic = Buffer.from("a:b:c:d").toString("base64");
+			const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
+			expect(res.status).toBe(200);
+			expect(authSpy).toHaveBeenCalledWith("a", "b:c:d");
+			expect(res.body.client).toBe("a");
+		});
+
+		it("URL-decodes percent-encoded credentials from Basic header", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			const repo = fakeRepo([basicConfidential("client_id@example", "secret with space")]);
+			const authSpy = vi.spyOn(repo, "authenticate");
+			app.post("/test", createClientAuthMiddleware(repo), (req, res) => {
+				res.json({ client: req.oauthClient?.clientId });
+			});
+			const basic = Buffer.from("client_id%40example:secret%20with%20space").toString("base64");
+			const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
+			expect(res.status).toBe(200);
+			expect(authSpy).toHaveBeenCalledWith("client_id@example", "secret with space");
+			expect(res.body.client).toBe("client_id@example");
+		});
+
+		it("Basic auth with `+` decodes to space (RFC 6749 §2.3.1 x-www-form-urlencoded)", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			const repo = fakeRepo([basicConfidential("alice", "with space")]);
+			const authSpy = vi.spyOn(repo, "authenticate");
+			app.post("/test", createClientAuthMiddleware(repo), (req, res) => {
+				res.json({ client: req.oauthClient?.clientId });
+			});
+			const basic = Buffer.from("alice:with+space").toString("base64");
+			const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
+			expect(res.status).toBe(200);
+			expect(authSpy).toHaveBeenCalledWith("alice", "with space");
+		});
+
+		it("Authorization scheme is case-insensitive (lowercase 'basic')", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([basicConfidential("alice", "s3cret")])),
+				(req, res) => res.json({ client: req.oauthClient?.clientId }),
+			);
+			const creds = Buffer.from("alice:s3cret").toString("base64");
+			const res = await request(app).post("/test").set("Authorization", `basic ${creds}`);
+			expect(res.status).toBe(200);
+			expect(res.body.client).toBe("alice");
+		});
+
+		it("Authorization scheme is case-insensitive (uppercase 'BASIC')", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([basicConfidential("alice", "s3cret")])),
+				(req, res) => res.json({ client: req.oauthClient?.clientId }),
+			);
+			const creds = Buffer.from("alice:s3cret").toString("base64");
+			const res = await request(app).post("/test").set("Authorization", `BASIC ${creds}`);
+			expect(res.status).toBe(200);
+			expect(res.body.client).toBe("alice");
+		});
+
+		it("returns 401 Malformed when Basic header contains invalid percent-encoding", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post("/test", createClientAuthMiddleware(fakeRepo([])), (_req, res) => res.end());
+			// "%zz" is invalid URL-encoding — decodeURIComponent will throw
+			const basic = Buffer.from("%zz:x").toString("base64");
+			const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.error_description).toBe("Malformed client credentials");
+		});
+	});
+
+	describe("P1 (Codex post-review): allowPublicClients gates the public-client path", () => {
+		it("default (allowPublicClients omitted) rejects public clients with 401 invalid_client", async () => {
+			// /oauth/introspect (RFC 7662 §2.1) and any non-/token route MUST
+			// reject public clients — knowledge of a client_id is not a credential.
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post("/test", createClientAuthMiddleware(fakeRepo([publicClient("spa")])), (_req, res) =>
+				res.end(),
+			);
+			const res = await request(app).post("/test").type("form").send({ client_id: "spa" });
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.error_description).toMatch(/Public clients are not allowed/);
+		});
+
+		it("allowPublicClients: false also rejects (explicit form)", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([publicClient("spa")]), { allowPublicClients: false }),
+				(_req, res) => res.end(),
+			);
+			const res = await request(app).post("/test").type("form").send({ client_id: "spa" });
+			expect(res.status).toBe(401);
+			expect(res.body.error_description).toMatch(/Public clients are not allowed/);
+		});
+
+		it("allowPublicClients: true accepts public clients (used by /oauth/token only)", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([publicClient("spa")]), { allowPublicClients: true }),
+				(req, res) => res.json({ client: req.oauthClient?.clientId }),
+			);
+			const res = await request(app).post("/test").type("form").send({ client_id: "spa" });
+			expect(res.status).toBe(200);
+			expect(res.body.client).toBe("spa");
+		});
+	});
+
+	describe("issuer-driven WWW-Authenticate realm", () => {
+		it('emits realm="<issuer>" when issuer option is provided', async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([]), { issuer: "https://issuer.example" }),
+				(_req, res) => res.end(),
+			);
+			const res = await request(app).post("/test");
+			expect(res.headers["www-authenticate"]).toBe('Basic realm="https://issuer.example"');
+		});
+
+		it('falls back to realm="oauth" when issuer is unset', async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post("/test", createClientAuthMiddleware(fakeRepo([])), (_req, res) => res.end());
+			const res = await request(app).post("/test");
+			expect(res.headers["www-authenticate"]).toBe('Basic realm="oauth"');
+		});
+
+		it("Copilot review: rejects unsafe realm characters and falls back to 'oauth'", async () => {
+			// `WWW-Authenticate: Basic realm="..."` is a quoted-string (RFC 7235
+			// §2.2 + RFC 7230). An issuer containing `"`, `\`, CR, LF, or other
+			// control bytes either produces a malformed header or opens a
+			// header-injection vector. The middleware validates the issuer and
+			// falls back to literal "oauth" on any unsafe character.
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([]), {
+					issuer: 'https://attacker.example/"\r\nSet-Cookie: x',
+				}),
+				(_req, res) => res.end(),
+			);
+			const res = await request(app).post("/test");
+			expect(res.headers["www-authenticate"]).toBe('Basic realm="oauth"');
+		});
+
+		it("backward-compat: accepts a Logger argument directly", async () => {
+			// F1 D-4 callers passed `Logger` as the second argument; the new signature
+			// takes an options object but keeps the legacy form working.
+			const calls: { ctx: unknown; msg?: string }[] = [];
+			const logger = {
+				trace: () => {},
+				debug: () => {},
+				info: () => {},
+				warn: () => {},
+				error: (ctx: unknown, msg?: string) => {
+					calls.push({ ctx, msg });
+				},
+				fatal: () => {},
+				child: () => logger,
+			};
+			const throwingRepo: ClientRepository = {
+				findById: async () => {
+					throw new Error("store down");
+				},
+				authenticate: async () => null,
+			};
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post("/test", createClientAuthMiddleware(throwingRepo, logger), (_req, res) => res.end());
+			const basic = Buffer.from("alice:s3cret").toString("base64");
+			const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
+			expect(res.status).toBe(503);
+			// The outage reached the logger handed in, at error level.
+			expect(calls.map((call) => call.msg)).toContain("client_repository_unavailable");
+		});
+	});
+
+	describe("private_key_jwt (#484)", () => {
+		const ISSUER = "https://auth.test";
+		let privateKey: CryptoKey;
+		let publicJwk: JWK;
+		beforeAll(async () => {
+			const pair = await generateKeyPair("ES256");
+			privateKey = pair.privateKey;
+			publicJwk = { ...(await exportJWK(pair.publicKey)), kid: "k1" };
+		});
+		const jwtClient = (): FakeClient => ({
+			clientId: "rp",
+			tokenEndpointAuthMethod: "private_key_jwt",
+			jwks: { keys: [publicJwk] },
+		});
+		const assertion = async (aud: string = `${ISSUER}/oauth/token`): Promise<string> => {
+			const now = Math.floor(Date.now() / 1000);
+			return new SignJWT({ iss: "rp", sub: "rp", aud, iat: now, exp: now + 60, jti: randomUUID() })
+				.setProtectedHeader({ alg: "ES256", kid: "k1" })
+				.sign(privateKey);
+		};
+		const buildApp = (options: Record<string, unknown> = {}) => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([jwtClient(), basicConfidential("acme", "s3cret")]), {
+					issuer: ISSUER,
+					replaySeenSet: createMemoryReplaySeenSet(),
+					...options,
+				}),
+				(req, res) => res.json({ clientId: req.oauthClient?.clientId }),
+			);
+			return app;
+		};
+		const send = (app: express.Express, body: Record<string, string>) =>
+			request(app).post("/test").type("form").send(body);
+
+		it("authenticates a private_key_jwt client and exposes it downstream", async () => {
+			const res = await send(buildApp(), {
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion: await assertion(),
+			});
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ clientId: "rp" });
+		});
+
+		it("is accepted where public clients are not — it is a confidential method", async () => {
+			const res = await send(buildApp({ allowPublicClients: false }), {
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion: await assertion(ISSUER),
+			});
+			expect(res.status).toBe(200);
+		});
+
+		it("refuses a replayed assertion with invalid_client", async () => {
+			const app = buildApp();
+			const body = {
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion: await assertion(),
+			};
+			expect((await send(app, body)).status).toBe(200);
+			const replay = await send(app, body);
+			expect(replay.status).toBe(401);
+			expect(replay.body.error).toBe("invalid_client");
+		});
+
+		it("refuses an assertion combined with another method — one per request (RFC 6749 §2.3)", async () => {
+			const app = buildApp();
+			const withBasic = await request(app)
+				.post("/test")
+				.set("Authorization", `Basic ${Buffer.from("acme:s3cret").toString("base64")}`)
+				.type("form")
+				.send({
+					client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+					client_assertion: await assertion(),
+				});
+			expect(withBasic.status).toBe(401);
+			expect(withBasic.body.error_description).toMatch(/one client authentication method/i);
+
+			const withSecret = await send(app, {
+				client_id: "acme",
+				client_secret: "s3cret",
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion: await assertion(),
+			});
+			expect(withSecret.status).toBe(401);
+			expect(withSecret.body.error_description).toMatch(/one client authentication method/i);
+
+			// Presence, not validity: `client_secret=` with nothing after it is
+			// still a second method on the wire.
+			const withEmptySecret = await send(app, {
+				client_id: "acme",
+				client_secret: "",
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion: await assertion(),
+			});
+			expect(withEmptySecret.status).toBe(401);
+			expect(withEmptySecret.body.error_description).toMatch(/one client authentication method/i);
+		});
+
+		it("answers server_error when no replay store is wired — never an unchecked jti", async () => {
+			const res = await send(buildApp({ replaySeenSet: undefined }), {
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion: await assertion(),
+			});
+			expect(res.status).toBe(500);
+			expect(res.body.error).toBe("server_error");
+		});
+
+		it("leaves the secret-based methods exactly as they were", async () => {
+			const res = await request(buildApp())
+				.post("/test")
+				.set("Authorization", `Basic ${Buffer.from("acme:s3cret").toString("base64")}`)
+				.type("form")
+				.send({});
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ clientId: "acme" });
+		});
+	});
+
+	// RFC 6749 §5.2 limits `error_description` to %x20-21 / %x23-5B / %x5D-7E,
+	// and this middleware answers on `/oauth/token`, `/oauth/introspect` (RFC
+	// 7662 §2.3) and `/oauth/revoke` (RFC 7009 §2.2.1), which all use that
+	// format. Every description it writes, including the assertion
+	// verifier's, is held to the set; a configured `tokenEndpointAuthMethod`
+	// it quotes is sanitised rather than trusted to be ASCII.
+	describe("error descriptions within RFC 6749 §5.2's character set", () => {
+		const WITHIN_SET = /^[\x20-\x21\x23-\x5B\x5D-\x7E]*$/;
+		const ISSUER = "https://auth.test";
+		let privateKey: CryptoKey;
+		beforeAll(async () => {
+			privateKey = (await generateKeyPair("ES256")).privateKey;
+		});
+		const signed = async (claims: { iss: string; sub: string }): Promise<string> => {
+			const now = Math.floor(Date.now() / 1000);
+			return new SignJWT({ ...claims, aud: `${ISSUER}/oauth/token`, iat: now, exp: now + 60 })
+				.setProtectedHeader({ alg: "ES256", kid: "k1" })
+				.sign(privateKey);
+		};
+		// A method value outside the set, as a later registration source
+		// could supply: the middleware must not pass it through.
+		const oddMethod = 'client_secret_"b\\\u00e9' as TokenEndpointAuthMethod;
+		const buildApp = () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(
+					fakeRepo([
+						basicConfidential("alice", "s3cret"),
+						{ clientId: "odd", tokenEndpointAuthMethod: oddMethod, clientSecret: "s3cret" },
+					]),
+					{ issuer: ISSUER, replaySeenSet: createMemoryReplaySeenSet() },
+				),
+				(_req, res) => res.end(),
+			);
+			return app;
+		};
+		const described = (res: { body: { error_description?: unknown } }): string => {
+			const description = String(res.body.error_description);
+			expect(description).toMatch(WITHIN_SET);
+			return description;
+		};
+
+		describe("clientAuth.mts", () => {
+			it("quotes the configured method with ' in the method mismatch", async () => {
+				const res = await request(buildApp())
+					.post("/test")
+					.type("form")
+					.send({ client_id: "alice", client_secret: "s3cret" });
+				expect(described(res)).toBe(
+					"tokenEndpointAuthMethod mismatch: client is configured for 'client_secret_basic'",
+				);
+			});
+
+			it("sanitises a configured method outside the set", async () => {
+				const res = await request(buildApp())
+					.post("/test")
+					.type("form")
+					.send({ client_id: "odd", client_secret: "s3cret" });
+				expect(described(res)).toBe(
+					"tokenEndpointAuthMethod mismatch: client is configured for 'client_secret_?b??'",
+				);
+			});
+
+			it("names RFC 6749 section 2.3 without a section sign", async () => {
+				const res = await request(buildApp())
+					.post("/test")
+					.set("Authorization", `Basic ${Buffer.from("alice:s3cret").toString("base64")}`)
+					.type("form")
+					.send({
+						client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+						client_assertion: await signed({ iss: "alice", sub: "alice" }),
+					});
+				expect(described(res)).toBe(
+					"Only one client authentication method per request (RFC 6749 section 2.3): a client_assertion cannot be combined with Basic credentials or client_secret",
+				);
+			});
+		});
+
+		describe("clientAssertion.mts, answered through the middleware", () => {
+			const assert = async (claims: { iss: string; sub: string }) =>
+				request(buildApp())
+					.post("/test")
+					.type("form")
+					.send({
+						client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+						client_assertion: await signed(claims),
+					});
+
+			it("names RFC 7523 section 3 without a section sign", async () => {
+				expect(described(await assert({ iss: "alice", sub: "someone-else" }))).toBe(
+					"client assertion iss and sub must both be the client_id (RFC 7523 section 3)",
+				);
+			});
+
+			it("quotes the configured method with ' in the method mismatch", async () => {
+				expect(described(await assert({ iss: "alice", sub: "alice" }))).toBe(
+					"tokenEndpointAuthMethod mismatch: client is configured for 'client_secret_basic'",
+				);
+			});
+
+			it("sanitises a configured method outside the set", async () => {
+				expect(described(await assert({ iss: "odd", sub: "odd" }))).toBe(
+					"tokenEndpointAuthMethod mismatch: client is configured for 'client_secret_?b??'",
+				);
+			});
+		});
+	});
+});

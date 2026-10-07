@@ -1,0 +1,1 @@
+{"version":3,"file":"rate-limiter.d.mts","sourceRoot":"","sources":["../../../src/ioredis/clients/rate-limiter.mts"],"names":[],"mappings":"AAgBA;;;GAGG;AAEH,OAAO,KAAK,EAAE,KAAK,EAAE,MAAM,SAAS,CAAC;AACrC,OAAO,KAAK,EAAE,iBAAiB,EAAsB,MAAM,mBAAmB,CAAC;AAG/E,wBAAgB,4BAA4B,CAAC,EAAE,EAAE,KAAK,GAAG,iBAAiB,CAiBzE"}

@@ -1,0 +1,529 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="../"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>@o3co/auth-provider-federation-apple | auth.provider API</title><meta name="description" content="Documentation for auth.provider API"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="../assets/style.css"/><link rel="stylesheet" href="../assets/highlight.css"/><script defer src="../assets/main.js"></script><script async src="../assets/icons.js" id="tsd-icons-script"></script><script async src="../assets/search.js" id="tsd-search-script"></script><script async src="../assets/navigation.js" id="tsd-nav-script"></script><script async src="../assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
+<div class="tsd-toolbar-contents container"><a href="../index.html" class="title">auth.provider API</a>
+<div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/>
+<ul role="listbox" id="tsd-search-results"></ul>
+<div id="tsd-search-status" aria-live="polite" aria-atomic="true">
+<div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-menu"></use></svg></a></div></header>
+<div class="container container-main">
+<div class="col-content">
+<div class="tsd-page-title">
+<ul class="tsd-breadcrumb" aria-label="Breadcrumb">
+<li><a href="" aria-current="page">@o3co/auth-provider-federation-apple</a></li></ul>
+<h1>Module @o3co/auth-provider-federation-apple</h1></div>
+<section class="tsd-panel tsd-typography"><h1 id="o3coauth-provider-federation-apple" class="tsd-anchor-link">@o3co/auth-provider-federation-apple<a href="#o3coauth-provider-federation-apple" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h1>
+<p>Last updated: 2026-10-05</p>
+<p>Sign in with Apple federation provider for <code>auth.provider</code> — Apple's <strong>web</strong>
+flow, in a browser, back to this server.</p>
+<p>The package does the web flow only: <code>clientId</code> is the Services ID, and the App
+ID — the <code>client_id</code> of an iOS app's native Sign in with Apple
+(AuthenticationServices) — goes nowhere in this config, so a code from the
+native flow is not exchanged here. App Store guidelines may require an app that
+offers third-party login to offer an equivalent privacy-preserving login option
+as well; this package is how a deployment of this stack offers Sign in with
+Apple through the browser.</p>
+<h2 id="responsibility" class="tsd-anchor-link">Responsibility<a href="#responsibility" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p><strong>Role.</strong> An adapter: it implements core's federation contract
+(<a href="../media/README-10.md"><code>core/src/federations</code></a>) for Sign in with
+Apple. It contributes the federation type <code>apple</code>: core hands it each enabled
+<code>core.federations</code> entry of that type, and it builds one federation per entry,
+registered for the session router with its redirect policy under the entry's
+name.</p>
+<p><strong>Owns:</strong> Apple's endpoints and issuer (written into the adapter, not
+discovered); the rotating ES256 client secret
+(<a href="../media/client-secret.mts"><code>src/client-secret.mts</code></a>); the checks on the return
+URL; how the id_token is verified; how Apple's claims become a profile —
+<code>email_verified</code> and <code>is_private_email</code> normalised to booleans, the display
+name read from the first authorization's POST body; and the schema of an
+<code>apple</code> entry's own keys (<a href="../media/entry.mts"><code>src/entry.mts</code></a>).</p>
+<p><strong>Does not own:</strong> the contract (core); the <code>core.federations</code> map, the keys
+core owns on every entry (<code>enabled</code>, <code>type</code>, <code>trustUpstreamAmr</code>,
+<code>callbackMeetsFreshness</code>, <code>callbackURL</code>) and the dispatch of an entry by its type (core's boot); the
+routes, the <code>form_post</code> callback, the federation transaction and its cookie,
+<code>state</code> / PKCE verifier / <code>nonce</code> generation, the redirect-allowlist rules and
+claim precedence — all <a href="_o3co_auth-provider-session.html"><code>@o3co/auth-provider-session</code></a>,
+which drives every <code>form_post</code> federation the same way; who the user is (the
+Store); the refresh and logout routes that call this adapter
+(<a href="_o3co_auth-provider-oauth.html"><code>@o3co/auth-provider-oauth</code></a>).</p>
+<p><strong>Why a separate package.</strong> Each adapter is its own package so that a deployment
+installs only the IdPs it uses, and <code>openid-client</code> only with an adapter. Why Apple is not a <code>type = &quot;oidc&quot;</code> section of
+<a href="_o3co_auth-provider-federation-oidc.html"><code>@o3co/auth-provider-federation-oidc</code></a> — five
+things the generic adapter does not do:</p>
+<ol>
+<li>Apple's scopes are <code>name</code> and <code>email</code>, without <code>openid</code>; the generic adapter
+refuses a scope list without <code>openid</code> at boot.</li>
+<li>The client secret is an ES256 JWT this relying party signs and must rotate,
+sent as <code>client_secret_post</code>; the generic adapter authenticates with
+<code>client_secret_basic</code> or <code>private_key_jwt</code>.</li>
+<li>Apple POSTs the callback, so the provider declares
+<code>responseMode: &quot;form_post&quot;</code>.</li>
+<li>The display name arrives only in the first authorization's POST body (<code>user</code>),
+never in the id_token.</li>
+<li>The return URL must be <code>https</code> and not loopback, which the provider checks at
+boot.</li>
+</ol>
+<h2 id="install" class="tsd-anchor-link">Install<a href="#install" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="sh"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">install</span><span class="hl-1"> </span><span class="hl-2">@o3co/auth-provider-federation-apple</span><span class="hl-1"> </span><span class="hl-2">@o3co/auth-provider-core</span><span class="hl-1"> </span><span class="hl-2">@o3co/auth-provider-session</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Peer dependencies: <code>@o3co/auth-provider-core</code> and
+<code>@o3co/auth-provider-session</code>. The package depends on <code>jose</code>,
+<code>openid-client</code> and <code>zod</code>.</p>
+<h2 id="usage" class="tsd-anchor-link">Usage<a href="#usage" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>One module, <code>appleFederationTypeModule()</code>
+(<a href="../media/type-module.mts"><code>src/type-module.mts</code></a>), handles every enabled
+<code>core.federations</code> entry whose <code>type</code> is <code>apple</code>. It contributes
+<code>federationTypes.apple</code>; core parses each such entry with the type's schema at
+boot and calls the module's factories with the entry's name, its
+<code>callbackURL</code> and its parsed keys, so the composition root fills no slot. The
+module requires no dependency.</p>
+<pre><code class="ts"><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">createApp</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-core&quot;</span><span class="hl-1">;</span><br/><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">appleFederationTypeModule</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-federation-apple&quot;</span><span class="hl-1">;</span><br/><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">sessionModule</span><span class="hl-1">, </span><span class="hl-6">sessionStoreModule</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-session&quot;</span><span class="hl-1">;</span><br/><br/><span class="hl-4">const</span><span class="hl-1"> </span><span class="hl-8">handle</span><span class="hl-1"> = </span><span class="hl-5">await</span><span class="hl-1"> </span><span class="hl-0">createApp</span><span class="hl-1">({</span><br/><span class="hl-1">  </span><span class="hl-6">modules:</span><span class="hl-1"> [</span><br/><span class="hl-1">    </span><span class="hl-6">sessionStoreModule</span><span class="hl-1">, </span><span class="hl-3">// the form_post transaction lives in this store</span><br/><span class="hl-1">    </span><span class="hl-6">sessionModule</span><span class="hl-1">,</span><br/><span class="hl-1">    </span><span class="hl-0">appleFederationTypeModule</span><span class="hl-1">(),</span><br/><span class="hl-1">    </span><span class="hl-3">// ... composition-root modules supplying userRepository and the session stores</span><br/><span class="hl-1">  ],</span><br/><span class="hl-1">  </span><span class="hl-6">bootstrapComponents:</span><span class="hl-1"> { </span><span class="hl-6">config</span><span class="hl-1">, </span><span class="hl-6">pathResolver</span><span class="hl-1"> },</span><br/><span class="hl-1">});</span>
+</code><button type="button">Copy</button></pre>
+
+<p><code>appleFederationTypeModule({ fetch })</code> sends every request to Apple of every
+<code>apple</code> entry — the token and JWKS requests — through that fetch: a proxy, or a
+test double. Without it the global <code>fetch</code> is used.</p>
+<h3 id="configuration" class="tsd-anchor-link">Configuration<a href="#configuration" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<pre><code class="hocon">core.federations {
+  apple {
+    enabled     = true
+    type        = "apple"
+    clientId    = "com.example.app.service"   # the Services ID
+    callbackURL = "https://auth.example.com/session/oauth/federation/apple/callback"
+    teamId      = "ABCDE12345"
+    keyId       = "XYZW98765F"
+    privateKey  = ${APPLE_PRIVATE_KEY}         # the .p8 file's contents
+    clientUrl   = "https://app.example.com/"
+  }
+}
+</code><button type="button">Copy</button></pre>
+
+<p>The entry's name is the federation's: the <code>:name</code> route segment
+(<code>/session/oauth/federation/&lt;name&gt;</code>), the name its upstream tokens are stored
+under, and the prefix of the identity handed to the Store (<code>&lt;name&gt;:&lt;sub&gt;</code>).
+Two entries of type <code>apple</code> — two Services IDs — are two federations.</p>
+<p>An entry is flat, and its schema is strict: the keys core owns (<code>enabled</code>,
+<code>type</code>, <code>trustUpstreamAmr</code>, <code>callbackMeetsFreshness</code>, <code>callbackURL</code>) and the keys
+below, nothing else.
+The schema is <code>appleEntrySchema</code> in <a href="../media/entry.mts"><code>src/entry.mts</code></a>. A key it
+does not name — a typo, or a nested <code>apple { ... }</code> section — refuses boot with <code>config-validation-failed</code> at <code>core.federations.&lt;name&gt;</code>,
+naming the key; a missing or malformed key is refused at
+<code>core.federations.&lt;name&gt;.&lt;field&gt;</code>. A key written <code>null</code> counts as absent. An absent key
+means what the table says, read by the provider or the redirect policy; the
+schema fills in no default.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>clientId</code></td>
+<td>yes</td>
+<td>The <strong>Services ID</strong> (see below), not the App ID.</td>
+</tr>
+<tr>
+<td><code>callbackURL</code></td>
+<td>yes</td>
+<td>The return URL registered against the Services ID: <code>https</code>, and not loopback (below). A key core owns: boot requires it of every entry it dispatches, and the session routes read it from the same entry.</td>
+</tr>
+<tr>
+<td><code>clientSecret</code></td>
+<td>one of</td>
+<td>A client secret produced elsewhere, as a string.</td>
+</tr>
+<tr>
+<td><code>teamId</code>, <code>keyId</code>, <code>privateKey</code></td>
+<td>one of, all three</td>
+<td>The key material this package signs the client secret with (<a href="#the-rotating-client-secret">below</a>). <code>privateKey</code> is the <code>.p8</code> file's PEM contents, not its path.</td>
+</tr>
+<tr>
+<td><code>clientUrl</code></td>
+<td>in practice</td>
+<td>Where the browser lands after a login whose start carried no <code>redirect_to</code>. Without it such a login ends in <code>500 misconfiguration</code> after the session has been saved — so it is needed unless every start carries a <code>redirect_to</code> and <code>authCallbackUrl</code> is set.</td>
+</tr>
+<tr>
+<td><code>redirectAllowlist</code>, <code>authCallbackUrl</code>, <code>sessionDomain</code></td>
+<td>no</td>
+<td>The <code>redirect_to</code> policy, as for every federation — see the <a href="_o3co_auth-provider-session.html#redirect-allowlists">session package's redirect rules</a>. A start that carries <code>redirect_to</code> needs both an allowlist entry for it and <code>authCallbackUrl</code>, or it is refused (<code>400</code>) or ends in <code>500 misconfiguration</code>.</td>
+</tr>
+<tr>
+<td><code>endSessionEndpoint</code></td>
+<td>no</td>
+<td>An upstream logout endpoint (<a href="#refresh-and-logout">Refresh and logout</a>). Apple publishes none.</td>
+</tr>
+</tbody>
+</table>
+<p><code>fetch</code> and <code>jwksUri</code> are not entry keys: they are test seams of
+<code>AppleProviderConfig</code>, for <code>createAppleProvider</code>, and the type module's seam is its <code>fetch</code> option (above), which reaches Apple's
+JWKS as well.
+Neither is a resolver for <code>clientSecret</code>, nor a <code>privateKey</code> read anew at every
+token exchange: a configuration holds strings, read at boot. Those two are
+code-only, through <code>createAppleProvider</code>.</p>
+<h2 id="what-you-need-from-apple-and-which-one-goes-where" class="tsd-anchor-link">What you need from Apple, and which one goes where<a href="#what-you-need-from-apple-and-which-one-goes-where" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>Apple's console has two identifiers that both look like a bundle ID, and
+picking the wrong one produces <code>invalid_client</code> with no further explanation.</p>
+<table>
+<thead>
+<tr>
+<th>Apple concept</th>
+<th>Where it goes</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>App ID</strong> (<code>com.example.app</code>)</td>
+<td>nowhere in this config</td>
+<td>Identifies the <em>app</em>. Enable &quot;Sign in with Apple&quot; on it; it is the parent of the Services ID, and it is the <code>client_id</code> for the <strong>native iOS</strong> flow only.</td>
+</tr>
+<tr>
+<td><strong>Services ID</strong> (<code>com.example.app.service</code>)</td>
+<td><code>clientId</code></td>
+<td>Identifies the <em>web</em> OAuth client. This is the <code>client_id</code> for every request this package makes. Register the return URL against it.</td>
+</tr>
+<tr>
+<td><strong>Team ID</strong> (<code>ABCDE12345</code>)</td>
+<td><code>teamId</code></td>
+<td>Top right of the developer portal. Becomes the client secret's <code>iss</code>.</td>
+</tr>
+<tr>
+<td><strong>Key ID</strong> (<code>XYZW98765F</code>)</td>
+<td><code>keyId</code></td>
+<td>Shown when you create a &quot;Sign in with Apple&quot; key. Becomes the client secret's header <code>kid</code>.</td>
+</tr>
+<tr>
+<td><strong><code>AuthKey_XYZW98765F.p8</code></strong></td>
+<td><code>privateKey</code></td>
+<td>The EC P-256 private key, PKCS#8 PEM. <strong>Downloadable exactly once</strong> — if it is lost, revoke the key and create another. Pass the file's contents, not its path.</td>
+</tr>
+</tbody>
+</table>
+<p>The <strong>return URL</strong> registered against the Services ID must equal <code>callbackURL</code>
+exactly, and Apple imposes two separate rules on it: the scheme must be
+<code>https</code>, <strong>and</strong> the host must not be loopback. <code>https://localhost/cb</code>
+satisfies the first and still fails, as do <code>https://127.0.0.1/cb</code>, the rest of
+<code>127.0.0.0/8</code>, and <code>https://[::1]/cb</code> — so local development needs a tunnel or
+a dev hostname holding a certificate. The provider checks both at
+construction, through core's loopback predicate (<code>isLoopbackHostname</code>), rather
+than letting the authorization endpoint answer the first login with an opaque
+<code>invalid_request</code>. The value the flow actually sends is held to it as well: the
+session module derives the <code>redirect_uri</code> from <code>core.federations.&lt;name&gt;.callbackURL</code>,
+and a request whose derived URL is not the configured <code>callbackURL</code> is refused
+before anything reaches Apple. Under the type module they are one value, the
+entry's; a composition that builds the provider with <code>createAppleProvider</code>
+and lets them drift fails at the first request instead of validating one URL
+and sending another.</p>
+<h2 id="the-rotating-client-secret" class="tsd-anchor-link">The rotating client secret<a href="#the-rotating-client-secret" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>Apple's <code>client_secret</code> is not a string you paste. It is an ES256 JWT the
+relying party signs with the <code>.p8</code> key:</p>
+<pre><code class="text">header  { alg: &quot;ES256&quot;, kid: &lt;Key ID&gt; }
+payload { iss: &lt;Team ID&gt;, sub: &lt;Services ID&gt;, aud: &quot;https://appleid.apple.com&quot;,
+          iat: &lt;now&gt;, exp: &lt;now + at most six months&gt; }
+</code><button type="button">Copy</button></pre>
+
+<p>Supply the key material (<code>teamId</code> + <code>keyId</code> + <code>privateKey</code>) and this package
+builds the signer for you. It caches the JWT and re-signs only once the cached
+one comes within 24 h of <code>exp</code>, so the signature is computed about twice a year
+rather than on every login. The default lifetime is 180 days — deliberately
+short of Apple's 15 777 000-second ceiling, so clock skew between this process
+and Apple's cannot turn a boundary comparison into an outage.</p>
+<p>Concurrent logins share one in-flight signature, and a failed signature leaves
+the cache untouched. The key is imported once per distinct key material: when
+<code>privateKey</code> reads differently from what the held key was imported from — a
+repaired mount, or a leaked <code>.p8</code> revoked and replaced — the key is
+re-imported and the cached secret dropped on the next request, without a
+restart. A signature still in progress under the old key is neither handed to a
+caller that arrives after the rotation nor kept once it completes. That works
+through whatever you passed as <code>privateKey</code>, to <code>createAppleProvider</code> as much as
+to <code>createAppleClientSecret</code>: the option is read at every token exchange, not
+copied at construction. <strong>Rotating the key without a restart is available only
+through <code>createAppleProvider</code></strong>, never under <code>appleFederationTypeModule()</code>: an
+entry's <code>privateKey</code> is the PEM the configuration held at boot, so a key
+replaced under the type module takes effect on the next restart. A federation
+is registered only through a type, so the route is a federation type of your
+own (<code>defineFederationType</code>, registered under <code>federationTypes</code>) whose factory
+builds the provider with <code>createAppleProvider</code>; that provider is named
+<code>apple</code>, so the entry of that type must be named <code>apple</code>. Through
+<code>createAppleProvider</code>, make <code>privateKey</code> a getter that re-reads the file —
+<code>get privateKey() { return readFileSync(path, &quot;utf8&quot;); }</code> — which then runs on
+every token exchange.</p>
+<p>If you already produce the secret elsewhere, pass <code>clientSecret</code> instead — in
+an entry a string; in code either a string or a resolver (<code>() =&gt; string | Promise&lt;string&gt;</code>), the
+<code>FederationClientSecret</code> form, which this adapter resolves with core's
+<code>resolveClientSecret</code> on every token request. Supply <strong>one</strong> of the two: both is ambiguous and neither is
+unconfigured, and either fails at boot — for an entry, as a
+<code>config-validation-failed</code> naming it, as does key material missing one of its
+three keys.</p>
+<pre><code class="ts"><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">readFileSync</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;node:fs&quot;</span><span class="hl-1">;</span><br/><span class="hl-5">import</span><span class="hl-1"> { </span><span class="hl-6">createAppleClientSecret</span><span class="hl-1"> } </span><span class="hl-5">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@o3co/auth-provider-federation-apple&quot;</span><span class="hl-1">;</span><br/><br/><span class="hl-4">const</span><span class="hl-1"> </span><span class="hl-8">clientSecret</span><span class="hl-1"> = </span><span class="hl-0">createAppleClientSecret</span><span class="hl-1">({</span><br/><span class="hl-1">  </span><span class="hl-6">teamId:</span><span class="hl-1"> </span><span class="hl-2">&quot;ABCDE12345&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-6">clientId:</span><span class="hl-1"> </span><span class="hl-2">&quot;com.example.app.service&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-6">keyId:</span><span class="hl-1"> </span><span class="hl-2">&quot;XYZW98765F&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-6">privateKey:</span><span class="hl-1"> </span><span class="hl-0">readFileSync</span><span class="hl-1">(</span><span class="hl-2">&quot;AuthKey_XYZW98765F.p8&quot;</span><span class="hl-1">, </span><span class="hl-2">&quot;utf8&quot;</span><span class="hl-1">),</span><br/><span class="hl-1">});</span>
+</code><button type="button">Copy</button></pre>
+
+<h2 id="-apple-posts-the-callback" class="tsd-anchor-link"><code>form_post</code>: Apple POSTs the callback<a href="#-apple-posts-the-callback" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>Whenever the requested <code>scope</code> includes <code>name</code> or <code>email</code> — which this
+provider's always does — Apple does <strong>not</strong> redirect back with query
+parameters. It POSTs an <code>application/x-www-form-urlencoded</code> body to the
+callback, because the first-authorization <code>user</code> field does not fit a redirect
+URL. The provider declares <code>responseMode: &quot;form_post&quot;</code>, and the session router
+does the rest: <code>response_mode=form_post</code> on the authorization request,
+<code>POST /session/oauth/federation/&lt;name&gt;/callback</code> (a GET there is
+<code>405 method_not_allowed</code>), and the flow's <code>state</code>, PKCE verifier, nonce and
+post-login redirect held in a federation transaction — a record in the session
+store and a dedicated <code>__Host-</code> cookie (<code>HttpOnly; Secure; SameSite=None; Path=/</code>, named per federation) — instead of in the session. <strong>The start leg does not modify the
+application session cookie</strong>, for the browser doing the Apple login or anyone
+else; the callback, as for any login, regenerates the session with the cookie
+attributes the deployment configured.</p>
+<p>How the transaction is bound, spent and single-used is the session package's —
+see <a href="_o3co_auth-provider-session.html#response-modes-query-and-form_post">Response modes</a>.
+Its cookie is <code>__Host-</code>, so
+<a href="_o3co_auth-provider-session.html#only-this-host-can-set-the-transaction-cookie">only the auth host can set it</a>.</p>
+<p>An RFC 9207 <code>iss</code> in the posted body is compared with
+<code>https://appleid.apple.com</code> before the code is spent, and another issuer's is
+refused. None is required: Apple's discovery document does not advertise
+<code>authorization_response_iss_parameter_supported</code>.</p>
+<h2 id="claims" class="tsd-anchor-link">Claims<a href="#claims" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>Apple publishes no <code>userinfo_endpoint</code>, so the verified id_token (RS256, keys
+at <code>https://appleid.apple.com/auth/keys</code>) is the only source of identity.
+<code>nonce</code> is required, not optional: <code>buildAuthorizationUrl</code> and <code>exchangeCode</code>
+both fail closed without one. A freshness ask (<code>prompt=login</code>, <code>max_age</code>) is
+<strong>not forwarded</strong>: Apple's authorization request (&quot;Request an authorization to
+the Sign in with Apple server&quot;) documents <code>client_id</code>, <code>nonce</code>,
+<code>redirect_uri</code>, <code>response_mode</code>, <code>response_type</code>, <code>scope</code> and <code>state</code> only.</p>
+<ul>
+<li><strong><code>email_verified</code> may arrive as the string <code>&quot;true&quot;</code>.</strong> It is normalised to a
+boolean. This matters more than it looks: <code>Boolean(&quot;false&quot;)</code> is <code>true</code>, so a
+coercion would report an unverified address as verified. A claim that is
+neither a boolean nor <code>&quot;true&quot;</code> / <code>&quot;false&quot;</code> reads as absent, because absence is
+not <code>false</code>.</li>
+<li><strong><code>is_private_email</code> marks a Hide My Email relay address</strong>
+(<code>…@privaterelay.appleid.com</code>) and is surfaced as <code>isPrivateEmail</code> so a
+deployment can decide about it — it is namespaced under
+<code>claims.federated.&lt;name&gt;</code> (the entry's name), never promoted. Relay addresses forward mail and the
+user can disable them at any time; if reaching a real inbox matters, this is
+the value to act on. <code>isPrivateRelayEmail(email)</code> is exported for the same
+decision elsewhere. Apple's own marker wins; the relay domain is consulted
+only when Apple sends no marker.</li>
+<li><strong>The user's name arrives once</strong>, in the POST body's <code>user</code> JSON field, on the
+first authorization only — never in the id_token, and never again on a later
+login. It is mapped to the same <code>name</code> claim the other adapters produce, so
+the session package's promotion rules apply unchanged: <code>email</code> and <code>name</code> fill
+a gap the local record left, and everything else stays under
+<code>claims.federated.&lt;name&gt;</code> (see <code>PROMOTABLE_FEDERATED_CLAIMS</code>). Persist it on
+first login if you want to keep it.</li>
+<li><strong>The <code>user</code> body is not signed.</strong> The <code>state</code> check binds it to the session
+and binds nothing else, so treat the name as self-asserted — which is exactly
+what claim precedence already assumes of every federated claim.</li>
+<li><strong>Each name part is capped</strong> at 128 UTF-16 code units (<code>APPLE_NAME_PART_MAX_LENGTH</code>):
+a longer <code>firstName</code> or <code>lastName</code> is dropped whole, not truncated, so the
+unsigned body cannot push tens of kilobytes into the claims envelope and the
+session store. A malformed <code>user</code> body yields no name rather than a failed
+login.</li>
+<li><strong>No <code>picture</code>.</strong> Apple asserts none.</li>
+</ul>
+<p>What <code>exchangeCode</code> returns:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>issuer</code></td>
+<td><code>https://appleid.apple.com</code></td>
+</tr>
+<tr>
+<td><code>sub</code></td>
+<td>the id_token's <code>sub</code> — Apple's stable, team-scoped identifier</td>
+</tr>
+<tr>
+<td><code>email</code></td>
+<td>the id_token's <code>email</code>, when a string</td>
+</tr>
+<tr>
+<td><code>emailVerified</code></td>
+<td>normalised as above</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>from the POST body's <code>user</code>, first authorization only</td>
+</tr>
+<tr>
+<td><code>isPrivateEmail</code></td>
+<td>normalised as above; absent when neither the marker nor an address says</td>
+</tr>
+<tr>
+<td><code>accessToken</code>, <code>idToken</code>, <code>refreshToken</code></td>
+<td>as Apple issued them; <code>idToken</code> and <code>refreshToken</code> only when non-empty strings</td>
+</tr>
+<tr>
+<td><code>scope</code></td>
+<td>Apple's <code>scope</code> as sent; absent when Apple sent none (the session router then records the requested scope). A <code>scope</code> that is not a string is refused by <code>openid-client</code> before the adapter sees it, and the login answers <code>502 exchange_failed</code></td>
+</tr>
+<tr>
+<td><code>expiresAt</code></td>
+<td>when <code>openid-client</code> handed the answer over (after it verified the id_token, a JWKS fetch included) + <code>expiresIn</code>; <strong><code>null</code> when Apple sent no <code>expires_in</code></strong> (Apple documents it on every token response), which <code>oauth</code>'s <code>POST /oauth/federation/:name/token</code> reads as &quot;do not refresh; reuse the stored token&quot;</td>
+</tr>
+<tr>
+<td><code>expiresIn</code></td>
+<td><code>expires_in</code> as <code>openid-client</code> read it — it applies <code>parseFloat</code>, so <code>&quot;1000seconds&quot;</code> is 1000 — or <code>null</code> when Apple sent none</td>
+</tr>
+<tr>
+<td><code>tokenType</code></td>
+<td><code>token_type</code> as <code>openid-client</code> reports it (lower-cased <code>bearer</code>), recorded by the session router verbatim</td>
+</tr>
+<tr>
+<td><code>authTime</code></td>
+<td>the verified id_token's <code>auth_time</code> as a <code>Date</code>, when Apple sends one; absent otherwise. A fraction is floored to its second; one that is not a non-negative number, or lies further ahead than the clock skew tolerated between hosts, fails the exchange</td>
+</tr>
+</tbody>
+</table>
+<p><code>mapClaims</code> maps <code>email</code>, <code>emailVerified</code>, <code>name</code> and <code>isPrivateEmail</code>.</p>
+<h2 id="freshness-and-an-mfa-first-binding" class="tsd-anchor-link">Freshness: <code>prompt=login</code>, <code>max_age</code> and an MFA first binding<a href="#freshness-and-an-mfa-first-binding" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p><code>/authorize</code>'s <code>prompt=login</code> and <code>max_age</code>, and the MFA module's first
+binding (a recent primary), judge a federated session by when the upstream
+last authenticated the user: the id_token's <code>auth_time</code>. Apple's request has
+neither <code>prompt</code> nor <code>max_age</code>, so this adapter cannot ask for a new login, and
+a login whose id_token carries no <code>auth_time</code> reports none. With
+<code>core.federations.&lt;name&gt;.callbackMeetsFreshness</code> at its default <code>false</code>, such a
+session meets no <code>prompt=login</code> or <code>max_age</code> (<code>login_required</code>) and binds no
+first factor: the user is sent to log in again each time. To use them with Apple, set
+<code>core.federations.&lt;name&gt;.callbackMeetsFreshness = true</code>: the callback itself
+then counts as the authentication, which is the behaviour before 0.17.0.</p>
+<h2 id="refresh-and-logout" class="tsd-anchor-link">Refresh and logout<a href="#refresh-and-logout" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ul>
+<li><strong><code>refreshToken()</code></strong> (<code>SupportsRefresh</code>) runs the <code>refresh_token</code> grant with a
+freshly resolved client secret and returns the token fields of the table
+above by the same rules — <code>accessToken</code>, <code>refreshToken</code> when rotated,
+<code>idToken</code>, <code>scope</code>, <code>expiresAt</code>, <code>expiresIn</code> and <code>tokenType</code> (a non-string
+<code>scope</code> fails the refresh). It returns no <code>issuer</code> or <code>sub</code> — the caller
+keeps the stored identity.</li>
+<li><strong><code>endSession()</code></strong> (<code>SupportsLogout</code>): Apple publishes no
+<code>end_session_endpoint</code>, and unlike Google there is no Apple logout URL to fall
+back to. With <code>endSessionEndpoint</code> configured, that URL with <code>id_token_hint</code>,
+<code>post_logout_redirect_uri</code> and <code>state</code>; otherwise <code>postLogoutRedirectUri</code>
+with <code>state</code>; otherwise it throws rather than inventing a destination. Local
+session destruction is unaffected. An unparsable URL throws too; the message
+names the field and quotes no value it was handed.
+Redirecting straight to <code>postLogoutRedirectUri</code> is safe because the caller
+hands only a URI it has matched against the client's registered
+<code>postLogoutRedirectUris</code>, or none — core's <code>EndSessionRequest</code> states the
+rule, and <code>oauth</code>'s logout routes keep it. A composition that calls
+<code>endSession()</code> itself must do the same.</li>
+</ul>
+<h2 id="public-api" class="tsd-anchor-link">Public API<a href="#public-api" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>Exported from <a href=""><code>src/index.mts</code></a>, each from the file linked:</p>
+<ul>
+<li><code>appleFederationTypeModule</code> (<a href="../media/type-module.mts"><code>src/type-module.mts</code></a>) —
+the Module contributing <code>federationTypes.apple</code>, with its options
+<code>AppleFederationTypeModuleOptions</code>, and <code>APPLE_FEDERATION_TYPE</code> (<code>&quot;apple&quot;</code>).</li>
+<li><code>createAppleProvider(config)</code> (<a href="../media/apple.mts"><code>src/apple.mts</code></a>) — the
+provider for the federation <code>apple</code>, built from code: the way to what an
+entry cannot carry (a <code>clientSecret</code> resolver, a <code>privateKey</code> read at every
+signing, a <code>jwksUri</code> override).</li>
+<li><code>createAppleClientSecret(options)</code>
+(<a href="../media/client-secret.mts"><code>src/client-secret.mts</code></a>) — the ES256 signer, a
+resolver for <code>clientSecret</code>.</li>
+<li><code>isPrivateRelayEmail(email)</code> (<a href="../media/apple.mts"><code>src/apple.mts</code></a>).</li>
+<li>Constants: <code>APPLE_ISSUER</code>, <code>APPLE_AUDIENCE</code>, <code>APPLE_PRIVATE_RELAY_DOMAIN</code>,
+<code>APPLE_NAME_PART_MAX_LENGTH</code>, <code>APPLE_CLIENT_SECRET_MAX_LIFETIME_SECONDS</code>,
+<code>APPLE_CLIENT_SECRET_DEFAULT_LIFETIME_SECONDS</code>,
+<code>APPLE_CLIENT_SECRET_RENEWAL_WINDOW_SECONDS</code>.</li>
+<li>Types: <code>AppleEntry</code> (<a href="../media/entry.mts"><code>src/entry.mts</code></a>), an entry's own keys
+as the schema answers them; <code>AppleProviderConfig</code>, <code>AppleProvider</code>,
+<code>AppleClientSecretOptions</code>.</li>
+</ul>
+<h2 id="tests" class="tsd-anchor-link">Tests<a href="#tests" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<table>
+<thead>
+<tr>
+<th>Test file</th>
+<th>Pins</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="../media/apple.test.mts"><code>apple.test.mts</code></a></td>
+<td>construction and its boot refusals, the return-URL rules, the authorization request, the exchange and the profile, refresh, <code>mapClaims</code>, <code>endSession</code> and <code>isPrivateRelayEmail</code></td>
+</tr>
+<tr>
+<td><a href="../media/client-secret.test.mts"><code>client-secret.test.mts</code></a></td>
+<td>the JWT Apple documents, and its caching and rotation</td>
+</tr>
+<tr>
+<td><a href="../media/apple.signature.test.mts"><code>apple.signature.test.mts</code></a></td>
+<td>that the id_token's signature is verified against the JWKS</td>
+</tr>
+<tr>
+<td><a href="../media/apple.token-snapshot.test.mts"><code>apple.token-snapshot.test.mts</code></a></td>
+<td>the lifetime, <code>expiresIn</code> and <code>tokenType</code> a login and a refresh report, with and without <code>expires_in</code>, and that a non-string <code>scope</code> is refused by the library</td>
+</tr>
+<tr>
+<td><a href="../media/apple.issuer-parameter.test.mts"><code>apple.issuer-parameter.test.mts</code></a></td>
+<td>the RFC 9207 <code>iss</code> check</td>
+</tr>
+<tr>
+<td><a href="../media/claim-precedence.test.mts"><code>claim-precedence.test.mts</code></a></td>
+<td>Apple's claims under the session package's precedence rules</td>
+</tr>
+<tr>
+<td><a href="../media/apple-type-module.test.mts"><code>apple-type-module.test.mts</code></a></td>
+<td>the type module through <code>createApp</code>: one provider and policy per entry, a login through the session routes, the strict, flat schema, the <code>fetch</code> option, refusals that quote no credential, and every key of an entry reaching the provider or the redirect policy</td>
+</tr>
+</tbody>
+</table>
+</section>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Interfaces"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="interfaces">Interfaces<a href="#interfaces" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="appleclientsecretoptions"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-federation-apple.AppleClientSecretOptions.html">AppleClientSecretOptions</a><a href="#appleclientsecretoptions" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="applefederationtypemoduleoptions"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-federation-apple.AppleFederationTypeModuleOptions.html">AppleFederationTypeModuleOptions</a><a href="#applefederationtypemoduleoptions" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="appleproviderconfig"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><a href="../interfaces/_o3co_auth-provider-federation-apple.AppleProviderConfig.html">AppleProviderConfig</a><a href="#appleproviderconfig" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Type Aliases"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="type-aliases">Type Aliases<a href="#type-aliases" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="appleentry"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><a href="../types/_o3co_auth-provider-federation-apple.AppleEntry.html">AppleEntry</a><a href="#appleentry" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="appleprovider"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><a href="../types/_o3co_auth-provider-federation-apple.AppleProvider.html">AppleProvider</a><a href="#appleprovider" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Variables"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="variables">Variables<a href="#variables" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="apple_audience"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-federation-apple.APPLE_AUDIENCE.html">APPLE_AUDIENCE</a><a href="#apple_audience" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="apple_client_secret_default_lifetime_seconds"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-federation-apple.APPLE_CLIENT_SECRET_DEFAULT_LIFETIME_SECONDS.html">APPLE_CLIENT_SECRET_DEFAULT_LIFETIME_SECONDS</a><a href="#apple_client_secret_default_lifetime_seconds" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="apple_client_secret_max_lifetime_seconds"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-federation-apple.APPLE_CLIENT_SECRET_MAX_LIFETIME_SECONDS.html">APPLE_CLIENT_SECRET_MAX_LIFETIME_SECONDS</a><a href="#apple_client_secret_max_lifetime_seconds" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="apple_client_secret_renewal_window_seconds"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-federation-apple.APPLE_CLIENT_SECRET_RENEWAL_WINDOW_SECONDS.html">APPLE_CLIENT_SECRET_RENEWAL_WINDOW_SECONDS</a><a href="#apple_client_secret_renewal_window_seconds" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="apple_federation_type"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-federation-apple.APPLE_FEDERATION_TYPE.html">APPLE_FEDERATION_TYPE</a><a href="#apple_federation_type" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="apple_issuer"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-federation-apple.APPLE_ISSUER.html">APPLE_ISSUER</a><a href="#apple_issuer" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="apple_name_part_max_length"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-federation-apple.APPLE_NAME_PART_MAX_LENGTH.html">APPLE_NAME_PART_MAX_LENGTH</a><a href="#apple_name_part_max_length" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="apple_private_relay_domain"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><a href="../variables/_o3co_auth-provider-federation-apple.APPLE_PRIVATE_RELAY_DOMAIN.html">APPLE_PRIVATE_RELAY_DOMAIN</a><a href="#apple_private_relay_domain" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Functions"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="functions">Functions<a href="#functions" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary><dl class="tsd-member-summaries"><dt class="tsd-member-summary" id="applefederationtypemodule"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-federation-apple.appleFederationTypeModule.html">appleFederationTypeModule</a><a href="#applefederationtypemodule" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="createappleclientsecret"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-federation-apple.createAppleClientSecret.html">createAppleClientSecret</a><a href="#createappleclientsecret" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="createappleprovider"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-federation-apple.createAppleProvider.html">createAppleProvider</a><a href="#createappleprovider" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd><dt class="tsd-member-summary" id="isprivaterelayemail"><span class="tsd-member-summary-name"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><a href="../functions/_o3co_auth-provider-federation-apple.isPrivateRelayEmail.html">isPrivateRelayEmail</a><a href="#isprivaterelayemail" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></span></dt><dd class="tsd-member-summary"></dd></dl></details></div>
+<div class="col-sidebar">
+<div class="page-menu">
+<div class="tsd-navigation settings">
+<details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>Settings</h3></summary>
+<div class="tsd-accordion-details">
+<div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span>
+<ul id="tsd-filter-options">
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div>
+<div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div>
+<details open class="tsd-accordion tsd-page-navigation"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>On This Page</h3></summary>
+<div class="tsd-accordion-details"><a href="#o3coauth-provider-federation-apple"><span>@o3co/auth-<wbr/>provider-<wbr/>federation-<wbr/>apple</span></a>
+<ul>
+<li><a href="#responsibility"><span>Responsibility</span></a></li>
+<li><a href="#install"><span>Install</span></a></li>
+<li><a href="#usage"><span>Usage</span></a></li>
+<li>
+<ul>
+<li><a href="#configuration"><span>Configuration</span></a></li></ul></li>
+<li><a href="#what-you-need-from-apple-and-which-one-goes-where"><span>What you need from <wbr/>Apple, and which one goes where</span></a></li>
+<li><a href="#the-rotating-client-secret"><span>The rotating client secret</span></a></li>
+<li><a href="#-apple-posts-the-callback"><span>: <wbr/>Apple <wbr/>POS<wbr/>Ts the callback</span></a></li>
+<li><a href="#claims"><span>Claims</span></a></li>
+<li><a href="#freshness-and-an-mfa-first-binding"><span>Freshness: ,  and an <wbr/>MFA first binding</span></a></li>
+<li><a href="#refresh-and-logout"><span>Refresh and logout</span></a></li>
+<li><a href="#public-api"><span>Public <wbr/>API</span></a></li>
+<li><a href="#tests"><span>Tests</span></a></li></ul>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Interfaces"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Interfaces</summary>
+<div><a href="#appleclientsecretoptions"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Apple<wbr/>Client<wbr/>Secret<wbr/>Options</span></a><a href="#applefederationtypemoduleoptions"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Apple<wbr/>Federation<wbr/>Type<wbr/>Module<wbr/>Options</span></a><a href="#appleproviderconfig"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Interface"><use href="../assets/icons.svg#icon-256"></use></svg><span>Apple<wbr/>Provider<wbr/>Config</span></a></div></details>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Type Aliases"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Type Aliases</summary>
+<div><a href="#appleentry"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><span>Apple<wbr/>Entry</span></a><a href="#appleprovider"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Type Alias"><use href="../assets/icons.svg#icon-2097152"></use></svg><span>Apple<wbr/>Provider</span></a></div></details>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Variables"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Variables</summary>
+<div><a href="#apple_audience"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>APPLE_<wbr/>AUDIENCE</span></a><a href="#apple_client_secret_default_lifetime_seconds"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>APPLE_<wbr/>CLIENT_<wbr/>SECRET_<wbr/>DEFAULT_<wbr/>LIFETIME_<wbr/>SECONDS</span></a><a href="#apple_client_secret_max_lifetime_seconds"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>APPLE_<wbr/>CLIENT_<wbr/>SECRET_<wbr/>MAX_<wbr/>LIFETIME_<wbr/>SECONDS</span></a><a href="#apple_client_secret_renewal_window_seconds"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>APPLE_<wbr/>CLIENT_<wbr/>SECRET_<wbr/>RENEWAL_<wbr/>WINDOW_<wbr/>SECONDS</span></a><a href="#apple_federation_type"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>APPLE_<wbr/>FEDERATION_<wbr/>TYPE</span></a><a href="#apple_issuer"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>APPLE_<wbr/>ISSUER</span></a><a href="#apple_name_part_max_length"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>APPLE_<wbr/>NAME_<wbr/>PART_<wbr/>MAX_<wbr/>LENGTH</span></a><a href="#apple_private_relay_domain"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Variable"><use href="../assets/icons.svg#icon-32"></use></svg><span>APPLE_<wbr/>PRIVATE_<wbr/>RELAY_<wbr/>DOMAIN</span></a></div></details>
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Functions"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Functions</summary>
+<div><a href="#applefederationtypemodule"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>apple<wbr/>Federation<wbr/>Type<wbr/>Module</span></a><a href="#createappleclientsecret"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>create<wbr/>Apple<wbr/>Client<wbr/>Secret</span></a><a href="#createappleprovider"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>create<wbr/>Apple<wbr/>Provider</span></a><a href="#isprivaterelayemail"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Function"><use href="../assets/icons.svg#icon-64"></use></svg><span>is<wbr/>Private<wbr/>Relay<wbr/>Email</span></a></div></details></div></details></div>
+<div class="site-menu">
+<nav class="tsd-navigation"><a href="../modules.html">auth.provider API</a>
+<ul class="tsd-small-nested-navigation" id="tsd-nav-container">
+<li>Loading...</li></ul></nav></div></div></div><footer>
+<p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer>
+<div class="overlay"></div></body></html>

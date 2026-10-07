@@ -1,0 +1,205 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/**
+ * `MfaFactorStore` kept by the Store, over its four MFA factor endpoints
+ * (README, "The Store's MFA endpoints"), on the user repository's transport.
+ *
+ * Guarantees: every answer the contract does not give an operation throws —
+ * a list is never answered as fewer records, an update never as written; a
+ * list is read whole or refused (a record the provider cannot read, one of
+ * another subject, an id twice); an update's answer must be the record named,
+ * with the changes sent, at the expected version plus one; what is thrown is
+ * built from an allowlist (`storeFailure.mts`, `storeErrors.mts`) and carries
+ * nothing the Store sent; the sealed `data` it is handed is sent as it is,
+ * and nothing is sent that the wire codec would not read back.
+ *
+ * A record is created or removed only conditionally: every create and every
+ * single-record removal it sends carries `expectedGeneration`, and only the
+ * whole set's reset (`removeAllForSubject`) is sent without one.
+ *
+ * The factor set's members (`listVersioned`, `createIf`, `removeIf`) read
+ * every answer through core's codec alone, once: a status the operation does
+ * not give is `unexpected_status`, read before any body, and whatever the
+ * codec refuses — a `404` or `409` without its outcome body among them — is
+ * `malformed_answer`. A conditional write states its deadline on the wire
+ * (`deadlineMs`, the request timeout from just before it is sent), at or
+ * before the moment the transport gives up, whose timer starts after it: a
+ * write past it is never applied after the adapter stopped waiting. A Store
+ * that reads it as passed answers `408`, which is `unexpected_status`. A conditional write that is sent and then fails,
+ * its deadline included, is unknown: it may have committed.
+ *
+ * Its write lifetime W is the timeout plus `DEFAULT_CLOCK_SKEW_MS`, and the
+ * factor-set writer issues a conditional write up to `MFA_SUBJECT_LEASE_MAX_MS`
+ * after its read; a `timeout` that would take the two past
+ * `BUNDLED_STORE_WRITE_LIFETIME_MS` is a `RangeError` at construction.
+ */
+import { BUNDLED_STORE_WRITE_LIFETIME_MS, DEFAULT_CLOCK_SKEW_MS, fromMfaStoreFactor, MFA_SUBJECT_LEASE_MAX_MS, readMfaStoreCreateIfAnswer, readMfaStoreFactor, readMfaStoreListAnswer, readMfaStoreRemoveIfAnswer, readMfaStoreVersionedListAnswer, toMfaStoreCreateIfRequest, toMfaStoreRemoveIfRequest, toMfaStoreUpdateRequest, } from "@o3co/auth-provider-core";
+import { assertSecureEndpoint } from "../endpointUrl.mjs";
+import { bearerAuthorization, checkStoreResponseCap, checkStoreTimeout, DEFAULT_MAX_RESPONSE_BYTES, postToStore, } from "../storeTransport.mjs";
+import { mfaStoreMalformedAnswer, mfaStoreRequestMessages, mfaStoreStatusError, mfaStoreUnreadableRecord, mfaStoreVersionSkipped, } from "./storeFailure.mjs";
+/** What this adapter's messages lead with. */
+const OWNER = "HttpMfaFactorStore";
+/**
+ * The largest `timeout`: a conditional write's lifetime (the timeout plus
+ * `DEFAULT_CLOCK_SKEW_MS`), issued up to `MFA_SUBJECT_LEASE_MAX_MS` after its
+ * read, ends within `BUNDLED_STORE_WRITE_LIFETIME_MS` of that read.
+ */
+const MAX_TIMEOUT_MS = BUNDLED_STORE_WRITE_LIFETIME_MS - MFA_SUBJECT_LEASE_MAX_MS - DEFAULT_CLOCK_SKEW_MS;
+/** `timeout` as the transport takes it, and no greater than {@link MAX_TIMEOUT_MS}. */
+function checkTimeout(timeout) {
+    const checked = checkStoreTimeout(timeout, OWNER);
+    if (checked > MAX_TIMEOUT_MS) {
+        throw new RangeError(`${OWNER}: "timeout" must be no greater than ${MAX_TIMEOUT_MS} milliseconds: ` +
+            `the timeout plus MFA_SUBJECT_LEASE_MAX_MS (${MFA_SUBJECT_LEASE_MAX_MS}) and ` +
+            `DEFAULT_CLOCK_SKEW_MS (${DEFAULT_CLOCK_SKEW_MS}) must be within ` +
+            `BUNDLED_STORE_WRITE_LIFETIME_MS (${BUNDLED_STORE_WRITE_LIFETIME_MS}), the factor store's write lifetime`);
+    }
+    return checked;
+}
+/** The statuses a conditional create is answered with, each with its outcome body. */
+const CREATE_IF_STATUSES = new Set([200, 409]);
+/** The statuses a conditional removal is answered with, each with its outcome body. */
+const REMOVE_IF_STATUSES = new Set([200, 404, 409]);
+const isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+/** What JSON text parses to, or `NOT_JSON`. */
+const NOT_JSON = Symbol("not JSON");
+function parsed(text) {
+    try {
+        return JSON.parse(text);
+    }
+    catch {
+        return NOT_JSON;
+    }
+}
+/** Whether `factor` holds exactly the changes an update sent. */
+const wrote = (factor, changes) => factor.data === changes.data &&
+    factor.label === changes.label &&
+    factor.lastUsedAtMs === changes.lastUsedAtMs;
+export class HttpMfaFactorStore {
+    kind = "store";
+    /** Private fields: `inspect()` and `JSON.stringify` of the store show neither the credential nor the endpoints. */
+    #urls;
+    #settings;
+    constructor({ listUrl, createUrl, updateUrl, deleteUrl, bearerToken, timeout, maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES, }) {
+        this.#urls = Object.freeze({
+            list: assertSecureEndpoint(listUrl, "listUrl", OWNER),
+            create: assertSecureEndpoint(createUrl, "createUrl", OWNER),
+            update: assertSecureEndpoint(updateUrl, "updateUrl", OWNER),
+            delete: assertSecureEndpoint(deleteUrl, "deleteUrl", OWNER),
+        });
+        this.#settings = Object.freeze({
+            authorization: bearerAuthorization(bearerToken, OWNER),
+            timeout: checkTimeout(timeout),
+            maxResponseBytes: checkStoreResponseCap(maxResponseBytes, OWNER),
+        });
+    }
+    async list(subject) {
+        const url = this.#urls.list;
+        const body = { subject };
+        const { response, text } = await this.#post("list", body, (status) => status === 200);
+        if (text === undefined)
+            throw mfaStoreStatusError("list", url, response);
+        const reading = readMfaStoreListAnswer(parsed(text), subject);
+        if (!reading.ok) {
+            throw reading.reason === "malformed"
+                ? mfaStoreMalformedAnswer("list", url)
+                : mfaStoreUnreadableRecord(url);
+        }
+        return reading.factors.map(fromMfaStoreFactor);
+    }
+    async listVersioned(subject) {
+        const body = { subject };
+        const { response, text } = await this.#post("list", body, (status) => status === 200);
+        if (text === undefined)
+            throw mfaStoreStatusError("list", this.#urls.list, response);
+        return this.#read("list", () => readMfaStoreVersionedListAnswer(parsed(text), subject));
+    }
+    async createIf(record, expected) {
+        const { response, text } = await this.#postConditional("create", (deadlineMs) => toMfaStoreCreateIfRequest(record, expected, deadlineMs), (status) => CREATE_IF_STATUSES.has(status));
+        if (text === undefined)
+            throw mfaStoreStatusError("create", this.#urls.create, response);
+        return this.#read("create", () => readMfaStoreCreateIfAnswer(response.status, parsed(text)));
+    }
+    async removeIf(subject, id, expected) {
+        const { response, text } = await this.#postConditional("delete", (deadlineMs) => toMfaStoreRemoveIfRequest(subject, id, expected, deadlineMs), (status) => REMOVE_IF_STATUSES.has(status));
+        if (text === undefined)
+            throw mfaStoreStatusError("delete", this.#urls.delete, response);
+        return this.#read("delete", () => readMfaStoreRemoveIfAnswer(response.status, parsed(text)));
+    }
+    async update(subject, id, expectedVersion, next) {
+        const url = this.#urls.update;
+        const body = toMfaStoreUpdateRequest(subject, id, expectedVersion, next);
+        const { response, text } = await this.#post("update", body, (status) => status === 200);
+        if (response.status === 409 || response.status === 404)
+            return null;
+        if (text === undefined)
+            throw mfaStoreStatusError("update", url, response);
+        const answer = parsed(text);
+        const factor = isRecord(answer) && Object.hasOwn(answer, "factor")
+            ? readMfaStoreFactor(answer.factor)
+            : undefined;
+        if (factor === undefined ||
+            factor.subject !== subject ||
+            factor.id !== id ||
+            !wrote(factor, body.changes)) {
+            throw mfaStoreMalformedAnswer("update", url);
+        }
+        if (factor.version !== expectedVersion + 1) {
+            throw mfaStoreVersionSkipped(url, { subject, id, expectedVersion });
+        }
+        return fromMfaStoreFactor(factor);
+    }
+    /** The subject's whole set reset: done on a `2xx` or a `404`. */
+    async removeAllForSubject(subject) {
+        const body = { subject, all: true };
+        const { response } = await this.#post("delete", body, () => false);
+        if (response.ok || response.status === 404)
+            return;
+        throw mfaStoreStatusError("delete", this.#urls.delete, response);
+    }
+    /**
+     * A conditional write to `operation`'s endpoint, its body built by
+     * `build` with its `deadlineMs`: the request timeout from now, taken just
+     * before the request is sent. Nothing yields between this and the
+     * transport's timer, which starts after it, so the deadline is at or
+     * before the moment the adapter gives up.
+     */
+    #postConditional(operation, build, readsBody) {
+        const deadlineMs = Date.now() + this.#settings.timeout;
+        return this.#post(operation, build(deadlineMs), readsBody);
+    }
+    /**
+     * What `read`, a reader of core's codec, makes of an answer of
+     * `operation`; the `TypeError` it throws for an answer outside the
+     * contract is `malformed_answer`, carrying none of the reader's words.
+     */
+    #read(operation, read) {
+        try {
+            return read();
+        }
+        catch (error) {
+            if (error instanceof TypeError) {
+                throw mfaStoreMalformedAnswer(operation, this.#urls[operation]);
+            }
+            throw error;
+        }
+    }
+    /** `body` to `operation`'s endpoint, its answer read when `readsBody` says so. */
+    #post(operation, body, readsBody) {
+        const url = this.#urls[operation];
+        return postToStore(url, body, this.#settings, mfaStoreRequestMessages(OWNER, operation, url), readsBody);
+    }
+}

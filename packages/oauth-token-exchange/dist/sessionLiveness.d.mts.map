@@ -1,0 +1,1 @@
+{"version":3,"file":"sessionLiveness.d.mts","sourceRoot":"","sources":["../src/sessionLiveness.mts"],"names":[],"mappings":"AAgBA;;;GAGG;AAEH,OAAO,KAAK,EAAE,gBAAgB,EAAE,MAAM,0BAA0B,CAAC;AAEjE;;;;;GAKG;AACH,wBAAsB,kBAAkB,CACvC,SAAS,EAAE,IAAI,CAAC,gBAAgB,EAAE,UAAU,CAAC,EAC7C,GAAG,EAAE,MAAM,GACT,OAAO,CAAC;IAAE,QAAQ,CAAC,OAAO,EAAE,MAAM,CAAA;CAAE,GAAG,UAAU,GAAG,WAAW,CAAC,CAKlE"}
