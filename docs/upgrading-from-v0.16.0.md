@@ -722,8 +722,9 @@ The boot refusals you can meet, with their messages, are in
   opens its family and joins the family to the session only when the
   `refresh_token` grant is registered and the client may use it by the rule
   `/oauth/token` applies when the token is redeemed: its `allowedGrantTypes`
-  names `refresh_token`, or it has no list and
-  `oauth.requireGrantTypeAllowlist` is off. Otherwise the response has no
+  names `refresh_token`, or it has no list, `oauth.requireGrantTypeAllowlist`
+  is off and the registered `refresh_token` grant does not deny by absence
+  (`requiresExplicitGrantAllowlist`; the bundled one does not). Otherwise the response has no
   `refresh_token`, the access token carries no `family_id`, and only the
   client joins the session, so logout still reaches it. Such a client could
   not redeem the refresh token before either. An access token without
@@ -731,7 +732,8 @@ The boot refusals you can meet, with their messages, are in
   (`401 invalid_token`, `missing family_id claim`), as the `session` grant's
   tokens are. **What to do:** for each client that refreshes, or that calls
   the federation token route, make sure its `allowedGrantTypes` names
-  `refresh_token` (or that it has no list), and that
+  `refresh_token` (or that it has no list, where neither the switch nor the
+  registered grant denies by absence), and that
   `oauth-authorization.grants.refreshToken.enabled` is on. See the
   [oauth README](../packages/oauth/README.md#authorization_code-the-session-sid-family_id-and-the-id_token).
 - **Federation grants.** `/reauthorize` answers a removed connection, or a
