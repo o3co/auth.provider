@@ -948,8 +948,8 @@ The boot refusals you can meet, with their messages, are in
   with no `azp` is answered the same way (it used to be
   `missing azp claim`). `POST /oauth/federation/:name/logout` applies the
   same rule to a token that names its client
-  (`federation_logout_jwt_verify_failed`), and still accepts one that names
-  none. Neither route logs `jwt_verify_aud_skipped` any longer for a token
+  (`federation_logout_jwt_verify_failed`), refuses one whose `azp` claim is
+  not a non-empty string, and still accepts one with no `azp` claim. Neither route logs `jwt_verify_aud_skipped` any longer for a token
   that names its client. A code exchange that named no `resource` issues
   for the client id, and keeps working. **What to do:** a client that calls
   either route with a token whose `aud` is a resource server obtains one for

@@ -392,8 +392,9 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			// must be at+jwt: refresh and id tokens share the KeyStore, so typ is
 			// the only defense against cross-type acceptance. A token that names
 			// its client (`azp`) must have been issued for that client itself, its
-			// `aud` containing that id. One that names none has no client to pin
-			// to: its audience is not checked (logged as `jwt_verify_aud_skipped`).
+			// `aud` containing that id; an `azp` that is not a non-empty string is
+			// refused. One with no `azp` claim has no client to pin to: its
+			// audience is not checked (logged as `jwt_verify_aud_skipped`).
 			let payload: Record<string, unknown>;
 			try {
 				const verified = await verifyJwt(token, opts.keyStore, {

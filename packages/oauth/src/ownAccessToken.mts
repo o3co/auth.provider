@@ -22,10 +22,9 @@
 import { decodeJwt } from "jose";
 
 /** The `verifyJwt` options that bind a token to the client it names. */
-export interface OwnAccessTokenPins {
-	readonly expectedAudience: string;
-	readonly expectedAzp: string;
-}
+export type OwnAccessTokenPins =
+	| { readonly expectedAudience: string; readonly expectedAzp: string }
+	| { readonly expectedAudience: readonly [] };
 
 /**
  * The pins for an access token presented by the client it was issued to: its
@@ -36,18 +35,22 @@ export interface OwnAccessTokenPins {
  * pins against the signed payload, so the audience check runs and an `azp`
  * the signature does not cover never passes.
  *
- * `null` for a token that names no `azp` (absent, empty or not a string) or
+ * An `azp` claim that is present but not a non-empty string names no client
+ * the token can be bound to: it is pinned to an audience nothing matches, so
+ * the verifier refuses it. `null` for a token with no `azp` claim, or one
  * that cannot be decoded: no client to pin to, which each route answers.
  */
 export const ownAccessTokenPins = (token: string): OwnAccessTokenPins | null => {
-	let azp: unknown;
+	let claims: Record<string, unknown>;
 	try {
-		azp = decodeJwt(token).azp;
+		claims = decodeJwt(token);
 	} catch {
 		// Not a decodable JWT: the verifier refuses it.
 		return null;
 	}
+	if (!Object.hasOwn(claims, "azp")) return null;
+	const { azp } = claims;
 	return typeof azp === "string" && azp.length > 0
 		? { expectedAudience: azp, expectedAzp: azp }
-		: null;
+		: { expectedAudience: [] };
 };

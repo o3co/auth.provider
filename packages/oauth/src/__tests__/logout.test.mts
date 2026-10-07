@@ -2597,22 +2597,44 @@ describe("POST /oauth/federation/:name/logout", () => {
 			expect(fedTokenStore.delete).not.toHaveBeenCalled();
 		});
 
-		// An `azp` that is not a non-empty string names no client to pin to: the
-		// token is answered as one with no `azp`, its audience unchecked (the
-		// route's rule for a token that names no client).
+		// An `azp` claim that is present but not a non-empty string is refused:
+		// only a token with no `azp` claim at all is answered as one that names
+		// no client. Nothing is disconnected, and no client's record is read.
 		it.each([
 			["a number", 123],
 			["an array naming the client", ["client-1"]],
 			["an empty string", ""],
-		])("answers a token whose azp is %s as one that names no client", async (_label, azp) => {
+			["null", null],
+		])("refuses a token whose azp is %s, and disconnects nothing", async (_label, azp) => {
+			const findById = vi.fn();
+			const fedTokenStore = makeFedTokenStore({ delete: vi.fn().mockResolvedValue(undefined) });
 			const logger = createMockLogger();
-			const app = buildFedLogoutApp({ logger });
+			const app = buildFedLogoutApp({
+				clientRepo: makeClientRepo({ findById }),
+				fedTokenStore,
+				logger,
+			});
 
-			const res = await postFedLogout(app, "google", await mintAccessToken({ azp, aud: RESOURCE }));
+			const res = await postFedLogout(
+				app,
+				"google",
+				await mintAccessToken({ azp, aud: RESOURCE }),
+				{
+					post_logout_redirect_uri: "https://rp.example/logged-out",
+				},
+			);
 
-			expect(res.status).toBe(200);
-			expect(res.body).toEqual({ disconnected: true });
-			expect(logger.warn.mock.calls.map(([, event]) => event)).toContain("jwt_verify_aud_skipped");
+			expect(res.status).toBe(401);
+			expect(res.body).toEqual({ error: "invalid_token", error_description: "invalid token" });
+			expect(res.headers["www-authenticate"]).toBe(
+				'Bearer error="invalid_token", error_description="invalid token"',
+			);
+			expect(fedTokenStore.get).not.toHaveBeenCalled();
+			expect(fedTokenStore.delete).not.toHaveBeenCalled();
+			expect(findById).not.toHaveBeenCalled();
+			expect(logger.warn.mock.calls.map(([, event]) => event)).not.toContain(
+				"jwt_verify_aud_skipped",
+			);
 		});
 
 		it("checks the audience, so the verifier logs no jwt_verify_aud_skipped", async () => {

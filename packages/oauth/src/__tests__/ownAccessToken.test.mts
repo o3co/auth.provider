@@ -28,12 +28,19 @@ describe("ownAccessTokenPins", () => {
 		});
 	});
 
+	it("is null for a token with no azp claim", () => {
+		expect(ownAccessTokenPins(tokenWith({ aud: "client-1" }))).toBeNull();
+	});
+
 	it.each([
-		["no azp", {}],
 		["an empty azp", { azp: "" }],
-		["an azp that is not a string", { azp: ["client-1"] }],
-	])("is null for a token with %s", (_label, claims) => {
-		expect(ownAccessTokenPins(tokenWith(claims))).toBeNull();
+		["an azp that is an array", { azp: ["client-1"] }],
+		["an azp that is a number", { azp: 123 }],
+		["an azp that is null", { azp: null }],
+	])("pins a token with %s to an audience nothing matches", (_label, claims) => {
+		expect(ownAccessTokenPins(tokenWith({ aud: "client-1", ...claims }))).toEqual({
+			expectedAudience: [],
+		});
 	});
 
 	it("is null for a value that is not a JWT", () => {

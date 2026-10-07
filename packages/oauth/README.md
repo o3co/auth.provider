@@ -634,7 +634,7 @@ On every success shape — and on the no-op answer for a session that is already
 
 Provider-scoped federation disconnect. Authorization: `Bearer <access_token>` with `typ: at+jwt`. Optional body: `post_logout_redirect_uri`, `state`.
 
-An access token that names its client (`azp`) must be issued for that client itself: its `aud` contains that id, or the request is `401 invalid_token` and nothing is disconnected. A token that names no client has no audience to check.
+An access token that names its client (`azp`) must be issued for that client itself: its `aud` contains that id, or the request is `401 invalid_token` and nothing is disconnected. An `azp` claim that is not a non-empty string is refused the same way. Only a token with no `azp` claim names no client, and has no audience to check.
 
 Flow: verifies the access token → checks its family is not revoked → reads from core's session lifecycle whether the session is live (`sessionLifecycle.liveness`; a session not live, or another subject's, is `401 invalid_token`) and which federations it joined (`sessionLifecycle.federations`) → verifies the federation joined it → holds `post_logout_redirect_uri` to the client's list → deletes the federation token → if the provider implements `SupportsLogout`, redirects to the IdP end-session URL; otherwise returns `200 {"disconnected": true}`.
 
