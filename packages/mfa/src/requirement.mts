@@ -535,15 +535,26 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 			nowMs,
 		);
 		if (recentMfa) return MET;
-		const verdict = stepUp(session);
+		return towardMfa(session, holdsMfa, stepUp(session));
+	};
+
+	/**
+	 * `verdict` for a `credential_change` action, held to what can meet it: a
+	 * step-up of a session without `mfa` only when its subject holds a record
+	 * a step-up could add `mfa` with now (`mayAddMfaIn`), `unmet` otherwise.
+	 */
+	const towardMfa = async (
+		session: SessionView,
+		holdsMfa: boolean,
+		verdict: RequirementVerdict,
+	): Promise<RequirementVerdict> => {
 		if (verdict.outcome !== "step_up" || holdsMfa) return verdict;
-		// A session without mfa is stepped up only toward a record that can add it.
 		const held = await readSubjectRecords({ factors, sealing }, session.sub, {
 			list: listRecords,
 			recoverySetFloor: options.recoverySetFloor,
 			logger,
 		});
-		return mayAddMfaIn(held) ? verdict : UNMET;
+		return mayAddMfaIn(held, session.enrollmentFacts?.mailAddress) ? verdict : UNMET;
 	};
 
 	/** A session a cookie, a code or a link carries, held over its record to the rule its mode and grade name. */
@@ -569,7 +580,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 				const verdict = await baseline(session, recorded);
 				return verdict.outcome === "met"
 					? recent(session, recorded, vouched, action, now.getTime())
-					: verdict;
+					: towardMfa(session, vouched.includes(MFA_AMR), verdict);
 			}
 			default:
 				throw new TypeError(`no record rule named ${rule satisfies never}`);

@@ -823,7 +823,8 @@ steps up on the MFA page — `POST /session/mfa/step-up`, then one of their
 factors verified on its transaction — which records recent MFA on the
 session when the factor adds `mfa` or the session holds it already; the
 start is then admitted. A user whose only counting factor is the email factor
-without `MFA_EMAIL_FACTOR_ADDS_MFA` steps up with a recovery code; one with
+without `MFA_EMAIL_FACTOR_ADDS_MFA`, in a session that does not hold `mfa`,
+steps up with a recovery code; one with
 none it can use — the recovery-code factor off, a set never shown, its codes
 used up, or their key gone from the ring — is answered `401 login_required` instead of a step-up, and needs the
 operator reset, then a first binding. Where no second factor can be recorded

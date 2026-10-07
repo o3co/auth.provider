@@ -574,7 +574,7 @@ describe("under required, a password session without a second factor whose subje
 	it("is a first binding under optional, and one whose subject holds a counting factor is stepped up under required", async () => {
 		const session = sessionOf("pwd", facts(), { mfaAgeMs: null });
 		expect(await build({ mode: "optional" }).requirement.admit(inputFor(session))).toEqual(STEP_UP);
-		const holding = build({ mode: "required", records: [factorRecord(SUBJECT, "totp")] });
+		const holding = build({ mode: "required", records: [openingFactorRecord(SUBJECT, "totp")] });
 		expect(await holding.requirement.admit(inputFor(session))).toEqual(STEP_UP);
 	});
 });

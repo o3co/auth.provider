@@ -47,10 +47,10 @@
  *   one the provider cannot read — a TOTP whose key is lost among them — or
  *   whose kind it no longer installs fails closed and asks;
  * - whether a step-up could add `mfa` to a session that lacks it
- *   (`mayAddMfaIn`): a `usable` record, of a factor that adds `mfa`, and
- *   for a recovery set one whose codes were answered — a set never shown is
- *   a code nobody holds, and a record the provider cannot read verifies
- *   nothing now;
+ *   (`mayAddMfaIn`): a `usable` record, of a factor that adds `mfa`, for a
+ *   recovery set one whose codes were answered — a set never shown is a code
+ *   nobody holds, and a record the provider cannot read verifies nothing
+ *   now — and for an email factor one whose code can be mailed;
  * - every reading that judges a recovery set — the offers, the list, a
  *   step-up's `no_qualifying_factor`, a password login's ask, whether a
  *   step-up could add `mfa` — reads the
@@ -63,6 +63,7 @@
 import {
 	type Logger,
 	loggableError,
+	type MailAddressFact,
 	type MfaFactor,
 	type MfaFactorData,
 	type MfaFactorRecord,
@@ -246,16 +247,29 @@ export const holdsUsableIn = (read: MfaSubjectRecords): boolean =>
 /**
  * Whether the subject `read` holds a record a step-up could add `mfa` with
  * now: a `usable` one — so one that does not open, or whose codes' key left
- * the ring, is not — of a factor that adds `mfa`, and, a recovery-code set,
- * whose codes were answered.
+ * the ring, is not — of a factor that adds `mfa`; a recovery-code set whose
+ * codes were answered; and an email factor whose code can be mailed: its
+ * recorded address digest readable under a key the ring holds, beside a
+ * session whose login held an address (`mailAddress`, as the session
+ * recorded it; none recorded leaves that to the challenge). Whether that
+ * address is still the one recorded is the challenge's to tell: the
+ * session's view does not carry it.
  */
-export const mayAddMfaIn = (read: MfaSubjectRecords): boolean =>
+export const mayAddMfaIn = (
+	read: MfaSubjectRecords,
+	mailAddress: MailAddressFact | undefined,
+): boolean =>
 	read.records.some((record) => {
 		const state = readFactorRecord(read.context, read.subject, record);
+		if (state.state !== "usable" || !state.factor.addsMfa) return false;
+		if (recoverySetShown(state.factor, state.data) === false) return false;
+		const recorded = enrolledAddressDigest(state.factor, state.data);
+		if (recorded === undefined) return true;
 		return (
-			state.state === "usable" &&
-			state.factor.addsMfa &&
-			recoverySetShown(state.factor, state.data) !== false
+			recorded !== null &&
+			read.context.sealing.holdsKey(recorded.keyId) &&
+			mailAddress !== "none" &&
+			mailAddress !== "unreadable"
 		);
 	});
 
