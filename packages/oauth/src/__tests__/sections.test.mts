@@ -23,7 +23,8 @@
  * one, a variable renamed with them refuses boot while its old name is set,
  * whatever its new name holds, and the authorization-code grant's `pkce` block, and its
  * variable, refuse boot as removed. The refresh grant's unknown-family policy
- * sits beside its switch, moved from `oauth.refreshToken`; `legacyRtPolicy`,
+ * is removed at both paths, `oauth-authorization.grants.refreshToken` and
+ * `oauth.refreshToken`, with both variables; `legacyRtPolicy`,
  * `legacyTokenCompat` and `oauth.authorize.allowUnmarkedClients` refuse boot
  * as removed. The access-token default is `oauth.accessToken.defaultExpiresIn`
  * alone: `oauth.accessToken.expiresIn` refuses boot as moved there, and its

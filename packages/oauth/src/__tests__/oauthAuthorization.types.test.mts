@@ -139,7 +139,7 @@ describe("the grant factories declare the slots they read", () => {
 		expectTypeOf<ClientCredentialsDeps>().not.toHaveProperty("userSessionStore");
 		expectTypeOf<SessionDeps>().not.toHaveProperty("codeRepository");
 		// No grant reads the whole configuration: each reads its settings from
-		// slots, and the refresh grant its unknown-family policy from the section.
+		// slots.
 		expectTypeOf<RefreshDeps>().not.toHaveProperty("config");
 		expectTypeOf<AuthorizationDeps>().not.toHaveProperty("config");
 		expectTypeOf<JwtBearerDeps>().not.toHaveProperty("config");
