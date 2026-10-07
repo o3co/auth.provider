@@ -453,7 +453,6 @@ The signing key is the `key-store` module's section: `key-store.provider`
 | `KEY_STORE_LOCAL_PRIVATE_KEY_PATH` | — | Path to PEM private key file |
 | `KEY_STORE_LOCAL_PUBLIC_KEY` | — | PEM-encoded public key |
 | `KEY_STORE_LOCAL_PUBLIC_KEY_PATH` | — | Path to PEM public key file |
-| `OAUTH_JWT_LEGACY_TYP_ACCEPT` | `false` | Accept tokens whose `typ` header is absent. `false` rejects them, treating a typ-less token as the misconfiguration or downgrade attempt it usually is. Set `true` only for a bounded migration window while v0.4.x tokens are still in circulation. |
 | `JWKS_PATH` | `/.well-known/jwks.json` | Where the verification keys are published under the issuer, and what discovery advertises as `jwks_uri` (`jwks.path`). An absolute path with no `//`, dot-segment, query, fragment, backslash, percent-encoding or control character. |
 | `JWKS_CACHE_MAX_AGE` | `300` | The JWKS response's `Cache-Control: public, max-age`, in seconds (`jwks.cacheMaxAge`). Keep it well below the key-overlap window, so a rotated key reaches caching verifiers in time. |
 

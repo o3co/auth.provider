@@ -66,8 +66,6 @@ const MEMBER_CASES: ReadonlyArray<readonly [string, (draft: Record<string, unkno
 	["oauthTokenSettings.issuer", (d) => delete d.issuer],
 	["oauthTokenSettings.issuer", (d) => (d.issuer = "http://auth.example.com")],
 	["oauthTokenSettings.issuer", (d) => (d.issuer = "https://auth.test?tenant=a")],
-	["oauthTokenSettings.legacyTypAccept", (d) => delete d.legacyTypAccept],
-	["oauthTokenSettings.legacyTypAccept", (d) => (d.legacyTypAccept = "true")],
 	["oauthTokenSettings.accessTokenLifetime", (d) => delete d.accessTokenLifetime],
 	[
 		"oauthTokenSettings.accessTokenLifetime",
@@ -92,7 +90,6 @@ describe("checkOAuthTokenSettings", () => {
 	it("answers settings that keep the contract, as they are", () => {
 		const settings = createTestOAuthTokenSettings({
 			issuer: "https://auth.example.com/tenant-a",
-			legacyTypAccept: true,
 			accessTokenLifetime: { defaultExpiresIn: 60, maxExpiresIn: MAX_DURATION_SECONDS },
 			refreshTokenExpiresIn: 1,
 			resourceIndicatorEnabled: true,
@@ -100,6 +97,11 @@ describe("checkOAuthTokenSettings", () => {
 		});
 		const config = configWith({ defaultExpiresIn: 60, maxExpiresIn: MAX_DURATION_SECONDS }, 86_400);
 		expect(checkOAuthTokenSettings(settings, config)).toEqual(settings);
+	});
+
+	it("answers no switch for typ-less tokens, even from a hand-filled slot that carries one", () => {
+		const slot = { ...createTestOAuthTokenSettings(), legacyTypAccept: true };
+		expect(checkOAuthTokenSettings(slot, CONFIG)).not.toHaveProperty("legacyTypAccept");
 	});
 
 	it("refuses a lifetime longer than the one core resolves from the configuration, naming the member and both values", () => {

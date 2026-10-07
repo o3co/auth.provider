@@ -209,12 +209,6 @@ export interface LogoutRouterOptions {
 	/** Audit sink for operator observability events. No-op when undefined. */
 	auditSink?: AuditSink;
 	/**
-	 * Accept tokens with no `typ` header, logging `jwt_verify_legacy_typ`.
-	 * Default `false`; `true` is a legacy opt-in. Applies to the bearer access
-	 * token and the id_token_hint.
-	 */
-	legacyTypAccept?: boolean;
-	/**
 	 * Core's session lifecycle: `/oauth/logout` ends the session with its
 	 * `close`, and its notifier tells the relying parties back-channel; the
 	 * federation logout reads whether the session is live and which
@@ -402,7 +396,6 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				const verified = await verifyJwt(token, opts.keyStore, {
 					type: "access_token",
 					expectedIssuer: opts.issuer ?? "",
-					legacyTypAccept: opts.legacyTypAccept ?? false,
 					// No revocation check, deliberately: logout only destroys the
 					// session the token names, which is safe for a revoked token and
 					// what a user does right after a credential-change cascade.
@@ -839,7 +832,6 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			const verified = await verifyJwt(idTokenHint, opts.keyStore, {
 				type: "id_token",
 				expectedIssuer: opts.issuer ?? "",
-				legacyTypAccept: opts.legacyTypAccept ?? false,
 				// Deliberately no revocation check: the hint names who is logging
 				// out (OIDC RP-Initiated Logout 1.0); it is not a credential.
 				revocation: "none",

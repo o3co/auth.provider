@@ -53,7 +53,7 @@ const refuse = (member: string, rule: string, value: unknown): never => {
 	);
 };
 
-const SWITCHES = ["legacyTypAccept", "resourceIndicatorEnabled", "requireEmailVerified"] as const;
+const SWITCHES = ["resourceIndicatorEnabled", "requireEmailVerified"] as const;
 
 /** A token lifetime a slot names beyond the one core resolves from the configuration. */
 export interface LifetimeBeyondConfiguration {
@@ -266,7 +266,6 @@ function settingsSnapshot(value: unknown): OAuthTokenSettings {
 
 	return Object.freeze({
 		issuer: issuer as string,
-		legacyTypAccept: switches.get("legacyTypAccept") as boolean,
 		accessTokenLifetime: Object.freeze({ defaultExpiresIn, maxExpiresIn }),
 		refreshTokenExpiresIn,
 		resourceIndicatorEnabled: switches.get("resourceIndicatorEnabled") as boolean,
