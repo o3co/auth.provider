@@ -107,8 +107,11 @@ const MFA_ON_REDIS: Readonly<Record<string, string>> = {
 	STANDARD_SMTP_MAIL_SENDER_FROM: "auth@auth.test",
 };
 
-const composing = (env: Readonly<Record<string, string>>): Promise<unknown> =>
-	compose({ env, environment: "production", shippedRefreshTokenFamilyStore: true }).then(
+const composing = (
+	env: Readonly<Record<string, string>>,
+	shippedRefreshTokenFamilyStore = true,
+): Promise<unknown> =>
+	compose({ env, environment: "production", shippedRefreshTokenFamilyStore }).then(
 		(composition) => {
 			current = composition;
 			return undefined;
@@ -157,9 +160,40 @@ describe("a Redis that will not report its eviction policy", () => {
 	});
 });
 
+describe("the shipped refresh-token family store on a Redis that will not report its eviction policy", () => {
+	it.each([
+		["unset", SINGLE_ENV],
+		["false", { ...SINGLE_ENV, REDIS_CLIENTS_ASSUME_NO_EVICTION: "false" }],
+	])(
+		"refuses the boot with REDIS_CLIENTS_ASSUME_NO_EVICTION %s, naming the store",
+		async (_label, env) => {
+			expect(await composing(env)).toMatchObject({
+				reason: "provides-factory-failed",
+				details: {
+					module: "redis-refresh-token-family-store",
+					componentKey: "refreshTokenFamilyStore",
+				},
+				cause: {
+					name: "RedisStoreEvictableError",
+					reason: "refresh-token-family-store-evictable",
+					maxmemoryPolicy: undefined,
+				},
+			});
+		},
+	);
+
+	it("boots with REDIS_CLIENTS_ASSUME_NO_EVICTION=true", async () => {
+		expect(
+			await composing({ ...SINGLE_ENV, REDIS_CLIENTS_ASSUME_NO_EVICTION: "true" }),
+		).toBeUndefined();
+		expect(current?.handle.components.refreshTokenFamilyStore?.kind).toBe("redis");
+	});
+});
+
 describe("the MFA stores on a Redis that will not report its eviction policy", () => {
 	/** Only the MFA stores on Redis: a refusal can come from no other store. */
 	const MFA_ONLY = { ...SINGLE_ENV, ...MFA_ON_REDIS };
+	const composingMfaOnly = (env: Readonly<Record<string, string>>) => composing(env, false);
 
 	it.each([
 		["unset", MFA_ONLY],
@@ -167,7 +201,7 @@ describe("the MFA stores on a Redis that will not report its eviction policy", (
 	])(
 		"refuses the boot with REDIS_CLIENTS_ASSUME_NO_EVICTION %s, naming an MFA store",
 		async (_label, env) => {
-			const err = await composing(env);
+			const err = await composingMfaOnly(env);
 			expect(err).toBeInstanceOf(BootError);
 			expect(err).toMatchObject({
 				reason: "provides-factory-failed",
@@ -182,7 +216,7 @@ describe("the MFA stores on a Redis that will not report its eviction policy", (
 
 	it("boots both MFA stores with REDIS_CLIENTS_ASSUME_NO_EVICTION=true", async () => {
 		expect(
-			await composing({ ...MFA_ONLY, REDIS_CLIENTS_ASSUME_NO_EVICTION: "true" }),
+			await composingMfaOnly({ ...MFA_ONLY, REDIS_CLIENTS_ASSUME_NO_EVICTION: "true" }),
 		).toBeUndefined();
 		expect(current?.modules.map((module) => module.name)).toEqual(
 			expect.arrayContaining(["redis-mfa-factor-store", "redis-mfa-transaction-store"]),

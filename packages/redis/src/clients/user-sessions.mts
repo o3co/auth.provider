@@ -20,6 +20,8 @@
  * whose paired expiry failed is never reported as written.
  */
 
+import type { RedisDurability } from "./durability.mjs";
+
 // --- UserSessionStoreClient ------------------------------------------------
 
 /**
@@ -172,4 +174,10 @@ export interface SubjectRevocationClient {
 			readonly skewMs: number;
 		},
 	): Promise<{ readonly value: string; readonly serverNowMs: number }>;
+	/**
+	 * What the server says about keeping what it is written, read once by the
+	 * store's factory for its eviction gate: a watermark evicted before its
+	 * expiry reads as no revocation.
+	 */
+	durability(): Promise<RedisDurability>;
 }

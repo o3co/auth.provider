@@ -27,6 +27,7 @@ import type {
 	UserSessionStoreClient,
 } from "../../clients.mjs";
 import { assertPipelineSucceeded, runScript } from "../commands.mjs";
+import { type IoredisDurabilityOptions, redisDurability } from "../durability.mjs";
 import {
 	PRUNE_AND_LIST,
 	REPLACE_IF_UNCHANGED,
@@ -82,7 +83,10 @@ export function makeIoredisSubjectSessionIndexClient(io: Redis): SubjectSessionI
 	return subjectSessionIndexClient;
 }
 
-export function makeIoredisSubjectRevocationClient(io: Redis): SubjectRevocationClient {
+export function makeIoredisSubjectRevocationClient(
+	io: Redis,
+	options: IoredisDurabilityOptions = {},
+): SubjectRevocationClient {
 	const subjectRevocationClient: SubjectRevocationClient = {
 		get: (k) => io.get(k),
 		advanceRevocationBoundaries: async (key, mode, write) => {
@@ -100,6 +104,7 @@ export function makeIoredisSubjectRevocationClient(io: Redis): SubjectRevocation
 			)) as [string, string];
 			return { value, serverNowMs: Number(serverNow) };
 		},
+		durability: () => redisDurability(io, options),
 	};
 	return subjectRevocationClient;
 }

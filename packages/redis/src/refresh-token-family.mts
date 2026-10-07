@@ -26,6 +26,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type { RefreshTokenFamilyClient } from "./clients.mjs";
+import { requireNoEviction } from "./internal/eviction-policy.mjs";
 import { redisReference } from "./internal/section.mjs";
 
 /**
@@ -130,8 +131,23 @@ const deserialize = (raw: string): RefreshTokenFamily => {
  * `WATCH` is connection-scoped, so each `updateFamily` call takes its own
  * `client.duplicate()` and reuses it across retries (`EXEC` clears the watch);
  * `registerFamily` and `findFamily` use the base client.
+ *
+ * It resolves once the server's eviction policy passes the gate
+ * (`internal/eviction-policy.mts`).
  */
-export function createRedisRefreshTokenFamilyStore(
+export async function createRedisRefreshTokenFamilyStore(
+	opts: RedisRefreshTokenFamilyStoreOptions,
+): Promise<RefreshTokenFamilyStore> {
+	const store = buildRedisRefreshTokenFamilyStore(opts);
+	await requireNoEviction("refreshTokenFamilyStore", () => opts.client.durability(), {
+		reason: "refresh-token-family-store-evictable",
+		holds:
+			"refresh-token families, each keyed with a TTL, a revoked one kept until its access tokens expire, and a revoked family evicted before then lets its access tokens read as not revoked",
+	});
+	return store;
+}
+
+function buildRedisRefreshTokenFamilyStore(
 	opts: RedisRefreshTokenFamilyStoreOptions,
 ): RefreshTokenFamilyStore {
 	const { client, keyPrefix } = opts;
@@ -241,7 +257,7 @@ export function createRedisRefreshTokenFamilyStore(
 }
 
 /** AdapterFactory builder for runtime-config-driven backend selection. */
-export const redisRefreshTokenFamilyStoreBuilder: AdapterBuilder<RefreshTokenFamilyStore> = (
+export const redisRefreshTokenFamilyStoreBuilder: AdapterBuilder<RefreshTokenFamilyStore> = async (
 	config,
 	_ctx,
 ) => {

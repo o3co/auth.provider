@@ -20,6 +20,7 @@ import {
 	isStorableExpiry,
 } from "@o3co/auth-provider-core";
 import type { AccessTokenDenylistClient } from "./clients.mjs";
+import { requireNoEviction } from "./internal/eviction-policy.mjs";
 import { keyPrefixSection, redisReference } from "./internal/section.mjs";
 
 /**
@@ -55,10 +56,23 @@ export interface RedisAccessTokenDenylistOptions {
  * Unlike ReplaySeenSet's `NX`, `add` is a plain `SET`: re-revoking the same
  * jti is idempotent and last-write-wins on the expiry, matching the memory
  * adapter's `Map.set`.
+ *
+ * It resolves once the server's eviction policy passes the gate
+ * (`internal/eviction-policy.mts`).
  */
-export function createRedisAccessTokenDenylist(
+export async function createRedisAccessTokenDenylist(
 	opts: RedisAccessTokenDenylistOptions,
-): AccessTokenDenylist {
+): Promise<AccessTokenDenylist> {
+	const denylist = buildRedisAccessTokenDenylist(opts);
+	await requireNoEviction("accessTokenDenylist", () => opts.client.durability(), {
+		reason: "access-token-denylist-evictable",
+		holds:
+			"revoked access tokens' jtis, each keyed with a TTL until its token expires, and a jti evicted before then lets that token read as not revoked",
+	});
+	return denylist;
+}
+
+function buildRedisAccessTokenDenylist(opts: RedisAccessTokenDenylistOptions): AccessTokenDenylist {
 	const { client, keyPrefix } = opts;
 	const fullKey = (jti: string): string => `${keyPrefix}${jti}`;
 
@@ -93,7 +107,7 @@ export function createRedisAccessTokenDenylist(
  * Then calls:
  *   factory.create({ type: "redis", client, keyPrefix: "atdeny:" });
  */
-export const redisAccessTokenDenylistBuilder: AdapterBuilder<AccessTokenDenylist> = (
+export const redisAccessTokenDenylistBuilder: AdapterBuilder<AccessTokenDenylist> = async (
 	config,
 	_ctx,
 ) => {

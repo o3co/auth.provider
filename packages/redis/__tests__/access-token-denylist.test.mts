@@ -17,39 +17,42 @@ import {
 	redisAccessTokenDenylistModule,
 } from "#/access-token-denylist.mjs";
 import type { AccessTokenDenylistClient } from "#/clients.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
 import { relativeDeadline, serverPasses, testRedis } from "./support/redis.mjs";
 
 let client: Redis;
+let denylistClient: AccessTokenDenylistClient;
 let keyCounter = 0;
 
 beforeAll(async () => {
 	const at = await testRedis();
 	client = new Redis(at);
+	denylistClient = makeIoredisClients(client).accessTokenDenylistClient;
 });
 
 afterAll(async () => {
 	await client?.quit();
 });
 
-function freshStore(): AccessTokenDenylist {
+function freshStore(): Promise<AccessTokenDenylist> {
 	keyCounter += 1;
 	return createRedisAccessTokenDenylist({
-		client: client as unknown as AccessTokenDenylistClient,
+		client: denylistClient,
 		keyPrefix: `atdeny:test-${keyCounter}:`,
 	});
 }
 
 describe("createRedisAccessTokenDenylist", () => {
-	it('declares kind "redis"', () => {
-		expect(freshStore().kind).toBe("redis");
+	it('declares kind "redis"', async () => {
+		expect((await freshStore()).kind).toBe("redis");
 	});
 
 	it("has() is false for a jti nobody revoked", async () => {
-		expect(await freshStore().has("never-added")).toBe(false);
+		expect(await (await freshStore()).has("never-added")).toBe(false);
 	});
 
 	it("has() is true after add()", async () => {
-		const store = freshStore();
+		const store = await freshStore();
 		await store.add("j1", Date.now() + 60_000);
 		expect(await store.has("j1")).toBe(true);
 	});
@@ -62,7 +65,7 @@ describe("createRedisAccessTokenDenylist", () => {
 		// Waited out to the latest instant the key can live to on the server's
 		// clock (`relativeDeadline`): its PX runs from when the SET reached the
 		// server, not from the host's call.
-		const store = freshStore();
+		const store = await freshStore();
 		const exp = Date.now() + 1_000;
 		const end = await relativeDeadline(
 			() => client,
@@ -78,7 +81,7 @@ describe("createRedisAccessTokenDenylist", () => {
 		// Past the latest instant the first add's key could have lived to, on
 		// the server's clock, the jti is still denied: the second add's expiry
 		// is the one in force.
-		const store = freshStore();
+		const store = await freshStore();
 		const first = Date.now() + 1_000;
 		const firstEnd = await relativeDeadline(
 			() => client,
@@ -94,7 +97,7 @@ describe("createRedisAccessTokenDenylist", () => {
 		// RFC 7009 revocation of an expired AT is legal and idempotent, and the
 		// route deliberately allows it (`ignoreExpiration: true`). `SET ... PX 0`
 		// is a Redis error, so the write is skipped rather than attempted.
-		const store = freshStore();
+		const store = await freshStore();
 		await expect(store.add("j-expired", Date.now() - 1_000)).resolves.toBeUndefined();
 		expect(await store.has("j-expired")).toBe(false);
 	});
@@ -102,7 +105,7 @@ describe("createRedisAccessTokenDenylist", () => {
 	// The next two mirror core's contract cases, which this adapter cannot run
 	// (its expiry is Redis's own key TTL, not the suite's fake clock).
 	it("refuses an expiry that is not a finite number, and writes nothing", async () => {
-		const store = freshStore();
+		const store = await freshStore();
 		for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
 			await expect(store.add("j-bad", bad)).rejects.toThrow(RangeError);
 			expect(await store.has("j-bad")).toBe(false);
@@ -113,7 +116,7 @@ describe("createRedisAccessTokenDenylist", () => {
 		// `PX` takes whole milliseconds; a fractional value is a Redis error
 		// (`ERR value is not an integer or out of range`), which the revoke
 		// route would swallow — leaving the token unrevoked.
-		const store = freshStore();
+		const store = await freshStore();
 		await store.add("j-frac", Date.now() + 60_000.5);
 		expect(await store.has("j-frac")).toBe(true);
 		const pttl = await client.pttl(`atdeny:test-${keyCounter}:j-frac`);
@@ -121,12 +124,12 @@ describe("createRedisAccessTokenDenylist", () => {
 	});
 
 	it("namespaces keys by keyPrefix so two deployments do not share revocations", async () => {
-		const a = createRedisAccessTokenDenylist({
-			client: client as unknown as AccessTokenDenylistClient,
+		const a = await createRedisAccessTokenDenylist({
+			client: denylistClient,
 			keyPrefix: "atdeny:tenant-a:",
 		});
-		const b = createRedisAccessTokenDenylist({
-			client: client as unknown as AccessTokenDenylistClient,
+		const b = await createRedisAccessTokenDenylist({
+			client: denylistClient,
 			keyPrefix: "atdeny:tenant-b:",
 		});
 		await a.add("shared-jti", Date.now() + 60_000);
@@ -136,15 +139,15 @@ describe("createRedisAccessTokenDenylist", () => {
 });
 
 describe("redisAccessTokenDenylistBuilder", () => {
-	it("refuses to build without a client instead of failing on first revocation", () => {
-		expect(() => redisAccessTokenDenylistBuilder({ type: "redis" }, {})).toThrow(/client/);
+	it("refuses to build without a client instead of failing on first revocation", async () => {
+		await expect(redisAccessTokenDenylistBuilder({ type: "redis" }, {})).rejects.toThrow(/client/);
 	});
 
-	it("builds when given a client", () => {
-		const store = redisAccessTokenDenylistBuilder(
-			{ type: "redis", client: client as unknown as AccessTokenDenylistClient },
+	it("builds when given a client", async () => {
+		const store = await redisAccessTokenDenylistBuilder(
+			{ type: "redis", client: denylistClient },
 			{},
-		) as AccessTokenDenylist;
+		);
 		expect(store.kind).toBe("redis");
 	});
 });

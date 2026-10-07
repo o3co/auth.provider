@@ -90,8 +90,17 @@ writeFileSync(PRIVATE_KEY_PATH, PRIVATE_KEY ?? "");
 writeFileSync(PUBLIC_KEY_PATH, PUBLIC_KEY ?? "");
 afterAll(() => rmSync(KEY_DIR, { recursive: true, force: true }));
 
-/** An unreachable Redis: the shared socket dials it and boot does not wait. */
+/** An unreachable Redis, for a boot refused before any store is built. */
 const REDIS_URL = "redis://127.0.0.1:9";
+
+/**
+ * The test Redis, for a boot that builds the shipped refresh-token family
+ * store: its factory reads the server's eviction policy, so boot waits on it.
+ */
+async function reachableRedisUrl(): Promise<string> {
+	const redis = await testRedis();
+	return `redis://${redis.host}:${redis.port}/${redis.db}`;
+}
 
 describe("the template's own modules' sections, read where they now sit", () => {
 	it("logging.level, which LOGGING_LEVEL sets", async () => {
@@ -126,12 +135,13 @@ describe("the template's own modules' sections, read where they now sit", () => 
 	});
 
 	it("redis-clients.url, which REDIS_CLIENTS_URL sets", async () => {
+		const url = await reachableRedisUrl();
 		const composition = await boot({
 			shippedRefreshTokenFamilyStore: true,
-			env: { ...SINGLE_ENV, REDIS_CLIENTS_URL: REDIS_URL },
+			env: { ...SINGLE_ENV, REDIS_CLIENTS_URL: url },
 		});
 
-		expect(parsedAt(composition, "redis-clients.url")).toBe(REDIS_URL);
+		expect(parsedAt(composition, "redis-clients.url")).toBe(url);
 	});
 });
 
@@ -339,10 +349,15 @@ describe("a variable the template's own modules renamed, through the template's 
 	});
 
 	it.each(ROWS)("$to set alone: boots, $path parsed from it", async (row) => {
-		const { to, path, value, parsed } = row;
+		const { to, path } = row;
+		// A row that loads the Redis store boots on the test Redis, its URL
+		// standing for the unreachable one the row names.
+		const url = "redis" in row ? await reachableRedisUrl() : undefined;
+		const [value, parsed] =
+			url !== undefined && row.value === REDIS_URL ? [url, url] : [row.value, row.parsed];
 		const composition = await boot({
 			...loading(row),
-			env: { ...SINGLE_ENV, [to]: value },
+			env: { ...SINGLE_ENV, ...(url === undefined ? {} : { REDIS_CLIENTS_URL: url }), [to]: value },
 		});
 
 		expect(parsedAt(composition, path)).toEqual(parsed);

@@ -27,9 +27,7 @@
  */
 
 import { generateKeyPairSync } from "node:crypto";
-import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { type AddressInfo, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -75,6 +73,7 @@ import {
 	standaloneRedisClientsModule,
 } from "../modules.mjs";
 import { repositoriesSectionSchema } from "../sections.mjs";
+import { listeningRedis } from "./redis-stand-in.fixture.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 /** The template's own defaults: what its modules declare as their sections' reference. */
@@ -990,38 +989,6 @@ describe("key-store", () => {
 		}
 	});
 });
-
-/**
- * A TCP server standing in for Redis: it records what each connection sends
- * and answers nothing, so a client dialled at it connects and writes its
- * handshake.
- */
-async function listeningRedis(): Promise<{
-	readonly port: number;
-	readonly received: () => string;
-	readonly close: () => Promise<void>;
-}> {
-	const sockets = new Set<Socket>();
-	let received = "";
-	const server = createServer((socket) => {
-		sockets.add(socket);
-		socket.on("close", () => sockets.delete(socket));
-		socket.on("data", (chunk) => {
-			received += chunk.toString("utf8");
-		});
-	});
-	server.listen(0, "127.0.0.1");
-	await once(server, "listening");
-	const { port } = server.address() as AddressInfo;
-	return {
-		port,
-		received: () => received,
-		close: async () => {
-			for (const socket of sockets) socket.destroy();
-			await new Promise<void>((resolve) => server.close(() => resolve()));
-		},
-	};
-}
 
 describe("redis-clients", () => {
 	it("owns redis-clients, and reads it as its section rather than the configuration", () => {

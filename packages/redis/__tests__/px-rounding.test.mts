@@ -37,6 +37,7 @@ import type {
 	DeviceCodeStoreClient,
 	FederationTokenStoreClient,
 	PendingConsentStoreClient,
+	RedisDurability,
 	RefreshTokenFamilyClient,
 	RefreshTokenFamilyMultiClient,
 	ReplaySeenSetClient,
@@ -53,6 +54,14 @@ import { createRedisReplaySeenSet } from "#/replay-seen-set.mjs";
 import { createRedisUserSessionStore } from "#/userSessionStore.mjs";
 
 const NOW = Date.UTC(2026, 8, 24, 12, 0, 0);
+
+/** A server that reads as `noeviction`, as the eviction gate needs to build a store. */
+const noEviction = async (): Promise<RedisDurability> => ({
+	maxmemoryPolicy: "noeviction",
+	appendOnly: true,
+	snapshots: undefined,
+	refusal: undefined,
+});
 
 beforeEach(() => {
 	vi.useFakeTimers();
@@ -110,6 +119,7 @@ const familyRecorder = (stored?: { raw: string; pttl: number }) => {
 		unwatch: async () => "OK",
 		multi: () => multi,
 		duplicate: () => Object.assign({ ...client }, { [Symbol.asyncDispose]: async () => {} }),
+		durability: noEviction,
 	};
 	return { px, multiPx, client };
 };
@@ -278,8 +288,12 @@ describe("the PX an adapter sends is its record's life, rounded up to a whole mi
 
 	it("AccessTokenDenylist.add", async () => {
 		const client = recorder();
-		const denylist = createRedisAccessTokenDenylist({
-			client: { set: client.set, exists: async () => 0 } as AccessTokenDenylistClient,
+		const denylist = await createRedisAccessTokenDenylist({
+			client: {
+				set: client.set,
+				exists: async () => 0,
+				durability: noEviction,
+			} as AccessTokenDenylistClient,
 			keyPrefix: "atdeny:",
 		});
 		for (const [i, life] of FRACTIONAL_LIVES.entries()) {
@@ -292,7 +306,7 @@ describe("the PX an adapter sends is its record's life, rounded up to a whole mi
 		// Unrounded, Redis refuses the SET, and the refresh token the family
 		// is registered for can never be redeemed.
 		const recording = familyRecorder();
-		const store = createRedisRefreshTokenFamilyStore({
+		const store = await createRedisRefreshTokenFamilyStore({
 			client: recording.client,
 			keyPrefix: "rtfam:",
 		});
@@ -304,7 +318,7 @@ describe("the PX an adapter sends is its record's life, rounded up to a whole mi
 
 	it("RefreshTokenFamilyStore.updateFamily", async () => {
 		const recording = familyRecorder(residentFamily());
-		const store = createRedisRefreshTokenFamilyStore({
+		const store = await createRedisRefreshTokenFamilyStore({
 			client: recording.client,
 			keyPrefix: "rtfam:",
 		});
@@ -324,7 +338,7 @@ describe("the PX an adapter sends is its record's life, rounded up to a whole mi
 		// `corrupt-data`.
 		let stored = "";
 		const recording = familyRecorder();
-		const store = createRedisRefreshTokenFamilyStore({
+		const store = await createRedisRefreshTokenFamilyStore({
 			client: {
 				...recording.client,
 				set: async (_key, value) => {
@@ -338,7 +352,7 @@ describe("the PX an adapter sends is its record's life, rounded up to a whole mi
 		const written = JSON.parse(stored) as RefreshTokenFamily;
 		expect(written.expiresAtMs).toBe(NOW + 1_235);
 
-		const reader = createRedisRefreshTokenFamilyStore({
+		const reader = await createRedisRefreshTokenFamilyStore({
 			client: familyRecorder({ raw: stored, pttl: 1_235 }).client,
 			keyPrefix: "rtfam:",
 		});
@@ -413,7 +427,7 @@ describe("the PEXPIREAT deadline DeviceCodeStore.create hands its client is a wh
 describe("an expiry that is not a finite number is refused before Redis is asked", () => {
 	it("RefreshTokenFamilyStore.registerFamily", async () => {
 		const recording = familyRecorder();
-		const store = createRedisRefreshTokenFamilyStore({
+		const store = await createRedisRefreshTokenFamilyStore({
 			client: recording.client,
 			keyPrefix: "rtfam:",
 		});
@@ -425,7 +439,7 @@ describe("an expiry that is not a finite number is refused before Redis is asked
 
 	it("RefreshTokenFamilyStore.updateFamily: an updater that commits one", async () => {
 		const recording = familyRecorder(residentFamily());
-		const store = createRedisRefreshTokenFamilyStore({
+		const store = await createRedisRefreshTokenFamilyStore({
 			client: recording.client,
 			keyPrefix: "rtfam:",
 		});
@@ -533,8 +547,12 @@ describe("an expiry or lifetime past the Date range is refused before Redis is a
 			client: { set: client.set, exists: async () => 0 } as ReplaySeenSetClient,
 			keyPrefix: "replay:",
 		});
-		const denylist = createRedisAccessTokenDenylist({
-			client: { set: client.set, exists: async () => 0 } as AccessTokenDenylistClient,
+		const denylist = await createRedisAccessTokenDenylist({
+			client: {
+				set: client.set,
+				exists: async () => 0,
+				durability: noEviction,
+			} as AccessTokenDenylistClient,
 			keyPrefix: "atdeny:",
 		});
 		for (const bad of PAST_THE_DATE_RANGE) {
@@ -547,7 +565,7 @@ describe("an expiry or lifetime past the Date range is refused before Redis is a
 
 	it("RefreshTokenFamilyStore.registerFamily and updateFamily", async () => {
 		const recording = familyRecorder(residentFamily());
-		const store = createRedisRefreshTokenFamilyStore({
+		const store = await createRedisRefreshTokenFamilyStore({
 			client: recording.client,
 			keyPrefix: "rtfam:",
 		});

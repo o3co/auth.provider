@@ -71,7 +71,8 @@ export { makeIoredisMfaFactorStoreClient, makeIoredisMfaTransactionStoreClient }
 /**
  * Options for {@link makeIoredisClients}. `assumeNoEviction` reaches the durability report of
  * each client whose store runs the eviction gate: the attempt counter's, the session lifecycle
- * store's, the federation token store's and the two MFA stores'.
+ * store's, the federation token store's, the two MFA stores', the access-token denylist's, the
+ * subject revocation store's and the refresh-token family store's.
  */
 export interface IoredisClientsOptions extends IoredisDurabilityOptions {
 	/**
@@ -120,12 +121,12 @@ export function makeIoredisClients(
 		options.assumeNoEviction === undefined ? {} : { assumeNoEviction: options.assumeNoEviction };
 
 	const challengeStoreClient = makeIoredisChallengeStoreClient(io);
-	const accessTokenDenylistClient = makeIoredisAccessTokenDenylistClient(io);
+	const accessTokenDenylistClient = makeIoredisAccessTokenDenylistClient(io, durability);
 	const replaySeenSetClient = makeIoredisReplaySeenSetClient(io);
-	const refreshTokenFamilyClient = makeIoredisRefreshTokenFamilyClient(io, logger);
+	const refreshTokenFamilyClient = makeIoredisRefreshTokenFamilyClient(io, logger, durability);
 	const userSessionStoreClient = makeIoredisUserSessionStoreClient(io);
 	const subjectSessionIndexClient = makeIoredisSubjectSessionIndexClient(io);
-	const subjectRevocationClient = makeIoredisSubjectRevocationClient(io);
+	const subjectRevocationClient = makeIoredisSubjectRevocationClient(io, durability);
 	const federationTokenStoreClient = makeIoredisFederationTokenStoreClient(io, durability);
 	const rateLimiterClient = makeIoredisRateLimiterClient(io);
 	const codeRepositoryClient = makeIoredisCodeRepositoryClient(io);

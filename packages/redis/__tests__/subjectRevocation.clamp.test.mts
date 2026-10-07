@@ -49,6 +49,12 @@ function recordingClient(events: Event[]): SubjectRevocationClient {
 			events.push({ kind: "advanceRevocationBoundaries", args });
 			return { value: "stored", serverNowMs: NOW };
 		},
+		durability: async () => ({
+			maxmemoryPolicy: "noeviction",
+			appendOnly: true,
+			snapshots: undefined,
+			refusal: undefined,
+		}),
 	};
 }
 
@@ -62,7 +68,7 @@ const recordingLogger = (events: Event[]) => ({
 describe("createRedisSubjectRevocation — the clamp on the server's clock", () => {
 	it("hands the server the boundary, the expiry, the grant retention and the skew to clamp by", async () => {
 		const events: Event[] = [];
-		const store = createRedisSubjectRevocation({
+		const store = await createRedisSubjectRevocation({
 			client: recordingClient(events),
 			keyPrefix: "p:",
 			logger: recordingLogger(events),
@@ -85,7 +91,7 @@ describe("createRedisSubjectRevocation — the clamp on the server's clock", () 
 
 	it("says at warn, after the write, that the server clamped, and nothing when it did not", async () => {
 		const events: Event[] = [];
-		const store = createRedisSubjectRevocation({
+		const store = await createRedisSubjectRevocation({
 			client: recordingClient(events),
 			keyPrefix: "p:",
 			logger: recordingLogger(events),
@@ -115,7 +121,7 @@ describe("createRedisSubjectRevocation — the clamp on the server's clock", () 
 		// The boundary is what ends tokens already issued: losing its signal
 		// must not fail the revocation.
 		const events: Event[] = [];
-		const throwing = createRedisSubjectRevocation({
+		const throwing = await createRedisSubjectRevocation({
 			client: recordingClient(events),
 			keyPrefix: "p:",
 			logger: {
@@ -125,7 +131,7 @@ describe("createRedisSubjectRevocation — the clamp on the server's clock", () 
 			},
 		});
 		await expect(throwing.revokeBefore("u", AHEAD, UNTIL)).resolves.toBeUndefined();
-		const noClock = createRedisSubjectRevocation({
+		const noClock = await createRedisSubjectRevocation({
 			client: {
 				...recordingClient(events),
 				advanceRevocationBoundaries: async () => ({ value: "stored", serverNowMs: Number.NaN }),
@@ -137,7 +143,7 @@ describe("createRedisSubjectRevocation — the clamp on the server's clock", () 
 	});
 
 	it("fails the revocation when the write fails", async () => {
-		const store = createRedisSubjectRevocation({
+		const store = await createRedisSubjectRevocation({
 			client: {
 				...recordingClient([]),
 				advanceRevocationBoundaries: async () => {
@@ -155,7 +161,7 @@ describe("createRedisSubjectRevocation — the clamp on the server's clock", () 
 		["a Date past the representable range", new Date(-1e20)],
 	])("refuses %s as before or expiresAt with a RangeError, sending nothing", async (_l, bad) => {
 		const events: Event[] = [];
-		const store = createRedisSubjectRevocation({
+		const store = await createRedisSubjectRevocation({
 			client: recordingClient(events),
 			keyPrefix: "p:",
 		});
@@ -171,7 +177,7 @@ describe("createRedisSubjectRevocation — the clamp on the server's clock", () 
 });
 
 describe("createRedisSubjectRevocation — a client that cannot clamp", () => {
-	it("is refused at construction, naming the method it lacks, with nothing said or sent", () => {
+	it("is refused at construction, naming the method it lacks, with nothing said or sent", async () => {
 		const events: Event[] = [];
 		const { advanceRevocationBoundaries: _absent, ...unclamping } = recordingClient(events);
 		const construct = () =>
@@ -180,7 +186,7 @@ describe("createRedisSubjectRevocation — a client that cannot clamp", () => {
 				keyPrefix: "p:",
 				logger: recordingLogger(events),
 			});
-		expect(construct).toThrow(/advanceRevocationBoundaries/);
+		await expect(construct()).rejects.toThrow(/advanceRevocationBoundaries/);
 		expect(events).toEqual([]);
 	});
 });
@@ -192,7 +198,10 @@ describe("the clamp's logger, as the module and the builder hand it", () => {
 
 	it("is core's consoleLogger when none is given", async () => {
 		const warn = vi.spyOn(consoleLogger, "warn").mockImplementation(() => undefined);
-		const store = createRedisSubjectRevocation({ client: recordingClient([]), keyPrefix: "p:" });
+		const store = await createRedisSubjectRevocation({
+			client: recordingClient([]),
+			keyPrefix: "p:",
+		});
 		await store.revokeBefore("u", AHEAD, UNTIL);
 		expect(warn.mock.calls.map((call) => call[1])).toEqual(["subject_revocation_boundary_clamped"]);
 	});
@@ -202,7 +211,7 @@ describe("the clamp's logger, as the module and the builder hand it", () => {
 		const provide = redisSessionStoresModule.provides?.subjectRevocation as unknown as (
 			deps: unknown,
 		) => ReturnType<typeof createRedisSubjectRevocation>;
-		const store = provide({
+		const store = await provide({
 			subjectRevocationClient: recordingClient(events),
 			logger: recordingLogger(events),
 			section: { keyPrefix: "ss:" },

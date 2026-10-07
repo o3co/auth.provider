@@ -54,6 +54,12 @@ function makeFakeIoredis(execReplies: unknown[]) {
 		watch: vi.fn(async () => "OK"),
 		unwatch: vi.fn(async () => "OK"),
 		set: vi.fn(async () => "OK"),
+		// A server that does not evict, as the store's eviction gate reads it.
+		info: vi.fn(async (section: string) =>
+			section === "memory"
+				? "# Memory\r\nmaxmemory_policy:noeviction\r\n"
+				: "# Persistence\r\naof_enabled:1\r\n",
+		),
 		on: vi.fn(),
 		quit: vi.fn(async () => "OK"),
 		disconnect: vi.fn(),
@@ -76,12 +82,12 @@ function makeFakeIoredis(execReplies: unknown[]) {
 	return { io: io as unknown as Redis, queued };
 }
 
-const makeStore = (execReplies: unknown[]) => {
+const makeStore = async (execReplies: unknown[]) => {
 	const { io, queued } = makeFakeIoredis(execReplies);
 	const { refreshTokenFamilyClient } = makeIoredisClients(io);
 	return {
 		queued,
-		store: createRedisRefreshTokenFamilyStore({
+		store: await createRedisRefreshTokenFamilyStore({
 			client: refreshTokenFamilyClient,
 			keyPrefix: "rtfam:",
 		}),
@@ -94,7 +100,7 @@ const commitRotation = () =>
 describe("updateFamily must not report a rotation Redis refused", () => {
 	it("does NOT return committed when the queued SET failed inside MULTI/EXEC", async () => {
 		// The exact ioredis shape: EXEC succeeded, the SET inside it did not.
-		const { store } = makeStore([
+		const { store } = await makeStore([
 			[[new Error("OOM command not allowed when used memory > 'maxmemory'"), null]],
 		]);
 
@@ -108,7 +114,7 @@ describe("updateFamily must not report a rotation Redis refused", () => {
 		// On `cause`, not in the message: the reply is Redis's text about the
 		// command it refused. `loggableError` projects the cause for the log.
 		const readonly = new Error("READONLY You can't write against a read only replica.");
-		const { store } = makeStore([[[readonly, null]]]);
+		const { store } = await makeStore([[[readonly, null]]]);
 		await expect(store.updateFamily("fam-1", commitRotation)).rejects.toMatchObject({
 			message: "refreshTokenFamilyClient.exec: a queued command failed inside MULTI/EXEC",
 			cause: readonly,
@@ -118,7 +124,7 @@ describe("updateFamily must not report a rotation Redis refused", () => {
 	it("still treats a null EXEC as a CAS conflict and retries (WATCH abort is not an error)", async () => {
 		// Load-bearing: turning null into a throw would break refresh-token
 		// rotation under contention, which is exactly when it must work.
-		const { store, queued } = makeStore([null, [[null, "OK"]]]);
+		const { store, queued } = await makeStore([null, [[null, "OK"]]]);
 
 		const result = await store.updateFamily("fam-1", commitRotation);
 
@@ -128,7 +134,7 @@ describe("updateFamily must not report a rotation Redis refused", () => {
 	});
 
 	it("returns committed when every queued command succeeded", async () => {
-		const { store } = makeStore([[[null, "OK"]]]);
+		const { store } = await makeStore([[[null, "OK"]]]);
 		const result = await store.updateFamily("fam-1", commitRotation);
 		expect(result.outcome).toBe("committed");
 		if (result.outcome === "committed") {

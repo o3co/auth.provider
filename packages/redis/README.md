@@ -133,18 +133,29 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   it a server of its own if the rest of your Redis may not run `noeviction`.
 - **For the attempt counter and the session lifecycle store, `noeviction`**,
   through the same [eviction gate](#the-eviction-gate).
+- **For the stores that hold revocation state, `noeviction`**: the
+  access-token denylist, subject revocation and the refresh-token family
+  store. Each keeps a revocation under a key with a TTL that lasts until the
+  credentials it refuses expire — a revoked jti until its token's `exp`, a
+  subject's watermark until the last credential it ends, a revoked family
+  until the last access token it minted. A `volatile-*` or `allkeys-*`
+  policy may evict that key early, and a revocation that is gone reads as
+  none. They pass the same [eviction gate](#the-eviction-gate).
 
 ### The eviction gate
 
 Every store whose keys must stay until they expire — the attempt counter,
-the session lifecycle store, the federation token store and the two MFA
-stores — is built only on a server whose `maxmemory-policy` reads as
-`noeviction`. Its factory (`createRedisAttemptCounter`,
-`createRedisSessionLifecycleStore`, `createRedisFederationTokenStore`,
-`createRedisMfaFactorStore`, `createRedisMfaTransactionStore`) asks the server
-once, through its client's `durability()`, and resolves only then; its module
-and the federation token store's builder build through it, so every path
-holds the store to the same gate
+the session lifecycle store, the federation token store, the two MFA stores,
+and the stores that hold revocation state (the access-token denylist,
+subject revocation and the refresh-token family store) — is built only on a
+server whose `maxmemory-policy` reads as `noeviction`. Its factory
+(`createRedisAttemptCounter`, `createRedisSessionLifecycleStore`,
+`createRedisFederationTokenStore`, `createRedisMfaFactorStore`,
+`createRedisMfaTransactionStore`, `createRedisAccessTokenDenylist`,
+`createRedisSubjectRevocation`, `createRedisRefreshTokenFamilyStore`) asks
+the server once, through its client's `durability()`, and resolves only
+then; its module and, where it has one, its adapter builder build through
+it, so every path holds the store to the same gate
 ([`src/internal/eviction-policy.mts`](src/internal/eviction-policy.mts)):
 
 - The policy is read from `INFO memory`, and from `CONFIG GET
