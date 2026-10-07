@@ -113,8 +113,8 @@ export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): Rat
 
 /**
  * AdapterFactory builder, over `client`, `limits`, `defaultLimit` and
- * `failMode` from its config and no contributed budget: those reach a limiter
- * through `redisRateLimiterModule`. Consumer wires:
+ * `failMode` from its config, as `redisRateLimiterModule` builds it from its
+ * section. Consumer wires:
  *   factory.register("redis", redisRateLimiterBuilder);
  */
 export const redisRateLimiterBuilder: AdapterBuilder<RateLimiter> = (config, _ctx) => {

@@ -36,7 +36,6 @@ import type {
 	GrantPolicyHookContribution,
 	MfaFactor,
 } from "../modules/manifest/contributes-map.mjs";
-import type { RateLimitSpec } from "../ratelimit/types.mjs";
 import { createReadinessRegistrar } from "../readiness/registrar.mjs";
 import type { AdmissionAction } from "../session-admission/actions.mjs";
 import type { RegisteredRequirement } from "../session-admission/requirement.mjs";
@@ -226,7 +225,7 @@ export function mergeWithBuiltins(
 		federationRedirectPolicies: makeMapNameKeyedCollector<unknown>(),
 		mfaFactors: makeMapNameKeyedCollector<MfaFactor | null>(),
 		sessionRequirements: withoutReplace(makeMapNameKeyedCollector<RegisteredRequirement>()),
-		rateLimitBudgets: makeMapNameKeyedCollector<RateLimitSpec | null>(),
+		rateLimitBudgets: makeMapNameKeyedCollector<null>(),
 		federationTypes: makeMapNameKeyedCollector<RegisteredFederationType>(),
 		admissionActions: makeMapNameKeyedCollector<AdmissionAction>(),
 		sessionCloseNotifiers: makeMapNameKeyedCollector<SessionCloseNotifier>(),

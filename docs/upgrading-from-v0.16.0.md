@@ -530,8 +530,8 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   session or the device-grant module, is loaded: each declares its prefix a
   verifier's own attempt limit, which no limiter module's configuration may
   loosen. Core names neither prefix itself. A limiter built with
-  `registerBuiltinRateLimiters` or `redisRateLimiterBuilder` reads no
-  contributed budget and keeps the `limits` it is given.
+  `registerBuiltinRateLimiters` or `redisRateLimiterBuilder` keeps the
+  `limits` it is given.
   The boot is refused (`config-validation-failed`, naming the key and the
   setting). Move the numbers to the module's own setting:
   `session.rateLimit.login` for login, `device-grant.rateLimit` for device
@@ -1176,18 +1176,35 @@ modules fills them.
   is now refused for its container (`contribution-malformed`) before the
   override guard (`contribution-kind-guarded`) that a record there still
   meets.
-- **Rate limits.** The module that keys a prefix contributes its budget
-  (`rateLimitBudgets`); the bundled limiters seed none (#782). No module
-  overrides a prefix: an `overrides.rateLimitBudgets` entry refuses the boot
-  (`contribution-kind-guarded`, #807). In code: the `failMode` options are
-  gone from `createDeviceVerificationHandler`, the federation-grants routers,
-  `RateLimitGuardOptions` and `RateLimitPolicyOptions`; `checkWithFailMode`
-  takes a policy from `createRateLimitPolicy` and refuses any other object;
-  `memoryRateLimiterModule` and `webauthnModule` require
-  `rateLimitBudgetResolver`, which a hand-built deps object for their
-  factories carries. `createRedisRateLimiter` no longer takes `budgets` and
-  `redisRateLimiterModule` requires only `rateLimiterClient`; set a prefix's
-  limit as `redis-rate-limiter.limits.<prefix>` (#807).
+- **Rate limits.** The module that keys a prefix claims it
+  (`rateLimitBudgets`) and sets no budget; the bundled limiters seed none
+  (#782). No module overrides a prefix: an `overrides.rateLimitBudgets` entry
+  refuses the boot (`contribution-kind-guarded`, #807). In code: the
+  `failMode` options are gone from `createDeviceVerificationHandler`, the
+  federation-grants routers, `RateLimitGuardOptions` and
+  `RateLimitPolicyOptions`; `checkWithFailMode` takes a policy from
+  `createRateLimitPolicy` and refuses any other object;
+  `createMemoryRateLimiter` and `createRedisRateLimiter` take no `budgets`,
+  `memoryRateLimiterModule` requires nothing and `redisRateLimiterModule`
+  only `rateLimiterClient`; set a prefix's limit as
+  `core-rate-limiter-memory.limits.<prefix>` or
+  `redis-rate-limiter.limits.<prefix>` (#807).
+- **BREAKING: a `rateLimitBudgets` contribution is a prefix claim only
+  (#807).** A module claims each prefix it keys with a factory that answers
+  `null` (`verifierLimitClaim({ setting })` for a verifier's own limit) and
+  contributes no budget. A key's budget is the limiter's own `limits` entry
+  for its prefix, else its `defaultLimit`, the same on the in-process and the
+  Redis limiter. A factory that answers a budget (`{ limit, windowSeconds }`)
+  refuses the boot (`contribute-factory-failed`, naming the module, the
+  prefix and the `limits` entry to set instead). The synthetic slot
+  `rateLimitBudgetResolver` and its type `RateLimitBudgetResolver` are
+  removed: a module that requires the slot refuses the boot
+  (`missing-required-component`). If a module of your own contributed a
+  budget, or your code reads `rateLimitBudgetResolver`, move the budget into
+  the limiter's `limits` — `core-rate-limiter-memory.limits.<prefix>` or
+  `redis-rate-limiter.limits.<prefix>` — and have the module's factory answer
+  `null`. The boot line `rate_limit_budgets_registered` lists each claimed
+  prefix with its module and no `budget` field.
   `createDeviceVerificationHandler`'s `subjectRevocation` is the full
   `SubjectRevocation`, no longer a `Pick` of `revokedBefore` (#717).
 - **A switched-off grant or second factor is no override target (#728).** A

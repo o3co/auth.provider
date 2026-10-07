@@ -837,10 +837,8 @@ export type {
 	PathResolver,
 	Provider,
 	ProviderDeps,
-	// A module's budget for a rate-limit prefix it owns, and the view
-	// core composes the budgets into.
+	// A module's claim of a rate-limit prefix it keys.
 	RateLimitBudgetFactory,
-	RateLimitBudgetResolver,
 	// A relocatedFrom entry whose new path no environment variable binds.
 	RelocationWithoutVariable,
 	// The manifest's replica-safety declaration, so a package

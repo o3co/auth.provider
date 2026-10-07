@@ -526,7 +526,6 @@
 . RateLimitBudgetFactory type
 . RateLimitBudgetLookup type
 . RateLimitBudgetLookupOptions type
-. RateLimitBudgetResolver type
 . RateLimitCheckOutcome type
 . RateLimitContext type
 . RateLimitDecision type
@@ -1192,7 +1191,6 @@
 ./modules/manifest Provider type
 ./modules/manifest ProviderDeps type
 ./modules/manifest RateLimitBudgetFactory type
-./modules/manifest RateLimitBudgetResolver type
 ./modules/manifest RelocationWithoutVariable type
 ./modules/manifest ReplicaSafetyDeclaration type
 ./modules/manifest RouteAdvertisement type

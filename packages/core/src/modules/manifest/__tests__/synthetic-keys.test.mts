@@ -1,5 +1,4 @@
 import { describe, expect, expectTypeOf, test } from "vitest";
-import type { RateLimitSpec } from "../../../ratelimit/types.mjs";
 import type { ComponentMap } from "../component-map.mjs";
 import type {
 	ExchangeTokenValidator,
@@ -10,16 +9,15 @@ import type {
 import {
 	type GrantHandlerResolver,
 	type MfaFactorResolver,
-	type RateLimitBudgetResolver,
 	SYNTHETIC_COMPONENT_KEYS,
 	type TokenExchangeValidatorResolver,
 } from "../synthetic-keys.mjs";
 
 describe("SYNTHETIC_COMPONENT_KEYS", () => {
-	test("contains exactly the 14 synthetic keys", () => {
+	test("contains exactly the 13 synthetic keys", () => {
 		// mfaFactorResolver comes from the MFA ADR's D3, and
 		// sessionRequirementResolver from the session-admission ADR's D3.
-		expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(14);
+		expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(13);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("federationProviders")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("tokenExchangeValidatorResolver")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("grantHandlerResolver")).toBe(true);
@@ -28,12 +26,12 @@ describe("SYNTHETIC_COMPONENT_KEYS", () => {
 		expect(SYNTHETIC_COMPONENT_KEYS.has("readinessRegistrar")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("mfaFactorResolver")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("sessionRequirementResolver")).toBe(true);
-		expect(SYNTHETIC_COMPONENT_KEYS.has("rateLimitBudgetResolver")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("deploymentMode")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("tokenBindingSettings")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("federationSettings")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("outboundPolicy")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("sessionCloseNotifierResolver")).toBe(true);
+		expect(SYNTHETIC_COMPONENT_KEYS.has("rateLimitBudgetResolver")).toBe(false);
 	});
 
 	test("is frozen via Object.freeze (own-property additions blocked)", () => {
@@ -107,14 +105,5 @@ describe("ComponentMap synthetic-resolver slots (declaration-merge)", () => {
 		expectTypeOf<ComponentMap["federationProviders"]>().toEqualTypeOf<
 			ReadonlyMap<string, FederationProvider> | undefined
 		>();
-	});
-});
-
-describe("RateLimitBudgetResolver", () => {
-	test("has read-only get and entries methods, over the budgets by prefix", () => {
-		expectTypeOf<RateLimitBudgetResolver>().toEqualTypeOf<{
-			readonly get: (prefix: string) => RateLimitSpec | undefined;
-			readonly entries: () => IterableIterator<readonly [string, RateLimitSpec]>;
-		}>();
 	});
 });
