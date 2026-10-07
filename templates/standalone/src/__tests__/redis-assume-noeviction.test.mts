@@ -190,6 +190,41 @@ describe("the shipped refresh-token family store on a Redis that will not report
 	});
 });
 
+describe("the replay seen-set on a Redis that will not report its eviction policy", () => {
+	/** Only the seen-set on Redis: a refusal can come from no other store. */
+	const REPLAY_ONLY = {
+		...SINGLE_ENV,
+		ADAPTERS_REPLAY_SEEN_SET: "redis",
+		REDIS_CLIENTS_URL: "redis://redis.test:6379",
+	};
+	const composingReplayOnly = (env: Readonly<Record<string, string>>) => composing(env, false);
+
+	it.each([
+		["unset", REPLAY_ONLY],
+		["false", { ...REPLAY_ONLY, REDIS_CLIENTS_ASSUME_NO_EVICTION: "false" }],
+	])(
+		"refuses the boot with REDIS_CLIENTS_ASSUME_NO_EVICTION %s, naming the store",
+		async (_label, env) => {
+			expect(await composingReplayOnly(env)).toMatchObject({
+				reason: "provides-factory-failed",
+				details: { module: "redis-replay-seen-set", componentKey: "replaySeenSet" },
+				cause: {
+					name: "RedisStoreEvictableError",
+					reason: "replay-seen-set-evictable",
+					maxmemoryPolicy: undefined,
+				},
+			});
+		},
+	);
+
+	it("boots with REDIS_CLIENTS_ASSUME_NO_EVICTION=true", async () => {
+		expect(
+			await composingReplayOnly({ ...REPLAY_ONLY, REDIS_CLIENTS_ASSUME_NO_EVICTION: "true" }),
+		).toBeUndefined();
+		expect(current?.handle.components.replaySeenSet?.kind).toBe("redis");
+	});
+});
+
 describe("the MFA stores on a Redis that will not report its eviction policy", () => {
 	/** Only the MFA stores on Redis: a refusal can come from no other store. */
 	const MFA_ONLY = { ...SINGLE_ENV, ...MFA_ON_REDIS };

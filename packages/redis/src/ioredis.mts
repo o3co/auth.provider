@@ -72,7 +72,7 @@ export { makeIoredisMfaFactorStoreClient, makeIoredisMfaTransactionStoreClient }
  * Options for {@link makeIoredisClients}. `assumeNoEviction` reaches the durability report of
  * each client whose store runs the eviction gate: the attempt counter's, the session lifecycle
  * store's, the federation token store's, the two MFA stores', the access-token denylist's, the
- * subject revocation store's and the refresh-token family store's.
+ * subject revocation store's, the refresh-token family store's and the replay seen-set's.
  */
 export interface IoredisClientsOptions extends IoredisDurabilityOptions {
 	/**
@@ -122,7 +122,7 @@ export function makeIoredisClients(
 
 	const challengeStoreClient = makeIoredisChallengeStoreClient(io);
 	const accessTokenDenylistClient = makeIoredisAccessTokenDenylistClient(io, durability);
-	const replaySeenSetClient = makeIoredisReplaySeenSetClient(io);
+	const replaySeenSetClient = makeIoredisReplaySeenSetClient(io, durability);
 	const refreshTokenFamilyClient = makeIoredisRefreshTokenFamilyClient(io, logger, durability);
 	const userSessionStoreClient = makeIoredisUserSessionStoreClient(io);
 	const subjectSessionIndexClient = makeIoredisSubjectSessionIndexClient(io);

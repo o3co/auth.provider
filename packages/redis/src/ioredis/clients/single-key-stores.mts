@@ -52,10 +52,14 @@ export function makeIoredisAccessTokenDenylistClient(
 	return accessTokenDenylistClient;
 }
 
-export function makeIoredisReplaySeenSetClient(io: Redis): ReplaySeenSetClient {
+export function makeIoredisReplaySeenSetClient(
+	io: Redis,
+	options: IoredisDurabilityOptions = {},
+): ReplaySeenSetClient {
 	const replaySeenSetClient: ReplaySeenSetClient = {
 		set: (k, v, _mode, ttl, _cond) => io.set(k, v, "PX", ttl, "NX") as Promise<"OK" | null>,
 		exists: (k) => io.exists(k),
+		durability: () => redisDurability(io, options),
 	};
 	return replaySeenSetClient;
 }

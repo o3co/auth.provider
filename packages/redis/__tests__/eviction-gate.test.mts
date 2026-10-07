@@ -6,9 +6,10 @@
 /**
  * The one eviction gate every Redis store whose keys must stay until they
  * expire runs before it is handed out — the attempt counter, the session
- * lifecycle store, the federation token store, the two MFA stores and the
+ * lifecycle store, the federation token store, the two MFA stores, the
  * stores that hold revocation state (the access-token denylist, subject
- * revocation and the refresh-token family store) — on every path that builds
+ * revocation and the refresh-token family store) and the replay seen-set — on
+ * every path that builds
  * one: the exported factory, the module and, where the store has one, the
  * adapter builder.
  *
@@ -48,6 +49,11 @@ import {
 	redisRefreshTokenFamilyStoreBuilder,
 	redisRefreshTokenFamilyStoreModule,
 } from "#/refresh-token-family.mjs";
+import {
+	createRedisReplaySeenSet,
+	redisReplaySeenSetBuilder,
+	redisReplaySeenSetModule,
+} from "#/replay-seen-set.mjs";
 import { createRedisSessionLifecycleStore } from "#/session-lifecycle-store.mjs";
 import {
 	createRedisSubjectRevocation,
@@ -259,6 +265,25 @@ const STORES: readonly Store[] = [
 			},
 		],
 	},
+	{
+		store: "replaySeenSet",
+		reason: "replay-seen-set-evictable",
+		paths: [
+			{
+				name: "createRedisReplaySeenSet",
+				build: (client) => createRedisReplaySeenSet({ client, keyPrefix: "replay:" }),
+			},
+			{
+				name: "redisReplaySeenSetBuilder",
+				build: (client) => Promise.resolve(redisReplaySeenSetBuilder({ client }, {})),
+			},
+			{
+				name: "redisReplaySeenSetModule",
+				build: (client) =>
+					provide(redisReplaySeenSetModule, "replaySeenSet", { replaySeenSetClient: client }),
+			},
+		],
+	},
 ];
 
 const CASES = STORES.flatMap((s) => s.paths.map((path) => ({ ...s, path })));
@@ -370,6 +395,12 @@ describe.each([
 		clientSlots: ["refreshTokenFamilyClient"],
 		reason: "refresh-token-family-store-evictable",
 	},
+	{
+		module: redisReplaySeenSetModule,
+		slot: "replaySeenSet",
+		clientSlots: ["replaySeenSetClient"],
+		reason: "replay-seen-set-evictable",
+	},
 ])("a boot that reads $slot from $module.name", ({ module, slot, clientSlots, reason }) => {
 	/** Reads the slot and contributes a route, so the slot is built at boot. */
 	const reader = defineModule({
@@ -437,6 +468,7 @@ describe("makeIoredisClients' assumeNoEviction", () => {
 		clients.accessTokenDenylistClient.durability(),
 		clients.subjectRevocationClient.durability(),
 		clients.refreshTokenFamilyClient.durability(),
+		clients.replaySeenSetClient.durability(),
 	];
 
 	it("reaches every client whose store runs the gate", async () => {
@@ -465,6 +497,7 @@ describe("the policy the bundled clients read off the server", () => {
 		accessTokenDenylist: "accessTokenDenylistClient",
 		subjectRevocation: "subjectRevocationClient",
 		refreshTokenFamilyStore: "refreshTokenFamilyClient",
+		replaySeenSet: "replaySeenSetClient",
 	};
 
 	/** A connection whose INFO memory and CONFIG GET maxmemory-policy answer as given; an Error is thrown. */

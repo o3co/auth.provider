@@ -22,6 +22,7 @@ import {
 	type ReplaySeenSet,
 } from "@o3co/auth-provider-core";
 import type { ReplaySeenSetClient } from "./clients.mjs";
+import { requireNoEviction } from "./internal/eviction-policy.mjs";
 import { keyPrefixSection, redisReference } from "./internal/section.mjs";
 
 /**
@@ -46,8 +47,23 @@ export interface RedisReplaySeenSetOptions {
  *   failing closed for replay detection, where `ChallengeStore.find` answers
  *   `null` for one. The asymmetry keeps false "consumed" outcomes down; such
  *   keys surface as a conservative "replayed".
+ *
+ * It resolves once the server's eviction policy passes the gate
+ * (`internal/eviction-policy.mts`).
  */
-export function createRedisReplaySeenSet(opts: RedisReplaySeenSetOptions): ReplaySeenSet {
+export async function createRedisReplaySeenSet(
+	opts: RedisReplaySeenSetOptions,
+): Promise<ReplaySeenSet> {
+	const seen = buildRedisReplaySeenSet(opts);
+	await requireNoEviction("replaySeenSet", () => opts.client.durability(), {
+		reason: "replay-seen-set-evictable",
+		holds:
+			"single-use values it has seen, each keyed with a TTL until the value's window ends, and a value evicted before then reads as never seen",
+	});
+	return seen;
+}
+
+function buildRedisReplaySeenSet(opts: RedisReplaySeenSetOptions): ReplaySeenSet {
 	const { client, keyPrefix } = opts;
 	const fullKey = (scope: string, key: string): string =>
 		`${keyPrefix}${canonicalChallengeKey(scope, key)}`;
@@ -81,10 +97,10 @@ export function createRedisReplaySeenSet(opts: RedisReplaySeenSetOptions): Repla
  *   factory.register("redis", redisReplaySeenSetBuilder);
  *   factory.create({ type: "redis", client, keyPrefix: "replay:" });
  */
-export const redisReplaySeenSetBuilder: AdapterBuilder<ReplaySeenSet> = (config, _ctx) => {
+export const redisReplaySeenSetBuilder: AdapterBuilder<ReplaySeenSet> = async (config, _ctx) => {
 	const c = config as { client?: ReplaySeenSetClient; keyPrefix?: string };
-	// Fails at boot on a missing client, as `redisFederationTokenStoreBuilder`
-	// does, rather than with a cryptic crash at runtime.
+	// Rejects at boot on a missing client, as `redisFederationTokenStoreBuilder`
+	// does, rather than failing with a cryptic crash at runtime.
 	if (!c.client) {
 		throw new Error("redisReplaySeenSetBuilder: 'client' option is required");
 	}
