@@ -36,7 +36,7 @@ import {
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
 import { decodeJwt, SignJWT } from "jose";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 
@@ -65,7 +65,11 @@ const grantWith = (evaluate?: GrantPolicyHook["evaluate"]) =>
 		...(evaluate ? { grantPolicy: { kind: "stub", evaluate } } : {}),
 	} as RefreshTokenGrantDeps);
 
-const ctx = (token: string, body: Record<string, unknown> = {}): GrantContext => ({
+const ctx = (
+	token: string,
+	body: Record<string, unknown> = {},
+	allowedAudiences: readonly string[] = [API, OTHER],
+): GrantContext => ({
 	body: { grant_type: "refresh_token", refresh_token: token, ...body },
 	session: {},
 	issuer: "localhost",
@@ -75,7 +79,7 @@ const ctx = (token: string, body: Record<string, unknown> = {}): GrantContext =>
 		tokenEndpointAuthMethod: "client_secret_basic",
 		allowedGrantTypes: ["refresh_token"],
 		allowedScopes: ["read"],
-		allowedAudiences: [API, OTHER],
+		allowedAudiences,
 	} as AuthenticatedClient,
 });
 
@@ -186,5 +190,67 @@ describe("refresh_token — a policy audience is held to the original audience",
 			return { outcome: "allow", grantedAudience: [OTHER] };
 		}).handle(ctx(await refreshToken(API)));
 		expect(result).toMatchObject({ status: 500, error: "server_error" });
+	});
+});
+
+describe("refresh_token — a plain refresh needs its original audience still registered", () => {
+	/** A token of family `fam-1`, as one the family store holds. */
+	const familyToken = (aud: string): Promise<string> =>
+		new SignJWT({ sub: "u1", scope: "read", azp: CLIENT_ID, family_id: "fam-1" })
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+			.setIssuer("localhost")
+			.setAudience(aud)
+			.setJti("rt-1")
+			.setExpirationTime("24h")
+			.sign(createSecretKey(Buffer.from(SECRET)));
+
+	const withFamily = () => {
+		const rotate = vi.fn(async () => ({ outcome: "rotated" as const }));
+		const revokeFamily = vi.fn(async () => {});
+		const grant = createRefreshTokenGrant({
+			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+			oauthTokenSettings: createTestOAuthTokenSettings({ resourceIndicatorEnabled: true }),
+			tokenBindingSettings: createTestTokenBindingSettings(),
+			keyStore,
+			refreshTokenFamilyRotation: { register: vi.fn(async () => {}), rotate },
+			refreshTokenFamilyRevocation: { revokeFamily, isFamilyRevoked: async () => false },
+		} as RefreshTokenGrantDeps);
+		return { grant, rotate, revokeFamily };
+	};
+
+	it("refuses invalid_grant, leaving the family untouched, when the original aud is no longer registered", async () => {
+		const { grant, rotate, revokeFamily } = withFamily();
+		const { result } = await grant.handle(ctx(await familyToken(API), {}, [OTHER]));
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "the grant's audience is no longer registered for this client",
+		});
+		expect(rotate).not.toHaveBeenCalled();
+		expect(revokeFamily).not.toHaveBeenCalled();
+	});
+
+	it("refuses it with a silent policy wired too", async () => {
+		const { result } = await grantWith(async () => ({ outcome: "allow" })).handle(
+			ctx(await refreshToken(API), {}, []),
+		);
+		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+	});
+
+	it("rotates and issues while the original aud is registered", async () => {
+		const { grant, rotate } = withFamily();
+		const { result } = await grant.handle(ctx(await familyToken(API), {}, [API]));
+		expect(issued(result).access.aud).toBe(API);
+		expect(rotate).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([
+		["no allowedAudiences", []],
+		["other allowedAudiences", [API, OTHER]],
+	] as const)("always issues a token for the client id itself (%s)", async (_, allowed) => {
+		const { grant, rotate } = withFamily();
+		const { result } = await grant.handle(ctx(await familyToken(CLIENT_ID), {}, allowed));
+		expect(issued(result).access.aud).toBe(CLIENT_ID);
+		expect(rotate).toHaveBeenCalledTimes(1);
 	});
 });

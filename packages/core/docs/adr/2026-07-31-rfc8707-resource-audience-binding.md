@@ -73,7 +73,9 @@ original audience instead of falling back to the client id; a `resource`
 outside it is not derivable, so D1 rejects it `invalid_target`; and a
 policy-returned audience is validated against both ceilings. The policy is
 handed the original audience as `GrantPolicyRequest.originalAudience`. A
-token that names no `aud` is held to its client's id.
+token that names no `aud` is held to its client's id. A default the
+registration no longer holds is refused `invalid_grant`, never replaced by
+the client id.
 
 ### D2 — Multiple distinct resources are rejected, not split or merged
 

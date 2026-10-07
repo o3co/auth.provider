@@ -550,6 +550,23 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				};
 			}
 
+			// The default, the original audience, is held to the registration as
+			// a policy's or a resource's choice is; one no longer registered is
+			// refused, never replaced. Before admission and the rotation, so the
+			// family is left as it was.
+			if (
+				finalAudience !== authenticatedClientId &&
+				!(ctx.authenticatedClient.allowedAudiences ?? []).includes(finalAudience ?? "")
+			) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription: "the grant's audience is no longer registered for this client",
+					},
+				};
+			}
+
 			const tokenPayloadClaims = tokenPayload as Record<string, unknown>;
 			const familyIdRaw = tokenPayloadClaims.family_id;
 			const familyId =

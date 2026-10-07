@@ -721,7 +721,10 @@ The boot refusals you can meet, with their messages, are in
   `refresh_token`, the presented refresh token's `aud` is the ceiling and the
   default for the new tokens' audience, as its scope already is. A plain
   refresh (no `resource`, no audience from the policy) keeps the original
-  `aud`; it used to issue for the client id. A `resource` outside the
+  `aud`; it used to issue for the client id. Once the client's
+  registration (`allowedAudiences` ∪ `{client_id}`) no longer holds that
+  `aud`, a plain refresh is `400 invalid_grant` and the family is left
+  untouched; the user signs in again. A `resource` outside the
   original `aud` is `400 invalid_target`, even when the client's
   `allowedAudiences` lists it; it used to be issued. A policy's
   `grantedAudience` outside the original `aud` is `500 server_error`, as one
