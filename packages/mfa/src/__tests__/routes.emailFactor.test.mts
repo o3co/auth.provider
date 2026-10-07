@@ -627,15 +627,23 @@ describe("account management after an email-code sign-in: recent MFA asks for a 
 
 	const regenerate = (agent: Agent) => mfaPost(agent, "/recovery-codes", {});
 
+	/** A recovery set of three codes for alice, its codes answered unless `shown` says otherwise. */
+	const seedRecoverySet = (store: MfaFactorStore, shown = true) =>
+		seedFactor(store, "recovery_code", { ...recoverySet(3).data, shown });
+
 	it("steps up a TOTP enrollment from the account page, 403 step_up_required: nothing opened, nothing bound, and the session's amr still without mfa", async () => {
 		const built = await withEmailFactor({ totp: true });
+		await seedRecoverySet(built.factorStore);
 		const { agent, sid } = await signInWithEmail(built);
 
 		const begun = await enrollFromAccount(agent, "totp");
 
 		expect(begun.status, JSON.stringify(begun.body)).toBe(403);
 		expect(begun.body).toMatchObject(STEP_UP_REQUIRED);
-		expect((await built.factorStore.list(ALICE.id)).map((entry) => entry.kind)).toEqual([KIND]);
+		expect((await built.factorStore.list(ALICE.id)).map((entry) => entry.kind).sort()).toEqual([
+			KIND,
+			"recovery_code",
+		]);
 		const session = await (built.userSessionStore as UserSessionStore).get(sid);
 		expect(session?.amr).toEqual(["pwd", "email"]);
 		expect(session?.amr).not.toContain("mfa");
@@ -643,7 +651,7 @@ describe("account management after an email-code sign-in: recent MFA asks for a 
 
 	it("steps up a regeneration of the recovery codes, 403 step_up_required: the set that stood is kept and no codes are answered", async () => {
 		const built = await withEmailFactor({ totp: true });
-		const standing = await seedFactor(built.factorStore, "recovery_code", recoverySet(3).data);
+		const standing = await seedRecoverySet(built.factorStore);
 		const { agent, sid } = await signInWithEmail(built);
 
 		const res = await regenerate(agent);
@@ -660,6 +668,34 @@ describe("account management after an email-code sign-in: recent MFA asks for a 
 			"pwd",
 			"email",
 		]);
+	});
+
+	it("answers 401 login_required, as unmet, where nothing the subject holds adds mfa: no recovery set, one never answered, or the recovery-code factor off", async () => {
+		for (const [what, setup] of [
+			["no recovery set", { set: undefined, recovery: true }],
+			["a set never answered", { set: false, recovery: true }],
+			["the recovery-code factor off", { set: true, recovery: false }],
+		] as const) {
+			const built = await withEmailFactor({ totp: true, recovery: setup.recovery });
+			if (setup.set !== undefined) await seedRecoverySet(built.factorStore, setup.set);
+			const { agent, sid } = await signInWithEmail(built);
+
+			const begun = await enrollFromAccount(agent, "totp");
+			const regenerated = await regenerate(agent);
+
+			expect(begun.status, `${what}: ${JSON.stringify(begun.body)}`).toBe(401);
+			expect(begun.body.error, what).toBe("login_required");
+			expect(regenerated.status, what).toBe(401);
+			expect(
+				(await built.factorStore.list(ALICE.id)).filter((entry) => entry.kind === "totp"),
+				what,
+			).toEqual([]);
+			expect((await (built.userSessionStore as UserSessionStore).get(sid))?.amr, what).toEqual([
+				"pwd",
+				"email",
+			]);
+			await disposeAll();
+		}
 	});
 
 	it("admits the enrollment once the session steps up with a factor that adds mfa: TOTP after the email code", async () => {
