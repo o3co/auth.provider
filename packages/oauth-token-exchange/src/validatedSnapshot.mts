@@ -16,16 +16,24 @@
 
 /**
  * A validator's answer, read once into a plain, deeply frozen `ValidatedToken`
- * that every stage of the exchange reads instead of the answer: each member
- * (`sub`, `scope`, `aud`, `familyId`, `sid`, `act`, `may_act`) and each claim
- * is read exactly once, so a check and the minted token cannot see two
- * values of one member. Of `claims`, the copy holds every own enumerable
- * claim and the ones the grant reads by name (`azp`, `exp`, `iss`, `cnf`,
- * `may_act`), read even where an inherited accessor holds them. Nested
- * objects and arrays are copied the same way. Every key is defined on the copy
- * as an own data property, so a key named `__proto__` is copied as a key and
- * never sets the copy's prototype. A read that throws propagates: the caller
- * answers it as the validator's outage. The authentication context the
+ * that every stage of the exchange reads instead of the answer, so a check
+ * and the minted token cannot see two values of one member.
+ *
+ * What is copied, at each level: the members the stages read by name, own or
+ * inherited, whenever the answer has them (`in`), even with no value — the
+ * answer's `sub`, `scope`, `aud`, `familyId`, `sid`, `act`, `may_act` and
+ * `claims`; of `claims`, `azp`, `exp`, `iss`, `cnf` and `may_act`; of `cnf`,
+ * the confirmation members (`jkt`, `x5t#S256`); of each `may_act` entry, `sub`
+ * and `iss`; of each `act`, its nested `act` — and, below the answer itself,
+ * every own enumerable key. So the copy holds every member a stage can read
+ * off the answer, and is never looser than it.
+ *
+ * Every member of an object is read at most once, however many paths reach
+ * the object (an alias, a cycle): the reads are kept per object, and a copy
+ * is registered before its members are copied. Every key is defined on the
+ * copy as an own data property, so a key named `__proto__` is copied as a key
+ * and never sets the copy's prototype. A read that throws propagates: the
+ * caller answers it as the validator's outage. The authentication context the
  * built-in validator verified for the answer is carried to the copy.
  */
 
@@ -35,8 +43,42 @@ import {
 	verifiedAuthenticationOf,
 } from "./validator/selfIssuedAccessToken.mjs";
 
+/**
+ * What a stage reads of an object: the members it reads by name, whether its
+ * own enumerable keys are copied too, what it reads of a member, and of each
+ * element of an array.
+ */
+interface Reads {
+	readonly names: readonly string[];
+	readonly ownKeys: boolean;
+	readonly of: Readonly<Record<string, Reads>>;
+	readonly each?: Reads;
+}
+
+/** Below what a stage reads by name: own enumerable keys, nothing by name. */
+const ANY: Reads = { names: [], ownKeys: true, of: {} };
+
+/** A `may_act` entry: `sub` and `iss`, read by name (`in` and access) by delegation. */
+const MAY_ACT_ENTRY: Reads = { names: ["sub", "iss"], ownKeys: true, of: {} };
+/** A `may_act`: one entry, or an array of them. */
+const MAY_ACT: Reads = { ...MAY_ACT_ENTRY, each: MAY_ACT_ENTRY };
+/** A `cnf`: the members core's confirmation matcher reads. */
+const CNF: Reads = { names: ["jkt", "x5t#S256"], ownKeys: true, of: {} };
+/** An `act` chain: the nested `act` the chain-depth count follows. */
+const ACT: Reads = { names: ["act"], ownKeys: true, of: {} };
+(ACT.of as Record<string, Reads>).act = ACT;
 /** The claims the grant reads by name. */
-const READ_CLAIMS = ["azp", "exp", "iss", "cnf", "may_act"] as const;
+const CLAIMS: Reads = {
+	names: ["azp", "exp", "iss", "cnf", "may_act"],
+	ownKeys: true,
+	of: { cnf: CNF, may_act: MAY_ACT },
+};
+/** The answer: its members, by name alone. */
+const ANSWER: Reads = {
+	names: ["sub", "scope", "aud", "familyId", "sid", "act", "may_act", "claims"],
+	ownKeys: false,
+	of: { act: ACT, may_act: MAY_ACT, claims: CLAIMS },
+};
 
 const authentications = new WeakMap<ValidatedToken, VerifiedAuthentication>();
 
@@ -46,7 +88,7 @@ const authentications = new WeakMap<ValidatedToken, VerifiedAuthentication>();
  * nothing. A read that throws propagates.
  */
 export function isValidatedShape(answer: unknown): answer is ValidatedToken {
-	return answerParts(answer) !== null;
+	return hasAnswerShape(answer, new Reader());
 }
 
 /**
@@ -54,26 +96,10 @@ export function isValidatedShape(answer: unknown): answer is ValidatedToken {
  * object, a `sub` that is not a string, or `claims` that are not an object.
  */
 export function snapshotValidated(answer: unknown): ValidatedToken | null {
-	const parts = answerParts(answer);
-	if (parts === null) return null;
-	const { source, sub, claims } = parts;
-
-	const seen = new Map<object, unknown>();
-	const copy: Record<string, unknown> = {};
-	define(copy, "sub", sub);
-	for (const member of ["scope", "aud", "familyId", "sid", "act", "may_act"] as const) {
-		const value: unknown = source[member];
-		if (value !== undefined) define(copy, member, plainCopy(value, seen));
-	}
-	const claimsCopy: Record<string, unknown> = {};
-	for (const name of new Set<string>([...Object.keys(claims), ...READ_CLAIMS])) {
-		const value: unknown = claims[name];
-		if (value !== undefined) define(claimsCopy, name, plainCopy(value, seen));
-	}
-	define(copy, "claims", Object.freeze(claimsCopy));
-
-	const snapshot = Object.freeze(copy) as unknown as ValidatedToken;
-	const authentication = verifiedAuthenticationOf(source);
+	const reader = new Reader();
+	if (!hasAnswerShape(answer, reader)) return null;
+	const snapshot = reader.copy(answer, ANSWER) as ValidatedToken;
+	const authentication = verifiedAuthenticationOf(answer);
 	if (authentication !== undefined) authentications.set(snapshot, authentication);
 	return snapshot;
 }
@@ -88,19 +114,75 @@ export function snapshotAuthentication(
 	return authentications.get(snapshot);
 }
 
-/** An answer, its `sub` and its `claims`, each member read once; `null` when one is not of its type. */
-function answerParts(answer: unknown): {
-	readonly source: ValidatedToken;
-	readonly sub: string;
-	readonly claims: Readonly<Record<string, unknown>>;
-} | null {
-	if (typeof answer !== "object" || answer === null) return null;
-	const source = answer as ValidatedToken;
-	const sub: unknown = source.sub;
-	if (typeof sub !== "string") return null;
-	const claims: unknown = source.claims;
-	if (typeof claims !== "object" || claims === null) return null;
-	return { source, sub, claims: claims as Readonly<Record<string, unknown>> };
+function hasAnswerShape(answer: unknown, reader: Reader): answer is ValidatedToken {
+	if (typeof answer !== "object" || answer === null) return false;
+	if (typeof reader.read(answer, "sub") !== "string") return false;
+	const claims = reader.read(answer, "claims");
+	return typeof claims === "object" && claims !== null;
+}
+
+/** One answer's reads: each member of each object read once, and each copy made once per `Reads`. */
+class Reader {
+	private readonly values = new Map<object, Map<string, unknown>>();
+	private readonly keys = new Map<object, readonly string[]>();
+	private readonly copies = new Map<object, Map<Reads, unknown>>();
+
+	/** `source[key]`, read on the first call alone. */
+	read(source: object, key: string): unknown {
+		let values = this.values.get(source);
+		if (values === undefined) {
+			values = new Map();
+			this.values.set(source, values);
+		}
+		if (values.has(key)) return values.get(key);
+		const value: unknown = (source as Record<string, unknown>)[key];
+		values.set(key, value);
+		return value;
+	}
+
+	/** `value` as a plain, frozen copy holding what `reads` names. */
+	copy(value: unknown, reads: Reads): unknown {
+		if (typeof value !== "object" || value === null) return value;
+		let byReads = this.copies.get(value);
+		if (byReads === undefined) {
+			byReads = new Map();
+			this.copies.set(value, byReads);
+		}
+		if (byReads.has(reads)) return byReads.get(reads);
+		if (Array.isArray(value)) {
+			const out: unknown[] = [];
+			byReads.set(reads, out);
+			const length = this.read(value, "length") as number;
+			for (let i = 0; i < length; i++) {
+				out.push(this.copy(this.read(value, String(i)), reads.each ?? ANY));
+			}
+			return Object.freeze(out);
+		}
+		const out: Record<string, unknown> = {};
+		byReads.set(reads, out);
+		const names = new Set<string>(reads.ownKeys ? this.ownKeys(value) : []);
+		for (const name of reads.names) if (name in value) names.add(name);
+		for (const name of names) {
+			define(
+				out,
+				name,
+				this.copy(
+					this.read(value, name),
+					Object.hasOwn(reads.of, name) ? (reads.of[name] as Reads) : ANY,
+				),
+			);
+		}
+		return Object.freeze(out);
+	}
+
+	private ownKeys(source: object): readonly string[] {
+		let keys = this.keys.get(source);
+		if (keys === undefined) {
+			keys = Object.keys(source);
+			this.keys.set(source, keys);
+		}
+		return keys;
+	}
 }
 
 /** `key` defined on `target` as an own, enumerable data property, whatever its name. */
@@ -111,23 +193,4 @@ function define(target: object, key: string, value: unknown): void {
 		writable: false,
 		configurable: false,
 	});
-}
-
-/** `value` as a plain, frozen copy: arrays element by element, objects by their own enumerable keys. */
-function plainCopy(value: unknown, seen: Map<object, unknown>): unknown {
-	if (typeof value !== "object" || value === null) return value;
-	const copied = seen.get(value);
-	if (copied !== undefined) return copied;
-	if (Array.isArray(value)) {
-		const out: unknown[] = [];
-		seen.set(value, out);
-		for (let i = 0; i < value.length; i++) out.push(plainCopy(value[i], seen));
-		return Object.freeze(out);
-	}
-	const out: Record<string, unknown> = {};
-	seen.set(value, out);
-	for (const key of Object.keys(value)) {
-		define(out, key, plainCopy((value as Record<string, unknown>)[key], seen));
-	}
-	return Object.freeze(out);
 }
