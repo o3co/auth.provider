@@ -63,22 +63,48 @@ export function registerBuiltinMfaFactorStores(
 	});
 }
 
+/**
+ * Says, once per store built, that an in-process transaction store forgets at
+ * the next restart what it holds beyond the ceremonies in flight: the subject
+ * lock state, the first-binding marks, and the email-proof requirement an
+ * operator reset recorded. Object-first, at warn: it is a deployment choice,
+ * not an outage. Like {@link warnMfaFactorStoreInMemory}, it warns under every
+ * `core.deployment.mode`, `single` included: the loss is at a restart, which
+ * one replica suffers as much as many.
+ * Shared with `memoryMfaTransactionStoreModule`; not on the barrel.
+ * @internal
+ */
+export function warnMfaTransactionStoreInMemory(logger: Logger): void {
+	logger.warn(
+		{ store: "mfaTransactionStore", adapter: "memory" },
+		"mfa_transaction_store_in_memory",
+	);
+}
+
 /** An empty {@link MfaTransactionStoreFactory}; register builders, or call {@link registerBuiltinMfaTransactionStores}. */
 export function createMfaTransactionStoreFactory(): MfaTransactionStoreFactory {
 	return createAdapterFactory<MfaTransactionStore>("MfaTransactionStore");
 }
 
 /**
- * Registers the in-tree builders: `memory`, capped at the adapter config's
- * `maxEntries` (`factory.create({ type: "memory", maxEntries })`, read as
- * `core-mfa-transaction-store-memory.maxEntries` is: absent means the default, a
- * value it cannot use is a `RangeError` naming the key). Throws
- * `AdapterFactoryError` (`duplicate`) when one is already registered.
+ * Registers the in-tree builders: `memory`, which warns when it is built,
+ * capped at the adapter config's `maxEntries` (`factory.create({ type:
+ * "memory", maxEntries })`, read as `core-mfa-transaction-store-memory.maxEntries`
+ * is: absent means the default, a value it cannot use is a `RangeError` naming
+ * the key). Throws `AdapterFactoryError` (`duplicate`) when one is already
+ * registered.
+ *
+ * @param logger - where the warning goes. Defaults to `consoleLogger`.
  */
-export function registerBuiltinMfaTransactionStores(factory: MfaTransactionStoreFactory): void {
-	factory.register("memory", (config) =>
-		createMemoryMfaTransactionStore(
+export function registerBuiltinMfaTransactionStores(
+	factory: MfaTransactionStoreFactory,
+	logger: Logger = consoleLogger,
+): void {
+	factory.register("memory", (config) => {
+		const store = createMemoryMfaTransactionStore(
 			configuredMaxEntries(config.maxEntries, "MfaTransactionStore memory adapter maxEntries"),
-		),
-	);
+		);
+		warnMfaTransactionStoreInMemory(logger);
+		return store;
+	});
 }

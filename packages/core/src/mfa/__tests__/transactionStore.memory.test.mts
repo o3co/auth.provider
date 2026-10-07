@@ -14,9 +14,10 @@
  * limitations under the License.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { replicaUnsafeReason } from "#/boot/replica-safety.mjs";
 import { createApp, defineModule } from "#/index.mjs";
+import type { Logger } from "#/logging/Logger.mjs";
 import {
 	createMfaTransactionStoreFactory,
 	registerBuiltinMfaTransactionStores,
@@ -45,6 +46,19 @@ const POLICY: MfaLockoutPolicy = {
 	weeklyBudget: 10,
 	hardLimit: 100,
 };
+
+const spyLogger = () => ({
+	debug: vi.fn(),
+	info: vi.fn(),
+	warn: vi.fn(),
+	error: vi.fn(),
+});
+
+/** The warning an in-process transaction store gives once when it is built. */
+const IN_MEMORY_WARNING = [
+	{ store: "mfaTransactionStore", adapter: "memory" },
+	"mfa_transaction_store_in_memory",
+] as const;
 
 const T0 = Date.UTC(2026, 8, 1);
 const DAY = 86_400_000;
@@ -366,43 +380,71 @@ describe("memoryMfaTransactionStoreModule", () => {
 		);
 	});
 
-	it("provides an in-process mfaTransactionStore", async () => {
-		let seen: MfaTransactionStore | undefined;
-		const reader = defineModule({
-			name: "test:mfa-transaction-store-reader",
-			requires: ["mfaTransactionStore"] as const,
-			contributes: {
-				routes: [
-					(deps) => {
-						seen = deps.mfaTransactionStore;
-						return {
-							id: "test-mfa-transaction-store-reader",
-							mountPath: "/__test_mfa_transaction_store_reader__",
-							handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
-						};
-					},
-				],
-			},
-		});
-		const handle = await createApp({
-			modules: [memoryMfaTransactionStoreModule, reader],
-			bootstrapComponents: {
-				config: makeValidCoreConfig(),
-				pathResolver: (p: string) => p,
-			} as never,
-		});
-		try {
-			expect(seen?.kind).toBe("memory");
-		} finally {
-			await handle.dispose();
-		}
-	});
+	it.each([
+		["left unstated", undefined],
+		["single", "single"],
+	] as const)(
+		"provides an in-process mfaTransactionStore, and says once, at warn, that a restart empties it (core.deployment.mode %s)",
+		async (_label, mode) => {
+			const logger = spyLogger();
+			let seen: MfaTransactionStore | undefined;
+			const reader = defineModule({
+				name: "test:mfa-transaction-store-reader",
+				requires: ["mfaTransactionStore"] as const,
+				contributes: {
+					routes: [
+						(deps) => {
+							seen = deps.mfaTransactionStore;
+							return {
+								id: "test-mfa-transaction-store-reader",
+								mountPath: "/__test_mfa_transaction_store_reader__",
+								handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+							};
+						},
+					],
+				},
+			});
+			const config = makeValidCoreConfig();
+			const handle = await createApp({
+				modules: [memoryMfaTransactionStoreModule, reader],
+				bootstrapComponents: {
+					config:
+						mode === undefined
+							? config
+							: { ...config, core: { ...config.core, deployment: { mode } } },
+					pathResolver: (p: string) => p,
+					logger: logger as unknown as Logger,
+				} as never,
+			});
+			try {
+				expect(seen?.kind).toBe("memory");
+				const warned = logger.warn.mock.calls.filter(
+					([, event]) => event === "mfa_transaction_store_in_memory",
+				);
+				expect(warned).toEqual([IN_MEMORY_WARNING]);
+				expect(logger.error).not.toHaveBeenCalled();
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
 });
 
 describe("the MfaTransactionStore adapter factory", () => {
 	it("builds the memory adapter by name", async () => {
 		const factory = createMfaTransactionStoreFactory();
-		registerBuiltinMfaTransactionStores(factory);
+		registerBuiltinMfaTransactionStores(factory, spyLogger() as unknown as Logger);
 		expect((await factory.create({ type: "memory" })).kind).toBe("memory");
+	});
+
+	it("says once per store built, at warn, that a restart empties the memory adapter", async () => {
+		const logger = spyLogger();
+		const factory = createMfaTransactionStoreFactory();
+		registerBuiltinMfaTransactionStores(factory, logger as unknown as Logger);
+		expect(logger.warn).not.toHaveBeenCalled();
+		await factory.create({ type: "memory" });
+		expect(logger.warn.mock.calls).toEqual([IN_MEMORY_WARNING]);
+		await factory.create({ type: "memory" });
+		expect(logger.warn.mock.calls).toEqual([IN_MEMORY_WARNING, IN_MEMORY_WARNING]);
 	});
 });
