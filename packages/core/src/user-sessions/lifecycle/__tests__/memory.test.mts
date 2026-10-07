@@ -157,6 +157,30 @@ describe("createInMemorySessionLifecycleStore", () => {
 			const store = createInMemorySessionLifecycleStore({ now: () => Number.NaN });
 			await expect(store.open("s", "u", new Date(START + HOUR))).rejects.toThrow(RangeError);
 		});
+
+		it.each([
+			["Infinity", Number.POSITIVE_INFINITY],
+			["-Infinity", Number.NEGATIVE_INFINITY],
+			["NaN", Number.NaN],
+			["a string", String(START)],
+			["a number past the Date range", 8.64e15 + 1],
+		])(
+			"keeps a closing record through a clock reading of %s, refusing instead",
+			async (_label, reading) => {
+				let current: unknown = START;
+				const store = createInMemorySessionLifecycleStore({ now: () => current as number });
+				expect((await store.open("s", "u", new Date(START + HOUR))).outcome).toBe("opened");
+				await store.beginClose("s", CLOSE);
+				current = reading;
+				await expect(store.read("s")).rejects.toThrow(RangeError);
+				await expect(store.listClosing(10)).rejects.toThrow(RangeError);
+				await expect(store.join("s", rp("a"))).rejects.toThrow(RangeError);
+				current = START;
+				expect((await read(store, "s"))?.value.state).toBe("closing");
+				expect(await store.listClosing(10)).toEqual(["s"]);
+				expect((await store.join("s", rp("a"))).outcome).toBe("closed");
+			},
+		);
 	});
 
 	describe("bounds", () => {

@@ -179,6 +179,63 @@ describe("createInMemorySubjectRevocation — its clock", () => {
 		expect(await store.revokedBefore("u")).toBeNull();
 	});
 
+	describe.each([
+		["Infinity", Number.POSITIVE_INFINITY],
+		["-Infinity", Number.NEGATIVE_INFINITY],
+		["NaN", Number.NaN],
+		["a string", "1800000000000"],
+		["undefined", undefined],
+		["a number past the Date range", 8.64e15 + 1],
+	])("a clock reading of %s", (_label, reading) => {
+		const until = new Date(NOW + 600_000);
+		const setup = async () => {
+			let current: unknown = NOW;
+			const store = createInMemorySubjectRevocation({ now: () => current as number });
+			await store.revokeBefore("u", new Date(NOW - 1_000), until);
+			return {
+				store,
+				set: (value: unknown) => {
+					current = value;
+				},
+			};
+		};
+
+		it("refuses both reads, and keeps the boundary for when the clock recovers", async () => {
+			const { store, set } = await setup();
+			set(reading);
+			await expect(store.revokedBefore("u")).rejects.toThrow(RangeError);
+			await expect(store.grantsRevokedBefore("u")).rejects.toThrow(RangeError);
+			set(NOW);
+			expect((await store.revokedBefore("u"))?.getTime()).toBe(NOW - 1_000);
+			expect((await store.grantsRevokedBefore("u"))?.getTime()).toBe(NOW - 1_000);
+		});
+
+		it("refuses a write, and keeps the boundary for when the clock recovers", async () => {
+			const { store, set } = await setup();
+			set(reading);
+			await expect(store.revokeSessionsBefore("u", new Date(NOW), until)).rejects.toThrow(
+				RangeError,
+			);
+			set(NOW);
+			expect((await store.revokedBefore("u"))?.getTime()).toBe(NOW - 1_000);
+			expect((await store.grantsRevokedBefore("u"))?.getTime()).toBe(NOW - 1_000);
+		});
+	});
+
+	it("reads its clock once per write, so a later reading cannot drop the record it advances", async () => {
+		const readings: unknown[] = [];
+		const store = createInMemorySubjectRevocation({
+			now: () => (readings.length > 0 ? readings.shift() : NOW) as number,
+		});
+		const until = new Date(NOW + 600_000);
+		await store.revokeBefore("u", new Date(NOW - 1_000), until);
+		readings.push(NOW, Number.POSITIVE_INFINITY);
+		await store.revokeSessionsBefore("u", new Date(NOW), until);
+		readings.length = 0;
+		expect((await store.revokedBefore("u"))?.getTime()).toBe(NOW);
+		expect((await store.grantsRevokedBefore("u"))?.getTime()).toBe(NOW - 1_000);
+	});
+
 	it("lets a record lapse on that clock", async () => {
 		let now = NOW;
 		const store = createInMemorySubjectRevocation({ now: () => now });

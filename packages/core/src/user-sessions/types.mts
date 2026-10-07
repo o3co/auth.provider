@@ -400,6 +400,10 @@ export interface SubjectRevocation {
 	 * store's clock is recorded as given. A `RangeError`, nothing
 	 * written, for a `before` or `expiresAt` that is not a `Date` with a finite
 	 * time (`checkSubjectRevocationInstant`).
+	 *
+	 * A store that reads its clock in-process fails the operation, and lapses
+	 * no record, when a reading is no instant a `Date` can hold; this holds
+	 * for every member, reads included.
 	 */
 	revokeBefore(subject: string, before: Date, expiresAt: Date): Promise<void>;
 	/**

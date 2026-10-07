@@ -19,8 +19,9 @@
  * restart, so it fences joins and closes within one replica only. Every
  * member checks and writes with no `await` between, so each is one step in
  * this process. A record lapses whole at its retention, judged on the
- * store's clock. It holds at most `maxEntries` records and `maxParticipants`
- * per record. Full, it drops lapsed records and, if that makes no room,
+ * store's clock; a clock reading that is no instant within the Date range
+ * fails the member with a `RangeError` and drops nothing. It holds at most
+ * `maxEntries` records and `maxParticipants` per record. Full, it drops lapsed records and, if that makes no room,
  * evicts the `closed` record whose retention ends first; it rejects when
  * there is none. So a full store may drop a closed record before its
  * retention, which the session lifecycle allows: it closes a record only
@@ -41,6 +42,7 @@ import {
 	newStoreGeneration,
 	type StoreGeneration,
 } from "../../adapters/conditionalWrite.mjs";
+import { isStorableExpiry } from "../../adapters/expiry.mjs";
 import { DEFAULT_CLOCK_SKEW_MS } from "../../jwt/verify.mjs";
 import { MAX_MEMORY_STORE_ENTRIES, usableMaxEntries } from "../../single-use/max-entries.mjs";
 import {
@@ -135,8 +137,8 @@ export function createInMemorySessionLifecycleStore(
 
 	const now = (): number => {
 		const at = clock();
-		if (!Number.isFinite(at))
-			throw new RangeError(`${owner}: the clock answered no finite instant`);
+		if (!isStorableExpiry(at))
+			throw new RangeError(`${owner}: the clock answered no instant within the Date range`);
 		return at;
 	};
 
