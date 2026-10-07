@@ -67,7 +67,8 @@ const EXEMPT: Readonly<Record<string, string>> = {
 /**
  * The section paths (`<section>.<path>`, `*` for any record key or list
  * element) whose schema keeps a default, each with why: the value is also
- * read where no `reference.conf` is layered. Each is also in the file.
+ * read where no `reference.conf` is layered. Each is also in the file where
+ * the file holds the path.
  */
 const DEFAULTS_KEPT: Readonly<Record<string, string>> = {
 	"redis-federation-grant-store":
@@ -104,6 +105,8 @@ interface ZodDef {
 	readonly left?: z.ZodType;
 	readonly right?: z.ZodType;
 	readonly getter?: () => z.ZodType;
+	readonly catchall?: z.ZodType;
+	readonly rest?: z.ZodType | null;
 }
 
 const defOf = (schema: z.ZodType): ZodDef =>
@@ -140,9 +143,13 @@ function filledPaths(schema: z.ZodType): string[][] {
 			next(def.out);
 		} else if (def.type === "object") {
 			for (const [key, child] of Object.entries(def.shape ?? {})) next(child, [...path, key]);
+			if (def.catchall) next(def.catchall, [...path, "*"]);
 		} else if (def.type === "record") next(def.valueType, [...path, "*"]);
 		else if (def.type === "array") next(def.element, [...path, "*"]);
-		else if (def.type === "tuple") for (const item of def.items ?? []) next(item, [...path, "*"]);
+		else if (def.type === "tuple") {
+			for (const item of def.items ?? []) next(item, [...path, "*"]);
+			if (def.rest) next(def.rest, [...path, "*"]);
+		}
 		else if (def.type === "union") for (const option of def.options ?? []) next(option);
 		else if (def.type === "intersection") {
 			next(def.left);
@@ -409,6 +416,23 @@ describe("every module with a section refuses an unknown key in it", () => {
 		} as unknown as Module;
 		expect(defaultProblems([...modules, probe])).toEqual([
 			"default-probe.list.*.on: the section schema fills a default; reference.conf holds it",
+		]);
+	});
+
+	it("finds a default under an object's catchall or a tuple's rest", () => {
+		const probe = {
+			name: "default-probe",
+			section: {
+				schema: z
+					.object({
+						pair: z.tuple([z.string()]).rest(z.number().default(1)),
+					})
+					.catchall(z.string().default("x")),
+			},
+		} as unknown as Module;
+		expect(defaultProblems([...modules, probe])).toEqual([
+			"default-probe.*: the section schema fills a default; reference.conf holds it",
+			"default-probe.pair.*: the section schema fills a default; reference.conf holds it",
 		]);
 	});
 });
