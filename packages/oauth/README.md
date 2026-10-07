@@ -634,6 +634,8 @@ On every success shape — and on the no-op answer for a session that is already
 
 Provider-scoped federation disconnect. Authorization: `Bearer <access_token>` with `typ: at+jwt`. Optional body: `post_logout_redirect_uri`, `state`.
 
+An access token that names its client (`azp`) must be issued for that client itself: its `aud` contains that id, or the request is `401 invalid_token` and nothing is disconnected. A token that names no client has no audience to check.
+
 Flow: verifies the access token → checks its family is not revoked → reads from core's session lifecycle whether the session is live (`sessionLifecycle.liveness`; a session not live, or another subject's, is `401 invalid_token`) and which federations it joined (`sessionLifecycle.federations`) → verifies the federation joined it → holds `post_logout_redirect_uri` to the client's list → deletes the federation token → if the provider implements `SupportsLogout`, redirects to the IdP end-session URL; otherwise returns `200 {"disconnected": true}`.
 
 The federation stays listed as having joined the session: the lifecycle keeps who joined until the session closes. Readers acting on its tokens skip a federation that has none — the federation-token route answers it `404 federation_not_linked` — and the session's close may end it upstream again, which is idempotent.
@@ -673,6 +675,7 @@ The fields are defined on core's `Client` record ([`repositories/types.mts`](../
 
 - A Bearer access token minted by this auth.provider instance (`typ: at+jwt`).
 - The token's `azp` claim identifies the client; the client record MUST opt in via `allowedAzpForFederationToken: true` (see below).
+- The access token presented must be issued for the calling client itself: its `aud` contains the id its `azp` names. Any other token, one issued for a resource server (RFC 8707) included, is `401 invalid_token`.
 
 ### Flow
 

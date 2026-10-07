@@ -49,6 +49,7 @@ import {
 	usableFrontchannelRP,
 } from "../logout/frontchannelLogoutUri.mjs";
 import { renderFrontchannelLogoutPage } from "../logout/renderFrontchannel.mjs";
+import { ownAccessTokenPins } from "../ownAccessToken.mjs";
 import { refuseVerificationUnavailable } from "../verificationUnavailable.mjs";
 
 type ExpressLike = {
@@ -389,13 +390,16 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 
 			// Step 2: alg / iss / typ and signature, pinned by the verifier. typ
 			// must be at+jwt: refresh and id tokens share the KeyStore, so typ is
-			// the only defense against cross-type acceptance. Audience is not
-			// checked (logged as `jwt_verify_aud_skipped`).
+			// the only defense against cross-type acceptance. A token that names
+			// its client (`azp`) must have been issued for that client itself, its
+			// `aud` containing that id. One that names none has no client to pin
+			// to: its audience is not checked (logged as `jwt_verify_aud_skipped`).
 			let payload: Record<string, unknown>;
 			try {
 				const verified = await verifyJwt(token, opts.keyStore, {
 					type: "access_token",
 					expectedIssuer: opts.issuer ?? "",
+					...ownAccessTokenPins(token),
 					// No revocation check, deliberately: logout only destroys the
 					// session the token names, which is safe for a revoked token and
 					// what a user does right after a credential-change cascade.

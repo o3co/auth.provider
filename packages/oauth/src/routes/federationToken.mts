@@ -188,8 +188,9 @@ const MAX_MAX_TOKEN_LIFETIME_MS = MAX_MAX_TOKEN_LIFETIME_DAYS * 86_400_000;
 /**
  * POST /federation/:name/token — the federation token proxy. Returns the
  * user's upstream federation access token to an opted-in client: the caller
- * presents a valid at+jwt access token, and the client named by its `azp`
- * must have `allowedAzpForFederationToken: true`.
+ * presents a valid at+jwt access token issued for the client named by its
+ * `azp` (its `aud` contains that id), and that client must have
+ * `allowedAzpForFederationToken: true`.
  *
  * Mounted under /oauth → POST /oauth/federation/:name/token.
  */

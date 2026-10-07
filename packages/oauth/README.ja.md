@@ -626,6 +626,8 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 
 プロバイダー単位のフェデレーション切断。Authorization に `typ: at+jwt` の `Bearer <access_token>`。ボディ（任意）: `post_logout_redirect_uri`、`state`。
 
+クライアントを名指す（`azp` を持つ）アクセストークンは、そのクライアント自身に発行されたものでなければならない: その `aud` がその ID を含まなければ、リクエストは `401 invalid_token` になり、何も切断しない。クライアントを名指さないトークンには、確かめる audience が無い。
+
 フロー: アクセストークンを検証 → そのファミリーが失効していないか確認 → core のセッションライフサイクルから、セッションが live か（`sessionLifecycle.liveness`。live でない、または別のサブジェクトのセッションなら `401 invalid_token`）と、どのフェデレーションが参加したか（`sessionLifecycle.federations`）を読む → フェデレーションが参加していることを確認 → `post_logout_redirect_uri` をクライアントのリストと照合 → フェデレーショントークンを削除 → プロバイダーが `SupportsLogout` を実装していれば IdP の end-session URL へリダイレクト。そうでなければ `200 {"disconnected": true}` を返す。
 
 フェデレーションは、セッションに参加したものとして一覧に残る: ライフサイクルはセッションが終了するまで誰が参加したかを保つ。そのトークンに基づいて動く読み手はトークンの無いフェデレーションを飛ばし — フェデレーショントークンのルートは `404 federation_not_linked` と答える — セッションの終了がそれを上流でもう一度終了させることがあるが、それは冪等である。
@@ -667,6 +669,7 @@ IdP の end-session 呼び出しが例外を投げた場合、ローカルの状
 
 - この auth.provider インスタンスが発行した Bearer アクセストークン（`typ: at+jwt`）。
 - トークンの `azp` クレームがクライアントを特定する。クライアントレコードは `allowedAzpForFederationToken: true` で明示的にオプトインしなければならない（下記参照）。
+- 提示するアクセストークンは、呼び出し元クライアント自身に発行されたものでなければならない: その `aud` が、`azp` の名指す ID を含む。それ以外のトークンは、リソースサーバー向けに発行されたもの（RFC 8707）も含め `401 invalid_token` になる。
 
 ### フロー
 

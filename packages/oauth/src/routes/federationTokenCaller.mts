@@ -16,9 +16,9 @@
 
 /**
  * Who is calling: the access token in the Authorization header, verified as
- * this issuer's `at+jwt`, and the claims the route acts on. Every refusal is
- * `401 invalid_token` with its challenge, but a keystore or revocation-store
- * outage, which is `503`.
+ * this issuer's `at+jwt` issued for the client its `azp` names, and the
+ * claims the route acts on. Every refusal is `401 invalid_token` with its
+ * challenge, but a keystore or revocation-store outage, which is `503`.
  */
 
 import {
@@ -28,6 +28,7 @@ import {
 	verifyJwt,
 } from "@o3co/auth-provider-core";
 import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
+import { ownAccessTokenPins } from "../ownAccessToken.mjs";
 import { refuseVerificationUnavailable } from "../verificationUnavailable.mjs";
 import type { FederationTokenCaller, FederationTokenContext } from "./federationTokenContext.mjs";
 
@@ -54,13 +55,16 @@ export const identifyCaller = async (
 	}
 
 	// Steps 2 + 3: alg / iss / typ (at+jwt) and signature, pinned by the
-	// verifier. Audience is not checked: the calling client is not
-	// separately authenticated (logged as `jwt_verify_aud_skipped`).
+	// verifier, and the token's client: the caller is the client named by
+	// its `azp`, and the token must be one it obtained for itself, its `aud`
+	// containing that id. A token that names no client is pinned to an
+	// audience nothing matches, so it is refused as any other.
 	let payload: Record<string, unknown>;
 	try {
 		const verified = await verifyJwt(token, opts.keyStore, {
 			type: "access_token",
 			expectedIssuer: opts.issuer ?? "",
+			...(ownAccessTokenPins(token) ?? { expectedAudience: [] }),
 			// A token-accepting surface: forward both the jti denylist and the
 			// subject watermark.
 			revocation: {
@@ -97,7 +101,8 @@ export const identifyCaller = async (
 		return null;
 	}
 
-	// Step 4: Extract family_id, sid, azp from payload.
+	// Step 4: Extract family_id, sid, azp from payload. `azp` is the one the
+	// verifier pinned; a token naming none was refused there.
 	const familyId = typeof payload.family_id === "string" ? payload.family_id : null;
 	const sid = typeof payload.sid === "string" ? payload.sid : null;
 	const azp = typeof payload.azp === "string" ? payload.azp : null;

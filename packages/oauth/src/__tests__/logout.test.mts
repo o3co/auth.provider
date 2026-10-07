@@ -2292,10 +2292,15 @@ describe("POST /oauth/federation/:name/logout", () => {
 		it("is none when the token's client has not registered it", async () => {
 			const { app, endSession } = buildWithUpstream();
 
-			const res = await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1" }), {
-				post_logout_redirect_uri: "https://evil.example/landing",
-				state: "s-1",
-			});
+			const res = await postFedLogout(
+				app,
+				"google",
+				await mintAccessToken({ azp: "client-1", aud: "client-1" }),
+				{
+					post_logout_redirect_uri: "https://evil.example/landing",
+					state: "s-1",
+				},
+			);
 
 			expect(res.status).toBe(303);
 			expect(endSession).toHaveBeenCalledOnce();
@@ -2309,9 +2314,14 @@ describe("POST /oauth/federation/:name/logout", () => {
 				clientRepo: makeClientRepo({ findById: vi.fn().mockResolvedValue(null) }),
 			});
 
-			const res = await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1" }), {
-				post_logout_redirect_uri: REGISTERED,
-			});
+			const res = await postFedLogout(
+				app,
+				"google",
+				await mintAccessToken({ azp: "client-1", aud: "client-1" }),
+				{
+					post_logout_redirect_uri: REGISTERED,
+				},
+			);
 
 			expect(res.status).toBe(303);
 			expect(endSession).toHaveBeenCalledWith(
@@ -2323,7 +2333,11 @@ describe("POST /oauth/federation/:name/logout", () => {
 			const findById = vi.fn().mockRejectedValue(storeReplyError());
 			const { app, endSession } = buildWithUpstream({ clientRepo: makeClientRepo({ findById }) });
 
-			const res = await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1" }));
+			const res = await postFedLogout(
+				app,
+				"google",
+				await mintAccessToken({ azp: "client-1", aud: "client-1" }),
+			);
 
 			expect(res.status).toBe(303);
 			expect(findById).not.toHaveBeenCalled();
@@ -2349,10 +2363,15 @@ describe("POST /oauth/federation/:name/logout", () => {
 		it("is the registered one when it matches exactly", async () => {
 			const { app, endSession } = buildWithUpstream();
 
-			await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1" }), {
-				post_logout_redirect_uri: REGISTERED,
-				state: "s-1",
-			});
+			await postFedLogout(
+				app,
+				"google",
+				await mintAccessToken({ azp: "client-1", aud: "client-1" }),
+				{
+					post_logout_redirect_uri: REGISTERED,
+					state: "s-1",
+				},
+			);
 
 			expect(endSession).toHaveBeenCalledWith(
 				expect.objectContaining({ postLogoutRedirectUri: REGISTERED, state: "s-1" }),
@@ -2366,9 +2385,14 @@ describe("POST /oauth/federation/:name/logout", () => {
 				logger,
 			});
 
-			const res = await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1" }), {
-				post_logout_redirect_uri: REGISTERED,
-			});
+			const res = await postFedLogout(
+				app,
+				"google",
+				await mintAccessToken({ azp: "client-1", aud: "client-1" }),
+				{
+					post_logout_redirect_uri: REGISTERED,
+				},
+			);
 
 			expect(res.status).toBe(303);
 			expect(res.headers.location).toBe("https://accounts.google.com/Logout");
@@ -2409,9 +2433,14 @@ describe("POST /oauth/federation/:name/logout", () => {
 					logger,
 				});
 
-				const res = await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1" }), {
-					post_logout_redirect_uri: entry,
-				});
+				const res = await postFedLogout(
+					app,
+					"google",
+					await mintAccessToken({ azp: "client-1", aud: "client-1" }),
+					{
+						post_logout_redirect_uri: entry,
+					},
+				);
 
 				expect(res.status).toBe(303);
 				expect(res.headers.location).toBe("https://accounts.google.com/Logout");
@@ -2438,6 +2467,99 @@ describe("POST /oauth/federation/:name/logout", () => {
 			const res = await request(app)
 				.post("/oauth/federation/google/logout")
 				.set("Authorization", `Bearer ${await mintAccessToken()}`);
+
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ disconnected: true });
+		});
+	});
+
+	// A token that names its client (`azp`) must have been issued for that
+	// client itself: its `aud` must contain the same id.
+	describe("the audience of a token that names its client", () => {
+		const RESOURCE = "https://rs.example/api";
+
+		it("refuses a token issued for a resource server, and disconnects nothing", async () => {
+			const fedTokenStore = makeFedTokenStore({ delete: vi.fn().mockResolvedValue(undefined) });
+			const logger = createMockLogger();
+			const app = buildFedLogoutApp({ fedTokenStore, logger });
+
+			const res = await postFedLogout(
+				app,
+				"google",
+				await mintAccessToken({ azp: "client-1", aud: RESOURCE }),
+			);
+
+			expect(res.status).toBe(401);
+			expect(res.body).toEqual({ error: "invalid_token", error_description: "invalid token" });
+			expect(res.headers["www-authenticate"]).toBe(
+				'Bearer error="invalid_token", error_description="invalid token"',
+			);
+			expect(fedTokenStore.get).not.toHaveBeenCalled();
+			expect(fedTokenStore.delete).not.toHaveBeenCalled();
+			expect(logger.warn).toHaveBeenCalledWith(
+				{ federation: "google", reason: "aud" },
+				"federation_logout_jwt_verify_failed",
+			);
+		});
+
+		it("refuses a token that names its client and no audience", async () => {
+			const app = buildFedLogoutApp();
+
+			const res = await postFedLogout(
+				app,
+				"google",
+				await mintAccessToken({ azp: "client-1", aud: undefined }),
+			);
+
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_token");
+		});
+
+		it("disconnects with a token whose audience is its own client", async () => {
+			const app = buildFedLogoutApp();
+
+			const res = await postFedLogout(
+				app,
+				"google",
+				await mintAccessToken({ azp: "client-1", aud: "client-1" }),
+			);
+
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ disconnected: true });
+		});
+
+		it("disconnects with a token whose several audiences include its own client", async () => {
+			const app = buildFedLogoutApp();
+
+			const res = await postFedLogout(
+				app,
+				"google",
+				await mintAccessToken({ azp: "client-1", aud: [RESOURCE, "client-1"] }),
+			);
+
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ disconnected: true });
+		});
+
+		it("checks the audience, so the verifier logs no jwt_verify_aud_skipped", async () => {
+			for (const aud of ["client-1", RESOURCE]) {
+				// A fresh logger each time: the verifier logs the gap once per logger.
+				const logger = createMockLogger();
+				const app = buildFedLogoutApp({ logger });
+
+				await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1", aud }));
+
+				const events = [...logger.warn.mock.calls, ...logger.info.mock.calls].map(
+					([, event]) => event,
+				);
+				expect(events, aud).not.toContain("jwt_verify_aud_skipped");
+			}
+		});
+
+		it("still disconnects with a token that names no client, its audience unchecked", async () => {
+			const app = buildFedLogoutApp();
+
+			const res = await postFedLogout(app, "google", await mintAccessToken({ aud: RESOURCE }));
 
 			expect(res.status).toBe(200);
 			expect(res.body).toEqual({ disconnected: true });

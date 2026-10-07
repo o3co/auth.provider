@@ -77,12 +77,16 @@ const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
 const secretKey = createSecretKey(Buffer.from(SECRET));
 
-/** Mint an at+jwt access token with the given extra claims. */
+/**
+ * Mint an at+jwt access token with the given extra claims: by default one
+ * `client-1` obtained for itself (`aud` and `azp` both name it).
+ */
 async function mintAccessToken(extra: Record<string, unknown> = {}): Promise<string> {
 	return new SignJWT({
 		sub: "u-1",
 		sid: "sid-1",
 		azp: "client-1",
+		aud: "client-1",
 		family_id: "fam-1",
 		...extra,
 	})
@@ -444,7 +448,102 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(401);
 			expect(res.body.error).toBe("invalid_token");
-			expect(res.body.error_description).toMatch(/azp/);
+		});
+	});
+
+	// The calling client is the token's `azp`; the token must have been issued
+	// for that client itself, so its `aud` must contain the same id.
+	describe("the token's audience must contain its own client", () => {
+		const RESOURCE = "https://rs.example/api";
+
+		it("refuses a token issued for a resource server to an opted-in client", async () => {
+			const clientRepo = makeClientRepo();
+			const fedTokenStore = makeFedTokenStore();
+			const logger = createMockLogger();
+			const app = buildApp({ clientRepo, fedTokenStore, logger });
+
+			const res = await postFedToken(app, "google", await mintAccessToken({ aud: RESOURCE }));
+
+			expect(res.status).toBe(401);
+			expect(res.body).toEqual({ error: "invalid_token", error_description: "invalid token" });
+			expect(res.headers["www-authenticate"]).toBe(
+				'Bearer error="invalid_token", error_description="invalid token"',
+			);
+			expect(res.body).not.toHaveProperty("access_token");
+			expect(fedTokenStore.get).not.toHaveBeenCalled();
+			expect(clientRepo.findById).not.toHaveBeenCalled();
+			expect(logger.warn).toHaveBeenCalledWith(
+				{ federation: "google", reason: "aud" },
+				"federation_token_jwt_verify_failed",
+			);
+		});
+
+		it("refuses a token with several audiences none of which is its client", async () => {
+			const app = buildApp();
+
+			const res = await postFedToken(
+				app,
+				"google",
+				await mintAccessToken({ aud: [RESOURCE, "client-2"] }),
+			);
+
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_token");
+		});
+
+		it("refuses a token that names no audience", async () => {
+			const app = buildApp();
+
+			const res = await postFedToken(app, "google", await mintAccessToken({ aud: undefined }));
+
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_token");
+		});
+
+		it("refuses a token whose audience is another opted-in client", async () => {
+			const app = buildApp();
+
+			const res = await postFedToken(app, "google", await mintAccessToken({ aud: "client-2" }));
+
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_token");
+		});
+
+		it("serves a token whose audience is its own client", async () => {
+			const app = buildApp();
+
+			const res = await postFedToken(app, "google", await mintAccessToken({ aud: "client-1" }));
+
+			expect(res.status).toBe(200);
+			expect(res.body.access_token).toBe("upstream-at-xyz");
+		});
+
+		it("serves a token whose several audiences include its own client", async () => {
+			const app = buildApp();
+
+			const res = await postFedToken(
+				app,
+				"google",
+				await mintAccessToken({ aud: [RESOURCE, "client-1"] }),
+			);
+
+			expect(res.status).toBe(200);
+			expect(res.body.access_token).toBe("upstream-at-xyz");
+		});
+
+		it("checks the audience, so the verifier logs no jwt_verify_aud_skipped", async () => {
+			for (const aud of ["client-1", RESOURCE]) {
+				// A fresh logger each time: the verifier logs the gap once per logger.
+				const logger = createMockLogger();
+				const app = buildApp({ logger });
+
+				await postFedToken(app, "google", await mintAccessToken({ aud }));
+
+				const events = [...logger.warn.mock.calls, ...logger.info.mock.calls].map(
+					([, event]) => event,
+				);
+				expect(events, aud).not.toContain("jwt_verify_aud_skipped");
+			}
 		});
 	});
 

@@ -938,6 +938,25 @@ The boot refusals you can meet, with their messages, are in
   that lands during that read is answered `404 federation_not_linked`. A
   relink is answered as a record rewritten meanwhile: the new record if it is
   not due, else `503`.
+- **BREAKING: the federation token and federation logout routes accept only
+  a token the client obtained for itself.** On
+  `POST /oauth/federation/:name/token`, the access token's `aud` (a string or
+  an array) must contain the client id its `azp` names; a token issued for
+  another audience — a resource server's, from an authorization that named a
+  `resource` (RFC 8707) — is `401 invalid_token` / `invalid token`, logged at
+  warn as `federation_token_jwt_verify_failed` with `reason: "aud"`. A token
+  with no `azp` is answered the same way (it used to be
+  `missing azp claim`). `POST /oauth/federation/:name/logout` applies the
+  same rule to a token that names its client
+  (`federation_logout_jwt_verify_failed`), and still accepts one that names
+  none. Neither route logs `jwt_verify_aud_skipped` any longer for a token
+  that names its client. A code exchange that named no `resource` issues
+  for the client id, and keeps working. **What to do:** a client that calls
+  either route with a token whose `aud` is a resource server obtains one for
+  itself, from an authorization that names no `resource`. A refresh keeps
+  the audience of the token it presents, so a grant made for a resource
+  server cannot be refreshed into one; the user authorizes again. See the
+  [oauth README](../packages/oauth/README.md#authentication).
 - **Token binding (#858).** Under `core.tokenBinding.dispatchPolicy =
   "intent-explicit"`, the v0.16.0 default, two mechanisms that both succeed
   at the deciding tier make a `/oauth/token` request `400 invalid_request`,
