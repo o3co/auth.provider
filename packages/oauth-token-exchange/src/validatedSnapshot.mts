@@ -29,9 +29,22 @@
  * every own enumerable key. So the copy holds every member a stage can read
  * off the answer, and is never looser than it. Where a stage reads a record
  * (the answer, `claims`, `cnf`, a `may_act` entry, `act`), an array is no
- * answer: an array's named members would not be copied. A `may_act` entry
- * reporting neither `sub` nor `iss` to `in`, which delegation therefore
- * matches with nothing, is copied as a value that matches nothing.
+ * answer: an array's named members would not be copied. The copy holds plain
+ * data only — strings, finite numbers, booleans, `null`, and arrays and
+ * records of them — and a function (a `toJSON` included), a symbol, a bigint
+ * or a number that is not finite in any copied position is no answer, so
+ * nothing in the copy runs code when it is read or serialised.
+ *
+ * `in` is asked once per object and member, and that one answer serves every
+ * use. Actor matching in delegation tests a `may_act` entry's `sub` and `iss`
+ * with `in`, while client matching reads `sub` by value; an entry reporting
+ * neither to `in` is copied as a value that matches nothing. That is
+ * conservative: it may refuse a client the entry's `sub` would have matched,
+ * and never permits what the entry would refuse.
+ *
+ * A validator's answer is expected to be plain data. Of an answer whose
+ * shape changes as it is read, the copy is the first read, and no more is
+ * promised.
  *
  * Every member of an object is read at most once, however many paths reach
  * the object (an alias, a cycle): the reads are kept per object, and a copy
@@ -103,14 +116,18 @@ const ANSWER: Reads = {
 const authentications = new WeakMap<ValidatedToken, VerifiedAuthentication>();
 
 /**
- * The copy of a `may_act` entry that reports neither `sub` nor `iss`: not a
- * record, so delegation matches no actor or client against it, as it matches
- * none against the entry.
+ * The copy of a `may_act` entry that reports neither `sub` nor `iss` to `in`:
+ * not a record, so delegation matches no actor or client against it. Actor
+ * matching matches no actor against the entry either; client matching, which
+ * reads `sub` by value, might have, so this is the conservative answer.
  */
 const MATCHES_NOTHING: readonly never[] = Object.freeze([]);
 
-/** Thrown inside a copy where a record position holds an array: the answer is no answer. */
-class NotARecord extends Error {}
+/**
+ * Thrown inside a copy where the answer is no answer: an array where a record
+ * is read, or a value that is not plain data.
+ */
+class NotAnAnswer extends Error {}
 
 /**
  * Whether `answer` has the shape of an answer — a record (an object that is
@@ -133,7 +150,7 @@ export function snapshotValidated(answer: unknown): ValidatedToken | null {
 	try {
 		snapshot = reader.copy(answer, ANSWER) as ValidatedToken;
 	} catch (err) {
-		if (err instanceof NotARecord) return null;
+		if (err instanceof NotAnAnswer) return null;
 		throw err;
 	}
 	const authentication = verifiedAuthenticationOf(answer);
@@ -165,6 +182,7 @@ function isRecord(value: unknown): value is object {
 class Reader {
 	private readonly values = new Map<object, Map<string, unknown>>();
 	private readonly keys = new Map<object, readonly string[]>();
+	private readonly presence = new Map<object, Map<string, boolean>>();
 	private readonly copies = new Map<object, Map<Reads, unknown>>();
 
 	/** `source[key]`, read on the first call alone. */
@@ -180,10 +198,42 @@ class Reader {
 		return value;
 	}
 
-	/** `value` as a plain, frozen copy holding what `reads` names. */
+	/** Whether `key in source`, asked on the first call alone. */
+	has(source: object, key: string): boolean {
+		let presence = this.presence.get(source);
+		if (presence === undefined) {
+			presence = new Map();
+			this.presence.set(source, presence);
+		}
+		const known = presence.get(key);
+		if (known !== undefined) return known;
+		const present = key in source;
+		presence.set(key, present);
+		return present;
+	}
+
+	/**
+	 * `value` as a plain, frozen copy holding what `reads` names; throws
+	 * {@link NotAnAnswer} for a value that is not plain data — strings, finite
+	 * numbers, booleans, `null`, and arrays and records of them — or an array
+	 * where `reads` is a record.
+	 */
 	copy(value: unknown, reads: Reads): unknown {
-		if (typeof value !== "object" || value === null) return value;
-		if (reads.record && Array.isArray(value)) throw new NotARecord();
+		if (value === undefined || value === null) return value;
+		switch (typeof value) {
+			case "string":
+			case "boolean":
+				return value;
+			case "number":
+				if (!Number.isFinite(value)) throw new NotAnAnswer();
+				return value;
+			case "object":
+				break;
+			default:
+				// A function (a `toJSON` included), a symbol or a bigint is not data.
+				throw new NotAnAnswer();
+		}
+		if (reads.record && Array.isArray(value)) throw new NotAnAnswer();
 		let byReads = this.copies.get(value);
 		if (byReads === undefined) {
 			byReads = new Map();
@@ -199,9 +249,9 @@ class Reader {
 			}
 			return Object.freeze(out);
 		}
-		if (reads.presence && reads.names.every((name) => !(name in value))) {
-			// Its reader finds none of the members it tests with `in`, so the record
-			// matches nothing, whatever a read by name answers: so does the copy.
+		if (reads.presence && reads.names.every((name) => !this.has(value, name))) {
+			// Actor matching finds none of the members it tests with `in`, so the
+			// record matches no actor; the copy matches nothing at all.
 			byReads.set(reads, MATCHES_NOTHING);
 			return MATCHES_NOTHING;
 		}
@@ -211,7 +261,7 @@ class Reader {
 		for (const name of reads.names) {
 			// Read whether or not `in` reports it: a stage reading the member by name
 			// sees what this read sees.
-			if (name in value || this.read(value, name) !== undefined) names.add(name);
+			if (this.has(value, name) || this.read(value, name) !== undefined) names.add(name);
 		}
 		for (const name of names) {
 			define(
