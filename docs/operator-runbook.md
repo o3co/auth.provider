@@ -783,8 +783,9 @@ subject-revocation boundary covers, so a user whose sessions were revoked
 signs in again before linking; `403 step_up_required` (with `requirement` and
 the requirement's `page`) when a registered session requirement asks for a
 step-up first — the MFA module does, under `mfa.mode` `optional` and
-`required` alike, unless a second factor was verified in the session within
-`mfa.manage.maxAgeSeconds`; for an account that holds no counting factor it
+`required` alike, unless a second factor was verified within
+`mfa.manage.maxAgeSeconds` in a session that holds `mfa` (an email code adds
+none unless `MFA_EMAIL_FACTOR_ADDS_MFA=true`); for an account that holds no counting factor it
 asks for a sign-in that recent instead, and answers an older one
 `401 login_required` — and, as the account's first binding, the
 account-email proof given in that session where the first-binding gate asks
@@ -813,7 +814,10 @@ it, so a replica whose clock runs ahead stretches recent MFA by its lead.
 A user who holds a counting factor and is answered `403 step_up_required`
 steps up on the MFA page — `POST /session/mfa/step-up`, then one of their
 factors verified on its transaction — which records recent MFA on the
-session; the start is then admitted. Where no second factor can be recorded
+session when the factor adds `mfa` or the session holds it already; the
+start is then admitted. A user whose only counting factor is the email factor
+without `MFA_EMAIL_FACTOR_ADDS_MFA` steps up with a recovery code; one without
+codes left needs the operator reset, then a first binding. Where no second factor can be recorded
 on the session, the user signs in again instead: session admission says so
 (`SessionView.secondFactorRecordable`) when the session store cannot record a
 step-up, and when the session's record is not in a shape one can be recorded
@@ -1055,7 +1059,10 @@ ADR's D5, D21, D24).
   `MFA_EMAIL_FACTOR_ENABLED=true` beside a mail sender. It mails a six-digit
   code at each challenge and a long code to enroll, each living
   `MFA_EMAIL_FACTOR_CODE_TTL_SECONDS` (600), capped at the transaction's
-  life. It counts, and adds `mfa` only with `MFA_EMAIL_FACTOR_ADDS_MFA=true`.
+  life. It counts, and adds `mfa` only with `MFA_EMAIL_FACTOR_ADDS_MFA=true`;
+  without it, a session signed in with an email code has no recent MFA for
+  linking an identity, registering a passkey or changing its factors and
+  recovery codes, and is stepped up to a factor that adds `mfa`.
   The factor keeps no address: only a keyed
   digest of the one its enrollment code went to. A login code goes to the
   account's current address only while that digest matches, so **a change of

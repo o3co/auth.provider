@@ -17,10 +17,10 @@
 /**
  * `isRecentMfa`, the one reading of recent MFA (ADR
  * 2026-09-25-multi-factor-authentication, D16 and F4): a second factor
- * verified in the session within `mfa.manage.maxAgeSeconds`, a time up to
- * `DEFAULT_CLOCK_SKEW_MS` ahead read as now and one further ahead as not
- * recent; for a subject with no counting factor, a primary that recent
- * instead.
+ * verified in the session within `mfa.manage.maxAgeSeconds`, in a session
+ * whose vouched `amr` holds `mfa`, a time up to `DEFAULT_CLOCK_SKEW_MS` ahead
+ * read as now and one further ahead as not recent; for a subject with no
+ * counting factor, a primary that recent instead.
  */
 
 import { DEFAULT_CLOCK_SKEW_MS } from "@o3co/auth-provider-core";
@@ -34,11 +34,21 @@ const msAhead = (ms: number): Date => new Date(NOW + ms);
 
 /** Recent MFA for a subject that holds a counting factor, over a primary as old as the window allows twice over. */
 const withFactor = (mfaAt: Date | undefined, authTime: Date = secondsAgo(2 * WINDOW_SECONDS)) =>
-	isRecentMfa({ authTime, mfaAt }, { holdsCountingFactor: true }, WINDOW_SECONDS, NOW);
+	isRecentMfa(
+		{ authTime, mfaAt, holdsMfa: true },
+		{ holdsCountingFactor: true },
+		WINDOW_SECONDS,
+		NOW,
+	);
 
 /** Recent MFA for a subject that holds no counting factor. */
 const withoutFactor = (authTime: Date, mfaAt?: Date) =>
-	isRecentMfa({ authTime, mfaAt }, { holdsCountingFactor: false }, WINDOW_SECONDS, NOW);
+	isRecentMfa(
+		{ authTime, mfaAt, holdsMfa: true },
+		{ holdsCountingFactor: false },
+		WINDOW_SECONDS,
+		NOW,
+	);
 
 describe("isRecentMfa — a second factor verified in the session", () => {
 	it("is recent inside the window", () => {
@@ -79,7 +89,7 @@ describe("isRecentMfa — a second factor verified in the session", () => {
 		const at = secondsAgo(1_800);
 		const within = (maxAgeSeconds: number) =>
 			isRecentMfa(
-				{ authTime: secondsAgo(7_200), mfaAt: at },
+				{ authTime: secondsAgo(7_200), mfaAt: at, holdsMfa: true },
 				{ holdsCountingFactor: true },
 				maxAgeSeconds,
 				NOW,
@@ -90,7 +100,7 @@ describe("isRecentMfa — a second factor verified in the session", () => {
 
 	it("is not recent when the clock it is asked at is not a finite time", () => {
 		for (const nowMs of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
-			const recent = { authTime: new Date(NOW), mfaAt: new Date(NOW) };
+			const recent = { authTime: new Date(NOW), mfaAt: new Date(NOW), holdsMfa: true };
 			expect(isRecentMfa(recent, { holdsCountingFactor: true }, WINDOW_SECONDS, nowMs)).toBe(false);
 			expect(isRecentMfa(recent, { holdsCountingFactor: false }, WINDOW_SECONDS, nowMs)).toBe(
 				false,
@@ -100,10 +110,41 @@ describe("isRecentMfa — a second factor verified in the session", () => {
 
 	it("is not recent under a window that is not a finite number of seconds", () => {
 		for (const maxAgeSeconds of [Number.NaN, Number.POSITIVE_INFINITY]) {
-			const recent = { authTime: secondsAgo(1), mfaAt: secondsAgo(1) };
+			const recent = { authTime: secondsAgo(1), mfaAt: secondsAgo(1), holdsMfa: true };
 			expect(isRecentMfa(recent, { holdsCountingFactor: true }, maxAgeSeconds, NOW)).toBe(false);
 			expect(isRecentMfa(recent, { holdsCountingFactor: false }, maxAgeSeconds, NOW)).toBe(false);
 		}
+	});
+});
+
+describe("isRecentMfa — a second factor counts only in a session that holds mfa", () => {
+	/** Recent MFA for a subject that holds a counting factor, over a session that holds `mfa` or not. */
+	const vouched = (holdsMfa: boolean, mfaAt: Date | undefined = secondsAgo(60)) =>
+		isRecentMfa(
+			{ authTime: secondsAgo(2 * WINDOW_SECONDS), mfaAt, holdsMfa },
+			{ holdsCountingFactor: true },
+			WINDOW_SECONDS,
+			NOW,
+		);
+
+	it("is not recent after a second factor inside the window in a session without mfa: an email code's", () => {
+		expect(vouched(false)).toBe(false);
+		expect(vouched(false, new Date(NOW))).toBe(false);
+	});
+
+	it("is recent after the same second factor in a session that holds mfa", () => {
+		expect(vouched(true)).toBe(true);
+	});
+
+	it("still stands a recent primary in for a subject who holds no counting factor, in a session without mfa", () => {
+		expect(
+			isRecentMfa(
+				{ authTime: secondsAgo(60), mfaAt: undefined, holdsMfa: false },
+				{ holdsCountingFactor: false },
+				WINDOW_SECONDS,
+				NOW,
+			),
+		).toBe(true);
 	});
 });
 
