@@ -15,6 +15,8 @@
  */
 
 import { createSecretKey } from "node:crypto";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import {
 	type AuditEvent,
 	type AuditSink,
@@ -45,8 +47,10 @@ import {
 	coreConfigForTests,
 	createTestApp,
 	createTestLoginEntry,
+	createTestOutboundPolicy,
 	federationTypeForTests,
 	type makeValidAppConfig,
+	type OutboundSectionForTests,
 } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { exportPKCS8, exportSPKI, generateKeyPair, SignJWT } from "jose";
@@ -1179,6 +1183,7 @@ describe("oauthEndpointsModule — the session-close notifier", () => {
 		const notifier = await factories?.oauth?.({
 			keyStore: createSymmetricKeyStore("test-secret-32-chars-xxxxxxxxxx"),
 			clientRepository: { findById: async () => null },
+			outboundPolicy: createTestOutboundPolicy(),
 			section: {
 				jwt: { issuer: "https://auth.test" },
 				accessToken: { defaultExpiresIn: 3600, maxExpiresIn: 3600 },
@@ -1190,6 +1195,70 @@ describe("oauthEndpointsModule — the session-close notifier", () => {
 		await expect(
 			notifier?.notify({ sid: "s", sub: "u", clientId: "gone", cause: "rp_logout" }),
 		).resolves.toBeUndefined();
+	});
+
+	describe("posts under core's outboundPolicy slot", () => {
+		/** The contributed notifier over one relying party at `uri`, under `outbound`. */
+		const contributed = async (uri: string, outbound: OutboundSectionForTests = {}) =>
+			oauthEndpointsModule.contributes?.sessionCloseNotifiers?.oauth?.({
+				keyStore: createSymmetricKeyStore("test-secret-32-chars-xxxxxxxxxx"),
+				clientRepository: {
+					findById: async (id: string) =>
+						id === "rp" ? { clientId: "rp", backchannelLogoutUri: uri } : null,
+				},
+				outboundPolicy: createTestOutboundPolicy(outbound),
+				section: {
+					jwt: { issuer: "https://auth.test" },
+					accessToken: { defaultExpiresIn: 3600, maxExpiresIn: 3600 },
+					refreshToken: { expiresIn: 86_400 },
+				},
+				logger: createMockLogger(),
+			} as never);
+
+		const withPeer = async (run: (origin: string, hits: string[]) => Promise<void>) => {
+			const hits: string[] = [];
+			const peer = createServer((req, res) => {
+				hits.push(req.url ?? "");
+				req.resume();
+				res.writeHead(200);
+				res.end();
+			});
+			await new Promise<void>((resolve) => peer.listen(0, "127.0.0.1", resolve));
+			try {
+				await run(`http://127.0.0.1:${(peer.address() as AddressInfo).port}`, hits);
+			} finally {
+				await new Promise<void>((resolve) => peer.close(() => resolve()));
+			}
+		};
+
+		const notice = { sid: "s", sub: "u", clientId: "rp", cause: "rp_logout" } as const;
+
+		it("never contacts a loopback relying party the policy does not list", async () => {
+			await withPeer(async (origin, hits) => {
+				const notifier = await contributed(`${origin}/bc`);
+				await expect(notifier?.notify(notice)).resolves.toBeUndefined();
+				expect(hits).toEqual([]);
+			});
+		});
+
+		it("posts to one core.outbound.internalHosts lists", async () => {
+			await withPeer(async (origin, hits) => {
+				const notifier = await contributed(`${origin}/bc`, { internalHosts: ["127.0.0.1"] });
+				await expect(notifier?.notify(notice)).resolves.toBeUndefined();
+				expect(hits).toEqual(["/bc"]);
+			});
+		});
+
+		it("refuses to be built over an egress proxy core.outbound does not state as direct", async () => {
+			vi.stubEnv("HTTPS_PROXY", "http://proxy.example.test:3128");
+			try {
+				await expect(async () => contributed("https://rp.example/bc")).rejects.toThrow(
+					/core\.outbound\.egress/,
+				);
+			} finally {
+				vi.unstubAllEnvs();
+			}
+		});
 	});
 });
 

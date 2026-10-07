@@ -33,6 +33,7 @@ import {
 	redeem,
 	WEB,
 } from "./all-modules-composition.fixture.mjs";
+import { backchannelPeer, withLoopbackRelyingParties } from "./backchannel-peer.fixture.mjs";
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -44,7 +45,9 @@ const claimsOf = (token: string): Record<string, unknown> =>
 
 describe("a session whose close is pending on a failed relying-party notice", () => {
 	it("is refused by introspection, userinfo and the session grant, its user session still there", async () => {
+		const peer = await backchannelPeer(503);
 		const { app, handle } = await compose({
+			config: withLoopbackRelyingParties,
 			extraClients: {
 				"rp-down": {
 					tokenEndpointAuthMethod: "client_secret_basic",
@@ -52,7 +55,7 @@ describe("a session whose close is pending on a failed relying-party notice", ()
 					allowedRedirectUris: ["https://rp-down.test/cb"],
 					allowedScopes: ["openid"],
 					allowedGrantTypes: ["authorization_code"],
-					backchannelLogoutUri: "https://rp-down.test/logout",
+					backchannelLogoutUri: peer.uri,
 				},
 			},
 		});
@@ -89,7 +92,7 @@ describe("a session whose close is pending on a failed relying-party notice", ()
 				await lifecycle.join(sid, {
 					rp: {
 						clientId: "rp-down",
-						backchannelLogoutUri: "https://rp-down.test/logout",
+						backchannelLogoutUri: peer.uri,
 						backchannelLogoutSessionRequired: true,
 						frontchannelLogoutUri: undefined,
 						frontchannelLogoutSessionRequired: undefined,
@@ -98,11 +101,8 @@ describe("a session whose close is pending on a failed relying-party notice", ()
 					familyId: "family-down",
 				}),
 			).toEqual({ outcome: "joined" });
-			const posted = vi
-				.spyOn(globalThis, "fetch")
-				.mockImplementation(async () => new Response(null, { status: 503 }));
 			expect((await lifecycle.close(sid, "rp_logout")).outcome).toBe("pending");
-			expect(posted).toHaveBeenCalled();
+			expect(peer.tokens.length).toBeGreaterThan(0);
 			expect(await sessions.get(sid)).not.toBeNull();
 
 			const afterIntrospect = await introspect();
@@ -121,11 +121,14 @@ describe("a session whose close is pending on a failed relying-party notice", ()
 			});
 		} finally {
 			await handle.dispose();
+			await peer.close();
 		}
 	});
 
 	it("an RP-initiated logout whose notice fails answers success, and its session is refused by introspection, userinfo and the session grant", async () => {
+		const peer = await backchannelPeer(503);
 		const { app, handle } = await compose({
+			config: withLoopbackRelyingParties,
 			extraClients: {
 				"rp-down": {
 					tokenEndpointAuthMethod: "client_secret_basic",
@@ -133,7 +136,7 @@ describe("a session whose close is pending on a failed relying-party notice", ()
 					allowedRedirectUris: ["https://rp-down.test/cb"],
 					allowedScopes: ["openid"],
 					allowedGrantTypes: ["authorization_code"],
-					backchannelLogoutUri: "https://rp-down.test/logout",
+					backchannelLogoutUri: peer.uri,
 				},
 			},
 		});
@@ -166,7 +169,7 @@ describe("a session whose close is pending on a failed relying-party notice", ()
 				await lifecycle.join(sid, {
 					rp: {
 						clientId: "rp-down",
-						backchannelLogoutUri: "https://rp-down.test/logout",
+						backchannelLogoutUri: peer.uri,
 						backchannelLogoutSessionRequired: true,
 						frontchannelLogoutUri: undefined,
 						frontchannelLogoutSessionRequired: undefined,
@@ -174,9 +177,6 @@ describe("a session whose close is pending on a failed relying-party notice", ()
 					},
 				}),
 			).toEqual({ outcome: "joined" });
-			const posted = vi
-				.spyOn(globalThis, "fetch")
-				.mockImplementation(async () => new Response(null, { status: 503 }));
 
 			const logout = await request(app)
 				.post("/oauth/logout")
@@ -186,7 +186,7 @@ describe("a session whose close is pending on a failed relying-party notice", ()
 			// The close committed with the notice pending: the logout succeeded.
 			expect(logout.status).toBe(200);
 			expect(logout.body).toEqual({ logged_out: true });
-			expect(posted).toHaveBeenCalled();
+			expect(peer.tokens.length).toBeGreaterThan(0);
 			expect(await sessions.get(sid)).not.toBeNull();
 
 			const introspected = await request(app)
@@ -211,6 +211,7 @@ describe("a session whose close is pending on a failed relying-party notice", ()
 			});
 		} finally {
 			await handle.dispose();
+			await peer.close();
 		}
 	});
 });

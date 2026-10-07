@@ -304,6 +304,8 @@ export interface FederationGrantRouterOptions extends FederationGrantTokenHandle
 	readonly rateLimiter?: RateLimiter;
 	/** Where a `private_key_jwt` assertion's single-use `jti` is recorded. */
 	readonly replaySeenSet?: ReplaySeenSet;
+	/** The fetch for a `private_key_jwt` client's `jwksUri`: core's `createOutboundFetch({ policy, source: "registration" })` over the `outboundPolicy` slot. */
+	readonly fetch: typeof fetch;
 }
 
 export function createFederationGrantRouter(options: FederationGrantRouterOptions): Router {
@@ -376,6 +378,7 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 			// value that is not a secret, and nothing else here proves it is the
 			// client it says it is.
 			...(options.replaySeenSet === undefined ? {} : { replaySeenSet: options.replaySeenSet }),
+			fetch: options.fetch,
 			// Its `client_repository_unavailable` and `client_assertion_refused`
 			// lines, with the site that tells them from the token endpoint's.
 			logger: (options.logger ?? consoleLogger).child({ site: "federation_grants" }),

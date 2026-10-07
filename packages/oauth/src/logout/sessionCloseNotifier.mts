@@ -18,11 +18,14 @@
  * The session-close notifier oauth contributes to core's session lifecycle:
  * one OIDC Back-Channel Logout token per notice, posted to the relying
  * party's `backchannel_logout_uri` as its registration reads when the notice
- * is sent. A notice is settled — resolved — once delivered, or when there is
- * nowhere to send it (no URI, no registration) or the relying party refused it
- * for good; it rejects only when it is worth sending again, so the lifecycle
- * keeps the work pending: the registry or the key store could not answer, the
- * request did not complete, or the answer was 408, 429 or a 5xx.
+ * is sent, through the fetch it is built with alone (core's outbound fetch,
+ * under `core.outbound`). A notice is settled — resolved — once delivered, or
+ * when there is nowhere to send it (no URI, no registration), the relying
+ * party refused it for good, or the fetch refused the destination or the
+ * answer (a redirect among them, never followed); it rejects only when it is
+ * worth sending again, so the lifecycle keeps the work pending: the registry
+ * or the key store could not answer, the request did not complete, or the
+ * answer was 408, 429 or a 5xx.
  *
  * Every token carries the session's `sid` unless the relying party declined
  * one (`backchannel_logout_session_required: false`), whatever closed it.
@@ -33,21 +36,28 @@ import {
 	type ClientRepository,
 	type EventLogger,
 	generateLogoutToken,
+	isOutboundRefusal,
 	type KeyStore,
+	loggableError,
 	type SessionCloseNotifier,
 } from "@o3co/auth-provider-core";
-import { postLogoutToken } from "./broadcastBackchannel.mjs";
+import { postLogoutToken } from "./postLogoutToken.mjs";
 
 export interface SessionCloseNotifierOptions {
 	readonly clientRepository: ClientRepository;
 	readonly keyStore: KeyStore;
 	/** This provider's issuer, the logout token's `iss`. */
 	readonly issuer: string;
-	/** Defaults to the global `fetch`, as the back-channel broadcast's. */
-	readonly fetchImpl?: typeof fetch;
-	/** The deadline of one delivery, in milliseconds. Defaults to the broadcast's. */
+	/**
+	 * The fetch every POST goes through: core's
+	 * `createOutboundFetch({ policy, source: "registration" })` over the
+	 * `outboundPolicy` slot, so `core.outbound` applies. Anything else
+	 * replaces that policy.
+	 */
+	readonly fetchImpl: typeof fetch;
+	/** The deadline of one delivery, in milliseconds. Defaults to 5000. */
 	readonly timeoutMs?: number;
-	/** Where a refusal settled for good is said, at warn; the broadcast's line. */
+	/** Where a notice settled undelivered is said, at warn. */
 	readonly logger?: Pick<EventLogger, "warn">;
 }
 
@@ -57,6 +67,13 @@ const retryable = (status: number): boolean => status === 408 || status === 429 
 export function createSessionCloseNotifier(
 	options: SessionCloseNotifierOptions,
 ): SessionCloseNotifier {
+	// Required at run time too: no notice is posted outside the fetch it was given.
+	if (typeof options.fetchImpl !== "function") {
+		throw new TypeError(
+			'createSessionCloseNotifier: fetchImpl is required; pass createOutboundFetch({ policy, source: "registration" })',
+		);
+	}
+	const fetchImpl = options.fetchImpl;
 	return {
 		async notify(notice) {
 			const client = await options.clientRepository.findById(notice.clientId);
@@ -70,10 +87,25 @@ export function createSessionCloseNotifier(
 				includeSid: client.backchannelLogoutSessionRequired !== false,
 				keyStore: options.keyStore,
 			});
-			const answer = await postLogoutToken(uri, token, {
-				...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
-				...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
-			});
+			let answer: { readonly ok: boolean; readonly status: number };
+			try {
+				answer = await postLogoutToken(uri, token, {
+					fetchImpl,
+					...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+				});
+			} catch (err) {
+				if (!isOutboundRefusal(err)) throw err;
+				// Refused by policy: sending it again is refused again.
+				options.logger?.warn(
+					{
+						clientId: auditErrorText(notice.clientId),
+						step: "destination",
+						err: loggableError(err),
+					},
+					"logout_backchannel_failed",
+				);
+				return;
+			}
 			// The status alone, never the relying party's words for it.
 			if (answer.ok) return;
 			if (retryable(answer.status)) {

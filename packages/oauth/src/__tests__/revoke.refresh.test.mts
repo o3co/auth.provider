@@ -19,6 +19,7 @@ import {
 	type ClientRepository,
 	createMemoryAccessTokenDenylist,
 	createMemoryReplaySeenSet,
+	createOutboundFetch,
 	createSymmetricKeyStore,
 	type RefreshTokenFamilyRevocation,
 	type ReplaySeenSet,
@@ -30,6 +31,9 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { JWT_BEARER_CLIENT_ASSERTION_TYPE } from "#/middleware/clientAssertion.mjs";
 import { createRevokeRouter } from "#/routes/revoke.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+
+/** Core's outbound fetch, as the composed router hands the endpoint. */
+const outboundFetch = createOutboundFetch({ config: {}, source: "registration" });
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -102,6 +106,7 @@ describe("POST /oauth/revoke — refresh token path", () => {
 		// access-token revocation unsupported — if that ever stops being a
 		// buildable composition, this fixture fails to construct and says so.
 		const router = createRevokeRouter(express, {
+			fetch: outboundFetch,
 			clientRepository,
 			keyStore,
 			refreshTokenFamilyRevocation,
@@ -249,6 +254,7 @@ describe("POST /oauth/revoke — cross-type fallback (hint=refresh_token + AT-sh
 		crossDenylist = createMemoryAccessTokenDenylist();
 
 		const router = createRevokeRouter(express, {
+			fetch: outboundFetch,
 			clientRepository,
 			keyStore,
 			refreshTokenFamilyRevocation: crossRevocation,
@@ -315,6 +321,7 @@ describe("POST /oauth/revoke — private_key_jwt client authentication", () => {
 	};
 	const buildApp = (replaySeenSet?: ReplaySeenSet) => {
 		const router = createRevokeRouter(express, {
+			fetch: outboundFetch,
 			clientRepository: jwtRepository,
 			keyStore,
 			refreshTokenFamilyRevocation: {

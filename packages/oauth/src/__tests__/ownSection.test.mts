@@ -38,6 +38,7 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	createTestFederationSettings,
+	createTestOutboundPolicy,
 	GrantRegistry,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
@@ -87,6 +88,10 @@ describe("the oauth module is one module value", () => {
 			...(oauthEndpointsModule.requires ?? []),
 			...(oauthEndpointsModule.optional ?? []),
 		]).not.toContain("config");
+	});
+
+	it("requires core's outboundPolicy, the policy every URL a client registration names is fetched under", () => {
+		expect(oauthEndpointsModule.requires).toContain("outboundPolicy");
 	});
 });
 
@@ -192,6 +197,7 @@ describe("what the module derives, it derives from its section", () => {
 				requirements: resolverForTests([]),
 				registry: new GrantRegistry(),
 				...(options as { section: OAuthSection; federationSettings: never }),
+				outboundPolicy: createTestOutboundPolicy(),
 				clientRepository: new InMemoryClientRepository(new Map()),
 				keyStore: createSymmetricKeyStore("oauth-own-section-test.at-least-32-bytes"),
 			});
@@ -225,6 +231,19 @@ describe("what the module derives, it derives from its section", () => {
 				keyStore: createSymmetricKeyStore("oauth-own-section-test.at-least-32-bytes"),
 			} as never),
 		).rejects.toThrow(/^createOAuthRouter: federationSettings is required — /);
+	});
+
+	it("refuses to build without outboundPolicy, core's policy for the URLs a client registration names", async () => {
+		const build = createOAuthRouter(express, {
+			requirements: resolverForTests([]),
+			registry: new GrantRegistry(),
+			section: sectionOf({ revocation: { accessToken: "unsupported" } }),
+			federationSettings: createTestFederationSettings(),
+			clientRepository: new InMemoryClientRepository(new Map()),
+			keyStore: createSymmetricKeyStore("oauth-own-section-test.at-least-32-bytes"),
+		} as never);
+		await expect(build).rejects.toThrow(/^createOAuthRouter: outboundPolicy is required — /);
+		await expect(build).rejects.toBeInstanceOf(RangeError);
 	});
 });
 

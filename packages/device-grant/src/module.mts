@@ -35,7 +35,9 @@
  * It reads no whole configuration. What it needs of `oauth {}` — the issuer,
  * the access-token lifetime and `requireEmailVerified` — it reads from the
  * `oauthTokenSettings` slot, required while the grant is on: the oauth
- * module provides it, and a composition without that module fills it.
+ * module provides it, and a composition without that module fills it. The
+ * destination policy a client's `jwksUri` is fetched under is core's
+ * `outboundPolicy` slot.
  *
  * Enabled, boot is refused without each setting and slot the grant needs to
  * be safe; the `require*` helpers below say why. The user code's attempt
@@ -55,6 +57,7 @@ import {
 	checkOAuthTokenSettings,
 	coerceBooleanFromEnv,
 	consoleLogger,
+	createOutboundFetch,
 	createRateLimitGuard,
 	defineModule,
 	guardedRead,
@@ -160,6 +163,9 @@ const REQUIRES = [
 	// access-token lifetime and `requireEmailVerified`. A composition without
 	// that module fills it.
 	"oauthTokenSettings",
+	// The destination policy of `core.outbound`, which a `private_key_jwt`
+	// client's `jwksUri` is fetched under. Boot always fills it.
+	"outboundPolicy",
 ] as const;
 // `replaySeenSet` records a client assertion's single-use `jti`. Optional as
 // on the OAuth router: without it a `private_key_jwt` request is
@@ -544,6 +550,7 @@ export const deviceAuthorizationGrantModule = defineModule<
 						// derived from `issuer`, as at `/oauth/revoke`.
 						...(deps.replaySeenSet ? { replaySeenSet: deps.replaySeenSet } : {}),
 						...(deps.logger ? { logger: deps.logger } : {}),
+						fetch: createOutboundFetch({ policy: deps.outboundPolicy, source: "registration" }),
 					}),
 				);
 				router.post(

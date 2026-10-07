@@ -31,6 +31,7 @@ import {
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorize, codeFrom, compose, login, redeem } from "./all-modules-composition.fixture.mjs";
+import { backchannelPeer, withLoopbackRelyingParties } from "./backchannel-peer.fixture.mjs";
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -49,7 +50,9 @@ const csrfTokenOf = (cookies: readonly string[]): string => {
 
 describe("POST /session/logout with the session lifecycle module", () => {
 	it("revokes the session's families, tells its relying parties and closes its record", async () => {
+		const peer = await backchannelPeer();
 		const { app, handle } = await compose({
+			config: withLoopbackRelyingParties,
 			extraClients: {
 				"rp-bc": {
 					tokenEndpointAuthMethod: "client_secret_basic",
@@ -57,7 +60,7 @@ describe("POST /session/logout with the session lifecycle module", () => {
 					allowedRedirectUris: ["https://rp-bc.test/cb"],
 					allowedScopes: ["openid"],
 					allowedGrantTypes: ["authorization_code"],
-					backchannelLogoutUri: "https://rp-bc.test/logout",
+					backchannelLogoutUri: peer.uri,
 				},
 			},
 		});
@@ -76,7 +79,7 @@ describe("POST /session/logout with the session lifecycle module", () => {
 				await lifecycle.join(sid, {
 					rp: {
 						clientId: "rp-bc",
-						backchannelLogoutUri: "https://rp-bc.test/logout",
+						backchannelLogoutUri: peer.uri,
 						backchannelLogoutSessionRequired: true,
 						frontchannelLogoutUri: undefined,
 						frontchannelLogoutSessionRequired: undefined,
@@ -84,10 +87,6 @@ describe("POST /session/logout with the session lifecycle module", () => {
 					},
 				}),
 			).toEqual({ outcome: "joined" });
-			const posted = vi
-				.spyOn(globalThis, "fetch")
-				.mockImplementation(async () => new Response(null, { status: 200 }));
-
 			const csrfToken = csrfTokenOf(cookies);
 			const res = await request(app)
 				.post("/session/logout")
@@ -96,12 +95,13 @@ describe("POST /session/logout with the session lifecycle module", () => {
 
 			expect(res.status).toBe(200);
 			expect(await families.isFamilyRevoked(familyId)).toBe(true);
-			expect(posted.mock.calls.map(([url]) => String(url))).toEqual(["https://rp-bc.test/logout"]);
+			expect(peer.tokens).toHaveLength(1);
 			expect(await sessions.get(sid)).toBeNull();
 			const store = components.sessionLifecycleStore as SessionLifecycleStore;
 			expect(readVersionedSessionLifecycle(await store.read(sid))?.value.state).toBe("closed");
 		} finally {
 			await handle.dispose();
+			await peer.close();
 		}
 	});
 

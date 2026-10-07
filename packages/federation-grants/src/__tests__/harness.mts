@@ -41,6 +41,7 @@ import {
 	createMemoryFederationGrantIntentStore,
 	createMemoryFederationGrantStore,
 	createMemoryRateLimiter,
+	createOutboundFetch,
 	type FederationGrantAcquisitionConnection,
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
@@ -256,6 +257,7 @@ export function harness(options: HarnessOptions = {}): Harness {
 			background,
 			now: () => world.now,
 			clientRepository,
+			fetch: createOutboundFetch({ config: {}, source: "registration" }),
 			issuer: options.issuer ?? "https://auth.test",
 			...(sink === undefined ? {} : { auditSink: sink }),
 			rateLimiter:

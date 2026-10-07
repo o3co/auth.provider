@@ -48,7 +48,7 @@ A deployment that only wires the bundled stores and modules has nothing to chang
 
 Some types that the library means these records to flow into now accept an explicit `undefined` (`?: T | undefined`). This only widens them:
 - `AssertionIssuerEntryInput` (#652);
-- `BroadcastRP`, `FrontchannelRP` (#653);
+- `FrontchannelRP` (#653);
 - `CreateCodeInput.expiresIn` (#655);
 - `GenerateIdTokenOptions.amr` / `acr` (#659);
 - `FederationGrantRefreshFailureInput.retryAfterSeconds` / `upstreamCode` (#660).

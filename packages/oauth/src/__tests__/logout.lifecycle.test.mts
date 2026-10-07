@@ -151,7 +151,6 @@ interface AppOptions {
 	readonly federationTokenStore?: FederationTokenStore;
 	readonly clientRepository?: ClientRepository;
 	readonly providers?: ReadonlyMap<string, FederationProvider>;
-	readonly fetchImpl?: typeof fetch;
 	readonly logger?: Logger;
 	readonly auditSink?: AuditSink;
 	readonly browserSession?: { sid?: string; destroyed?: boolean };
@@ -192,7 +191,6 @@ function buildApp(opts: AppOptions) {
 				authenticate: vi.fn(),
 			},
 			getFederationProviders: () => opts.providers,
-			fetchImpl: opts.fetchImpl ?? (vi.fn(async () => new Response(null)) as typeof fetch),
 			logger: opts.logger ?? createMockLogger(),
 			auditSink: opts.auditSink,
 			sessionLifecycle: opts.lifecycle,
@@ -412,7 +410,7 @@ describe("/oauth/logout through the session lifecycle: the close's answer", () =
 
 describe("/oauth/logout through the session lifecycle: back-channel", () => {
 	it("the route posts no logout token: the lifecycle's notifier tells the relying parties", async () => {
-		const fetchImpl = vi.fn(async () => new Response(null)) as unknown as typeof fetch;
+		const fetchImpl = vi.spyOn(globalThis, "fetch");
 		const lifecycle = fakeLifecycle({
 			close: vi.fn(async () => ({
 				outcome: "done" as const,
@@ -420,10 +418,11 @@ describe("/oauth/logout through the session lifecycle: back-channel", () => {
 				federations: [],
 			})),
 		});
-		const app = buildApp({ lifecycle, fetchImpl });
+		const app = buildApp({ lifecycle });
 
 		expect((await postLogout(app)).status).toBe(200);
 		expect(fetchImpl).not.toHaveBeenCalled();
+		fetchImpl.mockRestore();
 	});
 
 	it("a relying party that joined is told once, by the notifier, over a real lifecycle", async () => {
@@ -484,7 +483,6 @@ describe("/oauth/logout through the session lifecycle: back-channel", () => {
 			} as unknown as ReturnType<typeof untouchedStores>,
 			federationTokenStore,
 			clientRepository,
-			fetchImpl: fetchImpl as unknown as typeof fetch,
 		});
 
 		const res = await postLogout(app);

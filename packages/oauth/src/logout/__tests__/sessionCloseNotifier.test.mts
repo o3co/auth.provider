@@ -17,18 +17,22 @@
 /**
  * The session-close notifier oauth contributes: one back-channel logout
  * token per notice, to the relying party's registered URI, settled or
- * rejected by what the delivery answers.
+ * rejected by what the delivery answers, through the fetch it is built with.
  */
 
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import {
 	ClientEntrySchema,
 	type ClientRepository,
+	createOutboundFetch,
 	createSymmetricKeyStore,
 	InMemoryClientRepository,
 	type SessionCloseNotice,
 } from "@o3co/auth-provider-core";
+import { createTestOutboundPolicy } from "@o3co/auth-provider-core/testing";
 import { decodeJwt, decodeProtectedHeader } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createSessionCloseNotifier } from "#/logout/sessionCloseNotifier.mjs";
 
 const keyStore = createSymmetricKeyStore("test-secret-32-chars-xxxxxxxxxx");
@@ -218,5 +222,110 @@ describe("createSessionCloseNotifier", () => {
 		const claims = decodeJwt(tokenOf(fetchImpl.mock.calls[0] as [string, RequestInit]));
 		expect(claims.sid).toBeUndefined();
 		expect(claims.sub).toBe("user-1");
+	});
+});
+
+describe("createSessionCloseNotifier — the fetch it is built with", () => {
+	it.each([
+		["absent", undefined],
+		["null", null],
+		["not a function", "fetch"],
+	])("refuses to be built without a fetch (%s)", (_label, fetchImpl) => {
+		expect(() =>
+			createSessionCloseNotifier({
+				clientRepository,
+				keyStore,
+				issuer: ISSUER,
+				fetchImpl: fetchImpl as never,
+			}),
+		).toThrow(TypeError);
+	});
+});
+
+describe("createSessionCloseNotifier — through core's outbound fetch", () => {
+	/** A loopback relying party: a back-channel endpoint and a redirect, recording every path asked for. */
+	let peer: Server;
+	let origin: string;
+	const hits: string[] = [];
+
+	beforeAll(async () => {
+		peer = createServer((req, res) => {
+			hits.push(req.url ?? "");
+			req.resume();
+			if (req.url === "/redirect") {
+				res.writeHead(307, { location: "/landed" });
+			} else {
+				res.writeHead(200);
+			}
+			res.end();
+		});
+		await new Promise<void>((resolve) => peer.listen(0, "127.0.0.1", resolve));
+		origin = `http://127.0.0.1:${(peer.address() as AddressInfo).port}`;
+	});
+
+	afterAll(async () => {
+		await new Promise<void>((resolve) => peer.close(() => resolve()));
+	});
+
+	afterEach(() => {
+		hits.length = 0;
+	});
+
+	const repositoryAt = (uri: string) =>
+		({
+			findById: async (clientId: string) =>
+				clientId === "rp" ? { clientId: "rp", backchannelLogoutUri: uri } : null,
+		}) as unknown as ClientRepository;
+
+	const notifierUnder = (uri: string, internalHosts: readonly string[] = []) => {
+		const warn = vi.fn();
+		const notifier = createSessionCloseNotifier({
+			clientRepository: repositoryAt(uri),
+			keyStore,
+			issuer: ISSUER,
+			fetchImpl: createOutboundFetch({
+				policy: createTestOutboundPolicy({ internalHosts: [...internalHosts] }),
+				source: "registration",
+			}),
+			logger: { warn },
+		});
+		return { notifier, warn };
+	};
+
+	const failedSteps = (warn: ReturnType<typeof vi.fn>) =>
+		warn.mock.calls
+			.filter((call) => call[1] === "logout_backchannel_failed")
+			.map((call) => (call[0] as { step?: unknown }).step);
+
+	it("posts to a loopback relying party core.outbound.internalHosts lists", async () => {
+		const { notifier, warn } = notifierUnder(`${origin}/bc`, ["127.0.0.1"]);
+		await expect(notifier.notify(notice())).resolves.toBeUndefined();
+		expect(hits).toEqual(["/bc"]);
+		expect(warn).not.toHaveBeenCalled();
+	});
+
+	it("never contacts an unlisted one, and settles the notice, said at warn as a refused destination", async () => {
+		const { notifier, warn } = notifierUnder(`${origin}/bc`);
+		await expect(notifier.notify(notice())).resolves.toBeUndefined();
+		expect(hits).toEqual([]);
+		expect(failedSteps(warn)).toEqual(["destination"]);
+		expect(warn.mock.calls[0]?.[0]).toMatchObject({ clientId: "rp", step: "destination" });
+	});
+
+	it("does not follow a relying party's redirect, and settles the notice", async () => {
+		const { notifier, warn } = notifierUnder(`${origin}/redirect`, ["127.0.0.1"]);
+		await expect(notifier.notify(notice())).resolves.toBeUndefined();
+		expect(hits).toEqual(["/redirect"]);
+		expect(failedSteps(warn)).toEqual(["destination"]);
+	});
+
+	it("still rejects, to be sent again, when the exchange fails rather than being refused", async () => {
+		const closed = createServer();
+		await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
+		const port = (closed.address() as AddressInfo).port;
+		await new Promise<void>((resolve) => closed.close(() => resolve()));
+		const { notifier, warn } = notifierUnder(`http://127.0.0.1:${port}/bc`, ["127.0.0.1"]);
+		await expect(notifier.notify(notice())).rejects.toThrow();
+		expect(failedSteps(warn)).toEqual([]);
 	});
 });

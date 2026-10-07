@@ -42,6 +42,7 @@ import type {
 } from "@o3co/auth-provider-core";
 import {
 	createMemoryRateLimiter,
+	createOutboundFetch,
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 	resolveFederationGrantRetrievalLimits,
@@ -152,6 +153,7 @@ const deployment = (
 			limits: resolveFederationGrantRetrievalLimits({}),
 			background,
 			clientRepository,
+			fetch: createOutboundFetch({ config: {}, source: "registration" }),
 			issuer: "https://auth.test",
 			auditSink: sink,
 			rateLimiter: createMemoryRateLimiter({

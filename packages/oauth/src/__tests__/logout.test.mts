@@ -396,7 +396,6 @@ function buildApp(opts: BuildAppOpts = {}) {
 		federationTokenStore,
 		clientRepository,
 		getFederationProviders: opts.getFederationProviders ?? (() => undefined),
-		fetchImpl: fetchImpl as typeof fetch,
 		logger: opts.logger,
 		auditSink: opts.auditSink,
 	});

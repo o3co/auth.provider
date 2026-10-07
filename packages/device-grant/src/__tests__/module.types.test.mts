@@ -33,6 +33,8 @@ const REQUIRES = [
 	"deploymentMode",
 	// What the oauth module provides of `oauth {}`: no configuration is read.
 	"oauthTokenSettings",
+	// The destination policy core fills from `core.outbound`.
+	"outboundPolicy",
 ] as const;
 const OPTIONAL = [
 	"deviceCodeStore",

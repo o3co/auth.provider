@@ -1324,6 +1324,22 @@ modules fills them.
   refuses to build, naming the option; it no longer falls back to the
   `oauth {}` a `config` carries. A deps object handed to the module's
   factories by hand carries `federationSettings` instead of `config`.
+- **BREAKING: the oauth module, device authorization and the
+  federation-grant routes require the `outboundPolicy` slot, and
+  `createOAuthRouter` requires `outboundPolicy` (#1125).**
+  `oauthEndpointsModule`, `deviceAuthorizationGrantModule` and
+  `federationGrantsModule` require core's `outboundPolicy`, which core fills from `core.outbound` in
+  every composition, so a composition booted with `createApp` sees no code
+  change. Every `jwksUri` key set and every back-channel `logout_token` is
+  fetched under it, including the posts of the session-close notifier
+  `oauthEndpointsModule` contributes. A router built by hand with
+  `createOAuthRouter` passes `outboundPolicy` (in a test,
+  `createTestOutboundPolicy()` from `@o3co/auth-provider-core/testing`);
+  without it the router refuses to build, naming the option. A deps object
+  handed to these modules' factories by hand carries `outboundPolicy`. A
+  relying party or client served from a loopback, private or other
+  special-use address has its host listed in `core.outbound.internalHosts`
+  ([core's README](../packages/core/README.md#outbound-fetch)).
 - **BREAKING: an enabled TOTP factor requires the `oauthTokenSettings`
   slot (#1329).** `mfaTotpFactorModule` takes the deployment's issuer, which
   an unset `mfa-totp-factor.issuer` defaults to the host of, from the slot
@@ -2003,6 +2019,12 @@ modules fills them.
   now `Pick<SessionLifecycle, "open" | "close">`: a rollback closes the
   record it opened. Hand it the `sessionLifecycle` slot's value.
 - **`isTrustedProxyEntry`**, exported in v0.16.0, is deleted (#734).
+- **`broadcastBackchannelLogout`, `BroadcastBackchannelLogoutOptions` and
+  `BroadcastRP`**, exported by `@o3co/auth-provider-oauth` in v0.16.0, are
+  removed (#1104). Back-channel logout is the session-close notifier
+  `oauthEndpointsModule` contributes to core's session lifecycle: end a
+  session with `sessionLifecycle.close(sid, cause)`, and the notifier posts
+  the logout tokens through core's outbound fetch.
 - **`DEVICE_CODE_STORE_ABSENCE_POLICY`** is removed from core (#728). An
   enabled device grant requires a `deviceCodeStore`, and nothing declares its
   absence: `device-grant` no longer attaches the policy, and
@@ -2278,6 +2300,14 @@ modules fills them.
   `adapters.federationTokenStore`; a test that passed the bundle sets
   those adapters instead. `BuildModulesOverrides` has no seam for a session
   store of your own any more: compose it in your own module list.
+- **BREAKING: the key-set and back-channel fetch is passed in, with no
+  default (#1125).** `createClientAssertionVerifier` and
+  `createClientAuthMiddleware` require `fetch`, and
+  `createFederationGrantRouter` requires `fetch`.
+  Pass `createOutboundFetch({ policy, source: "registration" })` over the
+  `outboundPolicy` slot. A verifier or middleware built without one refuses
+  to build. `createClientAuthMiddleware` takes its options object only: pass
+  `{ logger, fetch, … }` where a bare logger was passed.
 - **Signatures.** `renderFrontchannelLogoutHtml` takes
   `postLogoutRedirect: { uri, state? }` (#1096); `createDeviceCodeGrant`
   requires a `grantPolicy` key, `undefined` for none (#1169); the federation
