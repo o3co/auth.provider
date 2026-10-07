@@ -206,6 +206,12 @@ export const DEFAULT_CIMD_NEGATIVE_CACHE_MS = 60 * 1000;
  */
 export const DEFAULT_CIMD_MAX_CONCURRENT_FETCHES = 8;
 
+/**
+ * How many requests may wait for a document fetch slot, as a multiple of
+ * the slots. Fixed, not configured.
+ */
+const CIMD_SLOT_QUEUE_FACTOR = 4;
+
 interface CacheEntry {
 	readonly client: PublicClient;
 	readonly etag: string | undefined;
@@ -439,19 +445,53 @@ export function createClientIdMetadataDocumentResolver(
 	const maxConcurrentFetches = opts.maxConcurrentFetches ?? DEFAULT_CIMD_MAX_CONCURRENT_FETCHES;
 	/** Refused client ids, with the instant each refusal expires. */
 	const refusals = new Map<string, number>();
-	/** Slots for an in-flight fetch; a waiter takes one when it is released. */
+	/**
+	 * Slots for an in-flight fetch. A released slot is handed straight to the
+	 * longest waiter. At most {@link CIMD_SLOT_QUEUE_FACTOR} times the slots
+	 * may wait, each no longer than the fetch's own deadline: a request past
+	 * either is a fetch that failed, so neither the queue nor the requests in
+	 * it grow without bound. A `Set` keeps arrival order and drops a waiter
+	 * that gave up in constant time.
+	 */
 	let inFlightFetches = 0;
-	const waiting: Array<() => void> = [];
-	const withSlot = async <T,>(job: () => Promise<T>): Promise<T> => {
-		if (inFlightFetches >= maxConcurrentFetches) {
-			await new Promise<void>((resolve) => waiting.push(resolve));
+	const waiting = new Set<() => void>();
+	const maxWaitingFetches = maxConcurrentFetches * CIMD_SLOT_QUEUE_FACTOR;
+	const slotWaitMs = Math.min(timeoutMs, opts.outboundPolicy.timeoutMs);
+	const releaseSlot = (): void => {
+		const next = waiting.values().next();
+		if (next.done === true) {
+			inFlightFetches -= 1;
+			return;
 		}
-		inFlightFetches += 1;
+		waiting.delete(next.value);
+		next.value();
+	};
+	const acquireSlot = (): Promise<void> => {
+		if (inFlightFetches < maxConcurrentFetches) {
+			inFlightFetches += 1;
+			return Promise.resolve();
+		}
+		if (waiting.size >= maxWaitingFetches) {
+			return Promise.reject(new Error("every document fetch slot is taken and its queue is full"));
+		}
+		return new Promise<void>((resolve, reject) => {
+			const timer = setTimeout(() => {
+				waiting.delete(granted);
+				reject(new Error("no document fetch slot came free within the fetch deadline"));
+			}, slotWaitMs);
+			const granted = () => {
+				clearTimeout(timer);
+				resolve();
+			};
+			waiting.add(granted);
+		});
+	};
+	const withSlot = async <T,>(job: () => Promise<T>): Promise<T> => {
+		await acquireSlot();
 		try {
 			return await job();
 		} finally {
-			inFlightFetches -= 1;
-			waiting.shift()?.();
+			releaseSlot();
 		}
 	};
 	const cache = new Map<string, CacheEntry>();
