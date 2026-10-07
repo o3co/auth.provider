@@ -60,7 +60,7 @@ export const redisSessionStoresModule = defineModule({
 	] as const,
 	optional: ["logger"] as const,
 	section: {
-		schema: keyPrefixSection("ss:"),
+		schema: keyPrefixSection,
 		reference: redisReference(),
 		relocatedFrom: {
 			redisSessionStores: { to: "", environmentVariable: null },

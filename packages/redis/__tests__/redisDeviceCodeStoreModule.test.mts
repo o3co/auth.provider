@@ -24,6 +24,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { redisDeviceCodeStoreModule } from "#/device-code-store.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
 import { testRedis } from "./support/redis.mjs";
+import { overReference } from "./support/section.mjs";
 
 let raw: Redis;
 
@@ -58,11 +59,14 @@ const deviceGrantStandIn = defineModule({
 });
 
 const multiReplicaConfig = (extra: Record<string, unknown> = {}) =>
-	({
-		...makeValidCoreConfig(),
-		core: { deployment: { mode: "multi" } },
-		...extra,
-	}) as never;
+	overReference(
+		{
+			...makeValidCoreConfig(),
+			core: { deployment: { mode: "multi" } },
+			...extra,
+		},
+		[redisDeviceCodeStoreModule],
+	) as never;
 
 describe("redisDeviceCodeStoreModule manifest", () => {
 	// Name, requires and section are pinned with the other modules in

@@ -184,6 +184,14 @@ const bootWith = async (
 			// environment captures of the variables they declare renamed.
 			config: {
 				...config,
+				// The in-process limiter's section as core's reference.conf ships it,
+				// under what the case writes there.
+				"core-rate-limiter-memory": {
+					maxBuckets: 10_000,
+					defaultLimit: { limit: 60, windowSeconds: 60 },
+					limits: {},
+					...(config as { "core-rate-limiter-memory"?: object })["core-rate-limiter-memory"],
+				},
 				"renamed-variables": {
 					...(config as { "renamed-variables"?: object })["renamed-variables"],
 					...renamedVariableCaptures({ modules, env: {} }),

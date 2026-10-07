@@ -26,6 +26,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { redisConsentStoreModule } from "#/consent-store.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
 import { testRedis } from "./support/redis.mjs";
+import { overReference } from "./support/section.mjs";
 
 let raw: Redis;
 
@@ -58,11 +59,14 @@ const consentStepStandIn = defineModule({
 });
 
 const multiReplicaConfig = (extra: Record<string, unknown> = {}) =>
-	({
-		...makeValidCoreConfig(),
-		core: { deployment: { mode: "multi" } },
-		...extra,
-	}) as never;
+	overReference(
+		{
+			...makeValidCoreConfig(),
+			core: { deployment: { mode: "multi" } },
+			...extra,
+		},
+		[redisConsentStoreModule],
+	) as never;
 
 describe("redisConsentStoreModule manifest", () => {
 	it("provides both slots the consent step needs, as the memory module does", () => {

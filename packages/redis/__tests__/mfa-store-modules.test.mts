@@ -63,7 +63,7 @@ import {
 import { redisMfaFactorStoreModule } from "#/mfa-factor-store.mjs";
 import { redisMfaTransactionStoreModule } from "#/mfa-transaction-store.mjs";
 import { testRedis } from "./support/redis.mjs";
-import { withSection } from "./support/section.mjs";
+import { overReference, shippedSection, withSection } from "./support/section.mjs";
 
 let at: Awaited<ReturnType<typeof testRedis>>;
 let raw: Redis;
@@ -186,9 +186,11 @@ describe.each(CASES)("$module.name", (c) => {
 		expect(Object.keys(c.module.provides ?? {})).toStrictEqual([c.slot]);
 	});
 
-	it(`reads ${c.configKey}.keyPrefix, its own section's, "${c.defaultPrefix}" when it is not set`, () => {
+	it(`reads ${c.configKey}.keyPrefix, its own section's, "${c.defaultPrefix}" as reference.conf ships it`, () => {
 		expect(c.module).not.toHaveProperty("configSchema");
-		expect(c.module.section?.schema.parse(undefined)).toStrictEqual({ keyPrefix: c.defaultPrefix });
+		expect(c.module.section?.schema.parse(shippedSection(c.module))).toStrictEqual({
+			keyPrefix: c.defaultPrefix,
+		});
 		expect(c.module.section?.schema.parse({ keyPrefix: "tenant-a:" })).toStrictEqual({
 			keyPrefix: "tenant-a:",
 		});
@@ -392,11 +394,14 @@ const mfaStandIn = defineModule({
 });
 
 const multiReplicaConfig = (extra: Record<string, unknown> = {}): AppConfig =>
-	({
-		...makeValidCoreConfig(),
-		core: { deployment: { mode: "multi" } },
-		...extra,
-	}) as never;
+	overReference(
+		{
+			...makeValidCoreConfig(),
+			core: { deployment: { mode: "multi" } },
+			...extra,
+		},
+		[redisMfaFactorStoreModule, redisMfaTransactionStoreModule],
+	) as never;
 
 describe("the MFA store modules booted through createApp", () => {
 	it('boot under core.deployment.mode = "multi" off the shared clients and fill both slots with the Redis adapters', async () => {

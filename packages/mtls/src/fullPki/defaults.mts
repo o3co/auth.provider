@@ -15,10 +15,11 @@
  */
 
 /**
- * The tuning defaults for `mode = "full-pki"`, in one place: `mtlsConfigSchema`
- * fills them in for config that omits the keys, and the mechanism factory for
- * a composition root that bypasses the schema. A second copy would drift
- * unseen, on the path nobody tests by default.
+ * The tuning defaults for `mode = "full-pki"` the mechanism factory fills in
+ * for a composition root that bypasses the module and its section. The
+ * module's section takes them from the package's `config/reference.conf`,
+ * which a test holds to these values: a copy that drifted would differ only
+ * on the path nobody tests by default.
  *
  * These bound work and pin strength, so a conservative default suits almost
  * every deployment. `revocation.mode` and `.on-unavailable` trade an outage

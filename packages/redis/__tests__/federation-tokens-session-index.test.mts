@@ -23,6 +23,7 @@ import {
 	redisFederationTokenStoreBuilder,
 	redisFederationTokenStoreModule,
 } from "#/federation-tokens.mjs";
+import { overShipped } from "./support/section.mjs";
 
 /**
  * Fake modelling the two Redis types the store uses: string keys for the
@@ -361,11 +362,13 @@ describe("scanFallback migration flag", () => {
 		expect(redis.scanIterator).not.toHaveBeenCalled();
 	});
 
-	it("the module's section exposes scanFallback, defaulting to true, read from a variable's string", () => {
+	it("the module's section exposes scanFallback, true as reference.conf ships it, read from a variable's string", () => {
 		const schema = redisFederationTokenStoreModule.section?.schema;
-		expect(schema?.parse({})).toMatchObject({ scanFallback: true });
-		expect(schema?.parse({ scanFallback: "false" })).toMatchObject({ scanFallback: false });
-		expect(schema?.parse({ scanFallback: "true" })).toMatchObject({ scanFallback: true });
+		const over = (section: Record<string, unknown>) =>
+			overShipped(redisFederationTokenStoreModule, section);
+		expect(schema?.parse(over({}))).toMatchObject({ scanFallback: true });
+		expect(schema?.parse(over({ scanFallback: "false" }))).toMatchObject({ scanFallback: false });
+		expect(schema?.parse(over({ scanFallback: "true" }))).toMatchObject({ scanFallback: true });
 	});
 });
 

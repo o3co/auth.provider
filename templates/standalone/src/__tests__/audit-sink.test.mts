@@ -115,6 +115,12 @@ const baseConfig: Switches & AppConfig & Record<string, unknown> = {
 	},
 	rateLimit: { failMode: "open" },
 	"standalone-in-memory-code-repository": { defaultExpiresIn: 600 },
+	// The in-process limiter's section as core's `reference.conf` ships it.
+	"core-rate-limiter-memory": {
+		maxBuckets: 10000,
+		defaultLimit: { limit: 60, windowSeconds: 60 },
+		limits: {},
+	},
 };
 
 const CLIENT_ID = "audit-client";

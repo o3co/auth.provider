@@ -28,6 +28,13 @@
  * forms those leave out: every level a section's schema declares must be
  * reached. A level whose keys are open by design is exempt, with its reason;
  * any other level that keeps an unknown key fails.
+ *
+ * The same sections fill no value of their own: a section's defaults are its
+ * package's `reference.conf`, which the composition root layers beneath the
+ * deployment's files, so a schema that also fills one (`.default`,
+ * `.prefault`, `.catch`) keeps a second copy that can drift from the file.
+ * A path whose default is also read where no `reference.conf` is layered is
+ * on `DEFAULTS_KEPT`, with why; the list only shrinks.
  */
 
 import { readFileSync } from "node:fs";
@@ -38,6 +45,7 @@ import { foundationMfaFactorStoreModule } from "@o3co/auth-provider-foundation";
 import { MULTI_ENV } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
 import { parseFile } from "@o3co/ts.hocon";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { testRedis } from "../../../../packages/redis/__tests__/support/redis.mts";
 import { composeFullSet, type FullSet } from "./full-set.fixture.mjs";
 
@@ -55,6 +63,119 @@ const EXEMPT: Readonly<Record<string, string>> = {
 	"federation-grants.connections.*.authorizationParams":
 		"each key is an authorization request parameter the upstream defines; the module refuses the ones it sets itself",
 };
+
+/**
+ * The section paths (`<section>.<path>`, `*` for any record key or list
+ * element) whose schema keeps a default, each with why: the value is also
+ * read where no `reference.conf` is layered. Each is also in the file.
+ */
+const DEFAULTS_KEPT: Readonly<Record<string, string>> = {
+	"redis-federation-grant-store":
+		"resolveRedisFederationGrantStoreOptions, an exported function a composition root that builds the store itself calls, parses the section as the operator wrote it, with no reference.conf beneath",
+	"redis-federation-grant-store.keyPrefix":
+		"read by resolveRedisFederationGrantStoreOptions, which parses the section with no reference.conf beneath",
+	"redis-federation-grant-intent-store":
+		"resolveRedisFederationGrantIntentStoreOptions, an exported function a composition root that builds the store itself calls, parses the section as the operator wrote it, with no reference.conf beneath",
+	"redis-federation-grant-intent-store.keyPrefix":
+		"read by resolveRedisFederationGrantIntentStoreOptions, which parses the section with no reference.conf beneath",
+	"mtls.fullPki.revocation.allowedHosts":
+		"the revocation block is absent until the operator writes it, with its mode and onUnavailable, which have no default; reference.conf cannot hold the rest of the block without making it present",
+	"mtls.fullPki.revocation.fetchTimeoutMs":
+		"the revocation block is absent until the operator writes it; reference.conf cannot hold its defaults without making it present",
+	"mtls.fullPki.revocation.cacheTtlSeconds":
+		"the revocation block is absent until the operator writes it; reference.conf cannot hold its defaults without making it present",
+	"mtls.fullPki.revocation.maxResponseBytes":
+		"the revocation block is absent until the operator writes it; reference.conf cannot hold its defaults without making it present",
+	"mtls.fullPki.revocation.ocspRequireNonce":
+		"the revocation block is absent until the operator writes it; reference.conf cannot hold its defaults without making it present",
+};
+
+/** The definition every Zod v4 schema carries, as far as `filledPaths` reads it. */
+interface ZodDef {
+	readonly type: string;
+	readonly innerType?: z.ZodType;
+	readonly in?: z.ZodType;
+	readonly out?: z.ZodType;
+	readonly shape?: Readonly<Record<string, z.ZodType>>;
+	readonly valueType?: z.ZodType;
+	readonly element?: z.ZodType;
+	readonly items?: readonly z.ZodType[];
+	readonly options?: readonly z.ZodType[];
+	readonly left?: z.ZodType;
+	readonly right?: z.ZodType;
+	readonly getter?: () => z.ZodType;
+}
+
+const defOf = (schema: z.ZodType): ZodDef =>
+	(schema as unknown as { _zod: { def: ZodDef } })._zod.def;
+
+/** The wrappers that fill a value the input does not carry. */
+const FILLING = new Set(["default", "prefault", "catch"]);
+
+/** The wrappers that parse as their inner schema does. */
+const PASSING = new Set(["optional", "nullable", "readonly", "nonoptional"]);
+
+/**
+ * Every path inside `schema` where a value is filled (`.default`,
+ * `.prefault`, `.catch`), as keys (`*` for any record key or list element;
+ * `[]` for the section itself): through objects, records, lists, tuples,
+ * unions, intersections, both ends of a pipe and a lazy schema, each schema
+ * entered once on its own way down.
+ */
+function filledPaths(schema: z.ZodType): string[][] {
+	const found = new Map<string, string[]>();
+	const walk = (node: z.ZodType, path: string[], ancestors: ReadonlySet<z.ZodType>) => {
+		if (ancestors.has(node)) return;
+		const within = new Set(ancestors).add(node);
+		const def = defOf(node);
+		const next = (child: z.ZodType | undefined, at: string[] = path) => {
+			if (child !== undefined) walk(child, at, within);
+		};
+		if (FILLING.has(def.type)) {
+			found.set(JSON.stringify(path), path);
+			next(def.innerType);
+		} else if (PASSING.has(def.type)) next(def.innerType);
+		else if (def.type === "pipe") {
+			next(def.in);
+			next(def.out);
+		} else if (def.type === "object") {
+			for (const [key, child] of Object.entries(def.shape ?? {})) next(child, [...path, key]);
+		} else if (def.type === "record") next(def.valueType, [...path, "*"]);
+		else if (def.type === "array") next(def.element, [...path, "*"]);
+		else if (def.type === "tuple") for (const item of def.items ?? []) next(item, [...path, "*"]);
+		else if (def.type === "union") for (const option of def.options ?? []) next(option);
+		else if (def.type === "intersection") {
+			next(def.left);
+			next(def.right);
+		} else if (def.type === "lazy" && def.getter) next(def.getter());
+	};
+	walk(schema, [], new Set());
+	return [...found.values()];
+}
+
+/**
+ * Every section path where a module's schema fills a value and
+ * `DEFAULTS_KEPT` does not name it, every entry of the list naming none, and
+ * every entry with no reason: one line each, sorted.
+ */
+function defaultProblems(checked: readonly Module[]): string[] {
+	const filled = new Set(
+		checked.flatMap((module) =>
+			module.section === undefined
+				? []
+				: filledPaths(module.section.schema).map((path) => [module.name, ...path].join(".")),
+		),
+	);
+	return [
+		...[...filled]
+			.filter((path) => !Object.hasOwn(DEFAULTS_KEPT, path))
+			.map((path) => `${path}: the section schema fills a default; reference.conf holds it`),
+		...Object.entries(DEFAULTS_KEPT).flatMap(([path, reason]) => [
+			...(filled.has(path) ? [] : [`${path}: kept on DEFAULTS_KEPT, but no schema fills it`]),
+			...(reason.trim() === "" ? [`${path}: kept with no reason`] : []),
+		]),
+	].sort();
+}
 
 /**
  * Each module factory a workspace package exports, with the sectioned
@@ -273,5 +394,21 @@ describe("every module with a section refuses an unknown key in it", () => {
 
 	it("finds no level keeping an unknown key, and none unreached", () => {
 		expect(problemsOf(modules)).toEqual([]);
+	});
+
+	it("finds no default a section schema fills: each is its package's reference.conf's", () => {
+		expect(defaultProblems(modules)).toEqual([]);
+	});
+
+	it("finds a default a section schema fills (the guard is not vacuous)", () => {
+		const probe = {
+			name: "default-probe",
+			section: {
+				schema: z.object({ list: z.array(z.object({ on: z.boolean().default(false) })) }).strict(),
+			},
+		} as unknown as Module;
+		expect(defaultProblems([...modules, probe])).toEqual([
+			"default-probe.list.*.on: the section schema fills a default; reference.conf holds it",
+		]);
 	});
 });

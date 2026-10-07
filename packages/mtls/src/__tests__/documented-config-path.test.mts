@@ -19,10 +19,10 @@
  * `packages/core/README.md` documents: the composition root hands `createApp`
  * the configuration it resolved, and boot parses it once, laying every
  * schema's output over what was written, and the module's section is parsed
- * at `mtls`. A parse that dropped `mtls` would let `enabled` fall to its
- * `false` default: mTLS would report itself
- * switched off rather than misconfigured, and every refusal would be
- * unreachable. These tests boot `mtlsModule` that way and ask it what it makes
+ * at `mtls`, over the package's `config/reference.conf`, which the root layers
+ * beneath it. A parse that dropped `mtls` would leave the switch off: mTLS
+ * would report itself switched off rather than misconfigured, and every
+ * refusal would be unreachable. These tests boot `mtlsModule` that way and ask it what it makes
  * of the result, at boot, where its refusals are.
  */
 
@@ -30,10 +30,11 @@ import { type AppConfig, BootError, createApp } from "@o3co/auth-provider-core";
 import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { mtlsModule } from "#/module.mjs";
+import { shippedMtlsSection } from "./shippedSection.mjs";
 
 /**
  * The documented composition root: the resolved configuration with the
- * operator's `mtls` block, handed to `createApp`. Answers the
+ * operator's `mtls` block laid over the shipped one, handed to `createApp`. Answers the
  * configuration boot parsed, or the boot's refusal with every cause it
  * carries as one text.
  */
@@ -41,7 +42,7 @@ async function throughDocumentedPath(
 	mtls: Record<string, unknown> | undefined,
 ): Promise<{ readonly config: unknown } | { readonly refused: string }> {
 	const base = makeValidAppConfig();
-	const resolved = mtls === undefined ? base : { ...base, mtls };
+	const resolved = mtls === undefined ? base : { ...base, mtls: shippedMtlsSection(mtls) };
 	try {
 		const handle = await createApp({
 			modules: [mtlsModule],

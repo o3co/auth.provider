@@ -18,7 +18,7 @@ import {
 	redisFederationTokenStoreModule,
 	redisFederationTokenStoreModuleFor,
 } from "#/federation-tokens.mjs";
-import { withSection } from "./support/section.mjs";
+import { overReference, shippedSection, withSection } from "./support/section.mjs";
 
 const fakeClient = () => ({
 	get: () => null,
@@ -133,9 +133,13 @@ describe("redisFederationTokenStoreModule", () => {
 		expect(typeof redisFederationTokenStoreModule.provides?.federationTokenStore).toBe("function");
 	});
 
-	it("reads its own section, redis-federation-token-store, with its defaults", () => {
+	it("reads its own section, redis-federation-token-store, with the defaults reference.conf ships", () => {
 		expect(redisFederationTokenStoreModule).not.toHaveProperty("configSchema");
-		expect(redisFederationTokenStoreModule.section?.schema.parse(undefined)).toEqual({
+		expect(
+			redisFederationTokenStoreModule.section?.schema.parse(
+				shippedSection(redisFederationTokenStoreModule),
+			),
+		).toEqual({
 			keyPrefix: "ft:",
 			ttl: 86400,
 			encryptionMode: "required",
@@ -249,7 +253,9 @@ const bootRefusal = async (extra: Record<string, unknown>): Promise<unknown> => 
 	const boot = createApp({
 		modules: [redisFederationTokenStoreModule, tokensReader],
 		bootstrapComponents: {
-			config: { ...makeValidCoreConfig(), ...extra },
+			config: overReference({ ...makeValidCoreConfig(), ...extra }, [
+				redisFederationTokenStoreModule,
+			]),
 			pathResolver: (p: string) => p,
 			federationTokenStoreClient: fakeClient(),
 		} as never,

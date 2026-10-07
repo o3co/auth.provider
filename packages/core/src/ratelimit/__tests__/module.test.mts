@@ -12,6 +12,7 @@ import type { RateLimiter } from "#/ratelimit/types.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 import { memoryRateLimiterModule } from "../module.mjs";
 import { verifierLimitClaim, withVerifierLimitDeclarations } from "../verifierLimits.mjs";
+import { shippedMemoryRateLimiterSection } from "./shippedSection.mjs";
 
 /** The prefixes a verifier limits itself, and the setting each is made at. */
 const VERIFIER_PREFIXES = [
@@ -38,17 +39,20 @@ describe("memoryRateLimiterModule", () => {
 		expect(memoryRateLimiterModule).not.toHaveProperty("configSchema");
 	});
 
-	it("defaults maxBuckets in its section's schema", () => {
-		const parsed = memoryRateLimiterModule.section?.schema.parse(undefined);
+	it("reads maxBuckets 10000 as core's reference.conf ships it, and fills none itself", () => {
+		const parsed = memoryRateLimiterModule.section?.schema.parse(shippedMemoryRateLimiterSection());
+		expect(memoryRateLimiterModule.section?.schema.safeParse(undefined).success).toBe(false);
 		expect(parsed).toMatchObject({ maxBuckets: 10_000 });
 	});
 
 	it("reads maxBuckets and a spec from the string an environment variable carries", () => {
 		expect(
-			memoryRateLimiterModule.section?.schema.parse({
-				maxBuckets: "500",
-				defaultLimit: { limit: "5", windowSeconds: "60" },
-			}),
+			memoryRateLimiterModule.section?.schema.parse(
+				shippedMemoryRateLimiterSection({
+					maxBuckets: "500",
+					defaultLimit: { limit: "5", windowSeconds: "60" },
+				}),
+			),
 		).toMatchObject({ maxBuckets: 500, defaultLimit: { limit: 5, windowSeconds: 60 } });
 	});
 
@@ -60,7 +64,8 @@ describe("memoryRateLimiterModule", () => {
 			{ defaultLimit: { limit: 5, windowSeconds: 60, window: 1 } },
 		]) {
 			expect(
-				memoryRateLimiterModule.section?.schema.safeParse(section)?.success,
+				memoryRateLimiterModule.section?.schema.safeParse(shippedMemoryRateLimiterSection(section))
+					?.success,
 				JSON.stringify(section),
 			).toBe(false);
 		}
@@ -89,12 +94,14 @@ describe("memoryRateLimiterModule", () => {
 		"refuses a limits entry for %s, a verifier's own limit, in its section's schema, naming the key and the setting",
 		(prefix, setting) => {
 			const parsed = withVerifierLimitDeclarations(new Map([[prefix, setting]]), () =>
-				memoryRateLimiterModule.section?.schema.safeParse({
-					limits: {
-						[prefix]: { limit: 5, windowSeconds: 60 },
-						token: { limit: 5, windowSeconds: 60 },
-					},
-				}),
+				memoryRateLimiterModule.section?.schema.safeParse(
+					shippedMemoryRateLimiterSection({
+						limits: {
+							[prefix]: { limit: 5, windowSeconds: 60 },
+							token: { limit: 5, windowSeconds: 60 },
+						},
+					}),
+				),
 			);
 			expect(parsed?.success).toBe(false);
 			expect(parsed?.error?.issues).toEqual([
@@ -111,7 +118,9 @@ describe("memoryRateLimiterModule", () => {
 		(prefix, setting) => {
 			const config = {
 				...makeValidCoreConfig(),
-				"core-rate-limiter-memory": { limits: { [prefix]: { limit: 5, windowSeconds: 60 } } },
+				"core-rate-limiter-memory": shippedMemoryRateLimiterSection({
+					limits: { [prefix]: { limit: 5, windowSeconds: 60 } },
+				}),
 			};
 			let err: unknown;
 			try {
@@ -142,9 +151,11 @@ describe("memoryRateLimiterModule", () => {
 		"accepts a limits entry for %s in its section's schema when nothing declares it: only declarations count",
 		(prefix) => {
 			expect(
-				memoryRateLimiterModule.section?.schema.safeParse({
-					limits: { [prefix]: { limit: 5, windowSeconds: 60 } },
-				})?.success,
+				memoryRateLimiterModule.section?.schema.safeParse(
+					shippedMemoryRateLimiterSection({
+						limits: { [prefix]: { limit: 5, windowSeconds: 60 } },
+					}),
+				)?.success,
 			).toBe(true);
 		},
 	);

@@ -40,6 +40,7 @@ import type {
 } from "#/clients.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
 import { testRedis } from "./support/redis.mjs";
+import { overReference, shippedSection } from "./support/section.mjs";
 
 let connections: Redis[] = [];
 let run = 0;
@@ -388,10 +389,12 @@ describe("redisAttemptCounterModule", () => {
 		expect(redisAttemptCounterModule.optional).toBeUndefined();
 	});
 
-	it(`reads its own section, 'redis-attempt-counter', strict, whose keyPrefix defaults to '${DEFAULT_REDIS_ATTEMPT_COUNTER_KEY_PREFIX}'`, () => {
+	it(`reads its own section, 'redis-attempt-counter', strict, whose keyPrefix reference.conf ships as '${DEFAULT_REDIS_ATTEMPT_COUNTER_KEY_PREFIX}'`, () => {
 		const schema = redisAttemptCounterModule.section?.schema;
 		expect(redisAttemptCounterModule.section).not.toHaveProperty("at");
-		expect(schema?.parse(undefined)).toEqual({ keyPrefix: "attempt:" });
+		expect(schema?.parse(shippedSection(redisAttemptCounterModule))).toEqual({
+			keyPrefix: "attempt:",
+		});
 		expect(schema?.safeParse({ keyPrefx: "a:" }).success).toBe(false);
 		expect(schema?.safeParse({ keyPrefix: "" }).success).toBe(false);
 	});
@@ -498,7 +501,7 @@ describe("redisAttemptCounterModule", () => {
 		const handle = await createApp({
 			modules: [redisAttemptCounterModule, reader],
 			bootstrapComponents: {
-				config: makeValidCoreConfig() as AppConfig,
+				config: overReference(makeValidCoreConfig(), [redisAttemptCounterModule]) as AppConfig,
 				pathResolver: (p: string) => p,
 				...makeIoredisClients(first()),
 			} as never,
@@ -517,7 +520,7 @@ describe("redisAttemptCounterModule", () => {
 		const refused = createApp({
 			modules: [redisAttemptCounterModule, reader],
 			bootstrapComponents: {
-				config: makeValidCoreConfig() as AppConfig,
+				config: overReference(makeValidCoreConfig(), [redisAttemptCounterModule]) as AppConfig,
 				pathResolver: (p: string) => p,
 				attemptCounterClient: unaskedClient({ ...DURABLE, maxmemoryPolicy: "volatile-lru" }),
 			} as never,

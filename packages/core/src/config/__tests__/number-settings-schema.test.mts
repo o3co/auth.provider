@@ -24,6 +24,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { shippedMemoryRateLimiterSection } from "#/ratelimit/__tests__/shippedSection.mjs";
 import { memoryRateLimiterSectionSchema } from "#/ratelimit/module.mjs";
 import { createRepositoryFactories } from "#/repositories/RepositoryFactory.mjs";
 
@@ -72,7 +73,9 @@ const issuesAt = (
 describe("the memory rate limiter's section reads each number setting in decimal digits", () => {
 	describe.each(RATE_LIMITER_KEYS)("%s", (path, set) => {
 		it.each(REFUSED.map((value) => [value]))("refuses %j, naming the key", (value) => {
-			const result = memoryRateLimiterSectionSchema.safeParse(set(value));
+			const result = memoryRateLimiterSectionSchema.safeParse(
+				shippedMemoryRateLimiterSection(set(value) as Record<string, unknown>),
+			);
 			expect(result.success).toBe(false);
 			expect(issuesAt(result, path)).toEqual([
 				expect.stringMatching(/^must be a whole number .*, in decimal digits$/),
@@ -80,7 +83,11 @@ describe("the memory rate limiter's section reads each number setting in decimal
 		});
 
 		it.each([[60], ["60"], [" 60 "]])("reads %j as 60", (value) => {
-			expect(memoryRateLimiterSectionSchema.safeParse(set(value)).error?.issues ?? []).toEqual([]);
+			expect(
+				memoryRateLimiterSectionSchema.safeParse(
+					shippedMemoryRateLimiterSection(set(value) as Record<string, unknown>),
+				).error?.issues ?? [],
+			).toEqual([]);
 		});
 	});
 });

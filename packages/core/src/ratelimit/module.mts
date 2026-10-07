@@ -8,7 +8,7 @@ import { wholeNumberInRangeFromEnv } from "../config/application.schema.mjs";
 import { MAX_DURATION_SECONDS } from "../config/durations.mjs";
 import { coreReference } from "../config/references.mjs";
 import { defineModule } from "../modules/index.mjs";
-import { createMemoryRateLimiter, DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS } from "./memory.mjs";
+import { createMemoryRateLimiter } from "./memory.mjs";
 import { refuseVerifierLimitEntries } from "./verifierLimits.mjs";
 
 /** A budget as the section writes it; each number read from the string a variable carries. */
@@ -23,23 +23,16 @@ const rateLimitSpecSchema = z
  * The schema of `core-rate-limiter-memory {}`, the module's own section:
  * per-prefix `limits`, none naming a verifier's prefix, the `defaultLimit` a
  * key nothing covers falls to, and `maxBuckets`, the bound on the counters it
- * holds. Strict at every level.
+ * holds. Strict at every level. It fills no default: core's
+ * `config/reference.conf` ships every value.
  */
 export const memoryRateLimiterSectionSchema = z
 	.object({
-		limits: z
-			.record(z.string(), rateLimitSpecSchema)
-			.superRefine(refuseVerifierLimitEntries)
-			.default({}),
-		defaultLimit: rateLimitSpecSchema.default({ limit: 60, windowSeconds: 60 }),
-		maxBuckets: wholeNumberInRangeFromEnv(1).default(DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS),
+		limits: z.record(z.string(), rateLimitSpecSchema).superRefine(refuseVerifierLimitEntries),
+		defaultLimit: rateLimitSpecSchema,
+		maxBuckets: wholeNumberInRangeFromEnv(1),
 	})
-	.strict()
-	.default(() => ({
-		limits: {},
-		defaultLimit: { limit: 60, windowSeconds: 60 },
-		maxBuckets: DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS,
-	}));
+	.strict();
 
 /**
  * In-memory RateLimiter module: its own section's limits, default and bucket

@@ -15,6 +15,7 @@ import {
 	redisMfaTransactionStoreModule,
 	redisReplaySeenSetModule,
 } from "#/index.mjs";
+import { shippedSection } from "./support/section.mjs";
 
 describe("redisChallengeStoreModule", () => {
 	it("has the canonical module name 'redis-challenge-store'", () => {
@@ -25,10 +26,12 @@ describe("redisChallengeStoreModule", () => {
 		expect(redisChallengeStoreModule.requires).toEqual(["challengeStoreClient"]);
 	});
 
-	it("reads its own section, 'redis-challenge-store', whose keyPrefix defaults to 'chal:'", () => {
+	it("reads its own section, 'redis-challenge-store', whose keyPrefix reference.conf ships as 'chal:'", () => {
 		expect(redisChallengeStoreModule).not.toHaveProperty("configSchema");
 		expect(redisChallengeStoreModule.section).not.toHaveProperty("at");
-		expect(redisChallengeStoreModule.section?.schema.parse(undefined)).toEqual({
+		expect(
+			redisChallengeStoreModule.section?.schema.parse(shippedSection(redisChallengeStoreModule)),
+		).toEqual({
 			keyPrefix: "chal:",
 		});
 	});
@@ -43,10 +46,12 @@ describe("redisReplaySeenSetModule", () => {
 		expect(redisReplaySeenSetModule.requires).toEqual(["replaySeenSetClient"]);
 	});
 
-	it("reads its own section, 'redis-replay-seen-set', whose keyPrefix defaults to 'replay:'", () => {
+	it("reads its own section, 'redis-replay-seen-set', whose keyPrefix reference.conf ships as 'replay:'", () => {
 		expect(redisReplaySeenSetModule).not.toHaveProperty("configSchema");
 		expect(redisReplaySeenSetModule.section).not.toHaveProperty("at");
-		expect(redisReplaySeenSetModule.section?.schema.parse(undefined)).toEqual({
+		expect(
+			redisReplaySeenSetModule.section?.schema.parse(shippedSection(redisReplaySeenSetModule)),
+		).toEqual({
 			keyPrefix: "replay:",
 		});
 	});
@@ -61,10 +66,12 @@ describe("redisDeviceCodeStoreModule", () => {
 		expect(redisDeviceCodeStoreModule.requires).toEqual(["deviceCodeStoreClient"]);
 	});
 
-	it("reads its own section, 'redis-device-code-store', whose keyPrefix defaults to 'devauth:'", () => {
+	it("reads its own section, 'redis-device-code-store', whose keyPrefix reference.conf ships as 'devauth:'", () => {
 		expect(redisDeviceCodeStoreModule).not.toHaveProperty("configSchema");
 		expect(redisDeviceCodeStoreModule.section).not.toHaveProperty("at");
-		expect(redisDeviceCodeStoreModule.section?.schema.parse(undefined)).toEqual({
+		expect(
+			redisDeviceCodeStoreModule.section?.schema.parse(shippedSection(redisDeviceCodeStoreModule)),
+		).toEqual({
 			keyPrefix: "devauth:",
 		});
 	});
@@ -105,10 +112,12 @@ describe("redisConsentStoreModule", () => {
 		]);
 	});
 
-	it("reads its own section, 'redis-consent-store', whose keyPrefix defaults to 'consent:'", () => {
+	it("reads its own section, 'redis-consent-store', whose keyPrefix reference.conf ships as 'consent:'", () => {
 		expect(redisConsentStoreModule).not.toHaveProperty("configSchema");
 		expect(redisConsentStoreModule.section).not.toHaveProperty("at");
-		expect(redisConsentStoreModule.section?.schema.parse(undefined)).toEqual({
+		expect(
+			redisConsentStoreModule.section?.schema.parse(shippedSection(redisConsentStoreModule)),
+		).toEqual({
 			keyPrefix: "consent:",
 		});
 	});
@@ -129,7 +138,7 @@ describe("the MFA store modules and adapters, from the package's entry", () => {
 			expect(module.name).toBe(name);
 			expect(module.requires).toEqual([client]);
 			expect(module).not.toHaveProperty("configSchema");
-			expect(module.section?.schema.parse(undefined)).toEqual({ keyPrefix: prefix });
+			expect(module.section?.schema.parse(shippedSection(module))).toEqual({ keyPrefix: prefix });
 		},
 	);
 
