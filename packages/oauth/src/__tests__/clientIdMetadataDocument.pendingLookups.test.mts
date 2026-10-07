@@ -33,26 +33,59 @@ import {
 	DEFAULT_CIMD_MAX_CONCURRENT_FETCHES,
 } from "#/clients/clientIdMetadataDocument.mjs";
 
-/** The outbound fetch's fixed ceiling on outstanding resolutions (core's `MAX_PENDING_LOOKUPS`). */
-const CEILING = 16;
+/**
+ * The outbound fetch's bound on outstanding resolutions, as core sizes it:
+ * two below the threadpool `UV_THREADPOOL_SIZE` states (4 by default), at
+ * least one. A testing fetch has a pool of its own, bounded the same way.
+ */
+const CEILING = (() => {
+	const raw = (process.env.UV_THREADPOOL_SIZE ?? "").trim();
+	const size = /^\d{1,4}$/.test(raw) ? Number(raw) : Number.NaN;
+	return Math.max(1, (size >= 1 && size <= 1024 ? size : 4) - 2);
+})();
 
 const unreachable: OutboundTransport = () => new Promise(() => undefined);
 
-/** A logger that records each warning's message. */
-const logger = (warned: string[]): Logger => {
+/** A logger that records each warning's message, and its fields in `fields` when given. */
+const logger = (warned: string[], fields?: Array<Record<string, unknown>>): Logger => {
 	const ignore = () => undefined;
 	return {
 		trace: ignore,
 		debug: ignore,
 		info: ignore,
-		warn: (_fields: unknown, message?: string) => {
+		warn: (logged: Record<string, unknown>, message?: string) => {
 			warned.push(String(message));
+			fields?.push(logged);
 		},
 		error: ignore,
 		fatal: ignore,
-		child: () => logger(warned),
+		child: () => logger(warned, fields),
 	} as unknown as Logger;
 };
+
+/** A valid document for `url`. */
+const documentFor = (url: string): Response =>
+	new Response(
+		JSON.stringify({
+			client_id: url,
+			client_name: "Acme Chat",
+			redirect_uris: ["https://client.example/cb"],
+			token_endpoint_auth_method: "none",
+		}),
+		{ status: 200, headers: { "content-type": "application/json" } },
+	);
+
+/** A fetch seam whose every call waits until the test answers it. */
+const answeredByTest = () => {
+	const pending: Array<{ readonly url: string; readonly answer: (res: Response) => void }> = [];
+	const fetch = ((input: string | URL | Request) =>
+		new Promise<Response>((answer) =>
+			pending.push({ url: String(input), answer }),
+		)) as typeof globalThis.fetch;
+	return { pending, fetch };
+};
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("fresh document URLs whose host names never resolve", () => {
 	it("answer at their deadline and never push outstanding resolutions past the ceiling", async () => {
@@ -74,7 +107,7 @@ describe("fresh document URLs whose host names never resolve", () => {
 			}),
 		});
 
-		const rounds = Math.ceil((CEILING * 3) / DEFAULT_CIMD_MAX_CONCURRENT_FETCHES);
+		const rounds = Math.max(3, Math.ceil((CEILING * 3) / DEFAULT_CIMD_MAX_CONCURRENT_FETCHES));
 		let id = 0;
 		for (let round = 0; round < rounds; round += 1) {
 			const begun = Date.now();
@@ -226,5 +259,155 @@ describe("the queue for a document fetch slot", () => {
 			"https://b.example/client.json",
 			"https://c.example/client.json",
 		]);
+	});
+});
+
+describe("a request no document fetch slot was free for", () => {
+	const VICTIM = "https://victim.example/client.json";
+
+	it("when the queue is full, is not remembered as a refusal: the id is fetched once a slot frees", async () => {
+		const seam = answeredByTest();
+		const warned: string[] = [];
+		const fields: Array<Record<string, unknown>> = [];
+		const resolver = createClientIdMetadataDocumentResolver({
+			allowedScopes: [],
+			allowedAudiences: [],
+			outboundPolicy: createTestOutboundPolicy(),
+			maxConcurrentFetches: 1,
+			timeoutMs: 5_000,
+			logger: logger(warned, fields),
+			fetch: seam.fetch,
+		});
+		const filling = Array.from({ length: 1 + 4 }, (_, i) =>
+			resolver.resolve(`https://fill${i}.example/client.json`),
+		);
+		await tick();
+		expect(await resolver.resolve(VICTIM)).toBeNull();
+		expect(warned).toEqual(["cimd_document_fetch_failed"]);
+		expect(String(fields[0]?.reason)).toMatch(/slot/);
+
+		for (let i = 0; i < 5; i += 1) {
+			seam.pending[i]?.answer(new Response(null, { status: 404 }));
+			await tick();
+		}
+		await Promise.all(filling);
+		const again = resolver.resolve(VICTIM);
+		await tick();
+		expect(seam.pending.at(-1)?.url).toBe(VICTIM);
+		seam.pending.at(-1)?.answer(documentFor(VICTIM));
+		expect(await again).toMatchObject({ clientId: VICTIM });
+	});
+
+	it("when the wait outlasts the fetch deadline, is not remembered as a refusal either", async () => {
+		const seam = answeredByTest();
+		const resolver = createClientIdMetadataDocumentResolver({
+			allowedScopes: [],
+			allowedAudiences: [],
+			outboundPolicy: createTestOutboundPolicy(),
+			maxConcurrentFetches: 1,
+			timeoutMs: 50,
+			fetch: seam.fetch,
+		});
+		const running = resolver.resolve("https://running.example/client.json");
+		await tick();
+		expect(await resolver.resolve(VICTIM)).toBeNull();
+		seam.pending[0]?.answer(new Response(null, { status: 404 }));
+		await running;
+
+		const again = resolver.resolve(VICTIM);
+		await tick();
+		expect(seam.pending.at(-1)?.url).toBe(VICTIM);
+		seam.pending.at(-1)?.answer(documentFor(VICTIM));
+		expect(await again).toMatchObject({ clientId: VICTIM });
+	});
+
+	it("is answered with a registration already validated, while its stale window lasts", async () => {
+		const seam = answeredByTest();
+		let clock = 1_000_000;
+		const resolver = createClientIdMetadataDocumentResolver({
+			allowedScopes: [],
+			allowedAudiences: [],
+			outboundPolicy: createTestOutboundPolicy(),
+			maxConcurrentFetches: 1,
+			timeoutMs: 5_000,
+			cacheMaxAgeMs: 1_000,
+			now: () => clock,
+			fetch: seam.fetch,
+		});
+		const first = resolver.resolve(VICTIM);
+		await tick();
+		seam.pending[0]?.answer(documentFor(VICTIM));
+		const validated = await first;
+		expect(validated).toMatchObject({ clientId: VICTIM });
+
+		clock += 2_000;
+		const filling = Array.from({ length: 1 + 4 }, (_, i) =>
+			resolver.resolve(`https://fill${i}.example/client.json`),
+		);
+		await tick();
+		expect(await resolver.resolve(VICTIM)).toBe(validated);
+		for (const p of seam.pending.slice(1)) p.answer(new Response(null, { status: 404 }));
+		for (let i = 0; i < 5; i += 1) {
+			await tick();
+			for (const p of seam.pending.slice(1)) p.answer(new Response(null, { status: 404 }));
+		}
+		await Promise.all(filling);
+	});
+});
+
+describe("a document fetch that timed out", () => {
+	const ID = "https://slow.example/client.json";
+
+	it("is not remembered as a refusal, unlike another failure of the fetch", async () => {
+		const body = new TextEncoder().encode(
+			JSON.stringify({
+				client_id: ID,
+				client_name: "Acme Chat",
+				redirect_uris: ["https://client.example/cb"],
+				token_endpoint_auth_method: "none",
+			}),
+		);
+		// Core's outbound fetch over: no answer (its deadline), a document, a failed exchange.
+		const exchanges: Array<() => ReturnType<OutboundTransport>> = [
+			() => new Promise(() => undefined),
+			async () => ({
+				status: 200,
+				statusText: "OK",
+				headers: [["content-type", "application/json"]],
+				body: (async function* () {
+					yield body;
+				})(),
+				close: () => undefined,
+			}),
+			async () => {
+				throw Object.assign(new Error("reset"), { code: "ECONNRESET" });
+			},
+		];
+		let calls = 0;
+		const outboundPolicy = createTestOutboundPolicy();
+		const resolver = createClientIdMetadataDocumentResolver({
+			allowedScopes: [],
+			allowedAudiences: [],
+			outboundPolicy,
+			cacheMaxAgeMs: 0,
+			fetch: createOutboundFetchForTesting({
+				policy: outboundPolicy,
+				source: "request",
+				timeoutMs: 50,
+				lookup: async () => ["93.184.216.34"],
+				transport: () => {
+					calls += 1;
+					return (exchanges.shift() as () => ReturnType<OutboundTransport>)();
+				},
+			}),
+		});
+		expect(await resolver.resolve(ID)).toBeNull();
+		expect(await resolver.resolve(ID)).toMatchObject({ clientId: ID });
+		expect(calls).toBe(2);
+
+		// Any other failure still is: the next request is answered without a fetch.
+		expect(await resolver.resolve(ID)).toBeNull();
+		expect(await resolver.resolve(ID)).toBeNull();
+		expect(calls).toBe(3);
 	});
 });

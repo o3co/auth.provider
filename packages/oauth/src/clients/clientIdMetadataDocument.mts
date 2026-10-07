@@ -241,6 +241,24 @@ const maxAgeMsOf = (cacheControl: string | null): number | undefined => {
 
 class DocumentRejected extends Error {}
 
+/**
+ * No document fetch slot for the request: the queue for one was full, or
+ * none came free within the fetch deadline. This server's own capacity, not
+ * a verdict on the id, so it is never remembered as a refusal.
+ */
+class FetchSlotUnavailable extends Error {
+	override readonly name = "FetchSlotUnavailable";
+}
+
+/**
+ * Whether `projected` is core's outbound fetch giving up at its deadline,
+ * read from the projection `loggableError` makes of it (its name and its
+ * `reason` code). A deadline cannot be told from this process's own
+ * resolutions being saturated, so it is not a verdict on the id either.
+ */
+const isOutboundDeadline = (projected: { readonly name: string; readonly reason?: string }) =>
+	projected.name === "OutboundFetchError" && projected.reason === "timeout";
+
 const asStringArray = (value: unknown, field: string): readonly string[] => {
 	if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) {
 		throw new DocumentRejected(`${field} must be an array of strings`);
@@ -472,12 +490,16 @@ export function createClientIdMetadataDocumentResolver(
 			return Promise.resolve();
 		}
 		if (waiting.size >= maxWaitingFetches) {
-			return Promise.reject(new Error("every document fetch slot is taken and its queue is full"));
+			return Promise.reject(
+				new FetchSlotUnavailable("every document fetch slot is taken and its queue is full"),
+			);
 		}
 		return new Promise<void>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				waiting.delete(granted);
-				reject(new Error("no document fetch slot came free within the fetch deadline"));
+				reject(
+					new FetchSlotUnavailable("no document fetch slot came free within the fetch deadline"),
+				);
 			}, slotWaitMs);
 			const granted = () => {
 				clearTimeout(timer);
@@ -637,7 +659,11 @@ export function createClientIdMetadataDocumentResolver(
 			} else {
 				cache.delete(clientId);
 			}
-			if (negativeCacheMs > 0) rememberRefusal(clientId);
+			// This server's capacity, or a deadline that cannot be told from it,
+			// is no verdict on the id: remembering it would let a caller who
+			// fills the slots keep a client of their choosing refused.
+			const capacity = err instanceof FetchSlotUnavailable || isOutboundDeadline(projected);
+			if (negativeCacheMs > 0 && !capacity) rememberRefusal(clientId);
 			return null;
 		}
 	};
