@@ -15,10 +15,10 @@
  */
 
 /**
- * Whether the calling client may present the subject token: by default only one
- * that names it, by its `azp` or in its `aud`, unless the client's registration
- * sets `allowExchangeOfTokensIssuedToOthers`. A refusal is `invalid_request` with
- * one warn line.
+ * Whether the calling client may present the subject token, and the actor token:
+ * by default only one that names it, by its `azp` or in its `aud`, unless the
+ * client's registration sets `allowExchangeOfTokensIssuedToOthers`, which covers
+ * both. A refusal is `invalid_request` with one warn line.
  */
 
 import type {
@@ -40,13 +40,37 @@ export function callerBindingRefusal(
 	client: PublicClient,
 	subjectValidated: ValidatedToken,
 ): GrantHandlerResult | null {
-	if (client.allowExchangeOfTokensIssuedToOthers === true) return null;
-	if (namesClient(subjectValidated, client.clientId)) return null;
+	if (presentableBy(client, subjectValidated)) return null;
 	deps.logger?.warn(
 		{ subject: subjectValidated.sub, clientId: client.clientId },
 		"token_exchange_subject_not_for_client",
 	);
 	return invalidRequest("subject_token azp and aud do not name this client");
+}
+
+/**
+ * The actor token's refusal on the subject token's terms, or `null` when the
+ * actor token names the client or the registration lets the client exchange
+ * tokens issued to others.
+ */
+export function actorCallerBindingRefusal(
+	deps: Pick<GrantDependencies, "logger">,
+	client: PublicClient,
+	subjectValidated: ValidatedToken,
+	actorValidated: ValidatedToken,
+): GrantHandlerResult | null {
+	if (presentableBy(client, actorValidated)) return null;
+	deps.logger?.warn(
+		{ subject: subjectValidated.sub, actor: actorValidated.sub, clientId: client.clientId },
+		"token_exchange_actor_not_for_client",
+	);
+	return invalidRequest("actor_token azp and aud do not name this client");
+}
+
+function presentableBy(client: PublicClient, validated: ValidatedToken): boolean {
+	return (
+		client.allowExchangeOfTokensIssuedToOthers === true || namesClient(validated, client.clientId)
+	);
 }
 
 function namesClient({ aud, claims }: ValidatedToken, clientId: string): boolean {

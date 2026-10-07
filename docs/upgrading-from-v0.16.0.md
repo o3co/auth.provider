@@ -770,6 +770,23 @@ The boot refusals you can meet, with their messages, are in
   them; an answer with neither is refused the same way. See the
   [oauth-token-exchange README](../packages/oauth-token-exchange/README.md#security-notes),
   note 18.
+- **BREAKING: token exchange requires the caller to be an audience of the
+  actor token too.** An `actor_token` is accepted only when its `azp` is the
+  calling client's id or its `aud` contains it, as for the subject token;
+  otherwise the exchange is `400 invalid_request` /
+  `actor_token azp and aud do not name this client`, logged at warn as
+  `token_exchange_actor_not_for_client`. A `may_act` naming the actor does
+  not stand in for it. Exchanges without an `actor_token` are unchanged.
+  **What to do:** grep for `token_exchange_actor_not_for_client` against a
+  staging copy. A client that presents actor tokens issued to other clients
+  is registered with `allowExchangeOfTokensIssuedToOthers: true`, which
+  covers the actor token as it covers the subject token; otherwise have the
+  actor obtain a token naming the exchanging client (in its `aud`, or as its
+  `azp`). An actor-token validator you contribute (`tokenExchangeValidators`)
+  must return the token's `aud` and/or `azp` the same way a subject-token
+  validator does. See the
+  [oauth-token-exchange README](../packages/oauth-token-exchange/README.md#security-notes),
+  note 18.
 - **BREAKING: a refresh keeps the audience of the token it presents.** On
   `refresh_token`, the presented refresh token's `aud` is the ceiling and the
   default for the new tokens' audience, as its scope already is. A plain
