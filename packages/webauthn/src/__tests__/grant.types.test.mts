@@ -21,6 +21,7 @@ import type {
 	RefreshTokenFamilyRotation,
 	SubjectRevocation,
 	TokenBindingSettings,
+	UserRepository,
 	WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
 import { describe, expect, expectTypeOf, it } from "vitest";
@@ -53,6 +54,8 @@ const OPTIONAL = [
 	"refreshTokenFamilyRotation",
 	// The subject's revocation boundary, which the grant reads before minting.
 	"subjectRevocation",
+	// The user behind the credential, read under `oauth.requireEmailVerified`.
+	"userRepository",
 ] as const;
 type ModuleDeps = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
@@ -119,6 +122,7 @@ describe("the webauthn grant declares the slots it reads", () => {
 		expectTypeOf<WebAuthnGrantDeps["subjectRevocation"]>().toEqualTypeOf<
 			SubjectRevocation | undefined
 		>();
+		expectTypeOf<WebAuthnGrantDeps["userRepository"]>().toEqualTypeOf<UserRepository | undefined>();
 		expect(true).toBe(true);
 	});
 });

@@ -51,7 +51,9 @@ import { createRegistrationVerifyHandler } from "./routes/registrationVerify.mjs
  * `webauthnConfig` slot, for the package's other readers (the WebAuthn second factor), and names
  * the slot `authoritative`. The token lifetimes and the resource-indicator switch come from the
  * `oauthTokenSettings` slot, and the refresh-token binding rule from core's `tokenBindingSettings`
- * slot, both of which it requires; it reads nothing of the whole configuration. Each route has
+ * slot, both of which it requires; it reads nothing of the whole configuration. Under
+ * `oauth.requireEmailVerified` the grant reads the user behind a passkey from the optional
+ * `userRepository` slot, through `findBySubject`. Each route has
  * its own id for collision detection and ordering.
  *
  * `POST /oauth/webauthn/authentication/options` is guarded by the deployment's `rateLimiter` when
@@ -74,7 +76,8 @@ export const webauthnModule = defineModule<
 	| "auditSink"
 	| "logger"
 	| "refreshTokenFamilyRotation"
-	| "subjectRevocation",
+	| "subjectRevocation"
+	| "userRepository",
 	typeof webauthnConfigSchema,
 	"webauthnConfig"
 >({
@@ -133,6 +136,9 @@ export const webauthnModule = defineModule<
 		// The subject's revocation boundary, which the grant reads before minting; unread when
 		// absent. An unreadable boundary is 503.
 		"subjectRevocation",
+		// The user behind a passkey, which the grant reads through `findBySubject` under
+		// `oauth.requireEmailVerified` alone; the grant refuses to build without it then.
+		"userRepository",
 	],
 	// The relying party and the rest of the section, for the package's other readers (the
 	// WebAuthn second factor): the section as boot parsed it, deeply frozen.

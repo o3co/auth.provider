@@ -857,6 +857,20 @@ The boot refusals you can meet, with their messages, are in
   clients that pad or re-encode the handle are the ones to watch:
   `token.issued.failure` with `details.reason` `"user_handle_mismatch"` or
   `"user_handle_missing"`.
+- **BREAKING: with `oauth.requireEmailVerified` on, passkey sign-ins of
+  unverified users are refused (#710).** The WebAuthn grant now applies the
+  gate `/authorize`, the session grant, jwt-bearer and device approval
+  apply: after the assertion it reads the user behind the credential through
+  the `userRepository` slot's new optional `findBySubject`, and a user the
+  Store does not hold, or whose `emailVerified` is not `true`, is
+  `400 invalid_grant` "email address is not verified", with no token or
+  refresh-token family issued. A lookup that throws is
+  `503 temporarily_unavailable` "identity resolution unavailable". With the
+  setting on, a composition installing `webauthnModule` whose
+  `userRepository` has no `findBySubject` refuses to start: implement it on
+  your repository, answering the `User` for the `sub` the passkey grant
+  issues (the credential's `userId`). With the setting off nothing changes.
+  See the webauthn README, "SECURITY — a verified email".
 - **The Store's users.** A `2xx` user with an empty `id` or `username` is
   refused as malformed, `503` on every login path (#862). A Store sends a
   stable label as `username` for a user without one.
