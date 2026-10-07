@@ -132,6 +132,47 @@ describe("createRepositoryFactories", () => {
 			expect(user?.username).toBe("alice");
 		});
 
+		it("refuses a users file entry the schema refuses, naming the file, the user and the field and never the value", async () => {
+			const body = "39.FBAWt.ck.rbQbPhmLOOPkwFxWEPZEYA3HR07Lr2k5OYqk.vRSi";
+			const yamlPath = writeYaml(
+				"users-invalid.yaml",
+				`alice:
+  password: "plainpass"
+bob:
+  password: "$2b$16$${body}"
+`,
+			);
+
+			const { userFactory } = createRepositoryFactories();
+			const refusal = await userFactory.create({ type: "yaml", path: yamlPath }).then(
+				() => undefined,
+				(err: unknown) => (err as Error).message,
+			);
+
+			expect(refusal).toBe(
+				`Invalid entry "bob" in ${yamlPath}: password: the bcrypt cost must be from 04 to 15`,
+			);
+		});
+
+		it("refuses a users file in which two users have the same id, naming both users", async () => {
+			const yamlPath = writeYaml(
+				"users-same-id.yaml",
+				`alice:
+  password: "a"
+  id: "u1"
+bob:
+  password: "b"
+  id: "u1"
+`,
+			);
+
+			const { userFactory } = createRepositoryFactories();
+
+			await expect(userFactory.create({ type: "yaml", path: yamlPath })).rejects.toThrow(
+				/"alice" and "bob"/,
+			);
+		});
+
 		it("throws AdapterFactoryError for unregistered type", async () => {
 			const { userFactory } = createRepositoryFactories();
 

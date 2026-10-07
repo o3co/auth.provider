@@ -155,14 +155,25 @@ const FULLY_POPULATED_USER = {
 } satisfies Required<User>;
 
 describe("UserEntrySchema conformance with User", () => {
-	it("round-trips every declared field", () => {
+	// `username` is the map key in a file-backed registration, as `clientId` is
+	// for a client, so an entry never carries it: the repository supplies it
+	// from the key, and the schema refuses it inside an entry.
+	const { username, ...entryFields } = FULLY_POPULATED_USER;
+
+	it("round-trips every declared field but the username, which is the entry's key", () => {
 		const parsed = UserEntrySchema.parse({
-			...FULLY_POPULATED_USER,
+			...entryFields,
 			password: "a-password",
 		}) as Record<string, unknown>;
-		for (const [key, value] of Object.entries(FULLY_POPULATED_USER)) {
+		for (const [key, value] of Object.entries(entryFields)) {
 			expect(parsed[key]).toEqual(value);
 		}
+	});
+
+	it("refuses the username inside an entry", () => {
+		expect(
+			UserEntrySchema.safeParse({ ...entryFields, username, password: "a-password" }).success,
+		).toBe(false);
 	});
 
 	it("keeps Store-specific claims rather than stripping them", () => {
@@ -172,7 +183,6 @@ describe("UserEntrySchema conformance with User", () => {
 		// deployment silently at boot.
 		const parsed = UserEntrySchema.parse({
 			password: "a-password",
-			username: "alice",
 			department: "engineering",
 		}) as Record<string, unknown>;
 		expect(parsed.department).toBe("engineering");

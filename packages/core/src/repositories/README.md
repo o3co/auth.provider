@@ -1,6 +1,6 @@
 # repositories
 
-Last updated: 2026-10-06
+Last updated: 2026-10-07
 
 ## Responsibility
 
@@ -46,19 +46,20 @@ It is separate because the Store's data model is read by `oauth`, `session`, `fo
 - A record a boundary refuses is never answered as a client: the lookup rejects with the branded refusal, which a layer that lets rejections through keeps, and never `null`; what the boundary answers is validated and frozen, and a refusal never quotes a URI — [`clientRepositoryBoundary.test.mts`](./__tests__/clientRepositoryBoundary.test.mts).
 - `tokenEndpointAuthMethod` is required and enforced against `clientSecret` at construction; `authenticate` on a public client returns `null` — [`InMemoryClientRepository.test.mts`](./__tests__/InMemoryClientRepository.test.mts).
 - `ClientEntrySchema` refuses private or symmetric JWK members, a secret beside `private_key_jwt`, `defaultScopes` outside `allowedScopes`, a `javascript:` redirect URI and one whose query the redirect-URI grammar refuses, and reports every bad entry — [`ClientEntrySchema.test.mts`](./__tests__/ClientEntrySchema.test.mts).
-- Every `Client` / `User` field round-trips through its entry schema, and a new optional field fails typecheck until the fixture covers it (#343) — [`entrySchemaConformance.test.mts`](./__tests__/entrySchemaConformance.test.mts) (typecheck-included).
+- Every `Client` / `User` field round-trips through its entry schema (but the key a file entry is held under, `clientId` / `username`), and a new optional field fails typecheck until the fixture covers it (#343) — [`entrySchemaConformance.test.mts`](./__tests__/entrySchemaConformance.test.mts) (typecheck-included).
 - `supportsMfaEnrollmentWitness` answers `true` only for a repository whose `markMfaEnrolled` is a function, and narrows it — [`mfaEnrollmentWitness.test.mts`](./__tests__/mfaEnrollmentWitness.test.mts) (typecheck-included).
 - No product file in any package or in the standalone template reads `mfaEnrolled` but `readMfaEnrollmentWitness` — [`mfaEnrollmentWitness.drift.test.mts`](../__tests__/mfaEnrollmentWitness.drift.test.mts).
 - The federation-grant fields are absent by default, exact-spelled, refused for public clients, and reach both projections — [`federationGrantClientFields.test.mts`](./__tests__/federationGrantClientFields.test.mts).
 - `isWellFormedClientId` admits an id at 256 characters and non-ASCII, and refuses one past 256, an empty one, and any C0, DEL or C1 control character — [`clientId.test.mts`](./__tests__/clientId.test.mts). The bundled repository and the yaml adapter refuse to register such an id, naming its position and never echoing a control character — [`registeredClientIds.test.mts`](./__tests__/registeredClientIds.test.mts).
 - `isGrantTypeAllowed`: absent → allowed unless `requireAllowlist`; `[]` → denied; exact string match — [`allowedGrantTypes.test.mts`](./__tests__/allowedGrantTypes.test.mts).
-- The bundled user adapter runs a bcrypt compare for unknown users and on the plain-text path, never returns `password`, and its identity lookup covers no registration and changes nothing — [`InMemoryUserRepository.test.mts`](./__tests__/InMemoryUserRepository.test.mts).
+- The bundled user adapter runs a bcrypt compare for unknown users and on the plain-text path, at the highest cost among its entries' hashes (10 when none holds one), never returns `password`, and its identity lookup covers no registration and changes nothing — [`InMemoryUserRepository.test.mts`](./__tests__/InMemoryUserRepository.test.mts).
+- A user entry (`UserEntrySchema`, and `InMemoryUserRepository` over any map it is handed) holds a plain-text password or a bcrypt hash: a password starting with `$2` is read as a hash, and held only as a well-formed `$2a$`, `$2b$` or `$2y$` hash (a two-digit cost, a `$`, 53 characters of bcrypt's alphabet) at a cost from 04 to 15; `$2y$` is compared as `$2b$`. The ceiling, 15, is a private constant: a compare at 15 is about 2 s, 32 times one at 10, on a thread of Node's libuv pool. An `id` is not empty, no two users share an id (the `id`, or the username where none is set), and an entry carries no `username`, which is its key. A refusal names the user and the field, never a value — [`InMemoryUserRepository.test.mts`](./__tests__/InMemoryUserRepository.test.mts), [`createRepositoryFactories.test.mts`](./__tests__/createRepositoryFactories.test.mts).
 - Factories: `register` throws on a duplicate type, an unregistered type is `AdapterFactoryError`, the `memory` code builder validates `defaultExpiresIn` — [`createRepositoryFactories.test.mts`](./__tests__/createRepositoryFactories.test.mts); `loadYamlMap` refuses non-mapping YAML and invalid entries, and a file that does not parse by its path, line, column and the parser's reason alone — no `cause`, nothing the parser quoted of the file — [`loadYamlMap.test.mts`](./__tests__/loadYamlMap.test.mts).
 - Records are readonly at compile time — [`../__tests__/repository-types-readonly.test.mts`](../__tests__/repository-types-readonly.test.mts).
 
 ## Failure and lifecycle
 
-- Absence is `null`; a malformed registration throws at construction (schema, and the client-id rule), so a bad entry refuses boot rather than a request. A Store that cannot answer `findSubjectByFederatedIdentity`, or whose data names more than one owner, throws: an arbitrary pick is worse than an outage.
+- Absence is `null`; a malformed registration throws at construction (schema, the client-id rule, and the user ids' uniqueness), so a bad entry refuses boot rather than a request. A Store that cannot answer `findSubjectByFederatedIdentity`, or whose data names more than one owner, throws: an arbitrary pick is worse than an outage.
 - `InMemoryCodeRepository` owns a GC interval; the `memory` builder registers `dispose()` with `BuilderContext.lifecycle` so `AppHandle.dispose()` clears it. `InMemoryUserRepository` links are process-local and lost on restart.
 - Nothing here retries, waits or times out.
 
