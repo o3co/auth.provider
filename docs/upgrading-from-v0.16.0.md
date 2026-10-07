@@ -898,6 +898,28 @@ The boot refusals you can meet, with their messages, are in
   your repository, answering the `User` for the `sub` the passkey grant
   issues (the credential's `userId`). With the setting off nothing changes.
   See the webauthn README, "SECURITY — a verified email".
+- **BREAKING: with `oauth.requireEmailVerified` on, token exchange is refused
+  for a subject whose email is not verified.** The `token_exchange` grant now
+  applies the same gate: once the presented tokens have passed their checks,
+  and before the grant policy and signing, it reads the user behind the
+  `subject_token`'s `sub` (the subject the issued token names) through the
+  `userRepository` slot's `findBySubject`. A user the Store does not hold, or
+  whose `emailVerified` is not `true`, is `400 invalid_grant` "email address
+  is not verified", and nothing is minted; a lookup that throws is
+  `503 temporarily_unavailable` "identity resolution unavailable". No subject
+  is exempt: a `subject_token` whose `sub` is a client's — a
+  `client_credentials` access token — names no user, and is refused too, as
+  is a token from a contributed validator whose `sub` the Store does not
+  hold. The `actor_token`'s subject is not read. With the setting on, a
+  composition installing `tokenExchangeModule` whose `userRepository` is
+  unfilled or has no `findBySubject` refuses to start
+  (`contribute-factory-failed`). **What to do:** before turning the setting
+  on, or upgrading with it on, implement `findBySubject` on your repository,
+  answering the `User` for the `sub` your exchanged tokens carry, and move
+  machine-to-machine callers that exchange `client_credentials` tokens to
+  another grant. With the setting off nothing changes. See the
+  [oauth-token-exchange README](../packages/oauth-token-exchange/README.md#security-notes),
+  note 24.
 - **The Store's users.** A `2xx` user with an empty `id` or `username` is
   refused as malformed, `503` on every login path (#862). A Store sends a
   stable label as `username` for a user without one.
