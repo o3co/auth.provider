@@ -372,6 +372,12 @@ const ALLOWED: ReadonlyArray<AllowedSites> = [
 		sites: { claim: 1 },
 		why: "a contract suite building the input a requirement is asked with, not a claim: its `carrier` is the one admission hands a requirement for a cookie session, and the suite reads no session",
 	},
+	// The browser logout, which ends the session its cookie names.
+	{
+		file: "packages/session/src/routes/Session.mts",
+		sites: { get: 1 },
+		why: "POST /session/logout's read of the session its cookie names, to close it when its subject is the cookie session's user: a logout ends a session, it does not admit one",
+	},
 ];
 
 /** The files whose prefixes may call `recordSecondFactor(`: the two bundled stores, and the MFA package (the session-admission ADR's D3, D10). */

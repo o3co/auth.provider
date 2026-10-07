@@ -649,9 +649,10 @@ What holds:
 - **What renewal orphans.** Records bound to the old express session id are
   lost: a consent `/authorize` parked, a federation-grant browser binding,
   and the session's other open MFA transactions. A flow in another tab starts
-  again. A tab that still holds the old cookie is refused once the session is
-  escalated, and signs in again; its `POST /session/logout` ends only its own
-  cookie session, not the renewed one, but for one window
+  again. A tab that still holds the old cookie is refused once the session's
+  escalation is recorded with the new nonce, and signs in again; its `POST /session/logout` still closes the
+  session, as the renewed cookie's would: the nonce keeps an old copy off the
+  escalation, not from ending the session
   ([below](#what-post-sessionlogout-invalidates)).
 
 ### What `POST /session/logout` invalidates
@@ -663,7 +664,8 @@ through core's session lifecycle, so they invalidate the same things.
 `auth.proxy` injection topology calls — closes the session through core's
 session lifecycle and destroys the express session. A router with a
 `UserSessionStore` requires the lifecycle beside it; a sessionless router
-(no store) has no record to close and destroys the express session alone.
+(no store) has no record to close and destroys the express session alone,
+whether or not it was handed a lifecycle.
 
 The logout closes the session with `sessionLifecycle.close(sid, "session_logout")` (`sessionLifecycleModule` fills the slot). The close runs as `/oauth/logout`'s does, in order: it revokes the session's refresh-token families and removes its federation tokens, then tells its relying parties back-channel (through the notifier `oauthEndpointsModule` contributes), then removes the per-session indexes, then deletes the `UserSession`, and removes the subject-index entry last, so a close still pending keeps the sid where a subject-wide revocation finds it.
 - A close that committed answers the same `200` and destroys the express session, whether its work is `done` or still `pending`: from the commit on, no liveness read answers the session live, and a later close or the lifecycle's sweep resumes what is left. A `pending` close is audited as `logout.close_pending` (`subject`, `sid`), as `/oauth/logout` audits it.
@@ -671,23 +673,28 @@ The logout closes the session with `sessionLifecycle.close(sid, "session_logout"
 - A close that did not commit, or a lifecycle that threw — whatever the error, a `RangeError` included — answers `503 temporarily_unavailable` and keeps the express session for a retry. That includes a close whose commit found no live record (the session's end had passed on the store's clock) and whose work, run at once with no record to save it in, failed: a retry runs it again. It is logged once as `session_logout_store_unavailable` (error, `store: "session_lifecycle"`, `step: "close"`, `sid`), carrying the error's projection when the lifecycle rejected; any answer but `done` or `pending` is the same outage, with no error to project.
 - A step of the close work that fails is core's `session_close_item_failed` (warn, with the `item`), and the close stays pending; alert on `item: "delete_user_session"`.
 
-**A copy the record was renewed away from.** Before it invalidates anything,
-the logout asks core's `cookieRenewedAway`: when the record the cookie names
-carries a renewal nonce this cookie session does not hold — an old cookie, or
-a copy of it, from before a step-up renewed the session — the record is the
-renewed session's, so only this cookie session is destroyed and the answer is
-the same `200`. The renewed session stays live, except in one window. The
-logout reads the record and then closes the session, as two steps, and a
-step-up keeps the record's `sid` and rebinds it by its renewal nonce alone (the
-MFA ADR's D27). When a step-up records its nonce after the logout read the
-record and before the close commits, the logout acts on what it read and
-closes the session, escalated by then, although the cookie it came from is now
-a copy the record was renewed away from. The renewal nonce is written to the
-`UserSessionStore` and the close commits in the `SessionLifecycleStore`, so no
-single store write orders the two. This is accepted: the logout only ends the
-session, never extends or grants one, and the same cookie could have closed
-that session before the step-up. When the record cannot be read, that is
-logged as `logout_user_session_read_failed` and the logout answers
+**The session the cookie session names.** Before it invalidates anything,
+the logout reads the `UserSession` record the cookie session's `sid` names,
+and closes the session when the record is the cookie session's user's (its
+`sub` is the cookie session's `user.id`), whatever renewal nonce either holds.
+Once a step-up's escalation is recorded with the renewed cookie session's
+nonce, an old cookie, or a copy of it, from before the renewal is not admitted
+anywhere (core's admission answers it `not_live`, `renewed`); a renewal whose
+record then failed binds no new nonce, and the record's binding stays as it
+was. Either way, the logout of such a copy closes the session as the renewed
+cookie's would: the nonce keeps a copy the record was renewed away from off
+the escalation, not from ending the session (the MFA ADR's D27). A record
+that is already gone is closed by its `sid`, as above, and the answer is
+`200` — with or without a user on the cookie session. A record that exists
+and is not the cookie session's user's — another subject's, or any record
+when the cookie session names a `sid` and holds no user — is not closed: only
+the cookie session is destroyed, and the answer is
+`401 login_required` ("The cookie session does not hold the session it
+names"), so the client does not report a session as closed that was not; a
+retry from the same browser holds no cookie session and answers `200`. A login
+writes the `sid` and the user together, so this is not expected in practice.
+When the record cannot be read, that is logged as
+`logout_user_session_read_failed` and the logout answers
 `503 temporarily_unavailable`: it closes nothing and keeps the express session
 for a retry.
 
