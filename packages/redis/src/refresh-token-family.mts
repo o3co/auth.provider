@@ -264,15 +264,15 @@ export const redisRefreshTokenFamilyStoreBuilder: AdapterBuilder<RefreshTokenFam
 /**
  * The schema of `redis-refresh-token-family-store {}`, the module's own
  * section: its key namespace and the compare-and-set retry bound (1 to 10),
- * read from the string a variable carries. Strict.
+ * read from the string a variable carries. Strict. It fills no default: the
+ * package's `config/reference.conf` ships both values.
  */
 export const redisRefreshTokenFamilyStoreSectionSchema = z
 	.object({
-		keyPrefix: z.string().default("rtfam:"),
-		casRetryLimit: wholeNumberInRangeFromEnv(1, 10).default(3),
+		keyPrefix: z.string(),
+		casRetryLimit: wholeNumberInRangeFromEnv(1, 10),
 	})
-	.strict()
-	.default(() => ({ keyPrefix: "rtfam:", casRetryLimit: 3 }));
+	.strict();
 
 /**
  * `defineModule` manifest for the Redis RefreshTokenFamilyStore (static

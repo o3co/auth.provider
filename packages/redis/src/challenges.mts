@@ -156,7 +156,7 @@ export const redisChallengeStoreModule = defineModule({
 	name: "redis-challenge-store",
 	requires: ["challengeStoreClient"] as const,
 	section: {
-		schema: keyPrefixSection("chal:"),
+		schema: keyPrefixSection,
 		reference: redisReference(),
 		relocatedFrom: { redisChallengeStore: { to: "", environmentVariable: null } },
 	},

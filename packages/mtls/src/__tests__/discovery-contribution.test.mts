@@ -35,10 +35,11 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { mtlsConfigSchema, mtlsModule } from "#/module.mjs";
+import { shippedMtlsSection } from "./shippedSection.mjs";
 
-/** The `mtls` section as boot hands it to the module: parsed with `mtlsConfigSchema`. */
-function mtlsConfig(overrides: Record<string, unknown> | undefined = {}): unknown {
-	return mtlsConfigSchema.parse(overrides);
+/** The `mtls` section as boot hands it to the module: the shipped one under `overrides`, parsed with `mtlsConfigSchema`. */
+function mtlsConfig(overrides: Record<string, unknown> = {}): unknown {
+	return mtlsConfigSchema.parse(shippedMtlsSection(overrides));
 }
 
 async function contribution(section: unknown): Promise<OidcDiscoveryContribution> {
@@ -54,7 +55,7 @@ describe("mtlsModule — discoveryMetadata contribution", () => {
 	});
 
 	it("advertises the binding regardless of where the certificate comes from", async () => {
-		// `source` defaults to the TLS layer, and the header path sits behind a
+		// `source` is the TLS layer in reference.conf, and the header path sits behind a
 		// trusted-proxy allowlist. Either way the ISSUED TOKEN carries
 		// the same `cnf["x5t#S256"]`, and the RFC 8705 §3.3 flag describes the
 		// token, not the transport the certificate arrived over.
@@ -67,8 +68,8 @@ describe("mtlsModule — discoveryMetadata contribution", () => {
 	it("is switched off by its section when mTLS is disabled (the secure default), so nothing is contributed", () => {
 		// RFC 8705 §3.3: an omitted flag already means `false`, and a disabled
 		// module registers nothing, so the field is never contributed as `false`.
-		expect(mtlsModule.section?.isEnabled?.(mtlsConfigSchema.parse({}))).toBe(false);
-		expect(mtlsModule.section?.isEnabled?.(mtlsConfigSchema.parse({ enabled: true }))).toBe(true);
+		expect(mtlsModule.section?.isEnabled?.(mtlsConfig())).toBe(false);
+		expect(mtlsModule.section?.isEnabled?.(mtlsConfig({ enabled: true }))).toBe(true);
 	});
 
 	it("is switched off when the mtls section is absent entirely", () => {

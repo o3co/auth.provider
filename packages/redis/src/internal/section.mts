@@ -30,9 +30,8 @@ export function redisReference(): URL {
 	return new URL("../../config/reference.conf", import.meta.url);
 }
 
-/** A store's section that holds its key namespace alone: strict, `keyPrefix` defaulting to `keyPrefix`. */
-export const keyPrefixSection = (keyPrefix: string) =>
-	z
-		.object({ keyPrefix: z.string().default(keyPrefix) })
-		.strict()
-		.default(() => ({ keyPrefix }));
+/**
+ * A store's section that holds its key namespace alone: strict, filling no
+ * default — the package's `config/reference.conf` ships each store's prefix.
+ */
+export const keyPrefixSection = z.object({ keyPrefix: z.string() }).strict();

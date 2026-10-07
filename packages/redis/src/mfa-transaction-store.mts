@@ -808,7 +808,7 @@ function buildRedisMfaTransactionStore(
 export const redisMfaTransactionStoreModule = defineModule({
 	name: "redis-mfa-transaction-store",
 	section: {
-		schema: keyPrefixSection(DEFAULT_REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX),
+		schema: keyPrefixSection,
 		reference: redisReference(),
 		relocatedFrom: {
 			redisMfaTransactionStore: { to: "", environmentVariable: null },

@@ -20,14 +20,14 @@
  * `tls_client_certificate_bound_access_tokens` to discovery, both built from
  * its own section, `mtls {}`, parsed with {@link mtlsConfigSchema} before any
  * factory runs. `mtls.enabled` (off in reference.conf) is the module's switch
- * (`section.isEnabled`): off, the module registers nothing. A key still
- * written at `oauth.mtls`, the section's old path, refuses boot naming the
- * new one. The settings under `core.tokenBinding`, the dispatch policy among
- * them, are core's.
+ * (`section.isEnabled`): off, or the section absent, the module registers
+ * nothing. A key still written at `oauth.mtls`, the section's old path,
+ * refuses boot naming the new one. The settings under `core.tokenBinding`,
+ * the dispatch policy among them, are core's.
  *
- * Secure defaults: the certificate comes from the TLS layer
- * (`source = "tls-layer"`), and the forwarded-header source requires an
- * explicit `trustedProxies` allowlist.
+ * Secure defaults, in the package's `config/reference.conf`: the certificate
+ * comes from the TLS layer (`source = "tls-layer"`), and the forwarded-header
+ * source requires an explicit `trustedProxies` allowlist.
  */
 
 import {
@@ -37,15 +37,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import { createMtlsMechanism, type MtlsMechanismOptions } from "./extractor.mjs";
-import {
-	DEFAULT_SIGNATURE_ALGORITHMS,
-	SIGNATURE_ALGORITHM_NAMES,
-	type SignatureAlgorithmName,
-} from "./fullPki/algorithms.mjs";
-import {
-	FULL_PKI_DEFAULT_MAX_CHAIN_DEPTH,
-	FULL_PKI_DEFAULT_MIN_RSA_KEY_BITS,
-} from "./fullPki/defaults.mjs";
+import { SIGNATURE_ALGORITHM_NAMES, type SignatureAlgorithmName } from "./fullPki/algorithms.mjs";
 
 // ---------------------------------------------------------------------------
 // Config schema
@@ -54,55 +46,60 @@ import {
 /**
  * The schema of `mtls {}`, the module's own section. Strict at every level: a
  * key it does not declare refuses boot. Each scalar leaf reads the string an
- * environment variable carries.
+ * environment variable carries. It fills no default: the package's
+ * `config/reference.conf` ships every value but the revocation block's, so a
+ * key a composition leaves out of a section it writes refuses boot, naming
+ * the key. Absent, the section is `undefined`, which the switch reads as off.
  */
 export const mtlsConfigSchema = z
 	.object({
-		/** The module's switch: false (default), and the module registers nothing. */
-		enabled: coerceBooleanFromEnv.default(false),
+		/** The module's switch: on only when true; absent is off, and the module registers nothing. */
+		enabled: coerceBooleanFromEnv.optional(),
 		/**
-		 * Where the leaf cert comes from. Defaults to `"tls-layer"`: RFC 8705 §3
-		 * wants the certificate from the transport, and a forwarded header
-		 * substitutes only when the forwarding hop is authenticated
+		 * Where the leaf cert comes from; `"tls-layer"` in reference.conf: RFC
+		 * 8705 §3 wants the certificate from the transport, and a forwarded
+		 * header substitutes only when the forwarding hop is authenticated
 		 * (`trustedProxies`).
 		 */
-		source: z.enum(["header", "tls-layer"]).default("tls-layer"),
+		source: z.enum(["header", "tls-layer"]),
 		/** Header name carrying the forwarded leaf cert (header source only). */
-		certHeader: z.string().min(1).default("x-forwarded-client-cert"),
+		certHeader: z.string().min(1),
 		/** Dialect for the forwarded-cert header (header source only). */
-		certHeaderDialect: z.enum(["envoy", "plain-pem"]).default("envoy"),
+		certHeaderDialect: z.enum(["envoy", "plain-pem"]),
 		/**
 		 * Peer addresses allowed to forward a client certificate header (header
 		 * source only). Each entry is an IPv4 / IPv6 literal, a CIDR range or a
-		 * named range. Empty by default — nothing is trusted implicitly — and
-		 * `source = "header"` with an empty list fails boot.
+		 * named range. Empty in reference.conf — nothing is trusted implicitly —
+		 * and `source = "header"` with an empty list fails boot.
 		 */
-		trustedProxies: z.array(z.string()).readonly().default([]),
+		trustedProxies: z.array(z.string()).readonly(),
 		/**
 		 * Trust posture. `"self-signed"` accepts any well-formed cert; `"pki"`
 		 * runs the narrow chain walk; `"full-pki"` runs RFC 5280 path validation
 		 * with revocation. The latter two require `trustedCas`.
 		 */
-		mode: z.enum(["self-signed", "pki", "full-pki"]).default("self-signed"),
+		mode: z.enum(["self-signed", "pki", "full-pki"]),
 		/** Trust anchors for mode = "pki" / "full-pki". Each entry: literal PEM or "file:<path>". */
-		trustedCas: z.array(z.string()).readonly().default([]),
+		trustedCas: z.array(z.string()).readonly(),
 		/**
 		 * Settings for `mode = "full-pki"` only. `revocation.mode` and
 		 * `revocation.onUnavailable` have no defaults: what to do when revocation
 		 * status cannot be obtained has no universally right answer, so the
-		 * operator must write one down.
+		 * operator must write one down. The revocation block's other keys are
+		 * the one place the schema fills defaults: the block is absent until the
+		 * operator writes it, and reference.conf cannot hold them without making
+		 * it present.
 		 */
 		fullPki: z
 			.object({
 				/** Maximum certificates in a path, leaf and anchor included. */
-				maxChainDepth: wholeNumberInRangeFromEnv(2, 16).default(FULL_PKI_DEFAULT_MAX_CHAIN_DEPTH),
+				maxChainDepth: wholeNumberInRangeFromEnv(2, 16),
 				/** Signature algorithms permitted at every hop. */
 				signatureAlgorithms: z
 					.array(z.enum(SIGNATURE_ALGORITHM_NAMES as unknown as [string, ...string[]]))
-					.readonly()
-					.default(DEFAULT_SIGNATURE_ALGORITHMS as unknown as string[]),
+					.readonly(),
 				/** Minimum RSA modulus in bits. Ignored for EC and EdDSA keys. */
-				minRsaKeyBits: wholeNumberInRangeFromEnv(1024).default(FULL_PKI_DEFAULT_MIN_RSA_KEY_BITS),
+				minRsaKeyBits: wholeNumberInRangeFromEnv(1024),
 				revocation: z
 					.object({
 						/**
@@ -136,20 +133,24 @@ export const mtlsConfigSchema = z
 			.optional(),
 	})
 	.strict()
-	.default(() => ({
-		enabled: false,
-		source: "tls-layer" as const,
-		certHeader: "x-forwarded-client-cert",
-		certHeaderDialect: "envoy" as const,
-		trustedProxies: [],
-		mode: "self-signed" as const,
-		trustedCas: [],
-	}));
+	.optional();
 
-/** The `mtls` section as its schema leaves it. */
-type MtlsSection = z.output<typeof mtlsConfigSchema>;
+/** The `mtls` section as its schema leaves it, present. */
+type MtlsSection = NonNullable<z.output<typeof mtlsConfigSchema>>;
 
 type FullPkiSection = NonNullable<MtlsSection["fullPki"]>;
+
+/**
+ * The section a factory is handed. Boot runs a factory only while the switch
+ * answers true, which an absent section does not; a factory called directly
+ * with none is refused, naming the section.
+ */
+function enabledSection(section: MtlsSection | undefined): MtlsSection {
+	if (section === undefined) {
+		throw new Error("mtlsModule: a factory ran with no mtls section; mTLS is off without one.");
+	}
+	return section;
+}
 
 /** `mtls.fullPki`, its revocation decided, in the shape `createMtlsMechanism` takes it. */
 const fullPkiOption = (
@@ -244,7 +245,7 @@ export const mtlsModule = defineModule<never, "logger", typeof mtlsConfigSchema>
 				environmentVariable: null,
 			},
 		},
-		isEnabled: (section) => section.enabled,
+		isEnabled: (section) => section?.enabled === true,
 	},
 	optional: ["logger"],
 	contributes: {
@@ -258,7 +259,7 @@ export const mtlsModule = defineModule<never, "logger", typeof mtlsConfigSchema>
 		discoveryMetadata: [() => ({ metadata: { tls_client_certificate_bound_access_tokens: true } })],
 		tokenBindingMechanisms: [
 			(deps) => {
-				const cfg = deps.section;
+				const cfg = enabledSection(deps.section);
 				// --- Boot-time fail-loud check 0: header source requires an
 				// explicit trusted-proxy allowlist. ---
 				//

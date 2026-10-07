@@ -22,8 +22,10 @@
 
 import { describe, expect, it } from "vitest";
 import { mtlsConfigSchema } from "#/module.mjs";
+import { shippedMtlsSection } from "./shippedSection.mjs";
 
-const fullPki = (settings: Record<string, unknown>) => ({ fullPki: settings });
+/** The shipped section with `settings` laid over its `fullPki` block. */
+const fullPki = (settings: Record<string, unknown>) => shippedMtlsSection({ fullPki: settings });
 const revocation = (settings: Record<string, unknown>) =>
 	fullPki({ revocation: { mode: "crl", onUnavailable: "reject", ...settings } });
 

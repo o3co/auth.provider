@@ -1355,6 +1355,27 @@ modules fills them.
   false }` alone, without the package's `reference.conf`, is refused; delete
   the section or layer the reference. Parsed directly, an absent section is
   `undefined`.
+- **BREAKING: the `mtls` section, the Redis stores' sections, core's
+  in-process rate limiter's section and the template's `redis-clients` fill
+  no default (#728).** `mtls`, `core-rate-limiter-memory`, each Redis store's
+  section (`redis-access-token-denylist`, `redis-attempt-counter`,
+  `redis-challenge-store`, `redis-consent-store`, `redis-device-code-store`,
+  `redis-federation-token-store`, `redis-mfa-factor-store`,
+  `redis-mfa-transaction-store`, `redis-rate-limiter`,
+  `redis-refresh-token-family-store`, `redis-replay-seen-set`,
+  `redis-session-stores`) and the template's `redis-clients.assumeNoEviction`
+  take their defaults only from the owning package's `config/reference.conf`.
+  A configuration that layers the modules' references (`moduleReferences`, as
+  the template does) sees no change. A configuration built by hand must write
+  every key of each of these sections it loads, or the boot is refused naming
+  the missing key. Parsed directly, `mtlsConfigSchema` reads an absent
+  section as `undefined`, which the module treats as off. It still fills the
+  tuning keys inside `fullPki.revocation`, a block that stays absent until
+  the operator writes it. `redis-federation-grant-store` and
+  `redis-federation-grant-intent-store` keep their `keyPrefix` default,
+  because `resolveRedisFederationGrantStoreOptions` and
+  `resolveRedisFederationGrantIntentStoreOptions` parse a section with no
+  `reference.conf` beneath it.
 - **BREAKING: the session grant is one module, `oauthSessionGrantModule`,
   switched by its own section (#728).** List it as it is: it reads
   `oauth-session.enabled` from the configuration boot parses, and an absent

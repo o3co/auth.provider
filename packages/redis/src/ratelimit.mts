@@ -145,19 +145,16 @@ const rateLimitSpecSchema = z
  * The schema of `redis-rate-limiter {}`, the module's own section: per-prefix
  * `limits`, none naming a verifier's prefix, the `defaultLimit` a key nothing
  * covers falls to, and `failMode`, the limiter's outage policy. Strict at
- * every level.
+ * every level. It fills no default: the package's `config/reference.conf`
+ * ships every value.
  */
 export const redisRateLimiterSectionSchema = z
 	.object({
-		limits: z
-			.record(z.string(), rateLimitSpecSchema)
-			.superRefine(refuseVerifierLimitEntries)
-			.default({}),
-		defaultLimit: rateLimitSpecSchema.default(() => ({ ...DEFAULT_LIMIT })),
-		failMode: z.enum(["open", "closed"]).default("closed"),
+		limits: z.record(z.string(), rateLimitSpecSchema).superRefine(refuseVerifierLimitEntries),
+		defaultLimit: rateLimitSpecSchema,
+		failMode: z.enum(["open", "closed"]),
 	})
-	.strict()
-	.default(() => ({ limits: {}, defaultLimit: { ...DEFAULT_LIMIT }, failMode: "closed" as const }));
+	.strict();
 
 /**
  * `defineModule` manifest for the redis RateLimiter. Reads its own section,

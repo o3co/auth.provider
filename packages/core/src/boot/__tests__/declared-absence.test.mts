@@ -25,6 +25,7 @@
  * `auditSink` in `core.declaredAbsent` out loud.
  */
 import { describe, expect, it } from "vitest";
+import { shippedMemoryRateLimiterSection } from "#/ratelimit/__tests__/shippedSection.mjs";
 import {
 	AUDIT_SINK_ABSENCE_POLICY,
 	createApp,
@@ -85,7 +86,13 @@ function boot(configOverrides: Record<string, unknown> = {}) {
 		audit?: unknown;
 	};
 	return {
-		config: { ...config, ...coreConfigForTests(), ...configOverrides },
+		config: {
+			...config,
+			...coreConfigForTests(),
+			// The in-process limiter's section, which core's reference.conf ships.
+			"core-rate-limiter-memory": shippedMemoryRateLimiterSection(),
+			...configOverrides,
+		},
 		pathResolver: (p: string) => p,
 	} as never;
 }

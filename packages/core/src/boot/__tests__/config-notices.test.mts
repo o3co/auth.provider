@@ -36,6 +36,7 @@ import { coreReference } from "#/config/references.mjs";
 import { RENAMED_VARIABLES_SECTION } from "#/config/removed-keys.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 import type { Module } from "#/modules/manifest/module-spec.mjs";
+import { shippedMemoryRateLimiterSection } from "#/ratelimit/__tests__/shippedSection.mjs";
 import { memoryRateLimiterModule } from "#/ratelimit/module.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
@@ -430,10 +431,10 @@ describe("environment_variables_not_applied — a captured variable no loaded mo
 	};
 
 	it("names RATE_LIMIT_FAIL_MODE, set with the in-process limiter, once", async () => {
-		const logger = await boot(
-			[memoryRateLimiterModule],
-			withCaptures({ RATE_LIMIT_FAIL_MODE: "open", REDIS_RATE_LIMITER_FAIL_MODE: null }),
-		);
+		const logger = await boot([memoryRateLimiterModule], {
+			...withCaptures({ RATE_LIMIT_FAIL_MODE: "open", REDIS_RATE_LIMITER_FAIL_MODE: null }),
+			"core-rate-limiter-memory": shippedMemoryRateLimiterSection(),
+		});
 		expect(noticesOf(logger, "environment_variables_not_applied")).toEqual([
 			{ variables: ["RATE_LIMIT_FAIL_MODE"] },
 		]);
@@ -455,10 +456,10 @@ describe("environment_variables_not_applied — a captured variable no loaded mo
 	});
 
 	it("does not name a variable a loaded module declares renamed, by its new name (its old one set refuses boot)", async () => {
-		const logger = await boot(
-			[memoryRateLimiterModule],
-			withCaptures({ CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS: "500" }),
-		);
+		const logger = await boot([memoryRateLimiterModule], {
+			...withCaptures({ CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS: "500" }),
+			"core-rate-limiter-memory": shippedMemoryRateLimiterSection(),
+		});
 		expect(noticesOf(logger, "environment_variables_not_applied")).toEqual([]);
 	});
 

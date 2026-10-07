@@ -32,6 +32,7 @@ import { FULL_PKI_DEFAULTS, resolveFullPkiTuning } from "#/fullPki/defaults.mjs"
 import type { FullPkiOptions, RevocationPolicy } from "#/fullPki/validate.mjs";
 import { createFullPkiValidator } from "#/fullPki/validate.mjs";
 import { mtlsConfigSchema } from "#/module.mjs";
+import { shippedMtlsSection } from "../shippedSection.mjs";
 import type { Minted, MintOcspResponseOptions } from "./pkiFactory.mjs";
 import {
 	basicConstraints,
@@ -485,8 +486,8 @@ describe("full-pki algorithm policy", () => {
 
 describe("full-pki tuning defaults", () => {
 	it("bounds the chain even when max-chain-depth never reaches the validator", async () => {
-		// A composition root that builds the mechanism by hand bypasses
-		// `mtlsConfigSchema` and its defaults. An absent depth arriving as
+		// A composition root that builds the mechanism by hand bypasses the
+		// module's section and the defaults reference.conf ships for it. An absent depth arriving as
 		// `undefined` makes `presented > undefined` evaluate to `false`, so the
 		// bound silently stops existing — a fail-open with nothing raised at
 		// boot. `resolveFullPkiTuning` is what stops that.
@@ -517,16 +518,19 @@ describe("full-pki tuning defaults", () => {
 		expect(resolved.signatureAlgorithms).toEqual(FULL_PKI_DEFAULTS.signatureAlgorithms);
 	});
 
-	it("the schema default and the code default are the same value", async () => {
-		// Two consumers, one source. Written twice they would eventually
-		// disagree, and only the path nobody tests by default would notice.
-		const parsed = mtlsConfigSchema.parse({
-			enabled: true,
-			mode: "full-pki",
-			fullPki: { revocation: { mode: "disabled", onUnavailable: "reject" } },
-		});
-		expect(parsed.fullPki?.maxChainDepth).toBe(FULL_PKI_DEFAULTS.maxChainDepth);
-		expect(parsed.fullPki?.minRsaKeyBits).toBe(FULL_PKI_DEFAULTS.minRsaKeyBits);
+	it("reference.conf ships the same values the code fills in", async () => {
+		// Two consumers, two copies. Unchecked they would eventually disagree,
+		// and only the path nobody tests by default would notice.
+		const parsed = mtlsConfigSchema.parse(
+			shippedMtlsSection({
+				enabled: true,
+				mode: "full-pki",
+				fullPki: { revocation: { mode: "disabled", onUnavailable: "reject" } },
+			}),
+		);
+		expect(parsed?.fullPki?.maxChainDepth).toBe(FULL_PKI_DEFAULTS.maxChainDepth);
+		expect(parsed?.fullPki?.minRsaKeyBits).toBe(FULL_PKI_DEFAULTS.minRsaKeyBits);
+		expect(parsed?.fullPki?.signatureAlgorithms).toEqual(FULL_PKI_DEFAULTS.signatureAlgorithms);
 	});
 });
 

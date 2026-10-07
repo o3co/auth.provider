@@ -849,6 +849,8 @@ describe("rateLimitBudgets — a verifier's claim", () => {
 
 		const parsed = memoryRateLimiterModule.section?.schema.safeParse({
 			limits: { fixture_attempts: { limit: 5, windowSeconds: 60 } },
+			defaultLimit: { limit: 60, windowSeconds: 60 },
+			maxBuckets: 100,
 		});
 		expect(parsed?.success).toBe(true);
 		const handle = await createApp({

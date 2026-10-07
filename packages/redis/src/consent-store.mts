@@ -351,7 +351,7 @@ export const redisConsentStoreModule = defineModule({
 	name: "redis-consent-store",
 	requires: ["consentStoreClient", "pendingConsentStoreClient"] as const,
 	section: {
-		schema: keyPrefixSection("consent:"),
+		schema: keyPrefixSection,
 		reference: redisReference(),
 		relocatedFrom: {
 			redisConsentStore: { to: "", environmentVariable: null },

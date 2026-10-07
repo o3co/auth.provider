@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { redisRefreshTokenFamilyStoreModule } from "#/index.mjs";
+import { overShipped, shippedSection } from "./support/section.mjs";
 
 describe("redisRefreshTokenFamilyStoreModule", () => {
 	it("has the canonical module name 'redis-refresh-token-family-store'", () => {
@@ -14,14 +15,20 @@ describe("redisRefreshTokenFamilyStoreModule", () => {
 		expect(redisRefreshTokenFamilyStoreModule.requires).toEqual(["refreshTokenFamilyClient"]);
 	});
 
-	it("reads its own section, 'redis-refresh-token-family-store', with its defaults", () => {
+	it("reads its own section, 'redis-refresh-token-family-store', with the defaults reference.conf ships", () => {
 		expect(redisRefreshTokenFamilyStoreModule).not.toHaveProperty("configSchema");
-		expect(redisRefreshTokenFamilyStoreModule.section?.schema.parse(undefined)).toEqual({
+		expect(
+			redisRefreshTokenFamilyStoreModule.section?.schema.parse(
+				shippedSection(redisRefreshTokenFamilyStoreModule),
+			),
+		).toEqual({
 			keyPrefix: "rtfam:",
 			casRetryLimit: 3,
 		});
 		expect(
-			redisRefreshTokenFamilyStoreModule.section?.schema.parse({ casRetryLimit: "5" }),
+			redisRefreshTokenFamilyStoreModule.section?.schema.parse(
+				overShipped(redisRefreshTokenFamilyStoreModule, { casRetryLimit: "5" }),
+			),
 		).toEqual({ keyPrefix: "rtfam:", casRetryLimit: 5 });
 	});
 
@@ -32,7 +39,10 @@ describe("redisRefreshTokenFamilyStoreModule", () => {
 			{ keyPrefix: "k:", casRetryLimit: 11 },
 			{ casRetries: 2 },
 		]) {
-			expect(schema?.safeParse(section).success, JSON.stringify(section)).toBe(false);
+			expect(
+				schema?.safeParse(overShipped(redisRefreshTokenFamilyStoreModule, section)).success,
+				JSON.stringify(section),
+			).toBe(false);
 		}
 	});
 });
