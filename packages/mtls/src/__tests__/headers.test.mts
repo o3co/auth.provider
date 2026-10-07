@@ -206,7 +206,30 @@ describe("parseEnvoyXfccHeader — XFCC grammar", () => {
 	});
 
 	it("ignores keys it does not read, even when they repeat", () => {
-		const xfcc = `Foo=1;Foo=2;cert=${OTHER};Cert=${LEAF}`;
+		const xfcc = `Foo=1;Foo=2;Certificate=${OTHER};Cert=${LEAF}`;
+		expect(parseEnvoyXfccHeader(xfcc).certPem).toBe(LEAF_PEM);
+	});
+
+	it("matches keys case-insensitively", () => {
+		const xfcc = `by=spiffe://example;HASH=${LEAF_HASH};cErT=${LEAF};chain=${INTERMEDIATE};SUBJECT="CN=a";uri=spiffe://example/ns/a;dns=a.example.com`;
+		const parsed = parseEnvoyXfccHeader(xfcc);
+		expect(parsed.certPem).toBe(LEAF_PEM);
+		expect(parsed.chainPem).toBe(INTERMEDIATE_PEM);
+	});
+
+	it.each([
+		["Cert", "cErT", LEAF, OTHER],
+		["Hash", "hash", LEAF_HASH, LEAF_HASH],
+		["Chain", "CHAIN", INTERMEDIATE, INTERMEDIATE],
+		["Subject", "subject", '"CN=a"', '"CN=a"'],
+	])("refuses %s= repeated as %s=", (key, otherCase, first, second) => {
+		const cert = key === "Cert" ? "" : `Cert=${LEAF};`;
+		const xfcc = `${cert}${key}=${first};${otherCase}=${second}`;
+		expect(() => parseEnvoyXfccHeader(xfcc)).toThrow("more than once");
+	});
+
+	it("accepts By, URI and DNS repeated in mixed case", () => {
+		const xfcc = `By=a;by=b;URI=c;uri=d;DNS=e;dns=f;Cert=${LEAF}`;
 		expect(parseEnvoyXfccHeader(xfcc).certPem).toBe(LEAF_PEM);
 	});
 
@@ -245,6 +268,16 @@ describe("parseEnvoyXfccHeader — Hash=", () => {
 
 	it("refuses a Hash= when Cert= is not a decodable PEM block", () => {
 		const xfcc = `Hash=${LEAF_HASH};Cert=${encodeURIComponent("-----BEGIN CERTIFICATE-----\nA*B\n-----END CERTIFICATE-----")}`;
+		expect(() => parseEnvoyXfccHeader(xfcc)).toThrow("Hash=");
+	});
+
+	it.each(["hash", "HASH", "hAsH"])("checks a %s= that is not the SHA-256 of Cert=", (key) => {
+		const xfcc = `${key}=${"0".repeat(64)};Cert=${LEAF}`;
+		expect(() => parseEnvoyXfccHeader(xfcc)).toThrow("Hash=");
+	});
+
+	it("checks a lowercase hash= against a lowercase cert=", () => {
+		const xfcc = `hash=${sha256Hex(OTHER_PEM)};cert=${LEAF}`;
 		expect(() => parseEnvoyXfccHeader(xfcc)).toThrow("Hash=");
 	});
 

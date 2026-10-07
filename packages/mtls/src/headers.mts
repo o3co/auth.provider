@@ -93,8 +93,20 @@ const pemBlockLabels = (pem: string): readonly string[] =>
 const XFCC_SINGLE_KEYS = ["Hash", "Cert", "Chain", "Subject"] as const;
 type XfccSingleKey = (typeof XFCC_SINGLE_KEYS)[number];
 
-const isXfccSingleKey = (key: string): key is XfccSingleKey =>
-	(XFCC_SINGLE_KEYS as readonly string[]).includes(key);
+/**
+ * XFCC keys are case-insensitive: each known key's lowercase form mapped to
+ * its canonical spelling, so `cErT` and `Cert` are one key.
+ */
+const XFCC_KEYS_BY_LOWERCASE: ReadonlyMap<string, string> = new Map(
+	[...XFCC_SINGLE_KEYS, "By", "URI", "DNS"].map((key) => [key.toLowerCase(), key]),
+);
+
+/** The canonical spelling of a known XFCC key in any case, or `undefined`. */
+const canonicalXfccKey = (key: string): string | undefined =>
+	XFCC_KEYS_BY_LOWERCASE.get(key.toLowerCase());
+
+const isXfccSingleKey = (key: string | undefined): key is XfccSingleKey =>
+	(XFCC_SINGLE_KEYS as readonly (string | undefined)[]).includes(key);
 
 /**
  * Read the fields of the first XFCC element, quoting undone.
@@ -188,9 +200,9 @@ const readFirstXfccElement = (value: string): ReadonlyArray<readonly [string, st
  * Only the first element (the client-facing hop) is read, by the grammar in
  * {@link readFirstXfccElement}. `Cert=` is required and `Chain=` optional
  * (both URL-encoded PEM). `Hash=`, when present, must be the hex SHA-256 of
- * the `Cert=` DER, compared case-insensitively. `Hash`, `Cert`, `Chain` and
- * `Subject` may appear once; `By`, `URI` and `DNS` may repeat; any other key
- * is ignored. Throws a plain `Error` on malformed input.
+ * the `Cert=` DER, compared case-insensitively. Keys match in any case.
+ * `Hash`, `Cert`, `Chain` and `Subject` may appear once; `By`, `URI` and
+ * `DNS` may repeat; any other key is ignored. Throws a plain `Error` on malformed input.
  */
 export const parseEnvoyXfccHeader = (value: string): ParsedCertHeader => {
 	// Size cap before any string work.
@@ -209,7 +221,8 @@ export const parseEnvoyXfccHeader = (value: string): ParsedCertHeader => {
 	}
 
 	const fields = new Map<XfccSingleKey, string>();
-	for (const [key, fieldValue] of elementFields) {
+	for (const [rawKey, fieldValue] of elementFields) {
+		const key = canonicalXfccKey(rawKey);
 		// `By`, `URI`, `DNS` and unknown keys are not read.
 		if (!isXfccSingleKey(key)) continue;
 		if (fields.has(key)) {

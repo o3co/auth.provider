@@ -161,6 +161,8 @@ describe("createMtlsMechanism — header source", () => {
 
 		it.each([
 			["Cert= twice", `Cert=${LEAF};Cert=${OTHER}`],
+			["Cert= twice in different case", `Cert=${LEAF};cErT=${OTHER}`],
+			["a lowercase hash= of no certificate", `hash=${"0".repeat(64)};Cert=${LEAF}`],
 			["Cert= twice through an unquoted Subject", `Cert=${LEAF};Subject=CN=a\\;Cert=${OTHER}`],
 			[
 				"a Hash= of another certificate",
