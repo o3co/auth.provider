@@ -800,6 +800,8 @@ describe("the cache tells the truth about an outage", () => {
 			fetch,
 			lookup: publicLookup,
 			now: () => clock.now,
+			// A window is configured: a 404 is refused all the same.
+			staleIfErrorMs: 300_000,
 		});
 
 		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
@@ -821,6 +823,8 @@ describe("the cache tells the truth about an outage", () => {
 			fetch,
 			lookup: publicLookup,
 			now: () => clock.now,
+			// A window is configured: a rejected document is refused all the same.
+			staleIfErrorMs: 300_000,
 		});
 
 		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
