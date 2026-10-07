@@ -163,6 +163,26 @@ describe("createRepositoryFactories", () => {
 			expect(logger.error).not.toHaveBeenCalled();
 		});
 
+		it("refuses a config without a path, under either name, before it warns", async () => {
+			const logger = {
+				trace: vi.fn(),
+				debug: vi.fn(),
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn(),
+				fatal: vi.fn(),
+				child: vi.fn(),
+			};
+			const { userFactory } = createRepositoryFactories({ logger: logger as unknown as Logger });
+
+			for (const type of ["yaml", "static"]) {
+				await expect(userFactory.create({ type })).rejects.toThrow(
+					'YAML user repository requires "path" in config',
+				);
+			}
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
 		it("refuses a users file entry the schema refuses, naming the file, the user and the field and never the value", async () => {
 			const body = "39.FBAWt.ck.rbQbPhmLOOPkwFxWEPZEYA3HR07Lr2k5OYqk.vRSi";
 			const yamlPath = writeYaml(
