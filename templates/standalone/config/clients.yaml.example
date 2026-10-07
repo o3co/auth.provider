@@ -57,7 +57,9 @@
 #   an audience of the subject token by default: the token's `azp` is the
 #   client, or its `aud` contains it. `true` lets this one client exchange
 #   tokens issued to other clients (a gateway, an on-behalf-of service). Only
-#   a strict `true` counts.
+#   a strict `true` counts. The token it is issued is for one of the subject
+#   token's audiences, so such a client's `allowedAudiences` must list the
+#   audiences of the tokens it exchanges.
 
 # A machine client that authenticates with a key pair (#484). Nothing here is
 # secret: the private half stays with the client, which signs an assertion

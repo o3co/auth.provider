@@ -34,9 +34,6 @@ import {
 } from "@o3co/auth-provider-core";
 import { invalidRequest } from "./answers.mjs";
 
-/** The subject token's `aud` as read once: a string, a copied array, or none. */
-type SubjectAudience = string | readonly unknown[] | undefined;
-
 /** The request's scope and targets, each held to its ceilings, and the ceilings. */
 export interface RequestTargets {
 	readonly subjectScope: readonly string[];
@@ -44,8 +41,6 @@ export interface RequestTargets {
 	readonly clientScopeSet: ReadonlySet<string>;
 	readonly requestedScope: readonly string[] | null;
 	readonly clientAudienceSet: ReadonlySet<string>;
-	/** The subject token's `aud`, read once and copied: what every audience check reads. */
-	readonly subjectAudience: SubjectAudience;
 	readonly subjectAudienceSet: ReadonlySet<string>;
 	readonly requestedAudience: readonly string[] | null;
 	readonly requestedResource: readonly string[] | null;
@@ -116,15 +111,14 @@ export function requestTargets(
 	}
 
 	// The audience ceilings: the client's registration (`allowedAudiences` plus its
-	// own id) and the subject token's audience (its client id when it names none).
-	// The request is held to both before the policy runs, so its refusal is its own;
-	// a policy's `grantedAudience` is held to the same two in the policy hook, and
-	// the default an omitted audience takes to the same two in `issuedTarget`.
-	// The subject's `aud` is read once and copied, so the ceiling, the default and the
-	// final check in `issuedTarget` all see the one value.
+	// own id) and the subject token's audience (see `subjectAudienceBoundary`). The
+	// request is held to both before the policy runs, so its refusal is its own; a
+	// policy's `grantedAudience` is held to the same two in the policy hook, and the
+	// default an omitted audience takes to the same two in `issuedTarget`. The
+	// subject's audience is read once, so the ceiling, the default and the final
+	// check all see the one value.
 	const clientAudienceSet = new Set([...(client.allowedAudiences ?? []), client.clientId]);
-	const subjectAudience = readSubjectAudience(subjectValidated);
-	const subjectAudienceSet = new Set(subjectAudienceBoundary(subjectAudience, client.clientId));
+	const subjectAudienceSet = subjectAudienceBoundary(subjectValidated, client.clientId);
 	// Targets are read by core's `readTargetParameter`. A value that is neither a
 	// string nor an array of strings is refused, never converted
 	// (`String([["billing"]])` is `"billing"`): `invalid_target` for `resource` (RFC
@@ -187,7 +181,7 @@ export function requestTargets(
 		if (!requestedResource.every(withinCeilings)) {
 			const requestAudience = issuedAudience(
 				requestedAudience ?? undefined,
-				subjectAudience,
+				subjectAudienceSet,
 				clientAudienceSet,
 				client.clientId,
 			);
@@ -218,7 +212,6 @@ export function requestTargets(
 		clientScopeSet,
 		requestedScope,
 		clientAudienceSet,
-		subjectAudience,
 		subjectAudienceSet,
 		requestedAudience,
 		requestedResource,
@@ -235,18 +228,14 @@ export function issuedTarget(
 	subjectValidated: ValidatedToken,
 	{
 		clientAudienceSet,
-		subjectAudience,
 		subjectAudienceSet,
 		requestedResource,
-	}: Pick<
-		RequestTargets,
-		"clientAudienceSet" | "subjectAudience" | "subjectAudienceSet" | "requestedResource"
-	>,
+	}: Pick<RequestTargets, "clientAudienceSet" | "subjectAudienceSet" | "requestedResource">,
 	grantedAudience: readonly string[] | undefined,
 ): { readonly audienceForToken: string } | GrantHandlerResult {
 	const audienceForToken = issuedAudience(
 		grantedAudience,
-		subjectAudience,
+		subjectAudienceSet,
 		clientAudienceSet,
 		client.clientId,
 	);
@@ -325,7 +314,8 @@ const loggedResources = (
 /**
  * The single audience an exchanged token is minted for:
  * - an explicit audience (request or policy, already bounded): its first entry;
- * - omitted, with a single subject audience the client is registered for: that;
+ * - omitted, with a subject audience of one value the client is registered for:
+ *   that;
  * - otherwise the client's own id, so omitting `audience` cannot mint for an
  *   audience outside the client's allowlist. `issuedTarget` refuses it when the
  *   subject token's audience does not carry it.
@@ -335,38 +325,33 @@ const loggedResources = (
  */
 function issuedAudience(
 	grantedAudience: readonly string[] | undefined,
-	subjectAud: SubjectAudience,
+	subjectAudienceSet: ReadonlySet<string>,
 	clientAudienceSet: ReadonlySet<string>,
 	clientId: string,
 ): string {
 	if (grantedAudience && grantedAudience.length > 0) return grantedAudience[0] ?? clientId; // `?? clientId` is forward-compat for noUncheckedIndexedAccess
-	const single =
-		typeof subjectAud === "string"
-			? subjectAud
-			: Array.isArray(subjectAud) && subjectAud.length === 1
-				? subjectAud[0]
-				: undefined;
-	if (typeof single === "string" && clientAudienceSet.has(single)) return single;
+	if (subjectAudienceSet.size === 1) {
+		const [single] = subjectAudienceSet;
+		if (single !== undefined && clientAudienceSet.has(single)) return single;
+	}
 	return clientId;
 }
 
 /**
- * The subject's `aud`, read from the validator's answer once: a string as is, an
- * array copied element by element, anything else none.
+ * The subject token's audience, read from the validator's answer once: the
+ * non-empty strings of its `aud`, de-duplicated. A subject token naming none is
+ * read as naming the client's own id only when it is the client's own (its `azp`
+ * is the client's id); a token of another client naming none names no audience,
+ * so nothing is within it.
  */
-function readSubjectAudience(subjectValidated: ValidatedToken): SubjectAudience {
+function subjectAudienceBoundary(
+	subjectValidated: ValidatedToken,
+	clientId: string,
+): ReadonlySet<string> {
 	const audience: unknown = subjectValidated.aud;
-	if (typeof audience === "string") return audience;
-	return Array.isArray(audience) ? Object.freeze([...audience]) : undefined;
-}
-
-function subjectAudienceBoundary(audience: SubjectAudience, clientId: string): readonly string[] {
-	if (typeof audience === "string" && audience.length > 0) return [audience];
-	if (Array.isArray(audience)) {
-		const values = audience.filter(
-			(value): value is string => typeof value === "string" && value.length > 0,
-		);
-		return values.length > 0 ? values : [clientId];
-	}
-	return [clientId];
+	const values = (Array.isArray(audience) ? audience : [audience]).filter(
+		(value): value is string => typeof value === "string" && value.length > 0,
+	);
+	if (values.length > 0) return new Set(values);
+	return new Set(subjectValidated.claims.azp === clientId ? [clientId] : []);
 }

@@ -808,15 +808,16 @@ const EXTRA_CLIENTS: Readonly<Record<string, Record<string, unknown>>> = {
 		defaultScopes: ["openid"],
 		allowedGrantTypes: [DEVICE_CODE_GRANT_TYPE],
 	},
-	// A confidential client exchanging the web client's tokens for its own.
-	// `email` and the federation-token allowlist are there so what an
-	// exchanged token must NOT reach — the session's claims at /userinfo, the
-	// upstream token — is within the client's registration: only the missing
-	// session capability stands in the way. The web client's tokens name
-	// neither the gateway nor its audience, so the registration lets it
-	// exchange tokens issued to others. An exchange issues only an audience
-	// the subject token carries, so the registration lists the web client's
-	// id, which an exchange naming no audience inherits.
+	// A confidential client exchanging the web client's tokens for tokens of
+	// its own (`azp` gateway) for the web client's audience, `WEB.id`, which
+	// its `allowedAudiences` lists: an exchange issues only an audience the
+	// subject token carries, and one naming no audience inherits the subject
+	// token's. `email` and the federation-token allowlist are there so what
+	// an exchanged token must NOT reach — the session's claims at /userinfo,
+	// the upstream token — is within the client's registration: only the
+	// missing session capability stands in the way. The web client's tokens
+	// do not name the gateway, so the registration lets it exchange tokens
+	// issued to others.
 	[GATEWAY.id]: {
 		tokenEndpointAuthMethod: "client_secret_basic",
 		clientSecret: GATEWAY.secret,
