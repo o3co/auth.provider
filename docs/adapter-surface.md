@@ -381,7 +381,7 @@ out-of-tree adapter can import and run:
 | `AttemptCounter` | `packages/test-kit/src/attempts/attemptCounter.contract.mts` (`attemptCounterContract`), published on `@o3co/auth-provider-test-kit`, which the kit's own tests run over core's in-process counter, and the redis package over its counter on a real Redis |
 | `MailSender` | `packages/test-kit/src/mail/mailSender.contract.mts` (`mailSenderContract`), published on `@o3co/auth-provider-test-kit`, over core's `createRecordingMailSender`, and the standard package's SMTP sender over a scripted relay and over Mailpit |
 | `MfaFactor` (a second factor contributed as `mfaFactors`; a contribution, not a slot) | `packages/test-kit/src/mfa/factor.contract.mts` (`mfaFactorContract`), over core's doubles `createTestMfaFactor` and `createTestMfaDigests` |
-| The slots of [what one module owns and others read](#what-one-module-owns-and-others-read) | `packages/core/src/testing/slots/` — one suite per slot, named in its row |
+| The slots of [what one module owns and others read](#what-one-module-owns-and-others-read) | `packages/core/src/testing/slots/` — one suite per slot a module provides, named in its row; the four slots core fills itself have theirs in core's own `deployment/`, `middleware/`, `federations/` and `net/` `__tests__/*.contract.mts` |
 
 Each is run against every in-repo implementation of its port, which is what
 makes it a description of the contract rather than of one adapter. There is one
