@@ -198,3 +198,9 @@ export {
 	tokenBindingSettingsContract,
 } from "./slots/tokenBindingSettings.mjs";
 export type { TestInspect } from "./test-inspect.mjs";
+// A `UserRepository` double for the consumers of its subject lookup.
+export {
+	createTestUserRepository,
+	type TestUserRepository,
+	type TestUserRepositoryOptions,
+} from "./userRepository.mjs";

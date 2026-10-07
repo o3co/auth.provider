@@ -682,6 +682,7 @@
 . SupportsRefresh type
 . SupportsSecondFactorUpdate type
 . SupportsSessionsOnlyRevocation type
+. SupportsSubjectLookup type
 . SyntheticKeyCollisionDetails type
 . TRUSTED_PROXY_NAMED_RANGES value
 . Token type
@@ -1137,6 +1138,7 @@
 . supportsRefresh value
 . supportsSecondFactorUpdate value
 . supportsSessionsOnlyRevocation value
+. supportsSubjectLookup value
 . terminalErrorHandler value
 . toAssertionIssuerEntry value
 . toMfaStoreCreateIfRequest value
@@ -1271,6 +1273,8 @@
 ./testing TestOAuthTokenSettingsOverrides type
 ./testing TestRateLimiter type
 ./testing TestRateLimiterOptions type
+./testing TestUserRepository type
+./testing TestUserRepositoryOptions type
 ./testing TokenBindingSettingsContractInput type
 ./testing auditHooksModule value
 ./testing clientEntries value
@@ -1294,6 +1298,7 @@
 ./testing createTestRateLimiter value
 ./testing createTestSessionCookiePolicy value
 ./testing createTestTokenBindingSettings value
+./testing createTestUserRepository value
 ./testing csrfGuardContract value
 ./testing csrfTokenSignerContract value
 ./testing deploymentModeContract value

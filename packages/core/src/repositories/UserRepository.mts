@@ -169,6 +169,19 @@ export interface UserRepository {
 	 * (2026-09-25-multi-factor-authentication), D12.
 	 */
 	markMfaEnrolled?(subject: string, enrolled: boolean): Promise<void>;
+	/**
+	 * The user behind `subject`, the `sub` this provider issues for them, read
+	 * as {@link User} says, or `null` when the Store holds no such user. For a
+	 * grant that authenticates a subject and holds no `User` of its own (the
+	 * WebAuthn passkey grant), so that what the Store publishes about the user
+	 * (`emailVerified`) can be read. Optional; detected by
+	 * {@link supportsSubjectLookup}.
+	 *
+	 * It MUST change nothing: no login recorded, no user created. Throws when
+	 * the backend cannot answer: a caller that gates on the answer treats a
+	 * throw as an outage, never as an absent user.
+	 */
+	findBySubject?(subject: string): Promise<User | null>;
 }
 
 /** A `UserRepository` that can write the MFA enrollment witness. */
@@ -188,6 +201,21 @@ export function supportsMfaEnrollmentWitness(
 	return (
 		typeof (repository as Partial<SupportsMfaEnrollmentWitness>).markMfaEnrolled === "function"
 	);
+}
+
+/** A `UserRepository` that can look a user up by subject. */
+export interface SupportsSubjectLookup {
+	findBySubject(subject: string): Promise<User | null>;
+}
+
+/**
+ * Whether `repository` can answer {@link UserRepository.findBySubject},
+ * detected by method presence like the other optional capabilities.
+ */
+export function supportsSubjectLookup(
+	repository: UserRepository,
+): repository is UserRepository & SupportsSubjectLookup {
+	return typeof (repository as Partial<SupportsSubjectLookup>).findBySubject === "function";
 }
 
 // ---------------------------------------------------------------------------
