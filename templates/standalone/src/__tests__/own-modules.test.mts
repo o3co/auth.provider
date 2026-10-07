@@ -47,8 +47,9 @@ import {
 	moduleReferences,
 	supportsMfaEnrollmentWitness,
 } from "@o3co/auth-provider-core";
-import { httpSettingsContract, packageReferenceProblems } from "@o3co/auth-provider-core/testing";
+import { packageReferenceProblems } from "@o3co/auth-provider-core/testing";
 import { HttpUserRepository } from "@o3co/auth-provider-foundation";
+import { httpSettingsContract } from "@o3co/auth-provider-test-kit";
 import { parseFile } from "@o3co/ts.hocon";
 import express from "express";
 import request from "supertest";
