@@ -1121,7 +1121,10 @@ The boot refusals you can meet, with their messages, are in
   one sign-in in flight per `form_post` federation at once, as before. A
   `form_post` start no longer reads a path from the federation's
   `callbackURL`: the `federation_misconfigured` reason `no_callback_path` is
-  gone. See the session README, "The transaction cookie".
+  gone. A `form_post` callback with a wrong `state` is still
+  `400 invalid_state`, but no longer spends the transaction: its cookie stays
+  and the matching callback completes. See the session README, "The
+  transaction cookie" and "When a transaction is spent".
 - **The Store's users.** A `2xx` user with an empty `id` or `username` is
   refused as malformed, `503` on every login path (#862). A Store sends a
   stable label as `username` for a user without one.

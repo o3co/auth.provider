@@ -727,12 +727,12 @@ describe("POST /oauth/federation/:name/callback — surface", () => {
 
 /**
  * The transaction cookie is `SameSite=None` by necessity, so it accompanies
- * *any* cross-site request to the callback path, including one a third party
- * causes with an `<img>` tag. If every refusal consumed the transaction, one
- * parameterless cross-site request would delete the victim's in-flight flow.
+ * *any* cross-site request to the auth host, including one a third party
+ * causes with an `<img>` tag or an auto-submitted form. If a refusal consumed
+ * the transaction, one such request would delete the victim's in-flight flow.
  * So a `form_post` federation refuses GET the way a `query` federation
- * refuses POST, and a callback carrying no `state` is not treated as an
- * attempt on the transaction at all. See README, When a transaction is spent.
+ * refuses POST, and a callback carrying no `state`, or a wrong one, spends
+ * nothing. See README, When a transaction is spent.
  */
 describe("a cross-site request cannot spend an in-flight transaction", () => {
 	it("refuses GET on a form_post federation's callback with 405 and Allow: POST", async () => {

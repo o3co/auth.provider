@@ -1099,29 +1099,28 @@ by default.
 
 #### When a transaction is spent
 
-Both the record and the cookie are dropped on every callback exit that
-**judged** the transaction — success, `invalid_state`, `exchange_failed`,
-`unknown_user` alike — and are deliberately *not* dropped by a refusal that
-judged nothing. The rule: **a refusal spends the transaction when the request
-made a claim about it, and leaves it alone when it made none.** A `state` is
-that claim. A callback carrying no `state` — checked once the record has resolved to this provider — claims nothing and costs nothing
-(`400 invalid_request`, record untouched); a GET is refused with `405` before
-the cookie is read. A *wrong* `state` is an attempt on this transaction, and it
-still spends it, so a guess gets no second try; so does a transaction id that
-resolves to no record or to another provider's (`400 invalid_session`), and a
-store read that fails spends it best-effort (`503`; a spend that fails there, or
-on a refusal, is one `federation_cleanup_failed` warn). The distinction matters because
-the cookie is `SameSite=None` by necessity and accompanies any cross-site
-request to the auth host: if every refusal consumed the record, a third
-party could destroy a victim's in-flight login with one `<img>` tag.
+**A transaction is spent only once `state` matches**: the record and the
+cookie are dropped on every callback exit after that — success,
+`exchange_failed`, `unknown_user` alike. A refusal before it spends nothing. A
+callback carrying no `state` — checked once the record has resolved to this
+provider — is `400 invalid_request`; a *wrong* `state` is `400 invalid_state`;
+both leave the record and its cookie in place, so the matching callback still
+completes. A GET is refused with `405` before the cookie is read. The one
+refusal that drops the transaction is a transaction id that resolves to no
+record or to another provider's (`400 invalid_session`), and a store read that
+fails drops it best-effort (`503`; a drop that fails there, or on that refusal,
+is one `federation_cleanup_failed` warn).
 
-That rule is `form_post`-only. A `query` federation keeps its envelope in the
-session and retires it only on the path that *matched* `state`, so a wrong
-`state` leaves the envelope in place — because the session cookie is
-`SameSite=Lax` and **is** sent on a top-level cross-site GET, so spending the
-envelope on a mismatch would give a third party the same availability attack.
-The guess it would defend against is not a real one: `state` is 128 bits from
-the CSPRNG. Only the "no `state`" rule is shared by both modes.
+This matters because the cookie is `SameSite=None` by necessity and
+accompanies any cross-site request to the auth host: if a refusal consumed the
+record, a third party could cancel a victim's in-flight login or link with one
+`<img>` tag or one auto-submitted form carrying a made-up `state`. Keeping the
+transaction on a mismatch costs nothing: `state` is 128 bits from the CSPRNG,
+so unlimited guesses at it are worth no more than one.
+
+A `query` federation follows the same rule: it keeps its envelope in the
+session and retires it only on the path that *matched* `state`, because the
+session cookie is `SameSite=Lax` and **is** sent on a top-level cross-site GET.
 
 #### What "single use" guarantees
 
