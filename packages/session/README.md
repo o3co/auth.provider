@@ -650,7 +650,8 @@ What holds:
   and the session's other open MFA transactions. A flow in another tab starts
   again. A tab that still holds the old cookie is refused once the session is
   escalated, and signs in again; its `POST /session/logout` ends only its own
-  cookie session, never the renewed one ([below](#what-post-sessionlogout-invalidates)).
+  cookie session, not the renewed one, but for one window
+  ([below](#what-post-sessionlogout-invalidates)).
 
 ### What `POST /session/logout` invalidates
 
@@ -674,10 +675,20 @@ the logout asks core's `cookieRenewedAway`: when the record the cookie names
 carries a renewal nonce this cookie session does not hold — an old cookie, or
 a copy of it, from before a step-up renewed the session — the record is the
 renewed session's, so only this cookie session is destroyed and the answer is
-the same `200`. The renewed session stays live. When the record cannot be
-read, that is logged as `logout_user_session_read_failed` and the logout
-answers `503 temporarily_unavailable`: it closes nothing and keeps the express
-session for a retry.
+the same `200`. The renewed session stays live, except in one window. The
+logout reads the record and then closes the session, as two steps, and a
+step-up keeps the record's `sid` and rebinds it by its renewal nonce alone (the
+MFA ADR's D27). When a step-up records its nonce after the logout read the
+record and before the close commits, the logout acts on what it read and
+closes the session, escalated by then, although the cookie it came from is now
+a copy the record was renewed away from. The renewal nonce is written to the
+`UserSessionStore` and the close commits in the `SessionLifecycleStore`, so no
+single store write orders the two. This is accepted: the logout only ends the
+session, never extends or grants one, and the same cookie could have closed
+that session before the step-up. When the record cannot be read, that is
+logged as `logout_user_session_read_failed` and the logout answers
+`503 temporarily_unavailable`: it closes nothing and keeps the express session
+for a retry.
 
 **The cookie session's destroy.** Once the express session is destroyed, the
 answer also expires the session cookie: the session store expires the cookie
