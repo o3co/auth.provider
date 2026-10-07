@@ -41,6 +41,7 @@ import { createTokenHandler } from "#/routes/token.mjs";
 import { oauthConfigForTests } from "#/testing/index.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { registeredGrants } from "./_helpers/grantRegistry.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { joiningLifecycle, openingLifecycleStore } from "./_helpers/sessionLifecycle.mjs";
@@ -60,7 +61,7 @@ const client: PublicClient = {
 	tokenEndpointAuthMethod: "client_secret_basic",
 	allowedRedirectUris: [REDIRECT_URI],
 	allowedScopes: ["read"],
-	allowedGrantTypes: ["authorization_code"],
+	allowedGrantTypes: ["authorization_code", "refresh_token"],
 };
 
 describe("createAuthorizationGrant — a join that rejects after the family is registered", () => {
@@ -88,6 +89,7 @@ describe("createAuthorizationGrant — a join that rejects after the family is r
 		const revokeFamily = vi.fn(async () => {});
 		const handler = createAuthorizationGrant({
 			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+			grantHandlerResolver: registeredGrants("refresh_token"),
 			...grantSettingsFrom(config),
 			keyStore: createSymmetricKeyStore("test-secret"),
 			codeRepository: {

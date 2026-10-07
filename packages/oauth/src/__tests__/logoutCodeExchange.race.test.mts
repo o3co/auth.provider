@@ -51,6 +51,7 @@ import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { oauthConfigForTests } from "#/testing/index.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { registeredGrants } from "./_helpers/grantRegistry.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 import {
@@ -188,6 +189,7 @@ async function world() {
 	): Promise<GrantResult> => {
 		const grant: GrantHandler = createAuthorizationGrant({
 			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+			grantHandlerResolver: registeredGrants("refresh_token"),
 			...grantSettingsFrom(config),
 			keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 			clientRepository: { findById: async () => null, authenticate: async () => null },

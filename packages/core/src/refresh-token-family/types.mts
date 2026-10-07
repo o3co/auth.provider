@@ -146,10 +146,9 @@ export interface RefreshTokenFamilyStore {
  *   rotate); absent, the caller must revoke it itself (fail-closed).
  * - `revoked`: the family is revoked (also what a sibling sees after a
  *   replay). The caller must reject; a logout-cascade signal.
- * - `unknown_family`: no record. The grant handler applies the refresh
- *   grant's unknown-family policy: `"reject"` answers
- *   `400 invalid_grant`, `"accept"` issues with a warning (for bounded
- *   migration windows only).
+ * - `unknown_family`: no record. The refresh grant always answers
+ *   `400 invalid_grant` / `unknown_family`: there is no acceptance policy
+ *   and nothing is issued for a family no record holds.
  *
  * The optional fields stay optional so implementations without them keep
  * compiling.

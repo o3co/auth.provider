@@ -29,8 +29,11 @@
  * session the request carried a cookie for) and report the same outage twice.
  * These cases pin that the store sees one write.
  *
- * A logout that destroyed the session expires the cookie express-session
- * set, with the attributes it was set with.
+ * A session destroyed during the request — by any route, `POST
+ * /session/logout` among them — has its cookie expired in the same answer,
+ * with the attributes express-session set it with; a destroy the store fails,
+ * a regenerated session and a destroy that completes after the answer leave
+ * the cookie alone.
  *
  * Booted through `createApp` with the real express-session and connect-redis,
  * over a node-redis client faked in memory (the one seam).
@@ -170,6 +173,7 @@ const resetCalls = (): void => {
 };
 
 beforeEach(() => {
+	probes.destroyedAfterAnswer = undefined;
 	fake.data.clear();
 	fake.failing.clear();
 	fake.failFrom.clear();
@@ -178,18 +182,63 @@ beforeEach(() => {
 
 const alice = { id: "user-1", username: "alice" };
 
+/** A `Set-Cookie` line's attributes, lower-cased, with its value and expiry left out. */
+const attributesOf = (line: string): string[] =>
+	line
+		.split(";")
+		.slice(1)
+		.map((part) => part.trim().toLowerCase())
+		.filter((part) => !part.startsWith("expires=") && !part.startsWith("max-age="))
+		.sort();
+
+/** The response's `Set-Cookie` lines for the session cookie, `name`. */
+const sessionCookieLines = (res: request.Response, name = "test.sid"): string[] => {
+	const raw = res.headers["set-cookie"] as unknown as string[] | string | undefined;
+	const lines = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
+	return lines.filter((line) => line.startsWith(`${name}=`));
+};
+
+/** The date a cleared cookie carries. */
+const EXPIRED = "Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+
+/** The one `Set-Cookie` line of `res` for `name`, checked to expire the cookie. */
+const expiredLine = (res: request.Response, name = "test.sid"): string => {
+	const lines = sessionCookieLines(res, name);
+	expect(lines).toHaveLength(1);
+	const [line] = lines as [string];
+	expect(line.startsWith(`${name}=;`)).toBe(true);
+	expect(line).toContain(EXPIRED);
+	return line;
+};
+
+/** What the probes that end a session saw: whether a destroy run after the answer called back, and with what. */
+const probes = { destroyedAfterAnswer: undefined as { readonly err: unknown } | undefined };
+
+/** End the request's session; the probe's answer is `200`, or `503` when the store failed. */
+const destroyAndAnswer = (req: Request, res: Response): void => {
+	req.session.destroy((err: unknown) => {
+		res.status(err ? 503 : 200).json({ destroyed: !err });
+	});
+};
+
 /**
  * `sessionStoreModule` over the fake Redis, then a module of routes that
- * read and write `req.session` — two probes, and the session package's own
- * login and federation routers.
+ * read and write `req.session` — the probes, and the session package's own
+ * login and federation routers. `store` is laid over `session-store`;
+ * `trustProxy` has the app trust `X-Forwarded-Proto`, so a `Secure` cookie is
+ * set over plain HTTP.
  */
-async function boot(logger: SpyLogger): Promise<express.Express> {
+async function boot(
+	logger: SpyLogger,
+	options: { readonly store?: Record<string, unknown>; readonly trustProxy?: boolean } = {},
+): Promise<express.Express> {
 	const base = makeValidAppConfig();
 	const config = withSessionCaptures({
 		...withStore(base, {
 			name: "test.sid",
 			secure: false,
 			storage: { type: "redis", redis: { url: "redis://fake:6379" } },
+			...options.store,
 		}),
 		core: { ...base.core, deployment: { mode: "single" } },
 	});
@@ -207,6 +256,33 @@ async function boot(logger: SpyLogger): Promise<express.Express> {
 					});
 					router.get("/read", (req: Request, res: Response) => {
 						res.json({ value: (req.session as unknown as Record<string, unknown>).value ?? null });
+					});
+					router.get("/destroy", destroyAndAnswer);
+					router.get("/destroy-after-answer", (req: Request, res: Response) => {
+						res.json({ ok: true });
+						req.session.destroy((err: unknown) => {
+							probes.destroyedAfterAnswer = { err };
+						});
+					});
+					router.get("/regenerate", (req: Request, res: Response) => {
+						req.session.regenerate((err: unknown) => {
+							if (err) {
+								res.status(503).json({ regenerated: false });
+								return;
+							}
+							(req.session as unknown as Record<string, unknown>).value = "regenerated";
+							res.json({ regenerated: true });
+						});
+					});
+					router.get("/regenerate-then-destroy", (req: Request, res: Response) => {
+						req.session.regenerate(() => destroyAndAnswer(req, res));
+					});
+					router.get("/reload-then-destroy", (req: Request, res: Response) => {
+						req.session.reload(() => destroyAndAnswer(req, res));
+					});
+					router.get("/destroy-twice", (req: Request, res: Response) => {
+						const held = req.session;
+						held.destroy(() => held.destroy(() => res.json({ ok: true })));
 					});
 					return { id: "test-probe", mountPath: "/probe", handler: router };
 				},
@@ -293,6 +369,7 @@ async function boot(logger: SpyLogger): Promise<express.Express> {
 	});
 	dispose = () => handle.dispose();
 	const app = express();
+	if (options.trustProxy === true) app.set("trust proxy", true);
 	app.use(handle.router);
 	clear(logger);
 	return app;
@@ -545,6 +622,7 @@ describe("a route that meets the cookie store failing answers once, and the sess
 		expect(fake.calls.del).toBe(1);
 		expect(fake.calls.set).toBe(0);
 		expect(fake.calls.expire).toBe(0);
+		expect(sessionCookieLines(res)).toEqual([]);
 	});
 });
 
@@ -602,20 +680,121 @@ describe("a cookie-session record the store holds but cannot read", () => {
 	});
 });
 
-describe("the session cookie at logout, through the store's own cookie", () => {
-	/** A `Set-Cookie` line's attributes, lower-cased, with its value and expiry left out. */
-	const attributesOf = (line: string): string[] =>
-		line
-			.split(";")
-			.slice(1)
-			.map((part) => part.trim().toLowerCase())
-			.filter((part) => !part.startsWith("expires=") && !part.startsWith("max-age="))
-			.sort();
-	const sessionCookieLines = (res: request.Response): string[] => {
-		const raw = res.headers["set-cookie"] as unknown as string[] | string | undefined;
-		const lines = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
-		return lines.filter((line) => line.startsWith("test.sid="));
-	};
+describe("the session cookie of a session destroyed during the request", () => {
+	it("a route that destroys the session: one Set-Cookie expiring the cookie, with the attributes express-session set it with", async () => {
+		const agent = request.agent(await boot(spyLogger()));
+		const written = await agent.get("/probe/write");
+		const [setLine] = sessionCookieLines(written);
+		expect(setLine).toBeDefined();
+
+		const res = await agent.get("/probe/destroy");
+
+		expect(res.status).toBe(200);
+		expect(attributesOf(expiredLine(res))).toEqual(attributesOf(setLine as string));
+		expect((await agent.get("/probe/read")).body).toEqual({ value: null });
+	});
+
+	it("carries the configured name, Domain, Secure and SameSite, as express-session set them", async () => {
+		const app = await boot(spyLogger(), {
+			store: {
+				name: "__Secure-app.sid",
+				secure: true,
+				sameSite: "none",
+				domain: "auth.example.com",
+			},
+			trustProxy: true,
+		});
+		const written = await request(app).get("/probe/write").set("X-Forwarded-Proto", "https");
+		const [setLine] = sessionCookieLines(written, "__Secure-app.sid");
+		expect(setLine).toBeDefined();
+
+		const res = await request(app)
+			.get("/probe/destroy")
+			.set("X-Forwarded-Proto", "https")
+			.set("Cookie", (setLine as string).split(";")[0] as string);
+
+		expect(res.status).toBe(200);
+		const line = expiredLine(res, "__Secure-app.sid");
+		expect(attributesOf(line)).toEqual(attributesOf(setLine as string));
+		expect(attributesOf(line)).toEqual([
+			"domain=auth.example.com",
+			"httponly",
+			"path=/",
+			"samesite=none",
+			"secure",
+		]);
+	});
+
+	it("a destroy the store fails leaves the cookie: no Set-Cookie for it", async () => {
+		const agent = request.agent(await boot(spyLogger()));
+		expect((await agent.get("/probe/write")).status).toBe(200);
+
+		fake.failing.add("del");
+		const res = await agent.get("/probe/destroy");
+
+		expect(res.status).toBe(503);
+		expect(sessionCookieLines(res)).toEqual([]);
+	});
+
+	it("a regenerated session keeps the new cookie it is set: one Set-Cookie, not expired", async () => {
+		const agent = request.agent(await boot(spyLogger()));
+		const [oldLine] = sessionCookieLines(await agent.get("/probe/write"));
+		expect(oldLine).toBeDefined();
+
+		const res = await agent.get("/probe/regenerate");
+
+		expect(res.status).toBe(200);
+		const lines = sessionCookieLines(res);
+		expect(lines).toHaveLength(1);
+		const [line] = lines as [string];
+		expect(line.split(";")[0]).not.toBe((oldLine as string).split(";")[0]);
+		expect(line).not.toMatch(/^test\.sid=;/);
+		expect(line).not.toContain(EXPIRED);
+		expect((await agent.get("/probe/read")).body).toEqual({ value: "regenerated" });
+	});
+
+	it("a session destroyed after a regenerate in the same request: the cookie expired", async () => {
+		const agent = request.agent(await boot(spyLogger()));
+		expect((await agent.get("/probe/write")).status).toBe(200);
+
+		const res = await agent.get("/probe/regenerate-then-destroy");
+
+		expect(res.status).toBe(200);
+		expiredLine(res);
+	});
+
+	it("a session destroyed after a reload in the same request: the cookie expired", async () => {
+		const agent = request.agent(await boot(spyLogger()));
+		expect((await agent.get("/probe/write")).status).toBe(200);
+
+		const res = await agent.get("/probe/reload-then-destroy");
+
+		expect(res.status).toBe(200);
+		expiredLine(res);
+	});
+
+	it("a session destroyed twice through a held reference: the cookie expired once", async () => {
+		const agent = request.agent(await boot(spyLogger()));
+		expect((await agent.get("/probe/write")).status).toBe(200);
+
+		const res = await agent.get("/probe/destroy-twice");
+
+		expect(res.status).toBe(200);
+		expiredLine(res);
+	});
+
+	it("a destroy that completes after the answer: the answer stands, nothing is thrown, the session is gone", async () => {
+		const agent = request.agent(await boot(spyLogger()));
+		expect((await agent.get("/probe/write")).status).toBe(200);
+
+		const res = await agent.get("/probe/destroy-after-answer");
+
+		expect(res.status).toBe(200);
+		expect(sessionCookieLines(res)).toEqual([]);
+		await vi.waitFor(() => expect(probes.destroyedAfterAnswer).toBeDefined());
+		expect(probes.destroyedAfterAnswer?.err).toBeFalsy();
+		expect((await agent.get("/probe/read")).body).toEqual({ value: null });
+	});
 
 	it("POST /session/logout expires the cookie express-session set, with the same attributes", async () => {
 		const agent = request.agent(await boot(spyLogger()));
@@ -630,11 +809,7 @@ describe("the session cookie at logout, through the store's own cookie", () => {
 			.set(csrf.body.header_name as string, csrf.body.csrf_token as string);
 
 		expect(res.status).toBe(200);
-		const cleared = sessionCookieLines(res);
-		expect(cleared).toHaveLength(1);
-		expect(cleared[0]).toMatch(/^test\.sid=;/);
-		expect(cleared[0]).toContain("Expires=Thu, 01 Jan 1970 00:00:00 GMT");
-		expect(attributesOf(cleared[0] as string)).toEqual(attributesOf(setLine as string));
+		expect(attributesOf(expiredLine(res))).toEqual(attributesOf(setLine as string));
 		expect((await agent.get("/probe/read")).body).toEqual({ value: null });
 	});
 });

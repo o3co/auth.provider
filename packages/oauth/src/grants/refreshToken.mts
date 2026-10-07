@@ -88,9 +88,7 @@ const CAPPED_EXPIRY_DRIFT_MARGIN_MS = 1_000;
  * factory built without one is refused. The lifetimes, `legacyTypAccept` and
  * the resource-indicator switch come from the `oauthTokenSettings` slot, and
  * the refresh-token binding rule from core's `tokenBindingSettings`. It
- * reads nothing of the configuration: `unknownFamilyPolicy` is the module's
- * `oauth-authorization.grants.refreshToken.unknownFamilyPolicy`, handed over
- * as the section parsed it.
+ * reads nothing of the configuration.
  */
 export type RefreshTokenGrantDeps = Pick<
 	GrantDependencies,
@@ -105,14 +103,7 @@ export type RefreshTokenGrantDeps = Pick<
 	ProviderDeps<
 		"sessionRequirementResolver" | "oauthTokenSettings" | "tokenBindingSettings",
 		"auditSink" | "sessionLifecycleStore"
-	> & {
-		/**
-		 * What a refresh token whose family no record holds gets: issued only
-		 * under `"accept"`, a migration window's setting; anything else, absent
-		 * included, refuses it.
-		 */
-		readonly unknownFamilyPolicy?: "accept" | "reject";
-	};
+	>;
 
 /**
  * The token endpoint's answer to an admission that does not refresh, or
@@ -173,9 +164,6 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				"(memorySessionStoresModule or redisSessionStoresModule) and sessionLifecycleModule.",
 		);
 	}
-	// Read once, here. Only `"accept"` issues for an unknown family: any other
-	// value a hand-built deps carries refuses, as absent does.
-	const acceptUnknownFamily = deps.unknownFamilyPolicy === "accept";
 	// What admission reads for the token's session; no acr table, since a
 	// refresh asks for no acr.
 	const admissionDeps: AdmissionDeps = {
@@ -742,8 +730,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 						},
 					};
 				}
-				// Every outcome is handled explicitly; issuing for an unknown family
-				// is operator policy (`unknownFamilyPolicy`), never a fall-through.
+				// Every outcome is handled explicitly: only `rotated` issues.
 				switch (rotateResult.outcome) {
 					case "rotated": {
 						rotationCommitted = true;
@@ -825,51 +812,24 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 								errorDescription: "family_revoked",
 							},
 						};
-					case "unknown_family": {
-						// Defense in depth: the fail-fast above already refuses a
-						// token with no `family_id`; never accept one here.
-						if (familyId === null) {
-							logger?.warn(
-								{ clientId: authenticatedClientId },
-								"unknown_family_rejected_no_family_id_claim",
-							);
-							return {
-								result: {
-									status: 400,
-									error: "invalid_grant",
-									errorDescription: "unknown_family",
-								},
-							};
-						}
-						if (!acceptUnknownFamily) {
-							logger?.warn(
-								{
-									familyId: newFamilyId,
-									jti: previousJti,
-									clientId: authenticatedClientId,
-								},
-								"unknown_family_rejected",
-							);
-							return {
-								result: {
-									status: 400,
-									error: "invalid_grant",
-									errorDescription: "unknown_family",
-								},
-							};
-						}
-						// "accept" — legacy migration mode only; emit
-						// audit log and fall through to issuance.
+					case "unknown_family":
+						// A family no record holds is never redeemed: its expiry and
+						// replay detection live in that record.
 						logger?.warn(
 							{
 								familyId: newFamilyId,
 								jti: previousJti,
 								clientId: authenticatedClientId,
 							},
-							"unknown_family_accepted_legacy_mode",
+							"unknown_family_rejected",
 						);
-						break;
-					}
+						return {
+							result: {
+								status: 400,
+								error: "invalid_grant",
+								errorDescription: "unknown_family",
+							},
+						};
 					default: {
 						// Compile-time exhaustiveness: a new rotation outcome must
 						// not fall through to issuance.
@@ -883,9 +843,9 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				// end that landed meanwhile mints nothing.
 				const refusalAfter = await recheck();
 				if (refusalAfter !== undefined) {
-					// A committed rotation spent the presented token and reserved one
+					// The committed rotation spent the presented token and reserved one
 					// never signed; the family is revoked so nothing rotates it on.
-					if (rotationCommitted) await revokeRotatedFamily(newFamilyId, authenticatedClientId);
+					await revokeRotatedFamily(newFamilyId, authenticatedClientId);
 					return { result: refusalAfter };
 				}
 
@@ -893,7 +853,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				// left against the clock now, after every await: a cap at the end of
 				// the family's life, or a store slow enough to spend it, leaves a
 				// token that would be signed already expired.
-				if (rotationCommitted && issuedAt + refreshExpiresIn <= Math.floor(Date.now() / 1000)) {
+				if (issuedAt + refreshExpiresIn <= Math.floor(Date.now() / 1000)) {
 					logger?.info(
 						{ familyId: newFamilyId, clientId: authenticatedClientId },
 						"refresh_token_family_lifetime_exhausted",
@@ -969,9 +929,8 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				);
 			} catch (err) {
 				if (!rotationCommitted) {
-					// Nothing was reserved (no rotation wired, or an unknown family
-					// accepted), so this is an ordinary signer outage and the
-					// presented token is still valid.
+					// Nothing was reserved (no rotation wired), so this is an
+					// ordinary signer outage and the presented token is still valid.
 					throw err;
 				}
 				logger?.error(

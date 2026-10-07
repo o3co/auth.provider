@@ -45,6 +45,7 @@ import { createJwtBearerGrant } from "#/grants/jwtBearer.mjs";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { oauthAuthorizationGrantsModule } from "#/oauthAuthorization.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+import { registeredGrants } from "./_helpers/grantRegistry.mjs";
 import { capturing, withGrants } from "./_helpers/sections.mjs";
 
 afterEach(() => {
@@ -181,6 +182,7 @@ describe("each grant refuses to be built without its settings", () => {
 					clientRepository,
 					codeRepository,
 					sessionRequirementResolver: requirements,
+					grantHandlerResolver: registeredGrants("refresh_token"),
 					oauthTokenSettings,
 					tokenBindingSettings,
 				} as never),
@@ -243,6 +245,7 @@ describe("each grant refuses to be built without its settings", () => {
 					clientRepository,
 					codeRepository,
 					sessionRequirementResolver: requirements,
+					grantHandlerResolver: registeredGrants("refresh_token"),
 					oauthTokenSettings: settings,
 					tokenBindingSettings: tokenBindingSettings as TokenBindingSettings | undefined,
 				};
