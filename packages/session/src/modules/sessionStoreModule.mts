@@ -27,6 +27,7 @@ import { createSessionCsrfTokenSigner } from "../csrf-token-signer.mjs";
 import { guardCookieSession } from "../internal/cookieSession.mjs";
 import {
 	type SessionCookieConfigSlice,
+	sessionCookieAttributes,
 	sessionCookiePolicyFrom,
 	sessionCookieRefusal,
 } from "../session-cookie-policy.mjs";
@@ -245,14 +246,7 @@ export const sessionStoreModule = defineModule<
 					resave: false,
 					saveUninitialized: false,
 					store,
-					cookie: {
-						path: "/",
-						httpOnly: true,
-						secure: cookie.secure,
-						maxAge: cookie.maxAgeMs,
-						sameSite: cookie.sameSite,
-						domain: cookie.domain,
-					},
+					cookie: { ...sessionCookieAttributes(cookie), maxAge: cookie.maxAgeMs },
 				});
 				// No `before` clause: see the mount-order contract above.
 				return {

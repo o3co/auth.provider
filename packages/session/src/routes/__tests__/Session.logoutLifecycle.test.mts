@@ -35,6 +35,7 @@ import {
 	newRenewalNonce,
 	readVersionedSessionLifecycle,
 	type SessionCloseNotice,
+	type SessionCookiePolicy,
 	type SessionLifecycle,
 	type SubjectSessionIndex,
 	type UserRepository,
@@ -137,6 +138,8 @@ function buildApp(opts: {
 	readonly bag?: Record<string, unknown>;
 	/** The cookie store's destroy fails with it. */
 	readonly destroyError?: Error;
+	/** The session cookie's attributes; absent: a host-only, non-secure `auth.session`. */
+	readonly sessionCookie?: Pick<SessionCookiePolicy, "name" | "secure" | "sameSite" | "domain">;
 }) {
 	const bag: Bag = {
 		isAuthenticated: true,
@@ -168,7 +171,12 @@ function buildApp(opts: {
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
 			section: { rateLimit: { login: { windowMs: 60_000, limit: 100 } } },
-			sessionCookie: { name: "auth.session", secure: false, sameSite: "lax", domain: undefined },
+			sessionCookie: opts.sessionCookie ?? {
+				name: "auth.session",
+				secure: false,
+				sameSite: "lax",
+				domain: undefined,
+			},
 			deploymentMode: "single",
 			...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 			...(opts.federationTokenStore ? { federationTokenStore: opts.federationTokenStore } : {}),
@@ -183,10 +191,11 @@ function buildApp(opts: {
 	return { app, bag };
 }
 
-const logout = (app: express.Express) =>
+/** A logout carrying the CSRF pair; its cookie is named after the session cookie, `sessionCookieName`. */
+const logout = (app: express.Express, sessionCookieName = "auth.session") =>
 	request(app)
 		.post("/session/logout")
-		.set("Cookie", `${csrf.cookieName}=${csrfToken}`)
+		.set("Cookie", `${sessionCookieName}.csrf=${csrfToken}`)
 		.set(csrf.headerName, csrfToken);
 
 describe("POST /session/logout through the session lifecycle: the close's answer", () => {
@@ -459,5 +468,98 @@ describe("where a user-session store is wired, core's session lifecycle is requi
 
 		expect(res.status).toBe(200);
 		expect(bag.destroyed).toBe(true);
+	});
+});
+
+/** The `Set-Cookie` lines of `res` that name the cookie `name`. */
+const setCookiesNamed = (res: request.Response, name: string): string[] => {
+	const raw = res.headers["set-cookie"] as unknown as string[] | string | undefined;
+	const lines = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
+	return lines.filter((line) => line.startsWith(`${name}=`));
+};
+
+/** A `Set-Cookie` line's attributes, lower-cased, with its value and expiry left out. */
+const attributesOf = (line: string): string[] =>
+	line
+		.split(";")
+		.slice(1)
+		.map((part) => part.trim().toLowerCase())
+		.filter((part) => !part.startsWith("expires=") && !part.startsWith("max-age="))
+		.sort();
+
+describe("POST /session/logout and the session cookie", () => {
+	it("a logout that destroyed the cookie session expires the session cookie, with the attributes it was set with", async () => {
+		const { app } = buildApp({ sessionLifecycle: fakeLifecycle() });
+
+		const res = await logout(app);
+
+		expect(res.status).toBe(200);
+		const lines = setCookiesNamed(res, "auth.session");
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toMatch(/^auth\.session=;/);
+		expect(lines[0]).toContain("Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+		expect(attributesOf(lines[0] as string)).toEqual(["httponly", "path=/", "samesite=lax"]);
+	});
+
+	it("carries the configured name, domain, Secure and SameSite of the session cookie", async () => {
+		const { app } = buildApp({
+			sessionLifecycle: fakeLifecycle(),
+			sessionCookie: {
+				name: "__Secure-app.sid",
+				secure: true,
+				sameSite: "none",
+				domain: "auth.example.com",
+			},
+		});
+
+		const res = await logout(app, "__Secure-app.sid");
+
+		expect(res.status).toBe(200);
+		const lines = setCookiesNamed(res, "__Secure-app.sid");
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toContain("Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+		expect(attributesOf(lines[0] as string)).toEqual([
+			"domain=auth.example.com",
+			"httponly",
+			"path=/",
+			"samesite=none",
+			"secure",
+		]);
+	});
+
+	it("a sessionless router's logout expires the session cookie too", async () => {
+		const { app } = buildApp({});
+
+		const res = await logout(app);
+
+		expect(res.status).toBe(200);
+		expect(setCookiesNamed(res, "auth.session")).toHaveLength(1);
+	});
+
+	it("a cookie store that cannot destroy leaves the session cookie as it is", async () => {
+		const { app } = buildApp({
+			sessionLifecycle: fakeLifecycle(),
+			destroyError: new Error("cookie store down"),
+		});
+
+		const res = await logout(app);
+
+		expect(res.status).toBe(503);
+		expect(setCookiesNamed(res, "auth.session")).toEqual([]);
+	});
+
+	it("a close that did not commit leaves the session cookie as it is", async () => {
+		const { app } = buildApp({
+			sessionLifecycle: fakeLifecycle({
+				close: async () => {
+					throw new Error("lifecycle down");
+				},
+			}),
+		});
+
+		const res = await logout(app);
+
+		expect(res.status).toBe(503);
+		expect(setCookiesNamed(res, "auth.session")).toEqual([]);
 	});
 });

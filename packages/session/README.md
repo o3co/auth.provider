@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-Last updated: 2026-10-06
+Last updated: 2026-10-07
 
 Browser login, logout and upstream-IdP federation routes for
 [auth.provider](../../README.md), the redirect policy every federation adapter
@@ -667,12 +667,17 @@ read, that is logged as `logout_user_session_read_failed` and the logout
 answers `503 temporarily_unavailable`: it closes nothing and keeps the express
 session for a retry.
 
-**The cookie session's destroy.** If destroying the express session fails —
-the cookie store's outage — the user is not logged out, so the response is
-`503 temporarily_unavailable`, logged once at error level as
+**The cookie session's destroy.** Once the express session is destroyed, the
+answer also expires the session cookie: a `Set-Cookie` for `session-store.name`
+dated in the past, with the attributes the cookie is set with (`Path=/`,
+`HttpOnly`, and `session-store.domain`, `session-store.secure` and
+`session-store.sameSite`), so the browser drops it. If destroying the express
+session fails — the cookie store's outage — the user is not logged out, so the
+response is `503 temporarily_unavailable`, logged once at error level as
 `session_logout_store_unavailable` (`store: "cookie_session"`, `step:
-"destroy"`, the `sid`), and the client retries; by then the session's close has
-committed, so `/authorize` refuses the surviving cookie on its own account. A
+"destroy"`, the `sid`), and the client retries, the cookie left as it is; by
+then the session's close has committed, so `/authorize` refuses the surviving
+cookie on its own account. A
 session carrying no `sid` has nothing to close and only the express session is
 destroyed.
 
@@ -1418,7 +1423,7 @@ The bundled adapters are the worked examples — for instance
 | [`src/__tests__/module.test.mts`](src/__tests__/module.test.mts) | the manifest's slots and absence policies, the two routers at `/session`, and the `callbackURL` boot rule |
 | [`src/__tests__/sessionStoreModule.test.mts`](src/__tests__/sessionStoreModule.test.mts) | the middleware route at `/`, the cookie it sets and that it is the provider's policy, each cookie refused at validation through `createApp` and by the route itself before the store opens, the cookies that still mount, and the replica-safety declaration and refusal |
 | [`src/store/__tests__/factory.test.mts`](src/store/__tests__/factory.test.mts) | the two built-in stores, the `session-store` readiness probe, and the Redis client's error listener |
-| [`src/__tests__/cookieSessionStore.test.mts`](src/__tests__/cookieSessionStore.test.mts) | the cookie-session store failing under the real express-session and connect-redis: the middleware's `503` and its one line, and a route's outage answered once with the session not written again |
+| [`src/__tests__/cookieSessionStore.test.mts`](src/__tests__/cookieSessionStore.test.mts) | the cookie-session store failing under the real express-session and connect-redis: the middleware's `503` and its one line, and a route's outage answered once with the session not written again, and the cookie a logout expires carrying the attributes express-session set it with |
 | [`src/__tests__/csrf.test.mts`](src/__tests__/csrf.test.mts) | the signed token, its expiry bound, the signer refused when built and read as refusing unless `verify` answers `true`, the origin check and the guard's acceptance rule |
 | [`src/__tests__/csrfTokenSigner.test.mts`](src/__tests__/csrfTokenSigner.test.mts) | the session store's `csrfTokenSigner`: core's contract, the fixed vectors, the entropy floor, a token signed under `session-store.secret` passing `/session/*` and the `csrfGuard` slot, and an override replacing it; `sessionModule` and a hand-built router refused without a signer, signing through the slot's, its tokens passing between the slot and `/session/*`, and reading no `session-store.secret` on any route |
 | [`src/__tests__/csrfGuard.test.mts`](src/__tests__/csrfGuard.test.mts), [`loginEntry.test.mts`](src/__tests__/loginEntry.test.mts), [`loginCompletion.test.mts`](src/__tests__/loginCompletion.test.mts), [`sessionCookiePolicy.test.mts`](src/__tests__/sessionCookiePolicy.test.mts) | what the modules provide other packages: each keeps core's contract, the modules provide it, the guard answers and logs as `/session/login`'s does and accepts the tokens `GET /session/csrf` hands out, the login entry is built without a page and fails where it is read, the cookie policy refuses whatever would break the contract, over every combination of the cookie's attributes, and a name or domain it refuses is refused at validation with its message; an override of the policy beside the store's module refuses boot, and a composition without the module fills the slot |

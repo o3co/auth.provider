@@ -27,6 +27,10 @@
  * cookie's `Max-Age` and a session record's lifetime. The signing secret is
  * not among them.
  *
+ * {@link sessionCookieAttributes} is the one statement of the attributes the
+ * cookie is set with — the ones express-session is given, and the ones a
+ * logout expires the cookie with, so a browser matches the two.
+ *
  * One rule ({@link sessionCookieRefusal}) decides which sections yield a
  * cookie; the store's section schema refuses at validation what it refuses,
  * so no section yields a policy that breaks core's contract
@@ -125,4 +129,33 @@ export function sessionCookiePolicyFrom(session: SessionCookieConfigSlice): Sess
 	// As express-session is given it: `null` or empty is a host-only cookie.
 	const domain = session.domain || undefined;
 	return Object.freeze({ name, secure, sameSite, domain, maxAgeMs: maxAge });
+}
+
+/** The attributes the session cookie is set with, beside its name and lifetime. */
+export interface SessionCookieAttributes {
+	readonly path: "/";
+	readonly httpOnly: true;
+	readonly secure: boolean;
+	readonly sameSite: "lax" | "strict" | "none";
+	readonly domain: string | undefined;
+}
+
+/**
+ * The attributes the session cookie is set with, from its policy: on every
+ * path, never readable by script, and the policy's `Secure`, `SameSite` and
+ * `Domain`. What express-session is given, and what a logout expires the
+ * cookie with: a browser drops a cookie only when the attributes match.
+ * `Path=/` and `HttpOnly` are this package's, not the policy's: they hold
+ * because this package's session store module sets the cookie.
+ */
+export function sessionCookieAttributes(
+	policy: Pick<SessionCookiePolicy, "secure" | "sameSite" | "domain">,
+): SessionCookieAttributes {
+	return {
+		path: "/",
+		httpOnly: true,
+		secure: policy.secure,
+		sameSite: policy.sameSite,
+		domain: policy.domain,
+	};
 }
