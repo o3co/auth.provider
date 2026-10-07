@@ -355,6 +355,26 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   so what `"accept"` still redeemed was a chain without a `sid` from a
   deployment that ran without a family store. See the
   [oauth README](../packages/oauth/README.md#refresh_token).
+- **BREAKING: `oauth.jwt.legacyTypAccept` is removed** (#767). The key, at
+  any value (`false` included), refuses the boot wherever
+  `oauthEndpointsModule` is installed (`config-path-relocated`,
+  `oauth.jwt.legacyTypAccept was removed`), and so does
+  `OAUTH_JWT_LEGACY_TYP_ACCEPT`, exported at any value, the empty string
+  included (`environment-variable-renamed`,
+  `OAUTH_JWT_LEGACY_TYP_ACCEPT sets oauth.jwt.legacyTypAccept, which was
+  removed`). A token with no `typ` header is refused on every route that
+  verifies a token this provider signed, as v0.16.0 already did with the key
+  unset: a refresh token is `400 invalid_grant` (`invalid refresh_token`), an
+  access token `401 invalid_token` at `/oauth/userinfo` and the federation
+  routes, `active: false` at `/oauth/introspect`, and a subject token is
+  refused by token exchange. `jwt_verify_legacy_typ` is no longer logged.
+  The tokens it admitted were the typ-less ones minted by releases before
+  v0.5.0, which stamped no `typ` header. **What to do:** delete the line and
+  unset the variable; there is nothing to set in their place. A deployment
+  that ran with the key on signs out the holders of such tokens at the
+  upgrade: they obtain new tokens, which carry `typ`, by signing in again.
+  In code, `JwtVerifyOptions` and `OAuthTokenSettings` lose
+  `legacyTypAccept` ([Exports removed, and signatures changed](#exports-removed-and-signatures-changed)).
 - `device-grant.store` (and `oauth.deviceAuthorization.store`), at any value,
   refuses the boot wherever `deviceAuthorizationGrantModule` is installed,
   the grant on or off (#728). Delete the line. An enabled device grant needs
@@ -1376,7 +1396,7 @@ modules fills them.
 - **BREAKING: an enabled oauth-authorization grant requires
   `oauthTokenSettings` and `tokenBindingSettings`, and reads its settings
   from them, not from the configuration (#728).** The grants take the
-  issuer, the lifetimes they mint, `legacyTypAccept`, whether resource
+  issuer, the lifetimes they mint, whether resource
   indicators are enforced and `requireEmailVerified` from
   `oauthTokenSettings`, and the refresh-token binding rule
   (`bindConfidentialClientRefreshTokens`) from core's `tokenBindingSettings`,
@@ -1896,7 +1916,7 @@ modules fills them.
 - **BREAKING: token exchange reads `oauthTokenSettings`, not the
   configuration** (#1331). `tokenExchangeModule` requires the
   `oauthTokenSettings` slot and no longer requires `config` or declares a
-  `configSchema`: the issuer and `legacyTypAccept` a subject token is held to,
+  `configSchema`: the issuer a subject token is held to,
   and the lifetimes it mints within, are the slot's. A composition with
   `oauthEndpointsModule` changes nothing, since the module provides the slot; one
   without it fills the slot itself, or the boot is refused
@@ -1926,6 +1946,17 @@ modules fills them.
   `OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY`. Code that reads either key off
   `AppConfig` or `CoreConfig` handles `undefined`; a configuration built by
   hand drops both.
+- **BREAKING: `legacyTypAccept` is gone from every type that carried it
+  (#767).** `JwtVerifyOptions` (core's `verifyJwt` refuses a token with no
+  `typ` header unless the caller passes `expectedTyp: null`, which skips the
+  `typ` check altogether), `OAuthTokenSettings` and core/testing's
+  `TestOAuthTokenSettingsOverrides`, the oauth package's `OAuthSection` and
+  `OAuthTokenSection`, and token exchange's
+  `CreateSelfIssuedAccessTokenValidatorOptions` lose it. A slot filled by
+  hand drops the member; `checkOAuthTokenSettings` no longer asks for it.
+  `verifyJwt` no longer reads a typ-less token's `payload.type`. Code that
+  passed `legacyTypAccept: false` drops the line: the behaviour is the same
+  ([Keys removed](#keys-removed)).
 - **The oauth module is one value, `oauthEndpointsModule` (#728).** The
   module reads every `oauth.*` setting from its own parsed
   section; `createOAuthRouter` takes that section as `section` (typed
