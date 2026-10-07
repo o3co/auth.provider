@@ -1852,8 +1852,12 @@ Plus one short-lived **duplicate** of the shared socket per refresh rotation:
 for its compare-and-swap and closes it on exit
 (`packages/redis/src/refresh-token-family.mts`). The duplicate neither
 reconnects nor queues: a rotation whose connection drops fails with the
-connection's error rather than committing without its `WATCH`
-(`packages/redis/src/ioredis/clients/refresh-token-family.mts`). Under refresh-heavy load
+connection's error rather than committing without its `WATCH`. Its commands
+wait for it to be ready, within one `commandTimeout`: one not ready by then (a
+Redis still loading its dataset after a restart or a promotion) is closed and
+the rotation fails as a timed-out command does, which the refresh grant
+answers `503 temporarily_unavailable`. Without a `commandTimeout` that wait has
+no bound (`packages/redis/src/ioredis/clients/refresh-token-family.mts`). Under refresh-heavy load
 against a managed Redis with TLS/AUTH this is connection churn — tracked as
 `#293` item 7, undecided at `v0.11.0`.
 

@@ -184,6 +184,7 @@ describe("makeIoredisClients refreshTokenFamilyClient.duplicate", () => {
 		disconnect = vi.fn();
 		duplicate = vi.fn();
 		connect = vi.fn().mockResolvedValue(undefined);
+		options = {};
 	}
 
 	function makeParentWithDuplicate(dup: FakeDuplicate): Redis {

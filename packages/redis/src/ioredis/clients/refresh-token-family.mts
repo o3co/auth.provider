@@ -35,8 +35,8 @@ import { type IoredisDurabilityOptions, redisDurability } from "../durability.mj
  * The duplicate's connection options over the parent's. `WATCH` lives and dies with one
  * connection, so the duplicate has no reconnect, no offline queue and no resend: once its
  * connection is lost, every later command, the `EXEC` included, rejects. It connects when
- * built, and its commands wait for that, since without an offline queue a command sent while
- * connecting is refused.
+ * built, and its commands wait for that (see {@link readyWithin}), since without an offline
+ * queue a command sent while connecting is refused.
  */
 const DUPLICATE_OPTIONS = {
 	lazyConnect: true,
@@ -44,6 +44,26 @@ const DUPLICATE_OPTIONS = {
 	retryStrategy: () => null,
 	autoResendUnfulfilledCommands: false,
 } as const;
+
+/**
+ * Connects `conn` and settles once it is ready. With a `commandTimeout`, a connection not
+ * ready within it (a server loading its dataset never is) is closed and the wait rejects as a
+ * timed-out command does, so no command is sent on it afterwards. With none, the wait is the
+ * connection's own.
+ */
+function readyWithin(conn: Redis): Promise<void> {
+	const connecting = conn.connect();
+	const limitMs = conn.options.commandTimeout;
+	if (typeof limitMs !== "number") return connecting;
+	let timer: NodeJS.Timeout | undefined;
+	const timedOut = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => {
+			conn.disconnect();
+			reject(new Error("Command timed out"));
+		}, limitMs);
+	});
+	return Promise.race([connecting, timedOut]).finally(() => clearTimeout(timer));
+}
 
 export function makeIoredisRefreshTokenFamilyClient(
 	io: Redis,
@@ -76,7 +96,7 @@ export function makeIoredisRefreshTokenFamilyClient(
 				logger.error({ err: loggableError(err) }, "redis_duplicate_connection_error");
 			});
 			// A failed connect is the error of the first command; it is logged by the listener.
-			const connected = dup.connect();
+			const connected = readyWithin(dup);
 			connected.catch(() => {});
 			const inner = buildRefreshClient(dup, connected);
 			const disposable: DisposableRefreshTokenFamilyClient = {
