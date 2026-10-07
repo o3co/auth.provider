@@ -865,3 +865,107 @@ describe("renderFrontchannelLogoutHtml", () => {
 		});
 	});
 });
+
+describe("renderFrontchannelLogoutPage with an upstream end-session URL", () => {
+	const UPSTREAM =
+		"https://idp.example/end-session?id_token_hint=h.i.nt&post_logout_redirect_uri=https%3A%2F%2Frp.example%2Fout&state=s-1";
+	const RPS: ReadonlyArray<FrontchannelRP> = [
+		{ clientId: "rp", frontchannelLogoutUri: "https://rp.example/fc" },
+	];
+	const targetOf = (html: string): string | undefined =>
+		scriptsOf(html)[0]?.attributes["data-target"];
+
+	it("ends at the upstream URL as given, with its post_logout_redirect_uri and state", () => {
+		const logger = createMockLogger();
+		const { html } = renderFrontchannelLogoutPage({
+			rps: RPS,
+			issuer: "https://auth.example",
+			sid: "sid-1",
+			upstreamEndSessionUri: UPSTREAM,
+			logger,
+		});
+
+		expect(targetOf(html)).toBe(UPSTREAM);
+		expect(iframeSrcsOf(html)).toHaveLength(1);
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+
+	it("ends at the upstream URL in place of the post-logout redirect, which the upstream URL carries", () => {
+		const { html } = renderFrontchannelLogoutPage({
+			rps: RPS,
+			issuer: "https://auth.example",
+			sid: "sid-1",
+			postLogoutRedirect: { uri: "https://rp.example/out", state: "s-1" },
+			upstreamEndSessionUri: UPSTREAM,
+			logger: createMockLogger(),
+		});
+
+		expect(scriptsOf(html)).toHaveLength(1);
+		expect(targetOf(html)).toBe(UPSTREAM);
+	});
+
+	it("navigates after the same delay, under the same policy as a page ending at the post-logout redirect", () => {
+		const common = {
+			rps: RPS,
+			issuer: "https://auth.example",
+			sid: "sid-1",
+			redirectDelayMs: 1500,
+		};
+		const upstream = renderFrontchannelLogoutPage({
+			...common,
+			upstreamEndSessionUri: UPSTREAM,
+			logger: createMockLogger(),
+		});
+		const local = renderFrontchannelLogoutPage({
+			...common,
+			postLogoutRedirect: { uri: "https://rp.example/out", state: "s-1" },
+			logger: createMockLogger(),
+		});
+
+		const [script] = scriptsOf(upstream.html);
+		assert(script !== undefined);
+		expect(script.attributes["data-delay"]).toBe("1500");
+		expect(script.text).toBe(scriptsOf(local.html)[0]?.text);
+		expect(upstream.contentSecurityPolicy).toBe(local.contentSecurityPolicy);
+		const policy = parsePolicy(upstream.contentSecurityPolicy);
+		expect(policy.get("script-src")).toEqual([hashSourceOf(script.text)]);
+		expect(policy.get("frame-src")).toEqual(["https://rp.example"]);
+		expect(policy.get("form-action")).toEqual(["'none'"]);
+		// The script comes after every iframe, so the frames start loading first.
+		expect(upstream.html.indexOf("<script")).toBeGreaterThan(upstream.html.lastIndexOf("<iframe"));
+	});
+
+	it.each([
+		["an executable scheme", "javascript:alert(1)//?state=s-1", "executable-scheme"],
+		[
+			"plain http off a loopback host",
+			"http://idp.example/end-session?state=s-1",
+			"http-non-loopback",
+		],
+		["a fragment", "https://idp.example/end-session?state=s-1#x", "fragment"],
+		["userinfo", "https://u:p@idp.example/end-session", "userinfo"],
+		["a value that is not a URL", "not-a-url", "unparsable"],
+	])(
+		"refuses an upstream URL with %s: the page keeps its iframes, has no redirect, and one warn names the reason, never the URI",
+		(_label, uri, reason) => {
+			const logger = createMockLogger();
+			const { html, contentSecurityPolicy } = renderFrontchannelLogoutPage({
+				rps: RPS,
+				issuer: "https://auth.example",
+				sid: "sid-1",
+				postLogoutRedirect: { uri: "https://rp.example/out", state: "s-1" },
+				upstreamEndSessionUri: uri,
+				logger,
+			});
+
+			expect(html).not.toContain("<script");
+			expect(html).toContain("<iframe");
+			expect(effectiveSources(parsePolicy(contentSecurityPolicy), "script-src")).toEqual([
+				"'none'",
+			]);
+			expect(logger.warn).toHaveBeenCalledTimes(1);
+			expectBestEffortWarn(logger, "logout_frontchannel_redirect_refused", { reason }, null);
+			expectUriNotLogged(logger, uri);
+		},
+	);
+});

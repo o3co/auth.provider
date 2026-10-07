@@ -252,7 +252,9 @@ interface UpstreamEndRequest {
  *      (`unavailable` → 503; `pending` → success, audited as
  *      `logout.close_pending`); the lifecycle's notifier tells the relying
  *      parties back-channel;
- *   7. respond: front-channel HTML | IdP redirect | post-logout redirect | JSON.
+ *   7. respond: front-channel HTML (ending at the IdP's end-session URL when
+ *      there is one, else at the post-logout redirect) | IdP redirect |
+ *      post-logout redirect | JSON.
  *
  * Also mounts `POST /oauth/federation/:name/logout`, the bearer-authenticated
  * disconnect of one federation, which holds `post_logout_redirect_uri` to the
@@ -954,7 +956,8 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 
 		// Where the browser goes back to the RP, with its `state` (OIDC
 		// RP-Initiated Logout 1.0 §3), for the redirect (7c). The front-channel
-		// page (7a) is handed the parts and composes the same URL.
+		// page (7a) is handed the parts and composes the same URL, unless the
+		// logout continues upstream.
 		let postLogoutRedirectTarget: string | undefined;
 		if (validatedPostLogoutRedirectUri) {
 			const redirectUrl = new URL(validatedPostLogoutRedirectUri);
@@ -978,8 +981,12 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				rps: frontchannelRps,
 				issuer: opts.issuer,
 				sid,
-				// The allowlist-validated URI and the RP's state, as parts: the
-				// page checks the URI and appends the state itself.
+				// The upstream end-session URL, when the session's federation
+				// ends sessions upstream: the page ends there, as 7b does, and the
+				// URL already carries the validated URI and the RP's state.
+				upstreamEndSessionUri: endSessionUri,
+				// Otherwise the allowlist-validated URI and the RP's state, as
+				// parts: the page checks the URI and appends the state itself.
 				...(validatedPostLogoutRedirectUri
 					? {
 							postLogoutRedirect: {
