@@ -32,8 +32,8 @@ import {
 	createTestApp,
 	createTestSessionCookiePolicy,
 	makeValidAppConfig,
-	sessionCookiePolicyContract,
 } from "@o3co/auth-provider-core/testing";
+import { sessionCookiePolicyContract } from "@o3co/auth-provider-test-kit";
 import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import { sessionStoreModule } from "#/modules/sessionStoreModule.mjs";

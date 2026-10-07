@@ -179,7 +179,8 @@ A package imports only core, so what another
 package needs of the browser session reaches it through a slot whose contract
 is core's ([`core/src/browser-session/types.mts`](../core/src/browser-session/types.mts),
 [`core/src/session-admission/login-completion.mts`](../core/src/session-admission/login-completion.mts)).
-Each provider runs core's contract suite in this package's tests.
+Each provider runs its slot's contract suite, from `@o3co/auth-provider-test-kit`,
+in this package's tests.
 
 | Slot | Provided by | What it is | Read by |
 | --- | --- | --- | --- |

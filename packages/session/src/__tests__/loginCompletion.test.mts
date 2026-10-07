@@ -40,9 +40,9 @@ import {
 	createTestCsrfGuard,
 	createTestCsrfTokenSigner,
 	createTestSessionCookiePolicy,
-	loginCompletionContract,
 	makeValidAppConfig,
 } from "@o3co/auth-provider-core/testing";
+import { loginCompletionContract } from "@o3co/auth-provider-test-kit";
 import express from "express";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createLoginCompletion } from "#/login-completion.mjs";

@@ -36,9 +36,9 @@ import {
 import {
 	createTestApp,
 	createTestCsrfTokenSigner,
-	csrfGuardContract,
 	makeValidAppConfig,
 } from "@o3co/auth-provider-core/testing";
+import { csrfGuardContract } from "@o3co/auth-provider-test-kit";
 import express, { type Request, type Response } from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
