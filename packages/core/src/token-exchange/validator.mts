@@ -48,9 +48,9 @@ export interface ExchangeTokenValidator {
 	 * `context.role` (e.g. a stricter issuer allowlist for actors) but SHOULD
 	 * default to identical validation.
 	 *
-	 * For a subject token, return the `aud` and the `claims.azp` the token
-	 * carries: the grant reads them to check that the token names the calling
-	 * client (see {@link ValidatedToken}).
+	 * For a subject token and an actor token, return the `aud` and the
+	 * `claims.azp` the token carries: the grant reads them to check that the
+	 * token names the calling client (see {@link ValidatedToken}).
 	 */
 	validate(token: string, context: ExchangeTokenValidationContext): Promise<ValidatedToken | null>;
 }
