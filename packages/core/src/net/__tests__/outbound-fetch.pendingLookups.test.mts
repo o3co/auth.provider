@@ -22,27 +22,38 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { MAX_PENDING_LOOKUPS as OUTBOUND_MAX_PENDING_LOOKUPS } from "#/net/outbound-fetch.mjs";
+import {
+	MAX_PENDING_LOOKUPS as OUTBOUND_MAX_PENDING_LOOKUPS,
+	MAX_WAITING_LOOKUPS as OUTBOUND_MAX_WAITING_LOOKUPS,
+} from "#/net/outbound-fetch.mjs";
 import type { OutboundTransport } from "#/net/outbound-transport.mjs";
 import { createOutboundFetchForTesting, OutboundFetchError } from "#/testing/outboundFetch.mjs";
 
 const PUBLIC_V4 = "93.184.216.34";
 
-/** A resolver whose every lookup stays outstanding until the test releases it. */
+/** A resolver whose every lookup stays outstanding until the test releases (or fails) it. */
 const heldResolver = () => {
-	const held: Array<{ readonly hostname: string; readonly release: () => void }> = [];
+	const held: Array<{
+		readonly hostname: string;
+		readonly release: () => void;
+		readonly fail: () => void;
+	}> = [];
 	let settled = 0;
 	return {
 		held,
 		/** Lookups started and not yet settled. */
 		outstanding: () => held.length - settled,
 		lookup: (hostname: string): Promise<readonly string[]> =>
-			new Promise((resolve) => {
+			new Promise((resolve, reject) => {
 				held.push({
 					hostname,
 					release: () => {
 						settled += 1;
 						resolve([PUBLIC_V4]);
+					},
+					fail: () => {
+						settled += 1;
+						reject(Object.assign(new Error("timed out"), { code: "ETIMEOUT" }));
 					},
 				});
 			}),
@@ -58,14 +69,45 @@ const ok: OutboundTransport = async () => ({
 	close: () => undefined,
 });
 
-const fetchOver = (lookup: (hostname: string) => Promise<readonly string[]>, timeoutMs = 50) =>
+/** A transport that answers 200 and then never ends the body; counts the answers it closed. */
+const stalling = () => {
+	let closed = 0;
+	const transport: OutboundTransport = async () => ({
+		status: 200,
+		statusText: "OK",
+		headers: [],
+		body: (async function* () {
+			await new Promise(() => undefined);
+		})(),
+		close: () => {
+			closed += 1;
+		},
+	});
+	return { transport, closed: () => closed };
+};
+
+const fetchOver = (
+	lookup: (hostname: string) => Promise<readonly string[]>,
+	timeoutMs = 50,
+	transport: OutboundTransport = ok,
+) =>
 	createOutboundFetchForTesting({
 		config: {},
 		source: "request",
 		lookup,
-		transport: ok,
+		transport,
 		timeoutMs,
 	});
+
+/** Holds every place of `fetch`'s with a call whose lookup stays outstanding. */
+const fillPlaces = async (fetch: typeof globalThis.fetch, prefix = "held") => {
+	const calls = Array.from({ length: OUTBOUND_MAX_PENDING_LOOKUPS }, (_, i) =>
+		fetch(`https://${prefix}${i}.example/doc`),
+	);
+	for (const call of calls) call.catch(() => undefined);
+	await flush();
+	return calls;
+};
 
 const reasonOf = async (promise: Promise<unknown>): Promise<string> => {
 	try {
@@ -165,6 +207,144 @@ describe("outstanding host-name resolutions", () => {
 		expect(await reasonOf(fetch("https://127.0.0.1/doc"))).not.toBe("timeout");
 		expect(await reasonOf(fetch("ftp://rp.example/doc"))).not.toBe("timeout");
 		expect(resolver.held).toHaveLength(OUTBOUND_MAX_PENDING_LOOKUPS);
+	});
+
+	it("bounds the calls waiting for a place, and fails one past that bound with timeout at once", async () => {
+		expect(OUTBOUND_MAX_WAITING_LOOKUPS).toBe(64);
+		const resolver = heldResolver();
+		const fetch = fetchOver(resolver.lookup, 5_000);
+		await fillPlaces(fetch);
+		const waiting = Array.from({ length: OUTBOUND_MAX_WAITING_LOOKUPS }, (_, i) =>
+			fetch(`https://wait${i}.example/doc`),
+		);
+		for (const call of waiting) call.catch(() => undefined);
+		await flush();
+
+		const started = Date.now();
+		const burst = await Promise.all(
+			Array.from({ length: 20 }, (_, i) => reasonOf(fetch(`https://over${i}.example/doc`))),
+		);
+		expect(burst.every((reason) => reason === "timeout")).toBe(true);
+		expect(Date.now() - started).toBeLessThan(1_000);
+		expect(resolver.held).toHaveLength(OUTBOUND_MAX_PENDING_LOOKUPS);
+
+		// Every waiter is still served, in turn, as places come free.
+		for (let i = 0; i < OUTBOUND_MAX_WAITING_LOOKUPS + OUTBOUND_MAX_PENDING_LOOKUPS; i += 1) {
+			resolver.held[i]?.release();
+			await flush();
+		}
+		const answers = await Promise.all(waiting);
+		expect(answers.every((answer) => answer.status === 200)).toBe(true);
+		expect(resolver.held.every((h) => !h.hostname.startsWith("over"))).toBe(true);
+	});
+
+	it("serves waiting calls in the order they arrived", async () => {
+		const resolver = heldResolver();
+		const fetch = fetchOver(resolver.lookup, 5_000);
+		const held = await fillPlaces(fetch);
+		const queued = ["a", "b", "c"].map((name) => fetch(`https://${name}.example/doc`));
+		await flush();
+		for (let i = 0; i < 3; i += 1) {
+			resolver.held[i]?.release();
+			await flush();
+		}
+		expect(resolver.held.slice(-3).map((h) => h.hostname)).toEqual([
+			"a.example",
+			"b.example",
+			"c.example",
+		]);
+		for (const h of resolver.held) h.release();
+		await Promise.all([...held, ...queued]);
+	});
+
+	it("drops a waiting call its caller aborts, and gives the next place to the call behind it", async () => {
+		const resolver = heldResolver();
+		const fetch = fetchOver(resolver.lookup, 5_000);
+		const held = await fillPlaces(fetch);
+		const caller = new AbortController();
+		const reason = new Error("caller gave up");
+		const aborted = fetch("https://aborted.example/doc", { signal: caller.signal });
+		const behind = fetch("https://behind.example/doc");
+		await flush();
+		caller.abort(reason);
+		await expect(aborted).rejects.toBe(reason);
+
+		resolver.held[0]?.release();
+		await flush();
+		expect(resolver.held.at(-1)?.hostname).toBe("behind.example");
+		expect(resolver.held.some((h) => h.hostname === "aborted.example")).toBe(false);
+		for (const h of resolver.held) h.release();
+		await Promise.all([...held, behind]);
+	});
+
+	it("passes a place on, starting nothing, when the call it was handed to aborted in the handoff", async () => {
+		const resolver = heldResolver();
+		const fetch = fetchOver(resolver.lookup, 5_000);
+		const held = await fillPlaces(fetch);
+		const caller = new AbortController();
+		const reason = new Error("caller gave up");
+		const handed = fetch("https://handed.example/doc", { signal: caller.signal });
+		handed.catch(() => undefined);
+		const behind = fetch("https://behind.example/doc");
+		await flush();
+
+		// The settled lookup hands its place over in a microtask; the abort lands
+		// after that, before the call it was handed to resumes.
+		resolver.held[0]?.release();
+		queueMicrotask(() => caller.abort(reason));
+		await expect(handed).rejects.toBe(reason);
+		await flush();
+		expect(resolver.held.some((h) => h.hostname === "handed.example")).toBe(false);
+		expect(resolver.held.at(-1)?.hostname).toBe("behind.example");
+		expect(resolver.outstanding()).toBe(OUTBOUND_MAX_PENDING_LOOKUPS);
+		for (const h of resolver.held) h.release();
+		await Promise.all([...held, behind]);
+	});
+
+	it("frees the place of a lookup that throws synchronously", async () => {
+		let calls = 0;
+		const fetch = fetchOver((): Promise<readonly string[]> => {
+			calls += 1;
+			throw Object.assign(new Error("bad name"), { code: "EBADNAME" });
+		});
+		for (let i = 0; i < OUTBOUND_MAX_PENDING_LOOKUPS + 2; i += 1) {
+			expect(await reasonOf(fetch(`https://rp${i}.example/doc`))).toBe("resolution_failed");
+		}
+		expect(calls).toBe(OUTBOUND_MAX_PENDING_LOOKUPS + 2);
+	});
+
+	it("frees the place of a lookup that fails after its call timed out, without an unhandled rejection", async () => {
+		const resolver = heldResolver();
+		const fetch = fetchOver(resolver.lookup);
+		await Promise.all(
+			Array.from({ length: OUTBOUND_MAX_PENDING_LOOKUPS }, (_, i) =>
+				reasonOf(fetch(`https://rp${i}.example/doc`)),
+			),
+		);
+		resolver.held[0]?.fail();
+		await flush();
+		const next = fetch("https://after.example/doc");
+		await flush();
+		expect(resolver.held.at(-1)?.hostname).toBe("after.example");
+		resolver.held.at(-1)?.release();
+		await expect(next).resolves.toHaveProperty("status", 200);
+	});
+
+	it("holds a call that waited for a place to its one deadline, through a body that stalls", async () => {
+		const resolver = heldResolver();
+		const body = stalling();
+		const fetch = fetchOver(resolver.lookup, 300, body.transport);
+		await fillPlaces(fetch);
+		const started = Date.now();
+		const queued = reasonOf(fetch("https://queued.example/doc"));
+		await new Promise((resolve) => setTimeout(resolve, 100));
+		resolver.held[0]?.release();
+		expect(await queued).toBe("timeout");
+		const elapsed = Date.now() - started;
+		expect(elapsed).toBeGreaterThanOrEqual(250);
+		expect(elapsed).toBeLessThan(600);
+		expect(resolver.held.some((h) => h.hostname === "queued.example")).toBe(true);
+		expect(body.closed()).toBeGreaterThanOrEqual(1);
 	});
 
 	it("leaves a fetch whose resolutions settle in time as it was", async () => {

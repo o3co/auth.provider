@@ -97,6 +97,19 @@ export const systemLookup = async (hostname: string): Promise<readonly string[]>
  */
 export const MAX_PENDING_LOOKUPS = 16;
 
+/**
+ * How many calls one built fetch lets wait for a place among its
+ * {@link MAX_PENDING_LOOKUPS}. A call that finds this many already waiting
+ * fails with `timeout` at once, without waiting and without starting a
+ * lookup: each waiter holds a listener and its call's deadline, so the queue
+ * is bounded as the lookups are. Fixed, not configured: four times the
+ * places, so a burst a few times the bound still queues.
+ */
+export const MAX_WAITING_LOOKUPS = 64;
+
+/** No place among the outstanding lookups, and no room to wait for one. */
+class LookupsSaturated extends Error {}
+
 const DEFAULT_TIMEOUT_MS = 5000;
 const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024;
 
@@ -260,36 +273,46 @@ const untilAborted = <T,>(promise: Promise<T>, signal: AbortSignal): Promise<T> 
 	});
 
 /**
- * The count of outstanding lookups for one built fetch, bounded at `max`. A
- * permit is taken before a lookup starts and given back only when the lookup
- * settles; a waiter is handed the permit directly, in arrival order.
+ * The count of outstanding lookups for one built fetch, bounded at `max`,
+ * with at most `maxWaiting` calls waiting for a place. A permit is taken
+ * before a lookup starts and given back only when the lookup settles; a
+ * waiter is handed the permit directly, in arrival order. The waiters are a
+ * `Set`, which iterates in insertion order and drops a cancelled one in
+ * constant time.
  */
-function lookupPermits(max: number) {
+function lookupPermits(max: number, maxWaiting: number) {
 	let outstanding = 0;
-	const waiters: Array<() => void> = [];
+	const waiters = new Set<() => void>();
 	const release = (): void => {
-		const next = waiters.shift();
-		if (next !== undefined) next();
-		else outstanding -= 1;
+		const next = waiters.values().next();
+		if (next.done === true) {
+			outstanding -= 1;
+			return;
+		}
+		waiters.delete(next.value);
+		next.value();
 	};
-	/** A permit, or `signal`'s reason once it aborts first; no permit is held then. */
+	/**
+	 * A permit; `signal`'s reason once it aborts first, or `LookupsSaturated`
+	 * when no one more may wait. No permit is held in either case.
+	 */
 	const acquire = (signal: AbortSignal): Promise<void> => {
 		signal.throwIfAborted();
 		if (outstanding < max) {
 			outstanding += 1;
 			return Promise.resolve();
 		}
+		if (waiters.size >= maxWaiting) throw new LookupsSaturated();
 		return new Promise<void>((resolve, reject) => {
 			const onAbort = () => {
-				const index = waiters.indexOf(granted);
-				if (index !== -1) waiters.splice(index, 1);
+				waiters.delete(granted);
 				reject(signal.reason);
 			};
 			const granted = () => {
 				signal.removeEventListener("abort", onAbort);
 				resolve();
 			};
-			waiters.push(granted);
+			waiters.add(granted);
 			signal.addEventListener("abort", onAbort, { once: true });
 		});
 	};
@@ -483,7 +506,7 @@ export function buildOutboundFetch(
 		policy.maxResponseBytes,
 	);
 
-	const lookUp = lookupPermits(MAX_PENDING_LOOKUPS);
+	const lookUp = lookupPermits(MAX_PENDING_LOOKUPS, MAX_WAITING_LOOKUPS);
 
 	const outboundFetch = async (input: unknown, init?: RequestInit): Promise<Response> => {
 		const request = readRequest(input, init);
@@ -506,6 +529,9 @@ export function buildOutboundFetch(
 			} else {
 				const resolving = lookUp(seams.lookup, destination.url.hostname, signal).catch(
 					(err: unknown) => {
+						if (err instanceof LookupsSaturated) {
+							throw new OutboundFetchError("timeout", destination.host);
+						}
 						throw new OutboundFetchError("resolution_failed", destination.host, errorCode(err));
 					},
 				);
