@@ -76,6 +76,7 @@ import {
 import { SUBJECT_REVOCATION_ABSENCE_POLICY } from "../user-sessions/types.mjs";
 import { contributesAuditHooks } from "./audit-fan-out.mjs";
 import { type ConfigDefaults, logConfigNotices, readConfigDefaults } from "./config-notices.mjs";
+import { checkConfigSlotCoreOnly } from "./config-slot.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import {
 	checkFederationEntriesHandled,
@@ -3482,6 +3483,11 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 		id: "federation-kind-guard",
 		spec: "issue #728 (a federation registers through the type its entry names, whatever a module declares, switched on or not)",
 		run: (ctx) => checkFederationKindGuard(ctx.rawModules, ctx.modules),
+	},
+	{
+		id: "config-slot-core-only",
+		spec: "issue #728 (B12: the whole configuration, the config slot, is read by core's own modules alone)",
+		run: (ctx) => checkConfigSlotCoreOnly(ctx.rawModules, ctx.modules),
 	},
 	{
 		id: "module-section-paths",

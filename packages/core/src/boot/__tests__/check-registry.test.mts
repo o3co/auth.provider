@@ -49,6 +49,7 @@ describe("stage-1 check registries", () => {
 			"module-entries-are-manifests",
 			"unique-module-names",
 			"federation-kind-guard",
+			"config-slot-core-only",
 			"module-section-paths",
 			"relocated-config-paths",
 			"renamed-environment-variables",

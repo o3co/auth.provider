@@ -71,15 +71,15 @@ function buildPlan(
 
 describe("materializeComponents — pre-seed bootstrap", () => {
 	it("bootstrap values appear in world.components; factory can read them as deps", async () => {
-		// Module depends on 'config' (bootstrap) and provides slotA using it.
+		// Module depends on 'pathResolver' (bootstrap) and provides slotA using it.
 		// We verify via a side-channel that the factory received the bootstrap value.
-		let receivedConfig: unknown;
+		let receivedResolver: unknown;
 		const modA = defineModule({
 			name: "A",
-			requires: ["config"] as const,
+			requires: ["pathResolver"] as const,
 			provides: {
 				slotA: (deps) => {
-					receivedConfig = deps.config;
+					receivedResolver = deps.pathResolver;
 					return 42;
 				},
 			},
@@ -89,10 +89,11 @@ describe("materializeComponents — pre-seed bootstrap", () => {
 		const plan = buildPlan([modA]);
 		const world = await materializeComponents(plan, minBoot, undefined);
 
-		// The bootstrap config must be present in the world's components
+		// The bootstrap values must be present in the world's components
 		expect(world.components.config).toBe(minBoot.config);
+		expect(world.components.pathResolver).toBe(minBoot.pathResolver);
 		// The factory received it as a dep
-		expect(receivedConfig).toBe(minBoot.config);
+		expect(receivedResolver).toBe(minBoot.pathResolver);
 		// slotA was materialised
 		expect(world.components.slotA).toBe(42);
 	});

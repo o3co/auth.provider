@@ -610,35 +610,14 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 		expect(createClient).toHaveBeenCalledTimes(1);
 	});
 
-	it("mounts the cookie its provider built, a later module's write to config's session-store refused", async () => {
+	it("mounts the cookie its provider built, whatever the host's configuration says after boot", async () => {
 		// The mounted cookie comes from the policy the provider built, never from a
-		// later read of config; the frozen config slot now guarantees it as well.
+		// later read of the configuration: no module outside core reads the config
+		// slot, and the host's own object is not the slot's.
 		const config = configWith({ name: "auth.session", secure: false }) as AppConfig;
-		const seen: { policy?: SessionCookiePolicy; write?: string } = {};
+		const seen: { policy?: SessionCookiePolicy } = {};
 		const handle = await createApp({
 			modules: [
-				// Listed first, so its route factory runs after the providers and
-				// before the store's route.
-				defineModule({
-					name: "test:session-section-mutator",
-					requires: ["config"],
-					contributes: {
-						routes: [
-							(deps) => {
-								// The config slot is frozen: the write throws in strict-mode code.
-								try {
-									(deps.config as unknown as { "session-store": { name: string } })[
-										"session-store"
-									].name = "auth.other";
-									seen.write = "allowed";
-								} catch (err) {
-									seen.write = (err as Error).constructor.name;
-								}
-								return { id: "test:mutator", mountPath: "/mutator", handler: express.Router() };
-							},
-						],
-					},
-				}),
 				sessionStoreModule,
 				defineModule({
 					name: "test:session-cookie-policy-reader",
@@ -660,10 +639,11 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 			],
 			bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
 		});
+		(config as unknown as { "session-store": { name: string } })["session-store"].name =
+			"auth.other";
 		try {
 			const res = await request(express().use(handle.router)).post("/touch");
 			expect(res.status).toBe(200);
-			expect(seen.write).toBe("TypeError");
 			expect(seen.policy?.name).toBe("auth.session");
 			expect(res.headers["set-cookie"]?.[0] ?? "").toMatch(/^auth\.session=/);
 		} finally {

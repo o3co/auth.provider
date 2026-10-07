@@ -3,6 +3,7 @@
 ## Status
 
 Accepted (2026-05-13). Extends ADR `2026-04-30-config-schema-strict-defaults-from-hocon.md`.
+Amended 2026-10-07 (who reads a grant's switch: see the end of Decision).
 
 ## Context
 
@@ -71,6 +72,16 @@ registration. HOCON `${?ENV_VAR}` substitution returns a string when the variabl
    (`enabled = ${?OAUTH_GRANTS_*_ENABLED}`) is repeated at the template layer so env-var
    overrides still reach the resolved config — HOCON precedence means an env substitution only
    in `reference.conf` would be shadowed by the template layer's explicit value.
+
+Amended 2026-10-07 ([#728](https://github.com/o3co/auth.provider/issues/728),
+B12). Decision 4 read the grant switches off the whole configuration. A
+module now reads its own section alone: `oauthAuthorizationModule` reads
+`oauth-authorization.grants.<grant>.enabled` from its section, as
+`deps.section`, with the same strict `=== true`. The whole configuration,
+the `config` slot, is read by the module objects core ships and by nothing
+else: boot refuses any other module that lists `config` in its `requires`
+or its `optional` (`reserved-component-key`), naming the module and the
+slot.
 
 ## Consequences
 

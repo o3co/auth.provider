@@ -152,16 +152,13 @@ describe("a module's section — delivered as deps.section", () => {
 	});
 
 	it("writes the parsed section back into the config slot, at its path", async () => {
-		let config: unknown;
 		let section: unknown;
 		const sectioned = defineModule({
 			name: "fixture-section",
-			requires: ["config"],
 			section: { schema: RetrySection },
 			contributes: {
 				grantMiddleware: [
 					(deps) => {
-						config = deps.config;
 						section = deps.section;
 						return null;
 					},
@@ -175,7 +172,8 @@ describe("a module's section — delivered as deps.section", () => {
 		});
 
 		expect(section).toEqual({ retries: 3 });
-		expect((config as Record<string, unknown>)["fixture-section"]).toEqual({ retries: 3 });
+		const config = handle.components.config as unknown as Record<string, unknown>;
+		expect(config["fixture-section"]).toEqual({ retries: 3 });
 		await handle.dispose();
 	});
 
@@ -297,7 +295,7 @@ describe("a module without a section", () => {
 		let keys: readonly string[] | undefined;
 		const plain = defineModule({
 			name: "fixture-plain",
-			requires: ["config"],
+			requires: ["pathResolver"],
 			contributes: {
 				grantMiddleware: [
 					(deps) => {
@@ -314,7 +312,7 @@ describe("a module without a section", () => {
 			bootstrapComponents: bootWith({ "fixture-plain": { retries: "not a number" } }),
 		});
 
-		expect(keys).toEqual(["config"]);
+		expect(keys).toEqual(["pathResolver"]);
 		await handle.dispose();
 	});
 });
@@ -409,10 +407,8 @@ describe("a module's section — read from the parsed configuration", () => {
 describe("a module's section — one frozen object", () => {
 	it("hands every factory the same deeply frozen section, apart from the config slot", async () => {
 		const seen: unknown[] = [];
-		let config: Record<string, unknown> | undefined;
 		const sectioned = defineModule({
 			name: "fixture-section",
-			requires: ["config"],
 			section: {
 				schema: z.object({
 					nested: z.object({ list: z.array(z.number()) }),
@@ -430,7 +426,6 @@ describe("a module's section — one frozen object", () => {
 				grantMiddleware: [
 					(deps) => {
 						seen.push(deps.section);
-						config = deps.config as unknown as Record<string, unknown>;
 						return null;
 					},
 				],
@@ -456,8 +451,8 @@ describe("a module's section — one frozen object", () => {
 		expect(Object.isFrozen(first.free.deep)).toBe(true);
 		// A subtree the schema passed through is a copy: the config slot's own is
 		// not the section's, and is frozen by boot's freeze of the slot.
-		expect(config).toBeDefined();
-		const raw = (config?.["fixture-section"] as { free: { deep: object } } | undefined)?.free;
+		const config = handle.components.config as unknown as Record<string, unknown>;
+		const raw = (config["fixture-section"] as { free: { deep: object } } | undefined)?.free;
 		expect(raw).toBeDefined();
 		if (raw === undefined) return;
 		expect(raw).not.toBe(first.free);

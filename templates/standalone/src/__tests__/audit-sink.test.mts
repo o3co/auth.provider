@@ -48,6 +48,7 @@ import { buildModules } from "../buildModules.mjs";
 import type { Switches } from "../configPath.mjs";
 import { createAppLogger, createAuditLogger, createLoggerAuditSink } from "../logger.mjs";
 import { auditSinkModuleFor } from "../modules.mjs";
+import { keyStoreSectionSchema } from "../sections.mjs";
 import { capturedRenames, shippedAdapters } from "./library-references.fixture.mjs";
 
 const keyPair = generateKeyPairSync("ed25519", {
@@ -146,16 +147,18 @@ const testRepositoriesModule = defineModule({
 	},
 });
 
+// The template's `key-store` section, read by its own schema, without the
+// section's relocation bridge.
 const testKeyStoreModule = defineModule({
-	name: "test:key-store",
-	requires: ["config"] as const,
+	name: "key-store",
+	section: { schema: keyStoreSectionSchema },
 	provides: {
-		keyStore: async ({ config: c }) => {
+		keyStore: async ({ section }) => {
 			const factory = createKeyStoreFactory();
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as { "key-store"?: { local?: object } })["key-store"]?.local ?? {}),
+				...(section.local ?? {}),
 			});
 		},
 	},

@@ -101,10 +101,10 @@ describe("integration — Scenario 1: happy boot of a multi-module manifest", ()
 		const stubUserRepository = { stub: "userRepository" } as never;
 		const stubAuditSink = { stub: "auditSink" } as never;
 
-		// Module: provides keyStore (requires config from bootstrap).
+		// Module: provides keyStore (requires pathResolver from bootstrap).
 		const keyStoreModule = defineModule({
 			name: "key-store",
-			requires: ["config"],
+			requires: ["pathResolver"],
 			provides: {
 				keyStore: (_deps) => stubKeyStore,
 			},
@@ -149,7 +149,7 @@ describe("integration — Scenario 1: happy boot of a multi-module manifest", ()
 		// here requires it.
 		const auditSinkEagerModule = defineModule({
 			name: "audit-sink-eager",
-			requires: ["config"],
+			requires: ["pathResolver"],
 			provides: {
 				auditSink: (_deps) => stubAuditSink,
 			},
@@ -237,7 +237,7 @@ describe("integration — Scenario 2: missing-required-component failure diagnos
 		// typed `as never`, as in Scenario 1.
 		const keyStoreModule = defineModule({
 			name: "key-store",
-			requires: ["config"],
+			requires: ["pathResolver"],
 			provides: {
 				keyStore: (_deps) => ({ stub: "keyStore" }) as never,
 			},
@@ -266,7 +266,7 @@ describe("integration — Scenario 2: missing-required-component failure diagnos
 
 		const sessionModule = defineModule({
 			name: "session",
-			requires: ["config"],
+			requires: ["pathResolver"],
 			provides: {
 				userSessionStore: (_deps) => ({
 					kind: "memory" as const,

@@ -67,19 +67,20 @@ describe("rateLimitBudgets — contributed by the module that owns the prefix", 
 		});
 		const configured = defineModule({
 			name: "budget-configured",
-			requires: ["config"],
+			section: { schema: z.object({ limit: z.number(), windowSeconds: z.number() }) },
 			contributes: {
 				rateLimitBudgets: {
-					"fixture-configured": (deps) =>
-						(deps.config as unknown as { budgetFixture: { limit: number; windowSeconds: number } })
-							.budgetFixture,
+					"fixture-configured": (deps) => ({
+						limit: deps.section.limit,
+						windowSeconds: deps.section.windowSeconds,
+					}),
 				},
 			},
 		});
 
 		const handle = await createApp({
 			modules: [fixed, configured],
-			bootstrapComponents: bootWith({ budgetFixture: { limit: 3, windowSeconds: 900 } }),
+			bootstrapComponents: bootWith({ "budget-configured": { limit: 3, windowSeconds: 900 } }),
 		});
 
 		const budgets = handle.components.rateLimitBudgetResolver;
