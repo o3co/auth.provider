@@ -351,11 +351,12 @@ describe("snapshotValidated — an own __proto__ key", () => {
 		);
 
 		const copy = snapshotValidated(answer);
+		if (copy === null) throw new Error("expected a copy");
 
-		expect(copy?.claims.azp).toBeUndefined();
-		expect(copy?.claims.cnf).toBeUndefined();
-		expect(Object.getPrototypeOf(copy?.claims)).toBe(Object.prototype);
-		expect(Object.hasOwn(copy?.claims ?? {}, "__proto__")).toBe(true);
+		expect(copy.claims.azp).toBeUndefined();
+		expect(copy.claims.cnf).toBeUndefined();
+		expect(Object.getPrototypeOf(copy.claims)).toBe(Object.prototype);
+		expect(Object.hasOwn(copy.claims ?? {}, "__proto__")).toBe(true);
 	});
 
 	it("copies a nested key named __proto__ as a key", () => {
@@ -364,11 +365,12 @@ describe("snapshotValidated — an own __proto__ key", () => {
 		);
 
 		const copy = snapshotValidated(answer);
+		if (copy === null) throw new Error("expected a copy");
 
-		expect((copy?.claims.cnf as Record<string, unknown>).jkt).toBeUndefined();
-		expect((copy?.claims.may_act as Record<string, unknown>).sub).toBeUndefined();
-		expect(copy?.act?.sub).toBeUndefined();
-		expect(Object.hasOwn(copy?.claims.cnf as object, "__proto__")).toBe(true);
+		expect((copy.claims.cnf as Record<string, unknown>).jkt).toBeUndefined();
+		expect((copy.claims.may_act as Record<string, unknown>).sub).toBeUndefined();
+		expect(copy.act?.sub).toBeUndefined();
+		expect(Object.hasOwn(copy.claims.cnf as object, "__proto__")).toBe(true);
 	});
 
 	it("refuses, at the exchange, a subject token whose only azp sits under an own __proto__ key", async () => {
@@ -394,5 +396,99 @@ describe("snapshotValidated — an own __proto__ key", () => {
 		const issued = decodeJwt(tokensOf(await h.exchange()).access_token);
 
 		expect(issued.cnf).toBeUndefined();
+	});
+});
+
+describe("token exchange reads each validator answer once — members read by name", () => {
+	it("still requires the proof for a cnf whose jkt is inherited", async () => {
+		const cnf = Object.create({ jkt: "a-key" });
+		const h = build(() => subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), cnf } }));
+
+		expect(await h.exchange()).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "subject_token requires a DPoP proof",
+		});
+	});
+
+	it("still refuses the actor a may_act with an inherited iss refuses", async () => {
+		const mayAct = Object.create(
+			{ iss: "https://another-issuer.example" },
+			{ sub: { value: "svc-a", enumerable: true } },
+		);
+		const h = build((role) =>
+			role === "subject"
+				? subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), may_act: mayAct } })
+				: { sub: "svc-a", claims: { iss: "https://actor-issuer.example" } },
+		);
+
+		expect(await h.exchange(WITH_ACTOR)).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "may_act_violation: actor not authorized by subject token",
+		});
+	});
+
+	it("still refuses the actor an entry of a may_act array with an inherited iss refuses", async () => {
+		const entry = Object.create(
+			{ iss: "https://another-issuer.example" },
+			{ sub: { value: "svc-a", enumerable: true } },
+		);
+		const h = build((role) =>
+			role === "subject"
+				? subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), may_act: [entry] } })
+				: { sub: "svc-a", claims: { iss: "https://actor-issuer.example" } },
+		);
+
+		expect(await h.exchange(WITH_ACTOR)).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "may_act_violation: actor not authorized by subject token",
+		});
+	});
+
+	it("keeps a may_act member present with no value, which refuses as the original does", async () => {
+		// `sub` is present and not a string: the entry matches nothing.
+		const mayAct = Object.create({ sub: undefined }, { iss: { value: ISSUER, enumerable: true } });
+		const h = build((role) =>
+			role === "subject"
+				? subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), may_act: mayAct } })
+				: { sub: "svc-a", claims: { iss: ISSUER } },
+		);
+
+		expect(await h.exchange(WITH_ACTOR)).toMatchObject({
+			status: 400,
+			errorDescription: "may_act_violation: actor not authorized by subject token",
+		});
+	});
+
+	it("runs each accessor once when the claims reach themselves, and the copy answers the one value", async () => {
+		let reads = 0;
+		const exp = EXP();
+		const answer = () => {
+			const claims: Record<string, unknown> = { azp: client.clientId };
+			Object.defineProperty(claims, "exp", {
+				get: () => {
+					reads += 1;
+					return exp;
+				},
+				enumerable: true,
+			});
+			claims.self = claims;
+			claims.alias = { claims };
+			return subjectAnswer({ claims });
+		};
+
+		const copy = snapshotValidated(answer());
+		if (copy === null) throw new Error("expected a copy");
+		expect(reads).toBe(1);
+		const self = copy.claims.self as Record<string, unknown>;
+		expect(self.exp).toBe(exp);
+		expect((self.self as Record<string, unknown>).exp).toBe(exp);
+
+		reads = 0;
+		const h = build(answer);
+		tokensOf(await h.exchange());
+		expect(reads).toBe(1);
 	});
 });

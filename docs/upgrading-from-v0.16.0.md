@@ -928,10 +928,13 @@ The boot refusals you can meet, with their messages, are in
   note 24.
 - **Token exchange reads a contributed validator's answer once.** The answer
   a `tokenExchangeValidators` entry returns is read once into a plain, frozen
-  copy, which every check, the grant policy and issuance read: claims that
-  are not enumerable own properties (beyond `azp`, `exp`, `iss`, `cnf` and
-  `may_act`, which are read by name) are not carried, and class instances
-  reach the policy flattened to their own enumerable fields. An answer whose
+  copy, which every check, the grant policy and issuance read. Each member
+  is read once. The members the checks read by name — `azp`, `exp`, `iss`,
+  `cnf` and `may_act` of `claims`, `jkt` and `x5t#S256` of `cnf`, `sub` and
+  `iss` of a `may_act` entry, the nested `act` of `act` — are carried even
+  when inherited; any other member that is not an own enumerable property
+  is not, and class instances reach the policy flattened to their own
+  enumerable fields. An answer whose
   `sub` is not a string, or whose `claims` are not an object, is a failed
   validation (`400 invalid_request`, `subject_token validation failed`), at
   the first validation and at the one before minting; a member whose read
