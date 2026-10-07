@@ -280,6 +280,10 @@ async function boot(
 					router.get("/reload-then-destroy", (req: Request, res: Response) => {
 						req.session.reload(() => destroyAndAnswer(req, res));
 					});
+					router.get("/destroy-twice", (req: Request, res: Response) => {
+						const held = req.session;
+						held.destroy(() => held.destroy(() => res.json({ ok: true })));
+					});
 					return { id: "test-probe", mountPath: "/probe", handler: router };
 				},
 				(deps) => ({
@@ -764,6 +768,16 @@ describe("the session cookie of a session destroyed during the request", () => {
 		expect((await agent.get("/probe/write")).status).toBe(200);
 
 		const res = await agent.get("/probe/reload-then-destroy");
+
+		expect(res.status).toBe(200);
+		expiredLine(res);
+	});
+
+	it("a session destroyed twice through a held reference: the cookie expired once", async () => {
+		const agent = request.agent(await boot(spyLogger()));
+		expect((await agent.get("/probe/write")).status).toBe(200);
+
+		const res = await agent.get("/probe/destroy-twice");
 
 		expect(res.status).toBe(200);
 		expiredLine(res);

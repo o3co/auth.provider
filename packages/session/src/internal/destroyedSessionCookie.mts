@@ -49,7 +49,10 @@ const REPLACING_OPERATIONS = ["regenerate", "reload"] as const;
  * - A destroy that completes after the answer was sent changes nothing.
  *
  * The session's methods are replaced on the request's own session object,
- * not enumerable, so the record the store keeps is unchanged.
+ * not enumerable, so the record the store keeps is unchanged. Only the
+ * session express-session loads, and those a regenerate or reload leaves, are
+ * watched: a session put on the request any other way is not. The cookie is
+ * expired at most once per request, however many destroys succeed.
  */
 export function expireDestroyedSessionCookie(
 	middleware: RequestHandler,
@@ -59,7 +62,12 @@ export function expireDestroyedSessionCookie(
 	return (req, res, next) => {
 		middleware(req, res, (err?: unknown) => {
 			if (err === undefined || err === null) {
-				watchSession(req, res, () => res.clearCookie(cookie.name, attributes));
+				let expired = false;
+				watchSession(req, res, () => {
+					if (expired) return;
+					expired = true;
+					res.clearCookie(cookie.name, attributes);
+				});
 			}
 			next(err);
 		});
