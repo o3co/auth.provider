@@ -206,6 +206,12 @@ export const DEFAULT_CIMD_NEGATIVE_CACHE_MS = 60 * 1000;
  */
 export const DEFAULT_CIMD_MAX_CONCURRENT_FETCHES = 8;
 
+/**
+ * How many requests may wait for a document fetch slot, as a multiple of
+ * the slots. Fixed, not configured.
+ */
+const CIMD_SLOT_QUEUE_FACTOR = 4;
+
 interface CacheEntry {
 	readonly client: PublicClient;
 	readonly etag: string | undefined;
@@ -234,6 +240,24 @@ const maxAgeMsOf = (cacheControl: string | null): number | undefined => {
 };
 
 class DocumentRejected extends Error {}
+
+/**
+ * No document fetch slot for the request: the queue for one was full, or
+ * none came free within the fetch deadline. This server's own capacity, not
+ * a verdict on the id, so it is never remembered as a refusal.
+ */
+class FetchSlotUnavailable extends Error {
+	override readonly name = "FetchSlotUnavailable";
+}
+
+/**
+ * Whether `projected` is core's outbound fetch giving up at its deadline,
+ * read from the projection `loggableError` makes of it (its name and its
+ * `reason` code). A deadline cannot be told from this process's own
+ * resolutions being saturated, so it is not a verdict on the id either.
+ */
+const isOutboundDeadline = (projected: { readonly name: string; readonly reason?: string }) =>
+	projected.name === "OutboundFetchError" && projected.reason === "timeout";
 
 const asStringArray = (value: unknown, field: string): readonly string[] => {
 	if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) {
@@ -439,19 +463,57 @@ export function createClientIdMetadataDocumentResolver(
 	const maxConcurrentFetches = opts.maxConcurrentFetches ?? DEFAULT_CIMD_MAX_CONCURRENT_FETCHES;
 	/** Refused client ids, with the instant each refusal expires. */
 	const refusals = new Map<string, number>();
-	/** Slots for an in-flight fetch; a waiter takes one when it is released. */
+	/**
+	 * Slots for an in-flight fetch. A released slot is handed straight to the
+	 * longest waiter. At most {@link CIMD_SLOT_QUEUE_FACTOR} times the slots
+	 * may wait, each no longer than the fetch's own deadline: a request past
+	 * either is a fetch that failed, so neither the queue nor the requests in
+	 * it grow without bound. A `Set` keeps arrival order and drops a waiter
+	 * that gave up in constant time.
+	 */
 	let inFlightFetches = 0;
-	const waiting: Array<() => void> = [];
-	const withSlot = async <T,>(job: () => Promise<T>): Promise<T> => {
-		if (inFlightFetches >= maxConcurrentFetches) {
-			await new Promise<void>((resolve) => waiting.push(resolve));
+	const waiting = new Set<() => void>();
+	const maxWaitingFetches = maxConcurrentFetches * CIMD_SLOT_QUEUE_FACTOR;
+	const slotWaitMs = Math.min(timeoutMs, opts.outboundPolicy.timeoutMs);
+	const releaseSlot = (): void => {
+		const next = waiting.values().next();
+		if (next.done === true) {
+			inFlightFetches -= 1;
+			return;
 		}
-		inFlightFetches += 1;
+		waiting.delete(next.value);
+		next.value();
+	};
+	const acquireSlot = (): Promise<void> => {
+		if (inFlightFetches < maxConcurrentFetches) {
+			inFlightFetches += 1;
+			return Promise.resolve();
+		}
+		if (waiting.size >= maxWaitingFetches) {
+			return Promise.reject(
+				new FetchSlotUnavailable("every document fetch slot is taken and its queue is full"),
+			);
+		}
+		return new Promise<void>((resolve, reject) => {
+			const timer = setTimeout(() => {
+				waiting.delete(granted);
+				reject(
+					new FetchSlotUnavailable("no document fetch slot came free within the fetch deadline"),
+				);
+			}, slotWaitMs);
+			const granted = () => {
+				clearTimeout(timer);
+				resolve();
+			};
+			waiting.add(granted);
+		});
+	};
+	const withSlot = async <T,>(job: () => Promise<T>): Promise<T> => {
+		await acquireSlot();
 		try {
 			return await job();
 		} finally {
-			inFlightFetches -= 1;
-			waiting.shift()?.();
+			releaseSlot();
 		}
 	};
 	const cache = new Map<string, CacheEntry>();
@@ -597,7 +659,11 @@ export function createClientIdMetadataDocumentResolver(
 			} else {
 				cache.delete(clientId);
 			}
-			if (negativeCacheMs > 0) rememberRefusal(clientId);
+			// This server's capacity, or a deadline that cannot be told from it,
+			// is no verdict on the id, so it is not remembered: the next
+			// request for the id fetches again.
+			const capacity = err instanceof FetchSlotUnavailable || isOutboundDeadline(projected);
+			if (negativeCacheMs > 0 && !capacity) rememberRefusal(clientId);
 			return null;
 		}
 	};

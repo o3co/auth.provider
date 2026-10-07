@@ -74,15 +74,90 @@ export type OutboundFetchOptions = OutboundFetchUse &
 		| { readonly policy: OutboundPolicy; readonly config?: undefined }
 	);
 
-/** The seams below the policy: name resolution and the exchange. */
+/**
+ * The seams below the policy: name resolution, the places it is run under
+ * (`lookups`, the process-wide pool for the public factory), and the exchange.
+ */
 export interface OutboundFetchSeams {
 	readonly lookup: (hostname: string) => Promise<readonly string[]>;
+	readonly lookups: LookupPermits;
 	readonly transport: OutboundTransport;
 }
 
 /** Every address the system resolver answers for `hostname`, both families, in its order. */
 export const systemLookup = async (hostname: string): Promise<readonly string[]> =>
 	(await dnsLookup(hostname, { all: true, order: "verbatim" })).map((entry) => entry.address);
+
+/** libuv's own threadpool size when `UV_THREADPOOL_SIZE` is not set. */
+const DEFAULT_THREADPOOL_SIZE = 4;
+/** libuv's largest threadpool. */
+const MAX_THREADPOOL_SIZE = 1024;
+
+/**
+ * The threadpool size libuv takes from `UV_THREADPOOL_SIZE`, read as libuv
+ * reads it: absent, 4; present, `atoi` — leading white space, a sign and the
+ * digits that follow, anything else 0 — held in an unsigned integer, so 0
+ * reads as 1, and a negative count or one past 1024 as 1024. A count whose
+ * magnitude an `int` cannot hold (2^31 or more) reads as 0, as `atoi`
+ * answers it, and so as one thread: the narrowest bound, never the widest.
+ */
+function threadpoolSizeOf(value: string | undefined): number {
+	if (value === undefined) return DEFAULT_THREADPOOL_SIZE;
+	const [, sign = "", digits = ""] = /^[\t\n\v\f\r ]*([+-]?)(\d*)/.exec(value) ?? [];
+	const parsed = digits === "" ? 0 : Number(digits);
+	const count = parsed >= 2 ** 31 ? 0 : parsed;
+	if (count === 0) return 1;
+	if (sign === "-") return MAX_THREADPOOL_SIZE;
+	return Math.min(count, MAX_THREADPOOL_SIZE);
+}
+
+/**
+ * How many host-name resolutions the process may have outstanding, for
+ * `UV_THREADPOOL_SIZE` as the process started with it (see
+ * `threadpoolSizeOf`): two fewer than the threadpool, and at least one. The
+ * system resolver runs on that threadpool, which bcrypt and the file system
+ * share, and it cannot be cancelled: a lookup the deadline gave up on keeps
+ * its thread until it settles. libuv runs host-name resolution on at most
+ * `(n + 1) / 2` of its `n` threads; this bound keeps the outbound fetch's
+ * own lookups finite, those nobody waits for any more included, and with the
+ * request share ({@link REQUEST_LOOKUP_SHARE}) keeps a URL a client supplies
+ * from holding more than one. With a pool of 1 or 2 threads, hung lookups can
+ * still occupy the threads libuv gives such work, which is why the README
+ * asks a deployment with Client ID Metadata Documents for the default size or
+ * more.
+ */
+export function lookupCeilingOf(threadpoolSize: string | undefined): number {
+	return Math.max(1, threadpoolSizeOf(threadpoolSize) - 2);
+}
+
+/**
+ * How many lookups for URLs a request names (`source: "request"`) may be
+ * outstanding at once, within the process's bound, each counted until it
+ * really settles; the rest of the bound is left to URLs from client
+ * registrations. A request's URL comes from the request, a registration's
+ * from the operator: request URLs whose resolver never answers hold this one
+ * place and no other. When the bound is a single place, the
+ * share is none, and a request's lookup fails with `timeout` at once.
+ */
+export const REQUEST_LOOKUP_SHARE = 1;
+
+/**
+ * How many calls may wait for a place among the outstanding lookups, across
+ * the process. A call that finds this many already waiting fails with
+ * `timeout` at once, without waiting and without starting a lookup: each
+ * waiter holds a listener and its call's deadline, so the queue is bounded as
+ * the lookups are. Fixed, not configured.
+ */
+export const MAX_WAITING_LOOKUPS = 64;
+
+/**
+ * How many of the {@link MAX_WAITING_LOOKUPS} may be calls for URLs a
+ * request names; the rest stay free for registrations to wait in.
+ */
+export const MAX_REQUEST_WAITING_LOOKUPS = 48;
+
+/** No place among the outstanding lookups, and no room to wait for one. */
+class LookupsSaturated extends Error {}
 
 const DEFAULT_TIMEOUT_MS = 5000;
 const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024;
@@ -245,6 +320,142 @@ const untilAborted = <T,>(promise: Promise<T>, signal: AbortSignal): Promise<T> 
 		if (signal.aborted) onAbort();
 		else signal.addEventListener("abort", onAbort, { once: true });
 	});
+
+/** Lookups run under a bounded number of places; see {@link createLookupPermits}. */
+export type LookupPermits = (
+	lookup: OutboundFetchSeams["lookup"],
+	hostname: string,
+	source: OutboundUrlSource,
+	signal: AbortSignal,
+) => Promise<readonly string[]>;
+
+interface LookupWaiter {
+	/** Arrival order across both sources. */
+	readonly arrival: number;
+	readonly grant: () => void;
+}
+
+/**
+ * A pool of `max` places for outstanding lookups, of which a request's URL
+ * may hold {@link REQUEST_LOOKUP_SHARE} (none when `max` is 1), with at most
+ * `maxWaiting` calls waiting, `maxRequestWaiting` of them for a request's
+ * URL. A place is taken before a lookup starts and given back only when the
+ * lookup settles. A freed place goes to the longest-waiting call that may
+ * take it: a request's call waits on while the request share is full, and a
+ * registration's call behind it goes first. Each source's waiters are a
+ * `Set`, which keeps arrival order and drops a cancelled one in constant time.
+ */
+export function createLookupPermits(
+	max: number,
+	maxWaiting = MAX_WAITING_LOOKUPS,
+	maxRequestWaiting = MAX_REQUEST_WAITING_LOOKUPS,
+): LookupPermits {
+	const requestShare = max >= 2 ? REQUEST_LOOKUP_SHARE : 0;
+	let outstanding = 0;
+	let requestOutstanding = 0;
+	let arrivals = 0;
+	const waiting: Record<OutboundUrlSource, Set<LookupWaiter>> = {
+		registration: new Set(),
+		request: new Set(),
+	};
+	const mayStart = (source: OutboundUrlSource): boolean =>
+		outstanding < max && (source === "registration" || requestOutstanding < requestShare);
+	const take = (source: OutboundUrlSource): void => {
+		outstanding += 1;
+		if (source === "request") requestOutstanding += 1;
+	};
+	const firstOf = (source: OutboundUrlSource): LookupWaiter | undefined =>
+		mayStart(source) ? waiting[source].values().next().value : undefined;
+	/** Hands free places to the longest-waiting calls that may take them. */
+	const dispatch = (): void => {
+		for (;;) {
+			const registration = firstOf("registration");
+			const request = firstOf("request");
+			const source: OutboundUrlSource | undefined =
+				request !== undefined &&
+				(registration === undefined || request.arrival < registration.arrival)
+					? "request"
+					: registration !== undefined
+						? "registration"
+						: undefined;
+			if (source === undefined) return;
+			const next = (source === "request" ? request : registration) as LookupWaiter;
+			waiting[source].delete(next);
+			take(source);
+			next.grant();
+		}
+	};
+	const release = (source: OutboundUrlSource): void => {
+		outstanding -= 1;
+		if (source === "request") requestOutstanding -= 1;
+		dispatch();
+	};
+	/**
+	 * A place; `signal`'s reason once it aborts first, or `LookupsSaturated`
+	 * when the source has no share or no one more may wait. No place is held
+	 * in either case.
+	 */
+	const acquire = (source: OutboundUrlSource, signal: AbortSignal): Promise<void> => {
+		signal.throwIfAborted();
+		if (source === "request" && requestShare === 0) throw new LookupsSaturated();
+		// A free place this source may take means no call of its own waits for one.
+		if (mayStart(source)) {
+			take(source);
+			return Promise.resolve();
+		}
+		const queued = waiting.registration.size + waiting.request.size;
+		if (
+			queued >= maxWaiting ||
+			(source === "request" && waiting.request.size >= maxRequestWaiting)
+		) {
+			throw new LookupsSaturated();
+		}
+		return new Promise<void>((resolve, reject) => {
+			const waiter: LookupWaiter = {
+				arrival: arrivals++,
+				grant: () => {
+					signal.removeEventListener("abort", onAbort);
+					resolve();
+				},
+			};
+			const onAbort = () => {
+				waiting[source].delete(waiter);
+				reject(signal.reason);
+			};
+			waiting[source].add(waiter);
+			signal.addEventListener("abort", onAbort, { once: true });
+		});
+	};
+	/**
+	 * `lookup(hostname)` under a place, or `signal`'s reason with no lookup
+	 * started. The place is given back when the lookup settles, however long
+	 * after the call stopped waiting for it.
+	 */
+	return async (lookup, hostname, source, signal) => {
+		await acquire(source, signal);
+		if (signal.aborted) {
+			// Handed a place after the deadline: no lookup is started on it.
+			release(source);
+			throw signal.reason;
+		}
+		let looking: Promise<readonly string[]>;
+		try {
+			looking = lookup(hostname);
+		} catch (err) {
+			looking = Promise.reject(err);
+		}
+		const settled = () => release(source);
+		looking.then(settled, settled);
+		return looking;
+	};
+}
+
+/**
+ * The places every fetch `createOutboundFetch` builds resolves under, one
+ * pool for the process: `UV_THREADPOOL_SIZE` is read once, here, as libuv
+ * reads it once at its first use of the threadpool.
+ */
+const processLookups = createLookupPermits(lookupCeilingOf(process.env.UV_THREADPOOL_SIZE));
 
 /** The answer's body, read whole under `cap`; a refusal past it. */
 async function readBody(
@@ -428,9 +639,14 @@ export function buildOutboundFetch(
 			if (destination.literal !== undefined) {
 				addresses = [destination.literal];
 			} else {
-				const resolving = seams.lookup(destination.url.hostname).catch((err: unknown) => {
-					throw new OutboundFetchError("resolution_failed", destination.host, errorCode(err));
-				});
+				const resolving = seams
+					.lookups(seams.lookup, destination.url.hostname, source, signal)
+					.catch((err: unknown) => {
+						if (err instanceof LookupsSaturated) {
+							throw new OutboundFetchError("timeout", destination.host);
+						}
+						throw new OutboundFetchError("resolution_failed", destination.host, errorCode(err));
+					});
 				addresses = await untilAborted(resolving, signal);
 				admitAddresses(destination, addresses);
 			}
@@ -479,7 +695,11 @@ export function buildOutboundFetch(
  * own reason; the deadline is the shorter of the caller's and this one's.
  */
 export function createOutboundFetch(options: OutboundFetchOptions): typeof fetch {
-	return buildOutboundFetch(options, { lookup: systemLookup, transport: nodeTransport });
+	return buildOutboundFetch(options, {
+		lookup: systemLookup,
+		lookups: processLookups,
+		transport: nodeTransport,
+	});
 }
 
 /** Whether `err` is the outbound fetch refusing a destination or an answer, as against the exchange failing. */
