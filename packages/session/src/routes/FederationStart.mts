@@ -82,7 +82,6 @@ export const createStartHandler =
 			logger,
 			transactionCookieName,
 			transactionStore,
-			transactionCookiePath,
 			transactionCookieAttributes,
 		} = ctx;
 		const provider = federationProviders.get(String(req.params.name));
@@ -165,8 +164,8 @@ export const createStartHandler =
 		const nonce = randomBytes(16).toString("base64url");
 
 		// The authoritative callback URL map, from core's federationSettings.
-		// Read before any state is persisted: a form_post start scopes its
-		// cookie to this path.
+		// Read before any state is persisted, so a start with nowhere to send
+		// the IdP back to leaves nothing behind.
 		const callbackUrl = providerCallbackUrls.get(provider.name);
 		if (!callbackUrl) {
 			logMisconfigured(logger, "no_callback_url", { provider: provider.name });
@@ -189,19 +188,18 @@ export const createStartHandler =
 
 		// A form_post callback is a cross-site POST, which does not carry a
 		// SameSite=Lax cookie, so its state travels as a transaction: an opaque
-		// id in a short-lived, path-scoped SameSite=None cookie, with the
-		// envelope in a store record. The application session cookie is never
-		// touched here: this route is unauthenticated and reachable through any
-		// third-party link, and express-session persists `req.session.cookie`.
+		// id in a short-lived `__Host-` SameSite=None cookie of this
+		// federation's own, with the envelope in a store record. The
+		// application session cookie is never touched here: this route is
+		// unauthenticated and reachable through any third-party link, and
+		// express-session persists `req.session.cookie`.
 		if (responseMode === "form_post") {
 			const transactions = transactionStore(req);
-			const cookiePath = transactionCookiePath(provider);
-			if (!transactions || cookiePath === undefined) {
+			if (!transactions) {
 				// The composition's fault, not an outage: a form_post federation
-				// whose request carries no express-session store, or whose
-				// callback URL has no path to scope the cookie to, cannot check
+				// whose request carries no express-session store cannot check
 				// state on the cross-site callback it would be sent.
-				logMisconfigured(logger, transactions ? "no_callback_path" : "no_session_store", {
+				logMisconfigured(logger, "no_session_store", {
 					provider: provider.name,
 					callbackUrl,
 				});
@@ -234,8 +232,8 @@ export const createStartHandler =
 				return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 			}
 
-			res.cookie(transactionCookieName, transactionId, {
-				...transactionCookieAttributes(cookiePath),
+			res.cookie(transactionCookieName(provider), transactionId, {
+				...transactionCookieAttributes,
 				// Expires with the record it addresses, so an abandoned flow
 				// leaves neither behind.
 				maxAge: federationTransactionTtlMs,

@@ -16,45 +16,45 @@
 
 /**
  * Where a `form_post` federation keeps its transaction: the record's store,
- * taken off the request, and the cookie that addresses it — `HttpOnly`,
- * `Secure`, `SameSite=None`, scoped to the provider's callback path alone.
+ * taken off the request, and the cookie that addresses it — one per
+ * federation, `__Host-`, `HttpOnly`, `Secure`, `SameSite=None`, `Path=/`.
  */
 
 import type { FederationProvider } from "@o3co/auth-provider-core";
 import type { Request, Response } from "express";
 import {
 	createFederationTransactionStore,
+	deriveFederationTransactionCookieName,
 	type FederationTransactionSessionStore,
 	type FederationTransactionStore,
 } from "../federations/transaction.mjs";
 
-/** Attributes shared by the `Set-Cookie` that issues the cookie and the one that clears it. */
-const transactionCookieAttributes = (path: string) =>
-	({
-		httpOnly: true,
-		// `SameSite=None` is what makes the cookie reach a cross-site POST,
-		// and every current browser drops such a cookie unless it is also
-		// `Secure`. Apple refuses a non-`https` redirect URI anyway, so a
-		// form_post federation is HTTPS-only regardless.
-		secure: true,
-		sameSite: "none",
-		path,
-	}) as const;
+/**
+ * Attributes shared by the `Set-Cookie` that issues the cookie and the one
+ * that clears it. `Path=/` and no `Domain`, as the `__Host-` name requires.
+ */
+const transactionCookieAttributes = {
+	httpOnly: true,
+	// `SameSite=None` is what makes the cookie reach a cross-site POST,
+	// and every current browser drops such a cookie unless it is also
+	// `Secure`. Apple refuses a non-`https` redirect URI anyway, so a
+	// form_post federation is HTTPS-only regardless.
+	secure: true,
+	sameSite: "none",
+	path: "/",
+} as const;
 
 /** The transaction's store and cookie, as the start writes them and the callback reads and clears them. */
 export interface FederationTransactionCookie {
-	readonly transactionCookieName: string;
+	/** The cookie that carries `provider`'s transaction id. */
+	readonly transactionCookieName: (provider: FederationProvider) => string;
 	readonly transactionStore: (req: Request) => FederationTransactionStore | undefined;
-	readonly transactionCookiePath: (provider: FederationProvider) => string | undefined;
 	readonly transactionCookieAttributes: typeof transactionCookieAttributes;
 	readonly clearTransactionCookie: (provider: FederationProvider, res: Response) => void;
 }
 
-/** The transaction cookie named `transactionCookieName`, scoped by `providerCallbackUrls`. */
-export const createTransactionCookie = (
-	providerCallbackUrls: ReadonlyMap<string, string>,
-	transactionCookieName: string,
-): FederationTransactionCookie => {
+/** The transaction cookies, each federation's named from `sessionCookieName`. */
+export const createTransactionCookie = (sessionCookieName: string): FederationTransactionCookie => {
 	/**
 	 * The federation transaction store, over the express-session store the
 	 * session middleware mounted (taken off the request, not injected, so it
@@ -75,20 +75,8 @@ export const createTransactionCookie = (
 		return createFederationTransactionStore(candidate as FederationTransactionSessionStore);
 	};
 
-	/**
-	 * The path the transaction cookie is scoped to: the provider's callback
-	 * route only. A `SameSite=None` cookie rides every cross-site request to a
-	 * matching path, so the narrower the better.
-	 */
-	const transactionCookiePath = (provider: FederationProvider): string | undefined => {
-		const callbackUrl = providerCallbackUrls.get(provider.name);
-		if (!callbackUrl) return undefined;
-		try {
-			return new URL(callbackUrl).pathname;
-		} catch {
-			return undefined;
-		}
-	};
+	const transactionCookieName = (provider: FederationProvider): string =>
+		deriveFederationTransactionCookieName(sessionCookieName, provider.name);
 
 	/**
 	 * Drop the transaction cookie. Called on every callback exit — success,
@@ -96,15 +84,12 @@ export const createTransactionCookie = (
 	 * leaves a cookie behind for the next attempt to trip over.
 	 */
 	const clearTransactionCookie = (provider: FederationProvider, res: Response): void => {
-		const path = transactionCookiePath(provider);
-		if (path === undefined) return;
-		res.clearCookie(transactionCookieName, transactionCookieAttributes(path));
+		res.clearCookie(transactionCookieName(provider), transactionCookieAttributes);
 	};
 
 	return {
 		transactionCookieName,
 		transactionStore,
-		transactionCookiePath,
 		transactionCookieAttributes,
 		clearTransactionCookie,
 	};

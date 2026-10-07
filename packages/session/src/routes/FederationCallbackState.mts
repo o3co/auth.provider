@@ -123,7 +123,7 @@ export const consumeCallbackState = async (
 
 	if (responseMode === "form_post") {
 		transactions = transactionStore(req);
-		transactionId = readCookie(req, transactionCookieName);
+		transactionId = readCookie(req, transactionCookieName(provider));
 		if (!transactions || transactionId === undefined || transactionId.length === 0) {
 			// No transaction cookie, no transaction. This is the refusal an
 			// attacker replaying a `state` from another browser meets.

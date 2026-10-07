@@ -335,7 +335,9 @@ describe("GET /oauth/federation/:name (start) — response mode", () => {
 		const harness = buildApp();
 		const flow = await startFlow(harness);
 		const res = await flow.post({ state: flow.state, code: "apple-code" });
-		const cleared = setCookies(res).find((c) => c.startsWith(`${HARNESS_TRANSACTION_COOKIE_NAME}=;`));
+		const cleared = setCookies(res).find((c) =>
+			c.startsWith(`${HARNESS_TRANSACTION_COOKIE_NAME}=;`),
+		);
 		expect(cleared).toBeDefined();
 		expect(cleared).toMatch(/;\s*Path=\/(;|$)/);
 		expect(cleared).toMatch(/Secure/);

@@ -38,7 +38,6 @@ import {
 	MAX_CSRF_TTL_SECONDS,
 	sessionCsrfSlice,
 } from "./csrf.mjs";
-import { deriveFederationTransactionCookieName } from "./federations/transaction.mjs";
 import { createLoginEntry } from "./login-entry.mjs";
 import { LOGIN_ATTEMPT_TAG, MAX_LOGIN_WINDOW_MS } from "./loginAttempts.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
@@ -339,11 +338,10 @@ export const sessionModule = defineModule<
 						sessionLifecycle: deps.sessionLifecycle,
 						federationTokenStore: deps.federationTokenStore,
 						sessionTtlMs: deps.sessionCookiePolicy.maxAgeMs,
-						// Named after the deployment's session cookie, as the CSRF
-						// cookie is, so an operator reading `Set-Cookie` can tell whose.
-						federationTransactionCookieName: deriveFederationTransactionCookieName(
-							deps.sessionCookiePolicy.name,
-						),
+						// Each form_post transaction cookie is named after the
+						// deployment's session cookie, as the CSRF cookie is, so an
+						// operator reading `Set-Cookie` can tell whose.
+						sessionCookieName: deps.sessionCookiePolicy.name,
 						...(deps.auditSink ? { auditSink: deps.auditSink } : {}),
 						logger: deps.logger ?? consoleLogger,
 					}),

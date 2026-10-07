@@ -46,7 +46,6 @@ import { FEDERATION_TRANSACTION_KEY_PREFIX } from "#/federations/transaction.mjs
 import { createRouter } from "#/routes/Federation.mjs";
 import {
 	HARNESS_SESSION_COOKIE_NAME,
-	HARNESS_TRANSACTION_COOKIE_NAME,
 	makeFederationTokenStore,
 	makePermissivePolicy,
 	makeUserRepository,

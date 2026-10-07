@@ -246,21 +246,16 @@ does the rest: `response_mode=form_post` on the authorization request,
 `POST /session/oauth/federation/<name>/callback` (a GET there is
 `405 method_not_allowed`), and the flow's `state`, PKCE verifier, nonce and
 post-login redirect held in a federation transaction — a record in the session
-store and a dedicated `HttpOnly; Secure; SameSite=None` cookie path-scoped to
-the callback — instead of in the session. **The start leg does not modify the
+store and a dedicated `__Host-` cookie (`HttpOnly; Secure; SameSite=None;
+Path=/`, named per federation) — instead of in the session. **The start leg does not modify the
 application session cookie**, for the browser doing the Apple login or anyone
 else; the callback, as for any login, regenerates the session with the cookie
 attributes the deployment configured.
 
 How the transaction is bound, spent and single-used is the session package's —
-see [Response modes](../session/README.md#response-modes-query-and-form_post) —
-and so is the one thing to settle before deploying:
-**[every host on the auth host's registrable domain is inside the trust boundary](../session/README.md#every-host-on-the-auth-hosts-registrable-domain-is-inside-the-trust-boundary)**.
-The transaction cookie is `__Secure-`, not `__Host-`, so any host under the same
-registrable domain (any `*.example.com` for `auth.example.com`) can plant one
-and log a victim's browser into the attacker's own Apple account. Run no
-untrusted content on any of those hosts; `session-store.domain = null` protects the
-session cookie, not this one.
+see [Response modes](../session/README.md#response-modes-query-and-form_post).
+Its cookie is `__Host-`, so
+[only the auth host can set it](../session/README.md#only-this-host-can-set-the-transaction-cookie).
 
 An RFC 9207 `iss` in the posted body is compared with
 `https://appleid.apple.com` before the code is spent, and another issuer's is

@@ -51,8 +51,8 @@ import { openingLifecycleStore } from "../../__tests__/_helpers/sessionLifecycle
 import {
 	buildFederationApp,
 	HARNESS_ISSUER,
-	harnessTransactionCookieName,
 	type HarnessApp,
+	harnessTransactionCookieName,
 } from "./federation-harness.mjs";
 
 const QUERY_CALLBACK_URL = "https://app.example.com/session/oauth/federation/test/callback";

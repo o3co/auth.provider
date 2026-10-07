@@ -47,7 +47,6 @@ import { createRouter } from "#/routes/Federation.mjs";
 import {
 	HARNESS_ISSUER,
 	HARNESS_SESSION_COOKIE_NAME,
-	HARNESS_TRANSACTION_COOKIE_NAME,
 	type HarnessSessionStore,
 	makePermissivePolicy,
 	makeSessionApp,

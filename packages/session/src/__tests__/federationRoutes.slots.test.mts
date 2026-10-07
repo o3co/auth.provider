@@ -142,9 +142,9 @@ describe("the session module's federation routes read their slots and section, n
 		const res = await request(app).get("/session/oauth/federation/apple");
 		expect(res.status).toBe(302);
 		const header = ((res.headers["set-cookie"] as unknown as string[]) ?? []).find((c) =>
-			c.includes(".federation="),
+			c.includes(".federation."),
 		);
-		expect(header?.split("=")[0]).toBe("__Secure-acme.sid.federation");
+		expect(header?.split("=")[0]).toBe("__Host-acme.sid.federation.apple");
 	});
 
 	it("lets a link start navigated from an origin on session.csrf.trustedOrigins through the origin check", async () => {

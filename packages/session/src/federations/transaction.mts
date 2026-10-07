@@ -23,7 +23,7 @@
  * one, and it must not be the session cookie: the start route is
  * unauthenticated, so anything it changed about the session cookie any third
  * party could change. So the cross-site part has its own cookie (an opaque id,
- * `HttpOnly; Secure; SameSite=None`, path-scoped to the callback route,
+ * `__Host-`, `HttpOnly; Secure; SameSite=None; Path=/`, one per federation,
  * expiring with the transaction) and its own record (the envelope the callback
  * needs, deleted the moment the callback consumes it). The application session
  * cookie is never touched.
@@ -53,7 +53,10 @@ export const DEFAULT_FEDERATION_TRANSACTION_TTL_MS = 600_000; // 10 min
  */
 export const FEDERATION_TRANSACTION_KEY_PREFIX = "fedtx:";
 
-/** Appended to the deployment's session cookie name — cf. `<session-store.name>.csrf`. */
+/**
+ * Appended to the deployment's session cookie name, ahead of the federation's
+ * own name — cf. `<session-store.name>.csrf`.
+ */
 export const FEDERATION_TRANSACTION_COOKIE_SUFFIX = ".federation";
 
 /** The ephemeral state a federation callback needs to complete the flow. */
@@ -120,21 +123,34 @@ export interface FederationTransactionStore {
 export const mintFederationTransactionId = (): string => randomBytes(32).toString("base64url");
 
 /**
- * Name the transaction cookie after the deployment's session cookie, the way
- * the CSRF cookie is named: any prefix the session name carries, in any case,
- * is stripped and `__Secure-` applied **unconditionally**, giving
- * `__Secure-<base>.federation` even for an unprefixed session cookie.
+ * Name federation `federationName`'s transaction cookie after the deployment's
+ * session cookie, the way the CSRF cookie is named: any prefix the session
+ * name carries, in any case, is stripped and `__Host-` applied
+ * **unconditionally**, giving `__Host-<base>.federation.<federationName>` even
+ * for an unprefixed session cookie.
  *
- * `__Secure-` rather than `__Host-`, because `__Host-` requires `Path=/` and
- * this cookie is path-scoped to the callback route: every browser would
- * silently drop a `__Host-` name. Unconditionally, because this cookie is
- * `SameSite=None` and therefore *always* issued with `Secure`; the prefix
- * states that where a browser enforces it, so nothing, including an attacker
- * in a position to inject a cookie, can set it over a plain-HTTP hop.
+ * `__Host-` because the cookie's value is what the callback takes as proof
+ * that this browser started this flow, so only this host may be able to set
+ * it. A browser refuses a `__Host-` cookie that carries `Domain`, lacks
+ * `Secure` or has a `Path` other than `/`, so neither a sibling host under the
+ * same parent domain nor a plain-HTTP hop can plant one. A `__Secure-` cookie
+ * would not do: it may carry `Domain=<parent>`, so a sibling host could plant
+ * a transaction id of its own choosing and have the callback complete that
+ * flow in this browser.
+ *
+ * `Path=/` is what `__Host-` requires, so the federation's name, not the
+ * callback path, keeps two federations' transactions apart: each has its own
+ * cookie, and a browser can hold one flow per federation at once. The cookie
+ * now rides every request to this host while the transaction lives; only the
+ * callback reads it, and it is an opaque, single-use id that expires with the
+ * transaction.
  */
-export const deriveFederationTransactionCookieName = (sessionCookieName: string): string => {
+export const deriveFederationTransactionCookieName = (
+	sessionCookieName: string,
+	federationName: string,
+): string => {
 	const base = sessionCookieName.replace(/^__(?:host|secure)-/i, "");
-	return `__Secure-${base}${FEDERATION_TRANSACTION_COOKIE_SUFFIX}`;
+	return `__Host-${base}${FEDERATION_TRANSACTION_COOKIE_SUFFIX}.${federationName}`;
 };
 
 const isLinkIntent = (
