@@ -717,6 +717,25 @@ describe("renderFrontchannelLogoutHtml", () => {
 			}
 		});
 
+		it("leaves renderFrontchannelLogoutHtml, which carries no policy, rendering those RPs' frames", () => {
+			const logger = createMockLogger();
+			const html = renderFrontchannelLogoutHtml({
+				rps: [
+					{ clientId: "ipv6", frontchannelLogoutUri: "https://[::1]:8443/fc" },
+					{ clientId: "underscore", frontchannelLogoutUri: "https://rp_fc.example/fc" },
+				],
+				issuer: "https://auth.example",
+				sid: "sid-1",
+				logger,
+			});
+
+			expect(iframeSrcsOf(html).map((src) => new URL(src).origin)).toEqual([
+				"https://[::1]:8443",
+				"https://rp_fc.example",
+			]);
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
 		describe("the redirect runs under the policy", () => {
 			it("allows its one static script by hash, and the script reads the target from its own data attribute", () => {
 				const { html, contentSecurityPolicy } = page(

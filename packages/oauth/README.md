@@ -170,7 +170,7 @@ Everything below is exported from [`src/index.mts`](./src/index.mts); the linked
 **Logout primitives**, for a composition that assembles its own logout:
 
 - `broadcastBackchannelLogout`, `BroadcastBackchannelLogoutOptions`, `BroadcastRP` — [`logout/broadcastBackchannel.mts`](./src/logout/broadcastBackchannel.mts)
-- `renderFrontchannelLogoutPage`, `FrontchannelLogoutPage`, `renderFrontchannelLogoutHtml`, `RenderFrontchannelLogoutHtmlOptions`, `FrontchannelRP` — [`logout/renderFrontchannel.mts`](./src/logout/renderFrontchannel.mts). `renderFrontchannelLogoutPage` returns the page with the `Content-Security-Policy` it must be sent under, as the only one on the response; `renderFrontchannelLogoutHtml` returns the markup alone
+- `renderFrontchannelLogoutHtml`, `RenderFrontchannelLogoutHtmlOptions`, `FrontchannelRP` — [`logout/renderFrontchannel.mts`](./src/logout/renderFrontchannel.mts)
 
 **Testing entry**, a subpath of its own rather than `src/index.mts`: `@o3co/auth-provider-oauth/testing` — [`testing/index.mts`](./src/testing/index.mts) — `oauthConfigForTests`, the `oauth` section a test builds.
 
@@ -611,7 +611,9 @@ Flow: verifies `id_token_hint` → holds `post_logout_redirect_uri` to the clien
 - `303` to `post_logout_redirect_uri` (when it matches the client's allowlist)
 - `200 {"logged_out": true}` (fallback)
 
-**The front-channel page sets its own `Content-Security-Policy`**, replacing the host's on that one response, so a host's global policy (the standalone template's `default-src 'none'`, for one) does not need to allow it. The page's policy allows frames from exactly the origins of the iframes it renders (`frame-src`, none when it renders no iframe) and its redirect script by its `sha256` hash, and is `'none'` for everything else, `base-uri`, `form-action` and `frame-ancestors` included. The script is the same text on every page and reads the redirect target and delay from its own `data-` attributes, so it redirects after `redirectDelayMs` whether or not the iframes have loaded. A relying party whose front-channel origin a CSP source expression cannot name (an IPv6 literal, or a host with a character other than a letter, a digit, `-` or `.`) gets no iframe, logged once at warn as `logout_frontchannel_iframe_skipped` with `reason: "origin-not-a-source-expression"`.
+**The front-channel page sets its own `Content-Security-Policy`**, replacing the host's on that one response, so a host's global policy (the standalone template's `default-src 'none'`, for one) does not need to allow it. The page's policy allows frames from exactly the origins of the iframes it renders (`frame-src`, none when it renders no iframe) and its redirect script by its `sha256` hash, and is `'none'` for everything else, `base-uri`, `form-action` and `frame-ancestors` included. The script is the same text on every page and reads the redirect target and delay from its own `data-` attributes, so it redirects after `redirectDelayMs` whether or not the iframes have loaded. A relying party whose front-channel origin a CSP source expression cannot name (an IPv6 literal, or a host with a character other than a letter, a digit, `-` or `.`) gets no iframe on that page, logged once at warn as `logout_frontchannel_iframe_skipped` with `reason: "origin-not-a-source-expression"`.
+
+`renderFrontchannelLogoutHtml` returns only the HTML, with an iframe for every relying party whose front-channel URI is `http`/`https`. A host that serves the page itself must send it under a suitable `Content-Security-Policy` of its own: one that allows frames from the relying parties' front-channel origins (`frame-src`) and the page's redirect script, by the `sha256` hash of its text, which is the same on every page (`script-src`). Under a stricter policy the frames and the redirect are blocked.
 
 The close's answer drives the rest:
 

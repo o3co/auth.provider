@@ -187,14 +187,26 @@ export interface FrontchannelLogoutPage {
  * Renders an OIDC Front-Channel Logout 1.0 page: one hidden `<iframe>` per RP
  * with an http(s) `frontchannelLogoutUri` (any other is skipped with a warn),
  * its URL carrying `iss` and, unless `frontchannelLogoutSessionRequired` is
- * `false`, `sid`. An RP whose origin a CSP source expression cannot name is
- * skipped with a warn. With a `postLogoutRedirect` whose `uri` core's
+ * `false`, `sid`. With a `postLogoutRedirect` whose `uri` core's
  * `checkRedirectUri` accepts (any other is dropped with a warn), a static
  * `<script>` redirects, with the RP's `state`, after `redirectDelayMs` so the
- * iframes can load. Returned with the policy that allows exactly that. Pure.
+ * iframes can load. Returned with the policy that allows exactly that; an RP
+ * whose origin a CSP source expression cannot name is skipped with a warn.
+ * Pure. Internal: the logout route serves it.
  */
 export function renderFrontchannelLogoutPage(
 	opts: RenderFrontchannelLogoutHtmlOptions,
+): FrontchannelLogoutPage {
+	return renderPage(opts, true);
+}
+
+/**
+ * The page. `framesNamedByPolicy`: render only the frames whose origin the
+ * returned policy can name, as the page served with it must.
+ */
+function renderPage(
+	opts: RenderFrontchannelLogoutHtmlOptions,
+	framesNamedByPolicy: boolean,
 ): FrontchannelLogoutPage {
 	const logger = opts.logger ?? console;
 	const frameOrigins = new Set<string>();
@@ -225,7 +237,7 @@ export function renderFrontchannelLogoutPage(
 			}
 			// A frame the page's policy could not allow is not rendered.
 			const origin = new URL(iframeSrc).origin;
-			if (!SOURCE_EXPRESSION_ORIGIN.test(origin)) {
+			if (framesNamedByPolicy && !SOURCE_EXPRESSION_ORIGIN.test(origin)) {
 				try {
 					logger.warn(
 						{ clientId: auditErrorText(rp.clientId), reason: "origin-not-a-source-expression" },
@@ -273,9 +285,10 @@ export function renderFrontchannelLogoutPage(
 }
 
 /**
- * The markup of `renderFrontchannelLogoutPage`. A caller that serves it sends
- * the page's `contentSecurityPolicy` with it; this returns the markup alone.
+ * The page's markup alone, every http(s) RP framed. A caller that serves it
+ * sends it under a policy of its own that allows the frames' origins and the
+ * redirect script's hash.
  */
 export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlOptions): string {
-	return renderFrontchannelLogoutPage(opts).html;
+	return renderPage(opts, false).html;
 }
