@@ -170,7 +170,6 @@ Everything below is exported from [`src/index.mts`](./src/index.mts); the linked
 
 **Logout primitives**, for a composition that assembles its own logout:
 
-- `broadcastBackchannelLogout`, `BroadcastBackchannelLogoutOptions`, `BroadcastRP` — [`logout/broadcastBackchannel.mts`](./src/logout/broadcastBackchannel.mts)
 - `renderFrontchannelLogoutHtml`, `RenderFrontchannelLogoutHtmlOptions`, `FrontchannelRP` — [`logout/renderFrontchannel.mts`](./src/logout/renderFrontchannel.mts)
 
 **Testing entry**, a subpath of its own rather than `src/index.mts`: `@o3co/auth-provider-oauth/testing` — [`testing/index.mts`](./src/testing/index.mts) — `oauthConfigForTests`, the `oauth` section a test builds.
@@ -592,7 +591,7 @@ The OIDC logout endpoints are mounted when the session stores and core's session
 
 `oauthEndpointsModule` contributes core's session-close notifier (`sessionCloseNotifiers`, under `oauth`), which core's session lifecycle calls once per relying party of a closing session, for each cause that tells them (every cause but `expiry`) — [`logout/sessionCloseNotifier.mts`](./src/logout/sessionCloseNotifier.mts). `/oauth/logout` closes the session through the lifecycle (below), and this notifier is what tells its relying parties back-channel; `POST /oauth/federation/:name/logout` closes no session and tells none.
 
-- It posts one OIDC Back-Channel Logout 1.0 `logout_token` to the relying party's `backchannelLogoutUri` as its registration reads when the notice is sent, over the same sender as `broadcastBackchannelLogout`, through core's outbound fetch, which the module builds once from core's `outboundPolicy` slot (`core.outbound`; see `backchannelLogoutUri` below). The token is signed by the key store, its `iss` the module's issuer (`oauth.jwt.issuer`).
+- It posts one OIDC Back-Channel Logout 1.0 `logout_token` to the relying party's `backchannelLogoutUri` as its registration reads when the notice is sent, through core's outbound fetch, which the module builds once from core's `outboundPolicy` slot (`core.outbound`; see `backchannelLogoutUri` below). The token is signed by the key store, its `iss` the module's issuer (`oauth.jwt.issuer`).
 - The token carries the session's `sid` unless the relying party declined one (`backchannelLogoutSessionRequired: false`), whatever closed the session.
 - The notice is settled — it resolves — once delivered, when there is nowhere to send it (no URI, or the client is no longer registered), when the relying party refuses it for good (any other 4xx, said at warn as `logout_backchannel_rejected`), or when `core.outbound` refuses the destination or the answer, a redirect among them (said at warn as `logout_backchannel_failed` with `step: "destination"`; sending it again would be refused again). It rejects only when sending again is worth it — the client registry or the key store could not answer, the request did not complete within its deadline, or the answer was 408, 429 or a 5xx — and the lifecycle then keeps that relying party's work pending for a later close or its sweep.
 

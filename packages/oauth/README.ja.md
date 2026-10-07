@@ -164,7 +164,6 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 **ログアウトの部品**（自前のログアウトを組み立てる構成向け）:
 
-- `broadcastBackchannelLogout`、`BroadcastBackchannelLogoutOptions`、`BroadcastRP` — [`logout/broadcastBackchannel.mts`](./src/logout/broadcastBackchannel.mts)
 - `renderFrontchannelLogoutHtml`、`RenderFrontchannelLogoutHtmlOptions`、`FrontchannelRP` — [`logout/renderFrontchannel.mts`](./src/logout/renderFrontchannel.mts)
 
 **テスト用エントリー**（`src/index.mts` ではなく専用のサブパス）: `@o3co/auth-provider-oauth/testing` — [`testing/index.mts`](./src/testing/index.mts) — テストが組み立てる `oauth` セクション、`oauthConfigForTests`。
@@ -582,7 +581,7 @@ OIDC のログアウトエンドポイントは、セッションのストアと
 
 `oauthEndpointsModule` は core のセッション終了の通知器（`sessionCloseNotifiers`、名前は `oauth`）を寄与する。core のセッションライフサイクルが、終了するセッションの relying party ごとに 1 回、通知する原因（`expiry` 以外のすべて）で呼ぶ — [`logout/sessionCloseNotifier.mts`](./src/logout/sessionCloseNotifier.mts)。`/oauth/logout` はライフサイクルを通してセッションを終了し（下記）、その relying party へのバックチャネルの通知はこの通知器が行う。`POST /oauth/federation/:name/logout` はセッションを終了せず、誰にも知らせない。
 
-- 通知を送る時点の登録で読んだ relying party の `backchannelLogoutUri` へ、OIDC Back-Channel Logout 1.0 の `logout_token` を 1 つ POST する。送り手は `broadcastBackchannelLogout` と同じで、モジュールが core の `outboundPolicy` スロット（`core.outbound`。下の `backchannelLogoutUri` を参照）から 1 度だけ組み立てる core のアウトバウンド fetch を通る。トークンはキーストアが署名し、`iss` はモジュールの issuer（`oauth.jwt.issuer`）である。
+- 通知を送る時点の登録で読んだ relying party の `backchannelLogoutUri` へ、OIDC Back-Channel Logout 1.0 の `logout_token` を 1 つ POST する。POST は、モジュールが core の `outboundPolicy` スロット（`core.outbound`。下の `backchannelLogoutUri` を参照）から 1 度だけ組み立てる core のアウトバウンド fetch を通る。トークンはキーストアが署名し、`iss` はモジュールの issuer（`oauth.jwt.issuer`）である。
 - トークンは、relying party が断っていない限り（`backchannelLogoutSessionRequired: false`）、何がセッションを終了させたかにかかわらず、そのセッションの `sid` を含む。
 - 通知は、届いたとき、送り先がないとき（URI がない、またはクライアントがもう登録されていない）、relying party が恒久的に断ったとき（それ以外の 4xx。warn で `logout_backchannel_rejected` と記録する）、`core.outbound` が宛先か応答（リダイレクトを含む）を拒否したとき（warn で `step: "destination"` 付きの `logout_backchannel_failed` と記録する。送り直しても再び拒否される）に片付き、resolve する。送り直す価値があるとき — クライアントの登録簿かキーストアが答えられない、期限内にリクエストが終わらない、応答が 408・429・5xx — だけ reject し、ライフサイクルはその relying party の作業を後の終了か巡回のために保留のまま残す。
 

@@ -41,7 +41,7 @@ import {
 	loggableError,
 	type SessionCloseNotifier,
 } from "@o3co/auth-provider-core";
-import { postLogoutToken } from "./broadcastBackchannel.mjs";
+import { postLogoutToken } from "./postLogoutToken.mjs";
 
 export interface SessionCloseNotifierOptions {
 	readonly clientRepository: ClientRepository;
@@ -55,9 +55,9 @@ export interface SessionCloseNotifierOptions {
 	 * replaces that policy.
 	 */
 	readonly fetchImpl: typeof fetch;
-	/** The deadline of one delivery, in milliseconds. Defaults to the broadcast's. */
+	/** The deadline of one delivery, in milliseconds. Defaults to 5000. */
 	readonly timeoutMs?: number;
-	/** Where a notice settled undelivered is said, at warn; the broadcast's lines. */
+	/** Where a notice settled undelivered is said, at warn. */
 	readonly logger?: Pick<EventLogger, "warn">;
 }
 

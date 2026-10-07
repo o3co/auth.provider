@@ -26,11 +26,6 @@ export {
 	isClientIdMetadataDocumentUrl,
 } from "./clients/clientIdMetadataDocument.mjs";
 export {
-	type BroadcastBackchannelLogoutOptions,
-	type BroadcastRP,
-	broadcastBackchannelLogout,
-} from "./logout/broadcastBackchannel.mjs";
-export {
 	type FrontchannelRP,
 	type RenderFrontchannelLogoutHtmlOptions,
 	renderFrontchannelLogoutHtml,

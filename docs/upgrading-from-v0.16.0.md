@@ -2019,6 +2019,12 @@ modules fills them.
   now `Pick<SessionLifecycle, "open" | "close">`: a rollback closes the
   record it opened. Hand it the `sessionLifecycle` slot's value.
 - **`isTrustedProxyEntry`**, exported in v0.16.0, is deleted (#734).
+- **`broadcastBackchannelLogout`, `BroadcastBackchannelLogoutOptions` and
+  `BroadcastRP`**, exported by `@o3co/auth-provider-oauth` in v0.16.0, are
+  removed (#1104). Back-channel logout is the session-close notifier
+  `oauthEndpointsModule` contributes to core's session lifecycle: end a
+  session with `sessionLifecycle.close(sid, cause)`, and the notifier posts
+  the logout tokens through core's outbound fetch.
 - **`DEVICE_CODE_STORE_ABSENCE_POLICY`** is removed from core (#728). An
   enabled device grant requires a `deviceCodeStore`, and nothing declares its
   absence: `device-grant` no longer attaches the policy, and
@@ -2296,8 +2302,8 @@ modules fills them.
   store of your own any more: compose it in your own module list.
 - **BREAKING: the key-set and back-channel fetch is passed in, with no
   default (#1125).** `createClientAssertionVerifier` and
-  `createClientAuthMiddleware` require `fetch`, `broadcastBackchannelLogout`
-  requires `fetchImpl`, and `createFederationGrantRouter` requires `fetch`.
+  `createClientAuthMiddleware` require `fetch`, and
+  `createFederationGrantRouter` requires `fetch`.
   Pass `createOutboundFetch({ policy, source: "registration" })` over the
   `outboundPolicy` slot. A verifier or middleware built without one refuses
   to build. `createClientAuthMiddleware` takes its options object only: pass

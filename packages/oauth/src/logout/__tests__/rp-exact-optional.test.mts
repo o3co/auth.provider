@@ -15,9 +15,9 @@
  */
 
 /**
- * `listRPs()` into the logout helpers compiles for a consumer who turns on
+ * `listRPs()` into the front-channel logout helper compiles for a consumer who turns on
  * `exactOptionalPropertyTypes`: a registered RP carries `undefined` for a
- * logout channel it did not register, so the helpers' optional fields say
+ * logout channel it did not register, so the helper's optional fields say
  * `?: T | undefined`. Without the option the two spellings are the same type,
  * so this compiles a probe with the option ON, and a control proves it is on.
  */
@@ -30,11 +30,10 @@ import { describe, expect, it } from "vitest";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sources = {
 	registeredRP: path.resolve(here, "../../../../core/src/user-sessions/types.mts"),
-	broadcast: path.resolve(here, "../broadcastBackchannel.mts"),
 	frontchannel: path.resolve(here, "../renderFrontchannel.mts"),
 };
 
-/** Compile one in-memory module next to the helpers with exact optional properties on. */
+/** Compile one in-memory module next to the helper with exact optional properties on. */
 const diagnosticsFor = (probe: string): readonly string[] => {
 	const probePath = path.join(here, "__exact_optional_probe__.mts");
 	const options: ts.CompilerOptions = {
@@ -66,15 +65,13 @@ const diagnosticsFor = (probe: string): readonly string[] => {
 
 const importLines = [
 	`import type { RegisteredRP } from ${JSON.stringify(sources.registeredRP)};`,
-	`import type { BroadcastRP } from ${JSON.stringify(sources.broadcast)};`,
 	`import type { FrontchannelRP } from ${JSON.stringify(sources.frontchannel)};`,
 ].join("\n");
 
-describe("RegisteredRP into the logout helpers under exactOptionalPropertyTypes", () => {
-	it("is accepted by both helpers as a registry returns it", () => {
+describe("RegisteredRP into the front-channel logout helper under exactOptionalPropertyTypes", () => {
+	it("is accepted by the helper as a registry returns it", () => {
 		const diagnostics = diagnosticsFor(`${importLines}
 declare const rps: ReadonlyArray<RegisteredRP>;
-export const back: ReadonlyArray<BroadcastRP> = rps;
 export const front: ReadonlyArray<FrontchannelRP> = rps;
 `);
 		expect(diagnostics).toEqual([]);
