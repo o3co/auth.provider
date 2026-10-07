@@ -258,7 +258,7 @@ describe("mtlsModule — integration via createApp", () => {
 		app.use(express.json());
 		app.use(handle.router);
 
-		const xfcc = `Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
+		const xfcc = `Hash=${LEAF_HASH_HEX};Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
 		const res = await request(app)
 			.post("/oauth/token")
 			.set("x-forwarded-client-cert", xfcc)

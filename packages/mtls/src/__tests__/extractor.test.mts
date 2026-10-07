@@ -160,6 +160,7 @@ describe("createMtlsMechanism — header source", () => {
 		});
 
 		it.each([
+			["an element without Hash=", `Cert=${LEAF}`],
 			["Cert= twice", `Cert=${LEAF};Cert=${OTHER}`],
 			["Cert= twice in different case", `Cert=${LEAF};cErT=${OTHER}`],
 			["a lowercase hash= of no certificate", `hash=${"0".repeat(64)};Cert=${LEAF}`],
@@ -219,7 +220,7 @@ describe("createMtlsMechanism — header source", () => {
 			trustedProxies: [TRUSTED_PEER],
 			mode: "self-signed",
 		});
-		const xfcc = `Cert=${encodeURIComponent(LEAF_PEM)}`;
+		const xfcc = `Hash=${LEAF_HASH_HEX};Cert=${encodeURIComponent(LEAF_PEM)}`;
 		const result = await mech.extract(makeReq({ "x-forwarded-client-cert": xfcc }) as Request);
 		expect(result?.confirmation).toEqual({ "x5t#S256": EXPECTED_LEAF_THUMBPRINT });
 	});
@@ -295,7 +296,7 @@ describe("createMtlsMechanism — validity window (mode-agnostic)", () => {
 			mode: "pki",
 			trustedCas: [ROOT_PEM],
 		});
-		const xfcc = `Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
+		const xfcc = `Hash=${LEAF_HASH_HEX};Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
 		await expect(
 			mech.extract(makeReq({ "x-forwarded-client-cert": xfcc }) as Request),
 		).rejects.toMatchObject({ reason: "cert_expired" });
@@ -314,7 +315,7 @@ describe("createMtlsMechanism — PKI mode (chain validation before thumbprint)"
 			mode: "pki",
 			trustedCas: [LEAF_PEM], // intentionally wrong
 		});
-		const xfcc = `Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
+		const xfcc = `Hash=${LEAF_HASH_HEX};Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
 		await expect(
 			mech.extract(makeReq({ "x-forwarded-client-cert": xfcc }) as Request),
 		).rejects.toMatchObject({ reason: "chain_validation_failed" });
@@ -328,7 +329,7 @@ describe("createMtlsMechanism — PKI mode (chain validation before thumbprint)"
 			mode: "pki",
 			trustedCas: [ROOT_PEM],
 		});
-		const xfcc = `Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
+		const xfcc = `Hash=${LEAF_HASH_HEX};Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
 		const result = await mech.extract(makeReq({ "x-forwarded-client-cert": xfcc }) as Request);
 		expect(result?.kind).toBe("mtls");
 		expect(result?.confirmation).toEqual({ "x5t#S256": EXPECTED_LEAF_THUMBPRINT });
@@ -621,7 +622,7 @@ describe("createMtlsMechanism — boot-time validation", () => {
 		});
 		// If the file was loaded successfully, PKI mode now has a usable trust
 		// anchor and the well-formed chain should validate end-to-end.
-		const xfcc = `Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
+		const xfcc = `Hash=${LEAF_HASH_HEX};Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
 		const result = await mech.extract(makeReq({ "x-forwarded-client-cert": xfcc }) as Request);
 		expect(result?.kind).toBe("mtls");
 		expect(result?.confirmation).toEqual({ "x5t#S256": EXPECTED_LEAF_THUMBPRINT });

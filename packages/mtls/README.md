@@ -177,7 +177,7 @@ set_current_client_cert_details:
 
 `SANITIZE_SET` enforces guidance (2) — Envoy drops any incoming XFCC header and writes its own based on the validated client cert.
 
-The `envoy` dialect reads the first XFCC element only, splitting elements on `,` and fields on `;` outside double-quoted values (inside one, `\` escapes the next character), and matches keys in any case. It refuses the header as `malformed_header` when `Hash`, `Cert`, `Chain` or `Subject` appears more than once in that element, or when `Hash=` is present and is not the hex SHA-256 of the `Cert=` DER (compared case-insensitively); `By`, `URI` and `DNS` may repeat, one per SAN, and any other key is ignored.
+The `envoy` dialect reads the first XFCC element only, splitting elements on `,` and fields on `;` outside double-quoted values (inside one, `\` escapes the next character), and matches keys in any case. It refuses the header as `malformed_header` when `Hash`, `Cert`, `Chain` or `Subject` appears more than once in that element, when `Cert=` is not one PEM block labelled `CERTIFICATE`, or when `Hash=` is absent or is not the hex SHA-256 of the `Cert=` DER (compared case-insensitively); `By`, `URI` and `DNS` may repeat, one per SAN, and any other key is ignored. Envoy always writes `Hash=` with a client certificate; a proxy that emulates XFCC must write it too.
 
 **nginx** — plain-PEM dialect using `$ssl_client_escaped_cert`:
 

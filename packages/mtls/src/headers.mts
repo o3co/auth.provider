@@ -21,7 +21,7 @@
  * re-exported from index.mts: `createMtlsMechanism` picks one by
  * `certHeaderDialect`. Each yields one leaf certificate or throws: a header
  * that could be read as naming two (a repeated XFCC key, a second PEM block,
- * an XFCC `Hash=` of another certificate) is refused.
+ * an XFCC `Hash=` that is absent or of another certificate) is refused.
  */
 
 import { createHash } from "node:crypto";
@@ -198,9 +198,10 @@ const readFirstXfccElement = (value: string): ReadonlyArray<readonly [string, st
  * Parse an Envoy XFCC (x-forwarded-client-cert) header value.
  *
  * Only the first element (the client-facing hop) is read, by the grammar in
- * {@link readFirstXfccElement}. `Cert=` is required and `Chain=` optional
- * (both URL-encoded PEM). `Hash=`, when present, must be the hex SHA-256 of
- * the `Cert=` DER, compared case-insensitively. Keys match in any case.
+ * {@link readFirstXfccElement}. `Cert=` (one URL-encoded PEM block
+ * labelled CERTIFICATE) and `Hash=` are required, `Chain=` (URL-encoded PEM)
+ * optional. `Hash=` must be the hex SHA-256 of the `Cert=` DER, compared
+ * case-insensitively. Keys match in any case.
  * `Hash`, `Cert`, `Chain` and `Subject` may appear once; `By`, `URI` and
  * `DNS` may repeat; any other key is ignored. Throws a plain `Error` on malformed input.
  */
@@ -243,10 +244,14 @@ export const parseEnvoyXfccHeader = (value: string): ParsedCertHeader => {
 			`XFCC Cert= decoded payload exceeds size cap (${certByteLen} > ${MAX_DECODED_PAYLOAD_BYTES} bytes)`,
 		);
 	}
-	// One leaf: a second block of any label is refused rather than letting
-	// `pemToDer` pick the first.
-	if (pemBlockLabels(certPem).length > 1) {
+	// One leaf, labelled CERTIFICATE: a second block of any label is refused
+	// rather than letting `pemToDer` pick the first.
+	const certLabels = pemBlockLabels(certPem);
+	if (certLabels.length > 1) {
 		throw new Error("XFCC Cert= contains multiple PEM blocks; the chain belongs in Chain=");
+	}
+	if (certLabels[0] !== "CERTIFICATE") {
+		throw new Error("XFCC Cert= does not contain a PEM certificate block");
 	}
 
 	const rawChain = fields.get("Chain");
@@ -260,20 +265,24 @@ export const parseEnvoyXfccHeader = (value: string): ParsedCertHeader => {
 		}
 	}
 
+	// Envoy writes Hash= whenever it writes a client certificate. Requiring
+	// it ties the element read here to the certificate the proxy saw, also
+	// when an unquoted value before Cert= ended the element early.
 	const hash = fields.get("Hash");
-	if (hash !== undefined) {
-		let der: Uint8Array;
-		try {
-			der = pemToDer(certPem);
-		} catch (err) {
-			throw new Error("XFCC Hash= cannot be checked: Cert= is not a decodable PEM block", {
-				cause: err,
-			});
-		}
-		const expected = createHash("sha256").update(der).digest("hex");
-		if (hash.toLowerCase() !== expected) {
-			throw new Error("XFCC Hash= is not the SHA-256 of the Cert= certificate");
-		}
+	if (hash === undefined) {
+		throw new Error('XFCC header is missing required "Hash=" field');
+	}
+	let der: Uint8Array;
+	try {
+		der = pemToDer(certPem);
+	} catch (err) {
+		throw new Error("XFCC Hash= cannot be checked: Cert= is not a decodable PEM block", {
+			cause: err,
+		});
+	}
+	const expected = createHash("sha256").update(der).digest("hex");
+	if (hash.toLowerCase() !== expected) {
+		throw new Error("XFCC Hash= is not the SHA-256 of the Cert= certificate");
 	}
 
 	return { certPem, ...(chainPem !== undefined ? { chainPem } : {}) };

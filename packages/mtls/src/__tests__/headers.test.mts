@@ -74,13 +74,13 @@ describe("parseEnvoyXfccHeader", () => {
 	it("uses only the first XFCC element when multiple comma-separated elements are present", () => {
 		// Envoy prepends the client-facing hop first — subsequent elements are
 		// from inner hops and MUST NOT be used for binding.
-		const xfcc = `Cert=${ENCODED_CERT},Cert=otherstuff`;
+		const xfcc = `Hash=${TEST_CERT_HASH};Cert=${ENCODED_CERT},Cert=otherstuff`;
 		const result = parseEnvoyXfccHeader(xfcc);
 		expect(result.certPem).toBe(TEST_CERT_PEM);
 	});
 
 	it("URL-decodes the Cert= value correctly (roundtrip)", () => {
-		const xfcc = `Cert=${ENCODED_CERT}`;
+		const xfcc = `Hash=${TEST_CERT_HASH};Cert=${ENCODED_CERT}`;
 		const result = parseEnvoyXfccHeader(xfcc);
 		// After URL-decoding, the PEM must match the original exactly.
 		expect(result.certPem).toContain("-----BEGIN CERTIFICATE-----");
@@ -160,12 +160,12 @@ describe("parseEnvoyXfccHeader — XFCC grammar", () => {
 		["DNS", `DNS="client.example.com;Cert=${OTHER};x=y"`],
 		["Subject", `Subject="CN=client;Cert=${OTHER};O=Example"`],
 	])("keeps ;Cert= inside a quoted %s value part of that value", (_key, field) => {
-		const xfcc = `By=spiffe://example/ns/proxy;Cert="${LEAF}";${field}`;
+		const xfcc = `By=spiffe://example/ns/proxy;Hash=${LEAF_HASH};Cert="${LEAF}";${field}`;
 		expect(parseEnvoyXfccHeader(xfcc).certPem).toBe(LEAF_PEM);
 	});
 
 	it("keeps ;Cert= inside a quoted value that precedes Cert= part of that value", () => {
-		const xfcc = `Subject="CN=client;Cert=${OTHER};O=Example";Cert="${LEAF}"`;
+		const xfcc = `Subject="CN=client;Cert=${OTHER};O=Example";Hash=${LEAF_HASH};Cert="${LEAF}"`;
 		expect(parseEnvoyXfccHeader(xfcc).certPem).toBe(LEAF_PEM);
 	});
 
@@ -181,17 +181,17 @@ describe("parseEnvoyXfccHeader — XFCC grammar", () => {
 	});
 
 	it("honours a backslash-escaped double quote inside a quoted value", () => {
-		const xfcc = `Subject="CN=a \\"quoted\\";Cert=${OTHER}";Cert=${LEAF}`;
+		const xfcc = `Subject="CN=a \\"quoted\\";Cert=${OTHER}";Hash=${LEAF_HASH};Cert=${LEAF}`;
 		expect(parseEnvoyXfccHeader(xfcc).certPem).toBe(LEAF_PEM);
 	});
 
 	it("does not end the first element at a comma inside a quoted value", () => {
-		const xfcc = `By=spiffe://example/ns/proxy;Subject="CN=client,O=Example,C=US";Cert="${LEAF}"`;
+		const xfcc = `By=spiffe://example/ns/proxy;Subject="CN=client,O=Example,C=US";Hash=${LEAF_HASH};Cert="${LEAF}"`;
 		expect(parseEnvoyXfccHeader(xfcc).certPem).toBe(LEAF_PEM);
 	});
 
 	it("ends the first element at the first comma outside quotes", () => {
-		const xfcc = `Subject="CN=a,O=b";Cert=${LEAF},Cert=${OTHER}`;
+		const xfcc = `Subject="CN=a,O=b";Hash=${LEAF_HASH};Cert=${LEAF},Cert=${OTHER}`;
 		expect(parseEnvoyXfccHeader(xfcc).certPem).toBe(LEAF_PEM);
 	});
 
@@ -206,7 +206,7 @@ describe("parseEnvoyXfccHeader — XFCC grammar", () => {
 	});
 
 	it("ignores keys it does not read, even when they repeat", () => {
-		const xfcc = `Foo=1;Foo=2;Certificate=${OTHER};Cert=${LEAF}`;
+		const xfcc = `Foo=1;Foo=2;Certificate=${OTHER};Hash=${LEAF_HASH};Cert=${LEAF}`;
 		expect(parseEnvoyXfccHeader(xfcc).certPem).toBe(LEAF_PEM);
 	});
 
@@ -229,13 +229,19 @@ describe("parseEnvoyXfccHeader — XFCC grammar", () => {
 	});
 
 	it("accepts By, URI and DNS repeated in mixed case", () => {
-		const xfcc = `By=a;by=b;URI=c;uri=d;DNS=e;dns=f;Cert=${LEAF}`;
+		const xfcc = `By=a;by=b;URI=c;uri=d;DNS=e;dns=f;Hash=${LEAF_HASH};Cert=${LEAF}`;
 		expect(parseEnvoyXfccHeader(xfcc).certPem).toBe(LEAF_PEM);
 	});
 
 	it("refuses a Cert= value that holds more than one PEM block", () => {
 		const xfcc = `Cert=${encodeURIComponent(`${LEAF_PEM}\n${OTHER_PEM}`)}`;
 		expect(() => parseEnvoyXfccHeader(xfcc)).toThrow("multiple PEM blocks");
+	});
+
+	it("refuses a Cert= value whose one PEM block is not labelled CERTIFICATE", () => {
+		const relabelled = LEAF_PEM.replaceAll("CERTIFICATE", "X509 CERTIFICATE");
+		const xfcc = `Hash=${LEAF_HASH};Cert=${encodeURIComponent(relabelled)}`;
+		expect(() => parseEnvoyXfccHeader(xfcc)).toThrow("PEM certificate block");
 	});
 
 	it("refuses a Cert= value whose first PEM block carries another label", () => {
@@ -281,8 +287,20 @@ describe("parseEnvoyXfccHeader — Hash=", () => {
 		expect(() => parseEnvoyXfccHeader(xfcc)).toThrow("Hash=");
 	});
 
-	it("needs no Hash= at all", () => {
-		expect(parseEnvoyXfccHeader(`Cert=${LEAF}`).certPem).toBe(LEAF_PEM);
+	it("refuses an element without Hash=", () => {
+		expect(() => parseEnvoyXfccHeader(`Cert=${LEAF}`)).toThrow("Hash=");
+	});
+
+	it("refuses an element whose Hash= names another certificate than its Cert=, though a later element holds that one", () => {
+		const xfcc = `Hash=${LEAF_HASH};URI=x;Cert=${OTHER},URI=y;Cert=${LEAF}`;
+		expect(() => parseEnvoyXfccHeader(xfcc)).toThrow("Hash=");
+	});
+
+	it("refuses an element without Hash= whose unquoted value ends it early at a comma", () => {
+		// The proxy wrote `URI=x,Cert=<other>` as one unquoted value before its
+		// own `Cert=`: the comma ends the first element after `Cert=<other>`.
+		const xfcc = `By=spiffe://example/ns/proxy;URI=x;Cert=${OTHER},URI=y;Cert=${LEAF}`;
+		expect(() => parseEnvoyXfccHeader(xfcc)).toThrow("Hash=");
 	});
 });
 
@@ -313,7 +331,7 @@ describe("parseEnvoyXfccHeader — Envoy-shaped headers", () => {
 			"two elements, the client-facing hop first",
 			`By=http://frontend.example.com;Hash=${LEAF_HASH};Cert="${LEAF}";URI=http://testclient.example.com,By=http://backend.example.com;Hash=${sha256Hex(OTHER_PEM)};Cert="${OTHER}";URI=http://frontend.example.com`,
 		],
-		["Cert= alone", `Cert=${LEAF}`],
+		["Hash= and Cert= alone", `Hash=${LEAF_HASH};Cert=${LEAF}`],
 	])("%s", (_name, xfcc) => {
 		const parsed = parseEnvoyXfccHeader(xfcc);
 		expect(parsed.certPem).toBe(LEAF_PEM);
