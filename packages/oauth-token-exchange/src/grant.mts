@@ -18,7 +18,8 @@
  * The RFC 8693 token-exchange grant: builds the handler, which runs the stages in
  * order and answers the first refusal. It holds what the grant asks the deployment
  * itself: the refresh-token family rule and the session rule over each validated
- * token, and the policy hook.
+ * token, the email gate over the subject under `oauth.requireEmailVerified`
+ * (`emailVerification.mts`), and the policy hook.
  */
 
 import type {
@@ -49,6 +50,7 @@ import { invalidRequest, isRefusal, tokenAnswer } from "./answers.mjs";
 import { callerBindingRefusal } from "./callerBinding.mjs";
 import { authenticateClient } from "./clientAuthentication.mjs";
 import { delegationRefusal } from "./delegation.mjs";
+import { emailGate } from "./emailVerification.mjs";
 import { GRANT_TYPE } from "./grantType.mjs";
 import { issueAccessToken } from "./issuance.mjs";
 import { liveSessionSubject } from "./sessionLiveness.mjs";
@@ -64,7 +66,8 @@ import {
 
 /**
  * What the exchange reads: the shared grant slots it uses, the client repository,
- * and core's validator resolver. The module's `ProviderDeps<R, O>` satisfies
+ * core's validator resolver, and `userRepository` (read under
+ * `oauth.requireEmailVerified` alone). The module's `ProviderDeps<R, O>` satisfies
  * every slot. Nothing is read of the whole configuration.
  */
 export interface TokenExchangeDependencies
@@ -72,13 +75,13 @@ export interface TokenExchangeDependencies
 			GrantDependencies,
 			"keyStore" | "logger" | "grantPolicy" | "refreshTokenFamilyRevocation" | "userSessionStore"
 		>,
-		ProviderDeps<"clientRepository", "sessionLifecycle"> {
+		ProviderDeps<"clientRepository", "sessionLifecycle" | "userRepository"> {
 	readonly tokenExchangeValidatorResolver: Pick<TokenExchangeValidatorResolver, "get">;
 	/**
 	 * What the oauth module provides of `oauth {}`: the access-token lifetimes
-	 * the grant mints within. Held to its contract here; that its lifetimes are
-	 * within the ones core resolves from the configuration is the caller's to
-	 * hold. Within `createApp`, boot holds every slot to them before any
+	 * the grant mints within, and `requireEmailVerified`. Held to its contract
+	 * here; that its lifetimes are within the ones core resolves from the
+	 * configuration is the caller's to hold. Within `createApp`, boot holds every slot to them before any
 	 * reader runs. A caller building the grant by hand, outside `createApp`,
 	 * passes the value `checkOAuthTokenSettings(value, config)` answers.
 	 */
@@ -103,9 +106,11 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 	// The lifetimes are read once, when the grant is built, so a hand-built value
 	// that breaks the contract fails the composition instead of every request after
 	// client authentication. Checked whole, never member by member.
-	const { defaultExpiresIn, maxExpiresIn } = checkOAuthTokenSettings(
-		deps.oauthTokenSettings,
-	).accessTokenLifetime;
+	const tokenSettings = checkOAuthTokenSettings(deps.oauthTokenSettings);
+	const { defaultExpiresIn, maxExpiresIn } = tokenSettings.accessTokenLifetime;
+	// Under `requireEmailVerified` the user behind the subject is read; a composition
+	// that cannot read one fails here, before any request.
+	const emailRefusal = emailGate(deps, tokenSettings.requireEmailVerified);
 
 	return {
 		// Deny by absence: token exchange mints a fresh credential from one the client
@@ -159,6 +164,11 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			}
 			const delegationRefused = delegationRefusal(deps, client, subjectValidated, actorValidated);
 			if (delegationRefused) return delegationRefused;
+
+			// The user the issued token names, once the presented tokens have passed
+			// and before the policy is asked; the actor is not read.
+			const unverified = await emailRefusal(subjectValidated.sub, client.clientId);
+			if (unverified) return unverified;
 
 			const targets = requestTargets(deps, body, client, subjectValidated);
 			if (isRefusal(targets)) return targets;

@@ -1,0 +1,848 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * A validator's answer is read once, as soon as `validate` resolves, into a
+ * plain frozen copy that every later stage reads: the caller binding, the
+ * standing rules, delegation, the email gate, the targets, the policy and
+ * issuance. An answer whose members are accessors that answer differently on
+ * a later read cannot have one value checked and another minted. A member
+ * whose read throws is the validator's outage (503), and a `sub` that is not
+ * a string, or `claims` that are not an object, is a failed validation, at the
+ * first asking and at the second. A claim key never changes what the copy
+ * answers for another claim: an own `__proto__` key is copied as a key.
+ */
+
+import { generateKeyPairSync, sign } from "node:crypto";
+import {
+	type ClientRepository,
+	createRemoteSigningKeyStore,
+	type ExchangeTokenValidator,
+	type GrantPolicyRequest,
+	type GrantResult,
+	type KeyStore,
+	type PublicClient,
+	type User,
+	type ValidatedToken,
+} from "@o3co/auth-provider-core";
+import {
+	createTestOAuthTokenSettings,
+	createTestUserRepository,
+} from "@o3co/auth-provider-core/testing";
+import { decodeJwt } from "jose";
+import { describe, expect, it, vi } from "vitest";
+import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
+import { snapshotValidated } from "#/validatedSnapshot.mjs";
+import { ISSUER, keyStore, makeFamilyRevocation, tokensOf } from "./fixtures.mjs";
+
+const JWT_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:jwt";
+const SECRET = "client-secret";
+
+const client: PublicClient = {
+	clientId: "client-a",
+	tokenEndpointAuthMethod: "client_secret_basic",
+	allowedRedirectUris: [],
+	allowedScopes: ["read", "write"],
+	allowedAudiences: ["billing", "ledger"],
+	allowedGrantTypes: [TOKEN_EXCHANGE_GRANT_TYPE],
+	backchannelLogoutSessionRequired: true,
+	frontchannelLogoutSessionRequired: true,
+	allowedAzpForFederationToken: false,
+};
+
+const clientRepository: ClientRepository = {
+	findById: async (id) => (id === client.clientId ? client : null),
+	authenticate: async (id, secret) => (id === client.clientId && secret === SECRET ? client : null),
+};
+
+const users: User[] = [
+	{ id: "user-1", username: "alice", emailVerified: true },
+	{ id: "user-2", username: "bob", emailVerified: false },
+];
+
+/** A getter that answers `first` on its first read and `later` on every read after. */
+function shifting<T>(first: T, later: T): () => T {
+	let reads = 0;
+	return () => (reads++ === 0 ? first : later);
+}
+
+/**
+ * A frozen answer whose `sub` reads `user-1` then `user-2`, and whose `aud`
+ * reads `billing` then `ledger`; its `azp` names the client.
+ */
+function shiftingAnswer(): ValidatedToken {
+	return Object.freeze(
+		Object.defineProperties(
+			{},
+			{
+				sub: { get: shifting("user-1", "user-2"), enumerable: true },
+				aud: { get: shifting("billing", "ledger"), enumerable: true },
+				scope: { value: "read", enumerable: true },
+				claims: {
+					value: Object.freeze({
+						azp: client.clientId,
+						exp: Math.floor(Date.now() / 1000) + 3600,
+					}),
+					enumerable: true,
+				},
+			},
+		),
+	) as ValidatedToken;
+}
+
+/** The answer for `role`'s token, on that token's `call`th asking (from 1). */
+type Answering = (role: "subject" | "actor", call: number) => unknown;
+
+function build(answer: Answering, options: { readonly keyStore?: KeyStore } = {}) {
+	const userRepository = createTestUserRepository({ users });
+	const policyRequests: GrantPolicyRequest[] = [];
+	const calls = { subject: 0, actor: 0 };
+	const validator: ExchangeTokenValidator = {
+		validate: vi.fn(
+			async (_token: string, { role }: { readonly role: "subject" | "actor" }) =>
+				answer(role, ++calls[role]) as ValidatedToken | null,
+		),
+	};
+	const logger = {
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+		child: vi.fn(),
+	};
+	logger.child.mockReturnValue(logger);
+	const grant = createTokenExchangeGrant({
+		oauthTokenSettings: createTestOAuthTokenSettings({
+			issuer: ISSUER,
+			accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 300 },
+			requireEmailVerified: true,
+		}),
+		keyStore: options.keyStore ?? keyStore,
+		refreshTokenFamilyRevocation: makeFamilyRevocation(),
+		tokenExchangeValidatorResolver: new Map([[JWT_TOKEN_TYPE, validator]]),
+		clientRepository,
+		userRepository,
+		logger,
+		grantPolicy: {
+			kind: "recording",
+			evaluate: async (request) => {
+				policyRequests.push(request);
+				return { outcome: "allow" };
+			},
+		},
+	});
+	const exchange = async (body: Record<string, string> = {}): Promise<GrantResult> =>
+		(
+			await grant.handle({
+				body: {
+					grant_type: TOKEN_EXCHANGE_GRANT_TYPE,
+					client_id: client.clientId,
+					client_secret: SECRET,
+					subject_token: "an-external-token",
+					subject_token_type: JWT_TOKEN_TYPE,
+					...body,
+				},
+				session: {},
+				issuer: ISSUER,
+				metadata: {},
+				authenticatedClient: null,
+			})
+		).result;
+	return { exchange, lookups: () => userRepository.lookups, policyRequests, logger };
+}
+
+describe("token exchange reads each validator answer once", () => {
+	it("mints for the subject and audience the checks passed, when the answer's accessors change on a later read", async () => {
+		const h = build(shiftingAnswer);
+
+		const result = await h.exchange();
+
+		const issued = decodeJwt(tokensOf(result).access_token);
+		expect(issued.sub).toBe("user-1");
+		expect(issued.aud).toBe("billing");
+		expect(h.lookups()).toEqual(["user-1"]);
+		expect(h.policyRequests.map((request) => request.subject)).toEqual(["user-1"]);
+	});
+
+	it("answers 503 when reading a member of the answer throws, logged as the validator's outage", async () => {
+		const h = build(
+			() =>
+				Object.defineProperties(
+					{ claims: { azp: client.clientId } },
+					{
+						sub: {
+							get() {
+								throw new Error("lazy load failed: secret");
+							},
+							enumerable: true,
+						},
+					},
+				) as unknown as ValidatedToken,
+		);
+
+		const result = await h.exchange();
+
+		expect(result).toEqual({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "subject_token validation store unavailable",
+		});
+		expect(h.lookups()).toEqual([]);
+		expect(h.logger.error.mock.calls[0]?.[1]).toBe("token_exchange_validation_unavailable");
+	});
+
+	for (const [label, sub] of [
+		["a number", 42],
+		["missing", undefined],
+	] as const) {
+		it(`refuses an answer whose sub is ${label} as a failed validation`, async () => {
+			const h = build(
+				() =>
+					({ sub, aud: "billing", claims: { azp: client.clientId } }) as unknown as ValidatedToken,
+			);
+
+			const result = await h.exchange();
+
+			expect(result).toEqual({
+				status: 400,
+				error: "invalid_request",
+				errorDescription: "subject_token validation failed",
+			});
+			expect(h.lookups()).toEqual([]);
+		});
+	}
+});
+
+const EXP = () => Math.floor(Date.now() / 1000) + 3600;
+
+/** A well-formed subject answer naming the client, with `extra` laid over it. */
+const subjectAnswer = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+	sub: "user-1",
+	aud: "billing",
+	scope: "read",
+	claims: { azp: client.clientId, exp: EXP() },
+	...extra,
+});
+
+const WITH_ACTOR = { actor_token: "an-actor-token", actor_token_type: JWT_TOKEN_TYPE };
+
+const failedValidation = (role: "subject" | "actor") => ({
+	status: 400,
+	error: "invalid_request",
+	errorDescription: `${role}_token validation failed`,
+});
+
+describe("token exchange reads each validator answer once — shapes and claims", () => {
+	it("refuses an answer whose claims are not an object as a failed validation", async () => {
+		const h = build(() => subjectAnswer({ claims: "azp=client-a" }));
+
+		expect(await h.exchange()).toEqual(failedValidation("subject"));
+		expect(h.lookups()).toEqual([]);
+	});
+
+	for (const [label, second] of [
+		["whose sub is not a string", { sub: 42, claims: {} }],
+		["whose claims are not an object", { sub: "user-1", claims: null }],
+		["that is not an object", "user-1"],
+	] as const) {
+		it(`refuses an exchange whose second asking answers ${label}, as a failed validation`, async () => {
+			const h = build((_role, call) => (call === 1 ? subjectAnswer() : second));
+
+			expect(await h.exchange()).toEqual(failedValidation("subject"));
+		});
+	}
+
+	it("mints from the claims the checks read, when a claim's accessor changes on a later read", async () => {
+		const exp = EXP();
+		const claims = Object.defineProperties(
+			{},
+			{
+				azp: { get: shifting(client.clientId, "client-other"), enumerable: true },
+				// Unbound at the matrix; bound on any later read.
+				cnf: { get: shifting<unknown>(undefined, { jkt: "a-key" }), enumerable: true },
+				// Live at the expiry check; long past on any later read.
+				exp: { get: shifting(exp, 1), enumerable: true },
+			},
+		);
+		const h = build(() => subjectAnswer({ claims }));
+
+		const issued = decodeJwt(tokensOf(await h.exchange()).access_token);
+
+		expect(issued.cnf).toBeUndefined();
+		expect(issued.exp).toBeLessThanOrEqual(exp);
+	});
+
+	it("carries the subject's act chain as the checks read it, when a nested accessor changes", async () => {
+		const act = Object.defineProperties(
+			{},
+			{ sub: { get: shifting("svc-0", "svc-9"), enumerable: true } },
+		);
+		const h = build((role) =>
+			role === "subject"
+				? subjectAnswer({
+						act,
+						claims: { azp: client.clientId, exp: EXP(), may_act: { sub: "svc-a" } },
+					})
+				: { sub: "svc-a", claims: { azp: client.clientId } },
+		);
+
+		const issued = decodeJwt(tokensOf(await h.exchange(WITH_ACTOR)).access_token);
+
+		expect(issued.act).toEqual({ sub: "svc-a", act: { sub: "svc-0" } });
+	});
+
+	it("holds delegation to the may_act it checked, when the claim's accessor changes on a later read", async () => {
+		const claims = Object.defineProperties(
+			{ azp: client.clientId, exp: EXP() },
+			{
+				may_act: {
+					get: shifting<unknown>({ sub: "svc-a" }, { sub: "svc-other" }),
+					enumerable: true,
+				},
+			},
+		);
+		const h = build((role) =>
+			role === "subject"
+				? subjectAnswer({ claims })
+				: { sub: "svc-a", claims: { azp: client.clientId } },
+		);
+
+		const issued = decodeJwt(tokensOf(await h.exchange(WITH_ACTOR)).access_token);
+
+		expect(issued.act).toEqual({ sub: "svc-a" });
+	});
+
+	it("records the actor the checks passed, when the actor answer's sub changes on a later read", async () => {
+		const actor = Object.freeze(
+			Object.defineProperties(
+				{},
+				{
+					sub: { get: shifting("svc-a", "svc-b"), enumerable: true },
+					claims: { value: Object.freeze({ azp: client.clientId }), enumerable: true },
+				},
+			),
+		);
+		const h = build((role) =>
+			role === "subject"
+				? subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), may_act: { sub: "svc-a" } } })
+				: actor,
+		);
+
+		const issued = decodeJwt(tokensOf(await h.exchange(WITH_ACTOR)).access_token);
+
+		expect(issued.act).toEqual({ sub: "svc-a" });
+	});
+});
+
+describe("snapshotValidated — an own __proto__ key", () => {
+	it("copies a claims key named __proto__ as a key, never as the copy's prototype", () => {
+		const answer = JSON.parse(
+			'{"sub":"user-1","claims":{"__proto__":{"azp":"client-a","cnf":{"jkt":"a-key"}}}}',
+		);
+
+		const copy = snapshotValidated(answer);
+		if (copy === null) throw new Error("expected a copy");
+
+		expect(copy.claims.azp).toBeUndefined();
+		expect(copy.claims.cnf).toBeUndefined();
+		expect(Object.getPrototypeOf(copy.claims)).toBe(Object.prototype);
+		expect(Object.hasOwn(copy.claims ?? {}, "__proto__")).toBe(true);
+	});
+
+	it("copies a nested key named __proto__ as a key", () => {
+		const answer = JSON.parse(
+			'{"sub":"user-1","claims":{"cnf":{"__proto__":{"jkt":"a-key"}},"may_act":{"__proto__":{"sub":"svc-a"}}},"act":{"__proto__":{"sub":"svc-0"}}}',
+		);
+
+		const copy = snapshotValidated(answer);
+		if (copy === null) throw new Error("expected a copy");
+
+		expect((copy.claims.cnf as Record<string, unknown>).jkt).toBeUndefined();
+		expect((copy.claims.may_act as Record<string, unknown>).sub).toBeUndefined();
+		expect(copy.act?.sub).toBeUndefined();
+		expect(Object.hasOwn(copy.claims.cnf as object, "__proto__")).toBe(true);
+	});
+
+	it("refuses, at the exchange, a subject token whose only azp sits under an own __proto__ key", async () => {
+		const h = build(() =>
+			JSON.parse('{"sub":"user-1","aud":"billing","claims":{"__proto__":{"azp":"client-a"}}}'),
+		);
+
+		expect(await h.exchange()).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "subject_token azp and aud do not name this client",
+		});
+	});
+
+	it("mints unbound, at the exchange, for a subject token whose only cnf sits under an own __proto__ key", async () => {
+		const exp = EXP();
+		const h = build(() =>
+			JSON.parse(
+				`{"sub":"user-1","aud":"billing","claims":{"azp":"client-a","exp":${exp},"cnf":{"__proto__":{"jkt":"a-key"}},"__proto__":{"cnf":{"jkt":"a-key"}}}}`,
+			),
+		);
+
+		const issued = decodeJwt(tokensOf(await h.exchange()).access_token);
+
+		expect(issued.cnf).toBeUndefined();
+	});
+});
+
+describe("token exchange reads each validator answer once — members read by name", () => {
+	it("still requires the proof for a cnf whose jkt is inherited", async () => {
+		const cnf = Object.create({ jkt: "a-key" });
+		const h = build(() => subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), cnf } }));
+
+		expect(await h.exchange()).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "subject_token requires a DPoP proof",
+		});
+	});
+
+	it("still refuses the actor a may_act with an inherited iss refuses", async () => {
+		const mayAct = Object.create(
+			{ iss: "https://another-issuer.example" },
+			{ sub: { value: "svc-a", enumerable: true } },
+		);
+		const h = build((role) =>
+			role === "subject"
+				? subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), may_act: mayAct } })
+				: { sub: "svc-a", claims: { azp: client.clientId, iss: "https://actor-issuer.example" } },
+		);
+
+		expect(await h.exchange(WITH_ACTOR)).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "may_act_violation: actor not authorized by subject token",
+		});
+	});
+
+	it("still refuses the actor an entry of a may_act array with an inherited iss refuses", async () => {
+		const entry = Object.create(
+			{ iss: "https://another-issuer.example" },
+			{ sub: { value: "svc-a", enumerable: true } },
+		);
+		const h = build((role) =>
+			role === "subject"
+				? subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), may_act: [entry] } })
+				: { sub: "svc-a", claims: { azp: client.clientId, iss: "https://actor-issuer.example" } },
+		);
+
+		expect(await h.exchange(WITH_ACTOR)).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "may_act_violation: actor not authorized by subject token",
+		});
+	});
+
+	it("keeps a may_act member present with no value, which refuses as the original does", async () => {
+		// `sub` is present and not a string: the entry matches nothing.
+		const mayAct = Object.create({ sub: undefined }, { iss: { value: ISSUER, enumerable: true } });
+		const h = build((role) =>
+			role === "subject"
+				? subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), may_act: mayAct } })
+				: { sub: "svc-a", claims: { azp: client.clientId, iss: ISSUER } },
+		);
+
+		expect(await h.exchange(WITH_ACTOR)).toMatchObject({
+			status: 400,
+			errorDescription: "may_act_violation: actor not authorized by subject token",
+		});
+	});
+
+	it("runs each accessor once when the claims reach themselves, and the copy answers the one value", async () => {
+		let reads = 0;
+		const exp = EXP();
+		const answer = () => {
+			const claims: Record<string, unknown> = { azp: client.clientId };
+			Object.defineProperty(claims, "exp", {
+				get: () => {
+					reads += 1;
+					return exp;
+				},
+				enumerable: true,
+			});
+			claims.self = claims;
+			claims.alias = { claims };
+			return subjectAnswer({ claims });
+		};
+
+		const copy = snapshotValidated(answer());
+		if (copy === null) throw new Error("expected a copy");
+		expect(reads).toBe(1);
+		const self = copy.claims.self as Record<string, unknown>;
+		expect(self.exp).toBe(exp);
+		expect((self.self as Record<string, unknown>).exp).toBe(exp);
+
+		reads = 0;
+		const h = build(answer);
+		tokensOf(await h.exchange());
+		expect(reads).toBe(1);
+	});
+});
+
+describe("token exchange reads each validator answer once — records, never arrays", () => {
+	it("refuses claims that are an array carrying named members, as a failed validation", async () => {
+		const claims = Object.assign([], {
+			azp: client.clientId,
+			cnf: { jkt: "a-key" },
+			may_act: { sub: "svc-other" },
+			exp: 1,
+		});
+		const h = build(() => subjectAnswer({ claims }));
+
+		expect(await h.exchange()).toEqual(failedValidation("subject"));
+		expect(h.lookups()).toEqual([]);
+	});
+
+	it("refuses an answer that is an array carrying the members, as a failed validation", async () => {
+		const h = build(() =>
+			Object.assign([], { sub: "user-1", aud: "billing", claims: { azp: client.clientId } }),
+		);
+
+		expect(await h.exchange()).toEqual(failedValidation("subject"));
+	});
+
+	it("refuses an exchange whose second asking answers claims that are an array", async () => {
+		const h = build((_role, call) =>
+			call === 1
+				? subjectAnswer()
+				: { sub: "user-1", claims: Object.assign([], { azp: client.clientId }) },
+		);
+
+		expect(await h.exchange()).toEqual(failedValidation("subject"));
+	});
+
+	for (const [label, extra] of [
+		["a cnf", { claims: { azp: client.clientId, cnf: Object.assign([], { jkt: "a-key" }) } }],
+		["an act", { act: Object.assign([], { sub: "svc-0" }) }],
+		["a nested act", { act: { sub: "svc-0", act: Object.assign([], { sub: "svc-1" }) } }],
+		[
+			"a may_act entry",
+			{ claims: { azp: client.clientId, may_act: [Object.assign([], { sub: "svc-a" })] } },
+		],
+	] as const) {
+		it(`refuses ${label} that is an array, as a failed validation`, async () => {
+			const h = build(() => subjectAnswer(extra));
+
+			expect(await h.exchange()).toEqual(failedValidation("subject"));
+		});
+	}
+
+	it("refuses an actor answer whose claims are an array, as a failed validation", async () => {
+		const h = build((role) =>
+			role === "subject"
+				? subjectAnswer()
+				: { sub: "svc-a", claims: Object.assign([], { iss: ISSUER }) },
+		);
+
+		expect(await h.exchange(WITH_ACTOR)).toEqual(failedValidation("actor"));
+	});
+});
+
+/**
+ * A record whose members a read by name sees, while `in`, `Object.keys` and
+ * the property descriptors report none: a lazy proxy over a backend.
+ */
+function hidden(members: Record<string, unknown>): object {
+	return new Proxy(
+		{},
+		{
+			get: (_target, key) => (typeof key === "string" ? members[key] : undefined),
+			has: () => false,
+			ownKeys: () => [],
+			getOwnPropertyDescriptor: () => undefined,
+		},
+	);
+}
+
+describe("token exchange reads each validator answer once — members only a read by name sees", () => {
+	it("still requires the proof for claims whose cnf only a read by name sees", async () => {
+		const claims = hidden({ azp: client.clientId, exp: EXP(), cnf: { jkt: "a-key" } });
+		const h = build(() => subjectAnswer({ claims }));
+
+		expect(await h.exchange()).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "subject_token requires a DPoP proof",
+		});
+	});
+
+	it("still refuses claims whose past exp only a read by name sees", async () => {
+		const claims = hidden({ azp: client.clientId, exp: Math.floor(Date.now() / 1000) - 60 });
+		const h = build(() => subjectAnswer({ claims }));
+
+		expect(await h.exchange()).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "subject_token has expired",
+		});
+	});
+
+	it("still refuses the actor claims whose may_act only a read by name sees refuse", async () => {
+		const claims = hidden({ azp: client.clientId, exp: EXP(), may_act: { sub: "svc-other" } });
+		const h = build((role) =>
+			role === "subject"
+				? subjectAnswer({ claims })
+				: { sub: "svc-a", claims: { azp: client.clientId } },
+		);
+
+		expect(await h.exchange(WITH_ACTOR)).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "may_act_violation: actor not authorized by subject token",
+		});
+	});
+
+	for (const [label, mayAct] of [
+		["a may_act", hidden({ sub: "svc-a" })],
+		["a may_act entry", [hidden({ sub: "svc-a" })]],
+	] as const) {
+		it(`still refuses the actor for ${label} whose sub and iss no presence check reports`, async () => {
+			// Delegation tests an entry's members with `in`: an entry that reports
+			// neither matches no actor, whatever a read by name answers.
+			const h = build((role) =>
+				role === "subject"
+					? subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), may_act: mayAct } })
+					: { sub: "svc-a", claims: { azp: client.clientId } },
+			);
+
+			expect(await h.exchange(WITH_ACTOR)).toEqual({
+				status: 400,
+				error: "invalid_request",
+				errorDescription: "may_act_violation: actor not authorized by subject token",
+			});
+		});
+	}
+});
+
+/** Core's remote-signing key store over an in-process Ed25519 key: it serialises the claims itself. */
+async function remoteSigningKeyStore(): Promise<KeyStore> {
+	const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+	return createRemoteSigningKeyStore({
+		algorithm: "EdDSA",
+		kid: "remote-1",
+		publicKeyPem: publicKey.export({ type: "spki", format: "pem" }).toString(),
+		signer: { sign: async (_kid, data) => new Uint8Array(sign(null, data, privateKey)) },
+	});
+}
+
+describe("token exchange reads each validator answer once — plain data only", () => {
+	it("refuses, before the remote signer serialises anything, an act carrying a toJSON", async () => {
+		const act = {
+			sub: "svc-0",
+			toJSON: () => ({ sub: "svc-0", act: { sub: "svc-1", act: { sub: "svc-2", act: {} } } }),
+		};
+		const h = build(
+			(role) =>
+				role === "subject"
+					? subjectAnswer({
+							act,
+							claims: { azp: client.clientId, exp: EXP(), may_act: { sub: "svc-a" } },
+						})
+					: { sub: "svc-a", claims: { azp: client.clientId } },
+			{ keyStore: await remoteSigningKeyStore() },
+		);
+
+		expect(await h.exchange(WITH_ACTOR)).toEqual(failedValidation("subject"));
+	});
+
+	it("mints through the remote signer for an answer of plain data", async () => {
+		const h = build(() => subjectAnswer(), { keyStore: await remoteSigningKeyStore() });
+
+		expect(decodeJwt(tokensOf(await h.exchange()).access_token).sub).toBe("user-1");
+	});
+
+	for (const [label, value] of [
+		["a function", () => "client-a"],
+		["a symbol", Symbol("claim")],
+		["a bigint", 10n],
+		["a number that is not finite", Number.NaN],
+		["an infinite number", Number.POSITIVE_INFINITY],
+	] as const) {
+		it(`refuses claims holding ${label}, as a failed validation`, async () => {
+			const h = build(() =>
+				subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), extra: { value } } }),
+			);
+
+			expect(await h.exchange()).toEqual(failedValidation("subject"));
+		});
+	}
+
+	it("refuses an actor answer whose claims hold a function, as a failed validation", async () => {
+		const h = build((role) =>
+			role === "subject"
+				? subjectAnswer()
+				: { sub: "svc-a", claims: { iss: ISSUER, toJSON: () => ({}) } },
+		);
+
+		expect(await h.exchange(WITH_ACTOR)).toEqual(failedValidation("actor"));
+	});
+});
+
+/**
+ * A `may_act` entry whose `has` reports `sub` on the first ask alone, and
+ * never `iss`; a read gives no `sub` and this provider's issuer as `iss`.
+ */
+function shiftingPresence(): object {
+	let subAsks = 0;
+	return new Proxy(
+		{},
+		{
+			get: (_target, key) => (key === "iss" ? ISSUER : undefined),
+			has: (_target, key) => key === "sub" && subAsks++ === 0,
+			ownKeys: () => [],
+			getOwnPropertyDescriptor: () => undefined,
+		},
+	);
+}
+
+describe("token exchange reads each validator answer once — presence asked once", () => {
+	for (const [label, mayAct] of [
+		["a may_act", () => shiftingPresence()],
+		["a may_act entry", () => [shiftingPresence()]],
+	] as const) {
+		it(`holds ${label} to the presence its first ask reported`, async () => {
+			// Present at the first ask with no string value, `sub` matches no actor.
+			const h = build((role) =>
+				role === "subject"
+					? subjectAnswer({
+							claims: { azp: client.clientId, exp: EXP(), may_act: mayAct() },
+						})
+					: { sub: "svc-a", claims: { azp: client.clientId, iss: ISSUER } },
+			);
+
+			expect(await h.exchange(WITH_ACTOR)).toEqual({
+				status: 400,
+				error: "invalid_request",
+				errorDescription: "may_act_violation: actor not authorized by subject token",
+			});
+		});
+	}
+});
+
+/**
+ * An array whose `get` answers `elements` (and `length`, `length` unless
+ * given), while `has` reports no index in `hiddenIndexes`: native `some` and
+ * `every` skip those indexes, as they skip holes.
+ */
+function proxyArray(
+	elements: readonly unknown[],
+	{ hiddenIndexes = [], length }: { hiddenIndexes?: readonly number[]; length?: number } = {},
+): unknown[] {
+	return new Proxy([] as unknown[], {
+		get: (target, key) => {
+			if (key === "length") return length ?? elements.length;
+			if (typeof key === "string" && /^\d+$/.test(key)) return elements[Number(key)];
+			return Reflect.get(target, key);
+		},
+		has: (target, key) => {
+			if (typeof key === "string" && /^\d+$/.test(key)) {
+				const index = Number(key);
+				return index < elements.length && !hiddenIndexes.includes(index);
+			}
+			return Reflect.has(target, key);
+		},
+	});
+}
+
+const ACTOR_REFUSED = {
+	status: 400,
+	error: "invalid_request",
+	errorDescription: "may_act_violation: actor not authorized by subject token",
+} as const;
+
+describe("token exchange reads each validator answer once — arrays as native iteration sees them", () => {
+	const withMayAct = (mayAct: unknown) =>
+		build((role) =>
+			role === "subject"
+				? subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), may_act: mayAct } })
+				: { sub: "svc-a", claims: { azp: client.clientId } },
+		);
+
+	it("refuses the actor a may_act array names only at an index its presence check hides", async () => {
+		const h = withMayAct(proxyArray([{ sub: "svc-a" }], { hiddenIndexes: [0] }));
+
+		expect(await h.exchange(WITH_ACTOR)).toEqual(ACTOR_REFUSED);
+	});
+
+	it("refuses the client a may_act array names only at an index its presence check hides", async () => {
+		const h = withMayAct(
+			proxyArray([{ sub: "client-other" }, { sub: client.clientId }], { hiddenIndexes: [1] }),
+		);
+
+		expect(await h.exchange()).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "may_act_violation: client not authorized by subject token",
+		});
+	});
+
+	it("does not name the client by an aud entry at an index its presence check hides", async () => {
+		// Native `includes` reads a hidden index and `some` skips it; the copy keeps
+		// a hole, so it never names the client where both would not.
+		const h = build(() =>
+			subjectAnswer({
+				aud: proxyArray([client.clientId], { hiddenIndexes: [0] }),
+				claims: { exp: EXP() },
+			}),
+		);
+
+		expect(await h.exchange()).toMatchObject({ status: 400, error: "invalid_request" });
+	});
+
+	for (const [label, length] of [
+		["fractional", 1.5],
+		["negative", -1],
+		["not a number", "2"],
+		["past the safe integers", 2 ** 53],
+	] as const) {
+		it(`refuses a may_act array whose length is ${label}, as a failed validation`, async () => {
+			const h = withMayAct(
+				proxyArray([{ sub: "svc-other" }, { sub: "svc-a" }], { length: length as number }),
+			);
+
+			expect(await h.exchange(WITH_ACTOR)).toEqual(failedValidation("subject"));
+		});
+	}
+
+	it("refuses an aud array whose length is fractional, as a failed validation", async () => {
+		const h = build(() =>
+			subjectAnswer({
+				aud: proxyArray(["billing", client.clientId], { length: 1.5 }),
+				claims: { exp: EXP() },
+			}),
+		);
+
+		expect(await h.exchange()).toEqual(failedValidation("subject"));
+	});
+
+	it("copies a real sparse array with its holes", () => {
+		const aud: string[] = [];
+		aud[1] = "billing";
+		const copy = snapshotValidated({ sub: "user-1", aud, claims: {} });
+		if (copy === null) throw new Error("expected a copy");
+
+		expect(Array.isArray(copy.aud)).toBe(true);
+		expect((copy.aud as readonly string[]).length).toBe(2);
+		expect(0 in (copy.aud as readonly string[])).toBe(false);
+		expect(Object.isFrozen(copy.aud)).toBe(true);
+	});
+});

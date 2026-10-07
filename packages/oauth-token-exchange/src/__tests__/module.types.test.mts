@@ -44,6 +44,8 @@ const OPTIONAL = [
 	"subjectRevocation",
 	"userSessionStore",
 	"sessionLifecycle",
+	// The user behind a subject token, read under `oauth.requireEmailVerified`.
+	"userRepository",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
