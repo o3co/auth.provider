@@ -25,9 +25,11 @@ export interface GrantPolicyRequest {
 	readonly originalScope?: readonly string[];
 	/**
 	 * The audience of the grant this request continues, as `originalScope` is
-	 * its scope: the presented refresh token's `aud` on `refresh_token`, the
-	 * subject token's on token exchange. Absent where the request continues
-	 * no earlier grant.
+	 * its scope: the presented token's effective audience — the refresh
+	 * token's on `refresh_token`, the subject token's on token exchange. A
+	 * token that carries no `aud` has its client's id as its audience, so
+	 * this is `[clientId]` then: it does not show that the token carried an
+	 * `aud` claim. Absent where the request continues no earlier grant.
 	 */
 	readonly originalAudience?: readonly string[];
 	readonly subjectTokenType?: string;
