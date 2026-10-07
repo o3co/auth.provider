@@ -2563,6 +2563,35 @@ first binding at once, and a page built against one that navigates to
 `redirect_to` on any `200` from the completion checks `message` first
 ([The MFA page's contract](../packages/mfa/README.md#the-mfa-pages-contract)).
 
+**BREAKING: a session signed in with an email code needs a factor that adds
+`mfa` before it changes the ways into the account.** Recent MFA — what
+linking an identity, registering a passkey, and enrolling, renaming or
+removing a factor or regenerating the recovery codes from the account page
+ask of a session — is now a second factor verified within
+`mfa.manage.maxAgeSeconds` in a session that holds `mfa`. The email code
+adds none unless `MFA_EMAIL_FACTOR_ADDS_MFA=true`, so after a password and an
+email code those actions answer `403 step_up_required`.
+Another email code at the step-up leaves them stepped up; TOTP, a passkey or
+a recovery code meets them, and a session signed in with one of those is
+admitted as before, an email code verified later in it included. A user
+whose only counting factor is the email factor steps up with a recovery code
+to add another. Where it has none it can use — the recovery-code factor off
+(`MFA_RECOVERY_CODE_FACTOR_ENABLED=false`), a set whose codes were never shown,
+one whose codes are used up, or one whose codes' key left the ring — a session
+that does not hold `mfa` is answered `401 login_required` for those actions
+rather than a step-up, and regenerating the codes is one of them: the way
+out is the operator reset
+([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)),
+then a first binding. An email factor under `MFA_EMAIL_FACTOR_ADDS_MFA=true`
+whose recorded address is no longer the account's still counts as one that
+can add `mfa`: the step-up is offered, and its challenge answers `403`
+(`mfa.email_address_mismatch`); the user re-enrolls the factor, or steps up
+with another. To keep the email code sufficient, set
+`MFA_EMAIL_FACTOR_ADDS_MFA=true`, which also lets an email login meet
+`urn:o3co:acr:mfa` — only where passwords are not reset by email. MFA is new
+since v0.16.0, so this is no break of a v0.16.0 surface; pre-releases of
+0.17.0 counted an email code as recent MFA.
+
 **Email factors enrolled on a 0.17.0 pre-release, for an address whose local
 part has upper-case letters, are enrolled again.** The provider now keeps an
 address's local part in the case the user record holds it, and lower-cases

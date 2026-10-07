@@ -60,6 +60,7 @@ import {
 	FIRST_BINDING_MARK,
 	factorRecord,
 	factorStoreHolding,
+	openingFactorRecord,
 	resolverOver,
 	SEALING,
 	stubFactor,
@@ -376,16 +377,16 @@ describe("a subject with no counting factor whose session recorded a witness tha
 		}
 	});
 
-	it("reads no witness while a record that may count stands — a counting factor, or a kind no installed factor declares — and holds the session to recent MFA", async () => {
-		for (const records of [
-			[factorRecord(SUBJECT, "totp")],
-			[factorRecord(SUBJECT, "retired-kind")],
-		]) {
+	it("reads no witness while a record that may count stands — a counting factor, or a kind no installed factor declares — and holds the session to recent MFA: stepped up toward a factor that adds mfa, unmet where none is installed", async () => {
+		for (const [records, withoutIt] of [
+			[[openingFactorRecord(SUBJECT, "totp")], STEP_UP],
+			[[factorRecord(SUBJECT, "retired-kind")], { outcome: "unmet" }],
+		] as const) {
 			const events: AuditEvent[] = [];
-			const { requirement } = build({ records, events });
+			const { requirement } = build({ records: [...records], events });
 			const withoutSecondFactor = sessionOf("fed", facts("enrolled"));
 			const withSecondFactor = sessionOf("pwd", facts("malformed"));
-			expect(await requirement.admit(inputFor(withoutSecondFactor))).toEqual(STEP_UP);
+			expect(await requirement.admit(inputFor(withoutSecondFactor))).toEqual(withoutIt);
 			expect(await requirement.admit(inputFor(withSecondFactor))).toEqual(MET);
 			expect(events).toEqual([]);
 		}
@@ -573,7 +574,7 @@ describe("under required, a password session without a second factor whose subje
 	it("is a first binding under optional, and one whose subject holds a counting factor is stepped up under required", async () => {
 		const session = sessionOf("pwd", facts(), { mfaAgeMs: null });
 		expect(await build({ mode: "optional" }).requirement.admit(inputFor(session))).toEqual(STEP_UP);
-		const holding = build({ mode: "required", records: [factorRecord(SUBJECT, "totp")] });
+		const holding = build({ mode: "required", records: [openingFactorRecord(SUBJECT, "totp")] });
 		expect(await holding.requirement.admit(inputFor(session))).toEqual(STEP_UP);
 	});
 });

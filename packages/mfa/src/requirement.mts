@@ -38,7 +38,9 @@
  * the record); elsewhere the session is sent to log in, where the login
  * records it. An action graded `credential_change` changes the
  * ways into the account — adds one, or renames or removes a factor — and is
- * held to recent MFA (`isRecentMfa`) over a primary the
+ * held to recent MFA (`isRecentMfa`: a second factor verified lately, in a
+ * session whose vouched `amr` holds `mfa`; a session without it is stepped
+ * up only toward a record that can add it, `unmet` otherwise) over a primary the
  * baseline knows — under `required` on top of the baseline, so it is never
  * looser than `use`: the subject's factor records say whether it may hold a
  * counting factor — a record of a kind no installed factor declares
@@ -106,7 +108,7 @@ import {
 	type StepUpPage,
 } from "@o3co/auth-provider-core";
 import { readFactorList } from "./factorList.mjs";
-import { asksForSecondFactor, readSubjectRecords } from "./factorState.mjs";
+import { asksForSecondFactor, mayAddMfaIn, readSubjectRecords } from "./factorState.mjs";
 import {
 	countingKinds,
 	enrollableKinds,
@@ -180,10 +182,12 @@ export interface MfaRequirementOptions {
 	readonly sealing: MfaSealing;
 }
 
-/** What recent MFA is read from: a live session's primary time and its last second factor. */
+/** What recent MFA is read from: a live session's primary time, its last second factor, and what it vouches for. */
 export interface RecentMfaSession {
 	readonly authTime: Date;
 	readonly mfaAt: Date | undefined;
+	/** Whether the session's vouched `amr` holds `mfa`: `mfaAt` counts only then. */
+	readonly holdsMfa: boolean;
 }
 
 /** What recent MFA is told of the session's subject. */
@@ -212,9 +216,10 @@ function withinWindow(at: Date | undefined, maxAgeMs: number, nowMs: number): bo
 
 /**
  * Whether `session` has recent MFA at `nowMs`: a second factor verified
- * within `maxAgeSeconds` (`mfa.manage.maxAgeSeconds`) or, when `subject`
- * holds no counting factor, a primary that recent. The window's edge is
- * recent.
+ * within `maxAgeSeconds` (`mfa.manage.maxAgeSeconds`) in a session whose
+ * vouched `amr` holds `mfa` — an email code, which adds none by default,
+ * does not give it to a session signed in with it — or, when `subject` holds
+ * no counting factor, a primary that recent. The window's edge is recent.
  */
 export function isRecentMfa(
 	session: RecentMfaSession,
@@ -223,7 +228,7 @@ export function isRecentMfa(
 	nowMs: number,
 ): boolean {
 	const maxAgeMs = maxAgeSeconds * 1_000;
-	if (withinWindow(session.mfaAt, maxAgeMs, nowMs)) return true;
+	if (session.holdsMfa && withinWindow(session.mfaAt, maxAgeMs, nowMs)) return true;
 	return !subject.holdsCountingFactor && withinWindow(session.authTime, maxAgeMs, nowMs);
 }
 
@@ -442,7 +447,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 	const recentPrimary = (freshness: Date | undefined, nowMs: number): boolean =>
 		freshness !== undefined &&
 		isRecentMfa(
-			{ authTime: freshness, mfaAt: undefined },
+			{ authTime: freshness, mfaAt: undefined, holdsMfa: false },
 			{ holdsCountingFactor: false },
 			recentMfaMaxAgeSeconds,
 			nowMs,
@@ -502,12 +507,17 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 	};
 
 	/**
-	 * Recent MFA over a record whose primary the baseline knows; a subject
-	 * with no counting factor is a first binding.
+	 * Recent MFA over a record whose primary the baseline knows, and the
+	 * `amr` admission vouches for on it; a subject with no counting factor is
+	 * a first binding. Without it, a session that lacks `mfa` is stepped up
+	 * only when the subject holds a record a step-up could add `mfa` with
+	 * (`mayAddMfaIn`), and is unmet otherwise, as where no factor could
+	 * finish a step-up.
 	 */
 	const recent = async (
 		session: SessionView,
 		recorded: SessionAuthentication | undefined,
+		vouched: readonly string[],
 		action: AdmissionAction,
 		nowMs: number,
 	): Promise<RequirementVerdict> => {
@@ -517,13 +527,34 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		if (!(await mayHoldCountingFactor(session.sub))) {
 			return firstBindingIn(session, recorded, action, nowMs);
 		}
+		const holdsMfa = vouched.includes(MFA_AMR);
 		const recentMfa = isRecentMfa(
-			{ authTime: session.authTime, mfaAt: recorded.mfaAt },
+			{ authTime: session.authTime, mfaAt: recorded.mfaAt, holdsMfa },
 			{ holdsCountingFactor: true },
 			recentMfaMaxAgeSeconds,
 			nowMs,
 		);
-		return recentMfa ? MET : stepUp(session);
+		if (recentMfa) return MET;
+		return towardMfa(session, holdsMfa, stepUp(session));
+	};
+
+	/**
+	 * `verdict` for a `credential_change` action, held to what can meet it: a
+	 * step-up of a session without `mfa` only when its subject holds a record
+	 * a step-up could add `mfa` with now (`mayAddMfaIn`), `unmet` otherwise.
+	 */
+	const towardMfa = async (
+		session: SessionView,
+		holdsMfa: boolean,
+		verdict: RequirementVerdict,
+	): Promise<RequirementVerdict> => {
+		if (verdict.outcome !== "step_up" || holdsMfa) return verdict;
+		const held = await readSubjectRecords({ factors, sealing }, session.sub, {
+			list: listRecords,
+			recoverySetFloor: options.recoverySetFloor,
+			logger,
+		});
+		return mayAddMfaIn(held, session.enrollmentFacts?.mailAddress) ? verdict : UNMET;
 	};
 
 	/** A session a cookie, a code or a link carries, held over its record to the rule its mode and grade name. */
@@ -537,18 +568,19 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		if (rule === "met") return MET;
 		if (session === null) return REAUTHENTICATE;
 		const recorded = authentication?.authentication;
+		const vouched = authentication?.amr ?? [];
 		switch (rule) {
 			case "live":
 				return MET;
 			case "baseline":
 				return baseline(session, recorded);
 			case "recent":
-				return recent(session, recorded, action, now.getTime());
+				return recent(session, recorded, vouched, action, now.getTime());
 			case "baseline+recent": {
 				const verdict = await baseline(session, recorded);
 				return verdict.outcome === "met"
-					? recent(session, recorded, action, now.getTime())
-					: verdict;
+					? recent(session, recorded, vouched, action, now.getTime())
+					: towardMfa(session, vouched.includes(MFA_AMR), verdict);
 			}
 			default:
 				throw new TypeError(`no record rule named ${rule satisfies never}`);

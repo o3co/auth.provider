@@ -37,8 +37,10 @@
  *   proof; its `User` is the one its cookie holds (`cookieSessionUser`).
  *   The step-up asks the requirement, as `mfa.manage`, what a first binding
  *   in the session is answered, and opens the proof only where it would not
- *   be refused outright; another requirement's step-up is answered as its
- *   own. Requirements are asked in order and the first that is not met
+ *   be refused outright — this requirement's `unmet`, a session without
+ *   `mfa` whose subject holds nothing that adds it, is not: the step-up
+ *   still serves the baseline and an `acr`; another requirement's step-up
+ *   is answered as its own. Requirements are asked in order and the first that is not met
  *   answers, so where this one's gate asks the proof, the trip opens before
  *   a later requirement is asked, and that one may still hold the binding
  *   back once the proof is given. A binding in a session that the subject's
@@ -1442,7 +1444,10 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				answerStepUp(res, judged);
 				return;
 			}
-			if (judged.outcome !== "admitted" && judged.outcome !== "step_up") {
+			// This requirement's unmet says a management action cannot be met through
+			// the factors held; the step-up itself, which other asks reach, still opens.
+			const unmetHere = judged.outcome === "unmet" && judged.requirement === MFA_REQUIREMENT_NAME;
+			if (judged.outcome !== "admitted" && judged.outcome !== "step_up" && !unmetHere) {
 				answerNoSession(res, judged);
 				return;
 			}

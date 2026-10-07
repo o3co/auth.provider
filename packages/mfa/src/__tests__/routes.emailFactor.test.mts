@@ -65,12 +65,16 @@ import {
 	loggedText,
 	mfaPost,
 	recordingAuditSink,
+	recoverySet,
+	STEP_UP_REQUIRED,
 	seedFactor,
 	seedTotp,
 	signInWithTotp,
+	stepUp,
 	suiteSealing,
 	T0,
 	thawClock,
+	totpCode,
 	verify,
 } from "./routesHarness.mjs";
 
@@ -598,6 +602,167 @@ describe("enrolling the email factor", () => {
 		const { hints } = await beginFirstBinding(app);
 
 		expect(hints.enrollable).toEqual(["totp"]);
+	});
+});
+
+describe("account management after an email-code sign-in: recent MFA asks for a factor that adds mfa", () => {
+	/** Alice signed in with her password and an email code: the agent, and the sid of the session written. */
+	async function signInWithEmail(
+		built: Awaited<ReturnType<typeof withEmailFactor>>,
+	): Promise<{ readonly agent: Agent; readonly sid: string }> {
+		const store = built.userSessionStore as UserSessionStore;
+		const create = vi.spyOn(store, "create");
+		try {
+			const { agent, transaction } = await beginLogin(built.app);
+			expect((await challenge(agent, transaction, built.record.id)).status).toBe(200);
+			const done = await verify(agent, transaction, built.record.id, lastCode(built.sender));
+			expect(done.status, JSON.stringify(done.body)).toBe(200);
+			const sid = (create.mock.calls.at(-1)?.[0] as { sid?: unknown } | undefined)?.sid;
+			if (typeof sid !== "string") throw new Error("the login wrote no session");
+			return { agent, sid };
+		} finally {
+			create.mockRestore();
+		}
+	}
+
+	const regenerate = (agent: Agent) => mfaPost(agent, "/recovery-codes", {});
+
+	/** A recovery set of three codes for alice, its codes answered unless `shown` says otherwise. */
+	const seedRecoverySet = (store: MfaFactorStore, shown = true) =>
+		seedFactor(store, "recovery_code", { ...recoverySet(3).data, shown });
+
+	it("steps up a TOTP enrollment from the account page, 403 step_up_required: nothing opened, nothing bound, and the session's amr still without mfa", async () => {
+		const built = await withEmailFactor({ totp: true });
+		await seedRecoverySet(built.factorStore);
+		const { agent, sid } = await signInWithEmail(built);
+
+		const begun = await enrollFromAccount(agent, "totp");
+
+		expect(begun.status, JSON.stringify(begun.body)).toBe(403);
+		expect(begun.body).toMatchObject(STEP_UP_REQUIRED);
+		expect((await built.factorStore.list(ALICE.id)).map((entry) => entry.kind).sort()).toEqual([
+			KIND,
+			"recovery_code",
+		]);
+		const session = await (built.userSessionStore as UserSessionStore).get(sid);
+		expect(session?.amr).toEqual(["pwd", "email"]);
+		expect(session?.amr).not.toContain("mfa");
+	});
+
+	it("steps up a regeneration of the recovery codes, 403 step_up_required: the set that stood is kept and no codes are answered", async () => {
+		const built = await withEmailFactor({ totp: true });
+		const standing = await seedRecoverySet(built.factorStore);
+		const { agent, sid } = await signInWithEmail(built);
+
+		const res = await regenerate(agent);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(403);
+		expect(res.body).toMatchObject(STEP_UP_REQUIRED);
+		expect(res.body).not.toHaveProperty("recovery_codes");
+		const sets = (await built.factorStore.list(ALICE.id)).filter(
+			(entry) => entry.kind === "recovery_code",
+		);
+		expect(sets.map((entry) => entry.id)).toEqual([standing.id]);
+		expect(built.audit.of("mfa.recovery_codes.generated")).toEqual([]);
+		expect((await (built.userSessionStore as UserSessionStore).get(sid))?.amr).toEqual([
+			"pwd",
+			"email",
+		]);
+	});
+
+	it("answers 401 login_required, as unmet, where nothing the subject holds adds mfa: no recovery set, one never answered, or the recovery-code factor off", async () => {
+		/** A set whose codes are digests under a key the ring no longer holds: its data opens, its codes verify nothing. */
+		const keyGone = (shown: boolean) => ({
+			codes: [{ keyId: "k-retired-from-the-ring", digest: "AAAA" }],
+			generation: 0,
+			shown,
+		});
+		for (const [what, setup] of [
+			["no recovery set", { set: undefined, recovery: true }],
+			["a set never answered", { set: false, recovery: true }],
+			["the recovery-code factor off", { set: true, recovery: false }],
+			[
+				"a set never answered whose codes' key left the ring",
+				{ set: keyGone(false), recovery: true },
+			],
+			["a set answered whose codes' key left the ring", { set: keyGone(true), recovery: true }],
+		] as const) {
+			const built = await withEmailFactor({ totp: true, recovery: setup.recovery });
+			if (typeof setup.set === "boolean") await seedRecoverySet(built.factorStore, setup.set);
+			else if (setup.set !== undefined) {
+				await seedFactor(built.factorStore, "recovery_code", setup.set);
+			}
+			const { agent, sid } = await signInWithEmail(built);
+
+			const begun = await enrollFromAccount(agent, "totp");
+			const regenerated = await regenerate(agent);
+
+			expect(begun.status, `${what}: ${JSON.stringify(begun.body)}`).toBe(401);
+			expect(begun.body.error, what).toBe("login_required");
+			expect(regenerated.status, what).toBe(401);
+			expect(
+				(await built.factorStore.list(ALICE.id)).filter((entry) => entry.kind === "totp"),
+				what,
+			).toEqual([]);
+			expect((await (built.userSessionStore as UserSessionStore).get(sid))?.amr, what).toEqual([
+				"pwd",
+				"email",
+			]);
+			await disposeAll();
+		}
+	});
+
+	it("admits the enrollment once the session steps up with a factor that adds mfa: TOTP after the email code", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const totp = await seedTotp(factorStore);
+		const built = await withEmailFactor({ totp: true, factorStore });
+		const { agent, sid } = await signInWithEmail(built);
+		expect((await enrollFromAccount(agent, "totp")).status).toBe(403);
+
+		const opened = await stepUp(agent);
+		expect(opened.status, JSON.stringify(opened.body)).toBe(200);
+		const stepped = await verify(
+			agent,
+			opened.body.transaction as string,
+			totp.record.id,
+			totpCode(totp.secret),
+		);
+		expect(stepped.status, JSON.stringify(stepped.body)).toBe(200);
+
+		const begun = await enrollFromAccount(agent, "totp");
+
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+		expect(begun.body.transaction).toEqual(expect.any(String));
+		expect((await (built.userSessionStore as UserSessionStore).get(sid))?.amr).toEqual(
+			expect.arrayContaining(["pwd", "email", "otp", "mfa"]),
+		);
+	});
+
+	it("does not admit a step-up with the email code again: the session still holds no mfa, so the action is stepped up once more", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		await seedTotp(factorStore);
+		const built = await withEmailFactor({ totp: true, factorStore });
+		const { agent } = await signInWithEmail(built);
+
+		const opened = await stepUp(agent);
+		expect(opened.status, JSON.stringify(opened.body)).toBe(200);
+		const transaction = opened.body.transaction as string;
+		expect((await challenge(agent, transaction, built.record.id)).status).toBe(200);
+		const stepped = await verify(agent, transaction, built.record.id, lastCode(built.sender));
+		expect(stepped.status, JSON.stringify(stepped.body)).toBe(200);
+
+		const res = await enrollFromAccount(agent, "totp");
+		expect(res.status, JSON.stringify(res.body)).toBe(403);
+		expect(res.body).toMatchObject(STEP_UP_REQUIRED);
+	});
+
+	it("admits it where the email factor adds mfa (addsMfa): the email code is then a factor that adds it", async () => {
+		const built = await withEmailFactor({ totp: true, addsMfa: true });
+		const { agent } = await signInWithEmail(built);
+
+		const begun = await enrollFromAccount(agent, "totp");
+
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
 	});
 });
 
