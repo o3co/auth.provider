@@ -37,7 +37,11 @@ import {
 	type PublicClient,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { createTestLoginEntry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestLoginEntry,
+	createTestOutboundPolicy,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -224,9 +228,9 @@ describe("the page is told which host a URL-shaped client_id names", () => {
 	it("adds client_id_host for a client resolved from its metadata document", async () => {
 		const inner: ClientRepository = { findById: async () => null, authenticate: async () => null };
 		const clientRepository = withClientIdMetadataDocuments(inner, {
+			outboundPolicy: createTestOutboundPolicy(),
 			allowedScopes: ["read", "write"],
 			allowedAudiences: [],
-			lookup: async () => ["93.184.216.34"],
 			fetch: (async () =>
 				new Response(
 					JSON.stringify({

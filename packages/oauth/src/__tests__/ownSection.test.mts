@@ -185,6 +185,7 @@ describe("what the module derives, it derives from its section", () => {
 			getFederationProviders: () => undefined,
 			registeredClients: new InMemoryClientRepository(new Map()) as ClientRepository,
 			consentStore: undefined,
+			outboundPolicy: createTestOutboundPolicy(),
 			clientIdMetadataDocumentSeams: {},
 			logger: { info() {}, warn() {}, error() {}, debug() {} } as never,
 		});

@@ -429,6 +429,15 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   slashless `iss`, which is what discovery already advertised.
 - **Unknown keys.** A key under `oauth.clientIdMetadataDocuments` that the
   oauth package's `reference.conf` does not list refuses the boot (#1151).
+- **BREAKING: `core.outbound` applies to the Client ID Metadata Document
+  fetch (#1136).** `oauth.clientIdMetadataDocuments.timeoutMs` and `maxBytes`
+  above `core.outbound.timeoutMs` and `maxResponseBytes` (5000 ms and 64 KiB
+  by default) are lowered to them, said once at boot as `cimd_limit_capped`
+  naming both keys; to keep the higher value, raise the `core.outbound` key
+  too. `core.outbound.deniedHosts` and `allowedHosts` apply to document hosts
+  as well. An `oauth.clientIdMetadataDocuments.allowedHosts` or `deniedHosts`
+  entry that is not a host name or a `.suffix` (a wildcard, a scheme, a port)
+  refuses the boot.
 - **BREAKING: an `oauth.authorize.acrValues` key is one value an
   `acr_values` request can name (#728).** `/authorize` reads `acr_values` as
   space-delimited RFC 6749 §3.3 scope-tokens, so a key is one or more
@@ -2308,6 +2317,9 @@ modules fills them.
   `outboundPolicy` slot. A verifier or middleware built without one refuses
   to build. `createClientAuthMiddleware` takes its options object only: pass
   `{ logger, fetch, … }` where a bare logger was passed.
+- **`createOAuthRouter`'s `clientIdMetadataDocuments` seam** takes `fetch`
+  and `now`; `lookup` is removed (#1136). A `fetch` passed there replaces
+  `core.outbound` for the document fetch, so it is for tests only.
 - **Signatures.** `renderFrontchannelLogoutHtml` takes
   `postLogoutRedirect: { uri, state? }` (#1096); `createDeviceCodeGrant`
   requires a `grantPolicy` key, `undefined` for none (#1169); the federation

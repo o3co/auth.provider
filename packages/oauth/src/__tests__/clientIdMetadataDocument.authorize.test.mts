@@ -31,7 +31,9 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	createTestLoginEntry,
+	createTestOutboundPolicy,
 	GrantRegistry,
+	type OutboundSectionForTests,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
 import express from "express";
@@ -72,8 +74,12 @@ const makeApp = async (opts: {
 	answers?: ReadonlyArray<() => Response>;
 	/** The resolver's clock. Default: the system clock. */
 	now?: () => number;
+	/** `core.outbound`, the router's outbound policy. */
+	outbound?: OutboundSectionForTests;
+	/** Pass no fetch: the router's own, built under the policy. Default: a canned one. */
+	ownFetch?: boolean;
 }) => {
-	const config = {
+	const sections = {
 		oauth: {
 			jwt: { issuer: "https://issuer.example" },
 			oidcMode: "dual",
@@ -98,7 +104,8 @@ const makeApp = async (opts: {
 		},
 		rateLimit: { failMode: "open" as const },
 		endpoints: { login: { url: "/login" }, consent: { url: "/consent" } },
-	} as unknown as AppConfig;
+	};
+	const config = sections as unknown as AppConfig;
 	const clientRepository: ClientRepository = {
 		findById: async () => null,
 		authenticate: async () => null,
@@ -110,6 +117,7 @@ const makeApp = async (opts: {
 		consumeByCode: async () => null,
 		removeByCode: async () => {},
 	};
+	const logger = createMockLogger();
 	const answers = opts.answers ?? [];
 	let calls = 0;
 	const fetchImpl = vi.fn(async () => {
@@ -128,6 +136,7 @@ const makeApp = async (opts: {
 		registry:
 			opts.authorizationCode === false ? new GrantRegistry() : authorizationServerRegistry(),
 		...routerInputsOf(config),
+		outboundPolicy: createTestOutboundPolicy(opts.outbound),
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -138,11 +147,10 @@ const makeApp = async (opts: {
 					pendingConsentStore: createMemoryPendingConsentStore(),
 				}),
 		clientIdMetadataDocuments: {
-			fetch: fetchImpl,
-			lookup: async () => ["93.184.216.34"],
+			...(opts.ownFetch === true ? {} : { fetch: fetchImpl }),
 			...(opts.now === undefined ? {} : { now: opts.now }),
 		},
-		logger: createMockLogger(),
+		logger,
 	});
 	const session: Record<string, unknown> = { isAuthenticated: true, user: { id: "user-1" } };
 	const app = express();
@@ -153,7 +161,7 @@ const makeApp = async (opts: {
 		next();
 	});
 	app.use("/oauth", router);
-	return { app, fetchImpl };
+	return { app, fetchImpl, logger };
 };
 
 const authorize = (app: express.Express, extra: Record<string, string> = {}) =>
@@ -323,5 +331,26 @@ describe("/authorize with a document whose revalidation fails after it expired",
 			"/consent",
 		);
 		expect(fetchImpl).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe("/authorize fetches a document under core.outbound", () => {
+	it("refuses a document whose host core.outbound.deniedHosts lists, with no fetch of its own", async () => {
+		const { app, logger } = await makeApp({
+			enabled: true,
+			ownFetch: true,
+			outbound: { deniedHosts: ["client.example"] },
+		});
+		const res = await authorize(app);
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_client");
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				err: expect.objectContaining({
+					cause: expect.objectContaining({ reason: "host_not_allowed" }),
+				}),
+			}),
+			"cimd_document_rejected",
+		);
 	});
 });
