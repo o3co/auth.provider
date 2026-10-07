@@ -164,7 +164,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 **ログアウトの部品**（自前のログアウトを組み立てる構成向け）:
 
 - `broadcastBackchannelLogout`、`BroadcastBackchannelLogoutOptions`、`BroadcastRP` — [`logout/broadcastBackchannel.mts`](./src/logout/broadcastBackchannel.mts)
-- `renderFrontchannelLogoutHtml`、`RenderFrontchannelLogoutHtmlOptions`、`FrontchannelRP` — [`logout/renderFrontchannel.mts`](./src/logout/renderFrontchannel.mts)
+- `renderFrontchannelLogoutPage`、`FrontchannelLogoutPage`、`renderFrontchannelLogoutHtml`、`RenderFrontchannelLogoutHtmlOptions`、`FrontchannelRP` — [`logout/renderFrontchannel.mts`](./src/logout/renderFrontchannel.mts)。`renderFrontchannelLogoutPage` はページと、それを送るときの唯一の `Content-Security-Policy` を返す。`renderFrontchannelLogoutHtml` はマークアップだけを返す
 
 **テスト用エントリー**（`src/index.mts` ではなく専用のサブパス）: `@o3co/auth-provider-oauth/testing` — [`testing/index.mts`](./src/testing/index.mts) — テストが組み立てる `oauth` セクション、`oauthConfigForTests`。
 
@@ -602,6 +602,8 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 - 終了が答えた最初のフェデレーションの IdP end-session URL への `303`（そのフェデレーションのプロバイダーが `SupportsLogout` を実装している場合）。保存済みのフェデレーション id_token を `id_token_hint` として添え、`post_logout_redirect_uri` はクライアントのリストに一致したときだけ添える。フェデレーショントークンのレコードが読めなければヒントを添えずにリダイレクトし、`logout_federation_token_read_failed`（warn）として 1 回ログに出す
 - `post_logout_redirect_uri` への `303`（クライアントのアローリストに一致する場合）
 - `200 {"logged_out": true}`（フォールバック）
+
+**フロントチャネルのページは自分の `Content-Security-Policy` を設定する**。その 1 つの応答ではホストのポリシーを置き換えるので、ホストの全体のポリシー（たとえば standalone テンプレートの `default-src 'none'`）はこのページを許可する必要がない。ページのポリシーは、描画する iframe のオリジンちょうどからのフレーム（`frame-src`。iframe を描画しないときは無し）と、リダイレクトのスクリプトをその `sha256` ハッシュで許可し、ほかはすべて `'none'` とする（`base-uri`、`form-action`、`frame-ancestors` を含む）。スクリプトはどのページでも同じ文字列で、リダイレクト先と遅延を自分の `data-` 属性から読むので、iframe の読み込みを待たずに `redirectDelayMs` の後にリダイレクトする。フロントチャネルのオリジンを CSP のソース式で表せない relying party（IPv6 リテラル、または英字・数字・`-`・`.` 以外の文字を含むホスト）には iframe を出さず、`logout_frontchannel_iframe_skipped` として warn で 1 回、`reason: "origin-not-a-source-expression"` とともに記録する。
 
 残りは終了の答えで決まる:
 

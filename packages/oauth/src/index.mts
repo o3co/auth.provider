@@ -31,9 +31,11 @@ export {
 	broadcastBackchannelLogout,
 } from "./logout/broadcastBackchannel.mjs";
 export {
+	type FrontchannelLogoutPage,
 	type FrontchannelRP,
 	type RenderFrontchannelLogoutHtmlOptions,
 	renderFrontchannelLogoutHtml,
+	renderFrontchannelLogoutPage,
 } from "./logout/renderFrontchannel.mjs";
 // The subject revocation service, installed explicitly — it needs core's
 // session lifecycle, which `oauthEndpointsModule` does not (ADR

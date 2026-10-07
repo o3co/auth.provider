@@ -1,10 +1,21 @@
 import { assert, describe, expect, it } from "vitest";
+import {
+	effectiveSources,
+	hashSourceOf,
+	iframeSrcsOf,
+	parsePolicy,
+	scriptsOf,
+} from "../../__tests__/_helpers/frontchannelPage.mjs";
 import { createMockLogger, type MockLogger } from "../../__tests__/_helpers/mockLogger.mjs";
 import {
 	expectBestEffortWarn,
 	expectUriNotLogged,
 } from "../../__tests__/_helpers/projectedLog.mjs";
-import { type FrontchannelRP, renderFrontchannelLogoutHtml } from "../renderFrontchannel.mjs";
+import {
+	type FrontchannelRP,
+	renderFrontchannelLogoutHtml,
+	renderFrontchannelLogoutPage,
+} from "../renderFrontchannel.mjs";
 
 describe("renderFrontchannelLogoutHtml", () => {
 	it("emits one iframe per RP with frontchannelLogoutUri", () => {
@@ -161,7 +172,7 @@ describe("renderFrontchannelLogoutHtml", () => {
 			postLogoutRedirect: { uri: "https://rp.example/logged-out" },
 			redirectDelayMs: 500,
 		});
-		expect(html).toContain(", 500)");
+		expect(scriptsOf(html)[0]?.attributes["data-delay"]).toBe("500");
 	});
 
 	it("no redirect script when postLogoutRedirect is absent", () => {
@@ -378,9 +389,9 @@ describe("renderFrontchannelLogoutHtml", () => {
 				issuer: "https://auth.example",
 				sid: "sid-1",
 			});
-			// The whole tag: a src that ended early would not be followed by ` style=`.
+			// The whole tag: a src that ended early would not be followed by ` hidden`.
 			const match = html.match(
-				/<iframe src="([^"]*)" style="display:none" aria-hidden="true" referrerpolicy="no-referrer"><\/iframe>/,
+				/<iframe src="([^"]*)" hidden aria-hidden="true" referrerpolicy="no-referrer"><\/iframe>/,
 			);
 			assert(match !== null, "expected one well-formed iframe");
 			return match[1] ?? "";
@@ -410,9 +421,9 @@ describe("renderFrontchannelLogoutHtml", () => {
 				postLogoutRedirect: { uri: "https://rp.example/logged-out" },
 				redirectDelayMs,
 			});
-			const match = html.match(/\}, ([^)]*)\);<\/script>/);
-			assert(match !== null, "expected the redirect script");
-			return match[1] ?? "";
+			const delay = scriptsOf(html)[0]?.attributes["data-delay"];
+			assert(delay !== undefined, "expected the redirect script");
+			return delay;
 		};
 
 		it.each([
@@ -422,7 +433,7 @@ describe("renderFrontchannelLogoutHtml", () => {
 			["a fraction", 1500.7, "1500"],
 			["a value that is not a number", "soon" as unknown as number, "2000"],
 			["zero", 0, "0"],
-		])("writes %s into the script as a whole number", (_label, value, expected) => {
+		])("writes %s onto the script as a whole number", (_label, value, expected) => {
 			expect(delayIn(value)).toBe(expected);
 		});
 	});
@@ -437,10 +448,8 @@ describe("renderFrontchannelLogoutHtml", () => {
 				logger,
 			});
 		/** The URL the page's script sends the browser to, or `undefined` for no script. */
-		const targetOf = (html: string): string | undefined => {
-			const match = html.match(/window\.location\.href = ("(?:[^"\\]|\\.)*");/);
-			return match === null ? undefined : (JSON.parse(match[1] ?? "") as string);
-		};
+		const targetOf = (html: string): string | undefined =>
+			scriptsOf(html)[0]?.attributes["data-target"];
 
 		it.each([
 			["a non-http(s) scheme", "data:text/plain,signed-out", "executable-scheme"],
@@ -456,7 +465,7 @@ describe("renderFrontchannelLogoutHtml", () => {
 				const html = render({ uri, state: "s-1" }, logger);
 
 				expect(targetOf(html)).toBeUndefined();
-				expect(html).not.toContain("<script>");
+				expect(html).not.toContain("<script");
 				expect(html).toContain("<iframe");
 				expect(html).not.toContain(uri);
 				expect(logger.warn).toHaveBeenCalledTimes(1);
@@ -513,7 +522,7 @@ describe("renderFrontchannelLogoutHtml", () => {
 					throw new Error("field unavailable");
 				},
 			});
-			expect(html).not.toContain("<script>");
+			expect(html).not.toContain("<script");
 			expectBestEffortWarn(
 				logger,
 				"logout_frontchannel_redirect_refused",
@@ -600,5 +609,193 @@ describe("renderFrontchannelLogoutHtml", () => {
 		// percent-encodes it, and the string literal escapes `<` and `>` besides.
 		expect(html).not.toContain("</script><script>");
 		expect(html).toContain("%3C/script%3E");
+	});
+
+	describe("the page's own Content-Security-Policy", () => {
+		const page = (
+			rps: ReadonlyArray<FrontchannelRP>,
+			extra: { postLogoutRedirect?: { uri: string; state?: string }; logger?: MockLogger } = {},
+		) =>
+			renderFrontchannelLogoutPage({
+				rps,
+				issuer: "https://auth.example",
+				sid: "sid-1",
+				logger: extra.logger ?? createMockLogger(),
+				...(extra.postLogoutRedirect ? { postLogoutRedirect: extra.postLogoutRedirect } : {}),
+			});
+
+		it("returns the same markup renderFrontchannelLogoutHtml does", () => {
+			const opts = {
+				rps: [{ clientId: "rp", frontchannelLogoutUri: "https://rp.example/fc" }],
+				issuer: "https://auth.example",
+				sid: "sid-1",
+				postLogoutRedirect: { uri: "https://rp.example/out", state: "s-1" },
+			};
+			expect(renderFrontchannelLogoutPage(opts).html).toBe(renderFrontchannelLogoutHtml(opts));
+		});
+
+		it("allows frames from exactly the origins it frames, nothing broader and no wildcard", () => {
+			const { html, contentSecurityPolicy } = page([
+				{ clientId: "a", frontchannelLogoutUri: "https://rp1.example/fc?tenant=x#r" },
+				{ clientId: "b", frontchannelLogoutUri: "https://rp1.example/other" },
+				{ clientId: "c", frontchannelLogoutUri: "http://rp2.example:8080/fc" },
+				{ clientId: "d", frontchannelLogoutUri: "https://RP3.Example:443/fc" },
+				{ clientId: "skipped", frontchannelLogoutUri: "ftp://rp4.example/fc" },
+				{ clientId: "none" },
+			]);
+			const policy = parsePolicy(contentSecurityPolicy);
+
+			const framed = [...new Set(iframeSrcsOf(html).map((src) => new URL(src).origin))];
+			expect(framed).toEqual([
+				"https://rp1.example",
+				"http://rp2.example:8080",
+				"https://rp3.example",
+			]);
+			expect([...(policy.get("frame-src") ?? [])].sort()).toEqual([...framed].sort());
+			expect(contentSecurityPolicy).not.toContain("*");
+			expect(contentSecurityPolicy).not.toContain("rp4.example");
+		});
+
+		it("denies everything else: default-src, base-uri, form-action and frame-ancestors are 'none'", () => {
+			const policy = parsePolicy(
+				page([{ clientId: "rp", frontchannelLogoutUri: "https://rp.example/fc" }])
+					.contentSecurityPolicy,
+			);
+			expect(policy.get("default-src")).toEqual(["'none'"]);
+			expect(policy.get("base-uri")).toEqual(["'none'"]);
+			expect(policy.get("form-action")).toEqual(["'none'"]);
+			expect(policy.get("frame-ancestors")).toEqual(["'none'"]);
+			expect(effectiveSources(policy, "script-src")).toEqual(["'none'"]);
+			expect(effectiveSources(policy, "style-src")).toEqual(["'none'"]);
+		});
+
+		it("allows no frame when it frames no relying party", () => {
+			const { html, contentSecurityPolicy } = page([
+				{ clientId: "skipped", frontchannelLogoutUri: "ftp://rp.example/fc" },
+			]);
+			const policy = parsePolicy(contentSecurityPolicy);
+
+			expect(iframeSrcsOf(html)).toEqual([]);
+			expect(policy.has("frame-src")).toBe(false);
+			expect(policy.has("child-src")).toBe(false);
+			expect(effectiveSources(policy, "frame-src")).toEqual(["'none'"]);
+		});
+
+		it("hides its frames with the hidden attribute, which no style-src governs", () => {
+			const { html } = page([{ clientId: "rp", frontchannelLogoutUri: "https://rp.example/fc" }]);
+			expect(html).toMatch(
+				/<iframe src="[^"]*" hidden aria-hidden="true" referrerpolicy="no-referrer"><\/iframe>/,
+			);
+			expect(html).not.toContain("style=");
+		});
+
+		it("skips, with one warn, an RP whose origin a source expression cannot name, and does not allow it", () => {
+			const logger = createMockLogger();
+			const { html, contentSecurityPolicy } = page(
+				[
+					{ clientId: "good", frontchannelLogoutUri: "https://good.example/fc" },
+					{ clientId: "ipv6", frontchannelLogoutUri: "https://[::1]:8443/fc" },
+					{ clientId: "underscore", frontchannelLogoutUri: "https://rp_fc.example/fc" },
+					{ clientId: "semicolon", frontchannelLogoutUri: "https://a;script-src/fc" },
+				],
+				{ logger },
+			);
+
+			expect(iframeSrcsOf(html).map((src) => new URL(src).origin)).toEqual([
+				"https://good.example",
+			]);
+			const policy = parsePolicy(contentSecurityPolicy);
+			expect(policy.get("frame-src")).toEqual(["https://good.example"]);
+			expect(policy.has("script-src")).toBe(false);
+			for (const clientId of ["ipv6", "underscore", "semicolon"]) {
+				expectBestEffortWarn(
+					logger,
+					"logout_frontchannel_iframe_skipped",
+					{ clientId, reason: "origin-not-a-source-expression" },
+					null,
+				);
+			}
+		});
+
+		describe("the redirect runs under the policy", () => {
+			it("allows its one static script by hash, and the script reads the target from its own data attribute", () => {
+				const { html, contentSecurityPolicy } = page(
+					[{ clientId: "rp", frontchannelLogoutUri: "https://rp.example/fc" }],
+					{ postLogoutRedirect: { uri: "https://rp.example/out", state: "s-1" } },
+				);
+				const scripts = scriptsOf(html);
+				expect(scripts).toHaveLength(1);
+				const [script] = scripts;
+				assert(script !== undefined);
+				expect(script.attributes["data-target"]).toBe("https://rp.example/out?state=s-1");
+				expect(script.attributes["data-delay"]).toBe("2000");
+				expect(script.text).toContain("dataset.target");
+				expect(script.text).not.toContain("rp.example");
+
+				const policy = parsePolicy(contentSecurityPolicy);
+				expect(policy.get("script-src")).toEqual([hashSourceOf(script.text)]);
+			});
+
+			it("emits the same script text, so the same hash, whatever the target and delay", () => {
+				const textOf = (uri: string, redirectDelayMs: number): string => {
+					const { html } = renderFrontchannelLogoutPage({
+						rps: [],
+						issuer: "iss",
+						sid: "sid",
+						postLogoutRedirect: { uri },
+						redirectDelayMs,
+					});
+					return scriptsOf(html)[0]?.text ?? "";
+				};
+				expect(textOf("https://a.example/out", 0)).toBe(textOf("https://b.example/x?y=1", 5000));
+				expect(textOf("https://a.example/out", 0)).not.toBe("");
+			});
+
+			it("has no script and allows none without a redirect", () => {
+				const { html, contentSecurityPolicy } = page([
+					{ clientId: "rp", frontchannelLogoutUri: "https://rp.example/fc" },
+				]);
+				expect(scriptsOf(html)).toEqual([]);
+				expect(html).not.toContain("<script");
+				expect(effectiveSources(parsePolicy(contentSecurityPolicy), "script-src")).toEqual([
+					"'none'",
+				]);
+			});
+
+			it.each([
+				[
+					"a single quote and an ampersand in the path and query",
+					"https://rp.example/a'b&c/out?x=1&y='2'",
+					"q\"<>'&",
+				],
+				[
+					"a closing script tag in the path",
+					"https://rp.example/</script><script>x()</script>",
+					"",
+				],
+				["a double quote in the path", 'https://rp.example/a"onload="x()', "s"],
+			])(
+				"writes a target with %s into the attribute so it decodes to the target and cannot break out",
+				(_label, uri, state) => {
+					const { html, contentSecurityPolicy } = page([], {
+						postLogoutRedirect: { uri, state },
+					});
+					const expected = new URL(uri);
+					if (state.length > 0) expected.searchParams.set("state", state);
+
+					const scripts = scriptsOf(html);
+					expect(scripts).toHaveLength(1);
+					expect(scripts[0]?.attributes["data-target"]).toBe(expected.toString());
+					expect(Object.keys(scripts[0]?.attributes ?? {}).sort()).toEqual([
+						"data-delay",
+						"data-target",
+					]);
+					expect(parsePolicy(contentSecurityPolicy).get("script-src")).toEqual([
+						hashSourceOf(scripts[0]?.text ?? ""),
+					]);
+					expect(html.match(/<script/g)).toHaveLength(1);
+				},
+			);
+		});
 	});
 });

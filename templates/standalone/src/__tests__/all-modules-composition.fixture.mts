@@ -23,8 +23,8 @@
  * `reference.conf`, core's last, under the environment a deployment would
  * export) read in `app.mts`'s two phases (`readSwitches`, then
  * `resolveForBoot` for `createApp`), `buildModules`, core's `createApp`, every
- * module and store it selects, the key store, the audit sink, `helmet` and the
- * terminal error handler.
+ * module and store it selects, the key store, the audit sink, the security
+ * headers (`securityHeaders`) and the terminal error handler.
  *
  * Substituted (the first two are overrides `buildModules` offers):
  * - client and user repositories: in memory, not YAML off disk;
@@ -65,7 +65,6 @@ import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
 import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
 import { oidcFederationTypeModule } from "@o3co/auth-provider-federation-oidc";
 import express from "express";
-import helmet from "helmet";
 import request from "supertest";
 import { beforeAll, describe, expect, it } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
@@ -78,6 +77,7 @@ import {
 	resolveForBoot,
 	type Switches,
 } from "#/configPath.mjs";
+import { securityHeaders } from "#/securityHeaders.mjs";
 
 export const ISSUER = "https://auth.test";
 const OIDC_ISSUER = "https://idp.test";
@@ -657,8 +657,8 @@ export interface Composition {
 }
 
 /**
- * Boots the composition and mounts it as `app.mts` does: `helmet`, the
- * composed router, and the terminal error handler last (unless
+ * Boots the composition and mounts it as `app.mts` does: its security headers
+ * (`securityHeaders`), the composed router, and the terminal error handler last (unless
  * `terminalErrorHandler` is `false`), all on one logger that is also the
  * boot's `logger` component.
  */
@@ -697,11 +697,7 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	if (httpSettings === undefined) throw new Error("createApp booted without httpSettings");
 	const app = express();
 	app.set("trust proxy", httpSettings.trustProxy);
-	app.use(
-		helmet({
-			contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } },
-		}),
-	);
+	app.use(securityHeaders());
 	app.use(handle.router);
 	if (options.terminalErrorHandler !== false) app.use(terminalErrorHandler(logger));
 	return { app, handle, config: parsed, resolved, modules, logger, upstreams: fakes };

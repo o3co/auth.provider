@@ -170,7 +170,7 @@ Everything below is exported from [`src/index.mts`](./src/index.mts); the linked
 **Logout primitives**, for a composition that assembles its own logout:
 
 - `broadcastBackchannelLogout`, `BroadcastBackchannelLogoutOptions`, `BroadcastRP` — [`logout/broadcastBackchannel.mts`](./src/logout/broadcastBackchannel.mts)
-- `renderFrontchannelLogoutHtml`, `RenderFrontchannelLogoutHtmlOptions`, `FrontchannelRP` — [`logout/renderFrontchannel.mts`](./src/logout/renderFrontchannel.mts)
+- `renderFrontchannelLogoutPage`, `FrontchannelLogoutPage`, `renderFrontchannelLogoutHtml`, `RenderFrontchannelLogoutHtmlOptions`, `FrontchannelRP` — [`logout/renderFrontchannel.mts`](./src/logout/renderFrontchannel.mts). `renderFrontchannelLogoutPage` returns the page with the `Content-Security-Policy` it must be sent under, as the only one on the response; `renderFrontchannelLogoutHtml` returns the markup alone
 
 **Testing entry**, a subpath of its own rather than `src/index.mts`: `@o3co/auth-provider-oauth/testing` — [`testing/index.mts`](./src/testing/index.mts) — `oauthConfigForTests`, the `oauth` section a test builds.
 
@@ -610,6 +610,8 @@ Flow: verifies `id_token_hint` → holds `post_logout_redirect_uri` to the clien
 - `303` to the IdP end-session URL of the first federation the close answers (when that federation's provider implements `SupportsLogout`). The stored federation id_token goes with it as `id_token_hint`, and `post_logout_redirect_uri` only when it matched the client's list; when the federation token record cannot be read, the redirect goes without the hint, logged once as `logout_federation_token_read_failed` (warn)
 - `303` to `post_logout_redirect_uri` (when it matches the client's allowlist)
 - `200 {"logged_out": true}` (fallback)
+
+**The front-channel page sets its own `Content-Security-Policy`**, replacing the host's on that one response, so a host's global policy (the standalone template's `default-src 'none'`, for one) does not need to allow it. The page's policy allows frames from exactly the origins of the iframes it renders (`frame-src`, none when it renders no iframe) and its redirect script by its `sha256` hash, and is `'none'` for everything else, `base-uri`, `form-action` and `frame-ancestors` included. The script is the same text on every page and reads the redirect target and delay from its own `data-` attributes, so it redirects after `redirectDelayMs` whether or not the iframes have loaded. A relying party whose front-channel origin a CSP source expression cannot name (an IPv6 literal, or a host with a character other than a letter, a digit, `-` or `.`) gets no iframe, logged once at warn as `logout_frontchannel_iframe_skipped` with `reason: "origin-not-a-source-expression"`.
 
 The close's answer drives the rest:
 
