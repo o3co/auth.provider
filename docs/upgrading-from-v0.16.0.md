@@ -722,6 +722,22 @@ The boot refusals you can meet, with their messages, are in
 - **`/authorize` exists only with the `authorization_code` grant.** Without
   it, `/oauth/authorize` and `/oauth/consent` answer `404` and discovery names
   no authorization endpoint (#775).
+- **BREAKING: an expired Client ID Metadata Document is not served when its
+  revalidation fails.** `oauth.clientIdMetadataDocuments.staleIfErrorMs`
+  defaults to `0` (it was `300000`, five minutes). Once a document client's
+  cached document has expired, a revalidation that fails for a reason that is
+  not the document's — a timeout, a DNS failure, a `5xx` or a `429` from its
+  host — leaves the client unresolved: `/authorize` answers
+  `400 invalid_client` and the other client lookups treat it as an unknown
+  client, logged as `cimd_document_fetch_failed`, until a fetch succeeds
+  again. A document that
+  is fresh, or that answers `304`, is served as before. **What to do:** to
+  keep the previous behaviour, set `staleIfErrorMs = 300000` under
+  `oauth.clientIdMetadataDocuments` (the standalone template:
+  `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_STALE_IF_ERROR_MS=300000`). A window
+  keeps a client working through an outage at its host, and for that long
+  honours the redirect allowlist this server last validated. See the
+  [oauth README](../packages/oauth/README.md#client-id-metadata-documents-529).
 - **Session admission.** Every consumer reads the browser session through
   core's one decision point (#715–#719). What changes: `isAuthenticated` must
   be exactly `true`; a session record past its `expiresAt`, one without

@@ -81,9 +81,9 @@ export interface ClientIdMetadataDocumentOptions {
 	/** Bound on remembered documents. Default {@link DEFAULT_CIMD_MAX_CACHE_ENTRIES}. */
 	readonly maxCacheEntries?: number;
 	/**
-	 * How long a cached registration may still be served after a
-	 * revalidation that failed for a reason that is not the document's.
-	 * Default {@link DEFAULT_CIMD_STALE_IF_ERROR_MS}. Zero disables it.
+	 * How long past its expiry a cached registration may still be served
+	 * after a revalidation that failed for a reason that is not the
+	 * document's. Default {@link DEFAULT_CIMD_STALE_IF_ERROR_MS}: none.
 	 */
 	readonly staleIfErrorMs?: number;
 	/**
@@ -158,11 +158,13 @@ const hostMatches = (patterns: readonly string[] | undefined, hostname: string):
 
 /**
  * How long a cached registration outlives a revalidation that failed for a
- * reason that is not the document's (DNS, 5xx, timeout): an outage at the
- * client's host is not a verdict on the client. A rejected document is
- * evicted immediately.
+ * reason that is not the document's (DNS, 5xx, 429, timeout). Zero: an
+ * expired document is honoured only once a fetch succeeds again, since a
+ * stale one keeps the redirect allowlist the document may since have
+ * changed. An operator who prefers riding out the client host's outage sets
+ * a window. A rejected document is evicted immediately either way.
  */
-export const DEFAULT_CIMD_STALE_IF_ERROR_MS = 5 * 60 * 1000;
+export const DEFAULT_CIMD_STALE_IF_ERROR_MS = 0;
 
 /**
  * How long a refusal is remembered. Without it, every distinct URL-shaped

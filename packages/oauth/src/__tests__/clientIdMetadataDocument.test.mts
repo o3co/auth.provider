@@ -704,13 +704,41 @@ describe("the host policy holds whichever way the name is spelled", () => {
 });
 
 describe("the cache tells the truth about an outage", () => {
-	it("serves a cached registration through a failed revalidation rather than breaking the client", async () => {
-		// Deleting the entry and answering `null` for every error — a DNS
-		// blip, a 5xx, a timeout — would have `/authorize` answer
-		// `invalid_client`: telling a caller their credential is bad when the
-		// truth is that a backend is unreachable, which this codebase refuses
-		// everywhere else. Defensible on a cold lookup; on a warm cache it is a
-		// working client broken by someone else's outage.
+	it("does not serve an expired registration whose revalidation failed, by default", async () => {
+		// With no `staleIfErrorMs` configured, a document is honoured only
+		// while it is fresh: once it has expired, a timeout, a 5xx or a 429
+		// at the client's server leaves the client unresolved until a fetch
+		// succeeds again.
+		const clock = { now: 1_000_000 };
+		const { fetch, calls } = fakeFetch([
+			() => json(document(), { "cache-control": "max-age=1" }),
+			() => {
+				throw new Error("connect ETIMEDOUT");
+			},
+			() => json({ error: "down" }, {}, 503),
+			() => json({ error: "slow down" }, {}, 429),
+		]);
+		const r = createClientIdMetadataDocumentResolver({
+			allowedScopes: ["read", "write"],
+			allowedAudiences: ["https://mcp.example"],
+			negativeCacheMs: 0,
+			fetch,
+			lookup: publicLookup,
+			now: () => clock.now,
+		});
+
+		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
+		clock.now += 2_000; // the entry has expired, so this revalidates
+		expect(await r.resolve(CLIENT_URL)).toBeNull();
+		expect(await r.resolve(CLIENT_URL)).toBeNull();
+		expect(await r.resolve(CLIENT_URL)).toBeNull();
+		expect(calls).toHaveLength(4);
+	});
+
+	it("serves a cached registration through a failed revalidation inside the configured window", async () => {
+		// With `staleIfErrorMs` set, an error that is not the document's — a
+		// DNS blip, a 5xx, a timeout — keeps the validated registration for
+		// that window instead of answering the client `invalid_client`.
 		const clock = { now: 1_000_000 };
 		const { fetch, calls } = fakeFetch([
 			() => json(document(), { "cache-control": "max-age=1" }),
@@ -721,6 +749,7 @@ describe("the cache tells the truth about an outage", () => {
 		const r = createClientIdMetadataDocumentResolver({
 			allowedScopes: ["read", "write"],
 			allowedAudiences: ["https://mcp.example"],
+			staleIfErrorMs: 300_000,
 			fetch,
 			lookup: publicLookup,
 			now: () => clock.now,
@@ -732,11 +761,9 @@ describe("the cache tells the truth about an outage", () => {
 		expect(calls).toHaveLength(2);
 	});
 
-	it("rides out the client server's own 5xx on a warm cache", async () => {
-		// A 503 from the client's server is not a verdict on the client. It
-		// reached this code as `DocumentRejected` — every non-200 did — so the
-		// warm registration was deleted and the client refused, which is the
-		// case the stale window exists for.
+	it("rides out the client server's own 5xx on a warm cache inside the configured window", async () => {
+		// A 503 or a 429 from the client's server is not a verdict on the
+		// client: it takes the stale window's path, not the refusal's.
 		const clock = { now: 1_000_000 };
 		const { fetch } = fakeFetch([
 			() => json(document(), { "cache-control": "max-age=1" }),
@@ -746,6 +773,7 @@ describe("the cache tells the truth about an outage", () => {
 		const r = createClientIdMetadataDocumentResolver({
 			allowedScopes: ["read", "write"],
 			allowedAudiences: ["https://mcp.example"],
+			staleIfErrorMs: 300_000,
 			fetch,
 			lookup: publicLookup,
 			now: () => clock.now,
