@@ -15,13 +15,11 @@
  */
 
 /**
- * The contract suite of the `oauthTokenSettings` slot and its test double.
+ * The contract suite of the `oauthTokenSettings` slot.
  * `oauthTokenSettingsContract(input)` holds the settings to what the
  * configuration schema holds `oauth {}` to, resolved; token-binding
- * settings are core's, never the slot's. `createTestOAuthTokenSettings`
- * answers the fixture configuration's settings with members replaced; it
- * checks nothing, so a test of a broken value builds it here. Published on
- * `@o3co/auth-provider-core/testing`.
+ * settings are core's, never the slot's. The slot's test double,
+ * `createTestOAuthTokenSettings`, is core's, on its testing entry.
  */
 
 import assert from "node:assert/strict";
@@ -103,7 +101,6 @@ export function oauthTokenSettingsContract(
 			run: async () => {
 				const settings = build();
 				const switches: Record<string, unknown> = {
-					legacyTypAccept: settings.legacyTypAccept,
 					resourceIndicatorEnabled: settings.resourceIndicatorEnabled,
 					requireEmailVerified: settings.requireEmailVerified,
 				};

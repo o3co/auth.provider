@@ -15,13 +15,13 @@
  */
 
 /**
- * The contract suite of the `httpSettings` slot and its test double.
+ * The contract suite of the `httpSettings` slot.
  * `httpSettingsContract(input)` holds the settings to the configuration
  * schema's rules: a `trustProxy` Express reads as meant (a boolean, a hop
  * count up to `MAX_TRUST_PROXY_HOPS`, or a non-empty list of entries
  * `checkTrustedProxyEntry` accepts), CORS origins `checkSerializedOrigin`
- * accepts, the whole frozen. `createTestHttpSettings` trusts no hop and lets
- * no origin read unless told otherwise; it checks nothing.
+ * accepts, the whole frozen. The slot's test double,
+ * `createTestHttpSettings`, is core's, on its testing entry.
  */
 
 import assert from "node:assert/strict";

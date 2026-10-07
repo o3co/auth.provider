@@ -1,6 +1,6 @@
 # @o3co/auth-provider-test-kit
 
-Last updated: 2026-10-05
+Last updated: 2026-10-07
 
 Contract suites for what code outside `@o3co/auth-provider-core` implements
 of auth.provider's ports, and the fakes they run against. Test code imports
@@ -53,7 +53,20 @@ devDependencies.
 - `sessionLifecycleStoreContract`, the contract suite of
   `SessionLifecycleStore`, the record that fences joining a session against
   closing it, in
-  [`src/sessionLifecycle/sessionLifecycleStore.contract.mts`](src/sessionLifecycle/sessionLifecycleStore.contract.mts).
+  [`src/sessionLifecycle/sessionLifecycleStore.contract.mts`](src/sessionLifecycle/sessionLifecycleStore.contract.mts);
+- `httpSettingsContract`, `oauthTokenSettingsContract` and
+  `federationGrantPolicyContract`, the contract suites of the settings slots
+  `httpSettings`, `oauthTokenSettings` and `federationGrantPolicy`, in
+  [`src/deployment/httpSettings.contract.mts`](src/deployment/httpSettings.contract.mts),
+  [`src/tokenSettings/oauthTokenSettings.contract.mts`](src/tokenSettings/oauthTokenSettings.contract.mts)
+  and
+  [`src/federationGrants/federationGrantPolicy.contract.mts`](src/federationGrants/federationGrantPolicy.contract.mts);
+- `rateLimiterContract`, the contract suite of `RateLimiter`, the
+  `rateLimiter` slot's value, in
+  [`src/rateLimit/rateLimiter.contract.mts`](src/rateLimit/rateLimiter.contract.mts);
+- `sessionRequirementContract`, the contract suite every session
+  requirement's tests run, in
+  [`src/sessionAdmission/sessionRequirement.contract.mts`](src/sessionAdmission/sessionRequirement.contract.mts).
 
 **Does not own:** the ports, their types and the reading of the witness
 (core); the wire format of the Store's MFA endpoints (core's
@@ -607,6 +620,32 @@ of `expiresAt` plus the clock skew and the commit plus `retainMs`. With
 their retention, and the sid not opened again. With `unreachable`: every
 member rejecting, never answering `missing`, `null`, `closed` or `refused`.
 
+## The settings slots', the rate limiter's and a session requirement's suites
+
+Each takes the value under test from `build()`, built afresh for each case,
+and holds it to what core's readers rely on:
+
+- `httpSettingsContract({ build })`: a `trustProxy` Express reads as meant,
+  CORS origins that are serialized origins, the whole frozen;
+- `oauthTokenSettingsContract({ build })`: a canonical issuer, the token
+  lifetimes the configuration schema allows, no token-binding setting, every
+  switch resolved to true or false, the whole frozen;
+- `federationGrantPolicyContract({ build })`: both switches resolved, no
+  allowance to keep grants while grants are off, the whole frozen;
+- `rateLimiterContract({ build, withOutage, withBudget })`: a `kind`, a
+  `failMode` and a `defaultLimit` the guard can read, a well-formed decision;
+  with `withOutage`, an outage thrown; with `withBudget`, a key allowed its
+  limit and refused past it, each key counted apart;
+- `sessionRequirementContract({ key, fixture, issuer, build, withOutage, primary })`:
+  what boot registers and seals, verdicts for every grade admission asks
+  about, never asked over a dead session or for a declared remediation, and
+  interruption answers that pass core's closed body. It registers through
+  core's `resolverForTests`, as boot does.
+
+The doubles these slots' consumers fill them with (`createTestHttpSettings`,
+`createTestOAuthTokenSettings`, `createTestFederationGrantPolicy`,
+`createTestRateLimiter`) stay on `@o3co/auth-provider-core/testing`.
+
 ## The fake Store
 
 `startFakeStore({ users, bearerToken, now, requestNow })` starts an in-memory HTTP server on
@@ -693,6 +732,11 @@ Exported from [`src/index.mts`](src/index.mts):
   `WebAuthnCredentialStoreContractInput` and `WebAuthnCredentialStoreHarness`;
 - `sessionLifecycleStoreContract`, with `SessionLifecycleStoreContractInput`
   and `SessionLifecycleStoreHarness`;
+- `httpSettingsContract`, with `HttpSettingsContractInput`;
+- `oauthTokenSettingsContract`, with `OAuthTokenSettingsContractInput`;
+- `federationGrantPolicyContract`, with `FederationGrantPolicyContractInput`;
+- `rateLimiterContract`, with `RateLimiterContractInput`;
+- `sessionRequirementContract`, with `RequirementContractInput`;
 - `startFakeStore`, with `FAKE_STORE_MAX_BODY_BYTES`, `FakeStore`,
   `FakeStoreOptions`, `FakeStoreUser`, `FakeStoreUrls`, `FakeStoreEndpoint`,
   `FakeStoreRequest`, `FakeStoreAnswer` and `FakeStoreAnswerer`.
@@ -711,6 +755,11 @@ Exported from [`src/index.mts`](src/index.mts):
 | [`federationTokenStoreConditional.contract.test.mts`](src/federationTokens/__tests__/federationTokenStoreConditional.contract.test.mts) | the federation token store's binding over core's in-process store; a store without the conditional members refused by every case; a `get` that answers another record than `getVersioned`, a replace that moves a sibling federation's generation, a `removeBySid` that leaves a federation of the session or reaches another session's, a replace that restores a record a logout removed, and a store that drops `obtainedAt`, leaves an unset one out or answers it as `null`, each refused by the case that names it; the outage and expiry cases named as not run when undeclared |
 | [`attemptCounter.contract.test.mts`](src/attempts/__tests__/attemptCounter.contract.test.mts) | the attempt counter's suite over core's in-process counter, on a fake clock and on the real one; each broken counter — one that applies a limit of its own, counts every key as one or only a key's first segment, never ends a window or ends it late or far late, is not atomic, keeps the limit a key's window started with, starts a new window when a spec changes the window, or only when it lengthens it, counts refused attempts, answers `remaining` one off, a refusal with attempts remaining or `resetAt` as a number, counts a key or spec it should reject or a key past 512 characters, or answers an outage as an allowed attempt — refused by the case that names it; the outage case run only when declared, failing when declared and not given, and otherwise named as not run |
 | [`sessionLifecycleStore.contract.test.mts`](src/sessionLifecycle/__tests__/sessionLifecycleStore.contract.test.mts) | the session lifecycle store's suite over core's in-process store, on a fake clock with every hook and on the real one with none; each broken store — one that answers a record never opened, drops a participant's data or repeats one, answers participants by their bytes or moves one joined again to the end, answers `opened` over another record or for an end already past, creates a record for a sid with none, leaves the participants' work or the snapshot out of a close, answers `joined` after the close committed, checks the state and writes in a later step, commits a repeated close again or starts its work over, ignores the generation of a completion, answers a malformed one as a conflict or answers `updated` for a race it lost, hands out the participants it holds, stays closing with nothing pending, answers a closed record as active, lists records not closing or past its limit, ignores its cursor, answers a record with its `close` left out, a field of its own (enumerable, hidden or a symbol) or as a class instance, answers a repeated open `opened` past the session's end, answers malformed, hands out the record it holds, closes another sid, ignores the session's end, lapses a closing record with the session rather than its work, keeps part of a record past its retention, or answers an outage as `missing`, `null` or `closed` — refused by the case that names it; an undeclared hook's cases named as not run, and a declared one missing failing its case |
+| [`httpSettings.contract.test.mts`](src/deployment/__tests__/httpSettings.contract.test.mts) | the `httpSettings` suite over core's double, with each shape `trustProxy` takes; settings with a `trustProxy` Express would not read as meant, an allowed origin that is not a string or not a serialized origin, or a member left unfrozen, refused by the case that names it |
+| [`oauthTokenSettings.contract.test.mts`](src/tokenSettings/__tests__/oauthTokenSettings.contract.test.mts) | the `oauthTokenSettings` suite over core's double, with every override a deployment could configure; settings with an issuer that is not canonical, a lifetime that is not one or a default above the max, a token-binding setting nested or not, a switch absent or not a boolean, or a member left unfrozen, refused by the case that names it |
+| [`federationGrantPolicy.contract.test.mts`](src/federationGrants/__tests__/federationGrantPolicy.contract.test.mts) | the `federationGrantPolicy` suite over core's double, with every combination, and over what core's `checkFederationGrantPolicy` answers; a policy with a switch that is not a boolean, an allowance to keep grants while grants are off, or not frozen, refused by the case that names it |
+| [`rateLimiter.contract.test.mts`](src/rateLimit/__tests__/rateLimiter.contract.test.mts) | the `RateLimiter` suite over core's in-process limiter and over core's double, with either outage policy and none; the outage and budget cases left out when undeclared; a limiter with a `kind` that names nothing, a `failMode` outside the guard's two, a `defaultLimit` it cannot apply, a decision that is not one, an outage answered, a budget never spent, keys counted together, or a budget looked up on a plain object, refused by the case that names it |
+| [`sessionRequirement.contract.test.mts`](src/sessionAdmission/__tests__/sessionRequirement.contract.test.mts) | the session requirement suite over a well-formed fixture, with and without an issuer, a remediation or `admitPrimary`; a requirement with a name not its key, a fixture declaring the second-factor authority, a reach the seal refuses (failing the reach case alone of the registration cases), remediations not its own or repeated, a hint key that is reserved or not a hint name, an outage answered `met`, a `step_up` without a page or a verdict that is not one, or an interruption body with a reserved key or an address in a hint, refused by the case that names it; a primary the fixture establishes for, or handed to one that never interrupts, failing the interruption case; the view the suite hands `admit` frozen, with the members of admission's own view over the same stores |
 | [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, `authenticateByToken` answering the user a token names with the witness as `authenticate` does and `401` otherwise, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never; a create or a removal of one record without `expectedGeneration` refused `400` and writing nothing, the reset still applied; the factor set's generation: a list's, a conditional create's and a conditional removal's answers, an update keeping it and every membership write moving it, the tombstone a last removal or a reset leaves and its expiry on the Store's clock, a set held without a generation, a record held into a set dropping its generation, `400` for an expected generation or a `deadlineMs` that is none, a late conditional write answered `408` and not applied while one before its deadline is, a deadline checked on the request clock and never the tombstones', and one winner among concurrent conditional writes |
 
 ## See also

@@ -15,12 +15,11 @@
  */
 
 /**
- * The contract suite of the `federationGrantPolicy` slot and its test double.
+ * The contract suite of the `federationGrantPolicy` slot.
  * `federationGrantPolicyContract(input)` holds the policy to its two
  * switches, resolved to booleans, no allowance to keep grants while grants
- * are off, the whole frozen. `createTestFederationGrantPolicy` answers grants
- * off unless told otherwise; it checks nothing, so a test of a broken value
- * builds it here. Published on `@o3co/auth-provider-core/testing`.
+ * are off, the whole frozen. The slot's test double,
+ * `createTestFederationGrantPolicy`, is core's, on its testing entry.
  */
 
 import assert from "node:assert/strict";

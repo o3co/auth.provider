@@ -15,8 +15,8 @@
  */
 
 /**
- * What the slot contract suites share: the one reading of "frozen all the
- * way down" a settings slot is held to. Not on the testing entry.
+ * The one reading of "frozen all the way down" the settings slots' suites
+ * hold a value to. Internal to the kit: not exported from its entry.
  */
 
 /**

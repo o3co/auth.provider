@@ -39,6 +39,14 @@ export {
 	conditionalSetContract,
 } from "./conditionalWrite/conditionalWrite.contract.mjs";
 export {
+	type HttpSettingsContractInput,
+	httpSettingsContract,
+} from "./deployment/httpSettings.contract.mjs";
+export {
+	type FederationGrantPolicyContractInput,
+	federationGrantPolicyContract,
+} from "./federationGrants/federationGrantPolicy.contract.mjs";
+export {
 	type FederationTokenStoreConditionalContractInput,
 	type FederationTokenStoreConditionalHarness,
 	federationTokenStoreConditionalContract,
@@ -81,10 +89,22 @@ export {
 	startFakeStore,
 } from "./mfa/fakeStore.mjs";
 export {
+	type RateLimiterContractInput,
+	rateLimiterContract,
+} from "./rateLimit/rateLimiter.contract.mjs";
+export {
+	type RequirementContractInput,
+	sessionRequirementContract,
+} from "./sessionAdmission/sessionRequirement.contract.mjs";
+export {
 	type SessionLifecycleStoreContractInput,
 	type SessionLifecycleStoreHarness,
 	sessionLifecycleStoreContract,
 } from "./sessionLifecycle/sessionLifecycleStore.contract.mjs";
+export {
+	type OAuthTokenSettingsContractInput,
+	oauthTokenSettingsContract,
+} from "./tokenSettings/oauthTokenSettings.contract.mjs";
 export {
 	type WebAuthnCredentialStoreContractInput,
 	type WebAuthnCredentialStoreHarness,

@@ -16,7 +16,7 @@
 
 /**
  * The contract suite of the `RateLimiter` port, the `rateLimiter` slot's
- * value, and its test double.
+ * value.
  *
  * `rateLimiterContract(input)` holds a limiter to what the rate-limit guard
  * relies on: a `kind` that names it; a `failMode` (its own outage policy),
@@ -27,9 +27,8 @@
  * named after an `Object.prototype` member included. The budget case hands
  * one spec for every key: how a limiter resolves a spec is its own.
  *
- * `createTestRateLimiter` records every key checked, allows every check or
- * counts each key against a limit, and can stand in for a backend that is
- * down. Published on `@o3co/auth-provider-core/testing`.
+ * The port's test double, `createTestRateLimiter`, is core's, on its testing
+ * entry.
  */
 
 import assert from "node:assert/strict";
