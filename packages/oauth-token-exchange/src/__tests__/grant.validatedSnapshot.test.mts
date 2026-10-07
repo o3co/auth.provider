@@ -733,3 +733,112 @@ describe("token exchange reads each validator answer once — presence asked onc
 		});
 	}
 });
+
+/**
+ * An array whose `get` answers `elements` (and `length`, `length` unless
+ * given), while `has` reports no index in `hiddenIndexes`: native `some` and
+ * `every` skip those indexes, as they skip holes.
+ */
+function proxyArray(
+	elements: readonly unknown[],
+	{ hiddenIndexes = [], length }: { hiddenIndexes?: readonly number[]; length?: number } = {},
+): unknown[] {
+	return new Proxy([] as unknown[], {
+		get: (target, key) => {
+			if (key === "length") return length ?? elements.length;
+			if (typeof key === "string" && /^\d+$/.test(key)) return elements[Number(key)];
+			return Reflect.get(target, key);
+		},
+		has: (target, key) => {
+			if (typeof key === "string" && /^\d+$/.test(key)) {
+				const index = Number(key);
+				return index < elements.length && !hiddenIndexes.includes(index);
+			}
+			return Reflect.has(target, key);
+		},
+	});
+}
+
+const ACTOR_REFUSED = {
+	status: 400,
+	error: "invalid_request",
+	errorDescription: "may_act_violation: actor not authorized by subject token",
+} as const;
+
+describe("token exchange reads each validator answer once — arrays as native iteration sees them", () => {
+	const withMayAct = (mayAct: unknown) =>
+		build((role) =>
+			role === "subject"
+				? subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), may_act: mayAct } })
+				: { sub: "svc-a", claims: {} },
+		);
+
+	it("refuses the actor a may_act array names only at an index its presence check hides", async () => {
+		const h = withMayAct(proxyArray([{ sub: "svc-a" }], { hiddenIndexes: [0] }));
+
+		expect(await h.exchange(WITH_ACTOR)).toEqual(ACTOR_REFUSED);
+	});
+
+	it("refuses the client a may_act array names only at an index its presence check hides", async () => {
+		const h = withMayAct(
+			proxyArray([{ sub: "client-other" }, { sub: client.clientId }], { hiddenIndexes: [1] }),
+		);
+
+		expect(await h.exchange()).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "may_act_violation: client not authorized by subject token",
+		});
+	});
+
+	it("does not name the client by an aud entry at an index its presence check hides", async () => {
+		// Native `includes` reads a hidden index and `some` skips it; the copy keeps
+		// a hole, so it never names the client where both would not.
+		const h = build(() =>
+			subjectAnswer({
+				aud: proxyArray([client.clientId], { hiddenIndexes: [0] }),
+				claims: { exp: EXP() },
+			}),
+		);
+
+		expect(await h.exchange()).toMatchObject({ status: 400, error: "invalid_request" });
+	});
+
+	for (const [label, length] of [
+		["fractional", 1.5],
+		["negative", -1],
+		["not a number", "2"],
+		["past the safe integers", 2 ** 53],
+	] as const) {
+		it(`refuses a may_act array whose length is ${label}, as a failed validation`, async () => {
+			const h = withMayAct(
+				proxyArray([{ sub: "svc-other" }, { sub: "svc-a" }], { length: length as number }),
+			);
+
+			expect(await h.exchange(WITH_ACTOR)).toEqual(failedValidation("subject"));
+		});
+	}
+
+	it("refuses an aud array whose length is fractional, as a failed validation", async () => {
+		const h = build(() =>
+			subjectAnswer({
+				aud: proxyArray(["billing", client.clientId], { length: 1.5 }),
+				claims: { exp: EXP() },
+			}),
+		);
+
+		expect(await h.exchange()).toEqual(failedValidation("subject"));
+	});
+
+	it("copies a real sparse array with its holes", () => {
+		const aud: string[] = [];
+		aud[1] = "billing";
+		const copy = snapshotValidated({ sub: "user-1", aud, claims: {} });
+		if (copy === null) throw new Error("expected a copy");
+
+		expect(Array.isArray(copy.aud)).toBe(true);
+		expect((copy.aud as readonly string[]).length).toBe(2);
+		expect(0 in (copy.aud as readonly string[])).toBe(false);
+		expect(Object.isFrozen(copy.aud)).toBe(true);
+	});
+});

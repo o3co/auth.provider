@@ -33,7 +33,11 @@
  * data only — strings, finite numbers, booleans, `null`, and arrays and
  * records of them — and a function (a `toJSON` included), a symbol, a bigint
  * or a number that is not finite in any copied position is no answer, so
- * nothing in the copy runs code when it is read or serialised.
+ * nothing in the copy runs code when it is read or serialised. An array is
+ * copied as a plain frozen array of its `length`, read once, which must be a
+ * length an array can have (a whole number from 0 to 2^32 − 1), else no
+ * answer; index by index, an index `in` does not report stays a hole, so the
+ * copy holds no element native iteration of the answer would skip.
  *
  * `in` is asked once per object and member, and that one answer serves every
  * use. Actor matching in delegation tests a `may_act` entry's `sub` and `iss`
@@ -122,6 +126,9 @@ const authentications = new WeakMap<ValidatedToken, VerifiedAuthentication>();
  * reads `sub` by value, might have, so this is the conservative answer.
  */
 const MATCHES_NOTHING: readonly never[] = Object.freeze([]);
+
+/** The greatest length an array can have. */
+const MAX_LENGTH = 2 ** 32 - 1;
 
 /**
  * Thrown inside a copy where the answer is no answer: an array where a record
@@ -241,11 +248,25 @@ class Reader {
 		}
 		if (byReads.has(reads)) return byReads.get(reads);
 		if (Array.isArray(value)) {
-			const out: unknown[] = [];
+			// A length a genuine array can have, read once; else no answer.
+			const length = this.read(value, "length");
+			if (
+				!Number.isSafeInteger(length) ||
+				(length as number) < 0 ||
+				(length as number) > MAX_LENGTH
+			) {
+				throw new NotAnAnswer();
+			}
+			const out: unknown[] = new Array(length as number);
 			byReads.set(reads, out);
-			const length = this.read(value, "length") as number;
-			for (let i = 0; i < length; i++) {
-				out.push(this.copy(this.read(value, String(i)), reads.each ?? ANY));
+			// Index by index, each asked for once: an index `in` does not report is
+			// left a hole, which native `some`, `every` and `filter` skip as they
+			// skip that index on the answer.
+			for (let i = 0; i < (length as number); i++) {
+				const index = String(i);
+				if (this.has(value, index)) {
+					out[i] = this.copy(this.read(value, index), reads.each ?? ANY);
+				}
 			}
 			return Object.freeze(out);
 		}
