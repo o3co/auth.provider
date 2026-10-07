@@ -646,6 +646,27 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   will not say, `makeIoredisClients(io, { assumeNoEviction: true })` (in the
   standalone template, `REDIS_CLIENTS_ASSUME_NO_EVICTION=true`,
   `redis-clients.assumeNoEviction`).
+- **BREAKING: the Redis replay seen-set refuses to boot unless the server's
+  `maxmemory-policy` is `noeviction` (#1612).** `redisReplaySeenSetModule`
+  now passes the same eviction gate as the stores in the two entries above:
+  the replay seen-set requires a no-eviction policy, as the other stores
+  whose loss must not read as absent do. It keeps each DPoP proof,
+  `private_key_jwt` assertion `jti` and consumed WebAuthn challenge it
+  records under a key with a TTL that lasts the value's window, and a record
+  evicted before then reads as never seen. A boot that builds it on any
+  other policy, or on one the server will not report, is refused with a
+  `provides-factory-failed` whose `cause` is a `RedisStoreEvictableError`
+  (`reason` `replay-seen-set-evictable`). Its factory now asks the server at
+  build time, so a server that cannot answer at boot — not yet started, or
+  unreachable — fails the boot with a `provides-factory-failed` too (the
+  driver's error as its `cause`), where the seen-set used to build without
+  asking. The standalone template ships the seen-set on Redis by default
+  (`adapters.replaySeenSet = "redis"`): start Redis before the provider. The
+  remedy is the same as above: set `maxmemory-policy noeviction`, or give
+  the seen-set a Redis of its own; where the server runs `noeviction` but
+  will not say, `makeIoredisClients(io, { assumeNoEviction: true })` (in the
+  standalone template, `REDIS_CLIENTS_ASSUME_NO_EVICTION=true`,
+  `redis-clients.assumeNoEviction`).
 - **BREAKING: the Redis federation stores read the environment's name
   trimmed and in lower case (#826).** The plaintext guard of
   `redis-federation-token-store` and `redis-federation-grant-store` matched
@@ -2185,6 +2206,15 @@ modules fills them.
   `RefreshTokenFamilyClient` gain `durability(): Promise<RedisDurability>`,
   which `makeIoredisClients` provides; a client of your own implements it as
   the other gated stores' clients do.
+- **BREAKING: the Redis replay seen-set's factory is async, and its client
+  reports `durability()` (#1612).** `createRedisReplaySeenSet` and
+  `redisReplaySeenSetBuilder` return a `Promise` of the seen-set, resolved
+  once the server passes the eviction gate (the entry under
+  [Values read more strictly](#values-read-more-strictly)); a missing client
+  rejects rather than throws. `await` them. `ReplaySeenSetClient` gains
+  `durability(): Promise<RedisDurability>`, which `makeIoredisClients`
+  provides; a client of your own implements it as the other gated stores'
+  clients do.
 
 ## Stores and records you implement
 

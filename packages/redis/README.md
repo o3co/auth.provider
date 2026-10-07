@@ -85,7 +85,7 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   supported by the bundled clients** — enable scripting, or implement the
   per-purpose client interfaces ([Backing-client contract](#backing-client-contract))
   over another atomic primitive yourself.
-- **A `maxmemory`, and an eviction policy that cannot drop a replay record.**
+- **A `maxmemory`, and `noeviction` for the replay seen-set.**
   The replay seen-set writes a record for every DPoP proof it sees — at the
   token endpoint before its rate limit runs, at a protected resource before
   the access token is verified — and keeps it for
@@ -98,9 +98,10 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   keys, and a deleted replay record is a proof or assertion that can be
   replayed within its window: `allkeys-lru` (and every `allkeys-*` policy)
   can evict any key, a replay record included, and the `volatile-*` policies
-  evict keys that carry a TTL, which every replay record does. Keep the
-  seen-set on a server whose policy is `noeviction`, or on one sized never
-  to reach `maxmemory`. Core's in-process seen-set has a cap of its own
+  evict keys that carry a TTL, which every replay record does. The
+  seen-set requires a no-eviction policy, as the other stores whose loss
+  must not read as absent do: it passes the
+  [eviction gate](#the-eviction-gate) (`replay-seen-set-evictable`). Core's in-process seen-set has a cap of its own
   (`core-replay-seen-set-memory.maxEntries`, a million records by default) and
   refuses at it the same way, with a reserve this adapter does not have:
   DPoP proofs fill at most 90% of it, so a DPoP flood leaves room for
@@ -152,13 +153,14 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
 
 Every store whose keys must stay until they expire — the attempt counter,
 the session lifecycle store, the federation token store, the two MFA stores,
-and the stores that hold revocation state (the access-token denylist,
-subject revocation and the refresh-token family store) — is built only on a
-server whose `maxmemory-policy` reads as `noeviction`. Its factory
-(`createRedisAttemptCounter`, `createRedisSessionLifecycleStore`,
+the stores that hold revocation state (the access-token denylist, subject
+revocation and the refresh-token family store) and the replay seen-set — is
+built only on a server whose `maxmemory-policy` reads as `noeviction`. Its
+factory (`createRedisAttemptCounter`, `createRedisSessionLifecycleStore`,
 `createRedisFederationTokenStore`, `createRedisMfaFactorStore`,
 `createRedisMfaTransactionStore`, `createRedisAccessTokenDenylist`,
-`createRedisSubjectRevocation`, `createRedisRefreshTokenFamilyStore`) asks
+`createRedisSubjectRevocation`, `createRedisRefreshTokenFamilyStore`,
+`createRedisReplaySeenSet`) asks
 the server once, through its client's `durability()`, and resolves only
 then; its module and, where it has one, its adapter builder build through
 it, so every path holds the store to the same gate

@@ -259,8 +259,12 @@ const sessionInput = (expiresAt: Date): CreateUserSessionInput => ({
 describe("the PX an adapter sends is its record's life, rounded up to a whole millisecond", () => {
 	it("ReplaySeenSet.markSeen", async () => {
 		const client = recorder();
-		const set = createRedisReplaySeenSet({
-			client: { set: client.set, exists: async () => 0 } as ReplaySeenSetClient,
+		const set = await createRedisReplaySeenSet({
+			client: {
+				set: client.set,
+				exists: async () => 0,
+				durability: noEviction,
+			} as ReplaySeenSetClient,
 			keyPrefix: "replay:",
 		});
 		for (const [i, life] of FRACTIONAL_LIVES.entries()) {
@@ -543,8 +547,12 @@ describe("an expiry or lifetime past the Date range is refused before Redis is a
 			} as ChallengeStoreClient,
 			keyPrefix: "chal:",
 		});
-		const seen = createRedisReplaySeenSet({
-			client: { set: client.set, exists: async () => 0 } as ReplaySeenSetClient,
+		const seen = await createRedisReplaySeenSet({
+			client: {
+				set: client.set,
+				exists: async () => 0,
+				durability: noEviction,
+			} as ReplaySeenSetClient,
 			keyPrefix: "replay:",
 		});
 		const denylist = await createRedisAccessTokenDenylist({

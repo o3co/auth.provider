@@ -42,6 +42,13 @@ const noopChallengeClient: ChallengeStoreClient = {
 const noopReplayClient: ReplaySeenSetClient = {
 	set: async () => "OK",
 	exists: async () => 0,
+	// A server that reads as `noeviction`, as the seen-set's eviction gate needs.
+	durability: async () => ({
+		maxmemoryPolicy: "noeviction",
+		appendOnly: true,
+		snapshots: undefined,
+		refusal: undefined,
+	}),
 };
 
 describe("redisChallengeStoreBuilder — client guard", () => {
@@ -62,17 +69,17 @@ describe("redisChallengeStoreBuilder — client guard", () => {
 });
 
 describe("redisReplaySeenSetBuilder — client guard", () => {
-	it("throws when 'client' option is missing (config = {})", () => {
-		expect(() => redisReplaySeenSetBuilder({} as never, { lifecycle: undefined } as never)).toThrow(
-			"redisReplaySeenSetBuilder: 'client' option is required",
-		);
+	it("rejects when 'client' option is missing (config = {})", async () => {
+		await expect(
+			redisReplaySeenSetBuilder({} as never, { lifecycle: undefined } as never),
+		).rejects.toThrow("redisReplaySeenSetBuilder: 'client' option is required");
 	});
 
-	it("succeeds when 'client' is present", () => {
-		const store = redisReplaySeenSetBuilder(
+	it("succeeds when 'client' is present", async () => {
+		const store = (await redisReplaySeenSetBuilder(
 			{ client: noopReplayClient } as never,
 			{ lifecycle: undefined } as never,
-		) as { kind: string };
+		)) as { kind: string };
 		expect(store).toBeDefined();
 		expect(store.kind).toBe("redis");
 	});

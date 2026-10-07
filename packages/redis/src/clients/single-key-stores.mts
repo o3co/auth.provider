@@ -66,6 +66,12 @@ export interface AccessTokenDenylistClient {
 export interface ReplaySeenSetClient {
 	set(key: string, value: string, mode: "PX", ttlMs: number, condition: "NX"): Promise<"OK" | null>;
 	exists(key: string): Promise<number>;
+	/**
+	 * What the server says about keeping what it is written, read once by the
+	 * seen-set's factory for its eviction gate: a value evicted before its
+	 * window ends reads as never seen.
+	 */
+	durability(): Promise<RedisDurability>;
 }
 
 // --- CodeRepositoryClient --------------------------------------------------

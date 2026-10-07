@@ -6,16 +6,19 @@
 import { Redis } from "ioredis";
 import { afterAll, beforeAll } from "vitest";
 import type { ReplaySeenSetClient } from "#/clients.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
 import { createRedisReplaySeenSet } from "#/replay-seen-set.mjs";
 import { runReplaySeenSetContract } from "./adapters.replay-seen-set.contract.mjs";
 import { keysExpire, testRedis } from "./support/redis.mjs";
 
 let client: Redis;
+let replaySeenSetClient: ReplaySeenSetClient;
 let keyCounter = 0;
 
 beforeAll(async () => {
 	const at = await testRedis();
 	client = new Redis(at);
+	replaySeenSetClient = makeIoredisClients(client).replaySeenSetClient;
 });
 
 afterAll(async () => {
@@ -28,7 +31,7 @@ runReplaySeenSetContract(
 		create: () => {
 			keyCounter += 1;
 			return createRedisReplaySeenSet({
-				client: client as unknown as ReplaySeenSetClient,
+				client: replaySeenSetClient,
 				keyPrefix: `replay:test-${keyCounter}:`,
 			});
 		},

@@ -350,7 +350,8 @@ Module-level messages that arrive wrapped in a factory failure:
   the access-token denylist (`redisAccessTokenDenylistModule`), subject
   revocation (`redisSessionStoresModule`, once a module reads
   `subjectRevocation`) and the refresh-token family store
-  (`redisRefreshTokenFamilyStoreModule`) — are built only on a server whose
+  (`redisRefreshTokenFamilyStoreModule`) — and the replay seen-set
+  (`redisReplaySeenSetModule`) are built only on a server whose
   `maxmemory-policy` reads as `noeviction`
   (`packages/redis/src/internal/eviction-policy.mts`). **Their Redis must run
   `maxmemory-policy` `noeviction`**, on a server of its own if the rest of your
@@ -364,8 +365,8 @@ Module-level messages that arrive wrapped in a factory failure:
   (`federation-token-store-evictable`, `session-lifecycle-store-evictable`,
   `mfa-factor-store-evictable`, `mfa-transaction-store-evictable`,
   `attempt-counter-evictable`, `access-token-denylist-evictable`,
-  `subject-revocation-evictable`, `refresh-token-family-store-evictable`) and
-  whose message names the policy and what an
+  `subject-revocation-evictable`, `refresh-token-family-store-evictable`,
+  `replay-seen-set-evictable`) and whose message names the policy and what an
   eviction would lose. A policy it cannot read — `INFO` and `CONFIG` refused,
   renamed or disabled for the connection's user — is refused the same way,
   `maxmemoryPolicy` `undefined`, the refusing reply as the error's own
@@ -2009,7 +2010,10 @@ lifetime) per family:
   limit runs and at a protected resource before the access token is verified,
   so this family grows with whatever request rate anyone sends. Give Redis a
   `maxmemory` with the `noeviction` policy: a full server then refuses the
-  write, and the request is answered `503` (fail closed). An evicting policy
+  write, and the request is answered `503` (fail closed). The seen-set requires
+  a no-eviction policy, as the other stores whose loss must not read as absent
+  do, and refuses the boot on any other (`replay-seen-set-evictable`, above).
+  An evicting policy
   (`allkeys-lru` and the other `allkeys-*`, and `volatile-*`, since every
   replay record has a TTL) makes room by deleting keys, and a deleted replay
   record is a proof or assertion that can be replayed within its window
