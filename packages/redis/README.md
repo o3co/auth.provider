@@ -1424,12 +1424,14 @@ instead.
 `AttemptCounter`'s suite is the test kit's `attemptCounterContract`, which
 [`attempt-counter.test.mts`](__tests__/attempt-counter.test.mts) runs over two
 connections, on a hand-moved clock and on the real one.
+`RateLimiter`'s suite is the test kit's `rateLimiterContract`, which
+[`ratelimit.contract.test.mts`](__tests__/ratelimit.contract.test.mts) runs over a stand-in script.
 Which ports have a suite, and the one Redis adapter the suites do not run
 against (`AccessTokenDenylist`, whose expiry is Redis's own key TTL and cannot
 follow the suite's fake clock), are in
 [docs/adapter-surface.md](../../docs/adapter-surface.md). The adapters whose
-ports have no core suite — `FederationTokenStore`, `RateLimiter`,
-`CodeRepository` — are covered by their own tests here.
+ports have no core suite — `FederationTokenStore`, `CodeRepository` — are
+covered by their own tests here.
 
 ## Source layout
 
