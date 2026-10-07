@@ -1,6 +1,6 @@
 # repositories
 
-Last updated: 2026-10-07
+Last updated: 2026-10-06
 
 ## Responsibility
 
@@ -32,7 +32,6 @@ It is separate because the Store's data model is read by `oauth`, `session`, `fo
 - The bundled registration path (`ClientEntrySchema`, read by the `yaml` / `static` adapters) holds every registered redirect-URI list to `../net/redirect-uri` at boot, its query rule included: a query name outside `[A-Za-z0-9_-]`, a parameter with no name, a `;`, or a name the authorization response appends is refused, and so is a federation-grant return URI carrying a name the grant flow appends. A `frontchannelLogoutUri` is held to the same query-name grammar and refused when its query carries `iss` or `sid`, the names front-channel logout sets. All compare names ignoring case, `_` and `-`, and `clientRepositoryBoundary.mts` holds a record a custom repository answers to the same rules. A custom `ClientRepository` bypasses that schema by design; `checkRedirectUri` is exported so it can hold its own registrations to the same rules, and nothing in the port makes it. The federation-grant flow does not rely on either: at request time it checks the redirect URI it was handed against the registration and refuses one that already carries the flow's result parameter (`../federation-grants/lodge.mts`).
 - `findSubjectByFederatedIdentity` must change nothing — no login, link or provisioning — and answers `linked` / `unlinked` / `indeterminate`; `linkFederatedIdentity` answers `refused` or `conflict`. Both are the Store's decisions, not core's.
 - The MFA enrollment witness (the MFA ADR's D12): `User.mfaEnrolled`, answered by the Store on `authenticate` and on `authenticateByToken` and read only through `readMfaEnrollmentWitness` — `enrolled`, `not_enrolled` (`false` or absent), or `malformed` (any other value, which is `503` and never a first binding) — and `markMfaEnrolled(subject, enrolled)`, detected by `supportsMfaEnrollmentWitness`. The bundled user adapter has no `markMfaEnrolled`; it answers whatever its entries carry.
-- The bundled user adapter compares a password with an entry's bcrypt hash (`$2a$`, `$2b$` or `$2y$`) through bcrypt, which reads only the first 72 bytes of the password and ignores the rest: a password matches when its first 72 bytes are those of the hashed password, whatever follows. 72 bytes of UTF-8 is fewer characters for multibyte text — about 24 for Japanese. An entry in plain text is compared over the password's full length.
 - Record types are readonly; a consumer that wants to mutate copies.
 
 ## Dependencies
