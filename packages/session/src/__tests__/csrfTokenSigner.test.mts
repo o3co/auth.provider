@@ -41,10 +41,10 @@ import {
 	createTestCsrfTokenSigner,
 	createTestFederationSettings,
 	createTestSessionCookiePolicy,
-	csrfTokenSignerContract,
 	makeValidAppConfig,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
+import { csrfTokenSignerContract } from "@o3co/auth-provider-test-kit";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";

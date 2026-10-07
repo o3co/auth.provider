@@ -76,7 +76,7 @@ const handle = await createApp({
 
 ### モジュールが他のパッケージに提供するもの
 
-パッケージは core だけを import するので、他のパッケージがブラウザセッションについて必要とするものは、契約が core にあるスロットを通して届く（[`core/src/browser-session/types.mts`](../core/src/browser-session/types.mts)、[`core/src/session-admission/login-completion.mts`](../core/src/session-admission/login-completion.mts)）。各提供者は、このパッケージのテストで core の契約スイートを実行する。
+パッケージは core だけを import するので、他のパッケージがブラウザセッションについて必要とするものは、契約が core にあるスロットを通して届く（[`core/src/browser-session/types.mts`](../core/src/browser-session/types.mts)、[`core/src/session-admission/login-completion.mts`](../core/src/session-admission/login-completion.mts)）。各提供者は、このパッケージのテストで `@o3co/auth-provider-test-kit` にあるスロットの契約スイートを実行する。
 
 | スロット | 提供者 | 内容 | 読む側 |
 | --- | --- | --- | --- |
