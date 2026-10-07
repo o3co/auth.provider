@@ -2357,7 +2357,10 @@ with what a store of yours records and refuses. Per port:
 - **The MFA ports**, new since v0.16.0. An `MfaFactorStore`'s membership
   writes are `createIf`, `removeIf` and the reset `removeAllForSubject`, at
   the generation `listVersioned` answered; it has no unconditional `create`
-  or `remove` (#1121, #1179, #1236). An `MfaTransactionStore` answers
+  or `remove` (#1121, #1179, #1236). Its `list` answers an array of records:
+  a list with a hole, or an entry that is not an object with a string `kind`,
+  is answered as the store's outage (`503`), never as a subject holding fewer
+  factors (#1605). An `MfaTransactionStore` answers
   `rebindAfterMs` on every subject-recovery answer (#1238). One written
   against a 0.17 release candidate implements
   `consumeEmailProofRequirement(subject, { leaseToken })` in place of

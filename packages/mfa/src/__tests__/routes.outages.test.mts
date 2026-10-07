@@ -184,6 +184,49 @@ describe("the factor store down", () => {
 		},
 	);
 
+	it.each([["transaction"], ["challenge"], ["verify"]] as const)(
+		"answering a list with a hole or an entry with no string kind: %s is answered 503 once — never as a subject without that factor",
+		async (route) => {
+			const factorStore = createMemoryMfaFactorStore();
+			const { record, secret } = await seedTotp(factorStore);
+			const { kind: _kind, ...withoutKind } = record;
+			const holed: unknown[] = [record];
+			holed.length = 2;
+			for (const answer of [holed, [record, withoutKind], [record, { ...record, kind: 7 }]]) {
+				let armed = false;
+				const { app, logger, transactionStore } = await boot({
+					config: configFor("required"),
+					factorStore: {
+						...factorStore,
+						list: async (subject) => (armed ? (answer as never) : factorStore.list(subject)),
+					},
+				});
+				const { agent, transaction } = await beginLogin(app);
+				armed = true;
+
+				const res =
+					route === "transaction"
+						? await readTransaction(agent, transaction)
+						: route === "challenge"
+							? await mfaPost(agent, "/challenge", {
+									transaction_id: transaction,
+									factor_id: record.id,
+								})
+							: await verify(agent, transaction, record.id, totpCode(secret));
+
+				expect(res.status).toBe(503);
+				expect(res.body).toEqual(MFA_UNAVAILABLE);
+				expect(events(logger, "error")).toEqual(["mfa_store_unavailable"]);
+				expect(logger.error.mock.calls[0]?.[0]).toMatchObject({
+					route,
+					store: "mfa_factor",
+					step: "list",
+				});
+				expect((await transactionStore.get(transaction))?.attempts).toBe(0);
+			}
+		},
+	);
+
 	it("at update, after the transaction was consumed: 503 once, no session, the step unspent — the user starts again from the password", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const { record, secret } = await seedTotp(factorStore);

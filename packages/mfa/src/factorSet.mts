@@ -131,6 +131,7 @@ import {
 	type StoreGeneration,
 } from "@o3co/auth-provider-core";
 import { OUTSIDE_CONTRACT } from "./ceremony.mjs";
+import { readFactorList } from "./factorList.mjs";
 import { type MfaSubjectRecords, readSubjectRecords } from "./factorState.mjs";
 import { mayCount } from "./firstBinding.mjs";
 import type { MfaSealing } from "./sealing.mjs";
@@ -769,13 +770,8 @@ export function createMfaFactorSet(options: {
 	const starts = new WeakMap<MfaFactorSetStart, Started>();
 	const floorOf = boundedRecoverySetFloor(leases, storeTimeoutMs);
 
-	const list = async (subject: string): Promise<MfaFactorRecord[]> => {
-		const records: unknown = await factorStore.list(subject);
-		if (!Array.isArray(records)) {
-			throw new TypeError("MfaFactorStore.list answered something that is not a list");
-		}
-		return [...(records as MfaFactorRecord[])].sort(byAge);
-	};
+	const list = async (subject: string): Promise<MfaFactorRecord[]> =>
+		readFactorList(await factorStore.list(subject)).sort(byAge);
 
 	/** Whether none of `records` may count. */
 	const noneCounts = (records: readonly MfaFactorRecord[]): boolean =>
@@ -1415,8 +1411,8 @@ export function createMfaFactorSetReset(options: {
 					}
 					// A store that answered the removal and left records stops it before the witness.
 					try {
-						const left: unknown = await time.read(() => factorStore.list(subject));
-						if (!Array.isArray(left) || left.length > 0) {
+						const left = readFactorList(await time.read(() => factorStore.list(subject)));
+						if (left.length > 0) {
 							return stopped(
 								"factors",
 								new Error("records still stand after the removal, or the list is no list"),

@@ -390,6 +390,33 @@ describe("GET /session/mfa/factors", () => {
 			"mfa_store_unavailable",
 		);
 	});
+
+	it("answers 503, logged once, when the factor store answers a list with a hole or an entry with no string kind — never a list without it", async () => {
+		const built = await composed();
+		const { agent, totp } = await signedIn(built);
+		const { record } = totp;
+		const { kind: _kind, ...withoutKind } = record;
+		const holed: unknown[] = [record];
+		holed.length = 2;
+		for (const [what, answer] of [
+			["a hole", holed],
+			["an entry without a kind", [record, withoutKind]],
+			["an entry whose kind is no string", [record, { ...record, id: "f-2", kind: 7 }]],
+		] as const) {
+			built.logger.error.mockClear();
+			const spy = vi.spyOn(built.factorStore, "list").mockResolvedValue(answer as never);
+
+			const res = await list(agent);
+
+			expect(res.status, what).toBe(503);
+			expect(res.body, what).toEqual(UNAVAILABLE);
+			expect(built.logger.error, what).toHaveBeenCalledWith(
+				expect.objectContaining({ route: "factors", store: "mfa_factor", step: "list" }),
+				"mfa_store_unavailable",
+			);
+			spy.mockRestore();
+		}
+	});
 });
 
 describe("POST /session/mfa/factors/rename", () => {

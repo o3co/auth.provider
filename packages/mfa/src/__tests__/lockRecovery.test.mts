@@ -494,21 +494,31 @@ describe("a release", () => {
 		expect(await recovery.release(SUBJECT, SID)).toMatchObject({ outcome: "held", hold: "hard" });
 	});
 
-	it("counts a record whose kind cannot be read, never throwing: the hard hold stands", async () => {
-		const factorStore = createMemoryMfaFactorStore();
+	it("answers the factor store's outage for a list with a record whose kind cannot be read, a hole, or an entry with no string kind, applying nothing: the hard hold stands", async () => {
+		const record = recordOf("odd", "totp", T - 1_000);
 		const unreadable = {
-			...recordOf("odd", "totp", T - 1_000),
+			...record,
 			get kind(): string {
 				throw new Error("a lazy field could not load");
 			},
 		};
-		vi.spyOn(factorStore, "list").mockResolvedValue([unreadable] as never);
-		const { store, recovery } = setup({ boundary: async () => AFTER_THE_ATTACK, factorStore });
-		await latch(store);
-		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
-		await recovery.authorize(SUBJECT, SID, "key", clock);
+		const { kind: _kind, ...withoutKind } = record;
+		for (const answer of [[unreadable], new Array(1), [withoutKind]]) {
+			const factorStore = createMemoryMfaFactorStore();
+			vi.spyOn(factorStore, "list").mockResolvedValue(answer as never);
+			const { store, recovery } = setup({ boundary: async () => AFTER_THE_ATTACK, factorStore });
+			const apply = vi.spyOn(store, "applySubjectRecovery");
+			await latch(store);
+			clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
+			await recovery.authorize(SUBJECT, SID, "key", clock);
 
-		expect(await recovery.release(SUBJECT, SID)).toMatchObject({ outcome: "held", hold: "hard" });
+			expect(await recovery.release(SUBJECT, SID)).toMatchObject({
+				outcome: "unavailable",
+				store: "mfa_factor",
+				step: "list",
+			});
+			expect(apply).not.toHaveBeenCalled();
+		}
 	});
 
 	it("reads the generation again after a pause when it moved before its acquire, and applies", async () => {

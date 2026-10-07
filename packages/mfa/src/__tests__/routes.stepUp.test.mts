@@ -562,6 +562,28 @@ describe("the step-up of a subject holding a counting factor", () => {
 		}
 	});
 
+	it("answers 503, opening nothing, when the factor store answers a list with a hole or an entry with no string kind — never mfa_no_qualifying_factor", async () => {
+		const { app, factorStore, transactionStore, userSessionStore } = await composed();
+		const { agent } = await signIn(app, userSessionStore);
+		const { record } = await seedTotp(factorStore);
+		const { kind: _kind, ...withoutKind } = record;
+		const create = vi.spyOn(transactionStore, "create");
+		for (const [what, answer] of [
+			["a hole", new Array(1)],
+			["an entry without a kind", [withoutKind]],
+			["an entry whose kind is no string", [{ ...record, kind: 7 }]],
+		] as const) {
+			const spy = vi.spyOn(factorStore, "list").mockResolvedValue(answer as never);
+
+			const res = await stepUp(agent);
+
+			expect(res.status, what).toBe(503);
+			expect(res.body.error, what).toBe("temporarily_unavailable");
+			spy.mockRestore();
+		}
+		expect(create).not.toHaveBeenCalled();
+	});
+
 	it("offers a recovery set whose data opens beside a TOTP whose data does not", async () => {
 		const { app, factorStore, transactionStore, userSessionStore } = await composed();
 		const { agent } = await signIn(app, userSessionStore);

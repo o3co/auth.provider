@@ -381,6 +381,25 @@ interface AdmitRow {
 /** A TOTP factor u-alice holds: a counting factor. */
 const HOLDING_TOTP: MfaFactorRecord[] = [factorRecord("u-alice")];
 
+/** Lists a store might answer for u-alice, each with an entry that is not a record, named. */
+const listsWithAnEntryNotARecord = (): [string, unknown[]][] => {
+	const holeBeforeRecord: unknown[] = new Array(2);
+	holeBeforeRecord[1] = factorRecord("u-alice");
+	const holeAfterRecord: unknown[] = [factorRecord("u-alice")];
+	holeAfterRecord.length = 2;
+	const { kind: _kind, ...withoutKind } = factorRecord("u-alice");
+	return [
+		["one hole", new Array(1)],
+		["a hole before a record", holeBeforeRecord],
+		["a hole after a record", holeAfterRecord],
+		["undefined", [undefined]],
+		["null", [null]],
+		["a string", ["totp"]],
+		["a record without a kind", [withoutKind]],
+		["a record whose kind is no string", [{ ...factorRecord("u-alice"), kind: 1 }]],
+	];
+};
+
 describe("admit — its table of verdicts under mfa.mode", () => {
 	const rows: readonly AdmitRow[] = [
 		// required · use and credential_change: no session, or a primary the rule does not know.
@@ -981,6 +1000,17 @@ describe("admit — credential_change reads the subject's factor records", () =>
 				requirement.admit(about(federated(), CHANGE)),
 				JSON.stringify(answer),
 			).rejects.toThrow(TypeError);
+		}
+	});
+
+	it("throws when the store answers a list with an entry that is not a record — a hole included — never read as fewer records", async () => {
+		for (const [what, answer] of listsWithAnEntryNotARecord()) {
+			for (const session of [federated(), password()]) {
+				const { requirement } = build("required", {
+					factorStore: { ...factorStoreHolding(), list: async () => answer as never },
+				});
+				await expect(requirement.admit(about(session, CHANGE)), what).rejects.toThrow(TypeError);
+			}
 		}
 	});
 
@@ -1630,6 +1660,35 @@ describe("admitPrimary — after a password login", () => {
 				JSON.stringify(answer),
 			).rejects.toThrow(TypeError);
 		}
+	});
+
+	it("throws when the store answers a list with an entry that is not a record — a hole included — admission answers unavailable, never a password-only session", async () => {
+		for (const [what, answer] of listsWithAnEntryNotARecord()) {
+			for (const mode of ["optional", "required"] as const) {
+				const { requirement } = build(mode, {
+					factorStore: { ...factorStoreHolding(), list: async () => answer as never },
+				});
+				await expect(requirement.admitPrimary?.(primaryOf("u-alice")), what).rejects.toThrow(
+					TypeError,
+				);
+				expect(await admitPrimary(depsFor(requirement), primaryOf("u-alice")), what).toEqual({
+					outcome: "unavailable",
+					store: "mfa",
+				});
+			}
+		}
+	});
+
+	it("reads an empty list as no factor: a first binding under required, the session under optional", async () => {
+		const factorStore = { ...factorStoreHolding(), list: async () => [] };
+		expect(
+			await build("optional", { factorStore }).requirement.admitPrimary?.(primaryOf("u-alice")),
+		).toBe("establish");
+		const { requirement } = build("required", { factorStore });
+		const admission = await admitPrimary(depsFor(requirement), primaryOf("u-alice"));
+		expect(admission.outcome).toBe("interrupt");
+		if (admission.outcome !== "interrupt") return;
+		expect((await admission.open("sess-1")).body.error).toBe("mfa_enrollment_required");
 	});
 
 	it("establishes a primary that is not a password login without reading the factors: the baseline applies after pwd only", async () => {

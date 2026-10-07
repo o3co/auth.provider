@@ -105,6 +105,7 @@ import {
 	type SessionView,
 	type StepUpPage,
 } from "@o3co/auth-provider-core";
+import { readFactorList } from "./factorList.mjs";
 import { asksForSecondFactor, readSubjectRecords } from "./factorState.mjs";
 import {
 	countingKinds,
@@ -321,14 +322,9 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		return primary === PASSWORD_AMR ? UNMET : REAUTHENTICATE;
 	};
 
-	/** The subject's factor records; a store that cannot answer, or answers something other than a list, throws. */
-	const listRecords = async (subject: string): Promise<readonly MfaFactorRecord[]> => {
-		const records: unknown = await factorStore.list(subject);
-		if (!Array.isArray(records)) {
-			throw new TypeError("MfaFactorStore.list answered something that is not a list");
-		}
-		return records;
-	};
+	/** The subject's factor records (`readFactorList`); a store that cannot answer, or answers anything but a list of records, throws. */
+	const listRecords = async (subject: string): Promise<readonly MfaFactorRecord[]> =>
+		readFactorList(await factorStore.list(subject));
 
 	const mayHoldCountingFactor = async (subject: string): Promise<boolean> =>
 		(await listRecords(subject)).some((record) => mayCount(factors, record));
