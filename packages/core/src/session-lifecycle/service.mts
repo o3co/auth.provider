@@ -46,7 +46,7 @@ import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { EventLogger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import type { RefreshTokenFamilyRevocation } from "../refresh-token-family/types.mjs";
-import { readRecord } from "../session-admission/live-session.mjs";
+import { isLiveRecord, readRecord } from "../session-admission/live-session.mjs";
 import {
 	checkSessionExpiresAt,
 	checkSessionLifecycleKey,
@@ -143,10 +143,11 @@ export type SessionFederations = {
 };
 
 /**
- * `live`, with the user session, while its record is active; `not_live` from
+ * `live`, with the user session, while its record is active and the user
+ * session stands as admission's live read judges a record; `not_live` from
  * the closing commit on, for a session with no record, or once the user
- * session is gone. A store that cannot answer rejects the call with its own
- * error.
+ * session is gone or at or past its end, whatever its store still answers.
+ * A store that cannot answer rejects the call with its own error.
  */
 export type SessionLiveness =
 	| { readonly outcome: "live"; readonly session: UserSession }
@@ -354,10 +355,15 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 	/**
 	 * The service's one read of a user session, through admission's one read
 	 * of a session record: liveness answers it, and a join joins only while it
-	 * is there.
+	 * is there. A record stands as a session by admission's rule, on a clock
+	 * reading taken after the read: one at or past its end, which a store that
+	 * keeps a row until a sweep still answers, or one missing its subject or
+	 * `authTime`, is none.
 	 */
-	const userSessionOf = async (sid: string): Promise<UserSession | null> =>
-		(await readRecord(userSessionStore, sid)) ?? null;
+	const userSessionOf = async (sid: string): Promise<UserSession | null> => {
+		const record = await readRecord(userSessionStore, sid);
+		return isLiveRecord(record, new Date()) ? record : null;
+	};
 
 	const unavailable = (operation: string, sid: string, error: unknown): void => {
 		logger.warn({ operation, sid, err: loggableError(error) }, "session_lifecycle_unavailable");

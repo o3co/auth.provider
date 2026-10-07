@@ -30,6 +30,7 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	createSymmetricKeyStore,
+	type FederationTokenStore,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -41,7 +42,12 @@ import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { routerInputsOf } from "./_helpers/sections.mjs";
-import { lifecycleStoreOver, livenessOver } from "./_helpers/sessionLifecycle.mjs";
+import {
+	lifecycleOver,
+	lifecycleStoreOver,
+	livenessOver,
+	openedLifecycleStore,
+} from "./_helpers/sessionLifecycle.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const ISSUER = "https://auth.example";
@@ -92,7 +98,12 @@ async function mintAccessToken(extra: Record<string, unknown> = {}): Promise<str
 		.sign(secretKey);
 }
 
-async function buildApp(opts: { userSessionStore?: UserSessionStore; auditSink?: AuditSink }) {
+async function buildApp(opts: {
+	userSessionStore?: UserSessionStore;
+	auditSink?: AuditSink;
+	/** Core's own lifecycle over the store, with an active record for `SID`, in place of the double. */
+	coreLifecycle?: boolean;
+}) {
 	const app = express();
 	app.use(express.json());
 	app.use(express.urlencoded({ extended: false }));
@@ -106,15 +117,36 @@ async function buildApp(opts: { userSessionStore?: UserSessionStore; auditSink?:
 		...(opts.userSessionStore
 			? {
 					userSessionStore: opts.userSessionStore,
-					// A lifecycle the host fills, whose read rejects when the store throws.
-					sessionLifecycle: livenessOver(opts.userSessionStore),
-					sessionLifecycleStore: lifecycleStoreOver(opts.userSessionStore),
+					...(opts.coreLifecycle === true
+						? coreLifecycleOver(opts.userSessionStore)
+						: {
+								// A lifecycle the host fills, whose read rejects when the store throws.
+								sessionLifecycle: livenessOver(opts.userSessionStore),
+								sessionLifecycleStore: lifecycleStoreOver(opts.userSessionStore),
+							}),
 				}
 			: {}),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
 	});
 	app.use("/oauth", router);
 	return app;
+}
+
+/** Core's lifecycle over `userSessionStore`, its record for `SID` active for an hour. */
+function coreLifecycleOver(userSessionStore: UserSessionStore) {
+	const sessionLifecycleStore = openedLifecycleStore([SID, "u1"]);
+	return {
+		sessionLifecycleStore,
+		sessionLifecycle: lifecycleOver({
+			userSessionStore,
+			refreshTokenFamilyRevocation: {
+				revokeFamily: async () => {},
+				isFamilyRevoked: async () => false,
+			},
+			federationTokenStore: {} as FederationTokenStore,
+			store: sessionLifecycleStore,
+		}),
+	};
 }
 
 /** Bearer self-introspection: the caller presents the token as its own credential. */
@@ -268,6 +300,36 @@ describe("/oauth/introspect — session liveness", () => {
 		expect(res.status).toBe(200);
 		expect(res.body.active).toBe(true);
 		expect(store.get).not.toHaveBeenCalled();
+	});
+
+	describe("over core's session lifecycle", () => {
+		/** A store that keeps `session`'s row until a sweep: it answers it past its end. */
+		const keeping = (session: UserSession) =>
+			({
+				kind: "memory",
+				create: vi.fn(async () => {}),
+				get: vi.fn(async () => session),
+				delete: vi.fn(async () => {}),
+			}) as unknown as UserSessionStore;
+
+		it("reports active:true while the user session is before its end", async () => {
+			const app = await buildApp({ userSessionStore: keeping(liveSession), coreLifecycle: true });
+
+			const res = await introspect(app, await mintAccessToken({ sid: SID }));
+
+			expect(res.status).toBe(200);
+			expect(res.body.active).toBe(true);
+		});
+
+		it("reports active:false for a user session past its end that the store still answers", async () => {
+			const ended = { ...liveSession, expiresAt: new Date(Date.now() - 1000) };
+			const app = await buildApp({ userSessionStore: keeping(ended), coreLifecycle: true });
+
+			const res = await introspect(app, await mintAccessToken({ sid: SID }));
+
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ active: false });
+		});
 	});
 
 	it("is inert when no session store is wired", async () => {

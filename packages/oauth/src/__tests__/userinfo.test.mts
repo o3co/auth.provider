@@ -17,6 +17,7 @@
 import { createSecretKey } from "node:crypto";
 import {
 	createSymmetricKeyStore,
+	type FederationTokenStore,
 	type RefreshTokenFamilyRevocation,
 	type UserSession,
 	type UserSessionStore,
@@ -26,7 +27,7 @@ import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/userinfo.mjs";
-import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
+import { lifecycleOver, livenessOver, openedLifecycleStore } from "./_helpers/sessionLifecycle.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -461,6 +462,62 @@ describe("GET /oauth/userinfo", () => {
 		expect(errRes.status).toBe(401);
 		expect(errRes.headers["cache-control"]).toBe("no-store");
 		expect(errRes.headers.pragma).toBe("no-cache");
+	});
+});
+
+describe("/oauth/userinfo over core's session lifecycle", () => {
+	const families: RefreshTokenFamilyRevocation = {
+		isFamilyRevoked: async () => false,
+		revokeFamily: async () => {},
+	};
+
+	/** The router over core's lifecycle, its record for `sid-1` active for an hour, and a store that answers `session` until a sweep. */
+	function appKeeping(session: UserSession) {
+		const userSessionStore: UserSessionStore = {
+			kind: "memory",
+			get: async () => session,
+			create: async () => {},
+			delete: async () => {},
+		};
+		const app = express();
+		app.use(express.json());
+		app.use(
+			"/oauth",
+			createRouter(express, {
+				keyStore,
+				sessionLifecycle: lifecycleOver({
+					userSessionStore,
+					refreshTokenFamilyRevocation: families,
+					federationTokenStore: {} as FederationTokenStore,
+					store: openedLifecycleStore(["sid-1", "u-1"]),
+				}),
+				refreshTokenFamilyRevocation: families,
+			}),
+		);
+		return app;
+	}
+
+	it("answers the session's claims while it is before its end", async () => {
+		const token = await mintAT({ family_id: "fam-1", sid: "sid-1", scope: "openid email" });
+
+		const res = await request(appKeeping(baseSession))
+			.get("/oauth/userinfo")
+			.set("Authorization", `Bearer ${token}`);
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ sub: "u-1", email: "alice@example.com", email_verified: true });
+	});
+
+	it("answers 401 session_invalid for a session past its end that the store still answers", async () => {
+		const token = await mintAT({ family_id: "fam-1", sid: "sid-1", scope: "openid email" });
+		const ended = { ...baseSession, expiresAt: new Date(Date.now() - 1000) };
+
+		const res = await request(appKeeping(ended))
+			.get("/oauth/userinfo")
+			.set("Authorization", `Bearer ${token}`);
+
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({ error: "invalid_token", error_description: "session_invalid" });
 	});
 });
 

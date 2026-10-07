@@ -1066,6 +1066,87 @@ describe("liveness", () => {
 		expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "not_live" });
 	});
 
+	describe("a user session read past its end, its record still active", () => {
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		/** The harness's user-session store answering `session` for every sid, as a store that keeps a row until a sweep does. */
+		const keeping = (h: Harness, session: Record<string, unknown>): void => {
+			h.sessions.get = async () => session as never;
+		};
+
+		const row = (fields: Record<string, unknown>): Record<string, unknown> => ({
+			sid: SID,
+			sub: SUB,
+			authTime: new Date(),
+			createdAt: new Date(),
+			expiresAt: new Date(Date.now() + DAY),
+			claims: {},
+			amr: ["pwd"],
+			authentication: undefined,
+			...fields,
+		});
+
+		it("is not_live for a row whose end has passed", async () => {
+			const h = harness();
+			await h.establish();
+			keeping(h, row({ expiresAt: new Date(Date.now() - 1000) }));
+			expect((await h.read())?.value.state).toBe("active");
+			expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "not_live" });
+		});
+
+		it("is not_live at exactly its end and live a millisecond before it, as admission judges a record", async () => {
+			vi.useFakeTimers({ toFake: ["Date"] });
+			const at = new Date("2026-06-01T00:00:00.000Z");
+			vi.setSystemTime(at);
+			const h = harness();
+			await h.establish();
+			keeping(h, row({ expiresAt: new Date(at.getTime()) }));
+			expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "not_live" });
+			keeping(h, row({ expiresAt: new Date(at.getTime() + 1) }));
+			expect((await h.lifecycle.liveness(SID)).outcome).toBe("live");
+		});
+
+		it("judges the end on a clock reading taken after the user session is read", async () => {
+			vi.useFakeTimers({ toFake: ["Date"] });
+			const at = new Date("2026-06-01T00:00:00.000Z");
+			vi.setSystemTime(at);
+			const h = harness();
+			await h.establish();
+			const ending = row({ expiresAt: new Date(at.getTime() + 1) });
+			h.sessions.get = async () => {
+				// The row's end arrives while the store answers.
+				vi.setSystemTime(at.getTime() + 1);
+				return ending as never;
+			};
+			expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "not_live" });
+		});
+
+		it.each([
+			["an empty subject", { sub: "" }],
+			["no subject", { sub: undefined }],
+			["an authTime that is not a date", { authTime: "earlier" }],
+			["an invalid authTime", { authTime: new Date(Number.NaN) }],
+			["an end that is not a date", { expiresAt: "later" }],
+			["an invalid end", { expiresAt: new Date(Number.NaN) }],
+			["no end", { expiresAt: undefined }],
+		])("is not_live for a row with %s", async (_, fields) => {
+			const h = harness();
+			await h.establish();
+			keeping(h, row(fields));
+			expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "not_live" });
+		});
+
+		it("refuses a join, revoking the family it names", async () => {
+			const h = harness();
+			await h.establish();
+			keeping(h, row({ expiresAt: new Date(Date.now() - 1000) }));
+			expect(await h.lifecycle.join(SID, { familyId: "f1" })).toEqual({ outcome: "refused" });
+			expect(h.revoked.has("f1")).toBe(true);
+		});
+	});
+
 	it("is not_live for a session with no record, its user session still there", async () => {
 		const h = harness();
 		await h.establish(SID, { open: false });
