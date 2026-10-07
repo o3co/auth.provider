@@ -705,6 +705,42 @@ describe("admit — credential_change: recent MFA on a session a record carries;
 			expected: MET,
 		},
 		{
+			row: "an email code verified inside the window, the session's amr without mfa → step_up: recent MFA is a second factor in a session that holds mfa",
+			input: about(password(["pwd", "email"], minutesAgo(1)), CHANGE),
+			records: [...HOLDING_TOTP, factorRecord("u-alice", "email", "f-2")],
+			factors: [FACTORS.totp(), FACTORS.email()],
+			expected: STEP_UP,
+		},
+		{
+			row: "an email code verified inside the window, the subject holding the email factor alone → step_up",
+			input: about(password(["pwd", "email"], minutesAgo(1)), CHANGE),
+			records: [factorRecord("u-alice", "email")],
+			factors: [FACTORS.totp(), FACTORS.email()],
+			expected: STEP_UP,
+		},
+		{
+			row: "a federated session with a second factor that adds no mfa inside the window → step_up",
+			input: about(
+				record(["fed", "email"], {
+					primary: "fed",
+					federation: "google",
+					upstreamAmr: undefined,
+					mfaAt: minutesAgo(1),
+				}),
+				CHANGE,
+			),
+			records: [factorRecord("u-alice", "email")],
+			factors: [FACTORS.totp(), FACTORS.email()],
+			expected: STEP_UP,
+		},
+		{
+			row: "an email code verified inside the window in a session that holds mfa → met",
+			input: about(password(["pwd", "otp", "mfa", "email"], minutesAgo(1)), CHANGE),
+			records: [...HOLDING_TOTP, factorRecord("u-alice", "email", "f-2")],
+			factors: [FACTORS.totp(), FACTORS.email()],
+			expected: MET,
+		},
+		{
 			row: "a second factor verified before the window → step_up, sent to log in again when still unmet",
 			input: about(password(["pwd", "otp", "mfa"], minutesAgo(24 * 60)), CHANGE),
 			records: HOLDING_TOTP,

@@ -38,7 +38,8 @@
  * the record); elsewhere the session is sent to log in, where the login
  * records it. An action graded `credential_change` changes the
  * ways into the account — adds one, or renames or removes a factor — and is
- * held to recent MFA (`isRecentMfa`) over a primary the
+ * held to recent MFA (`isRecentMfa`: a second factor verified lately, in a
+ * session whose vouched `amr` holds `mfa`) over a primary the
  * baseline knows — under `required` on top of the baseline, so it is never
  * looser than `use`: the subject's factor records say whether it may hold a
  * counting factor — a record of a kind no installed factor declares
@@ -180,10 +181,12 @@ export interface MfaRequirementOptions {
 	readonly sealing: MfaSealing;
 }
 
-/** What recent MFA is read from: a live session's primary time and its last second factor. */
+/** What recent MFA is read from: a live session's primary time, its last second factor, and what it vouches for. */
 export interface RecentMfaSession {
 	readonly authTime: Date;
 	readonly mfaAt: Date | undefined;
+	/** Whether the session's vouched `amr` holds `mfa`: `mfaAt` counts only then. */
+	readonly holdsMfa: boolean;
 }
 
 /** What recent MFA is told of the session's subject. */
@@ -212,9 +215,10 @@ function withinWindow(at: Date | undefined, maxAgeMs: number, nowMs: number): bo
 
 /**
  * Whether `session` has recent MFA at `nowMs`: a second factor verified
- * within `maxAgeSeconds` (`mfa.manage.maxAgeSeconds`) or, when `subject`
- * holds no counting factor, a primary that recent. The window's edge is
- * recent.
+ * within `maxAgeSeconds` (`mfa.manage.maxAgeSeconds`) in a session whose
+ * vouched `amr` holds `mfa` — an email code, which adds none by default,
+ * does not give it to a session signed in with it — or, when `subject` holds
+ * no counting factor, a primary that recent. The window's edge is recent.
  */
 export function isRecentMfa(
 	session: RecentMfaSession,
@@ -223,7 +227,7 @@ export function isRecentMfa(
 	nowMs: number,
 ): boolean {
 	const maxAgeMs = maxAgeSeconds * 1_000;
-	if (withinWindow(session.mfaAt, maxAgeMs, nowMs)) return true;
+	if (session.holdsMfa && withinWindow(session.mfaAt, maxAgeMs, nowMs)) return true;
 	return !subject.holdsCountingFactor && withinWindow(session.authTime, maxAgeMs, nowMs);
 }
 
@@ -442,7 +446,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 	const recentPrimary = (freshness: Date | undefined, nowMs: number): boolean =>
 		freshness !== undefined &&
 		isRecentMfa(
-			{ authTime: freshness, mfaAt: undefined },
+			{ authTime: freshness, mfaAt: undefined, holdsMfa: false },
 			{ holdsCountingFactor: false },
 			recentMfaMaxAgeSeconds,
 			nowMs,
@@ -502,12 +506,14 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 	};
 
 	/**
-	 * Recent MFA over a record whose primary the baseline knows; a subject
-	 * with no counting factor is a first binding.
+	 * Recent MFA over a record whose primary the baseline knows, and the
+	 * `amr` admission vouches for on it; a subject with no counting factor is
+	 * a first binding.
 	 */
 	const recent = async (
 		session: SessionView,
 		recorded: SessionAuthentication | undefined,
+		vouched: readonly string[],
 		action: AdmissionAction,
 		nowMs: number,
 	): Promise<RequirementVerdict> => {
@@ -518,7 +524,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 			return firstBindingIn(session, recorded, action, nowMs);
 		}
 		const recentMfa = isRecentMfa(
-			{ authTime: session.authTime, mfaAt: recorded.mfaAt },
+			{ authTime: session.authTime, mfaAt: recorded.mfaAt, holdsMfa: vouched.includes(MFA_AMR) },
 			{ holdsCountingFactor: true },
 			recentMfaMaxAgeSeconds,
 			nowMs,
@@ -537,17 +543,18 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		if (rule === "met") return MET;
 		if (session === null) return REAUTHENTICATE;
 		const recorded = authentication?.authentication;
+		const vouched = authentication?.amr ?? [];
 		switch (rule) {
 			case "live":
 				return MET;
 			case "baseline":
 				return baseline(session, recorded);
 			case "recent":
-				return recent(session, recorded, action, now.getTime());
+				return recent(session, recorded, vouched, action, now.getTime());
 			case "baseline+recent": {
 				const verdict = await baseline(session, recorded);
 				return verdict.outcome === "met"
-					? recent(session, recorded, action, now.getTime())
+					? recent(session, recorded, vouched, action, now.getTime())
 					: verdict;
 			}
 			default:

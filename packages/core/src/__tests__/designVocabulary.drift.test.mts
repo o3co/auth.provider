@@ -1224,8 +1224,8 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 	{
 		file: "packages/mfa/src/requirement.mts",
 		read: "authentication?.amr",
-		count: 1,
-		why: "a token's own amr, as requirementSessionFromAmr read it: a factor's own second-factor value in it meets the baseline, whatever its primary (the MFA ADR's O3; a passkey token carries hwk alone)",
+		count: 2,
+		why: "a token's own amr, as requirementSessionFromAmr read it: a factor's own second-factor value in it meets the baseline, whatever its primary (the MFA ADR's O3; a passkey token carries hwk alone); and a session's vouched amr, as requirementSession read it: recent MFA counts its mfaAt only beside mfa (the MFA ADR's O7)",
 	},
 	{
 		file: "packages/mfa/src/requirement.mts",
