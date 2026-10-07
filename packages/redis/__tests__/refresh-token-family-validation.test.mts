@@ -44,6 +44,12 @@ const makeMockClient = (
 		watch: async () => "OK",
 		unwatch: async () => "OK",
 		multi: () => noopMulti,
+		durability: async () => ({
+			maxmemoryPolicy: "noeviction",
+			appendOnly: true,
+			snapshots: undefined,
+			refusal: undefined,
+		}),
 		duplicate: (): DisposableRefreshTokenFamilyClient =>
 			Object.assign(
 				{ ...self },
@@ -61,7 +67,7 @@ describe("RedisRefreshTokenFamilyStore.findFamily — corrupt-data validation", 
 	it("throws RefreshTokenStorageError({reason:'corrupt-data'}) for truncated JSON in Redis", async () => {
 		const store = new Map<string, string>([[`${keyPrefix}fam-1`, "{truncated"]]);
 		const pttls = new Map<string, number>([[`${keyPrefix}fam-1`, 60_000]]);
-		const repo = createRedisRefreshTokenFamilyStore({
+		const repo = await createRedisRefreshTokenFamilyStore({
 			client: makeMockClient(store, pttls),
 			keyPrefix,
 		});
@@ -77,7 +83,7 @@ describe("RedisRefreshTokenFamilyStore.findFamily — corrupt-data validation", 
 			[`${keyPrefix}fam-2`, JSON.stringify({ familyId: "fam-2" })],
 		]);
 		const pttls = new Map<string, number>([[`${keyPrefix}fam-2`, 60_000]]);
-		const repo = createRedisRefreshTokenFamilyStore({
+		const repo = await createRedisRefreshTokenFamilyStore({
 			client: makeMockClient(store, pttls),
 			keyPrefix,
 		});
@@ -100,7 +106,7 @@ describe("RedisRefreshTokenFamilyStore.findFamily — corrupt-data validation", 
 			],
 		]);
 		const pttls = new Map<string, number>([[`${keyPrefix}fam-3`, 60_000]]);
-		const repo = createRedisRefreshTokenFamilyStore({
+		const repo = await createRedisRefreshTokenFamilyStore({
 			client: makeMockClient(store, pttls),
 			keyPrefix,
 		});
@@ -123,7 +129,7 @@ describe("RedisRefreshTokenFamilyStore.findFamily — corrupt-data validation", 
 			],
 		]);
 		const pttls = new Map<string, number>([[`${keyPrefix}fam-4`, 60_000]]);
-		const repo = createRedisRefreshTokenFamilyStore({
+		const repo = await createRedisRefreshTokenFamilyStore({
 			client: makeMockClient(store, pttls),
 			keyPrefix,
 		});
@@ -156,7 +162,7 @@ describe("RedisRefreshTokenFamilyStore.findFamily — corrupt-data validation", 
 				],
 			]);
 			const pttls = new Map<string, number>([[`${keyPrefix}fam-tight`, 60_000]]);
-			const repo = createRedisRefreshTokenFamilyStore({
+			const repo = await createRedisRefreshTokenFamilyStore({
 				client: makeMockClient(store, pttls),
 				keyPrefix,
 			});
@@ -180,7 +186,7 @@ describe("RedisRefreshTokenFamilyStore.findFamily — corrupt-data validation", 
 			],
 		]);
 		const pttls = new Map<string, number>([[`${keyPrefix}fam-ok`, 60_000]]);
-		const repo = createRedisRefreshTokenFamilyStore({
+		const repo = await createRedisRefreshTokenFamilyStore({
 			client: makeMockClient(store, pttls),
 			keyPrefix,
 		});
@@ -194,18 +200,18 @@ describe("RedisRefreshTokenFamilyStore.findFamily — corrupt-data validation", 
 });
 
 describe("redisRefreshTokenFamilyStoreBuilder — client guard", () => {
-	it("throws when 'client' option is missing (config = {})", () => {
-		expect(() =>
+	it("rejects when 'client' option is missing (config = {})", async () => {
+		await expect(
 			redisRefreshTokenFamilyStoreBuilder({} as never, { lifecycle: undefined } as never),
-		).toThrow("redisRefreshTokenFamilyStoreBuilder: 'client' option is required");
+		).rejects.toThrow("redisRefreshTokenFamilyStoreBuilder: 'client' option is required");
 	});
 
-	it("succeeds when 'client' is present", () => {
+	it("succeeds when 'client' is present", async () => {
 		const client = makeMockClient(new Map(), new Map());
-		const store = redisRefreshTokenFamilyStoreBuilder(
+		const store = (await redisRefreshTokenFamilyStoreBuilder(
 			{ client } as never,
 			{ lifecycle: undefined } as never,
-		) as { kind: string };
+		)) as { kind: string };
 		expect(store).toBeDefined();
 		expect(store.kind).toBe("redis");
 	});

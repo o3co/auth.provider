@@ -28,10 +28,12 @@ import type {
 	RefreshTokenFamilyMultiClient,
 } from "../../clients.mjs";
 import { assertPipelineSucceeded } from "../commands.mjs";
+import { type IoredisDurabilityOptions, redisDurability } from "../durability.mjs";
 
 export function makeIoredisRefreshTokenFamilyClient(
 	io: Redis,
 	logger: EventLogger,
+	options: IoredisDurabilityOptions = {},
 ): RefreshTokenFamilyClient {
 	// RefreshTokenFamilyClient needs duplicate() returning DisposableRefreshTokenFamilyClient.
 	// The duplicate is built by recursively wrapping the duplicated ioredis instance.
@@ -42,6 +44,7 @@ export function makeIoredisRefreshTokenFamilyClient(
 		watch: (...keys) => underlying.watch(...keys) as Promise<"OK">,
 		unwatch: () => underlying.unwatch() as Promise<"OK">,
 		multi: () => buildRefreshMulti(underlying.multi()),
+		durability: () => redisDurability(underlying, options),
 		duplicate: () => {
 			const dup = underlying.duplicate();
 			// `duplicate()` copies options but not listeners, and an `error` event with no

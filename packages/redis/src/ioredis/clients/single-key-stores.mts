@@ -26,6 +26,7 @@ import type {
 	CodeRepositoryClient,
 	ReplaySeenSetClient,
 } from "../../clients.mjs";
+import { type IoredisDurabilityOptions, redisDurability } from "../durability.mjs";
 
 export function makeIoredisChallengeStoreClient(io: Redis): ChallengeStoreClient {
 	const challengeStoreClient: ChallengeStoreClient = {
@@ -37,12 +38,16 @@ export function makeIoredisChallengeStoreClient(io: Redis): ChallengeStoreClient
 	return challengeStoreClient;
 }
 
-export function makeIoredisAccessTokenDenylistClient(io: Redis): AccessTokenDenylistClient {
+export function makeIoredisAccessTokenDenylistClient(
+	io: Redis,
+	options: IoredisDurabilityOptions = {},
+): AccessTokenDenylistClient {
 	// Revoked access-token jtis. Plain PX SET (no NX): re-revoking a jti is idempotent, and the
 	// last write sets the expiry.
 	const accessTokenDenylistClient: AccessTokenDenylistClient = {
 		set: (k, v, _mode, ttlMs) => io.set(k, v, "PX", ttlMs) as Promise<"OK">,
 		exists: (k) => io.exists(k),
+		durability: () => redisDurability(io, options),
 	};
 	return accessTokenDenylistClient;
 }

@@ -17,7 +17,9 @@
 /**
  * The one eviction gate every store whose keys must stay until they expire
  * passes before its factory hands it out: the attempt counter, the session
- * lifecycle store, the federation token store and the two MFA stores.
+ * lifecycle store, the federation token store, the two MFA stores and the
+ * stores that hold revocation state — the access-token denylist, subject
+ * revocation and the refresh-token family store.
  *
  * - A policy the server reports as `noeviction` passes.
  * - Any other policy it reports refuses, known or not.

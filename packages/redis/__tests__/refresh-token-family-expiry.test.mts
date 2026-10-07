@@ -69,6 +69,7 @@ function slowReplies(base: RefreshTokenFamilyClient): RefreshTokenFamilyClient {
 		unwatch: () => conn.unwatch(),
 		multi: () => slowMulti(conn.multi()),
 		duplicate: () => slowConnection(conn.duplicate()),
+		durability: () => conn.durability(),
 		[Symbol.asyncDispose]: () => conn[Symbol.asyncDispose](),
 	});
 	return {
@@ -79,15 +80,16 @@ function slowReplies(base: RefreshTokenFamilyClient): RefreshTokenFamilyClient {
 		unwatch: () => base.unwatch(),
 		multi: () => slowMulti(base.multi()),
 		duplicate: () => slowConnection(base.duplicate()),
+		durability: () => base.durability(),
 	};
 }
 
-function store(): { store: RefreshTokenFamilyStore; keyPrefix: string } {
+async function store(): Promise<{ store: RefreshTokenFamilyStore; keyPrefix: string }> {
 	keyCounter += 1;
 	const keyPrefix = `rtfam:expiry-${keyCounter}:`;
 	return {
 		keyPrefix,
-		store: createRedisRefreshTokenFamilyStore({
+		store: await createRedisRefreshTokenFamilyStore({
 			client: slowReplies(makeIoredisClients(client).refreshTokenFamilyClient),
 			keyPrefix,
 		}),
@@ -96,7 +98,7 @@ function store(): { store: RefreshTokenFamilyStore; keyPrefix: string } {
 
 describe("redis refresh-token family — the absolute expiry across slow replies", () => {
 	it("never moves the family's cap later, however many rotations run", async () => {
-		const { store: familyStore, keyPrefix } = store();
+		const { store: familyStore, keyPrefix } = await store();
 		const rotation = createRefreshTokenFamilyRotation({
 			refreshTokenFamilyStore: familyStore,
 			accessTokenHorizonMs: 3_600_000,
@@ -118,7 +120,7 @@ describe("redis refresh-token family — the absolute expiry across slow replies
 	}, 30_000);
 
 	it("still revokes, and never re-extends, a family read after its stored expiry while its key lives", async () => {
-		const { store: familyStore, keyPrefix } = store();
+		const { store: familyStore, keyPrefix } = await store();
 		const storedExpiryMs = Date.now() - 1_000;
 		const lingering = () =>
 			client.set(

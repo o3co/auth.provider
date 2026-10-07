@@ -26,6 +26,7 @@ import {
 	type SupportsSessionsOnlyRevocation,
 } from "@o3co/auth-provider-core";
 import type { SubjectRevocationClient } from "./clients.mjs";
+import { requireNoEviction } from "./internal/eviction-policy.mjs";
 
 export interface RedisSubjectRevocationOptions {
 	readonly client: SubjectRevocationClient;
@@ -64,8 +65,24 @@ export interface RedisSubjectRevocationOptions {
  * clamped to that in the same script (`advanceRevocationBoundaries`), and the
  * clamp is said at warn after the write; a failing logger never fails the
  * revocation. A client without that method is refused at construction.
+ *
+ * It resolves once the server's eviction policy passes the gate
+ * (`internal/eviction-policy.mts`); a client it cannot use rejects before the
+ * server is asked.
  */
-export function createRedisSubjectRevocation(
+export async function createRedisSubjectRevocation(
+	deps: RedisSubjectRevocationOptions,
+): Promise<SubjectRevocation & SupportsSessionsOnlyRevocation> {
+	const revocation = buildRedisSubjectRevocation(deps);
+	await requireNoEviction("subjectRevocation", () => deps.client.durability(), {
+		reason: "subject-revocation-evictable",
+		holds:
+			"subjects' revocation watermarks, each keyed with a TTL until the last credential it refuses expires, and a watermark evicted before then lets the subject's earlier sessions and tokens read as not revoked",
+	});
+	return revocation;
+}
+
+function buildRedisSubjectRevocation(
 	deps: RedisSubjectRevocationOptions,
 ): SubjectRevocation & SupportsSessionsOnlyRevocation {
 	const prefix = deps.keyPrefix ?? "ss:rev:";
@@ -211,10 +228,13 @@ export function createRedisSubjectRevocation(
  * AdapterFactory builder for the Redis-backed `SubjectRevocation`, for
  * per-adapter granularity; the bundled `redisSessionStoresModule` covers the
  * common case. The default `keyPrefix` is the bundle's (`ss:rev:`), so
- * switching between the two keeps the keyspace. A missing `client` throws at
- * boot, as in every other builder here, rather than at the first command.
+ * switching between the two keeps the keyspace. A missing `client` rejects at
+ * boot rather than failing at the first command.
  */
-export const redisSubjectRevocationBuilder: AdapterBuilder<SubjectRevocation> = (config, ctx) => {
+export const redisSubjectRevocationBuilder: AdapterBuilder<SubjectRevocation> = async (
+	config,
+	ctx,
+) => {
 	const c = config as {
 		client?: SubjectRevocationClient;
 		keyPrefix?: string;

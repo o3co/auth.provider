@@ -19,6 +19,8 @@
  * challenges, the access-token denylist, the replay seen-set and authorization codes.
  */
 
+import type { RedisDurability } from "./durability.mjs";
+
 // --- ChallengeStoreClient --------------------------------------------------
 
 /**
@@ -47,6 +49,12 @@ export interface ChallengeStoreClient {
 export interface AccessTokenDenylistClient {
 	set(key: string, value: string, mode: "PX", ttlMs: number): Promise<"OK">;
 	exists(key: string): Promise<number>;
+	/**
+	 * What the server says about keeping what it is written, read once by the
+	 * store's factory for its eviction gate: a revoked jti evicted before its
+	 * expiry reads as not revoked.
+	 */
+	durability(): Promise<RedisDurability>;
 }
 
 // --- ReplaySeenSetClient ---------------------------------------------------

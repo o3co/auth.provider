@@ -79,7 +79,7 @@ const tally = (settled: PromiseSettledResult<RefreshTokenFamilyRotationOutcome>[
 
 describe("refresh-replay detection and family revocation are one Redis write", () => {
 	it("revokes the family in the same WATCH/MULTI/EXEC that detects the replay", async () => {
-		const store = freshStore();
+		const store = await freshStore();
 		const rotation = createRefreshTokenFamilyRotation({
 			refreshTokenFamilyStore: store,
 			accessTokenHorizonMs: 3_600_000,
@@ -102,7 +102,7 @@ describe("refresh-replay detection and family revocation are one Redis write", (
 	});
 
 	it("N concurrent redemptions of the SAME refresh token: exactly one rotates, family ends revoked", async () => {
-		const store = freshStore();
+		const store = await freshStore();
 		const rotation = createRefreshTokenFamilyRotation({
 			refreshTokenFamilyStore: store,
 			accessTokenHorizonMs: 3_600_000,
@@ -139,7 +139,7 @@ describe("refresh-replay detection and family revocation are one Redis write", (
 		// race. Each round is an independent family.
 		const ROUNDS = 25;
 		for (let round = 0; round < ROUNDS; round++) {
-			const store = freshStore();
+			const store = await freshStore();
 			const rotation = createRefreshTokenFamilyRotation({
 				refreshTokenFamilyStore: store,
 				accessTokenHorizonMs: 3_600_000,
@@ -173,7 +173,7 @@ describe("refresh-replay detection and family revocation are one Redis write", (
 	});
 
 	it("once a replay has revoked the family, every later redemption is refused", async () => {
-		const store = freshStore();
+		const store = await freshStore();
 		const rotation = createRefreshTokenFamilyRotation({
 			refreshTokenFamilyStore: store,
 			accessTokenHorizonMs: 3_600_000,

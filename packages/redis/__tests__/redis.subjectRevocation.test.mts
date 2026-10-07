@@ -122,7 +122,7 @@ describe("SubjectRevocation — Redis-specific behaviour", () => {
 	it("expires the watermark on the server's clock", async () => {
 		// Dated from, and waited out on, that clock (a `PXAT` deadline), so a
 		// loaded run cannot land the first read after the expiry.
-		const s = store("t321r:exp:");
+		const s = await store("t321r:exp:");
 		const at = await aheadOfServer(() => raw)();
 		await s.revokeBefore("u1", new Date(1_000), at);
 		expect((await s.revokedBefore("u1"))?.getTime()).toBe(1_000);
@@ -132,7 +132,7 @@ describe("SubjectRevocation — Redis-specific behaviour", () => {
 
 	it("starts a fresh watermark after the previous one expired", async () => {
 		// The monotonic guard must not resurrect an expired entry's larger value.
-		const s = store("t321r:fresh:");
+		const s = await store("t321r:fresh:");
 		const at = await aheadOfServer(() => raw)();
 		await s.revokeBefore("u2", new Date(9_000_000), at);
 		expect((await s.revokedBefore("u2"))?.getTime()).toBe(9_000_000);
@@ -145,7 +145,7 @@ describe("SubjectRevocation — Redis-specific behaviour", () => {
 		// The reason this is a server-side compare rather than GET-then-SET: two
 		// replicas resetting the same credential race, and a read-modify-write in
 		// the client would let the loser's smaller value win.
-		const s = store("t321r:race:");
+		const s = await store("t321r:race:");
 		const expiresAt = new Date(Date.now() + 600_000);
 		await Promise.all(
 			Array.from({ length: 50 }, (_, i) =>
@@ -158,7 +158,7 @@ describe("SubjectRevocation — Redis-specific behaviour", () => {
 	it("retains a clamped full revocation for the grant retention past the boundary it recorded", async () => {
 		// The floor runs from the recorded boundary, not the one asked for: a
 		// boundary years ahead must not keep its record years longer.
-		const s = store("t321r:clamp:");
+		const s = await store("t321r:clamp:");
 		const now = serverClock(() => raw);
 		const asked = new Date((await now()) + 10 * SUBJECT_REVOCATION_MIN_RETENTION_MS);
 		await s.revokeBefore("u5", asked, new Date((await now()) + 600_000));
@@ -172,7 +172,7 @@ describe("SubjectRevocation — Redis-specific behaviour", () => {
 	it("never truncates an in-force watermark's TTL under a shorter write", async () => {
 		// Read back as the absolute deadline (`PEXPIRETIME`), which no clock
 		// moves, rather than two PTTL readings taken a round-trip apart.
-		const s = store("t321r:ttl:");
+		const s = await store("t321r:ttl:");
 		const long = new Date(Date.now() + 600_000);
 		await s.revokeBefore("u4", new Date(1_000), long);
 		expect(await raw.pexpiretime("t321r:ttl:u4")).toBe(long.getTime());
@@ -194,15 +194,19 @@ describe("SubjectRevocation — the two boundaries on one key", () => {
 		// deployment that never makes a sessions-only stamp can roll back.
 		const prefix = "t593e:1:";
 		const before = new Date();
-		await store(prefix).revokeBefore("u", before, new Date(Date.now() + 600_000));
+		await (await store(prefix)).revokeBefore("u", before, new Date(Date.now() + 600_000));
 		expect(await raw.get(`${prefix}u`)).toBe(String(before.getTime()));
 	});
 
 	it("uses the richer form only once the boundaries actually differ", async () => {
 		const prefix = "t593e:2:";
-		await store(prefix).revokeSessionsBefore("u", new Date(1_000), new Date(Date.now() + 600_000));
+		await (await store(prefix)).revokeSessionsBefore(
+			"u",
+			new Date(1_000),
+			new Date(Date.now() + 600_000),
+		);
 		expect(await raw.get(`${prefix}u`)).toBe("v1:1000:-");
-		await store(prefix).revokeBefore("u", new Date(500), new Date(Date.now() + 600_000));
+		await (await store(prefix)).revokeBefore("u", new Date(500), new Date(Date.now() + 600_000));
 		expect(await raw.get(`${prefix}u`)).toBe("v1:1000:500");
 	});
 
@@ -212,14 +216,18 @@ describe("SubjectRevocation — the two boundaries on one key", () => {
 		// resurrect grants an earlier revocation had ended.
 		const prefix = "t593e:3:";
 		await raw.set(`${prefix}u`, "1000", "PX", 600_000);
-		const adapter = store(prefix);
+		const adapter = await store(prefix);
 		expect((await adapter.revokedBefore("u"))?.getTime()).toBe(1_000);
 		expect((await adapter.grantsRevokedBefore("u"))?.getTime()).toBe(1_000);
 	});
 
 	it("keeps both boundaries on the one key, so there is no half-written state", async () => {
 		const prefix = "t593e:4:";
-		await store(prefix).revokeSessionsBefore("u", new Date(9_000), new Date(Date.now() + 600_000));
+		await (await store(prefix)).revokeSessionsBefore(
+			"u",
+			new Date(9_000),
+			new Date(Date.now() + 600_000),
+		);
 		expect(await raw.keys(`${prefix}*`)).toEqual([`${prefix}u`]);
 	});
 
@@ -228,15 +236,19 @@ describe("SubjectRevocation — the two boundaries on one key", () => {
 		// retention into a year would be this adapter deciding otherwise.
 		const prefix = "t593e:5:";
 		await raw.set(`${prefix}u`, "1000");
-		await store(prefix).revokeSessionsBefore("u", new Date(2_000), new Date(Date.now() + 1_000));
+		await (await store(prefix)).revokeSessionsBefore(
+			"u",
+			new Date(2_000),
+			new Date(Date.now() + 1_000),
+		);
 		expect(await raw.pttl(`${prefix}u`)).toBe(-1);
-		expect((await store(prefix).revokedBefore("u"))?.getTime()).toBe(2_000);
+		expect((await (await store(prefix)).revokedBefore("u"))?.getTime()).toBe(2_000);
 	});
 
 	it("keeps a full revocation for a year, whatever expiry the caller asked for", async () => {
 		const prefix = "t593e:6:";
 		const before = new Date();
-		await store(prefix).revokeBefore("u", before, new Date(Date.now() + 1_000));
+		await (await store(prefix)).revokeBefore("u", before, new Date(Date.now() + 1_000));
 		const ttl = await raw.pttl(`${prefix}u`);
 		// A year and a minute from the boundary, less whatever the round trip took.
 		expect(ttl).toBeGreaterThan(31_000_000_000);
@@ -244,7 +256,7 @@ describe("SubjectRevocation — the two boundaries on one key", () => {
 
 	it("refuses a value it cannot read rather than answering that nothing was revoked", async () => {
 		const prefix = "t593e:7:";
-		const adapter = store(prefix);
+		const adapter = await store(prefix);
 		for (const corrupt of [
 			"not-a-watermark",
 			"v1:abc:1",
@@ -400,11 +412,11 @@ describe("SubjectRevocation — the two boundaries on one key", () => {
 		]) {
 			await raw.set(`${prefix}u`, corrupt, "PX", 600_000);
 			await expect(
-				store(prefix).revokeBefore("u", new Date(), new Date(Date.now() + 600_000)),
+				(await store(prefix)).revokeBefore("u", new Date(), new Date(Date.now() + 600_000)),
 				corrupt,
 			).rejects.toThrow();
 			await expect(
-				store(prefix).revokeSessionsBefore("u", new Date(), new Date(Date.now() + 600_000)),
+				(await store(prefix)).revokeSessionsBefore("u", new Date(), new Date(Date.now() + 600_000)),
 				corrupt,
 			).rejects.toThrow();
 			expect(await raw.get(`${prefix}u`), corrupt).toBe(corrupt);
@@ -420,10 +432,10 @@ describe("SubjectRevocation — the two boundaries on one key", () => {
 		]) {
 			const construct = () =>
 				createRedisSubjectRevocation({ client: client as never, keyPrefix: "t593e:9:" });
-			expect(construct).toThrow(/advanceRevocationBoundaries/);
+			await expect(construct()).rejects.toThrow(/advanceRevocationBoundaries/);
 			// The refusal states the rule it enforces, with no issue number or design label.
-			expect(construct).toThrow(/clamp/);
-			expect(construct).not.toThrow(/#\d|\bD\d+\b/);
+			await expect(construct()).rejects.toThrow(/clamp/);
+			await expect(construct()).rejects.not.toThrow(/#\d|\bD\d+\b/);
 		}
 	});
 });

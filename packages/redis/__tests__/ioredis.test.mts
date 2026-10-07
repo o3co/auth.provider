@@ -763,9 +763,13 @@ describe("makeIoredisClients session-store scripts — EVALSHA-first with NOSCRI
 // ---------------------------------------------------------------------------
 
 describe("makeIoredisClients subjectRevocationClient — one write, the clamped one", () => {
-	it("offers only the read and the clamped write", () => {
+	it("offers only the read, the clamped write and the durability report", () => {
 		const client = makeIoredisClients(makeFakeIoredis()).subjectRevocationClient;
-		expect(Object.keys(client).sort()).toEqual(["advanceRevocationBoundaries", "get"]);
+		expect(Object.keys(client).sort()).toEqual([
+			"advanceRevocationBoundaries",
+			"durability",
+			"get",
+		]);
 	});
 });
 

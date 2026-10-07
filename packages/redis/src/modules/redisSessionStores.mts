@@ -46,7 +46,8 @@ import { createRedisUserSessionStore } from "../userSessionStore.mjs";
  * revocation store, which says a clamped boundary
  * (`subject_revocation_boundary_clamped`); `consoleLogger` when it is empty.
  *
- * The lifecycle store is built by `createRedisSessionLifecycleStore`, so a
+ * The lifecycle store and the revocation store are built by
+ * `createRedisSessionLifecycleStore` and `createRedisSubjectRevocation`, so a
  * server that fails the eviction gate (`internal/eviction-policy.mts`)
  * refuses the boot with a `RedisStoreEvictableError`.
  */

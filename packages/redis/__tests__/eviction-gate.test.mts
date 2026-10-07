@@ -6,9 +6,11 @@
 /**
  * The one eviction gate every Redis store whose keys must stay until they
  * expire runs before it is handed out — the attempt counter, the session
- * lifecycle store, the federation token store and the two MFA stores — on
- * every path that builds one: the exported factory, the module and, for the
- * federation token store, the adapter builder.
+ * lifecycle store, the federation token store, the two MFA stores and the
+ * stores that hold revocation state (the access-token denylist, subject
+ * revocation and the refresh-token family store) — on every path that builds
+ * one: the exported factory, the module and, where the store has one, the
+ * adapter builder.
  *
  * A store is built only on a server whose `maxmemory-policy` reads as
  * `noeviction`. Any other policy it reads refuses, known or not. A policy it
@@ -18,9 +20,15 @@
  */
 
 import { Buffer } from "node:buffer";
-import type { Module } from "@o3co/auth-provider-core";
+import { createApp, defineModule, type Module } from "@o3co/auth-provider-core";
+import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import type { Redis } from "ioredis";
 import { describe, expect, it } from "vitest";
+import {
+	createRedisAccessTokenDenylist,
+	redisAccessTokenDenylistBuilder,
+	redisAccessTokenDenylistModule,
+} from "#/access-token-denylist.mjs";
 import { createRedisAttemptCounter, redisAttemptCounterModule } from "#/attempt-counter.mjs";
 import type { RedisDurability } from "#/clients.mjs";
 import {
@@ -35,8 +43,17 @@ import {
 	redisMfaTransactionStoreModule,
 } from "#/mfa-transaction-store.mjs";
 import { redisSessionStoresModule } from "#/modules/redisSessionStores.mjs";
+import {
+	createRedisRefreshTokenFamilyStore,
+	redisRefreshTokenFamilyStoreBuilder,
+	redisRefreshTokenFamilyStoreModule,
+} from "#/refresh-token-family.mjs";
 import { createRedisSessionLifecycleStore } from "#/session-lifecycle-store.mjs";
-import { withSection } from "./support/section.mjs";
+import {
+	createRedisSubjectRevocation,
+	redisSubjectRevocationBuilder,
+} from "#/subjectRevocation.mjs";
+import { capturing, overReference, withSection } from "./support/section.mjs";
 
 /** A client that answers `durability` as given, and every other member with nothing. */
 const clientReporting = (durability: () => Promise<RedisDurability>): never =>
@@ -179,6 +196,69 @@ const STORES: readonly Store[] = [
 			},
 		],
 	},
+	{
+		store: "accessTokenDenylist",
+		reason: "access-token-denylist-evictable",
+		paths: [
+			{
+				name: "createRedisAccessTokenDenylist",
+				build: (client) => createRedisAccessTokenDenylist({ client, keyPrefix: "atdeny:" }),
+			},
+			{
+				name: "redisAccessTokenDenylistBuilder",
+				build: (client) => Promise.resolve(redisAccessTokenDenylistBuilder({ client }, {})),
+			},
+			{
+				name: "redisAccessTokenDenylistModule",
+				build: (client) =>
+					provide(redisAccessTokenDenylistModule, "accessTokenDenylist", {
+						accessTokenDenylistClient: client,
+					}),
+			},
+		],
+	},
+	{
+		store: "subjectRevocation",
+		reason: "subject-revocation-evictable",
+		paths: [
+			{
+				name: "createRedisSubjectRevocation",
+				build: (client) => createRedisSubjectRevocation({ client }),
+			},
+			{
+				name: "redisSubjectRevocationBuilder",
+				build: (client) => Promise.resolve(redisSubjectRevocationBuilder({ client }, {})),
+			},
+			{
+				name: "redisSessionStoresModule",
+				build: (client) =>
+					provide(redisSessionStoresModule, "subjectRevocation", {
+						subjectRevocationClient: client,
+					}),
+			},
+		],
+	},
+	{
+		store: "refreshTokenFamilyStore",
+		reason: "refresh-token-family-store-evictable",
+		paths: [
+			{
+				name: "createRedisRefreshTokenFamilyStore",
+				build: (client) => createRedisRefreshTokenFamilyStore({ client, keyPrefix: "rtfam:" }),
+			},
+			{
+				name: "redisRefreshTokenFamilyStoreBuilder",
+				build: (client) => Promise.resolve(redisRefreshTokenFamilyStoreBuilder({ client }, {})),
+			},
+			{
+				name: "redisRefreshTokenFamilyStoreModule",
+				build: (client) =>
+					provide(redisRefreshTokenFamilyStoreModule, "refreshTokenFamilyStore", {
+						refreshTokenFamilyClient: client,
+					}),
+			},
+		],
+	},
 ];
 
 const CASES = STORES.flatMap((s) => s.paths.map((path) => ({ ...s, path })));
@@ -266,6 +346,77 @@ describe.each(CASES)("$path.name", ({ path, store, reason }) => {
 	});
 });
 
+describe.each([
+	{
+		module: redisAccessTokenDenylistModule,
+		slot: "accessTokenDenylist",
+		clientSlots: ["accessTokenDenylistClient"],
+		reason: "access-token-denylist-evictable",
+	},
+	{
+		module: redisSessionStoresModule,
+		slot: "subjectRevocation",
+		clientSlots: [
+			"userSessionStoreClient",
+			"subjectSessionIndexClient",
+			"subjectRevocationClient",
+			"sessionLifecycleStoreClient",
+		],
+		reason: "subject-revocation-evictable",
+	},
+	{
+		module: redisRefreshTokenFamilyStoreModule,
+		slot: "refreshTokenFamilyStore",
+		clientSlots: ["refreshTokenFamilyClient"],
+		reason: "refresh-token-family-store-evictable",
+	},
+])("a boot that reads $slot from $module.name", ({ module, slot, clientSlots, reason }) => {
+	/** Reads the slot and contributes a route, so the slot is built at boot. */
+	const reader = defineModule({
+		name: `test:${slot}-reader`,
+		requires: [slot] as never,
+		contributes: {
+			routes: [
+				{
+					mountPath: "/__test_noop__",
+					id: "test-noop",
+					handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+				},
+			],
+		},
+	});
+
+	const boot = (answer: RedisDurability) =>
+		createApp({
+			modules: [module, reader],
+			bootstrapComponents: {
+				config: capturing(overReference(makeValidCoreConfig(), [module]), [module]),
+				pathResolver: (p: string) => p,
+				...Object.fromEntries(clientSlots.map((c) => [c, clientReporting(async () => answer)])),
+			} as never,
+		});
+
+	it("is refused on a server that may evict, naming the module and the store", async () => {
+		await expect(boot(report("allkeys-lru"))).rejects.toMatchObject({
+			name: "BootError",
+			reason: "provides-factory-failed",
+			details: { module: module.name, componentKey: slot },
+			cause: { name: "RedisStoreEvictableError", reason, maxmemoryPolicy: "allkeys-lru" },
+		});
+	});
+
+	it("boots on noeviction, and on a policy it cannot read when the clients assume noeviction", async () => {
+		for (const answer of [
+			report("noeviction"),
+			report(undefined, { refusal: NOPERM, assumeNoEviction: true }),
+		]) {
+			const handle = await boot(answer);
+			expect((handle.components as Record<string, unknown>)[slot]).toBeDefined();
+			await handle.dispose();
+		}
+	});
+});
+
 describe("makeIoredisClients' assumeNoEviction", () => {
 	/** A connection that refuses INFO and CONFIG, as an ACL-restricted user's does. */
 	const refusing = {
@@ -283,6 +434,9 @@ describe("makeIoredisClients' assumeNoEviction", () => {
 		clients.federationTokenStoreClient.durability(),
 		clients.mfaFactorStoreClient.durability(),
 		clients.mfaTransactionStoreClient.durability(),
+		clients.accessTokenDenylistClient.durability(),
+		clients.subjectRevocationClient.durability(),
+		clients.refreshTokenFamilyClient.durability(),
 	];
 
 	it("reaches every client whose store runs the gate", async () => {
@@ -308,6 +462,9 @@ describe("the policy the bundled clients read off the server", () => {
 		federationTokenStore: "federationTokenStoreClient",
 		mfaFactorStore: "mfaFactorStoreClient",
 		mfaTransactionStore: "mfaTransactionStoreClient",
+		accessTokenDenylist: "accessTokenDenylistClient",
+		subjectRevocation: "subjectRevocationClient",
+		refreshTokenFamilyStore: "refreshTokenFamilyClient",
 	};
 
 	/** A connection whose INFO memory and CONFIG GET maxmemory-policy answer as given; an Error is thrown. */

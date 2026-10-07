@@ -19,6 +19,8 @@
  * of its own that `duplicate()` opens and disposal closes.
  */
 
+import type { RedisDurability } from "./durability.mjs";
+
 // --- RefreshTokenFamilyClient ----------------------------------------------
 
 /**
@@ -48,6 +50,12 @@ export interface RefreshTokenFamilyClient {
 	unwatch(): Promise<"OK">;
 	multi(): RefreshTokenFamilyMultiClient;
 	duplicate(): DisposableRefreshTokenFamilyClient;
+	/**
+	 * What the server says about keeping what it is written, read once by the
+	 * store's factory for its eviction gate: a revoked family evicted before its
+	 * expiry reads as not revoked.
+	 */
+	durability(): Promise<RedisDurability>;
 }
 
 /**

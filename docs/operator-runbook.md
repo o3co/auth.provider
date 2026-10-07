@@ -345,8 +345,12 @@ Module-level messages that arrive wrapped in a factory failure:
   token store (`redisFederationTokenStoreModule`), the session lifecycle store
   (`redisSessionStoresModule`, once a module reads `sessionLifecycleStore`),
   the two MFA stores (`redisMfaFactorStoreModule`,
-  `redisMfaTransactionStoreModule`, the MFA ADR's D12) and the attempt counter
-  (`redisAttemptCounterModule`) — are built only on a server whose
+  `redisMfaTransactionStoreModule`, the MFA ADR's D12), the attempt counter
+  (`redisAttemptCounterModule`), and the stores that hold revocation state —
+  the access-token denylist (`redisAccessTokenDenylistModule`), subject
+  revocation (`redisSessionStoresModule`, once a module reads
+  `subjectRevocation`) and the refresh-token family store
+  (`redisRefreshTokenFamilyStoreModule`) — are built only on a server whose
   `maxmemory-policy` reads as `noeviction`
   (`packages/redis/src/internal/eviction-policy.mts`). **Their Redis must run
   `maxmemory-policy` `noeviction`**, on a server of its own if the rest of your
@@ -359,7 +363,9 @@ Module-level messages that arrive wrapped in a factory failure:
   `RedisStoreEvictableError` `cause` whose `reason` names the store
   (`federation-token-store-evictable`, `session-lifecycle-store-evictable`,
   `mfa-factor-store-evictable`, `mfa-transaction-store-evictable`,
-  `attempt-counter-evictable`) and whose message names the policy and what an
+  `attempt-counter-evictable`, `access-token-denylist-evictable`,
+  `subject-revocation-evictable`, `refresh-token-family-store-evictable`) and
+  whose message names the policy and what an
   eviction would lose. A policy it cannot read — `INFO` and `CONFIG` refused,
   renamed or disabled for the connection's user — is refused the same way,
   `maxmemoryPolicy` `undefined`, the refusing reply as the error's own

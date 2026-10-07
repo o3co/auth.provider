@@ -622,6 +622,30 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   `mfa_transaction_store_lock_evictable` are gone; the MFA stores'
   `…_durability_unchecked` now names only the persistence it could not read
   (`appendonly`, `save`).
+- **BREAKING: the Redis stores that hold revocation state refuse to boot
+  unless the server's `maxmemory-policy` is `noeviction` (#1598).** The
+  access-token denylist (`redisAccessTokenDenylistModule`), subject revocation
+  (`redisSessionStoresModule`'s `subjectRevocation`) and the refresh-token
+  family store (`redisRefreshTokenFamilyStoreModule`) now pass the same
+  eviction gate as the stores in the entry above, as they did not before:
+  each keeps a revocation under a key with a TTL that lasts until the
+  credentials it refuses expire. A boot that builds one of them on any other
+  policy, or on one the server will not report, is refused with a
+  `provides-factory-failed` whose `cause` is a `RedisStoreEvictableError`
+  (`reason` `access-token-denylist-evictable`,
+  `subject-revocation-evictable` or `refresh-token-family-store-evictable`).
+  Their factories now ask the server at build time, so a server that cannot
+  answer at boot — not yet started, or unreachable — fails the boot with a
+  `provides-factory-failed` too (the driver's error as its `cause`), where
+  these stores used to build without asking. The standalone template ships
+  the refresh-token family store on Redis always and the access-token
+  denylist on Redis by default (`adapters.accessTokenDenylist = "redis"`), so
+  this applies to its default boot, with every other `adapters` selection
+  on memory: start Redis before the provider. The remedy is the entry above's: set `maxmemory-policy noeviction`, or give
+  these stores a Redis of their own; where the server runs `noeviction` but
+  will not say, `makeIoredisClients(io, { assumeNoEviction: true })` (in the
+  standalone template, `REDIS_CLIENTS_ASSUME_NO_EVICTION=true`,
+  `redis-clients.assumeNoEviction`).
 - **BREAKING: the Redis federation stores read the environment's name
   trimmed and in lower case (#826).** The plaintext guard of
   `redis-federation-token-store` and `redis-federation-grant-store` matched
@@ -2106,6 +2130,19 @@ modules fills them.
   that implements `durability()` may report the operator's assertion as
   `RedisDurability.assumeNoEviction`. `redisAttemptCounterModule` no longer
   reads the `logger` slot.
+- **BREAKING: the Redis factories of the stores that hold revocation state
+  are async, and their clients report `durability()` (#1598).**
+  `createRedisAccessTokenDenylist`, `createRedisSubjectRevocation` and
+  `createRedisRefreshTokenFamilyStore` return a `Promise` of the store, and so
+  do `redisAccessTokenDenylistBuilder`, `redisSubjectRevocationBuilder` and
+  `redisRefreshTokenFamilyStoreBuilder`: each resolves once the server passes
+  the eviction gate (the entry under
+  [Values read more strictly](#values-read-more-strictly)), and an option or
+  client it refuses rejects rather than throws. `await` them.
+  `AccessTokenDenylistClient`, `SubjectRevocationClient` and
+  `RefreshTokenFamilyClient` gain `durability(): Promise<RedisDurability>`,
+  which `makeIoredisClients` provides; a client of your own implements it as
+  the other gated stores' clients do.
 
 ## Stores and records you implement
 

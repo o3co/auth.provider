@@ -28,7 +28,8 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { listeningRedis } from "./redis-stand-in.fixture.mjs";
 
 const templateRoot = fileURLToPath(new URL("../..", import.meta.url));
 const tsxCli = createRequire(import.meta.url).resolve("tsx/cli");
@@ -46,13 +47,28 @@ const clientsFile = (() => {
 })();
 
 /**
+ * The Redis the refresh-token family store's shared socket dials: a stand-in
+ * that reports `noeviction`, so the store passes its eviction gate and the run
+ * reaches no real server.
+ */
+let redis: Awaited<ReturnType<typeof listeningRedis>>;
+
+beforeAll(async () => {
+	redis = await listeningRedis();
+});
+
+afterAll(async () => {
+	await redis?.close();
+});
+
+/**
  * Development, with every store the `adapters` section selects in memory.
  * The refresh-token family store has no memory choice in the template; its
- * shared Redis socket points at a port nothing answers, so the run reaches no
- * real server. Nothing is inherited from the test runner's environment but
- * PATH, so its NODE_ENV and LOGGING_LEVEL do not reach the child.
+ * shared Redis socket points at the stand-in above. Nothing is inherited from
+ * the test runner's environment but PATH, so its NODE_ENV and LOGGING_LEVEL do
+ * not reach the child.
  */
-const ENV: Readonly<Record<string, string>> = {
+const env = (): Readonly<Record<string, string>> => ({
 	PATH: process.env.PATH ?? "",
 	CONFIG_ENV: "development",
 	NODE_ENV: "development",
@@ -74,11 +90,11 @@ const ENV: Readonly<Record<string, string>> = {
 	ADAPTERS_FEDERATION_TOKEN_STORE: "memory",
 	ADAPTERS_MFA_FACTOR_STORE: "memory",
 	ADAPTERS_MFA_TRANSACTION_STORE: "memory",
-	REDIS_CLIENTS_URL: "redis://127.0.0.1:9",
+	REDIS_CLIENTS_URL: `redis://127.0.0.1:${redis.port}`,
 	REPOSITORIES_CLIENT_YAML_PATH: clientsFile,
 	REPOSITORIES_USER_HTTP_AUTHENTICATE_URL: "http://127.0.0.1:9/authenticate",
 	REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL: "http://127.0.0.1:9/authenticate-by-token",
-};
+});
 
 interface Run {
 	readonly stdout: string;
@@ -91,7 +107,7 @@ function startAndStop(timeoutMs: number): Promise<Run> {
 	return new Promise((resolve, reject) => {
 		const child: ChildProcess = spawn(process.execPath, [tsxCli, "src/app.mts"], {
 			cwd: templateRoot,
-			env: ENV,
+			env: env(),
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 		let stdout = "";

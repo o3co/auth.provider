@@ -53,7 +53,7 @@ const session = (sid: string, sub = "u1") => ({
 });
 
 /** One replica's view of the shared store — separate adapter objects, one Redis. */
-const replica = (n: string) => {
+const replica = async (n: string) => {
 	const clients = makeIoredisClients(raw);
 	return {
 		userSessionStore: createRedisUserSessionStore({
@@ -64,7 +64,7 @@ const replica = (n: string) => {
 			client: clients.subjectSessionIndexClient,
 			keyPrefix: `t321e:${n}:sub:`,
 		}),
-		subjectRevocation: createRedisSubjectRevocation({
+		subjectRevocation: await createRedisSubjectRevocation({
 			client: clients.subjectRevocationClient,
 			keyPrefix: `t321e:${n}:rev:`,
 		}),
@@ -73,7 +73,7 @@ const replica = (n: string) => {
 
 describe("revokeAllForSubject on Redis-backed stores", () => {
 	it("reports nothing unavailable and cascades every session", async () => {
-		const r = replica("cascade");
+		const r = await replica("cascade");
 		await r.userSessionStore.create(session("s1"));
 		await r.userSessionStore.create(session("s2"));
 		await r.subjectSessionIndex.addSid("u1", "s1", FUTURE());
@@ -108,8 +108,8 @@ describe("revokeAllForSubject on Redis-backed stores", () => {
 	it("puts the watermark in force for a replica that never saw the reset", async () => {
 		// The replica that handles the next request is not the one that
 		// handled the password change.
-		const writer = replica("shared");
-		const reader = replica("shared");
+		const writer = await replica("shared");
+		const reader = await replica("shared");
 
 		await writer.subjectSessionIndex.addSid("u2", "s1", FUTURE());
 		const before = await revokeAllForSubject({
@@ -129,7 +129,7 @@ describe("revokeAllForSubject on Redis-backed stores", () => {
 	it("still reports what is missing when a slot is left unwired", async () => {
 		// A composition that wires only one of the pair is told which one it
 		// left out.
-		const r = replica("partial");
+		const r = await replica("partial");
 		const result = await revokeAllForSubject({
 			subject: "u3",
 			cascadeSession: async () => ({ ok: true }),
