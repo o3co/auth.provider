@@ -762,8 +762,9 @@ compared over its full length.
 Boot refuses an entry that breaks this, an empty `id` or username, two users with the same
 id, and a `username` key inside an entry, naming the user and the field and
 never the value. Each start with the `yaml` backend logs
-`user_repository_in_memory` at warn, whatever the environment: the users file
-is meant for development and tests. See
+`user_repository_in_memory` at warn on the template's logger (`LOGGING_LEVEL`
+applies), whatever the environment: the users file is meant for development
+and tests. See
 [the core package's README](../../packages/core/README.md#loading-clients-and-users-from-yaml).
 
 Both user-authentication URLs carry **plaintext user credentials** to the
