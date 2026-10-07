@@ -26,14 +26,17 @@
  * answers for another claim: an own `__proto__` key is copied as a key.
  */
 
-import type {
-	ClientRepository,
-	ExchangeTokenValidator,
-	GrantPolicyRequest,
-	GrantResult,
-	PublicClient,
-	User,
-	ValidatedToken,
+import { generateKeyPairSync, sign } from "node:crypto";
+import {
+	type ClientRepository,
+	createRemoteSigningKeyStore,
+	type ExchangeTokenValidator,
+	type GrantPolicyRequest,
+	type GrantResult,
+	type KeyStore,
+	type PublicClient,
+	type User,
+	type ValidatedToken,
 } from "@o3co/auth-provider-core";
 import {
 	createTestOAuthTokenSettings,
@@ -103,7 +106,7 @@ function shiftingAnswer(): ValidatedToken {
 /** The answer for `role`'s token, on that token's `call`th asking (from 1). */
 type Answering = (role: "subject" | "actor", call: number) => unknown;
 
-function build(answer: Answering) {
+function build(answer: Answering, options: { readonly keyStore?: KeyStore } = {}) {
 	const userRepository = createTestUserRepository({ users });
 	const policyRequests: GrantPolicyRequest[] = [];
 	const calls = { subject: 0, actor: 0 };
@@ -129,7 +132,7 @@ function build(answer: Answering) {
 			accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 300 },
 			requireEmailVerified: true,
 		}),
-		keyStore,
+		keyStore: options.keyStore ?? keyStore,
 		refreshTokenFamilyRevocation: makeFamilyRevocation(),
 		tokenExchangeValidatorResolver: new Map([[JWT_TOKEN_TYPE, validator]]),
 		clientRepository,
@@ -615,6 +618,111 @@ describe("token exchange reads each validator answer once — members only a rea
 				role === "subject"
 					? subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), may_act: mayAct } })
 					: { sub: "svc-a", claims: {} },
+			);
+
+			expect(await h.exchange(WITH_ACTOR)).toEqual({
+				status: 400,
+				error: "invalid_request",
+				errorDescription: "may_act_violation: actor not authorized by subject token",
+			});
+		});
+	}
+});
+
+/** Core's remote-signing key store over an in-process Ed25519 key: it serialises the claims itself. */
+async function remoteSigningKeyStore(): Promise<KeyStore> {
+	const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+	return createRemoteSigningKeyStore({
+		algorithm: "EdDSA",
+		kid: "remote-1",
+		publicKeyPem: publicKey.export({ type: "spki", format: "pem" }).toString(),
+		signer: { sign: async (_kid, data) => new Uint8Array(sign(null, data, privateKey)) },
+	});
+}
+
+describe("token exchange reads each validator answer once — plain data only", () => {
+	it("refuses, before the remote signer serialises anything, an act carrying a toJSON", async () => {
+		const act = {
+			sub: "svc-0",
+			toJSON: () => ({ sub: "svc-0", act: { sub: "svc-1", act: { sub: "svc-2", act: {} } } }),
+		};
+		const h = build(
+			(role) =>
+				role === "subject"
+					? subjectAnswer({
+							act,
+							claims: { azp: client.clientId, exp: EXP(), may_act: { sub: "svc-a" } },
+						})
+					: { sub: "svc-a", claims: {} },
+			{ keyStore: await remoteSigningKeyStore() },
+		);
+
+		expect(await h.exchange(WITH_ACTOR)).toEqual(failedValidation("subject"));
+	});
+
+	it("mints through the remote signer for an answer of plain data", async () => {
+		const h = build(() => subjectAnswer(), { keyStore: await remoteSigningKeyStore() });
+
+		expect(decodeJwt(tokensOf(await h.exchange()).access_token).sub).toBe("user-1");
+	});
+
+	for (const [label, value] of [
+		["a function", () => "client-a"],
+		["a symbol", Symbol("claim")],
+		["a bigint", 10n],
+		["a number that is not finite", Number.NaN],
+		["an infinite number", Number.POSITIVE_INFINITY],
+	] as const) {
+		it(`refuses claims holding ${label}, as a failed validation`, async () => {
+			const h = build(() =>
+				subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), extra: { value } } }),
+			);
+
+			expect(await h.exchange()).toEqual(failedValidation("subject"));
+		});
+	}
+
+	it("refuses an actor answer whose claims hold a function, as a failed validation", async () => {
+		const h = build((role) =>
+			role === "subject"
+				? subjectAnswer()
+				: { sub: "svc-a", claims: { iss: ISSUER, toJSON: () => ({}) } },
+		);
+
+		expect(await h.exchange(WITH_ACTOR)).toEqual(failedValidation("actor"));
+	});
+});
+
+/**
+ * A `may_act` entry whose `has` reports `sub` on the first ask alone, and
+ * never `iss`; a read gives no `sub` and this provider's issuer as `iss`.
+ */
+function shiftingPresence(): object {
+	let subAsks = 0;
+	return new Proxy(
+		{},
+		{
+			get: (_target, key) => (key === "iss" ? ISSUER : undefined),
+			has: (_target, key) => key === "sub" && subAsks++ === 0,
+			ownKeys: () => [],
+			getOwnPropertyDescriptor: () => undefined,
+		},
+	);
+}
+
+describe("token exchange reads each validator answer once — presence asked once", () => {
+	for (const [label, mayAct] of [
+		["a may_act", () => shiftingPresence()],
+		["a may_act entry", () => [shiftingPresence()]],
+	] as const) {
+		it(`holds ${label} to the presence its first ask reported`, async () => {
+			// Present at the first ask with no string value, `sub` matches no actor.
+			const h = build((role) =>
+				role === "subject"
+					? subjectAnswer({
+							claims: { azp: client.clientId, exp: EXP(), may_act: mayAct() },
+						})
+					: { sub: "svc-a", claims: { iss: ISSUER } },
 			);
 
 			expect(await h.exchange(WITH_ACTOR)).toEqual({

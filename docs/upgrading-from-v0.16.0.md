@@ -1040,12 +1040,16 @@ The boot refusals you can meet, with their messages, are in
   is not a string, whose `claims` are not a record, or that has an array
   where a check reads a record (`cnf`, a `may_act` entry, `act`), is a failed
   validation (`400 invalid_request`, `subject_token validation failed`). A
-  member read by name is read whether or not `in` reports it. The answer to
-  the validation before minting is held to the shape alone — a record with a
-  string `sub` and record `claims` — and nothing of it is copied or minted.
-  At either, a member whose read throws is `503 temporarily_unavailable`, as
-  a validator that throws. See
-  the oauth-token-exchange README, "External JWT subject_token".
+  member read by name is read whether or not `in` reports it. A validator's
+  answer is expected to be plain data: a function (a `toJSON` included), a
+  symbol, a bigint or a number that is not finite anywhere in a copied
+  position is a failed validation, and of an answer whose shape changes as
+  it is read, the copy is the first read, and no more is promised. The
+  answer to the validation before minting is held to the shape alone — a
+  record with a string `sub` and record `claims` — and nothing of it is
+  copied or minted. At either, a member whose read throws is
+  `503 temporarily_unavailable`, as a validator that throws. See the
+  oauth-token-exchange README, "External JWT subject_token".
 - **The Store's users.** A `2xx` user with an empty `id` or `username` is
   refused as malformed, `503` on every login path (#862). A Store sends a
   stable label as `username` for a user without one.
