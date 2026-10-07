@@ -23,7 +23,8 @@
  * one, a variable renamed with them refuses boot while its old name is set,
  * whatever its new name holds, and the authorization-code grant's `pkce` block, and its
  * variable, refuse boot as removed. The refresh grant's unknown-family policy
- * sits beside its switch, moved from `oauth.refreshToken`; `legacyRtPolicy`,
+ * is removed at both paths, `oauth-authorization.grants.refreshToken` and
+ * `oauth.refreshToken`, with both variables; `legacyRtPolicy`,
  * `legacyTokenCompat` and `oauth.authorize.allowUnmarkedClients` refuse boot
  * as removed. The access-token default is `oauth.accessToken.defaultExpiresIn`
  * alone: `oauth.accessToken.expiresIn` refuses boot as moved there, and its
@@ -137,12 +138,16 @@ describe("the package's config/reference.conf", () => {
 			"oauth-authorization": {
 				grants: {
 					authorizationCode: { enabled: false },
-					refreshToken: { enabled: false, unknownFamilyPolicy: "reject" },
+					refreshToken: { enabled: false },
 					clientCredentials: { enabled: false },
 					jwtBearer: { enabled: false },
 				},
 			},
 		});
+		expect(
+			(defaults()["oauth-authorization"] as { grants: { refreshToken: object } }).grants
+				.refreshToken,
+		).toStrictEqual({ enabled: false });
 	});
 
 	it.each([
@@ -154,10 +159,6 @@ describe("the package's config/reference.conf", () => {
 		[
 			"OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED",
 			"oauth-authorization.grants.refreshToken.enabled",
-		],
-		[
-			"OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY",
-			"oauth-authorization.grants.refreshToken.unknownFamilyPolicy",
 		],
 		[
 			"OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED",
@@ -187,6 +188,7 @@ describe("the package's config/reference.conf", () => {
 		"OAUTH_GRANTS_JWT_BEARER_ENABLED",
 		"OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256",
 		"OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY",
+		"OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY",
 		"ENDPOINTS_CONSENT_URL",
 		"OAUTH_CIMD_ENABLED",
 		"OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS",
@@ -227,13 +229,14 @@ describe("the paths the settings moved from, on the manifests", () => {
 		expect(section?.reference?.href).toBe(REFERENCE.href);
 	});
 
-	it("oauth-authorization: each grant's switch from oauth.grants.<grant>, the refresh grant's unknown-family policy from oauth.refreshToken, and the authorization-code grant's pkce block removed", () => {
+	it("oauth-authorization: each grant's switch from oauth.grants.<grant>, the authorization-code grant's pkce block removed, and the refresh grant's unknown-family policy removed at both paths with both variables", () => {
 		const section = everyModule()[2]?.section;
 		expect(section?.relocatedFrom).toEqual({
 			"oauth.grants.authorization_code": "grants.authorizationCode",
 			"oauth.grants.authorization_code.pkce": null,
-			"oauth.grants.refresh_token": "grants.refreshToken",
-			"oauth.refreshToken.unknownFamilyPolicy": "grants.refreshToken.unknownFamilyPolicy",
+			"oauth.grants.refresh_token.enabled": "grants.refreshToken.enabled",
+			"oauth.refreshToken.unknownFamilyPolicy": null,
+			"oauth-authorization.grants.refreshToken.unknownFamilyPolicy": null,
 			"oauth.grants.client_credentials": "grants.clientCredentials",
 			"oauth.grants.urn:ietf:params:oauth:grant-type:jwt-bearer": "grants.jwtBearer",
 		});
@@ -243,6 +246,8 @@ describe("the paths the settings moved from, on the manifests", () => {
 				"oauth.grants.authorization_code.pkce.requireS256",
 			OAUTH_GRANTS_REFRESH_TOKEN_ENABLED: "oauth.grants.refresh_token.enabled",
 			OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "oauth.refreshToken.unknownFamilyPolicy",
+			OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY:
+				"oauth-authorization.grants.refreshToken.unknownFamilyPolicy",
 			OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED: "oauth.grants.client_credentials.enabled",
 			OAUTH_GRANTS_JWT_BEARER_ENABLED:
 				"oauth.grants.urn:ietf:params:oauth:grant-type:jwt-bearer.enabled",
@@ -349,8 +354,8 @@ describe("the oauth-authorization section, and the switches read from it as boot
 		clientCredentials: { enabled: false },
 		jwtBearer: { enabled: false },
 	};
-	/** What the package's reference ships: every switch off, and the refresh grant's policy reject. */
-	const SHIPPED = { ...ALL_OFF, refreshToken: { enabled: false, unknownFamilyPolicy: "reject" } };
+	/** What the package's reference ships: every switch off. */
+	const SHIPPED = ALL_OFF;
 
 	it("is exported as a module value, and no factory builds it from a configuration", async () => {
 		const entry = (await import("#/index.mjs")) as Record<string, unknown>;
@@ -412,30 +417,16 @@ describe("the oauth-authorization section, and the switches read from it as boot
 		expect(pathOf({ grants: { refreshToken: { enable: true } } })).toEqual(["grants.refreshToken"]);
 	});
 
-	it.each(["accept", "reject"])("reads grants.refreshToken.unknownFamilyPolicy = %s", (policy) => {
-		expect(parse({ grants: { refreshToken: { unknownFamilyPolicy: policy } } })).toStrictEqual({
-			grants: { refreshToken: { unknownFamilyPolicy: policy } },
-		});
-	});
-
-	it.each(["warn", "ACCEPT", "", true])(
-		"refuses grants.refreshToken.unknownFamilyPolicy = %j at its path",
+	it.each(["accept", "reject"])(
+		"declares no grants.refreshToken.unknownFamilyPolicy: %j is a key the section does not know",
 		(policy) => {
 			expect(
 				oauthAuthorizationConfigSchema
 					.safeParse({ grants: { refreshToken: { unknownFamilyPolicy: policy } } })
 					.error?.issues.map((issue) => issue.path.join(".")),
-			).toEqual(["grants.refreshToken.unknownFamilyPolicy"]);
+			).toEqual(["grants.refreshToken"]);
 		},
 	);
-
-	it("holds no policy key under any other grant", () => {
-		expect(
-			oauthAuthorizationConfigSchema
-				.safeParse({ grants: { authorizationCode: { unknownFamilyPolicy: "accept" } } })
-				.error?.issues.map((issue) => issue.path.join(".")),
-		).toEqual(["grants.authorizationCode"]);
-	});
 });
 
 describe("boot, over a configuration that captures the modules' renamed variables", () => {
@@ -500,12 +491,6 @@ describe("boot, over a configuration that captures the modules' renamed variable
 			"oauth.grants.urn:ietf:params:oauth:grant-type:jwt-bearer.enabled",
 			"oauth-authorization.grants.jwtBearer.enabled",
 			"OAUTH_AUTHORIZATION_GRANTS_JWT_BEARER_ENABLED",
-		],
-		[
-			{ refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "accept" } },
-			"oauth.refreshToken.unknownFamilyPolicy",
-			"oauth-authorization.grants.refreshToken.unknownFamilyPolicy",
-			"OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY",
 		],
 	])("refuses %j, naming %s's new path and its variable", async (keys, from, to, variable) => {
 		const err = await refusal((config) => oauthWith(config, keys));
@@ -709,12 +694,6 @@ describe("boot, over a configuration that captures the modules' renamed variable
 		],
 		["ENDPOINTS_CONSENT_URL", "OAUTH_CONSENT_PAGE_URL", "oauth", "oauth.consentPage.url"],
 		[
-			"OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY",
-			"OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY",
-			"oauth-authorization",
-			"oauth-authorization.grants.refreshToken.unknownFamilyPolicy",
-		],
-		[
 			"OAUTH_ACCESS_TOKEN_EXPIRES_IN",
 			"OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN",
 			"oauth",
@@ -872,94 +851,58 @@ describe("boot, over a configuration that captures the modules' renamed variable
 		});
 	});
 
-	it("refuses OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY beside its new name set to another value", async () => {
-		const err = await refusal((config) => config, {
-			OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "accept",
-			OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "reject",
-		});
-
-		expect(err.details).toEqual({
-			reason: "environment-variable-renamed",
-			renamed: [
-				{
-					module: "oauth-authorization",
-					from: "OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY",
-					to: "OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY",
-					path: "oauth-authorization.grants.refreshToken.unknownFamilyPolicy",
-					state: "different",
-				},
-			],
-		});
-	});
-
-	it("refuses OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY beside its new name set to the same value", async () => {
-		const err = await refusal((config) => config, {
-			OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "accept",
-			OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "accept",
-		});
-
-		expect(err.details).toMatchObject({
-			reason: "environment-variable-renamed",
-			renamed: [{ from: "OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY", state: "different" }],
-		});
-	});
-
-	it("boots with OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY alone", async () => {
-		const modules = [oauthAuthorizationGrantsModule];
-		const slots = defineModule({
-			name: "test:slots",
-			provides: {
-				clientRepository: () => new InMemoryClientRepository(new Map()),
-				keyStore: () => createSymmetricKeyStore("oauth-sections-test-secret.at-least-32-bytes"),
-			},
-		});
-		const config = capturing(
-			withGrants(makeValidAppConfig(), {
-				authorizationCode: false,
-				refreshToken: false,
-				clientCredentials: true,
-			}),
-			modules,
-		) as unknown as Record<string, Record<string, unknown>>;
-		const handle = await createTestApp({
-			modules: [...modules, slots],
-			bootstrapComponents: {
-				config: {
+	describe("the refresh grant's unknown-family policy is removed", () => {
+		it.each(["accept", "reject", "warn"])(
+			"refuses oauth-authorization.grants.refreshToken.unknownFamilyPolicy = %j as a removed key, pointing at the upgrade guide",
+			async (value) => {
+				const err = await refusal((config) => ({
 					...config,
-					"oauth-authorization": {
-						grants: {
-							...(config["oauth-authorization"]?.grants as object),
-							refreshToken: { enabled: false, unknownFamilyPolicy: "accept" },
+					"oauth-authorization": { grants: { refreshToken: { unknownFamilyPolicy: value } } },
+				}));
+
+				expect(err.reason).toBe("config-path-relocated");
+				expect(err.details).toMatchObject({
+					relocated: [
+						{
+							module: "oauth-authorization",
+							from: "oauth-authorization.grants.refreshToken.unknownFamilyPolicy",
+							to: null,
 						},
-					},
-					"renamed-variables": {
-						...config["renamed-variables"],
-						OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "accept",
-					},
-				} as never,
-				pathResolver: (s: string) => s,
-				oauthTokenSettings: createTestOAuthTokenSettings(),
+					],
+				});
+				expect(err.message).toContain(
+					"oauth-authorization.grants.refreshToken.unknownFamilyPolicy was removed",
+				);
+				expect(err.message).toContain("docs/upgrading-from-v0.16.0.md");
 			},
+		);
+
+		it("refuses oauth.refreshToken.unknownFamilyPolicy, its old path, as removed", async () => {
+			const err = await refusal((config) =>
+				oauthWith(config, { refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "accept" } }),
+			);
+
+			expect(err.reason).toBe("config-path-relocated");
+			expect(err.details).toMatchObject({
+				relocated: [{ from: "oauth.refreshToken.unknownFamilyPolicy", to: null }],
+			});
 		});
-		expect(handle.inspect.grants.has("client_credentials")).toBe(true);
-		await handle.dispose();
+
+		it.each([
+			["OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY", "accept"],
+			["OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY", "reject"],
+			["OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY", "accept"],
+		])("refuses %s = %j as the variable of a removed key", async (variable, value) => {
+			const err = await refusal((config) => config, { [variable]: value });
+
+			expect(err.details).toMatchObject({
+				reason: "environment-variable-renamed",
+				renamed: [{ module: "oauth-authorization", from: variable, to: null, state: "removed" }],
+			});
+			expect(err.message).toContain("which was removed");
+			expect(err.message).toContain("docs/upgrading-from-v0.16.0.md");
+		});
 	});
-
-	it.each([
-		["warn", "warn"],
-		["the right word in another case", "Accept"],
-	])(
-		"refuses oauth-authorization.grants.refreshToken.unknownFamilyPolicy set to %s, naming the path",
-		async (_what, value) => {
-			const err = await refusal((config) => ({
-				...config,
-				"oauth-authorization": { grants: { refreshToken: { unknownFamilyPolicy: value } } },
-			}));
-
-			expect(err.reason).toBe("config-validation-failed");
-			expect(err.message).toContain("oauth-authorization.grants.refreshToken.unknownFamilyPolicy");
-		},
-	);
 
 	it.each([
 		["yes", { "oauth-session": { enabled: "yes" } }, "oauth-session.enabled"],

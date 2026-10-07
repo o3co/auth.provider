@@ -2411,7 +2411,7 @@ lists every breaking change since, and which of the steps below each needs.
    | `oauth.dpop.replay-store` (any value) | removed | `oauth.dpop.replay-store was removed. …` (`config-path-relocated`, wherever the DPoP module is installed): DPoP records its proofs in the `replaySeenSet` component, whose module chooses the backend (`adapters.replaySeenSet` in the standalone); delete the key. A `dpopReplayStore` bootstrap component is no longer read either — see the DPoP note below |
    | `device-grant.store` (and `oauth.deviceAuthorization.store`, any value) | removed | `device-grant.store was removed` (`config-path-relocated`), wherever `deviceAuthorizationGrantModule` is installed, the grant on or off: an enabled grant needs a `deviceCodeStore` component and a disabled one needs nothing, so there is no absence to declare; delete the key |
    | `oauth.refreshToken.legacyRtPolicy` (any value) | removed | `oauth.refreshToken.legacyRtPolicy was removed` (`config-path-relocated`), wherever `oauthEndpointsModule` is installed: a refresh token lacking `jti` or `family_id` while family rotation is wired is always refused; delete the key |
-   | `oauth.refreshToken.unknownFamilyPolicy` (and `OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY`) | moved to `oauth-authorization.grants.refreshToken.unknownFamilyPolicy` (`OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY`) | `config-path-relocated` naming the new path and variable, and the old variable `environment-variable-renamed` while it is set, beside the new one or not, wherever `oauthAuthorizationGrantsModule` is installed. Move the setting, do not delete it: without it the policy reads `"reject"` |
+   | `oauth-authorization.grants.refreshToken.unknownFamilyPolicy` and its older path `oauth.refreshToken.unknownFamilyPolicy` (any value), with `OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY` and `OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY` | removed | `<path> was removed` (`config-path-relocated`) for either key, and `<variable> sets <path>, which was removed` (`environment-variable-renamed`) for either variable, wherever `oauthAuthorizationGrantsModule` is installed: a refresh token whose family no record holds is always refused (`invalid_grant`, `unknown_family`), so a chain redeemed under `"accept"` ends at the upgrade and its users sign in again; delete the key and unset the variables |
    | flat `oauth.jwt.algorithm` / `kid` / `secret` / `privateKey` / `privateKeyPath` / `publicKey` / `publicKeyPath` / `previousKeys` / `previousSecrets` | moved to the key store's section, `key-store.local.<field>` | `oauth.jwt: Unrecognized key: "<field>"` (`config-validation-failed`), from the oauth module's strict section, wherever `oauthEndpointsModule` is installed: move each field to `key-store.local` |
    | `webauthn.allowCredentialsForKnownUser` (and `WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER`, any value) | removed | `webauthn.allowCredentialsForKnownUser was removed` (`config-path-relocated`), and the variable set at all `environment-variable-renamed`, wherever `webauthnModule` is installed: `authentication/options` lists no credentials and the grant refuses an assertion without a user handle (`user_handle_missing`), so non-discoverable (non-resident) keys no longer sign in; re-enroll those users with discoverable credentials, then delete the key and the variable |
    | `webauthn.rateLimit` (and `WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_LIMIT`, `WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_WINDOW_SECONDS`, `WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT`, `WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS`, any value) | removed | `webauthn.rateLimit.authenticationOptions.<key> was removed` (`config-path-relocated`), and a variable set at all `environment-variable-renamed`, wherever `webauthnModule` is installed; set `limits.webauthn-authentication-options` on the rate limiter instead |
@@ -2483,9 +2483,7 @@ lists every breaking change since, and which of the steps below each needs.
      its `amr` and `acr` — upstream values included — and the refresh grant
      carries them forward at every refresh until the token's family ends:
      `oauth.refreshToken.expiresIn` after the login that began it (a day by
-     default). Under
-     `oauth-authorization.grants.refreshToken.unknownFamilyPolicy = "accept"`
-     a token with no family record has no such bound.
+     default).
 
    A deployment for which that matters calls `revokeAllForSubject` for the
    subjects who signed in through an untrusted federation (or revokes a known
@@ -2497,17 +2495,12 @@ lists every breaking change since, and which of the steps below each needs.
 4. Note the migration windows that are **still open** at `v0.11.0`, each of
    which you should be able to close after the upgrade rather than leave on:
    `redis-federation-token-store.scanFallback` ([§5](#operational-notes)),
-   `oauth.jwt.legacyTypAccept` (`OAUTH_JWT_LEGACY_TYP_ACCEPT`), and
-   `oauth-authorization.grants.refreshToken.unknownFamilyPolicy = "accept"`
-   (`OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY`; at
-   `v0.11.0`, `oauth.refreshToken.unknownFamilyPolicy` and
-   `OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY`). That last one does not close by
-   waiting: under `"accept"` a refresh token with no family record is
-   redeemed with a new one of the full `oauth.refreshToken.expiresIn`, in the
-   same family and still with no record, so a client that keeps refreshing
-   holds a chain that never expires and is never replay-checked. Setting
-   `"reject"` ends it, and signs out every holder of such a chain at that
-   moment — plan it as a forced re-login.
+   and `oauth.jwt.legacyTypAccept` (`OAUTH_JWT_LEGACY_TYP_ACCEPT`). The
+   refresh grant's `unknownFamilyPolicy` (at `v0.11.0`,
+   `oauth.refreshToken.unknownFamilyPolicy`) is removed: a refresh token with
+   no family record is refused, so a chain still redeemed under `"accept"`
+   ends at the upgrade and its holders sign in again — plan it as a forced
+   re-login, and delete the key (step 2 lists it).
 
 5. **The oauth and session settings at their modules' sections.** Each path
    and variable that moved refuses boot naming the new one; the paths are in
@@ -2745,9 +2738,7 @@ lists every breaking change since, and which of the steps below each needs.
     session that recorded a second factor between `/authorize` and `/token`
     — and the refresh grant carries that forward the same way.
 
-  Under `oauth-authorization.grants.refreshToken.unknownFamilyPolicy =
-  "accept"` a token with no family record has no such bound. A deployment for which that matters
-  revokes the families issued during the roll, or calls
+  A deployment for which that matters revokes the families issued during the roll, or calls
   `revokeAllForSubject` for the subjects concerned, once the fleet is on the
   new release; the rest waits a family lifetime.
 - **Do not turn `mfa.mode` on until no replica older than the release in
