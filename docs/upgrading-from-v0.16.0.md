@@ -727,7 +727,7 @@ The boot refusals you can meet, with their messages, are in
   `grantedAudience` outside the original `aud` is `500 server_error`, as one
   outside `allowedAudiences` is. The new refresh token carries the same
   audience. The policy receives the original audience as
-  `GrantPolicyRequest.originalAudience`. **What to do:** a client that
+  `GrantPolicyRequest.originalAudience` (#1567). **What to do:** a client that
   refreshes to reach a different resource than its authorization named
   requests that resource at `/authorize` instead. A resource server that
   expected refreshed access tokens to carry the client id as `aud` accepts
