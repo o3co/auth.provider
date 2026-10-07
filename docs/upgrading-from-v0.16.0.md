@@ -1002,8 +1002,10 @@ The boot refusals you can meet, with their messages, are in
   and before the grant policy and signing, it reads the user behind the
   `subject_token`'s `sub` (the subject the issued token names) through the
   `userRepository` slot's `findBySubject`. A user the Store does not hold, or
-  whose `emailVerified` is not `true`, is `400 invalid_grant` "email address
-  is not verified", and nothing is minted; a lookup that throws is
+  whose `emailVerified` is not `true`, is `400 invalid_request` "email
+  address is not verified" (RFC 8693 §2.2.2's code, as for every token this
+  grant refuses; the session and passkey grants answer `invalid_grant`), and
+  nothing is minted; a lookup that throws is
   `503 temporarily_unavailable` "identity resolution unavailable". No subject
   is exempt: a `subject_token` whose `sub` is a client's — a
   `client_credentials` access token — names no user, and is refused too, as

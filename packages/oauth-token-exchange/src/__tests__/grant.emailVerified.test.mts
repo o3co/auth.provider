@@ -21,7 +21,8 @@
  * through `userRepository.findBySubject`, once the presented tokens have
  * passed their checks and before the targets, the grant policy and signing:
  * a user the Store does not hold, or whose email is not verified
- * (`isEmailVerified`), is `invalid_grant` "email address is not verified";
+ * (`isEmailVerified`), is `invalid_request` "email address is not verified",
+ * RFC 8693 §2.2.2's code for a subject token unacceptable by policy;
  * a lookup that throws is a 503. No subject is exempt: a subject token whose
  * `sub` is a client's (a `client_credentials` token) names no user, and is
  * refused. The actor is not read. A grant built with the setting on and no
@@ -79,7 +80,7 @@ const SECRET = "client-secret";
 
 const NOT_VERIFIED = {
 	status: 400,
-	error: "invalid_grant",
+	error: "invalid_request",
 	errorDescription: "email address is not verified",
 } as const;
 
@@ -452,7 +453,7 @@ describe("a composition installing tokenExchangeModule under oauth.requireEmailV
 		).rejects.toThrow(/requireEmailVerified.*userRepository.*findBySubject/);
 	});
 
-	it("answers 400 invalid_grant at /oauth/token for a subject whose email is not verified", async () => {
+	it("answers 400 invalid_request at /oauth/token for a subject whose email is not verified", async () => {
 		const app = await boot(
 			createTestUserRepository({ users: [{ ...verified, emailVerified: false }] }),
 		);
@@ -461,7 +462,7 @@ describe("a composition installing tokenExchangeModule under oauth.requireEmailV
 
 		expect(res.status).toBe(400);
 		expect(res.body).toEqual({
-			error: "invalid_grant",
+			error: "invalid_request",
 			error_description: "email address is not verified",
 		});
 	});
