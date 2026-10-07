@@ -2182,6 +2182,23 @@ with what a store of yours records and refuses. Per port:
     `null` otherwise. A store that drops it leaves a stepped-up session
     unbound from the cookie session it was renewed into
     ([core's `user-sessions` README](../packages/core/src/user-sessions/README.md)).
+  - **BREAKING: a session at or past its `expiresAt` is not live, whatever
+    `get` answers.** Core's session lifecycle judges the user session it
+    reads as session admission judges a record — a subject, an `authTime`,
+    and an `expiresAt` later than a clock reading taken after the read — so
+    a store that keeps a row past its end until a sweep no longer keeps its
+    session live until then. From the session's end, its access tokens
+    introspect `active: false` (`introspect.session_invalid`), `/oauth/userinfo`
+    answers `401 invalid_token` `session_invalid`, the federation token and
+    federation logout routes answer `401 invalid_token`, token exchange
+    refuses a token of the session with `400 invalid_request`
+    (`session_invalid`), and nothing joins the session; admission already
+    refused such a row. A row missing its subject or `authTime`, or with an
+    `expiresAt` that is not a valid date, is no session either. The bundled
+    memory and Redis stores answer no row past its end, so nothing changes
+    with them. Remedy: none for a store that answers `null` past the end; a
+    store of yours that keeps sessions usable past `expiresAt` extends
+    `expiresAt` instead.
   - Run the suites in
     `packages/core/src/user-sessions/__tests__/userSessionStore.contract.mts`:
     `runUserSessionStoreContract`, and `runSecondFactorUpdateContract` if

@@ -26,7 +26,8 @@
  * throws, or a store that throws when its capability is read, is answered
  * through admission's `unavailable`, which logs it. The sink is read only
  * to audit a subject mismatch, and a read of it that throws fails as that
- * audit: the answer stands.
+ * audit: the answer stands. The rule a record stands as a session by
+ * (`isLiveRecord`) is here, and the session lifecycle's liveness reads it.
  */
 
 import { emitAuditEvent } from "../audit/factory.mjs";
@@ -106,6 +107,30 @@ const copyRecord = (record: UserSession): UserSession => {
 	};
 };
 
+/**
+ * Whether a session ending at `expiresAt` is still before its end at `now`:
+ * a valid date strictly later than `now`. A session is over at its end.
+ */
+const endsAfter = (expiresAt: unknown, now: Date): expiresAt is Date =>
+	isValidDate(expiresAt) && expiresAt.getTime() > now.getTime();
+
+/**
+ * Whether a record a store answered stands as a session at `now`: it names a
+ * subject, holds a valid `authTime`, and ends after `now`. The port does not
+ * promise that `get` filters expiry, so a store that keeps a row until a sweep
+ * answers one past its end, which is no session; a record missing what it
+ * declares is none either. The live read below and the session lifecycle's
+ * liveness judge a record by this rule alone.
+ */
+export const isLiveRecord = (
+	record: UserSession | null | undefined,
+	now: Date,
+): record is UserSession =>
+	record != null &&
+	nonEmptyString(record.sub) !== undefined &&
+	isValidDate(record.authTime) &&
+	endsAfter(record.expiresAt, now);
+
 /** The one read of a session record admission makes: the store's answer, or its rejection. */
 export const readRecord = (
 	store: UserSessionStore,
@@ -149,20 +174,13 @@ export async function readLiveSession(
 	if (userSessionStore !== undefined && presented.sid === undefined) {
 		if (presented.carrier !== "token") return { answer: { outcome: "not_live", reason: "no_sid" } };
 	} else if (userSessionStore !== undefined) {
-		// `== null`: the port answers `null`, and a store of the deployment's own
-		// that answers `undefined` for a missing session is still no session.
-		const expiry: unknown = record == null ? undefined : record.expiresAt;
-		if (
-			record == null ||
-			nonEmptyString(record.sub) === undefined ||
-			!isValidDate(record.authTime) ||
-			!isValidDate(expiry) ||
-			!(expiry.getTime() > now.getTime())
-		) {
+		// The port answers `null`, and a store of the deployment's own that
+		// answers `undefined` for a missing session is still no session.
+		if (!isLiveRecord(record, now)) {
 			return { answer: { outcome: "not_live", reason: "gone" } };
 		}
 		session = record;
-		expiresAt = expiry;
+		expiresAt = record.expiresAt;
 	}
 
 	// Step 3: the subject.
@@ -264,7 +282,7 @@ export async function readLiveSession(
 	// Step 4b: the expiry again, on a clock reading taken after the lifecycle
 	// and the revocation boundary were read: the record answers as live only
 	// while it is unexpired once every read it stands on has answered.
-	if (expiresAt !== undefined && !(expiresAt.getTime() > checked.clock().getTime())) {
+	if (expiresAt !== undefined && !endsAfter(expiresAt, checked.clock())) {
 		return { answer: { outcome: "not_live", reason: "gone" } };
 	}
 

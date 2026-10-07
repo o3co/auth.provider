@@ -1,6 +1,6 @@
 # core/src — directory map
 
-Last updated: 2026-10-07
+Last updated: 2026-10-08
 
 ## Responsibility
 
@@ -87,7 +87,7 @@ The session lifecycle service over the port in [`user-sessions/lifecycle/`](./us
 - A close commits first, then runs its work in phases, each only once no item of an earlier phase is pending in the record: revocations and removals; the relying parties; the user session's delete; the subject's index entry, last: where subject revocation closes through the lifecycle (#1455), a close still pending keeps the sid listed, so a retried subject-wide revocation finds it and resumes the close. Each item is safe to run twice and is recorded with `completeIf` at the generation read; a failed one, or one whose completion could not be recorded, stays pending, and the close answers `pending` — distinct from the rejection a commit that did not land is. A later close of the session or the sweep resumes it.
 - Every cause runs the work; every cause but `expiry` also tells the relying parties. A refused join's family is revoked and its federation's tokens deleted by the service.
 - A sid with no record reads as closed: nothing joins it, it is not live, and a close of it is done with nothing to run. The service reads none of the per-session stores.
-- A session record is read only through `session-admission/`'s `readRecord`.
+- A session record is read only through `session-admission/`'s `readRecord`, and stands as a session only by its `isLiveRecord`, the rule admission's live read judges a record by: a subject, an `authTime`, and an end later than a clock reading taken after the read. A store that answers a row past its end answers no session: liveness is `not_live` and a join is refused.
 - Pinned by [`service.test.mts`](./session-lifecycle/__tests__/service.test.mts), [`module.test.mts`](./session-lifecycle/__tests__/module.test.mts) and [`sweeper.test.mts`](./session-lifecycle/__tests__/sweeper.test.mts).
 
 ### `token-exchange/`

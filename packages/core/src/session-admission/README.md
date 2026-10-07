@@ -1,6 +1,6 @@
 # session-admission
 
-Last updated: 2026-10-07
+Last updated: 2026-10-08
 
 ## Responsibility
 
@@ -23,7 +23,7 @@ It is a directory of its own so that the consumers cannot disagree on what a liv
 ## Dependencies
 
 - Imports values from `user-sessions/` (how a session was established, what it vouches for, what each login path records, and what a session's enrollment facts may hold), `repositories/` (`readMfaEnrollmentWitness`, the one reading of the witness; `readPlainFields`, the by-name plain-data copy a login's declared claims go through) and `mail/` (`normaliseMailAddress`, the one spelling of an address), which the primary builders derive a session's enrollment facts with, `federation-grants/` (the subject-revocation boundary reading, kept there because moving it here would close a value cycle through `user-sessions/`), `grants/` (the `amr` values and their composition), `jwt/` (the revocation skew), `audit/`, `errors/` (the RFC 6749 error-code grammar) and `logging/`. The testing entry imports nothing from `mfa/`: its merge rows spell the MFA module's modes themselves.
-- Imported by `boot/` (the resolver's builder, the registration of requirements and of actions, and the reach seal), `mfa/` (the continuation check an MFA transaction is held to), `user-sessions/` and `modules/manifest/` (types only), the root barrel and the testing entry. A consumer package reaches it through the package entry alone.
+- Imported by `boot/` (the resolver's builder, the registration of requirements and of actions, and the reach seal), `mfa/` (the continuation check an MFA transaction is held to), `session-lifecycle/` (`readRecord`, the one read of a session record, and `isLiveRecord`, the rule the live read judges a record by, so the lifecycle's liveness stands a session by the same rule), `user-sessions/` and `modules/manifest/` (types only), the root barrel and the testing entry. A consumer package reaches it through the package entry alone.
 - Never imports `boot/`, and nothing outside core but Express's request and response types, which the login completion's call carries.
 
 ## Invariants
