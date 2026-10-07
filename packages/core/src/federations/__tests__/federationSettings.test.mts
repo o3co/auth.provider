@@ -34,11 +34,12 @@ import { createApp, defineModule, type ProviderDeps } from "#/index.mjs";
 import type { ComponentMap } from "#/modules/manifest/component-map.mjs";
 import { federationTypeForTests } from "#/testing/fixtures/federationType.mjs";
 import { coreConfigForTests, makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
-import { createTestFederationSettings, federationSettingsContract } from "#/testing/index.mjs";
+import { createTestFederationSettings } from "#/testing/index.mjs";
 import {
 	federationCallbackMeetsFreshness,
 	federationTrustsUpstreamAmr,
 } from "#/user-sessions/authentication.mjs";
+import { federationSettingsContract } from "./federationSettings.contract.mjs";
 
 const RULES = [
 	"every entry names its type",

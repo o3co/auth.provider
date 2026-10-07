@@ -1881,6 +1881,12 @@ modules fills them.
   `FederationRedirectPolicyUnpairedDetails` are gone, and `BootErrorReason`
   loses `"federation-redirect-policy-unpaired"`; a federation registers
   through its type ([above](#slots-admission-and-wiring)).
+- **The contract suites of the slots core fills itself**
+  (`deploymentModeContract`, `tokenBindingSettingsContract`,
+  `federationSettingsContract`, `outboundPolicyContract` and their
+  `…ContractInput` types), new since v0.16.0 and on `./testing` in the 0.17
+  release candidates, leave core's `./testing` with no replacement (#1580): no module or host provides those slots, so
+  there is no provider of yours to run them over. The slots' test doubles stay.
 - **BREAKING: each federation package ships only its type module** (#1297,
   #1299, #1300, #1301). Removed, each with the `ComponentMap` slot it
   required: `googleFederationModule` and `googleFederationConfig` from

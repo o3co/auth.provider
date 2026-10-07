@@ -134,18 +134,12 @@ export {
 	csrfTokenSignerContract,
 } from "./slots/csrfTokenSigner.mjs";
 export {
-	type DeploymentModeContractInput,
-	deploymentModeContract,
-} from "./slots/deploymentMode.mjs";
-export {
 	createTestFederationGrantPolicy,
 	type FederationGrantPolicyContractInput,
 	federationGrantPolicyContract,
 } from "./slots/federationGrantPolicy.mjs";
 export {
 	createTestFederationSettings,
-	type FederationSettingsContractInput,
-	federationSettingsContract,
 	type TestFederationEntry,
 } from "./slots/federationSettings.mjs";
 export {
@@ -172,11 +166,7 @@ export {
 	oauthTokenSettingsContract,
 	type TestOAuthTokenSettingsOverrides,
 } from "./slots/oauthTokenSettings.mjs";
-export {
-	createTestOutboundPolicy,
-	type OutboundPolicyContractInput,
-	outboundPolicyContract,
-} from "./slots/outboundPolicy.mjs";
+export { createTestOutboundPolicy } from "./slots/outboundPolicy.mjs";
 export {
 	createTestRateLimiter,
 	type RateLimiterContractInput,
@@ -192,9 +182,5 @@ export {
 	type SessionCookiePolicyContractInput,
 	sessionCookiePolicyContract,
 } from "./slots/sessionCookiePolicy.mjs";
-export {
-	createTestTokenBindingSettings,
-	type TokenBindingSettingsContractInput,
-	tokenBindingSettingsContract,
-} from "./slots/tokenBindingSettings.mjs";
+export { createTestTokenBindingSettings } from "./slots/tokenBindingSettings.mjs";
 export type { TestInspect } from "./test-inspect.mjs";
