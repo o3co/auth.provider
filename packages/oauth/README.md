@@ -634,7 +634,7 @@ On every success shape — and on the no-op answer for a session that is already
 
 Provider-scoped federation disconnect. Authorization: `Bearer <access_token>` with `typ: at+jwt`. Optional body: `post_logout_redirect_uri`, `state`.
 
-An access token that names its client (`azp`) must be issued for that client itself: its `aud` contains that id, or the request is `401 invalid_token` and nothing is disconnected. An `azp` claim that is not a non-empty string is refused the same way. Only a token with no `azp` claim names no client, and has no audience to check.
+An access token that names its client (`azp`) must be issued for that client itself: its `aud` contains that id, or the request is `401 invalid_token` and nothing is disconnected. An `azp` claim that is not a non-empty string is refused the same way. Only a token with no `azp` claim names no client, and has no audience to check. A token whose audience a `resource` or the grant policy chose does not qualify, nor does a `session`-grant token of a client with `allowedAudiences`, which carries the first of them. A client with no token for itself cannot disconnect a federation this way: the federation stays connected until the session ends.
 
 Flow: verifies the access token → checks its family is not revoked → reads from core's session lifecycle whether the session is live (`sessionLifecycle.liveness`; a session not live, or another subject's, is `401 invalid_token`) and which federations it joined (`sessionLifecycle.federations`) → verifies the federation joined it → holds `post_logout_redirect_uri` to the client's list → deletes the federation token → if the provider implements `SupportsLogout`, redirects to the IdP end-session URL; otherwise returns `200 {"disconnected": true}`.
 
@@ -675,7 +675,7 @@ The fields are defined on core's `Client` record ([`repositories/types.mts`](../
 
 - A Bearer access token minted by this auth.provider instance (`typ: at+jwt`).
 - The token's `azp` claim identifies the client; the client record MUST opt in via `allowedAzpForFederationToken: true` (see below).
-- The access token presented must be issued for the calling client itself: its `aud` contains the id its `azp` names. Any other token, one issued for a resource server (RFC 8707) included, is `401 invalid_token`.
+- The access token presented must be issued for the calling client itself: its `aud` contains the id its `azp` names. Any other token is `401 invalid_token`: one whose audience a `resource` (RFC 8707) or the grant policy chose included.
 
 ### Flow
 
