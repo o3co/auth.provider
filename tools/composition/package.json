@@ -33,12 +33,12 @@
 		"@o3co/auth-provider-webauthn": "workspace:*",
 		"@o3co/ts.hocon": "^1.13.0",
 		"@types/express": "^5.0.6",
-		"@types/node": "^26.6.3",
+		"@types/node": "^26.6.4",
 		"@types/supertest": "^7.2.1",
 		"ioredis": "^6.0.0",
-		"supertest": "^7.3.0",
+		"supertest": "^7.3.1",
 		"typescript": "^6.0.3",
-		"vitest": "^5.0.2",
+		"vitest": "^5.0.3",
 		"zod": "^4.6.5"
 	}
 }
