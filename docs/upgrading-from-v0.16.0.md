@@ -234,7 +234,6 @@ sections that still accept one.
 | `dpop {}`, `mtls {}`, `device-grant {}` and `oauth-token-exchange {}` at the top level, camelCase; `OAUTH_DPOP_NONCE_*` → `DPOP_NONCE_*` (#804) | each package's README |
 | Each in-process and Redis store's settings, and `federationGrants` → `federation-grants {}`, under their modules' names, with eight renamed variables (`RATE_LIMIT_FAIL_MODE` → `REDIS_RATE_LIMITER_FAIL_MODE` among them) (#811) | the [redis README](../packages/redis/README.md), the [federation-grants README](../packages/federation-grants/README.md) |
 | The oauth and session settings: the grant switches, `oauth-session`, `session-store {}`, the login and consent pages, `OAUTH_CIMD_*` → `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_*`; the PKCE key retired (#827) | [operator runbook §7](operator-runbook.md#before-you-upgrade), step 5 |
-| The refresh grant's unknown-family policy: `oauth.refreshToken.unknownFamilyPolicy` → `oauth-authorization.grants.refreshToken.unknownFamilyPolicy`, `OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY` → `OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY` (#728) | [operator runbook §7](operator-runbook.md#before-you-upgrade), step 2; the [oauth README](../packages/oauth/README.md#refresh_token) |
 | The access-token default: `oauth.accessToken.expiresIn` → `oauth.accessToken.defaultExpiresIn`, `OAUTH_ACCESS_TOKEN_EXPIRES_IN` → `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`. Move the value, do not delete it: without it the default is `3600`, which a deployment that set a shorter lifetime would not notice | [operator runbook §7](operator-runbook.md#before-you-upgrade), step 2 |
 | The template's own settings, the adapter selections (`adapters.<slot>`), the repositories, `audit-sink`, `core.federations`, `key-store`, `redis-clients`, `LOG_LEVEL` → `LOGGING_LEVEL` (#853) | [operator runbook §7](operator-runbook.md#before-you-upgrade), step 6 |
 | Module names are kebab-case, as their sections are (#738): boot error details and anything that finds a module by name see the new names | — |
@@ -245,17 +244,6 @@ or `" true "`, which used to leave it off, now turns it on (runbook §7,
 step 5). And **unset `CLIENT_CODE_ENDPOINT_URI` and `CLIENT_CODE_PASSWORD`
 first**: both were removed, and set at all they refuse the boot, even beside
 the new names (step 6).
-
-**Move the unknown-family policy rather than delete it.** The grant issues
-for a refresh token whose family no record holds only under `"accept"`;
-anything else, an absent key included, reads as `"reject"`. Dropping an
-`"accept"` line instead of moving it therefore falls back to `"reject"` and
-signs out, at that moment, every holder of a family-less chain. A composition
-with `oauthAuthorizationGrantsModule` and without the oauth module behaves
-the same: the grants module declares the same `reference.conf`, which sets
-the default and binds the variable. A root that builds its configuration
-without layering that file — core's `reference.conf` alone — carries neither:
-the policy reads `"reject"`, whatever the variable says.
 
 **A section is validated only by its own module** (#728). Core's schema
 validates core's sections, `core` and `oauth`, and nothing else. A module's
@@ -349,6 +337,24 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   the key store's section, `key-store.local`, as before.
 - `repositories.code.type` (`CLIENT_CODE_TYPE`) is refused; use
   `ADAPTERS_CODE_REPOSITORY` (#853).
+- **BREAKING: the refresh grant's `unknownFamilyPolicy` is removed.**
+  `oauth-authorization.grants.refreshToken.unknownFamilyPolicy`, and its
+  v0.16.0 path `oauth.refreshToken.unknownFamilyPolicy`, at any value
+  (`"reject"` included), refuse the boot wherever
+  `oauthAuthorizationGrantsModule` is installed (`config-path-relocated`,
+  `… was removed`), and so do
+  `OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY` and
+  `OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY`, exported at any value
+  (`environment-variable-renamed`). A refresh token whose family no record
+  holds is always refused (`400 invalid_grant`, `unknown_family`, logged as
+  `unknown_family_rejected`); `unknown_family_accepted_legacy_mode` is no
+  longer logged. **What to do:** delete the line and unset the variables. A
+  deployment that ran `"accept"` signs out the holders of family-less chains
+  at the upgrade. Refresh tokens bound to a v0.16.0 session are refused at
+  admission anyway ([every user signs in again](#passkeys-users-and-sessions)),
+  so what `"accept"` still redeemed was a chain without a `sid` from a
+  deployment that ran without a family store. See the
+  [oauth README](../packages/oauth/README.md#refresh_token).
 - `device-grant.store` (and `oauth.deviceAuthorization.store`), at any value,
   refuses the boot wherever `deviceAuthorizationGrantModule` is installed,
   the grant on or off (#728). Delete the line. An enabled device grant needs
@@ -717,6 +723,25 @@ The boot refusals you can meet, with their messages, are in
   them; an answer with neither is refused the same way. See the
   [oauth-token-exchange README](../packages/oauth-token-exchange/README.md#security-notes),
   note 18.
+- **BREAKING: the code exchange issues a refresh token only where the client
+  can redeem one.** The `authorization_code` grant returns a `refresh_token`,
+  opens its family and joins the family to the session only when the
+  `refresh_token` grant is registered and the client may use it by the rule
+  `/oauth/token` applies when the token is redeemed: its `allowedGrantTypes`
+  names `refresh_token`, or it has no list, `oauth.requireGrantTypeAllowlist`
+  is off and the registered `refresh_token` grant does not deny by absence
+  (`requiresExplicitGrantAllowlist`; the bundled one does not). Otherwise the response has no
+  `refresh_token`, the access token carries no `family_id`, and only the
+  client joins the session, so logout still reaches it. Such a client could
+  not redeem the refresh token before either. An access token without
+  `family_id` is refused by the federation token route
+  (`401 invalid_token`, `missing family_id claim`), as the `session` grant's
+  tokens are. **What to do:** for each client that refreshes, or that calls
+  the federation token route, make sure its `allowedGrantTypes` names
+  `refresh_token` (or that it has no list, where neither the switch nor the
+  registered grant denies by absence), and that
+  `oauth-authorization.grants.refreshToken.enabled` is on. See the
+  [oauth README](../packages/oauth/README.md#authorization_code-the-session-sid-family_id-and-the-id_token).
 - **Federation grants.** `/reauthorize` answers a removed connection, or a
   client that may no longer use it, `403 access_denied/connection_not_permitted`
   (#883), and a revoked or pending grant whose boundary cannot be read `410` /
@@ -1338,12 +1363,9 @@ modules fills them.
   for the missing component. The id_token's `iss` is the slot's issuer, so
   an id_token is issued whenever `openid` is granted and a session is read;
   before, a configuration built by hand without `oauth.jwt.issuer` got none.
-  The module requires no `config`: the refresh grant's unknown-family policy
-  is the module's own section's
-  (`oauth-authorization.grants.refreshToken.unknownFamilyPolicy`), and
-  `createRefreshTokenGrant` takes it as `unknownFamilyPolicy` in place of
-  `config`, issuing for an unknown family only under `"accept"`. A deps
-  object handed to
+  The module requires no `config`, and `createRefreshTokenGrant` takes none
+  and no policy: a refresh token whose family no record holds is always
+  refused. A deps object handed to
   the module's grant factories carries `section`, `oauthTokenSettings` and
   `tokenBindingSettings`; a factory refuses a missing or broken
   `oauthTokenSettings` with a `RangeError` naming it, and a
@@ -1875,8 +1897,7 @@ modules fills them.
 - **BREAKING: `OAuthSection` loses `refreshToken.unknownFamilyPolicy` and
   `refreshToken.legacyRtPolicy`; both are optional in `AppConfig` and
   `CoreConfig` (#728).** The oauth module's section declares neither, and
-  boot refuses either set ([Paths and variables that
-  moved](#paths-and-variables-that-moved), [Keys removed](#keys-removed)).
+  boot refuses either set ([Keys removed](#keys-removed)).
   Core's schema holds their shape, the same enums, and no default, and
   core's `reference.conf` no longer sets them or binds
   `OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY`. Code that reads either key off

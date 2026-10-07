@@ -139,7 +139,6 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	OAUTH_SESSION_ENABLED: "false",
 	OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED: "true",
 	OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED: "true",
-	OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "reject",
 	OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED: "true",
 	OAUTH_AUTHORIZATION_GRANTS_JWT_BEARER_ENABLED: "false",
 
@@ -341,7 +340,9 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 	OAUTH_GRANTS_REFRESH_TOKEN_ENABLED:
 		"renamed OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY:
-		"renamed OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY, and only captured — set at any value, beside its new name or not, it fails boot",
+		"the variable of a removed key, and only captured — any value fails boot",
+	OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY:
+		"the variable of a removed key, and only captured — any value fails boot",
 	OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED:
 		"renamed OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_GRANTS_JWT_BEARER_ENABLED:

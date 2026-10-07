@@ -25,6 +25,7 @@ import session from "express-session";
 import { z } from "zod";
 import { createSessionCsrfTokenSigner } from "../csrf-token-signer.mjs";
 import { guardCookieSession } from "../internal/cookieSession.mjs";
+import { expireDestroyedSessionCookie } from "../internal/destroyedSessionCookie.mjs";
 import {
 	type SessionCookieConfigSlice,
 	sessionCookieAttributes,
@@ -240,6 +241,9 @@ export const sessionStoreModule = defineModule<
 				// A store error express-session would hand to `next(err)` is
 				// answered by the guard: `503` when the session cannot be loaded,
 				// one error line either way (`../internal/cookieSession.mts`).
+				// A session destroyed during the request, by whichever route, has
+				// this cookie expired in the same answer, with the attributes it is
+				// set with (`../internal/destroyedSessionCookie.mts`).
 				const middleware = session({
 					name: cookie.name,
 					secret,
@@ -252,7 +256,10 @@ export const sessionStoreModule = defineModule<
 				return {
 					id: "session-middleware",
 					mountPath: "/",
-					handler: guardCookieSession(middleware, deps.logger ?? consoleLogger),
+					handler: guardCookieSession(
+						expireDestroyedSessionCookie(middleware, cookie),
+						deps.logger ?? consoleLogger,
+					),
 				};
 			},
 		],

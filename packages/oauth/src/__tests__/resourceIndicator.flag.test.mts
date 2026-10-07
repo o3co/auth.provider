@@ -47,6 +47,7 @@ import {
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { registeredGrants } from "./_helpers/grantRegistry.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 
 // ---------------------------------------------------------------------------
@@ -147,6 +148,7 @@ function makeAuthzDeps(
 	}
 	return {
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+		grantHandlerResolver: registeredGrants("refresh_token"),
 		...grantSettingsFrom(base),
 		keyStore: createSymmetricKeyStore("test-secret"),
 		codeRepository: {

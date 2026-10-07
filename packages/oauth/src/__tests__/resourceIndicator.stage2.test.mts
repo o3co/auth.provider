@@ -52,6 +52,7 @@ import {
 } from "#/grants/clientCredentials.mjs";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+import { registeredGrants } from "./_helpers/grantRegistry.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 
 // ---------------------------------------------------------------------------
@@ -169,6 +170,7 @@ function makeAuthzDeps(
 ): AuthorizationGrantDeps {
 	return {
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+		grantHandlerResolver: registeredGrants("refresh_token"),
 		...grantSettingsFrom({
 			oauth: {
 				jwt: { secret: "test-secret" },

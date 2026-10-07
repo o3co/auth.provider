@@ -147,6 +147,7 @@ const world = async (
 		"authorization_code",
 		createAuthorizationGrant({
 			sessionRequirementResolver: requirements,
+			grantHandlerResolver: registry,
 			...grantSettingsFrom(config),
 			keyStore,
 			clientRepository,
