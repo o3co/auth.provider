@@ -24,6 +24,7 @@ import {
 	UnknownKidError,
 } from "./KeyStore.mjs";
 import { assertWellFormedKids } from "./kid.mjs";
+import { readRetirementTimes, verifiesBefore } from "./retirement.mjs";
 
 /**
  * The one thing a KMS, HSM or Vault-style provider has to do: sign bytes it is
@@ -58,6 +59,10 @@ export interface RemoteSigningPreviousKey {
 	readonly kid: string;
 	/** SPKI PEM. Public material only — that is the point of this store. */
 	readonly publicKeyPem: string;
+	/**
+	 * When this key stops verifying: a Date holding a valid time, read once when
+	 * the store is built. Anything else is refused there.
+	 */
 	readonly expiresAt: Date;
 }
 
@@ -198,6 +203,10 @@ export async function createRemoteSigningKeyStore(
 		["kid", kid],
 		...previousKeys.map((prev, i) => [`previousKeys[${i}].kid`, prev.kid] as const),
 	]);
+	const retiresAt = readRetirementTimes(
+		"createRemoteSigningKeyStore",
+		previousKeys.map((prev, i) => [`previousKeys[${i}].expiresAt`, prev.expiresAt] as const),
+	);
 	const allKids = [kid, ...previousKeys.map((k) => k.kid)];
 	const duplicates = allKids.filter((k, i) => allKids.indexOf(k) !== i);
 	if (duplicates.length > 0) {
@@ -208,10 +217,10 @@ export async function createRemoteSigningKeyStore(
 
 	const publicKey = (await importSPKI(publicKeyPem, algorithm)) as KeyLike;
 	const resolvedPrevious = await Promise.all(
-		previousKeys.map(async (prev) => ({
+		previousKeys.map(async (prev, i) => ({
 			kid: prev.kid,
 			publicKey: (await importSPKI(prev.publicKeyPem, algorithm)) as KeyLike,
-			expiresAt: prev.expiresAt,
+			retiresAt: retiresAt[i] as number,
 		})),
 	);
 
@@ -246,8 +255,8 @@ export async function createRemoteSigningKeyStore(
 			return [
 				{ kid, publicKey },
 				...resolvedPrevious
-					.filter((p) => p.expiresAt.getTime() > now)
-					.map((p) => ({ kid: p.kid, publicKey: p.publicKey, expiresAt: p.expiresAt })),
+					.filter((p) => verifiesBefore(p.retiresAt, now))
+					.map((p) => ({ kid: p.kid, publicKey: p.publicKey, expiresAt: new Date(p.retiresAt) })),
 			];
 		},
 
@@ -255,8 +264,8 @@ export async function createRemoteSigningKeyStore(
 			if (requestedKid === kid) return publicKey;
 			const previous = resolvedPrevious.find((p) => p.kid === requestedKid);
 			if (previous === undefined) throw new UnknownKidError(requestedKid);
-			if (previous.expiresAt.getTime() <= Date.now()) {
-				throw new ExpiredKidError(requestedKid, previous.expiresAt);
+			if (!verifiesBefore(previous.retiresAt, Date.now())) {
+				throw new ExpiredKidError(requestedKid, new Date(previous.retiresAt));
 			}
 			return previous.publicKey;
 		},

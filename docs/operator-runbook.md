@@ -2170,7 +2170,7 @@ If you build the socket yourself, attach an `error` listener: an `EventEmitter`
 | `privateKeyPath` / `publicKeyPath` (or inline `privateKey` / `publicKey`) | PEM pair for the asymmetric algorithms; the file path wins when both are given |
 | `secret` (`KEY_STORE_LOCAL_SECRET`) | HS256 only, ≥ 32 bytes decoded |
 | `previousKeys = [ { kid, publicKeyPath, expiresAt } ]` (or inline `publicKey` instead of `publicKeyPath`) | asymmetric only — additional **verification** keys, published in JWKS until `expiresAt` (an ISO date; invalid fails boot) |
-| `previousSecrets = [ { kid, secret, expiresAt } ]` | HS256 only — each secret clears the same 32-byte floor |
+| `previousSecrets = [ { kid, secret, expiresAt } ]` | HS256 only — each secret clears the same 32-byte floor; `expiresAt` as for `previousKeys` |
 
 The two rotation shapes are a discriminated union in the schema
 (`packages/core/src/config/application.schema.mts`): `previousKeys` under
@@ -2193,6 +2193,17 @@ root and supplies it as the `keyStore` component
 `sign` calls the provider, `getSigningKidFallback`, `getVerificationKeys` and
 `getVerificationKey` are served from the public halves held in process. HS256
 is deliberately not offered there.
+
+A composition root that builds a store itself — `createRemoteSigningKeyStore`,
+`createAsymmetricKeyStore` or `createSymmetricKeyStore` — passes each previous
+entry's `expiresAt` as a `Date` holding a valid time. The store refuses any
+other value when it is built, naming the entry
+(`createRemoteSigningKeyStore: previousKeys[0].expiresAt is not a usable
+retirement date (an invalid Date)`), and reads each date once, so changing the
+`Date` object afterwards moves no deadline
+(`packages/core/src/keys/retirement.mts`). A previous key verifies only
+strictly before its `expiresAt`; a deadline that cannot be compared counts as
+passed, and the key no longer verifies.
 
 ### What the JWKS publishes and how it is cached
 

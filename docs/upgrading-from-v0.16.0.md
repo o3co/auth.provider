@@ -1741,6 +1741,20 @@ modules fills them.
     `store: "session_lifecycle"` (`step: "liveness"` or `"federations"`) where
     it carried `"user_session"` or `"session_federation_index"`. Move an
     alert keyed on the old values.
+- **BREAKING: a key store refuses a previous key's `expiresAt` that is not a
+  valid `Date`.** `createAsymmetricKeyStore`, `createSymmetricKeyStore` and
+  `createRemoteSigningKeyStore` throw when they are built if a
+  `previousKeys[i].expiresAt` (`previousSecrets[i].expiresAt`) is an Invalid
+  Date or not a `Date` at all — an ISO string, epoch milliseconds, absent —
+  naming the entry: `createAsymmetricKeyStore: previousKeys[0].expiresAt is
+  not a usable retirement date (an invalid Date)`. Such an entry used to
+  build, and a key whose date was an Invalid Date went on verifying with no
+  end while the JWKS left it out. Each store now reads the date once, when it
+  is built, so changing the `Date` object afterwards no longer moves the
+  deadline. Pass a `Date` holding the retirement time (check
+  `Number.isNaN(date.getTime())` where you parse one); to retire a key at
+  once, drop its entry. The `key-store.local` builder already refused an
+  unparsable `expiresAt` at boot, so a configured key store is unaffected.
 
 ### Exports removed, and signatures changed
 

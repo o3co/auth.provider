@@ -16,6 +16,7 @@
 import { createSecretKey, type KeyObject, type webcrypto } from "node:crypto";
 import { importPKCS8, importSPKI, SignJWT } from "jose";
 import { assertWellFormedKids } from "./kid.mjs";
+import { readRetirementTimes, verifiesBefore } from "./retirement.mjs";
 
 /**
  * JWT claims per RFC 7519. Standard claims are typed; custom claims are
@@ -146,6 +147,10 @@ export interface AsymmetricKeyStoreOptions {
 	previousKeys?: Array<{
 		kid: string;
 		publicKeyPem: string;
+		/**
+		 * When this key stops verifying: a Date holding a valid time, read once when
+		 * the store is built. Anything else is refused there.
+		 */
 		expiresAt: Date;
 	}>;
 }
@@ -159,6 +164,10 @@ export async function createAsymmetricKeyStore(
 		["kid", kid],
 		...previousKeys.map((prev, i) => [`previousKeys[${i}].kid`, prev.kid] as const),
 	]);
+	const retiresAt = readRetirementTimes(
+		"createAsymmetricKeyStore",
+		previousKeys.map((prev, i) => [`previousKeys[${i}].expiresAt`, prev.expiresAt] as const),
+	);
 
 	// Validate kid uniqueness
 	const allKids = [kid, ...previousKeys.map((k) => k.kid)];
@@ -171,13 +180,14 @@ export async function createAsymmetricKeyStore(
 	const publicKey = await importSPKI(publicKeyPem, algorithm);
 
 	// Import all previous public keys upfront
-	const resolvedPrevious: Array<ManagedKey & { expiresAt: Date }> = await Promise.all(
-		previousKeys.map(async (prev) => ({
-			kid: prev.kid,
-			publicKey: (await importSPKI(prev.publicKeyPem, algorithm)) as KeyLike,
-			expiresAt: prev.expiresAt,
-		})),
-	);
+	const resolvedPrevious: ReadonlyArray<{ kid: string; publicKey: KeyLike; retiresAt: number }> =
+		await Promise.all(
+			previousKeys.map(async (prev, i) => ({
+				kid: prev.kid,
+				publicKey: (await importSPKI(prev.publicKeyPem, algorithm)) as KeyLike,
+				retiresAt: retiresAt[i] as number,
+			})),
+		);
 
 	return {
 		algorithm,
@@ -197,8 +207,10 @@ export async function createAsymmetricKeyStore(
 		},
 
 		async getVerificationKeys(): Promise<ManagedKey[]> {
-			const now = new Date();
-			const active = resolvedPrevious.filter((k) => k.expiresAt > now);
+			const now = Date.now();
+			const active = resolvedPrevious
+				.filter((k) => verifiesBefore(k.retiresAt, now))
+				.map((k) => ({ kid: k.kid, publicKey: k.publicKey, expiresAt: new Date(k.retiresAt) }));
 			return [{ kid, publicKey }, ...active];
 		},
 
@@ -210,8 +222,8 @@ export async function createAsymmetricKeyStore(
 			if (!prev) {
 				throw new UnknownKidError(requestedKid);
 			}
-			if (prev.expiresAt <= new Date()) {
-				throw new ExpiredKidError(requestedKid, prev.expiresAt);
+			if (!verifiesBefore(prev.retiresAt, Date.now())) {
+				throw new ExpiredKidError(requestedKid, new Date(prev.retiresAt));
 			}
 			return prev.publicKey;
 		},
@@ -221,6 +233,10 @@ export async function createAsymmetricKeyStore(
 export interface SymmetricPreviousSecret {
 	kid: string;
 	secret: string;
+	/**
+	 * When this key stops verifying: a Date holding a valid time, read once when
+	 * the store is built. Anything else is refused there.
+	 */
 	expiresAt: Date;
 }
 
@@ -247,6 +263,10 @@ export function createSymmetricKeyStore(
 		["kid", kid],
 		...previousSecrets.map((prev, i) => [`previousSecrets[${i}].kid`, prev.kid] as const),
 	]);
+	const retiresAt = readRetirementTimes(
+		"createSymmetricKeyStore",
+		previousSecrets.map((prev, i) => [`previousSecrets[${i}].expiresAt`, prev.expiresAt] as const),
+	);
 	const secretKey: KeyObject = createSecretKey(Buffer.from(secret));
 
 	const allKids = [kid, ...previousSecrets.map((p) => p.kid)];
@@ -255,11 +275,11 @@ export function createSymmetricKeyStore(
 		throw new Error(`Duplicate kid values: ${[...new Set(duplicates)].join(", ")}`);
 	}
 
-	const resolvedPrevious: ReadonlyArray<{ kid: string; secretKey: KeyObject; expiresAt: Date }> =
-		previousSecrets.map((p) => ({
+	const resolvedPrevious: ReadonlyArray<{ kid: string; secretKey: KeyObject; retiresAt: number }> =
+		previousSecrets.map((p, i) => ({
 			kid: p.kid,
 			secretKey: createSecretKey(Buffer.from(p.secret)),
-			expiresAt: p.expiresAt,
+			retiresAt: retiresAt[i] as number,
 		}));
 
 	return {
@@ -280,10 +300,10 @@ export function createSymmetricKeyStore(
 		},
 
 		async getVerificationKeys(): Promise<ManagedKey[]> {
-			const now = new Date();
+			const now = Date.now();
 			const active = resolvedPrevious
-				.filter((p) => p.expiresAt > now)
-				.map((p) => ({ kid: p.kid, publicKey: p.secretKey, expiresAt: p.expiresAt }));
+				.filter((p) => verifiesBefore(p.retiresAt, now))
+				.map((p) => ({ kid: p.kid, publicKey: p.secretKey, expiresAt: new Date(p.retiresAt) }));
 			return [{ kid, publicKey: secretKey }, ...active];
 		},
 
@@ -295,8 +315,8 @@ export function createSymmetricKeyStore(
 			if (!prev) {
 				throw new UnknownKidError(requestedKid);
 			}
-			if (prev.expiresAt <= new Date()) {
-				throw new ExpiredKidError(requestedKid, prev.expiresAt);
+			if (!verifiesBefore(prev.retiresAt, Date.now())) {
+				throw new ExpiredKidError(requestedKid, new Date(prev.retiresAt));
 			}
 			return prev.secretKey;
 		},
