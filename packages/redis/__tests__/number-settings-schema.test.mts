@@ -25,9 +25,16 @@ import { MAX_DURATION_SECONDS } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import { redisCodeRepositoryModule } from "#/code-repository.mjs";
-import { redisFederationTokenStoreSectionSchema } from "#/federation-tokens.mjs";
-import { redisRateLimiterSectionSchema } from "#/ratelimit.mjs";
-import { redisRefreshTokenFamilyStoreSectionSchema } from "#/refresh-token-family.mjs";
+import {
+	redisFederationTokenStoreModule,
+	redisFederationTokenStoreSectionSchema,
+} from "#/federation-tokens.mjs";
+import { redisRateLimiterModule, redisRateLimiterSectionSchema } from "#/ratelimit.mjs";
+import {
+	redisRefreshTokenFamilyStoreModule,
+	redisRefreshTokenFamilyStoreSectionSchema,
+} from "#/refresh-token-family.mjs";
+import { overShipped } from "./support/section.mjs";
 
 const codeRepositorySchema = (): z.ZodType => {
 	const schema = redisCodeRepositoryModule.section?.schema;
@@ -53,7 +60,8 @@ const KEYS: ReadonlyArray<
 		"redis-rate-limiter.defaultLimit.limit",
 		() => redisRateLimiterSectionSchema,
 		"defaultLimit.limit",
-		(value) => ({ defaultLimit: { limit: value, windowSeconds: 60 } }),
+		(value) =>
+			overShipped(redisRateLimiterModule, { defaultLimit: { limit: value, windowSeconds: 60 } }),
 		AT_LEAST_1,
 		5,
 	],
@@ -61,7 +69,8 @@ const KEYS: ReadonlyArray<
 		"redis-rate-limiter.defaultLimit.windowSeconds",
 		() => redisRateLimiterSectionSchema,
 		"defaultLimit.windowSeconds",
-		(value) => ({ defaultLimit: { limit: 5, windowSeconds: value } }),
+		(value) =>
+			overShipped(redisRateLimiterModule, { defaultLimit: { limit: 5, windowSeconds: value } }),
 		WINDOW,
 		5,
 	],
@@ -69,7 +78,10 @@ const KEYS: ReadonlyArray<
 		"redis-rate-limiter.limits.token.limit",
 		() => redisRateLimiterSectionSchema,
 		"limits.token.limit",
-		(value) => ({ limits: { token: { limit: value, windowSeconds: 60 } } }),
+		(value) =>
+			overShipped(redisRateLimiterModule, {
+				limits: { token: { limit: value, windowSeconds: 60 } },
+			}),
 		AT_LEAST_1,
 		5,
 	],
@@ -77,7 +89,10 @@ const KEYS: ReadonlyArray<
 		"redis-rate-limiter.limits.token.windowSeconds",
 		() => redisRateLimiterSectionSchema,
 		"limits.token.windowSeconds",
-		(value) => ({ limits: { token: { limit: 5, windowSeconds: value } } }),
+		(value) =>
+			overShipped(redisRateLimiterModule, {
+				limits: { token: { limit: 5, windowSeconds: value } },
+			}),
 		WINDOW,
 		5,
 	],
@@ -85,7 +100,7 @@ const KEYS: ReadonlyArray<
 		"redis-refresh-token-family-store.casRetryLimit",
 		() => redisRefreshTokenFamilyStoreSectionSchema,
 		"casRetryLimit",
-		(value) => ({ casRetryLimit: value }),
+		(value) => overShipped(redisRefreshTokenFamilyStoreModule, { casRetryLimit: value }),
 		"must be a whole number from 1 to 10, in decimal digits",
 		5,
 	],
@@ -93,7 +108,7 @@ const KEYS: ReadonlyArray<
 		"redis-federation-token-store.ttl",
 		() => redisFederationTokenStoreSectionSchema,
 		"ttl",
-		(value) => ({ ttl: value }),
+		(value) => overShipped(redisFederationTokenStoreModule, { ttl: value }),
 		AT_LEAST_1,
 		5,
 	],

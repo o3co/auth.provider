@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-import type { RateLimitSpec } from "../../ratelimit/types.mjs";
 import type { SessionRequirementResolver } from "../../session-admission/requirement.mjs";
 import type { SessionCloseNotifier } from "../../session-lifecycle/notifier.mjs";
 import type {
@@ -51,18 +50,6 @@ export interface TokenExchangeValidatorResolver {
 export interface MfaFactorResolver {
 	readonly get: (kind: string) => MfaFactor | undefined;
 	readonly entries: () => IterableIterator<readonly [string, MfaFactor]>;
-}
-
-/**
- * Read-only projection of the boot planner's `rateLimitBudgets` collector:
- * every contributed budget by the prefix it limits. A prefix whose factory
- * answered `null` (switched off by its module's settings) is absent from both
- * `get` and `entries`. A limiter reads it at request time and weighs it
- * against what an operator configured on the limiter for that prefix.
- */
-export interface RateLimitBudgetResolver {
-	readonly get: (prefix: string) => RateLimitSpec | undefined;
-	readonly entries: () => IterableIterator<readonly [string, RateLimitSpec]>;
 }
 
 /**
@@ -104,7 +91,6 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 		"federationRedirectPolicyResolver",
 		"mfaFactorResolver",
 		"sessionRequirementResolver",
-		"rateLimitBudgetResolver",
 		"sessionCloseNotifierResolver",
 		// Boot-planner-owned (createApp pre-seeds it). A consumer-supplied
 		// registrar would diverge silently: the planner drains its own while
@@ -162,8 +148,6 @@ declare module "@o3co/auth-provider-core" {
 		readonly mfaFactorResolver?: MfaFactorResolver;
 		/** The registered session requirements in registration order, branded by the planner (ADR 2026-09-28-session-admission). */
 		readonly sessionRequirementResolver?: SessionRequirementResolver;
-		/** Every module's rate-limit budget by prefix, read by a limiter at request time. */
-		readonly rateLimitBudgetResolver?: RateLimitBudgetResolver;
 		/** The contributed session-close notifier, read by the session lifecycle when a close runs. */
 		readonly sessionCloseNotifierResolver?: SessionCloseNotifierResolver;
 	}

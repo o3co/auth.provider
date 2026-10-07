@@ -291,7 +291,7 @@ export const redisDeviceCodeStoreModule = defineModule({
 	name: "redis-device-code-store",
 	requires: ["deviceCodeStoreClient"] as const,
 	section: {
-		schema: keyPrefixSection("devauth:"),
+		schema: keyPrefixSection,
 		reference: redisReference(),
 		relocatedFrom: { redisDeviceCodeStore: { to: "", environmentVariable: null } },
 	},

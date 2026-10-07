@@ -238,7 +238,7 @@ export {
 	// for the packages outside core that read a section this file declares.
 	coerceBooleanFromEnv,
 	isLifetimeSeconds,
-	// The hop ceiling `http.trustProxy` is held to, which the
+	// The hop ceiling `http.trustProxy` is held to, which the test kit's
 	// `httpSettings` contract suite holds the slot's value to as well.
 	MAX_TRUST_PROXY_HOPS,
 	type RefreshTokenLifetimeSource,
@@ -837,10 +837,8 @@ export type {
 	PathResolver,
 	Provider,
 	ProviderDeps,
-	// A module's budget for a rate-limit prefix it owns, and the view
-	// core composes the budgets into.
+	// A module's claim of a rate-limit prefix it keys.
 	RateLimitBudgetFactory,
-	RateLimitBudgetResolver,
 	// A relocatedFrom entry whose new path no environment variable binds.
 	RelocationWithoutVariable,
 	// The manifest's replica-safety declaration, so a package
@@ -1099,11 +1097,13 @@ export type {
 	LinkFederatedIdentityResult,
 	MfaEnrollmentWitness,
 	SupportsMfaEnrollmentWitness,
+	SupportsSubjectLookup,
 	UserRepository,
 } from "./repositories/UserRepository.mjs";
 export {
 	readMfaEnrollmentWitness,
 	supportsMfaEnrollmentWitness,
+	supportsSubjectLookup,
 } from "./repositories/UserRepository.mjs";
 // A login's one read of the `User` a repository answers: the subject and the
 // claims are read from its snapshot, never from the `User` again.

@@ -15,16 +15,15 @@
  */
 
 /**
- * The contract suite of the `deploymentMode` slot:
+ * The contract suite of the `deploymentMode` slot, which core alone fills:
  * `deploymentModeContract(input)` holds the value to its three answers —
  * `single`, `multi`, or `unset` when the operator said nothing. There is no
- * double: a test fills the slot with the literal. Published on
- * `@o3co/auth-provider-core/testing`.
+ * double: a test fills the slot with the literal.
  */
 
 import assert from "node:assert/strict";
-import type { DeploymentMode } from "../../deployment/types.mjs";
-import type { ContractCase } from "../../session-admission/testing/requirement.contract.mjs";
+import type { DeploymentMode } from "#/deployment/types.mjs";
+import type { ContractCase } from "#/testing/slots/shared.mjs";
 
 export interface DeploymentModeContractInput {
 	/** The mode under test: what core fills the slot with, from the configuration its test chose. */

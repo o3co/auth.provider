@@ -1062,6 +1062,9 @@ export function createRedisFederationGrantStore(
  * how long a record answers past the end of what it authorized
  * (`tombstoneRetention`, in whole seconds), and the key ring its credentials
  * are sealed under (`encryptionMode`, `encryptionKeys`). Strict at every level.
+ * It fills the prefix the package's `config/reference.conf` also ships:
+ * {@link resolveRedisFederationGrantStoreOptions} parses a section as an
+ * operator wrote it, with no reference.conf beneath.
  */
 export const redisFederationGrantStoreSectionSchema = z
 	.object({

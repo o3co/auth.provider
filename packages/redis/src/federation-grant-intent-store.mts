@@ -63,6 +63,7 @@ import {
 	federationGrantConsentExpiry,
 	isStorableLifetime,
 } from "@o3co/auth-provider-core";
+import { z } from "zod";
 import type { FederationGrantIntentStoreClient } from "./clients.mjs";
 import {
 	decodeFederationGrantConsent,
@@ -74,7 +75,7 @@ import {
 	federationGrantBindingText,
 	federationGrantIntentPairText,
 } from "./internal/federation-grant-intent-codec.mjs";
-import { keyPrefixSection, redisReference } from "./internal/section.mjs";
+import { redisReference } from "./internal/section.mjs";
 
 /**
  * How long the bound's index outlives its last reservation. It is not a grace
@@ -302,9 +303,14 @@ export function createRedisFederationGrantIntentStore(
  * The schema of `redis-federation-grant-intent-store {}`, the module's own
  * section: the key prefix acquisition's records live under
  * (`<prefix>{intents}:…`), strict. The flow budget and the bound are constants
- * on the port.
+ * on the port. It fills the prefix the package's `config/reference.conf` also
+ * ships: {@link resolveRedisFederationGrantIntentStoreOptions} parses a
+ * section as an operator wrote it, with no reference.conf beneath.
  */
-export const redisFederationGrantIntentStoreSectionSchema = keyPrefixSection("fg:");
+export const redisFederationGrantIntentStoreSectionSchema = z
+	.object({ keyPrefix: z.string().default("fg:") })
+	.strict()
+	.default(() => ({ keyPrefix: "fg:" }));
 
 /** The options the adapter takes, from its section as an operator wrote it, parsed here. */
 export function resolveRedisFederationGrantIntentStoreOptions(

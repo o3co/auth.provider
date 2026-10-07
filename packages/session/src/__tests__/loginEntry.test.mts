@@ -36,9 +36,9 @@ import {
 	createTestApp,
 	createTestCsrfTokenSigner,
 	createTestSessionCookiePolicy,
-	loginEntryContract,
 	makeValidAppConfig,
 } from "@o3co/auth-provider-core/testing";
+import { loginEntryContract } from "@o3co/auth-provider-test-kit";
 import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import { createLoginEntry, loginEntryFromConfig } from "#/login-entry.mjs";

@@ -40,7 +40,7 @@ import {
 	WebAuthnCredentialStorageError,
 	type WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
-import type { ContractCase } from "@o3co/auth-provider-core/testing";
+import type { ContractCase } from "../contractCase.mjs";
 
 /** What one case runs over: a fresh, empty store. */
 export interface WebAuthnCredentialStoreHarness {

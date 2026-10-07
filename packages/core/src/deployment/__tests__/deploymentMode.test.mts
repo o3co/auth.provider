@@ -33,7 +33,7 @@ import * as core from "#/index.mjs";
 import { createApp, defineModule, type ProviderDeps } from "#/index.mjs";
 import type { ComponentMap } from "#/modules/manifest/component-map.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
-import { deploymentModeContract } from "#/testing/index.mjs";
+import { deploymentModeContract } from "./deploymentMode.contract.mjs";
 
 const RULE = "the mode is single, multi or unset";
 

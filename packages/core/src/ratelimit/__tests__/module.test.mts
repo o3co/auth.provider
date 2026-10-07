@@ -12,6 +12,7 @@ import type { RateLimiter } from "#/ratelimit/types.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 import { memoryRateLimiterModule } from "../module.mjs";
 import { verifierLimitClaim, withVerifierLimitDeclarations } from "../verifierLimits.mjs";
+import { shippedMemoryRateLimiterSection } from "./shippedSection.mjs";
 
 /** The prefixes a verifier limits itself, and the setting each is made at. */
 const VERIFIER_PREFIXES = [
@@ -24,8 +25,8 @@ describe("memoryRateLimiterModule", () => {
 		expect(memoryRateLimiterModule.name).toBe("core-rate-limiter-memory");
 	});
 
-	it("requires the contributed budgets alone", () => {
-		expect(memoryRateLimiterModule.requires).toEqual(["rateLimitBudgetResolver"]);
+	it("requires nothing: no contributed budget is read", () => {
+		expect(memoryRateLimiterModule.requires ?? []).toEqual([]);
 	});
 
 	it("provides rateLimiter", () => {
@@ -38,17 +39,20 @@ describe("memoryRateLimiterModule", () => {
 		expect(memoryRateLimiterModule).not.toHaveProperty("configSchema");
 	});
 
-	it("defaults maxBuckets in its section's schema", () => {
-		const parsed = memoryRateLimiterModule.section?.schema.parse(undefined);
+	it("reads maxBuckets 10000 as core's reference.conf ships it, and fills none itself", () => {
+		const parsed = memoryRateLimiterModule.section?.schema.parse(shippedMemoryRateLimiterSection());
+		expect(memoryRateLimiterModule.section?.schema.safeParse(undefined).success).toBe(false);
 		expect(parsed).toMatchObject({ maxBuckets: 10_000 });
 	});
 
 	it("reads maxBuckets and a spec from the string an environment variable carries", () => {
 		expect(
-			memoryRateLimiterModule.section?.schema.parse({
-				maxBuckets: "500",
-				defaultLimit: { limit: "5", windowSeconds: "60" },
-			}),
+			memoryRateLimiterModule.section?.schema.parse(
+				shippedMemoryRateLimiterSection({
+					maxBuckets: "500",
+					defaultLimit: { limit: "5", windowSeconds: "60" },
+				}),
+			),
 		).toMatchObject({ maxBuckets: 500, defaultLimit: { limit: 5, windowSeconds: 60 } });
 	});
 
@@ -60,7 +64,8 @@ describe("memoryRateLimiterModule", () => {
 			{ defaultLimit: { limit: 5, windowSeconds: 60, window: 1 } },
 		]) {
 			expect(
-				memoryRateLimiterModule.section?.schema.safeParse(section)?.success,
+				memoryRateLimiterModule.section?.schema.safeParse(shippedMemoryRateLimiterSection(section))
+					?.success,
 				JSON.stringify(section),
 			).toBe(false);
 		}
@@ -89,12 +94,14 @@ describe("memoryRateLimiterModule", () => {
 		"refuses a limits entry for %s, a verifier's own limit, in its section's schema, naming the key and the setting",
 		(prefix, setting) => {
 			const parsed = withVerifierLimitDeclarations(new Map([[prefix, setting]]), () =>
-				memoryRateLimiterModule.section?.schema.safeParse({
-					limits: {
-						[prefix]: { limit: 5, windowSeconds: 60 },
-						token: { limit: 5, windowSeconds: 60 },
-					},
-				}),
+				memoryRateLimiterModule.section?.schema.safeParse(
+					shippedMemoryRateLimiterSection({
+						limits: {
+							[prefix]: { limit: 5, windowSeconds: 60 },
+							token: { limit: 5, windowSeconds: 60 },
+						},
+					}),
+				),
 			);
 			expect(parsed?.success).toBe(false);
 			expect(parsed?.error?.issues).toEqual([
@@ -111,7 +118,9 @@ describe("memoryRateLimiterModule", () => {
 		(prefix, setting) => {
 			const config = {
 				...makeValidCoreConfig(),
-				"core-rate-limiter-memory": { limits: { [prefix]: { limit: 5, windowSeconds: 60 } } },
+				"core-rate-limiter-memory": shippedMemoryRateLimiterSection({
+					limits: { [prefix]: { limit: 5, windowSeconds: 60 } },
+				}),
 			};
 			let err: unknown;
 			try {
@@ -142,42 +151,40 @@ describe("memoryRateLimiterModule", () => {
 		"accepts a limits entry for %s in its section's schema when nothing declares it: only declarations count",
 		(prefix) => {
 			expect(
-				memoryRateLimiterModule.section?.schema.safeParse({
-					limits: { [prefix]: { limit: 5, windowSeconds: 60 } },
-				})?.success,
+				memoryRateLimiterModule.section?.schema.safeParse(
+					shippedMemoryRateLimiterSection({
+						limits: { [prefix]: { limit: 5, windowSeconds: 60 } },
+					}),
+				)?.success,
 			).toBe(true);
 		},
 	);
 
-	it("limits a prefix by the budget its owner contributed, read at each check, under its own limits entry", async () => {
-		const budgets = new Map<string, { limit: number; windowSeconds: number }>();
-		const cfg = {
-			limits: { token: { limit: 4, windowSeconds: 45 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
-			maxBuckets: 10_000,
-		};
+	it("limits a prefix by its own limits entry, else its defaultLimit, whatever a resolver answers", async () => {
+		const asked: string[] = [];
 		const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({
-			section: cfg,
+			section: {
+				limits: { token: { limit: 4, windowSeconds: 45 } },
+				defaultLimit: { limit: 60, windowSeconds: 60 },
+				maxBuckets: 10_000,
+			},
 			rateLimitBudgetResolver: {
-				get: (prefix: string) => budgets.get(prefix),
-				entries: () => budgets.entries(),
+				get: (prefix: string) => {
+					asked.push(prefix);
+					return { limit: 2, windowSeconds: 300 };
+				},
+				entries: () => new Map().entries(),
 			},
 		} as never) as RateLimiter | undefined;
 		if (!limiter) throw new Error("rateLimiter provider missing");
-		budgets.set("mfa", { limit: 2, windowSeconds: 300 });
-		budgets.set("login", { limit: 20, windowSeconds: 900 });
 
-		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(2);
-		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).allowed).toBe(true);
-		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).allowed).toBe(false);
-		expect((await limiter.check("login:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(20);
 		expect((await limiter.check("token:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(4);
-		expect((await limiter.check("authorize:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(60);
+		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(60);
+		expect(asked).toEqual([]);
 	});
 
-	it("reads no owner's key: a prefix nothing contributes a budget for falls to its defaultLimit", async () => {
-		// The owners' keys are their modules' to read, and to refuse; the
-		// limiter reads their budgets through rateLimitBudgetResolver alone.
+	it("reads no owner's key: a prefix its own limits do not name falls to its defaultLimit", async () => {
+		// The owners' keys are their modules' to read, and to refuse.
 		const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({
 			section: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 }, maxBuckets: 10_000 },
 			config: {
@@ -189,7 +196,6 @@ describe("memoryRateLimiterModule", () => {
 					factors: { email: { sendLimit: { limit: 1, windowSeconds: 3600 } } },
 				},
 			},
-			rateLimitBudgetResolver: { get: () => undefined, entries: () => new Map().entries() },
 		} as never) as RateLimiter | undefined;
 		if (!limiter) throw new Error("rateLimiter provider missing");
 		for (const key of [

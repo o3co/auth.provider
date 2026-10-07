@@ -55,9 +55,11 @@ Take the new template's `src/` whole, `src/__tests__/` included, and its
 `config/` (`reference.conf`, `application.conf`, `development.conf`), then
 re-apply your own edits. The new `src/` imports packages a v0.16.0 scaffold
 does not list, whatever `MFA_MODE` says: `@o3co/auth-provider-mfa`,
-`@o3co/auth-provider-standard` and `zod`. Merge the template's dependency
-changes into your scaffold's `package.json`, at their published versions
-rather than `workspace:*`, and refresh the lockfile. Then:
+`@o3co/auth-provider-standard` and `zod`, and its tests import the slots'
+contract suites from `@o3co/auth-provider-test-kit`, a dev dependency.
+Merge the template's dependency changes into your scaffold's `package.json`,
+at their published versions rather than `workspace:*`, and refresh the
+lockfile. Then:
 
 - `HTTP_PORT` set to the empty string, or to anything but decimal digits,
   refuses the boot; it used to boot on a random port (#948).
@@ -356,6 +358,26 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   so what `"accept"` still redeemed was a chain without a `sid` from a
   deployment that ran without a family store. See the
   [oauth README](../packages/oauth/README.md#refresh_token).
+- **BREAKING: `oauth.jwt.legacyTypAccept` is removed** (#767). The key, at
+  any value (`false` included), refuses the boot wherever
+  `oauthEndpointsModule` is installed (`config-path-relocated`,
+  `oauth.jwt.legacyTypAccept was removed`), and so does
+  `OAUTH_JWT_LEGACY_TYP_ACCEPT`, exported at any value, the empty string
+  included (`environment-variable-renamed`,
+  `OAUTH_JWT_LEGACY_TYP_ACCEPT sets oauth.jwt.legacyTypAccept, which was
+  removed`). A token with no `typ` header is refused on every route that
+  verifies a token this provider signed, as v0.16.0 already did with the key
+  unset: a refresh token is `400 invalid_grant` (`invalid refresh_token`), an
+  access token `401 invalid_token` at `/oauth/userinfo` and the federation
+  routes, `active: false` at `/oauth/introspect`, and a subject token is
+  refused by token exchange. `jwt_verify_legacy_typ` is no longer logged.
+  The tokens it admitted were the typ-less ones minted by releases before
+  v0.5.0, which stamped no `typ` header. **What to do:** delete the line and
+  unset the variable; there is nothing to set in their place. A deployment
+  that ran with the key on signs out the holders of such tokens at the
+  upgrade: they obtain new tokens, which carry `typ`, by signing in again.
+  In code, `JwtVerifyOptions` and `OAuthTokenSettings` lose
+  `legacyTypAccept` ([Exports removed, and signatures changed](#exports-removed-and-signatures-changed)).
 - `device-grant.store` (and `oauth.deviceAuthorization.store`), at any value,
   refuses the boot wherever `deviceAuthorizationGrantModule` is installed,
   the grant on or off (#728). Delete the line. An enabled device grant needs
@@ -531,8 +553,8 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   session or the device-grant module, is loaded: each declares its prefix a
   verifier's own attempt limit, which no limiter module's configuration may
   loosen. Core names neither prefix itself. A limiter built with
-  `registerBuiltinRateLimiters` or `redisRateLimiterBuilder` reads no
-  contributed budget and keeps the `limits` it is given.
+  `registerBuiltinRateLimiters` or `redisRateLimiterBuilder` keeps the
+  `limits` it is given.
   The boot is refused (`config-validation-failed`, naming the key and the
   setting). Move the numbers to the module's own setting:
   `session.rateLimit.login` for login, `device-grant.rateLimit` for device
@@ -838,6 +860,20 @@ The boot refusals you can meet, with their messages, are in
   clients that pad or re-encode the handle are the ones to watch:
   `token.issued.failure` with `details.reason` `"user_handle_mismatch"` or
   `"user_handle_missing"`.
+- **BREAKING: with `oauth.requireEmailVerified` on, passkey sign-ins of
+  unverified users are refused (#710).** The WebAuthn grant now applies the
+  gate `/authorize`, the session grant, jwt-bearer and device approval
+  apply: after the assertion it reads the user behind the credential through
+  the `userRepository` slot's new optional `findBySubject`, and a user the
+  Store does not hold, or whose `emailVerified` is not `true`, is
+  `400 invalid_grant` "email address is not verified", with no token or
+  refresh-token family issued. A lookup that throws is
+  `503 temporarily_unavailable` "identity resolution unavailable". With the
+  setting on, a composition installing `webauthnModule` whose
+  `userRepository` has no `findBySubject` refuses to start: implement it on
+  your repository, answering the `User` for the `sub` the passkey grant
+  issues (the credential's `userId`). With the setting off nothing changes.
+  See the webauthn README, "SECURITY — a verified email".
 - **The Store's users.** A `2xx` user with an empty `id` or `username` is
   refused as malformed, `503` on every login path (#862). A Store sends a
   stable label as `username` for a user without one.
@@ -1187,18 +1223,36 @@ modules fills them.
   is now refused for its container (`contribution-malformed`) before the
   override guard (`contribution-kind-guarded`) that a record there still
   meets.
-- **Rate limits.** The module that keys a prefix contributes its budget
-  (`rateLimitBudgets`); the bundled limiters seed none (#782). No module
-  overrides a prefix: an `overrides.rateLimitBudgets` entry refuses the boot
-  (`contribution-kind-guarded`, #807). In code: the `failMode` options are
-  gone from `createDeviceVerificationHandler`, the federation-grants routers,
-  `RateLimitGuardOptions` and `RateLimitPolicyOptions`; `checkWithFailMode`
-  takes a policy from `createRateLimitPolicy` and refuses any other object;
-  `memoryRateLimiterModule` and `webauthnModule` require
-  `rateLimitBudgetResolver`, which a hand-built deps object for their
-  factories carries. `createRedisRateLimiter` no longer takes `budgets` and
-  `redisRateLimiterModule` requires only `rateLimiterClient`; set a prefix's
-  limit as `redis-rate-limiter.limits.<prefix>` (#807).
+- **Rate limits.** The module that keys a prefix claims it
+  (`rateLimitBudgets`) and sets no budget; the bundled limiters seed none
+  (#782). No module overrides a prefix: an `overrides.rateLimitBudgets` entry
+  refuses the boot (`contribution-kind-guarded`, #807). In code: the
+  `failMode` options are gone from `createDeviceVerificationHandler`, the
+  federation-grants routers, `RateLimitGuardOptions` and
+  `RateLimitPolicyOptions`; `checkWithFailMode` takes a policy from
+  `createRateLimitPolicy` and refuses any other object;
+  `createMemoryRateLimiter`, `createRedisRateLimiter` and
+  `createRateLimitBudgetLookup` (`RateLimitBudgetLookupOptions`) take no
+  `budgets`, `memoryRateLimiterModule` requires nothing and
+  `redisRateLimiterModule` only `rateLimiterClient`; set a prefix's limit as
+  `core-rate-limiter-memory.limits.<prefix>` or
+  `redis-rate-limiter.limits.<prefix>` (#807).
+- **BREAKING: a `rateLimitBudgets` contribution is a prefix claim only
+  (#807).** A module claims each prefix it keys with a factory that answers
+  `null` (`verifierLimitClaim({ setting })` for a verifier's own limit) and
+  contributes no budget. A key's budget is the limiter's own `limits` entry
+  for its prefix, else its `defaultLimit`, the same on the in-process and the
+  Redis limiter. A factory that answers a budget (`{ limit, windowSeconds }`)
+  refuses the boot (`contribute-factory-failed`, naming the module, the
+  prefix and the `limits` entry to set instead). The synthetic slot
+  `rateLimitBudgetResolver` and its type `RateLimitBudgetResolver` are
+  removed: a module that requires the slot refuses the boot
+  (`missing-required-component`). If a module of your own contributed a
+  budget, or your code reads `rateLimitBudgetResolver`, move the budget into
+  the limiter's `limits` — `core-rate-limiter-memory.limits.<prefix>` or
+  `redis-rate-limiter.limits.<prefix>` — and have the module's factory answer
+  `null`. The boot line `rate_limit_budgets_registered` lists each claimed
+  prefix with its module and no `budget` field.
   `createDeviceVerificationHandler`'s `subjectRevocation` is the full
   `SubjectRevocation`, no longer a `Pick` of `revokedBefore` (#717).
 - **A switched-off grant or second factor is no override target (#728).** A
@@ -1314,6 +1368,27 @@ modules fills them.
   false }` alone, without the package's `reference.conf`, is refused; delete
   the section or layer the reference. Parsed directly, an absent section is
   `undefined`.
+- **BREAKING: the `mtls` section, the Redis stores' sections, core's
+  in-process rate limiter's section and the template's `redis-clients` fill
+  no default (#728).** `mtls`, `core-rate-limiter-memory`, each Redis store's
+  section (`redis-access-token-denylist`, `redis-attempt-counter`,
+  `redis-challenge-store`, `redis-consent-store`, `redis-device-code-store`,
+  `redis-federation-token-store`, `redis-mfa-factor-store`,
+  `redis-mfa-transaction-store`, `redis-rate-limiter`,
+  `redis-refresh-token-family-store`, `redis-replay-seen-set`,
+  `redis-session-stores`) and the template's `redis-clients.assumeNoEviction`
+  take their defaults only from the owning package's `config/reference.conf`.
+  A configuration that layers the modules' references (`moduleReferences`, as
+  the template does) sees no change. A configuration built by hand must write
+  every key of each of these sections it loads, or the boot is refused naming
+  the missing key. Parsed directly, `mtlsConfigSchema` reads an absent
+  section as `undefined`, which the module treats as off. It still fills the
+  tuning keys inside `fullPki.revocation`, a block that stays absent until
+  the operator writes it. `redis-federation-grant-store` and
+  `redis-federation-grant-intent-store` keep their `keyPrefix` default,
+  because `resolveRedisFederationGrantStoreOptions` and
+  `resolveRedisFederationGrantIntentStoreOptions` parse a section with no
+  `reference.conf` beneath it.
 - **BREAKING: the session grant is one module, `oauthSessionGrantModule`,
   switched by its own section (#728).** List it as it is: it reads
   `oauth-session.enabled` from the configuration boot parses, and an absent
@@ -1387,7 +1462,7 @@ modules fills them.
 - **BREAKING: an enabled oauth-authorization grant requires
   `oauthTokenSettings` and `tokenBindingSettings`, and reads its settings
   from them, not from the configuration (#728).** The grants take the
-  issuer, the lifetimes they mint, `legacyTypAccept`, whether resource
+  issuer, the lifetimes they mint, whether resource
   indicators are enforced and `requireEmailVerified` from
   `oauthTokenSettings`, and the refresh-token binding rule
   (`bindConfidentialClientRefreshTokens`) from core's `tokenBindingSettings`,
@@ -1872,6 +1947,25 @@ modules fills them.
   `FederationRedirectPolicyUnpairedDetails` are gone, and `BootErrorReason`
   loses `"federation-redirect-policy-unpaired"`; a federation registers
   through its type ([above](#slots-admission-and-wiring)).
+- **The contract suites of the slots core fills itself**
+  (`deploymentModeContract`, `tokenBindingSettingsContract`,
+  `federationSettingsContract`, `outboundPolicyContract` and their
+  `…ContractInput` types), new since v0.16.0 and on `./testing` in the 0.17
+  release candidates, leave core's `./testing` with no replacement (#1580): no module or host provides those slots, so
+  there is no provider of yours to run them over. The slots' test doubles stay.
+- **The contract suites of the slots a module provides, and the session
+  requirement's** (`csrfGuardContract`, `csrfTokenSignerContract`,
+  `loginCompletionContract`, `loginEntryContract`,
+  `sessionCookiePolicyContract`, `httpSettingsContract`,
+  `oauthTokenSettingsContract`, `federationGrantPolicyContract`,
+  `rateLimiterContract` and `sessionRequirementContract`, their
+  `…ContractInput` types — the requirement's is `RequirementContractInput` —
+  and `ContractCase`), new since v0.16.0 and on `./testing` in the 0.17
+  release candidates, leave core's `./testing` for
+  `@o3co/auth-provider-test-kit` (#1582, #1595): import them from there, under
+  the same names, with the kit's own `ContractCase`. The slots' test doubles
+  (`createTestCsrfGuard`, `createRecordingLoginCompletion` and the rest) stay
+  on core's `./testing`.
 - **BREAKING: each federation package ships only its type module** (#1297,
   #1299, #1300, #1301). Removed, each with the `ComponentMap` slot it
   required: `googleFederationModule` and `googleFederationConfig` from
@@ -1907,7 +2001,7 @@ modules fills them.
 - **BREAKING: token exchange reads `oauthTokenSettings`, not the
   configuration** (#1331). `tokenExchangeModule` requires the
   `oauthTokenSettings` slot and no longer requires `config` or declares a
-  `configSchema`: the issuer and `legacyTypAccept` a subject token is held to,
+  `configSchema`: the issuer a subject token is held to,
   and the lifetimes it mints within, are the slot's. A composition with
   `oauthEndpointsModule` changes nothing, since the module provides the slot; one
   without it fills the slot itself, or the boot is refused
@@ -1937,6 +2031,17 @@ modules fills them.
   `OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY`. Code that reads either key off
   `AppConfig` or `CoreConfig` handles `undefined`; a configuration built by
   hand drops both.
+- **BREAKING: `legacyTypAccept` is gone from every type that carried it
+  (#767).** `JwtVerifyOptions` (core's `verifyJwt` refuses a token with no
+  `typ` header unless the caller passes `expectedTyp: null`, which skips the
+  `typ` check altogether), `OAuthTokenSettings` and core/testing's
+  `TestOAuthTokenSettingsOverrides`, the oauth package's `OAuthSection` and
+  `OAuthTokenSection`, and token exchange's
+  `CreateSelfIssuedAccessTokenValidatorOptions` lose it. A slot filled by
+  hand drops the member; `checkOAuthTokenSettings` no longer asks for it.
+  `verifyJwt` no longer reads a typ-less token's `payload.type`. Code that
+  passed `legacyTypAccept: false` drops the line: the behaviour is the same
+  ([Keys removed](#keys-removed)).
 - **The oauth module is one value, `oauthEndpointsModule` (#728).** The
   module reads every `oauth.*` setting from its own parsed
   section; `createOAuthRouter` takes that section as `section` (typed
@@ -2242,6 +2347,22 @@ if you run a Store, then go `optional` — users enroll at their own pace — an
 `required` once most have. Switching to `required`, a live password session
 of a user with no counting factor is asked to log in again, and that login
 binds their first factor.
+
+**A first factor bound without the account-email proof counts from the next
+sign-in.** Where no proof is asked — no mail sender wired under `when-mail`,
+an account with no address, or `MFA_ENROLLMENT_REQUIRE_EMAIL_PROOF=never` — a
+user's first factor adds nothing to the sign-in it is bound in. At a login,
+`POST /session/mfa/enrollment/complete` answers `200` with the factor and its
+recovery codes, no `message`, and establishes no session: your login page
+shows the codes, then sends the user to sign in again, with the password and
+the factor just bound. From the account page the session stays as it signed
+in, and codes and tokens issued from it carry its `amr` without the factor
+until it steps up with the factor. A first factor bound with the proof, and
+every later factor, count at once as before. MFA is new since v0.16.0, so
+this is no break of a v0.16.0 surface; pre-releases of 0.17.0 counted every
+first binding at once, and a page built against one that navigates to
+`redirect_to` on any `200` from the completion checks `message` first
+([The MFA page's contract](../packages/mfa/README.md#the-mfa-pages-contract)).
 
 **Email factors enrolled on a 0.17.0 pre-release, for an address whose local
 part has upper-case letters, are enrolled again.** The provider now keeps an

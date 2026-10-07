@@ -5,12 +5,12 @@
 
 /**
  * The Redis rate limiter against the `RateLimiter` port's contract suite,
- * published on core's testing entry: over a stand-in for the atomic
+ * published by the test kit: over a stand-in for the atomic
  * `incrementWithTtl` script, one that answers and one whose connection is
  * down, each under both outage policies the limiter can answer.
  */
 
-import { rateLimiterContract } from "@o3co/auth-provider-core/testing";
+import { rateLimiterContract } from "@o3co/auth-provider-test-kit";
 import { describe, it } from "vitest";
 import { createRedisRateLimiter } from "#/ratelimit.mjs";
 

@@ -19,10 +19,11 @@
  * `POST /verify`, an enrollment — a login's first binding, or one from a
  * signed-in session — `POST /enrollment` and `POST /enrollment/complete`,
  * and a session's step-up, `POST /step-up`, over the coordinator; a
- * verified second factor, or a factor bound at a login, resumes the login
- * through core's `resumePrimary` and finishes it through the
- * `loginCompletion` slot; one verified on a session's step-up, or bound in
- * a session, escalates that session. See README, "The routes".
+ * verified second factor, or a factor bound at a login that counts at once,
+ * resumes the login through core's `resumePrimary` and finishes it through
+ * the `loginCompletion` slot; one verified on a session's step-up, or bound
+ * in a session and counting at once, escalates that session. See README,
+ * "The routes".
  *
  * - Every answer is `no-store`. Bodies are parsed on these paths alone.
  * - Every POST sits behind the deployment's CSRF guard, then the flood guard
@@ -64,6 +65,10 @@
  *   session (`escalation.mts`). A step-up answers as the escalation came to;
  *   a binding answers its factor and codes, shown once, whatever it came to.
  *   Neither reaches a login's completion.
+ * - A binding that adds nothing — a first binding by a sign-in alone, whose
+ *   factor counts from the next sign-in that uses it (`enrollment.mts`) —
+ *   escalates no session and completes no login: it answers its factor and
+ *   codes alone, with no `message`, and a login's establishes no session.
  * - A login's binding marks its recovery codes shown just before the answer
  *   that carries them, once nothing else can answer the login: one answered
  *   otherwise — another requirement's interruption, `401`, `503` — leaves
@@ -1386,25 +1391,34 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 							"mfa_email_proof_flag_uncleared",
 						);
 					}
-					if (outcome.purpose === "enroll") {
-						// The binding escalates its session. The codes are shown this once, so
-						// the binding is answered whether or not the escalation lands; each
-						// failure is logged there.
-						if (call.session !== undefined) {
-							await escalateSession(
-								"enrollment",
-								req,
-								res,
-								{ sid: call.session.sid, sub: outcome.subject },
-								expectedRenewalNonce,
-								outcome.adds,
-							);
-						}
-						res.status(200).json(await answer());
+					// What the binding adds, when it counts in this sign-in (`enrollment.mts`).
+					const { adds } = outcome;
+					if (outcome.purpose !== "enroll" && adds !== undefined) {
+						await completeLogin(
+							"enrollment",
+							req,
+							res,
+							{ continuation: outcome.continuation, adds },
+							answer,
+						);
 						answerSaid();
 						return;
 					}
-					await completeLogin("enrollment", req, res, outcome, answer);
+					// A binding in a session that adds escalates it. One that adds nothing
+					// leaves the sign-in as it was: a login's establishes no session. The
+					// codes are shown this once, so the binding is answered whether or not
+					// an escalation lands; each failure is logged there.
+					if (outcome.purpose === "enroll" && call.session !== undefined && adds !== undefined) {
+						await escalateSession(
+							"enrollment",
+							req,
+							res,
+							{ sid: call.session.sid, sub: outcome.subject },
+							expectedRenewalNonce,
+							adds,
+						);
+					}
+					res.status(200).json(await answer());
 					answerSaid();
 					return;
 				}

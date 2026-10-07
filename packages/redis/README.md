@@ -524,9 +524,10 @@ the first command.
 The rate limiter takes a key's budget from core's one lookup,
 `createRateLimitBudgetLookup`: its own `redis-rate-limiter.limits` entry for the
 key's prefix, else its `defaultLimit`, which it declares
-(`RateLimiter.defaultLimit`). The modules that key a limiter claim their
-prefixes with no budget of their own, so neither the module nor
-`redisRateLimiterBuilder`, which takes its `limits` as given, reads one. Its
+(`RateLimiter.defaultLimit`), the same budget the in-process limiter applies
+for the same configuration. The modules that key a limiter claim their
+prefixes and contribute no budget; `redisRateLimiterBuilder` takes its
+`limits` as given. Its
 `limits` may not name `login` or `device_verification`, a verifier's own
 attempt limit set at `session.rateLimit.login` and `device-grant.rateLimit`
 and counted on the attempt counter: the section refuses such an entry.
@@ -535,8 +536,8 @@ the limiter's outage policy (`RateLimiter.failMode`), which the guard applies
 while Redis cannot answer; a value other than `"open"` or `"closed"` refuses
 boot naming the key, and the default is `closed`.
 `redisRateLimiterBuilder` takes the policy as its config's `failMode`, with
-the same values; it reads no contributed budget, only the `limits` and
-`defaultLimit` it is given. That key governs only a limiter these build: any
+the same values, and only the `limits` and `defaultLimit` it is given. That
+key governs only a limiter these build: any
 other limiter answers its own policy, and boot warns
 `rate_limit_fail_mode_not_applied` when `rateLimit.failMode`, the key's old
 path, says `"open"` and the wired limiter does not.
@@ -1423,12 +1424,14 @@ instead.
 `AttemptCounter`'s suite is the test kit's `attemptCounterContract`, which
 [`attempt-counter.test.mts`](__tests__/attempt-counter.test.mts) runs over two
 connections, on a hand-moved clock and on the real one.
+`RateLimiter`'s suite is the test kit's `rateLimiterContract`, which
+[`ratelimit.contract.test.mts`](__tests__/ratelimit.contract.test.mts) runs over a stand-in script.
 Which ports have a suite, and the one Redis adapter the suites do not run
 against (`AccessTokenDenylist`, whose expiry is Redis's own key TTL and cannot
 follow the suite's fake clock), are in
 [docs/adapter-surface.md](../../docs/adapter-surface.md). The adapters whose
-ports have no core suite — `FederationTokenStore`, `RateLimiter`,
-`CodeRepository` — are covered by their own tests here.
+ports have no core suite — `FederationTokenStore`, `CodeRepository` — are
+covered by their own tests here.
 
 ## Source layout
 

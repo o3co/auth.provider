@@ -21,7 +21,7 @@
  * an express session (`regenerate`, `save`, `sessionID`) whose regenerations
  * and saves are counted. A response records its status, body, headers and
  * cookies. A component that needs more of Express than this is outside the
- * contracts. Not on the testing entry.
+ * contracts. Not on the kit's entry.
  */
 
 import type { NextFunction, Request, RequestHandler, Response } from "express";

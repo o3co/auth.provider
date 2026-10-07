@@ -28,6 +28,12 @@
  * one (none, one that yields no claim, or one after the redemption, which is warned), one
  * challenge lifetime before the redemption.
  *
+ * With `oauth.requireEmailVerified` on, the user behind the credential is read through
+ * `userRepository.findBySubject` after the sign-count update and before the scope, the policy, the
+ * family and signing; a user the Store does not hold or whose email is not verified
+ * (`isEmailVerified`) is `invalid_grant`, and a lookup that throws is 503. A grant built with the
+ * setting on and no repository that can look a user up is refused at composition.
+ *
  * With `subjectRevocation` wired, the subject's revocation boundary is read after every slow step
  * and before anything is registered or signed, and an authentication it covers
  * (`subjectBoundaryCovers`, the rule `verifyJwt` applies) is `invalid_grant`; a
@@ -51,12 +57,15 @@ import {
 	type GrantHandlerResult,
 	generateToken,
 	generateTokenResponse,
+	isEmailVerified,
 	isGrantTypeAllowed,
 	loggableError,
 	ownedConfirmation,
 	type ProviderDeps,
 	readSpaceDelimitedParameter,
+	type SupportsSubjectLookup,
 	subjectBoundaryCovers,
+	supportsSubjectLookup,
 	type Token,
 } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
@@ -81,8 +90,9 @@ const REFRESH_TOKEN_GRANT_TYPE = "refresh_token";
 /**
  * What the WebAuthn grant reads: the shared grant slots (`keyStore` to mint, `grantPolicy`,
  * `refreshTokenFamilyRotation`, `subjectRevocation`, `logger`), the credential store and
- * challenge ceremony, the `oauthTokenSettings` slot (the token lifetimes and the
- * resource-indicator switch), core's
+ * challenge ceremony, the `oauthTokenSettings` slot (the token lifetimes, the
+ * resource-indicator switch and `requireEmailVerified`), `userRepository` (read under
+ * `requireEmailVerified` alone), core's
  * `tokenBindingSettings` slot (whether a confidential client's refresh token is bound), and the
  * RP fields of `webauthnConfig` — `webauthnModule` hands it its own section there. Nothing is
  * read from the whole configuration.
@@ -101,7 +111,8 @@ export interface WebAuthnGrantDeps
 			| "webauthnCredentialStore"
 			| "challengeCeremony"
 			| "oauthTokenSettings"
-			| "tokenBindingSettings"
+			| "tokenBindingSettings",
+			"userRepository"
 		> {
 	readonly webauthnConfig: {
 		readonly rpId: string;
@@ -143,6 +154,20 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 	const tokenSettings = checkOAuthTokenSettings(deps.oauthTokenSettings);
 	const accessTokenExpiresIn = tokenSettings.accessTokenLifetime.defaultExpiresIn;
 	const refreshTokenExpiresIn = tokenSettings.refreshTokenExpiresIn;
+	// Under `requireEmailVerified` the user behind the credential is read; a composition that
+	// cannot read one fails here, before any challenge is consumed.
+	let subjectLookup: SupportsSubjectLookup | undefined;
+	if (tokenSettings.requireEmailVerified) {
+		const userRepository = deps.userRepository;
+		if (userRepository === undefined || !supportsSubjectLookup(userRepository)) {
+			throw new Error(
+				"webauthn grant: oauth.requireEmailVerified is on, and the userRepository slot is not " +
+					"filled with a repository that has findBySubject, so the user behind a passkey cannot " +
+					"be read. Fill the slot with a UserRepository that implements findBySubject.",
+			);
+		}
+		subjectLookup = userRepository;
+	}
 	// The binding rule is read once, here, from core's `tokenBindingSettings` slot, which core
 	// fills frozen from `core.tokenBinding`: a deps built without it, or with a value whose
 	// rule is not a boolean, fails at composition too.
@@ -353,7 +378,34 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			}
 
 			// ------------------------------------------------------------------
-			// Step 6: Scope resolution
+			// Step 6: The email gate
+			//
+			// Every path that mints for a user applies it. `invalid_grant`, as the
+			// session grant answers: RFC 6749 §5.2 defines no `access_denied` for
+			// the token endpoint.
+			// ------------------------------------------------------------------
+			if (subjectLookup !== undefined) {
+				// The field is read inside the `try`: an accessor-backed record can reach its
+				// backend on that read, and a throw there is the same outage.
+				let emailVerified: boolean;
+				try {
+					emailVerified = isEmailVerified(await subjectLookup.findBySubject(credential.userId));
+				} catch (err) {
+					return storeUnavailable("user_repository", "read", clientId, err);
+				}
+				if (!emailVerified) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "email address is not verified",
+						},
+					};
+				}
+			}
+
+			// ------------------------------------------------------------------
+			// Step 7: Scope resolution
 			// ------------------------------------------------------------------
 			const scopeOutcome = resolveScope(ctx);
 			if ("error" in scopeOutcome) {
@@ -362,7 +414,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			let effectiveScopes = scopeOutcome.scopes;
 
 			// ------------------------------------------------------------------
-			// Step 7: grantPolicy gate
+			// Step 8: grantPolicy gate
 			//
 			// Runs whenever `grantPolicy` is wired, as in the refresh grant; the
 			// `oauthTokenSettings` slot's `resourceIndicatorEnabled` gates only whether
@@ -413,7 +465,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			}
 
 			// ------------------------------------------------------------------
-			// Step 8: The issuance instant, then the subject's revocation boundary
+			// Step 9: The issuance instant, then the subject's revocation boundary
 			//
 			// Both tokens are signed with this `iat`. The boundary is the last
 			// read before anything is registered or signed, so a revocation
@@ -444,7 +496,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			}
 
 			// ------------------------------------------------------------------
-			// Step 9: Derive audience + issue tokens
+			// Step 10: Derive audience + issue tokens
 			// ------------------------------------------------------------------
 			const client = ctx.authenticatedClient;
 			// Policy audience > `allowedAudiences[0]` > client id, the rule every user-bound grant

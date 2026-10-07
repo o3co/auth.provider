@@ -15,24 +15,39 @@
  */
 
 /**
- * The contract suite every requirement's tests run (the session-admission
- * ADR's D3): a well-formed fixture passes every case, and each way a
- * requirement can break the contract fails the case that names it.
+ * `sessionRequirementContract` run over a well-formed fixture, and the proof
+ * that each case is not vacuous: a fixture broken one way each, refused by
+ * the case that names what it breaks. The suite reads registration through
+ * `resolverForTests` and builds admission's view of a live session by hand;
+ * the last cases pin both to what core does.
  */
 
-import { describe, expect, it } from "vitest";
-import { passwordPrimary } from "#/session-admission/admit.mjs";
-import type {
-	RequirementInterruption,
-	SessionRequirement,
-} from "#/session-admission/requirement.mjs";
 import {
-	type RequirementContractInput,
-	sessionRequirementContract,
-} from "#/session-admission/testing/requirement.contract.mjs";
+	passwordPrimary,
+	type RequirementInput,
+	type RequirementInterruption,
+	type SessionRequirement,
+	type SessionView,
+} from "@o3co/auth-provider-core";
+import { describe, expect, it } from "vitest";
+import { type RequirementContractInput, sessionRequirementContract } from "#/index.mjs";
 
 const NOW = new Date("2026-09-28T12:00:00Z");
 const ISSUER = "https://auth.test";
+
+const RULES = {
+	name: "name equals its key, and a fixture never declares the second-factor authority",
+	reach:
+		"reach holds non-empty strings, no primary's marker, no second-factor value unless the requirement declares the second-factor authority, and — in this release — nothing at all unless it does; stepUpPage is set when reach is not empty, and is valid when set",
+	remediations: "remediations are the requirement's own routes — <name>.<route> — each once",
+	hintKeys: "hintKeys are hint names",
+	deadSession: "admit is never called with a dead session",
+	remediationAction: "admit is never called for a remediation action",
+	verdict: "admit answers a verdict, and a step_up only when stepUpPage is set",
+	outage: "an outage is thrown, never answered met",
+	interruption:
+		"an interruption's body carries none of the reserved keys, and no hint value carries an address",
+} as const;
 
 const primary = () =>
 	passwordPrimary({
@@ -95,59 +110,55 @@ describe("sessionRequirementContract — a well-formed fixture", () => {
 
 	it("names each of its cases, in order", () => {
 		expect(cases.map((c) => c.name)).toEqual([
-			"name equals its key, and a fixture never declares the second-factor authority",
-			"reach holds non-empty strings, no primary's marker, no second-factor value unless the requirement declares the second-factor authority, and — in this release — nothing at all unless it does; stepUpPage is set when reach is not empty, and is valid when set",
-			"remediations are the requirement's own routes — <name>.<route> — each once",
-			"hintKeys are hint names",
-			"admit is never called with a dead session",
-			"admit is never called for a remediation action",
-			"admit answers a verdict, and a step_up only when stepUpPage is set",
-			"an outage is thrown, never answered met",
-			"an interruption's body carries none of the reserved keys, and no hint value carries an address",
+			RULES.name,
+			RULES.reach,
+			RULES.remediations,
+			RULES.hintKeys,
+			RULES.deadSession,
+			RULES.remediationAction,
+			RULES.verdict,
+			RULES.outage,
+			RULES.interruption,
 		]);
 	});
 
-	it.each(cases)("$name", async ({ run }) => {
-		await run();
-	});
+	for (const contractCase of cases) {
+		it(contractCase.name, contractCase.run);
+	}
 });
 
 describe("sessionRequirementContract — each way a requirement can break it", () => {
 	it("a name that is not its key, or a fixture that declares the second-factor authority; a fixture named mfa that does not declare it, or a requirement under test that is not a fixture and declares it, passes", async () => {
-		expect(await failing({ build: () => fixture({ name: "other" }) })).toContain(
-			"name equals its key, and a fixture never declares the second-factor authority",
-		);
+		expect(await failing({ build: () => fixture({ name: "other" }) })).toContain(RULES.name);
 		expect(await failing({ build: () => fixture({ secondFactorAuthority: true }) })).toContain(
-			"name equals its key, and a fixture never declares the second-factor authority",
+			RULES.name,
 		);
 		expect(
 			await failing({
 				key: "mfa",
 				build: () => fixture({ name: "mfa", remediations: ["mfa.step_up"] }),
 			}),
-		).not.toContain(
-			"name equals its key, and a fixture never declares the second-factor authority",
-		);
+		).not.toContain(RULES.name);
 		// The declaration is read as registration reads it: one that is neither
 		// true, false nor absent does not register.
 		expect(
 			await failing({ build: () => fixture({ secondFactorAuthority: "yes" as never }) }),
-		).toContain("name equals its key, and a fixture never declares the second-factor authority");
+		).toContain(RULES.name);
 		// A requirement under test that is not a fixture may declare it.
 		expect(
 			await failing({ fixture: false, build: () => fixture({ secondFactorAuthority: true }) }),
-		).not.toContain(
-			"name equals its key, and a fixture never declares the second-factor authority",
-		);
+		).not.toContain(RULES.name);
 	});
 
 	it("a reach with a reserved value under another name, a primary's marker, or a page missing", async () => {
-		const reach =
-			"reach holds non-empty strings, no primary's marker, no second-factor value unless the requirement declares the second-factor authority, and — in this release — nothing at all unless it does; stepUpPage is set when reach is not empty, and is valid when set";
-		expect(await failing({ build: () => fixture({ reach: new Set(["otp"]) }) })).toContain(reach);
-		expect(await failing({ build: () => fixture({ reach: new Set(["pwd"]) }) })).toContain(reach);
+		expect(await failing({ build: () => fixture({ reach: new Set(["otp"]) }) })).toContain(
+			RULES.reach,
+		);
+		expect(await failing({ build: () => fixture({ reach: new Set(["pwd"]) }) })).toContain(
+			RULES.reach,
+		);
 		expect(await failing({ build: () => fixture({ reach: new Set(["fixture-ok"]) }) })).toContain(
-			reach,
+			RULES.reach,
 		);
 		expect(
 			await failing({
@@ -157,18 +168,16 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 						stepUpPage: { url: "https://evil.test/x", params: {} },
 					}),
 			}),
-		).toContain(reach);
+		).toContain(RULES.reach);
 		// A page with an empty reach is allowed: a step-up that adds no value.
 		expect(
 			await failing({
 				build: () => fixture({ stepUpPage: { url: "/x", params: {} } }),
 			}),
-		).not.toContain(reach);
+		).not.toContain(RULES.reach);
 	});
 
 	it("a reach from a requirement that does not declare the second-factor authority — one named mfa among them: only the authority adds vouched values in this release", async () => {
-		const only =
-			"reach holds non-empty strings, no primary's marker, no second-factor value unless the requirement declares the second-factor authority, and — in this release — nothing at all unless it does; stepUpPage is set when reach is not empty, and is valid when set";
 		expect(
 			await failing({
 				build: () =>
@@ -177,8 +186,8 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 						stepUpPage: { url: "/fixture-a", params: {} },
 					}),
 			}),
-		).toContain(only);
-		expect(await failing({ build: () => fixture() })).not.toContain(only);
+		).toContain(RULES.reach);
+		expect(await failing({ build: () => fixture() })).not.toContain(RULES.reach);
 		expect(
 			await failing({
 				key: "mfa",
@@ -190,7 +199,7 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 						stepUpPage: { url: "/mfa", params: {} },
 					}),
 			}),
-		).toContain(only);
+		).toContain(RULES.reach);
 		// The authority, under any name, reaches the second-factor values.
 		expect(
 			await failing({
@@ -202,48 +211,53 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 						stepUpPage: { url: "/fixture-a", params: {} },
 					}),
 			}),
-		).not.toContain(only);
+		).not.toContain(RULES.reach);
+	});
+
+	it("a reach the seal refuses fails the reach case alone of the registration cases", async () => {
+		const failed = await failing({ build: () => fixture({ reach: new Set(["otp"]) }) });
+		expect(failed).toContain(RULES.reach);
+		expect(failed).not.toContain(RULES.name);
+		expect(failed).not.toContain(RULES.remediations);
+		expect(failed).not.toContain(RULES.hintKeys);
 	});
 
 	it("remediations that are not names, are not the requirement's own routes, or repeat", async () => {
-		const remediations =
-			"remediations are the requirement's own routes — <name>.<route> — each once";
-		expect(await failing({ build: () => fixture({ remediations: [""] }) })).toContain(remediations);
+		expect(await failing({ build: () => fixture({ remediations: [""] }) })).toContain(
+			RULES.remediations,
+		);
 		expect(await failing({ build: () => fixture({ remediations: ["a", "a"] }) })).toContain(
-			remediations,
+			RULES.remediations,
 		);
 		expect(
 			await failing({ build: () => fixture({ remediations: ["oauth.authorize"] }) }),
-		).toContain(remediations);
+		).toContain(RULES.remediations);
 		expect(
 			await failing({
 				build: () => fixture({ remediations: ["fixture-a.step_up", "fixture-a.step_up"] }),
 			}),
-		).toContain(remediations);
+		).toContain(RULES.remediations);
 	});
 
 	it("a primary handed in that the fixture's admitPrimary establishes for — the interruption case must not pass vacuously", async () => {
 		expect(
 			await failing({ build: () => fixture({ admitPrimary: async () => "establish" }) }),
-		).toContain(
-			"an interruption's body carries none of the reserved keys, and no hint value carries an address",
-		);
+		).toContain(RULES.interruption);
 	});
 
-	it("a hint key that is reserved", async () => {
-		expect(await failing({ build: () => fixture({ hintKeys: ["email"] }) })).toContain(
-			"hintKeys are hint names",
-		);
+	it("a hint key that is reserved, or not a hint name", async () => {
+		for (const hintKey of ["email", "Level", "", "a".repeat(33)]) {
+			expect(await failing({ build: () => fixture({ hintKeys: [hintKey] }) }), hintKey).toContain(
+				RULES.hintKeys,
+			);
+		}
 	});
 
 	it("an outage answered met", async () => {
-		expect(await failing({ withOutage: () => fixture() })).toContain(
-			"an outage is thrown, never answered met",
-		);
+		expect(await failing({ withOutage: () => fixture() })).toContain(RULES.outage);
 	});
 
 	it("a step_up from a requirement without a page, and a verdict that is not one", async () => {
-		const verdict = "admit answers a verdict, and a step_up only when stepUpPage is set";
 		expect(
 			await failing({
 				build: () =>
@@ -253,17 +267,15 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 						admit: async () => ({ outcome: "step_up", whenStillUnmet: "unmet" }),
 					}),
 			}),
-		).toContain(verdict);
+		).toContain(RULES.verdict);
 		expect(
 			await failing({
 				build: () => fixture({ admit: async () => ({ outcome: "maybe" }) as never }),
 			}),
-		).toContain(verdict);
+		).toContain(RULES.verdict);
 	});
 
 	it("an interruption whose body carries a reserved key, or a hint carrying an address", async () => {
-		const body =
-			"an interruption's body carries none of the reserved keys, and no hint value carries an address";
 		expect(
 			await failing({
 				build: () =>
@@ -272,7 +284,7 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 							interruption({ error: "fixture_required", user: { id: "user-1" } }),
 					}),
 			}),
-		).toContain(body);
+		).toContain(RULES.interruption);
 		expect(
 			await failing({
 				build: () =>
@@ -281,17 +293,15 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 							interruption({ error: "fixture_required", hints: { level: "alice@example.com" } }),
 					}),
 			}),
-		).toContain(body);
+		).toContain(RULES.interruption);
 	});
 
 	it("skips the outage and interruption cases when the input offers neither", async () => {
 		const names = sessionRequirementContract(
 			input({ withOutage: undefined, primary: undefined }),
 		).map((c) => c.name);
-		expect(names).not.toContain("an outage is thrown, never answered met");
-		expect(names).not.toContain(
-			"an interruption's body carries none of the reserved keys, and no hint value carries an address",
-		);
+		expect(names).not.toContain(RULES.outage);
+		expect(names).not.toContain(RULES.interruption);
 	});
 });
 
@@ -313,7 +323,50 @@ describe("sessionRequirementContract — the paths a fixture's shape takes", () 
 
 	it("fails the interruption case, rather than passing it, when a primary is handed to a fixture that never interrupts", async () => {
 		expect(await failing({ build: () => fixture({ admitPrimary: undefined }) })).toContain(
-			"an interruption's body carries none of the reserved keys, and no hint value carries an address",
+			RULES.interruption,
 		);
+	});
+});
+
+describe("sessionRequirementContract — the view it hands admit", () => {
+	/** The sessions `admit` was handed while the case named `caseName` ran. */
+	const viewsHandedIn = async (caseName: string): Promise<(SessionView | null)[]> => {
+		const seen: (SessionView | null)[] = [];
+		const cases = sessionRequirementContract(
+			input({
+				build: () =>
+					fixture({
+						admit: async (asked: RequirementInput) => {
+							seen.push(asked.session);
+							return { outcome: "met" };
+						},
+					}),
+			}),
+		);
+		const found = cases.find((c) => c.name === caseName);
+		expect(found, caseName).toBeDefined();
+		await found?.run();
+		return seen;
+	};
+
+	it("is the view admission hands a requirement over the same stores: frozen, the same members, no second factor recordable", async () => {
+		// Admission's own view, from the case that admits a live session.
+		const [admitted] = await viewsHandedIn(RULES.deadSession);
+		// The view the suite builds itself, for each grade it asks about.
+		const built = await viewsHandedIn(RULES.verdict);
+		expect(admitted).not.toBeNull();
+		expect(built.length).toBeGreaterThan(0);
+		for (const view of [admitted, ...built]) {
+			expect(view).not.toBeNull();
+			expect(Object.isFrozen(view)).toBe(true);
+			expect(Object.keys(view as SessionView).sort()).toEqual(
+				Object.keys(admitted as SessionView).sort(),
+			);
+			expect(view?.sid).toBe(admitted?.sid);
+			expect(view?.sub).toBe(admitted?.sub);
+			expect(view?.authTime).toBeInstanceOf(Date);
+			expect(view?.expiresAt).toBeInstanceOf(Date);
+			expect(view?.secondFactorRecordable).toBe(false);
+		}
 	});
 });

@@ -141,7 +141,7 @@ const VOCABULARY: readonly VocabularyRow[] = [
 	},
 	{
 		concept:
-			"the budget a limiter applies to a key — its own limits entry, else the owner's contributed budget, else its default (#728)",
+			"the budget a limiter applies to a key — its own limits entry, else its default (#728)",
 		home: "packages/core/src/ratelimit/budgetLookup.mts",
 		definition: /(?:function|const)\s+createRateLimitBudgetLookup\b/,
 	},

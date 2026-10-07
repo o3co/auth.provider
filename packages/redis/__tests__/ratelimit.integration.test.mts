@@ -11,11 +11,16 @@
  * inside the configured window, which the guard's 429 needs for `Retry-After`.
  */
 
-import { createMemoryRateLimiter } from "@o3co/auth-provider-core";
+import {
+	createMemoryRateLimiter,
+	memoryRateLimiterModule,
+	type RateLimitDecision,
+	type RateLimiter,
+} from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeIoredisClients } from "#/ioredis.mjs";
-import { createRedisRateLimiter } from "#/ratelimit.mjs";
+import { createRedisRateLimiter, redisRateLimiterModule } from "#/ratelimit.mjs";
 import { testRedis } from "./support/redis.mjs";
 
 let redis: Redis;
@@ -121,6 +126,61 @@ describe("createRedisRateLimiter on ioredis — resetAt", () => {
 			const resetAt = decision.resetAt?.getTime() ?? Number.NaN;
 			expect(resetAt).toBeGreaterThanOrEqual(before + 59_000);
 			expect(resetAt).toBeLessThanOrEqual(after + 60_000);
+		}
+	});
+});
+
+describe("both limiter modules — one configuration, one budget", () => {
+	const SECTION = {
+		limits: { tagree: { limit: 2, windowSeconds: 60 } },
+		defaultLimit: { limit: 3, windowSeconds: 120 },
+	};
+
+	const limiters = (): Record<"memory" | "redis", RateLimiter> => {
+		const memory = memoryRateLimiterModule.provides?.rateLimiter?.({
+			section: { ...SECTION, maxBuckets: 100 },
+		} as never) as RateLimiter | undefined;
+		const redisLimiter = redisRateLimiterModule.provides?.rateLimiter?.({
+			section: { ...SECTION, failMode: "closed" },
+			rateLimiterClient: makeIoredisClients(redis).rateLimiterClient,
+		} as never) as RateLimiter | undefined;
+		if (!memory || !redisLimiter) throw new Error("rateLimiter provider missing");
+		return { memory, redis: redisLimiter };
+	};
+
+	/** Whether each of `times` checks of `key` was allowed, and the limit each reported. */
+	const spend = async (limiter: RateLimiter, key: string, times: number) => {
+		const answers: RateLimitDecision[] = [];
+		for (let i = 0; i < times; i++) answers.push(await limiter.check(key, {}));
+		return answers.map(({ allowed, limit }) => ({ allowed, limit }));
+	};
+
+	it("applies the limits entry for a prefix it names, else the defaultLimit, the same on each", async () => {
+		const run = Date.now();
+		const answers = await Promise.all(
+			Object.entries(limiters()).map(async ([kind, limiter]) => ({
+				kind,
+				named: await spend(limiter, `tagree:ip:${kind}-${run}`, 3),
+				unnamed: await spend(limiter, `tother:ip:${kind}-${run}`, 4),
+				inherited: await spend(limiter, `constructor:ip:${kind}-${run}`, 4),
+			})),
+		);
+
+		const allowedTwice = [
+			{ allowed: true, limit: 2 },
+			{ allowed: true, limit: 2 },
+			{ allowed: false, limit: 2 },
+		];
+		const allowedThrice = [
+			{ allowed: true, limit: 3 },
+			{ allowed: true, limit: 3 },
+			{ allowed: true, limit: 3 },
+			{ allowed: false, limit: 3 },
+		];
+		for (const { kind, named, unnamed, inherited } of answers) {
+			expect(named, kind).toEqual(allowedTwice);
+			expect(unnamed, kind).toEqual(allowedThrice);
+			expect(inherited, kind).toEqual(allowedThrice);
 		}
 	});
 });

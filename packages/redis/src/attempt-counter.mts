@@ -157,11 +157,11 @@ function buildRedisAttemptCounter(options: RedisAttemptCounterOptions): AttemptC
 	};
 }
 
-/** The module's section: its key namespace alone, strict, never empty. */
-const sectionSchema = z
-	.object({ keyPrefix: z.string().min(1).default(DEFAULT_REDIS_ATTEMPT_COUNTER_KEY_PREFIX) })
-	.strict()
-	.default(() => ({ keyPrefix: DEFAULT_REDIS_ATTEMPT_COUNTER_KEY_PREFIX }));
+/**
+ * The module's section: its key namespace alone, strict, never empty. It
+ * fills no default: the package's `config/reference.conf` ships the prefix.
+ */
+const sectionSchema = z.object({ keyPrefix: z.string().min(1) }).strict();
 
 /**
  * `defineModule` manifest for the Redis `AttemptCounter`, filling the

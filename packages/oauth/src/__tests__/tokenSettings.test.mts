@@ -47,8 +47,8 @@ import {
 	createTestApp,
 	createTestOAuthTokenSettings,
 	makeValidAppConfig,
-	oauthTokenSettingsContract,
 } from "@o3co/auth-provider-core/testing";
+import { oauthTokenSettingsContract } from "@o3co/auth-provider-test-kit";
 import { describe, expect, it } from "vitest";
 import { oauthEndpointsModule } from "#/module.mjs";
 import { oauthTokenSettingsFrom } from "#/tokenSettings.mjs";
@@ -64,7 +64,6 @@ const everySwitchOn = () => {
 		...base,
 		oauth: {
 			...base.oauth,
-			jwt: { ...base.oauth.jwt, legacyTypAccept: true },
 			accessToken: { defaultExpiresIn: 300, maxExpiresIn: 900 },
 			refreshToken: { ...base.oauth.refreshToken, expiresIn: 7200 },
 			resourceIndicator: { enabled: true },
@@ -97,7 +96,6 @@ describe("oauthTokenSettingsFrom answers what the readers resolve for themselves
 		const config = fixture();
 		expect(oauthTokenSettingsFrom(config.oauth)).toEqual({
 			issuer: config.oauth.jwt.issuer,
-			legacyTypAccept: false,
 			accessTokenLifetime: resolveAccessTokenLifetime(config),
 			refreshTokenExpiresIn: resolveRefreshTokenLifetime(config),
 			resourceIndicatorEnabled: false,
@@ -108,12 +106,18 @@ describe("oauthTokenSettingsFrom answers what the readers resolve for themselves
 	it("over a configuration with every switch on", () => {
 		expect(oauthTokenSettingsFrom(everySwitchOn().oauth)).toEqual({
 			issuer: "https://auth.test",
-			legacyTypAccept: true,
 			accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 900 },
 			refreshTokenExpiresIn: 7200,
 			resourceIndicatorEnabled: true,
 			requireEmailVerified: true,
 		});
+	});
+
+	it("carries no switch for typ-less tokens, even from a hand-built section that carries one", () => {
+		const base = fixture();
+		const jwt = { ...base.oauth.jwt, legacyTypAccept: true };
+		const settings = oauthTokenSettingsFrom({ ...base.oauth, jwt });
+		expect(settings).not.toHaveProperty("legacyTypAccept");
 	});
 
 	it("carries no token-binding setting, whatever the configuration says: they are core's", () => {

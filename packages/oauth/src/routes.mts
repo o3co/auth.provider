@@ -162,7 +162,6 @@ const authTimeNoLaterThan = (
 const createIntrospectHandler = ({
 	keyStore,
 	canonicalIssuer,
-	legacyTypAccept: legacyTypAcceptOpt,
 	accessTokenDenylist,
 	subjectRevocation,
 	refreshTokenFamilyRevocation,
@@ -172,7 +171,6 @@ const createIntrospectHandler = ({
 }: {
 	readonly keyStore: KeyStore;
 	readonly canonicalIssuer: string;
-	readonly legacyTypAccept: boolean | undefined;
 	readonly accessTokenDenylist: AccessTokenDenylist | undefined;
 	readonly subjectRevocation: SubjectRevocation | undefined;
 	readonly refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation | undefined;
@@ -210,7 +208,6 @@ const createIntrospectHandler = ({
 				type: "access_token",
 				expectedIssuer: canonicalIssuer,
 				...(expectedAudiences ? { expectedAudience: expectedAudiences } : {}),
-				legacyTypAccept: legacyTypAcceptOpt ?? false,
 				// Token-accepting surface — forward what the composition
 				// wired, jti denylist and subject watermark both.
 				revocation: { denylist: accessTokenDenylist, subjectRevocation },
@@ -587,7 +584,6 @@ export const createOAuthRouter = async (
 			clientIdMetadataDocumentSeams,
 			logger,
 		});
-	const legacyTypAcceptOpt = options.legacyTypAccept;
 	// `/oauth/token` MUST accept public clients (`tokenEndpointAuthMethod: "none"`)
 	// because PKCE/S256 at `/oauth/authorize` is their authenticity gate.
 	// `private_key_jwt` on every client-authenticated endpoint: the
@@ -728,7 +724,6 @@ export const createOAuthRouter = async (
 			createIntrospectCallerCheck({
 				keyStore,
 				canonicalIssuer,
-				legacyTypAccept: legacyTypAcceptOpt,
 				accessTokenDenylist,
 				subjectRevocation,
 				introspectClientAuthMw,
@@ -738,7 +733,6 @@ export const createOAuthRouter = async (
 			createIntrospectHandler({
 				keyStore,
 				canonicalIssuer,
-				legacyTypAccept: legacyTypAcceptOpt,
 				accessTokenDenylist,
 				subjectRevocation,
 				refreshTokenFamilyRevocation,
@@ -771,7 +765,6 @@ export const createOAuthRouter = async (
 			accessTokenDenylist,
 			subjectRevocation,
 			issuer: canonicalIssuer,
-			legacyTypAccept: legacyTypAcceptOpt,
 			logger,
 		}),
 	);
@@ -797,7 +790,6 @@ export const createOAuthRouter = async (
 				getFederationProviders,
 				auditSink,
 				logger,
-				legacyTypAccept: legacyTypAcceptOpt,
 			}),
 		);
 	}
@@ -819,7 +811,6 @@ export const createOAuthRouter = async (
 				auditSink,
 				logger,
 				issuer: canonicalIssuer,
-				legacyTypAccept: legacyTypAcceptOpt,
 			}),
 		);
 	}

@@ -15,25 +15,20 @@
  */
 
 /**
- * The `RateLimiter` port's contract suite, with its optional `failMode` —
- * the limiter's own outage policy — and the test double. The suite
- * runs against the double and against core's in-process limiter; each way a
- * limiter can break the contract fails the case that names it.
+ * `rateLimiterContract` run over core's in-process limiter and over core's
+ * double, and the proof that each case is not vacuous: limiters broken one
+ * way each, refused by the case that names what they break.
  */
 
-import { describe, expect, expectTypeOf, it } from "vitest";
-import { createMemoryRateLimiter } from "#/ratelimit/memory.mjs";
-import type {
-	RateLimitDecision,
-	RateLimiter,
-	RateLimitFailMode,
-	RateLimitSpec,
-} from "#/ratelimit/types.mjs";
 import {
-	createTestRateLimiter,
-	type RateLimiterContractInput,
-	rateLimiterContract,
-} from "#/testing/index.mjs";
+	createMemoryRateLimiter,
+	type RateLimitDecision,
+	type RateLimiter,
+	type RateLimitSpec,
+} from "@o3co/auth-provider-core";
+import { createTestRateLimiter } from "@o3co/auth-provider-core/testing";
+import { describe, expect, it } from "vitest";
+import { type RateLimiterContractInput, rateLimiterContract } from "#/index.mjs";
 
 const RULES = {
 	kind: "kind is a non-empty string",
@@ -65,7 +60,7 @@ const failing = async (input: RateLimiterContractInput): Promise<string[]> => {
 	return failed;
 };
 
-/** A limiter answering `decision` to every check, as `kind`, with `failMode` when given. */
+/** A limiter answering `decision` to every check, as `kind`, with `extra` members. */
 const answering = (decision: unknown, extra: Record<string, unknown> = {}): (() => RateLimiter) => {
 	return () =>
 		({
@@ -75,21 +70,29 @@ const answering = (decision: unknown, extra: Record<string, unknown> = {}): (() 
 		}) as RateLimiter;
 };
 
-describe("RateLimiter.failMode", () => {
-	it("is optional, and is the guard's outage vocabulary", () => {
-		expectTypeOf<RateLimiter["failMode"]>().toEqualTypeOf<RateLimitFailMode | undefined>();
-		const withoutOne: RateLimiter = { kind: "none", check: async () => ({ allowed: true }) };
-		const withOne: RateLimiter = {
-			kind: "one",
-			failMode: "open",
-			check: async () => ({ allowed: true }),
-		};
-		expect(withoutOne.failMode).toBeUndefined();
-		expect(withOne.failMode).toBe("open");
+describe("rateLimiterContract — core's in-process limiter", () => {
+	const spec: RateLimitSpec = { limit: 10, windowSeconds: 60 };
+	const cases = rateLimiterContract({
+		build: () => createMemoryRateLimiter({ defaultLimit: spec }),
+		withBudget: (budget) => createMemoryRateLimiter({ defaultLimit: budget }),
 	});
+
+	it("runs every case but the outage's: it has no backend to lose", () => {
+		expect(cases.map((c) => c.name)).toEqual([
+			RULES.kind,
+			RULES.failMode,
+			RULES.defaultLimit,
+			RULES.decision,
+			RULES.budget,
+		]);
+	});
+
+	for (const contractCase of cases) {
+		it(contractCase.name, contractCase.run);
+	}
 });
 
-describe("rateLimiterContract — the double", () => {
+describe("rateLimiterContract — core's double", () => {
 	const cases = rateLimiterContract({
 		build: () => createTestRateLimiter({ failMode: "closed" }),
 		withOutage: downDouble,
@@ -113,9 +116,9 @@ describe("rateLimiterContract — the double", () => {
 		).toEqual([RULES.kind, RULES.failMode, RULES.defaultLimit, RULES.decision]);
 	});
 
-	it.each(cases)("$name", async ({ run }) => {
-		await run();
-	});
+	for (const contractCase of cases) {
+		it(contractCase.name, contractCase.run);
+	}
 
 	it("keeps them with either policy, and with none", async () => {
 		for (const failMode of ["open", "closed", undefined] as const) {
@@ -125,66 +128,6 @@ describe("rateLimiterContract — the double", () => {
 				}),
 			).toEqual([]);
 		}
-	});
-});
-
-describe("rateLimiterContract — core's in-process limiter", () => {
-	const spec: RateLimitSpec = { limit: 10, windowSeconds: 60 };
-	it.each(
-		rateLimiterContract({
-			build: () => createMemoryRateLimiter({ defaultLimit: spec }),
-			withBudget: (budget) => createMemoryRateLimiter({ defaultLimit: budget }),
-		}),
-	)("$name", async ({ run }) => {
-		await run();
-	});
-
-	it("declares no outage policy: it has no backend to lose", () => {
-		expect(createMemoryRateLimiter({ defaultLimit: spec }).failMode).toBeUndefined();
-	});
-
-	it("declares the defaultLimit it was built with, frozen", () => {
-		const defaultLimit = { limit: 7, windowSeconds: 90 };
-		const declared = createMemoryRateLimiter({ defaultLimit }).defaultLimit;
-		defaultLimit.limit = 700;
-		expect(declared).toEqual({ limit: 7, windowSeconds: 90 });
-		expect(Object.isFrozen(declared)).toBe(true);
-	});
-});
-
-describe("createTestRateLimiter", () => {
-	it("allows every check without a limit, and records each key", async () => {
-		const limiter = createTestRateLimiter();
-		expect(limiter.kind).toBe("test");
-		expect("failMode" in limiter).toBe(false);
-		for (let i = 0; i < 5; i++) {
-			expect((await limiter.check("login:ip:192.0.2.1", {})).allowed).toBe(true);
-		}
-		await limiter.check("token:ip:192.0.2.2", {});
-		expect(limiter.checked).toEqual([...Array(5).fill("login:ip:192.0.2.1"), "token:ip:192.0.2.2"]);
-		expect(Object.isFrozen(limiter.checked)).toBe(true);
-	});
-
-	it("refuses a key past its limit, counting each key apart", async () => {
-		const limiter = createTestRateLimiter({ limit: 2, failMode: "open" });
-		expect(limiter.failMode).toBe("open");
-		const answers = [];
-		for (let i = 0; i < 3; i++) answers.push(await limiter.check("a", {}));
-		expect(answers.map((d) => [d.allowed, d.remaining, d.limit])).toEqual([
-			[true, 1, 2],
-			[true, 0, 2],
-			[false, 0, 2],
-		]);
-		expect((await limiter.check("b", {})).allowed).toBe(true);
-	});
-
-	it("stands in for a backend that is down: every check rejects with the error, until it recovers", async () => {
-		const limiter = createTestRateLimiter();
-		const outage = new Error("down");
-		limiter.failWith(outage);
-		await expect(limiter.check("a", {})).rejects.toBe(outage);
-		limiter.recover();
-		expect((await limiter.check("a", {})).allowed).toBe(true);
 	});
 });
 

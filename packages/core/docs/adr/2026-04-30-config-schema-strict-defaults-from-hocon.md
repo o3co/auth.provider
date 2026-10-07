@@ -195,3 +195,51 @@ When adding a new config field:
   motivated this ADR.
 - This refactor's PR — implements the change across the schema and
   associated test fixtures.
+
+## Amendment 2026-10-07 — sections owned by modules, defaults in each package's reference.conf
+
+Amended 2026-10-07 (#728). The rule stands: a schema states the shape, and
+HOCON supplies the values. What it applies to has changed.
+
+- **No application-wide schema.** `AppConfigSchema`, `fullSectionsSchema`
+  and `composeConfigSchema` are removed. `CoreConfigSchema` declares core's
+  own section, `core {}`, alone. Every other top-level section belongs to the
+  module named after it, which declares the section's schema in its manifest
+  (`section.schema`). Boot parses `core {}` with `CoreConfigSchema` and each
+  loaded module's section with that module's schema, and hands the module
+  the result (`deps.section`). The configuration is checked by the schemas
+  of the packages a composition loads, composed at boot, and not by one
+  schema that knows every package. A section no loaded module owns is not
+  parsed.
+- **Strict per section.** Each section refuses, at every object level, a
+  key it does not declare, naming its path. A level whose keys are open by
+  design (a record keyed by names the deployment chooses) is listed with
+  its reason. `sectionStrictnessProblems` (`@o3co/auth-provider-core/testing`)
+  is the check: core's tests run it over core's modules, and
+  `tools/composition` over every package's.
+- **Defaults per package.** "Defaults live in `application.conf` only" now
+  reads: a section's defaults live in the `config/reference.conf` of the
+  package that owns the section (core's own file for `core {}` and core's
+  modules). The module names the file (`section.reference`), and the
+  composition root layers it beneath the deployment's files (ADR 2026-05-13,
+  amended the same day). A module's section schema carries no `.default`,
+  `.prefault` or `.catch`.
+- **Where a schema keeps a default.** Two kinds of path keep one. The first
+  is a section that an exported function also parses as the operator wrote
+  it, with no `reference.conf` beneath:
+  `resolveRedisFederationGrantStoreOptions` and
+  `resolveRedisFederationGrantIntentStoreOptions`. The second is a tuning
+  key inside a block that stays absent until the operator writes it:
+  `mtls.fullPki.revocation`, which `reference.conf` cannot hold without
+  making the block present. The file still holds the same value wherever it
+  holds the path.
+- **The guard.** The negative consequence above ("this ADR plus the
+  docstring … are the only guards") no longer holds for module sections.
+  `tools/composition`'s section guard walks every module's section schema
+  and fails on any value the schema fills. Its allow-list names each path
+  above with its reason, and it also fails on an entry that matches no
+  default, so the list can only shrink.
+- **Library consumers (I2).** A composition root that does not use the
+  standalone template supplies defaults by layering the files
+  `moduleReferences(modules)` names for the modules it loads. It no longer
+  passes a whole configuration through a composed schema.

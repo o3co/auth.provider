@@ -118,6 +118,12 @@ const config: AppConfig & Record<string, unknown> = {
 	},
 	rateLimit: { failMode: "open" },
 	"standalone-in-memory-code-repository": { defaultExpiresIn: 600 },
+	// The in-process limiter's section as core's `reference.conf` ships it.
+	"core-rate-limiter-memory": {
+		maxBuckets: 10000,
+		defaultLimit: { limit: 60, windowSeconds: 60 },
+		limits: {},
+	},
 } as unknown as AppConfig;
 
 /** What phase one hands `buildModules`: the configuration, and every store in process. */

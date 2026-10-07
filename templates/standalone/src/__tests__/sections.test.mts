@@ -440,12 +440,20 @@ describe("key-store", () => {
 
 describe("redis-clients", () => {
 	it("accepts a URL, and a password beside it", () => {
-		expect(redisClientsSectionSchema.parse({ url: "redis://r:6379", password: "p" })).toEqual({
+		expect(
+			redisClientsSectionSchema.parse({
+				url: "redis://r:6379",
+				password: "p",
+				assumeNoEviction: false,
+			}),
+		).toEqual({
 			url: "redis://r:6379",
 			password: "p",
 			assumeNoEviction: false,
 		});
-		expect(redisClientsSectionSchema.parse({ url: "redis://r:6379" })).toEqual({
+		expect(
+			redisClientsSectionSchema.parse({ url: "redis://r:6379", assumeNoEviction: false }),
+		).toEqual({
 			url: "redis://r:6379",
 			assumeNoEviction: false,
 		});
@@ -476,7 +484,11 @@ describe("redis-clients", () => {
 	it.each([
 		["no URL", {}],
 		["a null URL", { url: null }],
-		["a key the section does not declare", { url: "redis://r:6379", db: 2 }],
+		[
+			"a key the section does not declare",
+			{ url: "redis://r:6379", db: 2, assumeNoEviction: false },
+		],
+		["no assumeNoEviction, which the template's reference.conf ships", { url: "redis://r:6379" }],
 	])("refuses %s", (_what, section) => {
 		expect(redisClientsSectionSchema.safeParse(section).success).toBe(false);
 	});

@@ -22,9 +22,9 @@
  * configuration only when there is none; never member by member, which
  * would mix two sources in one reading. A member the slot lacks would then
  * read `undefined`, a quiet `false` for a switch, so each member read is
- * held to its contract rule (`oauthTokenSettingsContract`) and a missing or
- * wrong one refuses, naming it. The oauth module's provider always passes;
- * this is for a slot a host fills by hand.
+ * held to its contract rule (the test kit's `oauthTokenSettingsContract`)
+ * and a missing or wrong one refuses, naming it. The oauth module's
+ * provider always passes; this is for a slot a host fills by hand.
  */
 
 import {
@@ -53,7 +53,7 @@ const refuse = (member: string, rule: string, value: unknown): never => {
 	);
 };
 
-const SWITCHES = ["legacyTypAccept", "resourceIndicatorEnabled", "requireEmailVerified"] as const;
+const SWITCHES = ["resourceIndicatorEnabled", "requireEmailVerified"] as const;
 
 /** A token lifetime a slot names beyond the one core resolves from the configuration. */
 export interface LifetimeBeyondConfiguration {
@@ -266,7 +266,6 @@ function settingsSnapshot(value: unknown): OAuthTokenSettings {
 
 	return Object.freeze({
 		issuer: issuer as string,
-		legacyTypAccept: switches.get("legacyTypAccept") as boolean,
 		accessTokenLifetime: Object.freeze({ defaultExpiresIn, maxExpiresIn }),
 		refreshTokenExpiresIn,
 		resourceIndicatorEnabled: switches.get("resourceIndicatorEnabled") as boolean,

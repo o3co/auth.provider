@@ -86,11 +86,6 @@ export interface FederationTokenRouterOptions {
 	maxTokenLifetimeMs?: number;
 	/** Configured issuer, pinned by the central verifier. */
 	issuer?: string;
-	/**
-	 * Accept tokens with no `typ` header, logging `jwt_verify_legacy_typ`.
-	 * Default `false`; `true` is a legacy opt-in.
-	 */
-	legacyTypAccept?: boolean;
 }
 
 /**

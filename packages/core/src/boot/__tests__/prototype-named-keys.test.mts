@@ -57,9 +57,11 @@ function refusal(modules: readonly Module[], config: Record<string, unknown>): B
 	return expect.fail("boot should have been refused");
 }
 
-/** The rate limiter's own section, with `limits` as the operator wrote it. */
+/** The rate limiter's own section, with `limits` as the operator wrote it over the shipped keys. */
 const limiterSection = (limits: string) =>
-	loaded(`"core-rate-limiter-memory" { limits { ${limits} } }`);
+	loaded(
+		`"core-rate-limiter-memory" { maxBuckets = 10000, defaultLimit { limit = 60, windowSeconds = 60 }, limits { ${limits} } }`,
+	);
 
 describe("a configuration key named after an Object.prototype member, or prototype, refuses boot", () => {
 	it.each(["__proto__", "constructor", "prototype", "toString", "hasOwnProperty", "valueOf"])(

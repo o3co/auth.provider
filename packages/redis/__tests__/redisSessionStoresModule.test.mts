@@ -22,6 +22,7 @@ import type { RedisDurability } from "#/clients.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
 import { redisSessionStoresModule } from "#/modules/redisSessionStores.mjs";
 import { testRedis } from "./support/redis.mjs";
+import { overReference, shippedSection } from "./support/section.mjs";
 
 let raw: Redis;
 
@@ -35,10 +36,7 @@ afterAll(async () => {
 });
 
 const minBoot = (extra: Record<string, unknown>) =>
-	({
-		...makeValidCoreConfig(),
-		...extra,
-	}) as never;
+	overReference({ ...makeValidCoreConfig(), ...extra }, [redisSessionStoresModule]) as never;
 
 describe("redisSessionStoresModule manifest", () => {
 	it("declares requires: 4 per-purpose client slots", () => {
@@ -68,9 +66,11 @@ describe("redisSessionStoresModule manifest", () => {
 		);
 	});
 
-	it("reads its own section, redis-session-stores, keyPrefix defaulting to ss:", () => {
+	it("reads its own section, redis-session-stores, keyPrefix ss: as reference.conf ships it", () => {
 		expect(redisSessionStoresModule).not.toHaveProperty("configSchema");
-		expect(redisSessionStoresModule.section?.schema.parse(undefined)).toEqual({ keyPrefix: "ss:" });
+		expect(
+			redisSessionStoresModule.section?.schema.parse(shippedSection(redisSessionStoresModule)),
+		).toEqual({ keyPrefix: "ss:" });
 	});
 });
 

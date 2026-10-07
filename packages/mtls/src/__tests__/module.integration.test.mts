@@ -32,6 +32,7 @@ import express, { type RequestHandler, Router } from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { mtlsConfigSchema, mtlsModule } from "#/module.mjs";
+import { shippedMtlsSection } from "./shippedSection.mjs";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -358,23 +359,28 @@ describe("mtlsModule — integration via createApp", () => {
 // Config defaults
 // ---------------------------------------------------------------------------
 
-describe("mtlsConfigSchema — secure defaults", () => {
-	it("defaults `source` to tls-layer, not the forwarded header", () => {
+describe("the shipped mtls section — secure defaults", () => {
+	it("takes the certificate from tls-layer, not the forwarded header", () => {
 		// A "header" default would make merely enabling mTLS trust an
 		// X-Forwarded-Client-Cert from whoever opened the connection. The
 		// certificate comes from the transport unless an operator opts out AND
 		// names the proxies allowed to speak for it.
-		const parsed = mtlsConfigSchema.parse(undefined);
-		expect(parsed.source).toBe("tls-layer");
+		const parsed = mtlsConfigSchema.parse(shippedMtlsSection());
+		expect(parsed?.source).toBe("tls-layer");
 	});
 
-	it("defaults `trustedProxies` to an empty list (nothing is trusted implicitly)", () => {
-		const parsed = mtlsConfigSchema.parse(undefined);
-		expect(parsed.trustedProxies).toEqual([]);
+	it("trusts no proxy: `trustedProxies` is an empty list", () => {
+		const parsed = mtlsConfigSchema.parse(shippedMtlsSection());
+		expect(parsed?.trustedProxies).toEqual([]);
 	});
 
-	it("keeps the module disabled by default", () => {
-		const parsed = mtlsConfigSchema.parse(undefined);
-		expect(parsed.enabled).toBe(false);
+	it("keeps the module disabled", () => {
+		const parsed = mtlsConfigSchema.parse(shippedMtlsSection());
+		expect(parsed?.enabled).toBe(false);
+	});
+
+	it("fills nothing in the schema: an absent section stays absent, and the switch reads it as off", () => {
+		expect(mtlsConfigSchema.parse(undefined)).toBeUndefined();
+		expect(mtlsModule.section?.isEnabled?.(undefined)).toBe(false);
 	});
 });

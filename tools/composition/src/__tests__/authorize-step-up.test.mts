@@ -60,6 +60,7 @@ import {
 	composeFullSet,
 	type FullSet,
 	type FullSetOptions,
+	fromBase32,
 	MFA_KEY,
 	seedTotp,
 } from "./full-set.fixture.mts";
@@ -419,6 +420,50 @@ function withoutSecondFactor(store: UserSessionStore): UserSessionStore {
 		has: (target, property) => property !== "recordSecondFactor" && Reflect.has(target, property),
 	});
 }
+
+describe("a first factor bound from the account page without the account-email proof", () => {
+	it("leaves the session as it signed in: a code minted after the binding carries pwd alone and no acr, and acr_values then steps the session up with the factor it bound", async () => {
+		const user = newUser();
+		const set = await boot([user]);
+		const page = browser();
+		await signIn(set.app, page, user);
+		// The user has no address, so no account-email proof is asked: the factor is bound by password.
+		const begun = await page.post(set.app, "/session/mfa/enrollment", { kind: "totp" });
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+		const secret = fromBase32(begun.body.secret as string);
+		const bound = await page.post(set.app, "/session/mfa/enrollment/complete", {
+			transaction_id: begun.body.transaction,
+			proof: totpCodeForTests(secret),
+		});
+		expect(bound.status, JSON.stringify(bound.body)).toBe(200);
+		const factorId = bound.body.factor.id as string;
+		const records = await storesOf(set).mfaFactorStore.list(user.id);
+		expect(records.find((record) => record.id === factorId)?.binding).toBe("password");
+
+		const plain = await redeem(
+			set.app,
+			atClient(await page.get(set.app, authorizePath())).get("code") as string,
+		);
+		expect(plain.status, JSON.stringify(plain.body)).toBe(200);
+		for (const token of [plain.body.id_token, plain.body.access_token] as string[]) {
+			const claims = claimsOf(token);
+			expect(claims.amr).toEqual(["pwd"]);
+			expect(claims.acr).toBeUndefined();
+		}
+
+		const back = atMfaPage(await page.get(set.app, authorizePath({ acr_values: ACR_MFA })));
+		await stepUp(set.app, set.app, page, { factorId, secret }, 1);
+		const stepped = await redeem(
+			set.app,
+			atClient(await page.get(set.app, back)).get("code") as string,
+		);
+		expect(stepped.status, JSON.stringify(stepped.body)).toBe(200);
+		expect(claimsOf(stepped.body.id_token as string)).toMatchObject({
+			amr: ["pwd", "otp", "mfa"],
+			acr: ACR_MFA,
+		});
+	});
+});
 
 describe("acr_values onto a session store that cannot record a second factor", () => {
 	const bootWithout = (users: readonly User[]) =>

@@ -31,7 +31,7 @@ import {
 	redisFederationTokenStoreBuilder,
 	redisFederationTokenStoreModule,
 } from "#/federation-tokens.mjs";
-import { capturing, withSection } from "./support/section.mjs";
+import { capturing, overReference, withSection } from "./support/section.mjs";
 
 const tokenClient = {
 	get: async () => null,
@@ -202,11 +202,14 @@ describe.each(STORES)("the $label store's module reads the deploymentMode slot",
 				modules: [store.module, readerOf(store.provided)],
 				bootstrapComponents: {
 					config: capturing(
-						{
-							...makeValidCoreConfig(),
-							...store.plaintext,
-							...(deployment === undefined ? {} : { core: { deployment } }),
-						},
+						overReference(
+							{
+								...makeValidCoreConfig(),
+								...store.plaintext,
+								...(deployment === undefined ? {} : { core: { deployment } }),
+							},
+							[store.module],
+						),
 						[store.module],
 					),
 					pathResolver: (p: string) => p,

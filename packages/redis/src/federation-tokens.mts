@@ -756,26 +756,22 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 
 /**
  * The schema of `redis-federation-token-store {}`, the module's own section,
- * each leaf read from the string a variable carries. Strict.
+ * each leaf read from the string a variable carries. Strict. It fills no
+ * default: the package's `config/reference.conf` ships every value but the
+ * key.
  */
 export const redisFederationTokenStoreSectionSchema = z
 	.object({
-		keyPrefix: z.string().default("ft:"),
-		ttl: wholeNumberInRangeFromEnv(1).default(86400),
-		encryptionMode: z.enum(["required", "allow-plaintext"]).default("required"),
+		keyPrefix: z.string(),
+		ttl: wholeNumberInRangeFromEnv(1),
+		encryptionMode: z.enum(["required", "allow-plaintext"]),
 		encryptionKey: z.string().optional(),
 		// Migration flag; see `RedisFederationTokenStoreOptions.scanFallback`.
 		// An exported-but-empty variable reads as `false`, turning the safety
 		// net off, so set it to `true` or `false`, never empty.
-		scanFallback: coerceBooleanFromEnv.default(true),
+		scanFallback: coerceBooleanFromEnv,
 	})
-	.strict()
-	.default(() => ({
-		keyPrefix: "ft:",
-		ttl: 86400,
-		encryptionMode: "required" as const,
-		scanFallback: true,
-	}));
+	.strict();
 
 /** What a composition root tells the module that its config cannot. */
 export interface RedisFederationTokenStoreModuleOptions {

@@ -1,6 +1,6 @@
 # @o3co/auth-provider-mtls
 
-Last updated: 2026-10-02
+Last updated: 2026-10-07
 
 mTLS ([RFC 8705](https://www.rfc-editor.org/rfc/rfc8705)) sender-constrained tokens for [`auth.provider`](../../README.md): a token issued to a client that presented a certificate is bound to that certificate, and is refused from anyone presenting another.
 
@@ -363,7 +363,7 @@ The exports are listed in [`src/index.mts`](src/index.mts), whose header also sa
 - the error type and its codes (`MtlsError`, `MtlsErrorCode` — `invalid_certificate`, or `temporarily_unavailable` for `revocation_unavailable`), the outage refusal's cause (`MtlsRevocationUnavailableError`) and its members (`MtlsRevocationSourceError`), and the diagnostic `ClientCertificate` / `CertHeaderDialect` types;
 - the signature-algorithm vocabulary (`SIGNATURE_ALGORITHM_NAMES`, `DEFAULT_SIGNATURE_ALGORITHMS`, `SignatureAlgorithmName`) — the legal values of `fullPki.signatureAlgorithms`, exported so that an operator's list can be checked against the one the schema enforces.
 
-The header dialect parsers, the narrow-mode chain walker, the PEM↔DER codec and the `full-pki` validator, CRL and OCSP resolvers and guarded fetch are **internal**: each is reached through configuration (`certHeaderDialect`, `mode`, `fullPki.revocation`), not by import. The package's config defaults ship as HOCON in [`config/reference.conf`](config/reference.conf), exported as `@o3co/auth-provider-mtls/reference.conf`, which `mtlsModule` declares as its section's reference, so core's `moduleReferences(modules)` names it for a composition root that layers what its modules declare (#728).
+The header dialect parsers, the narrow-mode chain walker, the PEM↔DER codec and the `full-pki` validator, CRL and OCSP resolvers and guarded fetch are **internal**: each is reached through configuration (`certHeaderDialect`, `mode`, `fullPki.revocation`), not by import. The package's config defaults ship as HOCON in [`config/reference.conf`](config/reference.conf), exported as `@o3co/auth-provider-mtls/reference.conf`, which `mtlsModule` declares as its section's reference, so core's `moduleReferences(modules)` names it for a composition root that layers what its modules declare (#728). `mtlsConfigSchema` fills none of these defaults itself, except the tuning keys inside `fullPki.revocation`, a block that stays absent until the operator writes it. A section parsed without the file beneath it is refused, with each missing key named, and an absent section parses as `undefined`, which the module reads as off.
 
 ## Source layout
 

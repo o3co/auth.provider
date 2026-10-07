@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-grants
 
-Last updated: 2026-10-06
+Last updated: 2026-10-07
 
 Federation grants for [`auth.provider`](https://github.com/o3co/auth.provider) — offline delegation of upstream access tokens (#593). A user consents once that a client may reach one upstream connection on their behalf; the client then obtains upstream access tokens over HTTP, later, with the user nowhere near a browser.
 
@@ -238,7 +238,7 @@ While it is on, `federationGrantsModule` provides core's `federationGrantPolicy`
 - **Authoritative.** The module's own code reads the section, so while it is on an `overrideComponents` entry for the slot refuses boot (`authoritative-component-overridden`), as a `bootstrapComponents` entry (`bootstrap-component-collision`) and a second provider (`duplicate-provides`) are for any provided key.
 - **Absent while off.** Switched off, the module provides nothing: the slot is absent, which reads as grants off, and a host may fill it itself.
 
-[`grantPolicy.test.mts`](src/__tests__/grantPolicy.test.mts) runs core's `federationGrantPolicyContract` over what the module provides; [`boot.test.mts`](src/__tests__/boot.test.mts) pins what a composition holds.
+[`grantPolicy.test.mts`](src/__tests__/grantPolicy.test.mts) runs the test kit's `federationGrantPolicyContract` over what the module provides; [`boot.test.mts`](src/__tests__/boot.test.mts) pins what a composition holds.
 
 ## A disabled deployment registers nothing
 

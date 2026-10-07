@@ -482,7 +482,7 @@ function buildRedisMfaFactorStore(options: RedisMfaFactorStoreOptions): MfaFacto
 export const redisMfaFactorStoreModule = defineModule({
 	name: "redis-mfa-factor-store",
 	section: {
-		schema: keyPrefixSection(DEFAULT_REDIS_MFA_FACTOR_STORE_KEY_PREFIX),
+		schema: keyPrefixSection,
 		reference: redisReference(),
 		relocatedFrom: {
 			redisMfaFactorStore: { to: "", environmentVariable: null },

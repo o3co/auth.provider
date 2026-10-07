@@ -103,7 +103,7 @@ export const redisReplaySeenSetModule = defineModule({
 	name: "redis-replay-seen-set",
 	requires: ["replaySeenSetClient"] as const,
 	section: {
-		schema: keyPrefixSection("replay:"),
+		schema: keyPrefixSection,
 		reference: redisReference(),
 		relocatedFrom: { redisReplaySeenSet: { to: "", environmentVariable: null } },
 	},

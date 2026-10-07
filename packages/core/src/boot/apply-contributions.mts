@@ -31,14 +31,12 @@ import type { GrantHandler, MfaFactor } from "../modules/manifest/contributes-ma
 import {
 	type GrantHandlerResolver,
 	type MfaFactorResolver,
-	type RateLimitBudgetResolver,
 	type SessionCloseNotifierResolver,
 	SYNTHETIC_COMPONENT_KEYS,
 	type TokenExchangeValidatorResolver,
 } from "../modules/manifest/synthetic-keys.mjs";
 import { readRateLimitFailMode } from "../ratelimit/guard.mjs";
-import type { RateLimiter, RateLimitSpec } from "../ratelimit/types.mjs";
-import { isBoundedRateLimitSpec } from "../ratelimit/usableSpec.mjs";
+import type { RateLimiter } from "../ratelimit/types.mjs";
 import type { AdmissionAction } from "../session-admission/actions.mjs";
 import { sessionRequirementResolverOver } from "../session-admission/admit.mjs";
 import {
@@ -264,28 +262,6 @@ function makeSessionCloseNotifierResolver(
 }
 
 /**
- * Instantiate a stable read-side `RateLimitBudgetResolver` over the
- * `rateLimitBudgets` collector. A prefix whose factory answered
- * `null` — switched off by its module's settings — is registered in the
- * collector, so a second contribution of it is still a duplicate, and is
- * absent from what the resolver answers. Reads through at call time, like
- * the other resolvers.
- * @internal
- */
-function makeRateLimitBudgetResolver(
-	collector: NameKeyedCollector<RateLimitSpec | null>,
-): RateLimitBudgetResolver {
-	return {
-		get: (prefix: string) => collector.get(prefix) ?? undefined,
-		entries: function* (): IterableIterator<readonly [string, RateLimitSpec]> {
-			for (const [prefix, budget] of collector.entries()) {
-				if (budget !== null) yield [prefix, budget] as const;
-			}
-		},
-	};
-}
-
-/**
  * Whether the projections of one boot's working map may be read: closed while
  * stage 3 runs the `provides` factories, open from stage 4 on (`open`). The
  * two federation projections stay closed through the name-keyed pass too,
@@ -398,7 +374,6 @@ export function prepareSyntheticProjections(
 		federationRedirectPolicies,
 		mfaFactors,
 		sessionRequirements,
-		rateLimitBudgets,
 		admissionActions,
 		sessionCloseNotifiers,
 	} = contributionKinds;
@@ -429,9 +404,6 @@ export function prepareSyntheticProjections(
 	}
 	if (mfaFactors !== undefined) {
 		inject("mfaFactorResolver", () => makeMfaFactorResolver(mfaFactors));
-	}
-	if (rateLimitBudgets !== undefined) {
-		inject("rateLimitBudgetResolver", () => makeRateLimitBudgetResolver(rateLimitBudgets));
 	}
 	if (sessionCloseNotifiers !== undefined) {
 		inject("sessionCloseNotifierResolver", () =>
@@ -521,12 +493,13 @@ const issuerOf = (components: Readonly<Record<string, unknown>>): string | undef
  *   off by not installing it) or whose `name` is not the key. What registers
  *   is the copy `registeredRequirement` makes, its page held to the issuer's
  *   origin; its `reach` is read later (`checkSessionRequirements`);
- * - a `rateLimitBudgets` budget no limiter can apply as written
- *   (`isBoundedRateLimitSpec`). What registers is the frozen copy that was
- *   validated.
+ * - a `rateLimitBudgets` claim answering anything but `null`: a claim
+ *   contributes no budget, and a limiter's budget for a prefix is its own
+ *   `limits` entry, else its `defaultLimit`.
  *
- * `null` (switched off by configuration) passes for `grants`, `mfaFactors`
- * and `rateLimitBudgets` and keeps the name claimed.
+ * `null` passes for `grants` and `mfaFactors` (switched off by
+ * configuration) and for `rateLimitBudgets` (the claim), and keeps the name
+ * claimed.
  * @internal
  */
 function checkNameKeyedValue(
@@ -603,22 +576,9 @@ function checkNameKeyedValue(
 	if (kind === "rateLimitBudgets") {
 		// The prefix itself was held at stage 1 (`contribution-shapes`).
 		if (value === null) return value;
-		// Each field read once, into the one object that is validated, frozen
-		// and registered: a getter or a proxy answering differently on a second
-		// read cannot pass the check with one budget and register another.
-		const read =
-			typeof value === "object"
-				? {
-						limit: (value as { readonly limit?: unknown }).limit,
-						windowSeconds: (value as { readonly windowSeconds?: unknown }).windowSeconds,
-					}
-				: { limit: undefined, windowSeconds: undefined };
-		if (typeof value !== "object" || !isBoundedRateLimitSpec(read)) {
-			throw new RangeError(
-				`rateLimitBudgets "${name}": a budget is { limit, windowSeconds }, a positive whole limit and a positive whole number of seconds, at most a year (got limit ${shownConfigValue(read.limit)}, windowSeconds ${shownConfigValue(read.windowSeconds)})`,
-			);
-		}
-		return Object.freeze(read);
+		throw new RangeError(
+			`rateLimitBudgets "${name}": a prefix claim answers null and contributes no budget — a limiter's budget for the prefix is its own limits entry, else its defaultLimit, so set this one as the limiter's limits.${name} (got ${shownConfigValue(value)})`,
+		);
 	}
 	if (kind === "sessionRequirements") {
 		if (value === null || value === undefined) {
@@ -640,8 +600,8 @@ function checkNameKeyedValue(
  * The name-keyed kinds whose `null` switches an entry off, each with what the
  * refusal of an override of a switched-off entry says: the pre-scan refuses
  * one as `override-target-missing`, so an override never switches on what its
- * owner's settings switched off. `rateLimitBudgets` takes `null` too and is
- * not here: stage 1 refuses every override of a prefix
+ * owner's settings switched off. `rateLimitBudgets` takes `null` too, as its
+ * claim, and is not here: stage 1 refuses every override of a prefix
  * (`contribution-kind-guarded`), so none reaches the pre-scan.
  * @internal
  */
@@ -666,20 +626,14 @@ function limiterInForce(
 
 /**
  * Logs `rate_limit_budgets_registered` at info — the wired limiter's kind and
- * outage policy, and each prefix with its contributed budget and the module
- * that claimed it; a limiter's own `limits` entry wins over that budget and is
- * not shown — and `rate_limit_fail_mode_not_applied` at warn when
- * `rateLimit.failMode` says `open` and the wired limiter applies another
- * policy: the path `redis-rate-limiter.failMode` moved from, which only the
+ * outage policy, and each claimed prefix with the module that claimed it —
+ * and `rate_limit_fail_mode_not_applied` at warn when `rateLimit.failMode`
+ * says `open` and the wired limiter applies another policy: the path `redis-rate-limiter.failMode` moved from, which only the
  * Redis limiter's module refuses, so with any other limiter it would
  * otherwise be dropped unseen.
  * @internal
  */
-function logRateLimitBudgets(
-	material: ComponentWorld,
-	components: Record<string, unknown>,
-	collector: NameKeyedCollector<RateLimitSpec | null> | undefined,
-): void {
+function logRateLimitBudgets(material: ComponentWorld, components: Record<string, unknown>): void {
 	const claimants = new Map<string, string>();
 	for (const moduleName of material.plan.initOrder) {
 		// biome-ignore lint/style/noNonNullAssertion: every module in the init order was validated under its name
@@ -695,15 +649,7 @@ function logRateLimitBudgets(
 	logger.info(
 		{
 			limiter,
-			budgets: [...claimants].map(([prefix, module]) => {
-				const budget = collector?.get(prefix) ?? null;
-				return {
-					prefix,
-					budget:
-						budget === null ? null : { limit: budget.limit, windowSeconds: budget.windowSeconds },
-					module,
-				};
-			}),
+			budgets: [...claimants].map(([prefix, module]) => ({ prefix, module })),
 		},
 		"rate_limit_budgets_registered",
 	);
@@ -1493,7 +1439,7 @@ export async function applyContributions(
 		contributionKinds.admissionActions,
 	);
 	await checkSessionCloseNotifier(material, components, contributionKinds.sessionCloseNotifiers);
-	logRateLimitBudgets(material, components, contributionKinds.rateLimitBudgets);
+	logRateLimitBudgets(material, components);
 	logAdmissionActions(material, components, contributionKinds.admissionActions);
 
 	// ---------------------------------------------------------------------------

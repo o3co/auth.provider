@@ -45,7 +45,6 @@ import type {
 import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { HttpMethod, RouteContribution } from "../modules/manifest/route-contribution.mjs";
 import type { PathResolver } from "../modules/types.mjs";
-import type { RateLimitSpec } from "../ratelimit/types.mjs";
 import type { ReadinessProbe, ReadinessRegistrar } from "../readiness/types.mjs";
 import type { AdmissionAction } from "../session-admission/actions.mjs";
 import type { RegisteredRequirement } from "../session-admission/requirement.mjs";
@@ -527,12 +526,10 @@ export interface ContributionCollectorMap {
 	 */
 	readonly sessionRequirements?: NameKeyedCollector<RegisteredRequirement>;
 	/**
-	 * Collector for `rateLimitBudgets` contributions, by prefix: the
-	 * frozen copy of each budget, or `null` for one its module's settings
-	 * switched off — which claims the prefix, and which
-	 * `rateLimitBudgetResolver` leaves out.
+	 * Collector for `rateLimitBudgets` claims, by prefix: each one `null`,
+	 * held so that a second claim of a prefix is a duplicate.
 	 */
-	readonly rateLimitBudgets?: NameKeyedCollector<RateLimitSpec | null>;
+	readonly rateLimitBudgets?: NameKeyedCollector<null>;
 	/**
 	 * Collector for `sessionCloseNotifiers` contributions, by name: each
 	 * notifier, never `null`. `sessionCloseNotifierResolver` answers the one
@@ -1384,9 +1381,9 @@ export interface ComponentAbsenceUndeclaredDetails {
 
 /**
  * A host `contributionKinds` collector for a kind whose collector is the
- * planner's alone: `rateLimitBudgets` — a host collector could answer
- * a looser budget than the owning module contributed, on a prefix such as
- * RFC 8628 §5.1's device verification — `federationTypes`, and
+ * planner's alone: `rateLimitBudgets` — a host collector could let a second
+ * module claim a prefix its owner claimed, such as RFC 8628 §5.1's device
+ * verification — `federationTypes`, and
  * `admissionActions`, whose grades admission hands the requirements,
  * `auditHooks`, which the audit fan-out reads, and `federations` and
  * `federationRedirectPolicies`, which boot fills from the dispatched

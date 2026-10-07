@@ -82,7 +82,6 @@ const valueAt = (tree: unknown, path: string): unknown =>
 describe("the package's reference binds every variable of oauth {} at its path", () => {
 	it.each([
 		["OAUTH_JWT_ISSUER", "oauth.jwt.issuer"],
-		["OAUTH_JWT_LEGACY_TYP_ACCEPT", "oauth.jwt.legacyTypAccept"],
 		["OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN", "oauth.accessToken.maxExpiresIn"],
 		["OAUTH_REFRESH_TOKEN_EXPIRES_IN", "oauth.refreshToken.expiresIn"],
 		["OAUTH_OIDC_MODE", "oauth.oidcMode"],
@@ -130,6 +129,17 @@ describe("the package's reference binds every variable of oauth {} at its path",
 		).toBeUndefined();
 	});
 
+	it("binds OAUTH_JWT_LEGACY_TYP_ACCEPT at no path under oauth {}: the key is removed", () => {
+		expect(
+			oauthBindings(REFERENCE).filter((binding) =>
+				binding.startsWith("OAUTH_JWT_LEGACY_TYP_ACCEPT "),
+			),
+		).toEqual([]);
+		expect(
+			valueAt(oauthOf(REFERENCE, { OAUTH_JWT_LEGACY_TYP_ACCEPT: "true" }), "jwt.legacyTypAccept"),
+		).toBeUndefined();
+	});
+
 	it("sets a default for each key of oauth {} the module reads", () => {
 		expect(Object.keys(oauthOf(REFERENCE)).sort()).toEqual([
 			"accessToken",
@@ -163,7 +173,7 @@ describe("the reference, read by the module's schema", () => {
 
 	it("parses with no variable but the issuer set, every switch off and the shipped defaults", () => {
 		expect(load()).toEqual({
-			jwt: { issuer: "https://auth.test", legacyTypAccept: false },
+			jwt: { issuer: "https://auth.test" },
 			accessToken: { defaultExpiresIn: 3600 },
 			refreshToken: { expiresIn: 86400 },
 			oidcMode: "oidc-required",
@@ -185,7 +195,6 @@ describe("the reference, read by the module's schema", () => {
 	it("reads each variable as the string it carries", () => {
 		expect(
 			load({
-				OAUTH_JWT_LEGACY_TYP_ACCEPT: "true",
 				OAUTH_REFRESH_TOKEN_EXPIRES_IN: "7200",
 				OAUTH_OIDC_MODE: "dual",
 				OAUTH_REVOCATION_ACCESS_TOKEN: "unsupported",
@@ -196,7 +205,6 @@ describe("the reference, read by the module's schema", () => {
 				OAUTH_RESOURCE_INDICATOR_ENABLED: "true",
 			}),
 		).toMatchObject({
-			jwt: { legacyTypAccept: true },
 			refreshToken: { expiresIn: 7200 },
 			oidcMode: "dual",
 			revocation: { accessToken: "unsupported", subject: "watermark" },

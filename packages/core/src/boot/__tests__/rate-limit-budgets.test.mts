@@ -15,16 +15,16 @@
  */
 
 /**
- * The `rateLimitBudgets` contribution kind: a module contributes the
- * budget of each rate-limit prefix it owns — the default limit and window it
- * reads from its own settings — name-keyed by the prefix, and core composes
- * them into one view, the synthetic `rateLimitBudgetResolver`, that a limiter
- * reads at request time. Two modules contributing one prefix refuse boot.
+ * The `rateLimitBudgets` contribution kind: a module claims each rate-limit
+ * prefix it keys a limiter under, name-keyed by the prefix, with no budget of
+ * its own (`null`, or a verifier's claim): a key's limit is the limiter's own
+ * `limits` entry for its prefix, else its `defaultLimit`. Two modules
+ * claiming one prefix, an override of a prefix, and a factory answering
+ * anything but `null` refuse boot.
  */
 
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { MAX_DURATION_SECONDS } from "../../config/durations.mjs";
 import { defineModule, type Module } from "../../modules/manifest/index.mjs";
 import { memoryRateLimiterModule } from "../../ratelimit/module.mjs";
 import type { RateLimiter } from "../../ratelimit/types.mjs";
@@ -33,12 +33,6 @@ import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { createApp, mergeWithBuiltins } from "../create-app.mjs";
 import type { BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";
-
-declare module "@o3co/auth-provider-core" {
-	interface ComponentMap {
-		readonly budgetFixtureSlot: number;
-	}
-}
 
 const bootWith = (extra: Record<string, unknown> = {}): BootstrapMap =>
 	({
@@ -57,77 +51,85 @@ async function refusal(promise: Promise<unknown>): Promise<BootError> {
 	return expect.fail("boot should have been refused");
 }
 
-describe("rateLimitBudgets — contributed by the module that owns the prefix", () => {
-	it("registers each budget under its prefix, read from the module's own settings, in one view", async () => {
-		const fixed = defineModule({
-			name: "budget-fixed",
-			contributes: {
-				rateLimitBudgets: { "fixture-fixed": () => ({ limit: 5, windowSeconds: 60 }) },
-			},
-		});
-		const configured = defineModule({
-			name: "budget-configured",
-			section: { schema: z.object({ limit: z.number(), windowSeconds: z.number() }) },
-			contributes: {
-				rateLimitBudgets: {
-					"fixture-configured": (deps) => ({
-						limit: deps.section.limit,
-						windowSeconds: deps.section.windowSeconds,
-					}),
-				},
-			},
-		});
-
+describe("rateLimitBudgets — a module claims the prefixes it keys", () => {
+	it("claims each prefix with null, and core composes no budget view", async () => {
 		const handle = await createApp({
-			modules: [fixed, configured],
-			bootstrapComponents: bootWith({ "budget-configured": { limit: 3, windowSeconds: 900 } }),
+			modules: [
+				defineModule({
+					name: "claim-one",
+					contributes: { rateLimitBudgets: { "fixture-one": () => null } },
+				}),
+				defineModule({
+					name: "claim-two",
+					contributes: { rateLimitBudgets: { "fixture-two": () => null } },
+				}),
+			],
+			bootstrapComponents: bootWith(),
 		});
 
-		const budgets = handle.components.rateLimitBudgetResolver;
-		expect(budgets?.get("fixture-fixed")).toEqual({ limit: 5, windowSeconds: 60 });
-		expect(budgets?.get("fixture-configured")).toEqual({ limit: 3, windowSeconds: 900 });
-		expect(budgets?.get("unowned")).toBeUndefined();
-		expect([...(budgets?.entries() ?? [])]).toEqual([
-			["fixture-fixed", { limit: 5, windowSeconds: 60 }],
-			["fixture-configured", { limit: 3, windowSeconds: 900 }],
-		]);
+		expect(Object.hasOwn(handle.components, "rateLimitBudgetResolver")).toBe(false);
 		await handle.dispose();
 	});
 
-	it("registers what the factory answered at registration: the view holds a frozen copy", async () => {
-		const answered = { limit: 5, windowSeconds: 60 };
-		const mod = defineModule({
-			name: "budget-owner",
-			contributes: { rateLimitBudgets: { fixture: () => answered } },
+	it("has no rateLimitBudgetResolver component for a module to require", async () => {
+		const reader = defineModule({
+			name: "budget-reader",
+			requires: ["rateLimitBudgetResolver" as never],
+			contributes: { grantMiddleware: [() => null] },
 		});
 
-		const handle = await createApp({ modules: [mod], bootstrapComponents: bootWith() });
-		answered.limit = 500;
+		const err = await refusal(createApp({ modules: [reader], bootstrapComponents: bootWith() }));
 
-		const budget = handle.components.rateLimitBudgetResolver?.get("fixture");
-		expect(budget).toEqual({ limit: 5, windowSeconds: 60 });
-		expect(Object.isFrozen(budget)).toBe(true);
-		await handle.dispose();
+		expect(err.reason).toBe("missing-required-component");
+		expect(err.message).toContain("rateLimitBudgetResolver");
 	});
 
-	it("a budget answered null claims its prefix and is absent from the view", async () => {
+	it("refuses a factory answering a budget, naming the module and prefix, and the limiter's limits as its place", async () => {
 		const mod = defineModule({
-			name: "budget-off",
+			name: "budget-broken",
 			contributes: {
-				rateLimitBudgets: {
-					"fixture-off": () => null,
-					"fixture-on": () => ({ limit: 1, windowSeconds: 1 }),
-				},
+				rateLimitBudgets: { fixture: () => ({ limit: 5, windowSeconds: 60 }) as never },
 			},
 		});
 
-		const handle = await createApp({ modules: [mod], bootstrapComponents: bootWith() });
+		const err = await refusal(createApp({ modules: [mod], bootstrapComponents: bootWith() }));
 
-		const budgets = handle.components.rateLimitBudgetResolver;
-		expect(budgets?.get("fixture-off")).toBeUndefined();
-		expect([...(budgets?.entries() ?? [])].map(([prefix]) => prefix)).toEqual(["fixture-on"]);
-		await handle.dispose();
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({
+			reason: "contribute-factory-failed",
+			module: "budget-broken",
+			kind: "rateLimitBudgets",
+			name: "fixture",
+		});
+		expect(err.message).toContain('rateLimitBudgets "fixture"');
+		expect(err.message).toContain("contributes no budget");
+		expect(err.message).toContain("limits.fixture");
 	});
+
+	it.each<readonly [string, unknown]>([
+		["a budget", { limit: 5, windowSeconds: 60 }],
+		["undefined", undefined],
+		["a string", "5"],
+	])(
+		"refuses a factory answering %s instead of null, naming the module and prefix",
+		async (_label, answered) => {
+			const mod = defineModule({
+				name: "budget-broken",
+				contributes: { rateLimitBudgets: { fixture: () => answered as never } },
+			});
+
+			const err = await refusal(createApp({ modules: [mod], bootstrapComponents: bootWith() }));
+
+			expect(err.reason).toBe("contribute-factory-failed");
+			expect(err.details).toMatchObject({
+				reason: "contribute-factory-failed",
+				module: "budget-broken",
+				kind: "rateLimitBudgets",
+				name: "fixture",
+			});
+			expect(err.message).toContain('rateLimitBudgets "fixture"');
+		},
+	);
 });
 
 /** A module that requires the limiter, so the planner builds it. */
@@ -151,6 +153,8 @@ const withMemoryLimiter = (extra: Record<string, unknown> = {}): BootstrapMap =>
 
 type Budget = { readonly limit: number; readonly windowSeconds: number } | null;
 
+const claim = (): null => null;
+
 describe("rateLimitBudgets — no module overrides a prefix", () => {
 	it.each<readonly [string, Budget]>([
 		["a tighter budget", { limit: 1, windowSeconds: 600 }],
@@ -167,9 +171,7 @@ describe("rateLimitBudgets — no module overrides a prefix", () => {
 						limiterUser,
 						defineModule({
 							name: "budget-owner",
-							contributes: {
-								rateLimitBudgets: { fixture: () => ({ limit: 5, windowSeconds: 300 }) },
-							},
+							contributes: { rateLimitBudgets: { fixture: claim } },
 						}),
 						defineModule({
 							name: "budget-replacer",
@@ -177,7 +179,7 @@ describe("rateLimitBudgets — no module overrides a prefix", () => {
 								rateLimitBudgets: {
 									fixture: () => {
 										ran = true;
-										return overridden;
+										return overridden as never;
 									},
 								},
 							},
@@ -217,7 +219,7 @@ describe("rateLimitBudgets — no module overrides a prefix", () => {
 						defineModule({
 							name: "budget-replacer",
 							overrides: {
-								rateLimitBudgets: { [prefix]: () => ({ limit: 1, windowSeconds: 600 }) },
+								rateLimitBudgets: { [prefix]: () => ({ limit: 1, windowSeconds: 600 }) as never },
 							},
 						}),
 					],
@@ -250,7 +252,7 @@ describe("rateLimitBudgets — an override is refused as the manifest was read",
 				modules: [
 					defineModule({
 						name: "budget-owner",
-						contributes: { rateLimitBudgets: { login: () => ({ limit: 5, windowSeconds: 300 }) } },
+						contributes: { rateLimitBudgets: { login: claim } },
 					}),
 					shifting,
 				],
@@ -274,7 +276,7 @@ describe("rateLimitBudgets — the boot line", () => {
 		child: vi.fn(),
 	});
 
-	it("logs each prefix with its budget and the module that set it, and the limiter's kind and outage policy", async () => {
+	it("logs each prefix with the module that claimed it, and the limiter's kind and outage policy", async () => {
 		const logger = spyLogger();
 		const handle = await createApp({
 			modules: [
@@ -283,10 +285,7 @@ describe("rateLimitBudgets — the boot line", () => {
 				defineModule({
 					name: "budget-owner",
 					contributes: {
-						rateLimitBudgets: {
-							fixture: () => ({ limit: 5, windowSeconds: 300 }),
-							"fixture-off": () => null,
-						},
+						rateLimitBudgets: { fixture: claim, "fixture-two": claim },
 					},
 				}),
 			],
@@ -300,8 +299,8 @@ describe("rateLimitBudgets — the boot line", () => {
 				{
 					limiter: { kind: "memory", failMode: "closed" },
 					budgets: [
-						{ prefix: "fixture", budget: { limit: 5, windowSeconds: 300 }, module: "budget-owner" },
-						{ prefix: "fixture-off", budget: null, module: "budget-owner" },
+						{ prefix: "fixture", module: "budget-owner" },
+						{ prefix: "fixture-two", module: "budget-owner" },
 					],
 				},
 				"rate_limit_budgets_registered",
@@ -381,7 +380,7 @@ describe("rateLimitBudgets — refused", () => {
 		let ran = false;
 		const factory = () => {
 			ran = true;
-			return { limit: 5, windowSeconds: 60 };
+			return null;
 		};
 		const first = defineModule({
 			name: "budget-first",
@@ -408,48 +407,17 @@ describe("rateLimitBudgets — refused", () => {
 		expect(ran).toBe(false);
 	});
 
-	it.each([
-		["a zero limit", { limit: 0, windowSeconds: 60 }],
-		["a fractional window", { limit: 5, windowSeconds: 1.5 }],
-		["a NaN limit", { limit: Number.NaN, windowSeconds: 60 }],
-		["a window past the Date range", { limit: 5, windowSeconds: Number.MAX_SAFE_INTEGER }],
-		["a window one second over a year", { limit: 5, windowSeconds: MAX_DURATION_SECONDS + 1 }],
-	])(
-		"a budget no limiter can apply as written — %s — refuses boot naming the module and prefix",
-		async (_label, budget) => {
-			const mod = defineModule({
-				name: "budget-broken",
-				contributes: { rateLimitBudgets: { fixture: () => budget } },
-			});
-
-			const err = await refusal(createApp({ modules: [mod], bootstrapComponents: bootWith() }));
-
-			expect(err.reason).toBe("contribute-factory-failed");
-			expect(err.details).toMatchObject({
-				reason: "contribute-factory-failed",
-				module: "budget-broken",
-				kind: "rateLimitBudgets",
-				name: "fixture",
-			});
-			expect(err.message).toContain('rateLimitBudgets "fixture"');
-		},
-	);
-
-	const spec = (): Budget => ({ limit: 5, windowSeconds: 60 });
-	const off = (): Budget => null;
-
-	it.each<readonly [string, string, "contributes" | "overrides", () => Budget]>([
-		["empty", "", "contributes", spec],
-		["carrying a colon", "fixture:ip", "contributes", spec],
-		["carrying a colon, on a budget switched off", "fixture:ip", "contributes", off],
-		["carrying a colon, in an override", "fixture:ip", "overrides", off],
+	it.each<readonly [string, string, "contributes" | "overrides"]>([
+		["empty", "", "contributes"],
+		["carrying a colon", "fixture:ip", "contributes"],
+		["carrying a colon, in an override", "fixture:ip", "overrides"],
 	])(
 		"a prefix no limiter key can carry — %s — refuses boot at stage 1, before any factory runs",
-		async (_label, prefix, channel, answer) => {
+		async (_label, prefix, channel) => {
 			let ran = false;
-			const factory = (): Budget => {
+			const factory = (): null => {
 				ran = true;
-				return answer();
+				return null;
 			};
 			const mod = defineModule({
 				name: "budget-misfiled",
@@ -481,9 +449,9 @@ describe("rateLimitBudgets — refused", () => {
 		"a prefix named after an Object.prototype member — %s, in %s — refuses boot at stage 1, before any factory runs",
 		async (prefix, channel) => {
 			let ran = false;
-			const factory = (): Budget => {
+			const factory = (): null => {
 				ran = true;
-				return spec();
+				return null;
 			};
 			const mod = defineModule({
 				name: "budget-inherited-name",
@@ -506,29 +474,6 @@ describe("rateLimitBudgets — refused", () => {
 		},
 	);
 
-	it.each([
-		["undefined", undefined],
-		["a string", "5"],
-	])(
-		"a factory answering %s instead of a budget refuses boot naming the module and prefix",
-		async (_label, answered) => {
-			const mod = defineModule({
-				name: "budget-broken",
-				contributes: { rateLimitBudgets: { fixture: () => answered as never } },
-			});
-
-			const err = await refusal(createApp({ modules: [mod], bootstrapComponents: bootWith() }));
-
-			expect(err.reason).toBe("contribute-factory-failed");
-			expect(err.details).toMatchObject({
-				module: "budget-broken",
-				kind: "rateLimitBudgets",
-				name: "fixture",
-			});
-			expect(err.message).toContain('rateLimitBudgets "fixture"');
-		},
-	);
-
 	it("a host may not replace the collector: the kind is guarded", async () => {
 		const err = await refusal(
 			createApp({
@@ -542,33 +487,9 @@ describe("rateLimitBudgets — refused", () => {
 		expect(err.stage).toBe("validateManifests");
 		expect(err.details).toEqual({ reason: "contribution-kind-guarded", kind: "rateLimitBudgets" });
 	});
-
-	it("a provider that reads the view while the provides factories run refuses boot", async () => {
-		const owner = defineModule({
-			name: "budget-owner",
-			contributes: { rateLimitBudgets: { fixture: () => ({ limit: 5, windowSeconds: 60 }) } },
-		});
-		const eagerReader = defineModule({
-			name: "budget-eager-reader",
-			requires: ["rateLimitBudgetResolver"],
-			provides: {
-				budgetFixtureSlot: (deps) => deps.rateLimitBudgetResolver.get("fixture")?.limit ?? 0,
-			},
-			lifecycle: { budgetFixtureSlot: { eager: true } },
-		});
-
-		const err = await refusal(
-			createApp({ modules: [owner, eagerReader], bootstrapComponents: bootWith() }),
-		);
-
-		expect(err.reason).toBe("provides-factory-failed");
-		expect(err.message).toContain(
-			"rateLimitBudgetResolver was read while the provides factories run",
-		);
-	});
 });
 
-describe("rateLimitBudgets — the in-process limiter reads them", () => {
+describe("rateLimitBudgets — the in-process limiter limits a claimed prefix by its own settings", () => {
 	/** The limiter a consumer of the slot is handed, after a boot with `modules`. */
 	const limiterAfter = async (modules: readonly Module[]) => {
 		let handed: RateLimiter | undefined;
@@ -599,24 +520,10 @@ describe("rateLimitBudgets — the in-process limiter reads them", () => {
 		return { handle, limiter: handed };
 	};
 
-	it("limits a contributed prefix by its budget", async () => {
+	it("limits a claimed prefix by its own limits entry", async () => {
 		const owner = defineModule({
 			name: "budget-owner",
-			contributes: { rateLimitBudgets: { fixture: () => ({ limit: 1, windowSeconds: 60 }) } },
-		});
-		const { handle, limiter } = await limiterAfter([owner]);
-
-		const first = await limiter.check("fixture:ip:1.2.3.4", { ip: "1.2.3.4" });
-		const second = await limiter.check("fixture:ip:1.2.3.4", { ip: "1.2.3.4" });
-		expect(first.limit).toBe(1);
-		expect(second.allowed).toBe(false);
-		await handle.dispose();
-	});
-
-	it("limits a prefix its own limits declare by that entry, over a contributed budget", async () => {
-		const owner = defineModule({
-			name: "budget-owner",
-			contributes: { rateLimitBudgets: { declared: () => ({ limit: 1, windowSeconds: 60 }) } },
+			contributes: { rateLimitBudgets: { declared: claim } },
 		});
 		const { handle, limiter } = await limiterAfter([owner]);
 
@@ -624,7 +531,7 @@ describe("rateLimitBudgets — the in-process limiter reads them", () => {
 		await handle.dispose();
 	});
 
-	it("limits a prefix whose budget is switched off by its defaultLimit", async () => {
+	it("limits a claimed prefix its own limits do not name by its defaultLimit", async () => {
 		const owner = defineModule({
 			name: "budget-owner",
 			contributes: { rateLimitBudgets: { fixture: () => null } },
@@ -633,52 +540,6 @@ describe("rateLimitBudgets — the in-process limiter reads them", () => {
 
 		expect((await limiter.check("fixture:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(60);
 		await handle.dispose();
-	});
-});
-
-describe("rateLimitBudgets — read once", () => {
-	it("registers the budget it validated: a getter that answers differently on a second read changes nothing", async () => {
-		let reads = 0;
-		const shifty = {
-			get limit() {
-				reads += 1;
-				return reads === 1 ? 5 : 1_000_000;
-			},
-			windowSeconds: 60,
-		};
-		const mod = defineModule({
-			name: "budget-shifty",
-			contributes: { rateLimitBudgets: { fixture: () => shifty } },
-		});
-
-		const handle = await createApp({ modules: [mod], bootstrapComponents: bootWith() });
-
-		expect(reads).toBe(1);
-		expect(handle.components.rateLimitBudgetResolver?.get("fixture")).toEqual({
-			limit: 5,
-			windowSeconds: 60,
-		});
-		await handle.dispose();
-	});
-
-	it("refuses the budget it read: a getter that answers a usable limit only on a later read is refused", async () => {
-		let reads = 0;
-		const shifty = {
-			get limit() {
-				reads += 1;
-				return reads === 1 ? 0 : 5;
-			},
-			windowSeconds: 60,
-		};
-		const mod = defineModule({
-			name: "budget-shifty",
-			contributes: { rateLimitBudgets: { fixture: () => shifty } },
-		});
-
-		const err = await refusal(createApp({ modules: [mod], bootstrapComponents: bootWith() }));
-
-		expect(err.reason).toBe("contribute-factory-failed");
-		expect(err.message).toContain("got limit 0");
 	});
 });
 
@@ -786,10 +647,7 @@ describe("rateLimitBudgets — a verifier's claim", () => {
 		const plain = defineModule({
 			name: "plain-owner",
 			contributes: {
-				rateLimitBudgets: {
-					fixture_plain: () => null,
-					fixture_budgeted: () => ({ limit: 1, windowSeconds: 60 }),
-				},
+				rateLimitBudgets: { fixture_plain: claim },
 			},
 		});
 
@@ -799,7 +657,7 @@ describe("rateLimitBudgets — a verifier's claim", () => {
 				plain,
 				verifierModule("fixture_attempts", "fixture.attempts"),
 			],
-			bootstrapComponents: limitsOn("fixture_plain", "fixture_budgeted", "unclaimed"),
+			bootstrapComponents: limitsOn("fixture_plain", "unclaimed"),
 		});
 		await handle.dispose();
 	});
@@ -820,16 +678,14 @@ describe("rateLimitBudgets — a verifier's claim", () => {
 		},
 	);
 
-	it("claims the prefix with no budget: absent from the resolver, keyed by the limiter's defaultLimit", async () => {
-		let resolver: { get: (prefix: string) => unknown } | undefined;
+	it("claims the prefix with no budget: keyed by the limiter's defaultLimit", async () => {
 		let handed: RateLimiter | undefined;
 		const reader = defineModule({
 			name: "budget-reader",
-			requires: ["rateLimitBudgetResolver", "rateLimiter"],
+			requires: ["rateLimiter"],
 			contributes: {
 				grantMiddleware: [
 					(deps) => {
-						resolver = deps.rateLimitBudgetResolver;
 						handed = deps.rateLimiter;
 						return null;
 					},
@@ -846,7 +702,6 @@ describe("rateLimitBudgets — a verifier's claim", () => {
 			bootstrapComponents: limitsOn(),
 		});
 
-		expect(resolver?.get("fixture_attempts")).toBeUndefined();
 		expect((await handed?.check("fixture_attempts:ip:1.2.3.4", { ip: "1.2.3.4" }))?.limit).toBe(60);
 		await handle.dispose();
 	});
@@ -881,7 +736,9 @@ describe("rateLimitBudgets — a verifier's claim", () => {
 					defineModule({
 						name: "budget-replacer",
 						overrides: {
-							rateLimitBudgets: { fixture_attempts: () => ({ limit: 1, windowSeconds: 600 }) },
+							rateLimitBudgets: {
+								fixture_attempts: () => ({ limit: 1, windowSeconds: 600 }) as never,
+							},
 						},
 					}),
 				],
@@ -992,6 +849,8 @@ describe("rateLimitBudgets — a verifier's claim", () => {
 
 		const parsed = memoryRateLimiterModule.section?.schema.safeParse({
 			limits: { fixture_attempts: { limit: 5, windowSeconds: 60 } },
+			defaultLimit: { limit: 60, windowSeconds: 60 },
+			maxBuckets: 100,
 		});
 		expect(parsed?.success).toBe(true);
 		const handle = await createApp({
@@ -1008,5 +867,73 @@ describe("rateLimitBudgets — a verifier's claim", () => {
 		expect(claim.verifier).toEqual({ setting: "fixture.attempts" });
 		expect(Object.isFrozen(claim)).toBe(true);
 		expect(Object.isFrozen(claim.verifier)).toBe(true);
+	});
+});
+
+describe("rateLimitBudgets — an async factory", () => {
+	it("is accepted when it resolves to null", async () => {
+		const handle = await createApp({
+			modules: [
+				defineModule({
+					name: "claim-async",
+					contributes: { rateLimitBudgets: { fixture: async () => null } },
+				}),
+			],
+			bootstrapComponents: bootWith(),
+		});
+		await handle.dispose();
+	});
+
+	it("is accepted as a verifier's claim when it resolves to null, and its declaration still refuses a limits entry", async () => {
+		const asyncClaim = Object.assign(async () => null, {
+			verifier: { setting: "fixture.attempts" },
+		});
+		const claimant = defineModule({
+			name: "verifier-async",
+			contributes: { rateLimitBudgets: { fixture_attempts: asyncClaim } },
+		});
+
+		const handle = await createApp({
+			modules: [memoryRateLimiterModule, claimant],
+			bootstrapComponents: withMemoryLimiter(),
+		});
+		await handle.dispose();
+
+		const err = await refusal(
+			createApp({
+				modules: [memoryRateLimiterModule, claimant],
+				bootstrapComponents: withMemoryLimiter({
+					"core-rate-limiter-memory": {
+						limits: { fixture_attempts: { limit: 5, windowSeconds: 60 } },
+						defaultLimit: { limit: 60, windowSeconds: 60 },
+						maxBuckets: 100,
+					},
+				}),
+			}),
+		);
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("set fixture.attempts instead");
+	});
+
+	it("refuses boot when it resolves to a budget, naming the module, the prefix and the limits entry", async () => {
+		const mod = defineModule({
+			name: "budget-async",
+			contributes: {
+				rateLimitBudgets: {
+					fixture: (async () => ({ limit: 5, windowSeconds: 60 })) as never,
+				},
+			},
+		});
+
+		const err = await refusal(createApp({ modules: [mod], bootstrapComponents: bootWith() }));
+
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({
+			module: "budget-async",
+			kind: "rateLimitBudgets",
+			name: "fixture",
+		});
+		expect(err.message).toContain("contributes no budget");
+		expect(err.message).toContain("limits.fixture");
 	});
 });

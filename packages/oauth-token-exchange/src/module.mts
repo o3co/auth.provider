@@ -48,8 +48,7 @@ const REQUIRES = [
 	"clientRepository",
 	"keyStore",
 	// What the oauth module provides of `oauth {}`: the lifetimes the grant
-	// mints within, and the issuer and `legacyTypAccept` the validator holds a
-	// subject token to. A composition without the oauth module fills it. The
+	// mints within, and the issuer the validator holds a subject token to. A composition without the oauth module fills it. The
 	// whole configuration is not read.
 	"oauthTokenSettings",
 ] as const;
@@ -151,8 +150,6 @@ export const tokenExchangeModule: Module = defineModule<
 					// check (see OPTIONAL).
 					accessTokenDenylist: deps.accessTokenDenylist,
 					subjectRevocation: deps.subjectRevocation,
-					// The operator's setting, not the validator's own default.
-					legacyTypAccept: settings.legacyTypAccept,
 					logger: deps.logger,
 				});
 			},

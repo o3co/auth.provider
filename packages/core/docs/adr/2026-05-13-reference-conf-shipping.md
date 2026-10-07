@@ -141,3 +141,29 @@ slot.
 - ADR `2026-04-30-config-schema-strict-defaults-from-hocon.md` — establishes HOCON as the
   single source of truth for runtime defaults. This ADR extends that decision by making the
   library's HOCON layer consumer-reachable via npm.
+
+## Amendment 2026-10-07 — one reference.conf per package
+
+Amended 2026-10-07 (#728). Core's `reference.conf` is no longer the only
+library layer. Each package that owns a section ships its own
+`config/reference.conf`, which holds only its modules' sections, and each of
+those modules names the file (`section.reference`).
+`moduleReferences(modules)` (core) returns the files a composition layers for
+the modules it loads: each module's, in module order, then core's at the
+bottom. The composition root parses and layers them beneath its own files.
+Core names the files and reads none of them, so it takes no HOCON
+dependency. In the standalone template, its own files sit over the
+template's `reference.conf`, which sits over each loaded package's. A
+package's tests hold its file to its own modules' sections, each of which its
+schema parses without losing a path (`packageReferenceProblems`).
+
+A section's schema fills no default of its own (ADR 2026-04-30, amended the
+same day), so the package's `reference.conf` is the only place a default
+lives. A composition root that does not layer the file of a module it loads
+hands that module a section without its defaults. Boot refuses that section
+and names each missing key. A module whose switch reads an absent section as
+off (`mtls` and `dpop`, for example) stays off instead.
+
+The migration note for custom composition roots now reads: layer the files
+`moduleReferences(modules)` returns for the modules the root loads, not
+core's `reference.conf` alone.

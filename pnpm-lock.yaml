@@ -297,6 +297,9 @@ importers:
       '@o3co/auth-provider-core':
         specifier: workspace:*
         version: link:../core
+      '@o3co/auth-provider-test-kit':
+        specifier: workspace:*
+        version: link:../test-kit
       '@o3co/auth-provider-foundation':
         specifier: workspace:*
         version: link:../foundation
@@ -512,6 +515,9 @@ importers:
       '@o3co/auth-provider-core':
         specifier: workspace:*
         version: link:../core
+      '@o3co/auth-provider-test-kit':
+        specifier: workspace:*
+        version: link:../test-kit
       '@o3co/ts.hocon':
         specifier: ^1.13.0
         version: 1.13.0(yaml@2.9.1)(zod@4.6.5)
@@ -626,6 +632,9 @@ importers:
       '@o3co/auth-provider-core':
         specifier: workspace:*
         version: link:../core
+      '@o3co/auth-provider-test-kit':
+        specifier: workspace:*
+        version: link:../test-kit
       '@o3co/ts.hocon':
         specifier: ^1.13.0
         version: 1.13.0(yaml@2.9.1)(zod@4.6.5)
@@ -702,12 +711,18 @@ importers:
       '@o3co/auth-provider-core':
         specifier: workspace:*
         version: link:../core
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
       '@types/node':
         specifier: ^26.6.4
         version: 26.6.4
       '@vitest/coverage-v8':
         specifier: ^5.0.3
         version: 5.0.3(vitest@5.0.3)
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -818,6 +833,9 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
+      '@o3co/auth-provider-test-kit':
+        specifier: workspace:*
+        version: link:../../packages/test-kit
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6

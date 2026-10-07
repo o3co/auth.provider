@@ -276,7 +276,6 @@ overlay の値は `application.conf` より優先される。scaffold には `de
 | `KEY_STORE_LOCAL_PRIVATE_KEY_PATH` | — | PEM 秘密鍵ファイルのパス |
 | `KEY_STORE_LOCAL_PUBLIC_KEY` | — | PEM エンコードされた公開鍵 |
 | `KEY_STORE_LOCAL_PUBLIC_KEY_PATH` | — | PEM 公開鍵ファイルのパス |
-| `OAUTH_JWT_LEGACY_TYP_ACCEPT` | `false` | `typ` ヘッダーの無いトークンを受け付ける。`false` ではそれらを拒否し、typ の無いトークンを、たいていそうであるように設定ミスかダウングレードの試みとして扱う。`true` にするのは、v0.4.x のトークンがまだ流通している間の、期限を区切った移行期間に限ること。 |
 | `JWKS_PATH` | `/.well-known/jwks.json` | issuer の下で検証鍵を公開するパスで、discovery が `jwks_uri` として広告するもの（`jwks.path`）。`//`、ドットセグメント、クエリ、フラグメント、バックスラッシュ、パーセントエンコーディング、制御文字を含まない絶対パス。 |
 | `JWKS_CACHE_MAX_AGE` | `300` | JWKS レスポンスの `Cache-Control: public, max-age`（秒、`jwks.cacheMaxAge`）。ローテーションした鍵がキャッシュする検証者に間に合って届くよう、鍵の重複期間より十分短く保つこと。 |
 

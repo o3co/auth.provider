@@ -24,32 +24,38 @@
  * page, an outage thrown, never `met`), to
  * never being asked over a dead session or for a declared remediation, and
  * to interruption answers that pass core's closed body.
+ *
+ * It reads core only through its public entries. Registration is core's
+ * `resolverForTests`, which registers each requirement and seals its reach
+ * as boot does: the cases that read what registration accepts register with
+ * `allowAnyReach`, so a reach whose values the seal refuses fails the reach
+ * case alone of them (a reach that cannot be read at all fails them too). A requirement asked directly is handed admission's view of a live
+ * session built here, as admission builds it over stores that cannot record
+ * a second factor.
  */
 
 import assert from "node:assert/strict";
-import { requirementSession } from "../../user-sessions/authentication.mjs";
-import { createInMemorySessionLifecycleStore } from "../../user-sessions/lifecycle/memory.mjs";
-import type { SessionLifecycleStore } from "../../user-sessions/lifecycle/types.mjs";
-import type { UserSession, UserSessionStore } from "../../user-sessions/types.mjs";
-import { readAcrTable } from "../acr.mjs";
-import { type ActionGrade, ADMISSION_GRADES } from "../actions.mjs";
-import { admitPrimary, admitSession, cookieClaim, viewOf } from "../admit.mjs";
 import {
-	isHintKey,
+	type ActionGrade,
+	ADMISSION_GRADES,
+	admitPrimary,
+	admitSession,
+	cookieClaim,
+	createInMemorySessionLifecycleStore,
 	issuedRemediationActions,
 	type PrimaryAuthentication,
+	type RegisteredRequirement,
 	type RequirementInput,
-	registeredRequirement,
+	readAcrTable,
+	requirementSession,
+	type SessionLifecycleStore,
 	type SessionRequirement,
-	sealRegisteredReach,
-} from "../requirement.mjs";
-import { resolverForTests } from "./resolver.mjs";
-
-/** One rule of the contract: its name, and a run that throws when the requirement breaks it. */
-export interface ContractCase {
-	readonly name: string;
-	readonly run: () => Promise<void>;
-}
+	type SessionView,
+	type UserSession,
+	type UserSessionStore,
+} from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import type { ContractCase } from "../contractCase.mjs";
 
 export interface RequirementContractInput {
 	/** The key the requirement is contributed under. */
@@ -89,6 +95,34 @@ const liveSession = (): UserSession => ({
 		mfaAt: undefined,
 	},
 });
+
+/**
+ * Admission's view of `session` over stores none of which can record a
+ * second factor: a frozen projection of the record, its dates copied, with
+ * no enrollment facts since the record holds none.
+ */
+const viewOfLive = (session: UserSession): SessionView =>
+	Object.freeze({
+		sid: session.sid,
+		sub: session.sub,
+		authTime: new Date(session.authTime.getTime()),
+		expiresAt: new Date(session.expiresAt.getTime()),
+		secondFactorRecordable: false,
+	});
+
+/**
+ * `requirement` as registration answers it, its reach read but not held to
+ * the seal's rules: the reach case holds it to them. Throws what registration
+ * refuses.
+ */
+const registered = (requirement: SessionRequirement, issuer: string | undefined) => {
+	const copy: RegisteredRequirement | undefined = resolverForTests([requirement], {
+		...(issuer === undefined ? {} : { issuer }),
+		allowAnyReach: true,
+	}).get(requirement.name);
+	assert.ok(copy !== undefined, `"${requirement.name}" did not register under its name`);
+	return copy;
+};
 
 const storeAnswering = (answer: UserSession | null): UserSessionStore => ({
 	kind: "contract",
@@ -142,8 +176,7 @@ export function sessionRequirementContract(
 	const liveInput = (grade: ActionGrade): RequirementInput => {
 		const session = liveSession();
 		return {
-			// Admission's view over the contract's stores, none of which can record a second factor.
-			session: viewOf(session, false),
+			session: viewOfLive(session),
 			authentication: requirementSession(session),
 			carrier: "cookie",
 			subject: session.sub,
@@ -165,7 +198,7 @@ export function sessionRequirementContract(
 				if (fixture) {
 					// As registration reads it: anything but a boolean does not register.
 					assert.notEqual(
-						registeredRequirement(requirement, issuer).secondFactorAuthority,
+						registered(requirement, issuer).secondFactorAuthority,
 						true,
 						"a fixture never declares the second-factor authority: boot binds the authority to core's MFA ports",
 					);
@@ -174,17 +207,19 @@ export function sessionRequirementContract(
 		},
 		{
 			name: "reach holds non-empty strings, no primary's marker, no second-factor value unless the requirement declares the second-factor authority, and — in this release — nothing at all unless it does; stepUpPage is set when reach is not empty, and is valid when set",
-			// Registration validates the page; the seal boot runs holds the reach
-			// to its rules.
+			// Registration validates the page; the seal boot runs, which the
+			// resolver runs too, holds the reach to its rules. The resolver's
+			// refusal names its allowAnyReach option, which is for core's own
+			// tests: a requirement that keeps this case passes without it.
 			run: async () => {
-				sealRegisteredReach(registeredRequirement(build(), issuer));
+				resolverForTests([build()], issuer === undefined ? {} : { issuer });
 			},
 		},
 		{
 			name: "remediations are the requirement's own routes — <name>.<route> — each once",
 			run: async () => {
 				// Registration holds the rule; a fixture that breaks it does not register.
-				const { name, remediations } = registeredRequirement(build(), issuer);
+				const { name, remediations } = registered(build(), issuer);
 				for (const remediation of remediations) {
 					assert.ok(
 						remediation.startsWith(`${name}.`),
@@ -200,11 +235,10 @@ export function sessionRequirementContract(
 		},
 		{
 			name: "hintKeys are hint names",
+			// Registration refuses a list with a key that is not a hint name, so
+			// a requirement registered is one whose keys all are.
 			run: async () => {
-				const { hintKeys } = registeredRequirement(build(), issuer);
-				for (const hintKey of hintKeys) {
-					assert.ok(isHintKey(hintKey), `"${hintKey}" is not a hint name core admits`);
-				}
+				registered(build(), issuer);
 			},
 		},
 		{

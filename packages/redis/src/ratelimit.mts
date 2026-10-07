@@ -113,8 +113,8 @@ export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): Rat
 
 /**
  * AdapterFactory builder, over `client`, `limits`, `defaultLimit` and
- * `failMode` from its config and no contributed budget: those reach a limiter
- * through `redisRateLimiterModule`. Consumer wires:
+ * `failMode` from its config, as `redisRateLimiterModule` builds it from its
+ * section. Consumer wires:
  *   factory.register("redis", redisRateLimiterBuilder);
  */
 export const redisRateLimiterBuilder: AdapterBuilder<RateLimiter> = (config, _ctx) => {
@@ -145,19 +145,16 @@ const rateLimitSpecSchema = z
  * The schema of `redis-rate-limiter {}`, the module's own section: per-prefix
  * `limits`, none naming a verifier's prefix, the `defaultLimit` a key nothing
  * covers falls to, and `failMode`, the limiter's outage policy. Strict at
- * every level.
+ * every level. It fills no default: the package's `config/reference.conf`
+ * ships every value.
  */
 export const redisRateLimiterSectionSchema = z
 	.object({
-		limits: z
-			.record(z.string(), rateLimitSpecSchema)
-			.superRefine(refuseVerifierLimitEntries)
-			.default({}),
-		defaultLimit: rateLimitSpecSchema.default(() => ({ ...DEFAULT_LIMIT })),
-		failMode: z.enum(["open", "closed"]).default("closed"),
+		limits: z.record(z.string(), rateLimitSpecSchema).superRefine(refuseVerifierLimitEntries),
+		defaultLimit: rateLimitSpecSchema,
+		failMode: z.enum(["open", "closed"]),
 	})
-	.strict()
-	.default(() => ({ limits: {}, defaultLimit: { ...DEFAULT_LIMIT }, failMode: "closed" as const }));
+	.strict();
 
 /**
  * `defineModule` manifest for the redis RateLimiter. Reads its own section,

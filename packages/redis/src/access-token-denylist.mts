@@ -122,7 +122,7 @@ export const redisAccessTokenDenylistModule = defineModule({
 	name: "redis-access-token-denylist",
 	requires: ["accessTokenDenylistClient"] as const,
 	section: {
-		schema: keyPrefixSection("atdeny:"),
+		schema: keyPrefixSection,
 		reference: redisReference(),
 		relocatedFrom: {
 			redisAccessTokenDenylist: { to: "", environmentVariable: null },

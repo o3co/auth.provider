@@ -28,6 +28,7 @@ import { type BootstrapMap, createApp } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { mtlsConfigSchema, mtlsModule } from "#/module.mjs";
+import { shippedMtlsSection } from "../shippedSection.mjs";
 
 const fixturesDir = join(dirname(dirname(fileURLToPath(import.meta.url))), "fixtures");
 const ROOT_PEM = readFileSync(join(fixturesDir, "root.pem"), "utf8");
@@ -47,16 +48,14 @@ const makeBoot = (overrides: FullPkiOverrides): BootstrapMap =>
 				...makeValidCoreConfig().core,
 				tokenBinding: { dispatchPolicy: "intent-explicit" },
 			},
-			mtls: {
+			mtls: shippedMtlsSection({
 				enabled: true,
 				source: overrides.source ?? "header",
-				certHeader: "x-forwarded-client-cert",
-				certHeaderDialect: "envoy",
 				mode: overrides.mode ?? "full-pki",
 				trustedCas: overrides.trustedCas ?? [ROOT_PEM],
 				trustedProxies: ["loopback"],
 				...(overrides.fullPki === undefined ? {} : { fullPki: overrides.fullPki }),
-			},
+			}),
 		} as never,
 		pathResolver: (s: string) => s,
 	}) as unknown as BootstrapMap;
@@ -233,7 +232,8 @@ describe("mode = full-pki — boot invariants", () => {
 });
 
 describe("mtlsConfigSchema — full-pki", () => {
-	const parse = (mtls: Record<string, unknown>) => mtlsConfigSchema.safeParse(mtls);
+	const parse = (mtls: Record<string, unknown>) =>
+		mtlsConfigSchema.safeParse(shippedMtlsSection(mtls));
 
 	it.each(["ocsp", "both"] as const)(
 		"accepts revocation.mode = %s with a non-empty allowed-hosts",
@@ -274,32 +274,36 @@ describe("mtlsConfigSchema — full-pki", () => {
 	});
 
 	it("requires the nonce by default (RFC 8954), and lets an operator state otherwise", () => {
-		const strict = mtlsConfigSchema.parse({
-			enabled: true,
-			mode: "full-pki",
-			fullPki: {
-				revocation: {
-					mode: "ocsp",
-					onUnavailable: "reject",
-					allowedHosts: ["ocsp.example.test"],
+		const strict = mtlsConfigSchema.parse(
+			shippedMtlsSection({
+				enabled: true,
+				mode: "full-pki",
+				fullPki: {
+					revocation: {
+						mode: "ocsp",
+						onUnavailable: "reject",
+						allowedHosts: ["ocsp.example.test"],
+					},
 				},
-			},
-		});
-		expect(strict.fullPki?.revocation?.ocspRequireNonce).toBe(true);
+			}),
+		);
+		expect(strict?.fullPki?.revocation?.ocspRequireNonce).toBe(true);
 
-		const lenient = mtlsConfigSchema.parse({
-			enabled: true,
-			mode: "full-pki",
-			fullPki: {
-				revocation: {
-					mode: "ocsp",
-					onUnavailable: "reject",
-					allowedHosts: ["ocsp.example.test"],
-					ocspRequireNonce: false,
+		const lenient = mtlsConfigSchema.parse(
+			shippedMtlsSection({
+				enabled: true,
+				mode: "full-pki",
+				fullPki: {
+					revocation: {
+						mode: "ocsp",
+						onUnavailable: "reject",
+						allowedHosts: ["ocsp.example.test"],
+						ocspRequireNonce: false,
+					},
 				},
-			},
-		});
-		expect(lenient.fullPki?.revocation?.ocspRequireNonce).toBe(false);
+			}),
+		);
+		expect(lenient?.fullPki?.revocation?.ocspRequireNonce).toBe(false);
 	});
 
 	it("refuses an unknown signature algorithm rather than matching nothing", () => {

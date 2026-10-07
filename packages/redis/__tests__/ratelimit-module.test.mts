@@ -17,6 +17,7 @@ import {
 } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { redisRateLimiterModule } from "#/ratelimit.mjs";
+import { overShipped, shippedSection } from "./support/section.mjs";
 
 describe("redisRateLimiterModule", () => {
 	it("has the canonical name", () => {
@@ -92,9 +93,11 @@ describe("redisRateLimiterModule", () => {
 		"accepts a limits entry for %s in its section's schema when nothing declares it: only declarations count",
 		(prefix) => {
 			expect(
-				redisRateLimiterModule.section?.schema.safeParse({
-					limits: { [prefix]: { limit: 5, windowSeconds: 60 } },
-				})?.success,
+				redisRateLimiterModule.section?.schema.safeParse(
+					overShipped(redisRateLimiterModule, {
+						limits: { [prefix]: { limit: 5, windowSeconds: 60 } },
+					}),
+				)?.success,
 			).toBe(true);
 		},
 	);
@@ -145,15 +148,17 @@ describe("redisRateLimiterModule", () => {
 			},
 		);
 
-		it("is closed when the section gives none", () => {
-			expect(redisRateLimiterModule.section?.schema.parse({})).toMatchObject({
-				failMode: "closed",
-			});
+		it("is closed as reference.conf ships it", () => {
+			expect(
+				redisRateLimiterModule.section?.schema.parse(shippedSection(redisRateLimiterModule)),
+			).toMatchObject({ failMode: "closed" });
 		});
 
 		it("refuses a failMode that is neither open nor closed, naming the key", () => {
 			for (const failMode of ["maybe", "", "OPEN", 1, null]) {
-				const parsed = redisRateLimiterModule.section?.schema.safeParse({ failMode });
+				const parsed = redisRateLimiterModule.section?.schema.safeParse(
+					overShipped(redisRateLimiterModule, { failMode }),
+				);
 				expect(parsed?.success, JSON.stringify(failMode)).toBe(false);
 				expect(parsed?.error?.issues.map((issue) => issue.path.join("."))).toEqual(["failMode"]);
 			}
@@ -167,21 +172,28 @@ describe("redisRateLimiterModule", () => {
 			{ limits: { token: { limit: 5, windowSeconds: 1e13 } } },
 			{ failmode: "open" },
 		]) {
-			expect(schema?.safeParse(section)?.success, JSON.stringify(section)).toBe(false);
+			expect(
+				schema?.safeParse(overShipped(redisRateLimiterModule, section))?.success,
+				JSON.stringify(section),
+			).toBe(false);
 		}
 	});
 
 	it("reads its own section, redis-rate-limiter, its defaultLimit 60 per 60 s unless written", () => {
 		expect(redisRateLimiterModule).not.toHaveProperty("configSchema");
-		expect(redisRateLimiterModule.section?.schema.parse(undefined)).toEqual({
+		expect(
+			redisRateLimiterModule.section?.schema.parse(shippedSection(redisRateLimiterModule)),
+		).toEqual({
 			limits: {},
 			defaultLimit: { limit: 60, windowSeconds: 60 },
 			failMode: "closed",
 		});
 		expect(
-			redisRateLimiterModule.section?.schema.parse({
-				defaultLimit: { limit: "5", windowSeconds: "30" },
-			}),
+			redisRateLimiterModule.section?.schema.parse(
+				overShipped(redisRateLimiterModule, {
+					defaultLimit: { limit: "5", windowSeconds: "30" },
+				}),
+			),
 		).toMatchObject({ defaultLimit: { limit: 5, windowSeconds: 30 } });
 	});
 });

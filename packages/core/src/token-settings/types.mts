@@ -42,9 +42,9 @@
  * default refresh-token family revocation module) reads the configuration.
  *
  * Every value is resolved (no deprecated alias or absence left to interpret)
- * and the whole is frozen. Contract suite and test double:
- * `oauthTokenSettingsContract`, `createTestOAuthTokenSettings` on
- * `@o3co/auth-provider-core/testing`.
+ * and the whole is frozen. Contract suite: `oauthTokenSettingsContract` on
+ * `@o3co/auth-provider-test-kit`. Test double: `createTestOAuthTokenSettings`
+ * on `@o3co/auth-provider-core/testing`.
  */
 
 import type { AccessTokenLifetime } from "../config/application.schema.mjs";
@@ -56,11 +56,6 @@ export interface OAuthTokenSettings {
 	 * this provider builds for a browser is on.
 	 */
 	readonly issuer: string;
-	/**
-	 * `oauth.jwt.legacyTypAccept`, `false` when unset: whether verifying a
-	 * token this provider issued accepts one with no `typ` header.
-	 */
-	readonly legacyTypAccept: boolean;
 	/**
 	 * The access-token lifetime as `resolveAccessTokenLifetime` reads
 	 * `oauth.accessToken`: the seconds minted when a request asks for no
