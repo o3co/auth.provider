@@ -730,7 +730,7 @@ The boot refusals you can meet, with their messages, are in
   host — leaves the client unresolved: `/authorize` answers
   `400 invalid_client` and the other client lookups treat it as an unknown
   client, logged as `cimd_document_fetch_failed`, until a fetch succeeds
-  again. A document that
+  again and for at least `negativeCacheMs` after the failure. A document that
   is fresh, or that answers `304`, is served as before. **What to do:** to
   keep the previous behaviour, set `staleIfErrorMs = 300000` under
   `oauth.clientIdMetadataDocuments` (the standalone template:
