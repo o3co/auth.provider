@@ -297,6 +297,9 @@ importers:
       '@o3co/auth-provider-core':
         specifier: workspace:*
         version: link:../core
+      '@o3co/auth-provider-test-kit':
+        specifier: workspace:*
+        version: link:../test-kit
       '@o3co/auth-provider-foundation':
         specifier: workspace:*
         version: link:../foundation
