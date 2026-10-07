@@ -1132,79 +1132,174 @@ describe("createTokenExchangeGrant — a malformed policy decision", () => {
 });
 
 describe("createTokenExchangeGrant — audience inheritance", () => {
-	it("rejects inherited subject.aud when not in client allowlist (cross-client confusion)", async () => {
-		// Subject token was issued with aud="a-api" (for Client A).
-		// Our handler's client is client-a but has allowedAudiences=[].
-		// When audience request parameter is omitted, we must NOT silently
-		// inherit "a-api" (which would be permissive) — fall back to clientId.
+	/** An exchange by `client-a`, registered for `allowedAudiences`, of a subject token carrying `claims`. */
+	async function exchangeAs(
+		allowedAudiences: string[],
+		claims: Record<string, unknown>,
+		body: Record<string, unknown> = {},
+		logger: ReturnType<typeof spyLogger> = spyLogger(),
+	) {
 		const g = buildGrant({
-			clientRepository: mockClientRepository(publicClient({ allowedAudiences: [] })),
+			logger: logger as unknown as Logger,
+			clientRepository: mockClientRepository(publicClient({ allowedAudiences })),
 		});
-		const token = await signSelfIssuedAccessToken({ aud: "a-api", family_id: "fam-1" });
-		const { result } = await g.handle(
-			ctx({
-				client_id: "client-a",
-				client_secret: "any",
-				subject_token: token,
-				subject_token_type: ACCESS_TOKEN_TYPE,
-			}),
-		);
-		expect(result.status).toBe(200);
-		const tokens = tokensOf(result);
-		const payload = decodeJwt(tokens.access_token);
-		// aud must be the clientId (fallback), NOT the inherited subject.aud
-		expect(payload.aud).toBe("client-a");
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1", ...claims });
+		return (
+			await g.handle(
+				ctx({
+					client_id: "client-a",
+					client_secret: "any",
+					subject_token: token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+					...body,
+				}),
+			)
+		).result;
+	}
+
+	it("refuses an omitted audience when the subject's audience is outside the client allowlist", async () => {
+		// Subject token issued with aud="a-api" and azp="client-a". Inheriting "a-api"
+		// would leave the client's allowlist; the client's own id would leave the
+		// subject's audience. No audience is within both, so nothing is issued.
+		const logger = spyLogger();
+		const result = await exchangeAs([], { aud: "a-api" }, {}, logger);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_target",
+			errorDescription: "audience_widening_not_allowed: client-a",
+		});
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		const [line, event] = logger.warn.mock.calls[0] as [Record<string, unknown>, string];
+		expect(event).toBe("token_exchange_audience_widening_rejected");
+		expect(line).toMatchObject({
+			subject: "user-1",
+			clientId: "client-a",
+			widenedAudiences: ["client-a"],
+		});
 	});
 
 	it("inherits subject.aud when it matches client allowlist (happy path)", async () => {
 		// Subject issued with aud="billing". Client has allowedAudiences including "billing".
-		const g = buildGrant({
-			clientRepository: mockClientRepository(publicClient({ allowedAudiences: ["billing"] })),
-		});
-		const token = await signSelfIssuedAccessToken({ aud: "billing", family_id: "fam-1" });
-		const { result } = await g.handle(
-			ctx({
-				client_id: "client-a",
-				client_secret: "any",
-				subject_token: token,
-				subject_token_type: ACCESS_TOKEN_TYPE,
-			}),
-		);
+		const result = await exchangeAs(["billing"], { aud: "billing" });
 		expect(result.status).toBe(200);
-		const tokens = tokensOf(result);
-		const payload = decodeJwt(tokens.access_token);
-		expect(payload.aud).toBe("billing");
+		expect(decodeJwt(tokensOf(result).access_token).aud).toBe("billing");
 	});
 
 	it("inherits subject.aud when it matches clientId (default allowlist)", async () => {
 		// Subject issued with aud=clientId. No allowedAudiences configured.
 		// This is the common case for non-Token-Exchange access_tokens.
-		const g = buildGrant({
-			clientRepository: mockClientRepository(publicClient({ allowedAudiences: [] })),
-		});
-		const token = await signSelfIssuedAccessToken({ aud: "client-a", family_id: "fam-1" });
-		const { result } = await g.handle(
-			ctx({
-				client_id: "client-a",
-				client_secret: "any",
-				subject_token: token,
-				subject_token_type: ACCESS_TOKEN_TYPE,
-			}),
-		);
+		const result = await exchangeAs([], { aud: "client-a" });
 		expect(result.status).toBe(200);
-		const tokens = tokensOf(result);
-		const payload = decodeJwt(tokens.access_token);
-		expect(payload.aud).toBe("client-a");
+		expect(decodeJwt(tokensOf(result).access_token).aud).toBe("client-a");
 	});
 
 	it("inherits subject.aud when encoded as a single-element array (RFC 7519 §4.1.3)", async () => {
 		// RFC 7519 permits aud as a string OR an array. A single-element array
 		// is semantically equivalent to a bare string and must not silently fall
 		// back to clientId.
+		const result = await exchangeAs(["billing"], { aud: ["billing"] });
+		expect(result.status).toBe(200);
+		expect(decodeJwt(tokensOf(result).access_token).aud).toBe("billing");
+	});
+
+	it("refuses an omitted audience for a multi-element subject.aud that does not name the client", async () => {
+		// Multi-valued audience cannot be represented in a single-aud token, so the
+		// default is the client's own id — which this subject token does not carry.
+		const result = await exchangeAs(["billing", "inventory"], { aud: ["billing", "inventory"] });
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_target",
+			errorDescription: "audience_widening_not_allowed: client-a",
+		});
+	});
+
+	it("defaults to clientId for a multi-element subject.aud that names the client", async () => {
+		const result = await exchangeAs(["billing"], { aud: ["billing", "client-a"] });
+		expect(result.status).toBe(200);
+		expect(decodeJwt(tokensOf(result).access_token).aud).toBe("client-a");
+	});
+
+	it("refuses an omitted audience for a single-element-array subject.aud outside the allowlist", async () => {
+		// Same as the string case: no audience is within both ceilings.
+		const result = await exchangeAs([], { aud: ["a-api"] });
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_target",
+			errorDescription: "audience_widening_not_allowed: client-a",
+		});
+	});
+
+	it("defaults to clientId for a subject token that carries no aud", async () => {
+		// A subject token naming no audience is read as naming the client's own id
+		// (the caller binding accepts it by its azp), so the client's id is within
+		// both ceilings.
+		const result = await exchangeAs(["billing"], { aud: undefined });
+		expect(result.status).toBe(200);
+		expect(decodeJwt(tokensOf(result).access_token).aud).toBe("client-a");
+	});
+
+	it("issues an explicit audience within both ceilings", async () => {
+		const result = await exchangeAs(
+			["billing", "inventory"],
+			{ aud: ["billing", "inventory"] },
+			{
+				audience: "inventory",
+			},
+		);
+		expect(result.status).toBe(200);
+		expect(decodeJwt(tokensOf(result).access_token).aud).toBe("inventory");
+	});
+
+	it("refuses the client's own id as an explicit audience when the subject's audience does not name it", async () => {
+		const result = await exchangeAs(["billing"], { aud: "billing" }, { audience: "client-a" });
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_target",
+			errorDescription: "audience_widening_not_allowed: client-a",
+		});
+	});
+
+	it("refuses the client's own id as a resource when the subject's audience does not name it", async () => {
+		// Refused before a policy runs, as any resource no issued audience could equal.
+		const logger = spyLogger();
+		const result = await exchangeAs(
+			["billing"],
+			{ aud: ["billing", "inventory"] },
+			{ resource: "client-a" },
+			logger,
+		);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_target",
+			errorDescription: "requested_resources_not_in_audience: client-a",
+		});
+		expect(logger.warn.mock.calls.map(([, event]) => event)).toEqual([
+			"token_exchange_resource_not_in_audience",
+		]);
+	});
+
+	it("issues for the client's own id as a resource when the subject token carries no aud", async () => {
+		const result = await exchangeAs([], { aud: undefined }, { resource: "client-a" });
+		expect(result.status).toBe(200);
+		expect(decodeJwt(tokensOf(result).access_token).aud).toBe("client-a");
+	});
+
+	it("refuses a policy that names no audience when the default leaves the subject's audience", async () => {
+		// A policy decision without `grantedAudience` leaves the default standing,
+		// and the default is held to the same two ceilings.
 		const g = buildGrant({
+			grantPolicy: {
+				kind: "silent",
+				async evaluate() {
+					return { outcome: "allow" };
+				},
+			},
 			clientRepository: mockClientRepository(publicClient({ allowedAudiences: ["billing"] })),
 		});
-		const token = await signSelfIssuedAccessToken({ aud: ["billing"], family_id: "fam-1" });
+		const token = await signSelfIssuedAccessToken({
+			aud: ["billing", "inventory"],
+			family_id: "fam-1",
+		});
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
@@ -1213,16 +1308,17 @@ describe("createTokenExchangeGrant — audience inheritance", () => {
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
 		);
-		expect(result.status).toBe(200);
-		const tokens = tokensOf(result);
-		const payload = decodeJwt(tokens.access_token);
-		expect(payload.aud).toBe("billing");
+		expect(result).toMatchObject({ status: 400, error: "invalid_target" });
 	});
 
-	it("falls back to clientId when subject.aud is a multi-element array", async () => {
-		// Multi-valued audience cannot be represented in a single-aud token.
-		// Falling back to clientId is the safe choice (no surprise widening).
+	it("issues the audience a policy grants within both ceilings when the request names none", async () => {
 		const g = buildGrant({
+			grantPolicy: {
+				kind: "narrowing",
+				async evaluate() {
+					return { outcome: "allow", grantedAudience: ["inventory"] };
+				},
+			},
 			clientRepository: mockClientRepository(
 				publicClient({ allowedAudiences: ["billing", "inventory"] }),
 			),
@@ -1240,29 +1336,7 @@ describe("createTokenExchangeGrant — audience inheritance", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		const tokens = tokensOf(result);
-		const payload = decodeJwt(tokens.access_token);
-		expect(payload.aud).toBe("client-a");
-	});
-
-	it("rejects single-element-array subject.aud when not in allowlist", async () => {
-		// Same cross-client confusion defense as the string case.
-		const g = buildGrant({
-			clientRepository: mockClientRepository(publicClient({ allowedAudiences: [] })),
-		});
-		const token = await signSelfIssuedAccessToken({ aud: ["a-api"], family_id: "fam-1" });
-		const { result } = await g.handle(
-			ctx({
-				client_id: "client-a",
-				client_secret: "any",
-				subject_token: token,
-				subject_token_type: ACCESS_TOKEN_TYPE,
-			}),
-		);
-		expect(result.status).toBe(200);
-		const tokens = tokensOf(result);
-		const payload = decodeJwt(tokens.access_token);
-		expect(payload.aud).toBe("client-a");
+		expect(decodeJwt(tokensOf(result).access_token).aud).toBe("inventory");
 	});
 });
 
