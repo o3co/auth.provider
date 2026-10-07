@@ -531,6 +531,56 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.access_token).toBe("upstream-at-xyz");
 		});
 
+		/** `token` with its payload's claims changed after signing, its signature kept. */
+		const withClaimsChanged = (token: string, change: Record<string, unknown>): string => {
+			const [header, payload, signature] = token.split(".");
+			const claims = JSON.parse(Buffer.from(payload ?? "", "base64url").toString("utf8"));
+			const changed = Buffer.from(JSON.stringify({ ...claims, ...change })).toString("base64url");
+			return `${header}.${changed}.${signature}`;
+		};
+
+		it.each([
+			["a number", 123],
+			["an array naming the client", ["client-1"]],
+			["an empty string", ""],
+		])("refuses a token whose azp is %s, its aud naming the client", async (_label, azp) => {
+			const clientRepo = makeClientRepo();
+			const fedTokenStore = makeFedTokenStore();
+			const app = buildApp({ clientRepo, fedTokenStore });
+
+			const res = await postFedToken(
+				app,
+				"google",
+				await mintAccessToken({ azp, aud: "client-1" }),
+			);
+
+			expect(res.status).toBe(401);
+			expect(res.body).toEqual({ error: "invalid_token", error_description: "invalid token" });
+			expect(clientRepo.findById).not.toHaveBeenCalled();
+			expect(fedTokenStore.get).not.toHaveBeenCalled();
+		});
+
+		it("refuses a token whose azp was changed after signing to the client its aud names", async () => {
+			const clientRepo = makeClientRepo();
+			const fedTokenStore = makeFedTokenStore();
+			const logger = createMockLogger();
+			const app = buildApp({ clientRepo, fedTokenStore, logger });
+			const token = withClaimsChanged(await mintAccessToken({ azp: "client-2", aud: "client-1" }), {
+				azp: "client-1",
+			});
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(401);
+			expect(res.body).toEqual({ error: "invalid_token", error_description: "invalid token" });
+			expect(logger.warn).toHaveBeenCalledWith(
+				{ federation: "google", reason: "signature" },
+				"federation_token_jwt_verify_failed",
+			);
+			expect(clientRepo.findById).not.toHaveBeenCalled();
+			expect(fedTokenStore.get).not.toHaveBeenCalled();
+		});
+
 		it("checks the audience, so the verifier logs no jwt_verify_aud_skipped", async () => {
 			for (const aud of ["client-1", RESOURCE]) {
 				// A fresh logger each time: the verifier logs the gap once per logger.

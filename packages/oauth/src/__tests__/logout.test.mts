@@ -2541,6 +2541,80 @@ describe("POST /oauth/federation/:name/logout", () => {
 			expect(res.body).toEqual({ disconnected: true });
 		});
 
+		/** `token` with its payload's claims changed after signing, its signature kept. */
+		const withClaimsChanged = (token: string, change: Record<string, unknown>): string => {
+			const [header, payload, signature] = token.split(".");
+			const claims = JSON.parse(Buffer.from(payload ?? "", "base64url").toString("utf8"));
+			const changed = Buffer.from(JSON.stringify({ ...claims, ...change })).toString("base64url");
+			return `${header}.${changed}.${signature}`;
+		};
+
+		it("refuses a token whose several audiences exclude its client, and disconnects nothing", async () => {
+			const fedTokenStore = makeFedTokenStore({ delete: vi.fn().mockResolvedValue(undefined) });
+			const app = buildFedLogoutApp({ fedTokenStore });
+
+			const res = await postFedLogout(
+				app,
+				"google",
+				await mintAccessToken({ azp: "client-1", aud: [RESOURCE, "client-2"] }),
+			);
+
+			expect(res.status).toBe(401);
+			expect(res.body).toEqual({ error: "invalid_token", error_description: "invalid token" });
+			expect(fedTokenStore.delete).not.toHaveBeenCalled();
+		});
+
+		it("refuses a token whose azp was changed after signing to the client its aud names", async () => {
+			const fedTokenStore = makeFedTokenStore({ delete: vi.fn().mockResolvedValue(undefined) });
+			const logger = createMockLogger();
+			const app = buildFedLogoutApp({ fedTokenStore, logger });
+			const token = withClaimsChanged(await mintAccessToken({ azp: "client-2", aud: "client-1" }), {
+				azp: "client-1",
+			});
+
+			const res = await postFedLogout(app, "google", token);
+
+			expect(res.status).toBe(401);
+			expect(res.body).toEqual({ error: "invalid_token", error_description: "invalid token" });
+			expect(logger.warn).toHaveBeenCalledWith(
+				{ federation: "google", reason: "signature" },
+				"federation_logout_jwt_verify_failed",
+			);
+			expect(fedTokenStore.delete).not.toHaveBeenCalled();
+		});
+
+		it("refuses a token that names no client once its azp is changed after signing", async () => {
+			const fedTokenStore = makeFedTokenStore({ delete: vi.fn().mockResolvedValue(undefined) });
+			const app = buildFedLogoutApp({ fedTokenStore });
+			const token = withClaimsChanged(await mintAccessToken({ azp: "client-1", aud: RESOURCE }), {
+				azp: undefined,
+			});
+
+			const res = await postFedLogout(app, "google", token);
+
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_token");
+			expect(fedTokenStore.delete).not.toHaveBeenCalled();
+		});
+
+		// An `azp` that is not a non-empty string names no client to pin to: the
+		// token is answered as one with no `azp`, its audience unchecked (the
+		// route's rule for a token that names no client).
+		it.each([
+			["a number", 123],
+			["an array naming the client", ["client-1"]],
+			["an empty string", ""],
+		])("answers a token whose azp is %s as one that names no client", async (_label, azp) => {
+			const logger = createMockLogger();
+			const app = buildFedLogoutApp({ logger });
+
+			const res = await postFedLogout(app, "google", await mintAccessToken({ azp, aud: RESOURCE }));
+
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ disconnected: true });
+			expect(logger.warn.mock.calls.map(([, event]) => event)).toContain("jwt_verify_aud_skipped");
+		});
+
 		it("checks the audience, so the verifier logs no jwt_verify_aud_skipped", async () => {
 			for (const aud of ["client-1", RESOURCE]) {
 				// A fresh logger each time: the verifier logs the gap once per logger.
