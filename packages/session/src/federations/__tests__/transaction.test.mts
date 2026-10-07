@@ -68,34 +68,35 @@ const envelope = {
 };
 
 describe("deriveFederationTransactionCookieName", () => {
-	it("names the cookie after the deployment's session cookie", () => {
-		expect(deriveFederationTransactionCookieName("auth.session")).toBe(
-			"__Secure-auth.session.federation",
+	it("names the cookie after the deployment's session cookie and the federation", () => {
+		expect(deriveFederationTransactionCookieName("auth.session", "apple")).toBe(
+			"__Host-auth.session.federation.apple",
 		);
 	});
 
-	it("applies __Secure- unconditionally, even to a session name that carries no prefix", () => {
+	it("applies __Host- unconditionally, even to a session name that carries no prefix", () => {
 		// Not merely a swap: unlike the session cookie, whose `Secure` flag is the
 		// operator's to set, this cookie is SameSite=None and so is always issued
-		// with `Secure`. The prefix states that invariant where the browser
-		// enforces it.
+		// with `Secure`. `__Host-` states that where the browser enforces it, and
+		// also that no other host — a sibling subdomain included — can set it.
 		for (const name of ["auth.session", "sid", "my_app-cookie"]) {
-			expect(deriveFederationTransactionCookieName(name)).toBe(`__Secure-${name}.federation`);
+			expect(deriveFederationTransactionCookieName(name, "apple")).toBe(
+				`__Host-${name}.federation.apple`,
+			);
 		}
 	});
 
-	it("swaps a __Host- prefix for __Secure-, because this cookie is path-scoped", () => {
-		// `__Host-` requires `Path=/`. This cookie is deliberately scoped to the
-		// callback route, so a `__Host-` name would be dropped by every browser
-		// and the callback would fail with nothing visibly wrong.
-		expect(deriveFederationTransactionCookieName("__Host-auth.session")).toBe(
-			"__Secure-auth.session.federation",
+	it("swaps a __Secure- prefix for __Host-, so a sibling host cannot plant the cookie", () => {
+		// A `__Secure-` cookie may carry `Domain=<parent>`: a sibling host
+		// could set it for this one. `__Host-` may not.
+		expect(deriveFederationTransactionCookieName("__Secure-app.sid", "apple")).toBe(
+			"__Host-app.sid.federation.apple",
 		);
 	});
 
-	it("does not double up an existing __Secure- prefix", () => {
-		expect(deriveFederationTransactionCookieName("__Secure-app.sid")).toBe(
-			"__Secure-app.sid.federation",
+	it("does not double up an existing __Host- prefix", () => {
+		expect(deriveFederationTransactionCookieName("__Host-auth.session", "apple")).toBe(
+			"__Host-auth.session.federation.apple",
 		);
 	});
 
@@ -106,8 +107,18 @@ describe("deriveFederationTransactionCookieName", () => {
 			"__secure-app.sid",
 			"__SECURE-app.sid",
 		]) {
-			expect(deriveFederationTransactionCookieName(name)).toBe("__Secure-app.sid.federation");
+			expect(deriveFederationTransactionCookieName(name, "apple")).toBe(
+				"__Host-app.sid.federation.apple",
+			);
 		}
+	});
+
+	it("gives each federation a name of its own", () => {
+		// The cookie is `Path=/`, so the name — not the path — is what keeps
+		// two federations' transactions apart.
+		const apple = deriveFederationTransactionCookieName("auth.session", "apple");
+		const other = deriveFederationTransactionCookieName("auth.session", "apple-staging");
+		expect(apple).not.toBe(other);
 	});
 });
 

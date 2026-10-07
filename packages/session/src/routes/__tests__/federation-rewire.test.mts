@@ -54,7 +54,7 @@ describe("Federation.mts route rewire — federationRedirectPolicyResolver param
 		expect(() =>
 			createRouter(stubExpress, {
 				federationSettings: createTestFederationSettings(),
-				federationTransactionCookieName: "test.session.federation",
+				sessionCookieName: "test.session",
 				federationProviders: new Map(),
 				federationRedirectPolicyResolver: resolver as never,
 				providerCallbackUrls: new Map(),

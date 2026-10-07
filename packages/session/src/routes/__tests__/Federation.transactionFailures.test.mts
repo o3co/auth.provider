@@ -104,8 +104,8 @@ type Knobs = {
 	destroyThrows?: { readonly reason: unknown };
 	/** Register this callback URL instead of a well-formed one. */
 	callbackUrl?: string | null;
-	/** Passed straight through; absent is the harness's name. */
-	cookieName?: string;
+	/** The session cookie name handed to the router; absent is the harness's. */
+	sessionCookieName?: string;
 	/** Make the session's own `save` fail, for the query-mode branch. */
 	failSessionSave?: boolean;
 	/** The router's logger. */
@@ -156,7 +156,11 @@ const STORE_UNAVAILABLE = {
 	error_description: "Session store unavailable",
 };
 
-const DEFAULT_COOKIE_NAME = deriveFederationTransactionCookieName("harness.session");
+const DEFAULT_SESSION_COOKIE_NAME = "harness.session";
+const DEFAULT_COOKIE_NAME = deriveFederationTransactionCookieName(
+	DEFAULT_SESSION_COOKIE_NAME,
+	"apple",
+);
 
 function buildApp(knobs: Knobs = {}) {
 	const records = new Map<string, unknown>();
@@ -221,7 +225,7 @@ function buildApp(knobs: Knobs = {}) {
 			sessionLifecycle: fakeSessionLifecycle(),
 			sessionLifecycleStore: openingLifecycleStore(),
 			federationTokenStore: makeFederationTokenStore(),
-			federationTransactionCookieName: knobs.cookieName ?? DEFAULT_COOKIE_NAME,
+			sessionCookieName: knobs.sessionCookieName ?? DEFAULT_SESSION_COOKIE_NAME,
 			...(knobs.logger === undefined ? {} : { logger: knobs.logger }),
 		}),
 	);
@@ -278,20 +282,6 @@ describe("a form_post start leg refuses when it cannot hold a transaction", () =
 			logger,
 			"federation_misconfigured",
 			{ provider: "apple", reason: "no_session_store" },
-			false,
-		);
-	});
-
-	it("500s when the callback URL has no path to scope the cookie to", async () => {
-		const logger = spyLogger();
-		const { app } = buildApp({ callbackUrl: "not-a-url", logger });
-		const res = await request(app).get("/oauth/federation/apple");
-		expect(res.status).toBe(500);
-		expect(res.body.error).toBe("misconfiguration");
-		expectOneErrorLine(
-			logger,
-			"federation_misconfigured",
-			{ provider: "apple", reason: "no_callback_path" },
 			false,
 		);
 	});
@@ -459,7 +449,8 @@ describe("a form_post callback refuses when the transaction cannot be resolved o
 		},
 	);
 
-	it("still refuses cleanly when the provider has no callback URL to scope the cleared cookie to", async () => {
+	it("refuses cleanly, and clears the cookie, when the provider has no callback URL", async () => {
+		// The cookie is `Path=/`, so clearing it needs nothing from the callback URL.
 		const { app } = buildApp({ callbackUrl: null });
 		const res = await request(app)
 			.post("/oauth/federation/apple/callback")
@@ -468,16 +459,20 @@ describe("a form_post callback refuses when the transaction cannot be resolved o
 			.send({ state: "s", code: "c" });
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("invalid_session");
+		const cleared = ((res.headers["set-cookie"] as unknown as string[]) ?? []).find((c) =>
+			c.startsWith(`${DEFAULT_COOKIE_NAME}=;`),
+		);
+		expect(cleared).toMatch(/Path=\/(;|$)/);
 	});
 });
 
-describe("the transaction cookie is named what the router is given", () => {
-	it("issues it under federationTransactionCookieName, the session module's name for it", async () => {
-		const { app } = buildApp({ cookieName: "__Secure-acme.sid.federation" });
+describe("the transaction cookie is named from the session cookie name the router is given", () => {
+	it("issues it as __Host-<session name>.federation.<federation>, whatever prefix the session name carries", async () => {
+		const { app } = buildApp({ sessionCookieName: "__Secure-acme.sid" });
 		const res = await request(app).get("/oauth/federation/apple");
 		const header = ((res.headers["set-cookie"] as unknown as string[]) ?? []).find((c) =>
-			c.includes(".federation="),
+			c.includes(".federation."),
 		);
-		expect(header?.split("=")[0]).toBe("__Secure-acme.sid.federation");
+		expect(header?.split("=")[0]).toBe("__Host-acme.sid.federation.apple");
 	});
 });

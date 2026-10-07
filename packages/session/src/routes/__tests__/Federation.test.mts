@@ -38,15 +38,14 @@ import { describe, expect, it, vi } from "vitest";
 import { fakeSessionLifecycle } from "#/__tests__/_helpers/sessionLifecycle.mjs";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createFederationRedirectPolicy } from "#/federations/redirect-policy.mjs";
-import { deriveFederationTransactionCookieName } from "#/federations/transaction.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
 import { openingLifecycleStore } from "../../__tests__/_helpers/sessionLifecycle.mjs";
 
 /** The settings of a composition whose `core.federations` declares none. */
 const NO_FEDERATIONS = createTestFederationSettings();
 
-/** The `form_post` transaction cookie these routers issue, named after the package's default session cookie. */
-const TRANSACTION_COOKIE_NAME = deriveFederationTransactionCookieName("auth.session");
+/** The session cookie name these routers are handed; each `form_post` transaction cookie is named from it. */
+const SESSION_COOKIE_NAME = "auth.session";
 
 // ---------------------------------------------------------------------------
 // Session shim helpers
@@ -280,7 +279,7 @@ function buildStatelessApp({
 	app.use(
 		createRouter(express, {
 			federationSettings: NO_FEDERATIONS,
-			federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
+			sessionCookieName: SESSION_COOKIE_NAME,
 			requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 			federationProviders: providers,
 			federationRedirectPolicyResolver: federationRedirectPolicyResolver ?? defaultResolver,
@@ -362,7 +361,7 @@ function buildCallbackApp({
 		createRouter(express, {
 			federationSettings: federationSettings ?? NO_FEDERATIONS,
 			...(linkTrustedOrigins ? { linkTrustedOrigins } : {}),
-			federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
+			sessionCookieName: SESSION_COOKIE_NAME,
 			requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 			federationProviders: providers,
 			federationRedirectPolicyResolver: federationRedirectPolicyResolver ?? defaultResolver,
@@ -1825,7 +1824,7 @@ describe("Federation routes", () => {
 			expect(() =>
 				createRouter(express, {
 					federationSettings: NO_FEDERATIONS,
-					federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
+					sessionCookieName: SESSION_COOKIE_NAME,
 					requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
@@ -1841,7 +1840,7 @@ describe("Federation routes", () => {
 			expect(() =>
 				createRouter(express, {
 					federationSettings: NO_FEDERATIONS,
-					federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
+					sessionCookieName: SESSION_COOKIE_NAME,
 					requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
@@ -1859,7 +1858,7 @@ describe("Federation routes", () => {
 			expect(() =>
 				createRouter(express, {
 					federationSettings: NO_FEDERATIONS,
-					federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
+					sessionCookieName: SESSION_COOKIE_NAME,
 					requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
@@ -1877,7 +1876,7 @@ describe("Federation routes", () => {
 			expect(() =>
 				createRouter(express, {
 					federationSettings: NO_FEDERATIONS,
-					federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
+					sessionCookieName: SESSION_COOKIE_NAME,
 					requirements: undefined as never,
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
@@ -1896,7 +1895,7 @@ describe("Federation routes", () => {
 			expect(() =>
 				createRouter(express, {
 					federationSettings: NO_FEDERATIONS,
-					federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
+					sessionCookieName: SESSION_COOKIE_NAME,
 					requirements: forged as never,
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
@@ -1916,7 +1915,7 @@ describe("Federation routes", () => {
 			expect(() =>
 				createRouter(express, {
 					federationSettings: NO_FEDERATIONS,
-					federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
+					sessionCookieName: SESSION_COOKIE_NAME,
 					requirements: resolverForTests([], {
 						actions: { "session.link": { grade: "credential_change" } },
 					}),
@@ -1936,7 +1935,7 @@ describe("Federation routes", () => {
 			expect(() =>
 				createRouter(express, {
 					federationSettings: NO_FEDERATIONS,
-					federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
+					sessionCookieName: SESSION_COOKIE_NAME,
 					requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
@@ -1952,15 +1951,12 @@ describe("Federation routes", () => {
 
 		it.each([
 			["federationSettings", "federation routes require federationSettings"],
-			[
-				"federationTransactionCookieName",
-				"federation routes require federationTransactionCookieName",
-			],
+			["sessionCookieName", "federation routes require sessionCookieName"],
 		])("throws if %s is missing", (missing, message) => {
 			expect(() =>
 				createRouter(express, {
 					federationSettings: NO_FEDERATIONS,
-					federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
+					sessionCookieName: SESSION_COOKIE_NAME,
 					requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
@@ -3746,7 +3742,7 @@ describe("the federation login callback answers a store that cannot answer as an
 		app.use(
 			createRouter(express, {
 				federationSettings: NO_FEDERATIONS,
-				federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
+				sessionCookieName: SESSION_COOKIE_NAME,
 				requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 				federationProviders: new Map([["test", makeFakeProvider()]]),
 				federationRedirectPolicyResolver: new Map([["test", makePermissivePolicy()]]),
@@ -3779,7 +3775,7 @@ describe("a federation route's composition fault is a 500, logged once at error"
 		app.use(
 			createRouter(express, {
 				federationSettings: NO_FEDERATIONS,
-				federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
+				sessionCookieName: SESSION_COOKIE_NAME,
 				requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 				federationProviders: new Map([["test", makeFakeProvider()]]),
 				federationRedirectPolicyResolver:
@@ -3930,7 +3926,7 @@ describe("a redirect policy that answers a 5xx is logged once at error; its 4xx 
 		app.use(
 			createRouter(express, {
 				federationSettings: NO_FEDERATIONS,
-				federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
+				sessionCookieName: SESSION_COOKIE_NAME,
 				requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 				federationProviders: new Map([["test", makeFakeProvider()]]),
 				federationRedirectPolicyResolver: new Map([

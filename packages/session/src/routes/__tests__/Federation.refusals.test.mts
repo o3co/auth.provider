@@ -54,7 +54,8 @@ import {
 	makeUserSessionStore,
 } from "./federation-harness.mjs";
 
-const COOKIE_NAME = deriveFederationTransactionCookieName("harness.session");
+const SESSION_COOKIE_NAME = "harness.session";
+const COOKIE_NAME = deriveFederationTransactionCookieName(SESSION_COOKIE_NAME, "apple");
 
 function makeFormPostProvider(
 	exchangeCode: FederationProvider["exchangeCode"],
@@ -171,7 +172,7 @@ function buildApp({
 		createRouter(express, {
 			requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 			federationSettings: createTestFederationSettings(),
-			federationTransactionCookieName: COOKIE_NAME,
+			sessionCookieName: SESSION_COOKIE_NAME,
 			federationProviders: new Map<string, FederationProvider>([
 				["apple", makeFormPostProvider(exchangeCode)],
 				["query-idp", makeQueryProvider()],

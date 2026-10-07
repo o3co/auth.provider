@@ -41,6 +41,7 @@ import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { FEDERATION_TRANSACTION_KEY_PREFIX } from "#/federations/transaction.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
 import {
+	HARNESS_SESSION_COOKIE_NAME,
 	HARNESS_TRANSACTION_COOKIE_NAME,
 	makeFederationTokenStore,
 	makePermissivePolicy,
@@ -185,7 +186,7 @@ function buildApp() {
 			sessionLifecycle: fakeSessionLifecycle(),
 			sessionLifecycleStore: openingLifecycleStore(),
 			federationTokenStore: makeFederationTokenStore(),
-			federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,
+			sessionCookieName: HARNESS_SESSION_COOKIE_NAME,
 		}),
 	);
 

@@ -98,7 +98,6 @@ const fake = vi.hoisted(() => {
 
 vi.mock("redis", () => ({ createClient: () => fake.client }));
 
-import { deriveFederationTransactionCookieName } from "#/federations/transaction.mjs";
 import { sessionStoreModule } from "#/modules/sessionStoreModule.mjs";
 import {
 	makeFederationTokenStore,
@@ -308,9 +307,7 @@ async function boot(
 					handler: createFederationRouter(express, {
 						requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 						federationSettings: createTestFederationSettings(),
-						federationTransactionCookieName: deriveFederationTransactionCookieName(
-							deps.sessionCookiePolicy.name,
-						),
+						sessionCookieName: deps.sessionCookiePolicy.name,
 						federationProviders: new Map([
 							[
 								"test",
