@@ -19,8 +19,13 @@
  * forwarded-cert header, in two dialects: `"envoy"` (Envoy XFCC) and
  * `"plain-pem"` (a PEM value, possibly URL-encoded). Internal, not
  * re-exported from index.mts: `createMtlsMechanism` picks one by
- * `certHeaderDialect`.
+ * `certHeaderDialect`. Each yields one leaf certificate or throws: a header
+ * that could be read as naming two (a repeated XFCC key, a second PEM block,
+ * an XFCC `Hash=` that is absent or of another certificate) is refused.
  */
+
+import { createHash } from "node:crypto";
+import { pemToDer } from "./pem.mjs";
 
 /**
  * The supported certificate header dialects. A closed union: a new dialect
@@ -67,35 +72,138 @@ const safeDecodeURIComponent = (value: string, field: string): string => {
 	}
 };
 
+/** Every PEM BEGIN marker, whatever its label. */
+const PEM_BEGIN_MARKER = /-----BEGIN ([A-Z0-9 ]+)-----/g;
+
 /**
- * Strip enclosing double-quotes from an XFCC field value: Envoy 1.18+ quotes
- * values containing structural characters (`Cert="…"`). Escapes are undone
- * per the RFC 7230 quoted-string grammar (`\"`, `\\`). Unquoted values pass
- * through; a quote at only one end is a parse error, not passed through.
+ * The labels of the PEM blocks in a decoded value, in order. `pemToDer` reads
+ * the first block of any label, so a value is one certificate only when this
+ * is exactly `["CERTIFICATE"]`.
  */
-const unquoteXfccField = (raw: string, fieldName: string): string => {
-	if (raw.length === 0) return raw;
-	const leading = raw.startsWith('"');
-	const trailing = raw.endsWith('"');
-	if (!leading && !trailing) return raw;
-	if (leading !== trailing || raw.length < 2) {
-		throw new Error(`XFCC field "${fieldName}" has mismatched quoting`);
+const pemBlockLabels = (pem: string): readonly string[] =>
+	Array.from(pem.matchAll(PEM_BEGIN_MARKER), (match) => match[1] ?? "");
+
+/**
+ * The XFCC keys Envoy writes once per element. A second occurrence makes the
+ * element ambiguous, and the header is refused. Envoy repeats `By`, `URI`
+ * and `DNS`, one field per Subject Alternative Name (`By` for the proxy's own
+ * certificate, `URI` and `DNS` for the client's); this package does not read
+ * them, so their repetition is accepted. Every other key is ignored.
+ */
+const XFCC_SINGLE_KEYS = ["Hash", "Cert", "Chain", "Subject"] as const;
+type XfccSingleKey = (typeof XFCC_SINGLE_KEYS)[number];
+
+/**
+ * XFCC keys are case-insensitive: each known key's lowercase form mapped to
+ * its canonical spelling, so `cErT` and `Cert` are one key.
+ */
+const XFCC_KEYS_BY_LOWERCASE: ReadonlyMap<string, string> = new Map(
+	[...XFCC_SINGLE_KEYS, "By", "URI", "DNS"].map((key) => [key.toLowerCase(), key]),
+);
+
+/** The canonical spelling of a known XFCC key in any case, or `undefined`. */
+const canonicalXfccKey = (key: string): string | undefined =>
+	XFCC_KEYS_BY_LOWERCASE.get(key.toLowerCase());
+
+const isXfccSingleKey = (key: string | undefined): key is XfccSingleKey =>
+	(XFCC_SINGLE_KEYS as readonly (string | undefined)[]).includes(key);
+
+/**
+ * Read the fields of the first XFCC element, quoting undone.
+ *
+ * XFCC grammar (Envoy):
+ *   XFCC    = element *("," element)
+ *   element = field *(";" field)
+ *   field   = key "=" value
+ *   value   = token / quoted-string
+ *
+ * `,` ends the element and `;` ends a field only outside a double-quoted
+ * string. Inside one, `\` takes the next character literally (RFC 7230
+ * quoted-string), so a quoted Subject, URI or DNS value may hold `,`, `;`
+ * and `=`. A quote that is not the whole value (opened mid-value, never
+ * closed, or followed by more text) is refused. A field with no `=` is
+ * skipped. Returns the fields in order, repeated keys included.
+ */
+const readFirstXfccElement = (value: string): ReadonlyArray<readonly [string, string]> => {
+	const fields: Array<readonly [string, string]> = [];
+	let key = "";
+	let fieldValue = "";
+	// "key" until the first "=", then the value: "start" (only whitespace so
+	// far), "bare" (a token), "quoted" (inside a quoted-string) or "closed"
+	// (after its closing quote).
+	let state: "key" | "start" | "bare" | "quoted" | "closed" = "key";
+
+	const endField = (): void => {
+		// A token's trailing whitespace is not part of it; a quoted value's is.
+		if (state !== "key")
+			fields.push([key.trim(), state === "bare" ? fieldValue.trimEnd() : fieldValue]);
+		key = "";
+		fieldValue = "";
+		state = "key";
+	};
+
+	for (let i = 0; i < value.length; i++) {
+		const ch = value.charAt(i);
+		if (state === "quoted") {
+			if (ch === "\\") {
+				i++;
+				if (i >= value.length) break;
+				fieldValue += value.charAt(i);
+			} else if (ch === '"') {
+				state = "closed";
+			} else {
+				fieldValue += ch;
+			}
+			continue;
+		}
+		if (ch === "," || ch === ";") {
+			endField();
+			if (ch === ",") return fields;
+			continue;
+		}
+		switch (state) {
+			case "key":
+				if (ch === '"') throw new Error("XFCC field name has mismatched quoting");
+				if (ch === "=") state = "start";
+				else key += ch;
+				break;
+			case "start":
+				if (ch === '"') state = "quoted";
+				else if (ch.trim().length > 0) {
+					fieldValue += ch;
+					state = "bare";
+				}
+				break;
+			case "bare":
+				if (ch === '"') {
+					throw new Error(`XFCC field "${key.trim()}" has mismatched quoting`);
+				}
+				fieldValue += ch;
+				break;
+			case "closed":
+				if (ch.trim().length > 0) {
+					throw new Error(`XFCC field "${key.trim()}" has mismatched quoting`);
+				}
+				break;
+		}
 	}
-	// Strip enclosing quotes + un-escape \" and \\ per quoted-string grammar.
-	return raw.slice(1, -1).replace(/\\(["\\])/g, "$1");
+	if (state === "quoted") {
+		throw new Error(`XFCC field "${key.trim()}" has mismatched quoting`);
+	}
+	endField();
+	return fields;
 };
 
 /**
  * Parse an Envoy XFCC (x-forwarded-client-cert) header value.
  *
- * XFCC grammar (simplified from Envoy docs):
- *   XFCC = element *("," element)
- *   element = field *(";" field)
- *   field = token "=" value
- *
- * Only the first element (the client-facing hop) is read. `Cert=` is
- * required, `Chain=` optional (both URL-encoded PEM); other fields are
- * ignored. Throws a plain `Error` on malformed input.
+ * Only the first element (the client-facing hop) is read, by the grammar in
+ * {@link readFirstXfccElement}. `Cert=` (one URL-encoded PEM block
+ * labelled CERTIFICATE) and `Hash=` are required, `Chain=` (URL-encoded PEM)
+ * optional. `Hash=` must be the hex SHA-256 of the `Cert=` DER, compared
+ * case-insensitively. Keys match in any case.
+ * `Hash`, `Cert`, `Chain` and `Subject` may appear once; `By`, `URI` and
+ * `DNS` may repeat; any other key is ignored. Throws a plain `Error` on malformed input.
  */
 export const parseEnvoyXfccHeader = (value: string): ParsedCertHeader => {
 	// Size cap before any string work.
@@ -106,28 +214,22 @@ export const parseEnvoyXfccHeader = (value: string): ParsedCertHeader => {
 		);
 	}
 
-	// Use only the first XFCC element — Envoy prepends the client-facing hop at
-	// the front of the comma-separated list when chaining proxies.
-	const firstElement = value.split(",")[0]?.trim();
-	if (!firstElement) {
+	// Envoy prepends the client-facing hop at the front of the comma-separated
+	// list when chaining proxies.
+	const elementFields = readFirstXfccElement(value);
+	if (elementFields.length === 0) {
 		throw new Error("XFCC header is empty");
 	}
 
-	// Parse semicolon-delimited key=value fields.
-	// NOTE: PEM values themselves can contain "=", "+" etc., so we split on the
-	// FIRST "=" only within each semicolon-delimited field.
-	const fields = new Map<string, string>();
-	for (const field of firstElement.split(";")) {
-		const eqIdx = field.indexOf("=");
-		if (eqIdx === -1) {
-			// Field with no value (e.g. a standalone token) — skip silently.
-			continue;
+	const fields = new Map<XfccSingleKey, string>();
+	for (const [rawKey, fieldValue] of elementFields) {
+		const key = canonicalXfccKey(rawKey);
+		// `By`, `URI`, `DNS` and unknown keys are not read.
+		if (!isXfccSingleKey(key)) continue;
+		if (fields.has(key)) {
+			throw new Error(`XFCC field "${key}" appears more than once in the element`);
 		}
-		const key = field.slice(0, eqIdx).trim();
-		const rawValue = field.slice(eqIdx + 1).trim();
-		if (key.length > 0) {
-			fields.set(key, rawValue);
-		}
+		fields.set(key, fieldValue);
 	}
 
 	const rawCert = fields.get("Cert");
@@ -135,20 +237,25 @@ export const parseEnvoyXfccHeader = (value: string): ParsedCertHeader => {
 		throw new Error('XFCC header is missing required "Cert=" field');
 	}
 
-	// Cert= and Chain= are URL-encoded, and may be quoted (unquoteXfccField).
-	const certPem = safeDecodeURIComponent(unquoteXfccField(rawCert, "Cert"), "Cert");
+	const certPem = safeDecodeURIComponent(rawCert, "Cert");
 	const certByteLen = Buffer.byteLength(certPem, "utf8");
 	if (certByteLen > MAX_DECODED_PAYLOAD_BYTES) {
 		throw new Error(
 			`XFCC Cert= decoded payload exceeds size cap (${certByteLen} > ${MAX_DECODED_PAYLOAD_BYTES} bytes)`,
 		);
 	}
+	// One leaf, labelled CERTIFICATE: a second block of any label is refused
+	// rather than letting `pemToDer` pick the first.
+	const certLabels = pemBlockLabels(certPem);
+	if (certLabels.length > 1) {
+		throw new Error("XFCC Cert= contains multiple PEM blocks; the chain belongs in Chain=");
+	}
+	if (certLabels[0] !== "CERTIFICATE") {
+		throw new Error("XFCC Cert= does not contain a PEM certificate block");
+	}
 
 	const rawChain = fields.get("Chain");
-	const chainPem =
-		rawChain !== undefined
-			? safeDecodeURIComponent(unquoteXfccField(rawChain, "Chain"), "Chain")
-			: undefined;
+	const chainPem = rawChain !== undefined ? safeDecodeURIComponent(rawChain, "Chain") : undefined;
 	if (chainPem !== undefined) {
 		const chainByteLen = Buffer.byteLength(chainPem, "utf8");
 		if (chainByteLen > MAX_DECODED_PAYLOAD_BYTES) {
@@ -156,6 +263,26 @@ export const parseEnvoyXfccHeader = (value: string): ParsedCertHeader => {
 				`XFCC Chain= decoded payload exceeds size cap (${chainByteLen} > ${MAX_DECODED_PAYLOAD_BYTES} bytes)`,
 			);
 		}
+	}
+
+	// Envoy writes Hash= whenever it writes a client certificate. Requiring
+	// it ties the element read here to the certificate the proxy saw, also
+	// when an unquoted value before Cert= ended the element early.
+	const hash = fields.get("Hash");
+	if (hash === undefined) {
+		throw new Error('XFCC header is missing required "Hash=" field');
+	}
+	let der: Uint8Array;
+	try {
+		der = pemToDer(certPem);
+	} catch (err) {
+		throw new Error("XFCC Hash= cannot be checked: Cert= is not a decodable PEM block", {
+			cause: err,
+		});
+	}
+	const expected = createHash("sha256").update(der).digest("hex");
+	if (hash.toLowerCase() !== expected) {
+		throw new Error("XFCC Hash= is not the SHA-256 of the Cert= certificate");
 	}
 
 	return { certPem, ...(chainPem !== undefined ? { chainPem } : {}) };
@@ -188,16 +315,16 @@ export const parsePlainPemHeader = (value: string): ParsedCertHeader => {
 		);
 	}
 
-	// Two or more BEGIN markers mean a chain where only a leaf is expected:
-	// rejected rather than silently using the first cert (downgrade prevention).
-	const beginCount = (decoded.match(/-----BEGIN CERTIFICATE-----/g) ?? []).length;
-	if (beginCount === 0) {
-		throw new Error("plain-pem header does not contain a PEM certificate block");
-	}
-	if (beginCount > 1) {
+	// Two or more BEGIN markers, of any label, mean more than the one leaf
+	// expected: rejected rather than letting `pemToDer` read the first block.
+	const labels = pemBlockLabels(decoded);
+	if (labels.length > 1) {
 		throw new Error(
 			"plain-pem header contains multiple PEM blocks; use the envoy dialect for chain transport",
 		);
+	}
+	if (labels[0] !== "CERTIFICATE") {
+		throw new Error("plain-pem header does not contain a PEM certificate block");
 	}
 
 	return { certPem: decoded };

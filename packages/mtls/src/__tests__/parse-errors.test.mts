@@ -23,6 +23,7 @@
  * refusal goes.
  */
 
+import { createHash, X509Certificate } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,6 +37,7 @@ import { mintCa, mintIntermediate, mintLeaf } from "./fullPki/pkiFactory.mjs";
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const LEAF_PEM = readFileSync(join(fixturesDir, "leaf.pem"), "utf8");
 const ROOT_PEM = readFileSync(join(fixturesDir, "root.pem"), "utf8");
+const LEAF_HASH_HEX = createHash("sha256").update(new X509Certificate(LEAF_PEM).raw).digest("hex");
 
 const TRUSTED_PEER = "10.0.0.7";
 
@@ -143,7 +145,7 @@ describe("a parser's refusal: fixed text, the parser's error on the cause", () =
 			mode: "pki",
 			trustedCas: [ROOT_PEM],
 		});
-		const xfcc = `Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(NOT_A_CERTIFICATE)}`;
+		const xfcc = `Hash=${LEAF_HASH_HEX};Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(NOT_A_CERTIFICATE)}`;
 		const err = await failureOf(() => mech.extract(headerReq(xfcc)));
 		expect(err).toMatchObject({ reason: "cert_decode_failed" });
 		expectCarried(err, "Chain= entry DER parse failed");

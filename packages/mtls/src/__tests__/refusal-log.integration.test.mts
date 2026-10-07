@@ -145,6 +145,32 @@ describe("a refused certificate header at the token endpoint", () => {
 		await handle.dispose();
 	});
 
+	it("an XFCC element with Cert= twice: the same refusal and line as any other parse failure", async () => {
+		const { app, handle, calls } = await boot("envoy");
+		const cert = encodeURIComponent(LEAF_PEM);
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("x-forwarded-client-cert", `Cert=${cert};Cert=${cert}`)
+			.send({});
+
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_certificate");
+		expect(verdictLine(calls)).toEqual({
+			mechanism: "mtls",
+			code: "invalid_certificate",
+			reason: "malformed_header",
+			err: {
+				name: "MtlsError",
+				detail: "envoy header parse failure",
+				code: "invalid_certificate",
+				reason: "malformed_header",
+				stack: FRAMES,
+				cause: { name: "Error", detail: expect.stringContaining("more than once"), stack: FRAMES },
+			},
+		});
+		await handle.dispose();
+	});
+
 	it("a PEM block whose DER is not a certificate: reason cert_decode_failed, OpenSSL's error inside the projection", async () => {
 		const { app, handle, calls } = await boot("plain-pem");
 		const notACertificate = `-----BEGIN CERTIFICATE-----\n${Buffer.from("not a certificate").toString("base64")}\n-----END CERTIFICATE-----\n`;

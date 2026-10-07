@@ -947,6 +947,18 @@ The boot refusals you can meet, with their messages, are in
   deployment stops presenting both: [operator runbook §4](operator-runbook.md#4-alerts),
   `token_binding_ambiguous`. A `rateLimitBudgets` prefix named after an
   `Object.prototype` member refuses the boot (`contribution-malformed`).
+- **mTLS forwarded certificate header, `envoy` dialect.** With
+  `mtls.source = "header"` and `certHeaderDialect = "envoy"`, the XFCC header
+  is read by its quoted-string grammar, with keys matched in any case. It
+  must carry `Hash=`, the hex SHA-256 of the `Cert=` DER, and a `Cert=` that
+  is one PEM block labelled `CERTIFICATE`; `Hash`, `Cert`, `Chain` and
+  `Subject` may each appear once in the first element. Anything else is
+  refused `400 invalid_certificate` (audit reason `malformed_header`). Envoy
+  writes `Hash=` whenever it forwards a client certificate; if your proxy
+  omits it (an XFCC emulation, or a configuration that drops it), make it
+  write `Hash=` before you upgrade, or every bound token request through it
+  is refused. The `plain-pem` dialect likewise refuses a value with more than
+  one PEM block of any label ([mtls README](../packages/mtls/README.md#sample-reverse-proxy-snippets)).
 
 ### Passkeys, users and sessions
 

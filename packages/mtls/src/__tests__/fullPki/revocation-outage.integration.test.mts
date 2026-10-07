@@ -30,6 +30,7 @@
  * outage alone refuses nothing there.
  */
 
+import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { type AddressInfo, connect } from "node:net";
 import { type Logger, protectedResourceBindingMw, tokenBindingMw } from "@o3co/auth-provider-core";
@@ -223,7 +224,7 @@ const mechanism = (
 	});
 
 const xfcc = (leaf: Minted, int: Minted): string =>
-	`Cert=${encodeURIComponent(leaf.pem)};Chain=${encodeURIComponent(int.pem)}`;
+	`Hash=${createHash("sha256").update(leaf.der).digest("hex")};Cert=${encodeURIComponent(leaf.pem)};Chain=${encodeURIComponent(int.pem)}`;
 
 /** `/oauth/token` behind core's token-binding dispatcher, and `/resource` behind the protected-resource one. */
 const appWith = (

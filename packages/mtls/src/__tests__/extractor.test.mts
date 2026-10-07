@@ -41,6 +41,9 @@ const EXPECTED_LEAF_THUMBPRINT = createHash("sha256")
 	.digest("base64url")
 	.replace(/=+$/, "");
 
+/** Lowercase hex SHA-256 of the leaf's DER: what Envoy writes as XFCC `Hash=`. */
+const LEAF_HASH_HEX = createHash("sha256").update(LEAF_DER).digest("hex");
+
 /** The peer address every header-source test connects from unless it says otherwise. */
 const TRUSTED_PEER = "10.0.0.7";
 
@@ -120,7 +123,7 @@ describe("createMtlsMechanism — header source", () => {
 			certHeaderDialect: "envoy",
 			mode: "self-signed",
 		});
-		const xfcc = `By=spiffe://cluster/sa/svc;Hash=abc;Cert=${encodeURIComponent(LEAF_PEM)}`;
+		const xfcc = `By=spiffe://cluster/sa/svc;Hash=${LEAF_HASH_HEX};Cert=${encodeURIComponent(LEAF_PEM)}`;
 		const result = await mech.extract(makeReq({ "x-forwarded-client-cert": xfcc }) as Request);
 		expect(result?.confirmation).toEqual({ "x5t#S256": EXPECTED_LEAF_THUMBPRINT });
 	});
@@ -135,6 +138,51 @@ describe("createMtlsMechanism — header source", () => {
 		await expect(
 			mech.extract(makeReq({ "x-forwarded-client-cert": "By=foo;Hash=bar" }) as Request),
 		).rejects.toMatchObject({ reason: "malformed_header" });
+	});
+
+	describe("envoy XFCC fields", () => {
+		const envoyMech = () =>
+			createMtlsMechanism({
+				source: "header",
+				trustedProxies: [TRUSTED_PEER],
+				certHeaderDialect: "envoy",
+				mode: "self-signed",
+			});
+		const LEAF = encodeURIComponent(LEAF_PEM);
+		const OTHER = encodeURIComponent(ROOT_PEM);
+
+		it("binds the Cert= certificate when a quoted Subject holds ;Cert= and a comma", async () => {
+			const xfcc = `By=spiffe://cluster/sa/proxy;Hash=${LEAF_HASH_HEX};Cert="${LEAF}";Subject="CN=client;Cert=${OTHER};O=Example, Inc.";URI=spiffe://cluster/sa/client;DNS=client.example.com;DNS=www.client.example.com`;
+			const result = await envoyMech().extract(
+				makeReq({ "x-forwarded-client-cert": xfcc }) as Request,
+			);
+			expect(result?.confirmation).toEqual({ "x5t#S256": EXPECTED_LEAF_THUMBPRINT });
+		});
+
+		it.each([
+			["an element without Hash=", `Cert=${LEAF}`],
+			["Cert= twice", `Cert=${LEAF};Cert=${OTHER}`],
+			["Cert= twice in different case", `Cert=${LEAF};cErT=${OTHER}`],
+			["a lowercase hash= of no certificate", `hash=${"0".repeat(64)};Cert=${LEAF}`],
+			["Cert= twice through an unquoted Subject", `Cert=${LEAF};Subject=CN=a\\;Cert=${OTHER}`],
+			[
+				"a Hash= of another certificate",
+				`Hash=${createHash("sha256").update(new X509Certificate(ROOT_PEM).raw).digest("hex")};Cert=${LEAF}`,
+			],
+		])("refuses %s as malformed_header", async (_name, xfcc) => {
+			const failure = await envoyMech()
+				.extract(makeReq({ "x-forwarded-client-cert": xfcc }) as Request)
+				.then(
+					() => undefined,
+					(err: unknown) => err,
+				);
+			expect(failure).toBeInstanceOf(MtlsError);
+			expect(failure).toMatchObject({
+				reason: "malformed_header",
+				message: "envoy header parse failure",
+				detail: { dialect: "envoy" },
+			});
+		});
 	});
 
 	it("throws MtlsError(cert_decode_failed) when the PEM body is unparseable", async () => {
@@ -172,7 +220,7 @@ describe("createMtlsMechanism — header source", () => {
 			trustedProxies: [TRUSTED_PEER],
 			mode: "self-signed",
 		});
-		const xfcc = `Cert=${encodeURIComponent(LEAF_PEM)}`;
+		const xfcc = `Hash=${LEAF_HASH_HEX};Cert=${encodeURIComponent(LEAF_PEM)}`;
 		const result = await mech.extract(makeReq({ "x-forwarded-client-cert": xfcc }) as Request);
 		expect(result?.confirmation).toEqual({ "x5t#S256": EXPECTED_LEAF_THUMBPRINT });
 	});
@@ -248,7 +296,7 @@ describe("createMtlsMechanism — validity window (mode-agnostic)", () => {
 			mode: "pki",
 			trustedCas: [ROOT_PEM],
 		});
-		const xfcc = `Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
+		const xfcc = `Hash=${LEAF_HASH_HEX};Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
 		await expect(
 			mech.extract(makeReq({ "x-forwarded-client-cert": xfcc }) as Request),
 		).rejects.toMatchObject({ reason: "cert_expired" });
@@ -267,7 +315,7 @@ describe("createMtlsMechanism — PKI mode (chain validation before thumbprint)"
 			mode: "pki",
 			trustedCas: [LEAF_PEM], // intentionally wrong
 		});
-		const xfcc = `Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
+		const xfcc = `Hash=${LEAF_HASH_HEX};Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
 		await expect(
 			mech.extract(makeReq({ "x-forwarded-client-cert": xfcc }) as Request),
 		).rejects.toMatchObject({ reason: "chain_validation_failed" });
@@ -281,7 +329,7 @@ describe("createMtlsMechanism — PKI mode (chain validation before thumbprint)"
 			mode: "pki",
 			trustedCas: [ROOT_PEM],
 		});
-		const xfcc = `Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
+		const xfcc = `Hash=${LEAF_HASH_HEX};Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
 		const result = await mech.extract(makeReq({ "x-forwarded-client-cert": xfcc }) as Request);
 		expect(result?.kind).toBe("mtls");
 		expect(result?.confirmation).toEqual({ "x5t#S256": EXPECTED_LEAF_THUMBPRINT });
@@ -574,7 +622,7 @@ describe("createMtlsMechanism — boot-time validation", () => {
 		});
 		// If the file was loaded successfully, PKI mode now has a usable trust
 		// anchor and the well-formed chain should validate end-to-end.
-		const xfcc = `Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
+		const xfcc = `Hash=${LEAF_HASH_HEX};Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
 		const result = await mech.extract(makeReq({ "x-forwarded-client-cert": xfcc }) as Request);
 		expect(result?.kind).toBe("mtls");
 		expect(result?.confirmation).toEqual({ "x5t#S256": EXPECTED_LEAF_THUMBPRINT });
