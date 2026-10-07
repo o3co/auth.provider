@@ -29,6 +29,7 @@
 
 import type { GrantDependencies, GrantHandlerResult, ProviderDeps } from "@o3co/auth-provider-core";
 import {
+	auditErrorText,
 	consoleLogger,
 	isEmailVerified,
 	loggableError,
@@ -71,7 +72,12 @@ export function emailGate(deps: EmailGateDependencies, requireEmailVerified: boo
 			verified = isEmailVerified(await lookup.findBySubject(subject));
 		} catch (err) {
 			(deps.logger ?? consoleLogger).error(
-				{ store: "user_repository", step: "read", clientId, err: loggableError(err) },
+				{
+					store: "user_repository",
+					step: "read",
+					clientId: auditErrorText(clientId),
+					err: loggableError(err),
+				},
 				"token_exchange_user_repository_unavailable",
 			);
 			return {

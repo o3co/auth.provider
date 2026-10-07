@@ -40,7 +40,7 @@ import {
 import { buildActClaim } from "./act.mjs";
 import { invalidRequest } from "./answers.mjs";
 import type { ReportedBindings } from "./tokenValidation.mjs";
-import { verifiedAuthenticationOf } from "./validator/selfIssuedAccessToken.mjs";
+import { snapshotAuthentication } from "./validatedSnapshot.mjs";
 
 /** What the issued token is minted from. */
 export interface Issuance {
@@ -171,7 +171,7 @@ function carriedAuthentication(
 	issuer: string | undefined,
 	issuedAt: number,
 ): { readonly acr?: string; readonly amr?: readonly string[]; readonly auth_time?: number } {
-	const verified = verifiedAuthenticationOf(subjectValidated);
+	const verified = snapshotAuthentication(subjectValidated);
 	if (verified === undefined || issuer === undefined || verified.issuer !== issuer) return {};
 	const { acr, amr, authTime, issuedAt: subjectIssuedAt } = verified;
 	return {
