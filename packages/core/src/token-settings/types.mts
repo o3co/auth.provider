@@ -42,9 +42,9 @@
  * default refresh-token family revocation module) reads the configuration.
  *
  * Every value is resolved (no deprecated alias or absence left to interpret)
- * and the whole is frozen. Contract suite and test double:
- * `oauthTokenSettingsContract`, `createTestOAuthTokenSettings` on
- * `@o3co/auth-provider-core/testing`.
+ * and the whole is frozen. Contract suite: `oauthTokenSettingsContract` on
+ * `@o3co/auth-provider-test-kit`. Test double: `createTestOAuthTokenSettings`
+ * on `@o3co/auth-provider-core/testing`.
  */
 
 import type { AccessTokenLifetime } from "../config/application.schema.mjs";

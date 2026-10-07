@@ -15,7 +15,7 @@
  */
 
 /**
- * The request and response the slot contract suites drive a component over,
+ * The request and response core's tests drive a slot's component over,
  * without a server: the part of Express a component of these slots is held
  * to. A request carries headers, its own origin, a path, a parsed body and
  * an express session (`regenerate`, `save`, `sessionID`) whose regenerations

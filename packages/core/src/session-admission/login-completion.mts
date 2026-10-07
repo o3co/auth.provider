@@ -25,8 +25,8 @@
  * requires this slot. The session stores, the session's lifetime and the
  * CSRF mechanism stay the provider's: a caller hands only the request, the
  * response where one is answered, and a reporter in its own vocabulary.
- * The contract suite and a recording double are on
- * `@o3co/auth-provider-core/testing`.
+ * The contract suite is on `@o3co/auth-provider-test-kit`, and a recording
+ * double on `@o3co/auth-provider-core/testing`.
  */
 
 import type { Request, Response } from "express";

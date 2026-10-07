@@ -23,7 +23,7 @@
 
 import assert from "node:assert/strict";
 import type { DeploymentMode } from "#/deployment/types.mjs";
-import type { ContractCase } from "#/session-admission/testing/requirement.contract.mjs";
+import type { ContractCase } from "#/testing/slots/shared.mjs";
 
 export interface DeploymentModeContractInput {
 	/** The mode under test: what core fills the slot with, from the configuration its test chose. */

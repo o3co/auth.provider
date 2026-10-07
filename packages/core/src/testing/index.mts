@@ -41,11 +41,6 @@ export {
 	mergeAdmission,
 	mergeSessionStore,
 } from "../session-admission/testing/merge.rows.mjs";
-export {
-	type ContractCase,
-	type RequirementContractInput,
-	sessionRequirementContract,
-} from "../session-admission/testing/requirement.contract.mjs";
 export { resolverForTests } from "../session-admission/testing/resolver.mjs";
 export {
 	auditHooksModule,
@@ -122,66 +117,37 @@ export {
 } from "./renamedVariables.mjs";
 // The check that each module refuses an unknown key at every level of its section.
 export { type SectionStrictnessOptions, sectionStrictnessProblems } from "./sectionStrictness.mjs";
-export {
-	type CsrfGuardContractInput,
-	createTestCsrfGuard,
-	csrfGuardContract,
-	type TestCsrfGuardOptions,
-} from "./slots/csrfGuard.mjs";
-export {
-	type CsrfTokenSignerContractInput,
-	createTestCsrfTokenSigner,
-	csrfTokenSignerContract,
-} from "./slots/csrfTokenSigner.mjs";
-export {
-	createTestFederationGrantPolicy,
-	type FederationGrantPolicyContractInput,
-	federationGrantPolicyContract,
-} from "./slots/federationGrantPolicy.mjs";
+// The slots' test doubles: a consumer's tests fill a slot with one instead
+// of importing the package that owns it. The contract suites of the slots
+// modules fill are `@o3co/auth-provider-test-kit`'s.
+export { createTestCsrfGuard, type TestCsrfGuardOptions } from "./slots/csrfGuard.mjs";
+export { createTestCsrfTokenSigner } from "./slots/csrfTokenSigner.mjs";
+export { createTestFederationGrantPolicy } from "./slots/federationGrantPolicy.mjs";
 export {
 	createTestFederationSettings,
 	type TestFederationEntry,
 } from "./slots/federationSettings.mjs";
 export {
 	createTestHttpSettings,
-	type HttpSettingsContractInput,
-	httpSettingsContract,
 	type TestHttpSettingsOverrides,
 } from "./slots/httpSettings.mjs";
 export {
 	createRecordingLoginCompletion,
-	type LoginCompletionContractInput,
-	loginCompletionContract,
 	type RecordingLoginCompletion,
 	type RecordingLoginCompletionOptions,
 } from "./slots/loginCompletion.mjs";
-export {
-	createTestLoginEntry,
-	type LoginEntryContractInput,
-	loginEntryContract,
-} from "./slots/loginEntry.mjs";
+export { createTestLoginEntry } from "./slots/loginEntry.mjs";
 export {
 	createTestOAuthTokenSettings,
-	type OAuthTokenSettingsContractInput,
-	oauthTokenSettingsContract,
 	type TestOAuthTokenSettingsOverrides,
 } from "./slots/oauthTokenSettings.mjs";
 export { createTestOutboundPolicy } from "./slots/outboundPolicy.mjs";
 export {
 	createTestRateLimiter,
-	type RateLimiterContractInput,
-	rateLimiterContract,
 	type TestRateLimiter,
 	type TestRateLimiterOptions,
 } from "./slots/rateLimiter.mjs";
-// The slots through which modules share what one of them owns: each
-// slot's contract suite, and a test double a consumer's tests fill the slot
-// with instead of importing the owner's package.
-export {
-	createTestSessionCookiePolicy,
-	type SessionCookiePolicyContractInput,
-	sessionCookiePolicyContract,
-} from "./slots/sessionCookiePolicy.mjs";
+export { createTestSessionCookiePolicy } from "./slots/sessionCookiePolicy.mjs";
 export { createTestTokenBindingSettings } from "./slots/tokenBindingSettings.mjs";
 export type { TestInspect } from "./test-inspect.mjs";
 // A `UserRepository` double for the consumers of its subject lookup.

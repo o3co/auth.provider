@@ -15,132 +15,14 @@
  */
 
 /**
- * The contract suite of the `sessionCookiePolicy` slot and its test double.
- * `sessionCookiePolicyContract(input)` holds the policy to what the session
- * configuration and store hold the cookie to, what a browser keeps
- * included (`SameSite=None`, `__Secure-` and `__Host-` names).
- * `createTestSessionCookiePolicy` answers the fixture configuration's
- * cookie with any attribute replaced; it checks nothing. Published on
+ * The test double of the `sessionCookiePolicy` slot.
+ * `createTestSessionCookiePolicy` answers the fixture configuration's cookie
+ * with any attribute replaced; it checks nothing. The contract suite is
+ * `@o3co/auth-provider-test-kit`'s. Published on
  * `@o3co/auth-provider-core/testing`.
  */
 
-import assert from "node:assert/strict";
 import type { SessionCookiePolicy } from "../../browser-session/types.mjs";
-import { MAX_DURATION_MS } from "../../config/durations.mjs";
-import type { ContractCase } from "../../session-admission/testing/requirement.contract.mjs";
-import { unfrozenPath } from "./shared.mjs";
-
-export interface SessionCookiePolicyContractInput {
-	/** The policy under test, built afresh for each case: a provider's, over the configuration its test chose. */
-	readonly build: () => SessionCookiePolicy;
-}
-
-/** RFC 6265 §4.1.1: a cookie name is an RFC 2616 token — visible ASCII but separators. */
-const COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
-
-/** A `Domain` a cookie can carry: LDH labels, one leading dot allowed (the `cookie` package's rule). */
-const COOKIE_DOMAIN =
-	/^([.]?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)([.][a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i;
-
-/** RFC 6265bis: browsers match the `__Host-` and `__Secure-` prefixes case-insensitively. */
-const HOST_PREFIX = /^__host-/i;
-const SECURE_PREFIX = /^__secure-/i;
-
-const SAME_SITE: ReadonlySet<unknown> = new Set(["lax", "strict", "none"]);
-
-/** The cases of the `sessionCookiePolicy` contract over the policy `input` builds. */
-export function sessionCookiePolicyContract(
-	input: SessionCookiePolicyContractInput,
-): readonly ContractCase[] {
-	const { build } = input;
-	return [
-		{
-			name: "name is a cookie name: a non-empty RFC 6265 token",
-			run: async () => {
-				const { name } = build();
-				assert.ok(
-					typeof name === "string" && COOKIE_NAME.test(name),
-					`name ${JSON.stringify(name)} is not a cookie name`,
-				);
-			},
-		},
-		{
-			name: "sameSite is lax, strict or none, and secure is true or false",
-			run: async () => {
-				const { sameSite, secure } = build();
-				assert.ok(
-					SAME_SITE.has(sameSite),
-					`sameSite ${String(sameSite)} is not lax, strict or none`,
-				);
-				assert.equal(typeof secure, "boolean", `secure ${String(secure)} is not true or false`);
-			},
-		},
-		{
-			name: "domain is a cookie domain — a host name, one leading dot allowed — or undefined for a host-only cookie",
-			run: async () => {
-				const { domain } = build();
-				assert.ok(
-					domain === undefined || (typeof domain === "string" && COOKIE_DOMAIN.test(domain)),
-					`domain ${JSON.stringify(domain)} is neither a cookie domain nor undefined`,
-				);
-			},
-		},
-		{
-			name: "a cookie sent cross-site (sameSite none) is secure",
-			run: async () => {
-				const { sameSite, secure } = build();
-				if (sameSite !== "none") return;
-				assert.equal(
-					secure,
-					true,
-					"a SameSite=None cookie that is not secure is refused by the browser",
-				);
-			},
-		},
-		{
-			name: "a __Host- name is secure and host-only, and a __Secure- name secure",
-			run: async () => {
-				const { name, secure, domain } = build();
-				if (typeof name !== "string") return;
-				if (SECURE_PREFIX.test(name)) {
-					assert.equal(
-						secure,
-						true,
-						"a __Secure- cookie that is not secure is dropped by the browser",
-					);
-				}
-				if (!HOST_PREFIX.test(name)) return;
-				assert.equal(secure, true, "a __Host- cookie that is not secure is dropped by the browser");
-				assert.equal(
-					domain,
-					undefined,
-					"a __Host- cookie that names a domain is dropped by the browser",
-				);
-			},
-		},
-		{
-			name: "maxAgeMs is a whole number of milliseconds from 1 to the one-year ceiling",
-			run: async () => {
-				const { maxAgeMs } = build();
-				assert.ok(
-					Number.isInteger(maxAgeMs) && maxAgeMs > 0 && maxAgeMs <= MAX_DURATION_MS,
-					`maxAgeMs ${String(maxAgeMs)} is not a lifetime`,
-				);
-			},
-		},
-		{
-			name: "the policy is frozen",
-			run: async () => {
-				const found = unfrozenPath(build(), "the policy");
-				assert.equal(
-					found,
-					undefined,
-					`${found} is not frozen: a module that reads the policy could change it under the others`,
-				);
-			},
-		},
-	];
-}
 
 /**
  * The fixture configuration's session cookie — `__Host-auth.session`,

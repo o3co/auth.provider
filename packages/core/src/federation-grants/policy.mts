@@ -31,7 +31,8 @@
  * grants' switch and keep policy, and "grant" here is a federation grant,
  * never an OAuth grant type.
  *
- * Contract suite and test double: `federationGrantPolicyContract`,
+ * Contract suite: `federationGrantPolicyContract` on
+ * `@o3co/auth-provider-test-kit`. Test double:
  * `createTestFederationGrantPolicy` on `@o3co/auth-provider-core/testing`.
  */
 

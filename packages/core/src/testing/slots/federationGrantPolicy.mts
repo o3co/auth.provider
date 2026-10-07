@@ -15,71 +15,14 @@
  */
 
 /**
- * The contract suite of the `federationGrantPolicy` slot and its test double.
- * `federationGrantPolicyContract(input)` holds the policy to its two
- * switches, resolved to booleans, no allowance to keep grants while grants
- * are off, the whole frozen. `createTestFederationGrantPolicy` answers grants
- * off unless told otherwise; it checks nothing, so a test of a broken value
- * builds it here. Published on `@o3co/auth-provider-core/testing`.
+ * The test double of the `federationGrantPolicy` slot.
+ * `createTestFederationGrantPolicy` answers grants off unless told
+ * otherwise; it checks nothing, so a test of a broken value builds it here.
+ * The contract suite is `@o3co/auth-provider-test-kit`'s. Published on
+ * `@o3co/auth-provider-core/testing`.
  */
 
-import assert from "node:assert/strict";
 import type { FederationGrantPolicy } from "../../federation-grants/policy.mjs";
-import type { ContractCase } from "../../session-admission/testing/requirement.contract.mjs";
-import { unfrozenPath } from "./shared.mjs";
-
-export interface FederationGrantPolicyContractInput {
-	/** The policy under test, built afresh for each case: a provider's, over the configuration its test chose. */
-	readonly build: () => FederationGrantPolicy;
-}
-
-/** A switch's case: it is resolved to true or false. */
-const resolvedSwitch = (
-	build: () => FederationGrantPolicy,
-	name: keyof FederationGrantPolicy,
-): ContractCase => ({
-	name: `${name} is true or false`,
-	run: async () => {
-		const value: unknown = build()[name];
-		assert.equal(
-			typeof value,
-			"boolean",
-			`${name} must be resolved to true or false, never left absent or as the string an environment variable carries (got ${String(value)})`,
-		);
-	},
-});
-
-/** The cases of the `federationGrantPolicy` contract over the policy `input` builds. */
-export function federationGrantPolicyContract(
-	input: FederationGrantPolicyContractInput,
-): readonly ContractCase[] {
-	const { build } = input;
-	return [
-		resolvedSwitch(build, "enabled"),
-		resolvedSwitch(build, "allowKeepOnSubjectRevocation"),
-		{
-			name: "allowKeepOnSubjectRevocation is false while grants are off",
-			run: async () => {
-				const { enabled, allowKeepOnSubjectRevocation } = build();
-				assert.ok(
-					enabled !== false || allowKeepOnSubjectRevocation !== true,
-					"allowKeepOnSubjectRevocation is true while enabled is false: an allowance to keep grants a deployment does not have is an allowance over nothing, and a reader reads the member alone",
-				);
-			},
-		},
-		{
-			name: "the policy is frozen",
-			run: async () => {
-				const found = unfrozenPath(build(), "the policy");
-				assert.equal(
-					found,
-					undefined,
-					`${found} is not frozen: a module that reads the policy could change it under the others`,
-				);
-			},
-		},
-	];
-}
 
 /** Grants off and nothing kept — unless `overrides` say otherwise — frozen. */
 export function createTestFederationGrantPolicy(

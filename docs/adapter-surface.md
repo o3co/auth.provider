@@ -158,11 +158,11 @@ under [What one module owns and others read](#what-one-module-owns-and-others-re
 A key several modules read has one owner (#728): the owning module parses its
 own section and provides what the others need through a slot whose contract is
 core's, and they require the slot instead of reading the owner's section — in
-code a package imports only core. Each contract a module provides ships a
-suite on `@o3co/auth-provider-core/testing`, which the owner's tests run over
-what it provides, and every contract but `deploymentMode` a test double there,
-which a reader's tests fill the slot with instead of importing the owner's
-package. The session
+code a package imports only core. Each contract a module provides has a
+suite on `@o3co/auth-provider-test-kit`, which the owner's tests run over
+what it provides, and every contract but `deploymentMode` a test double on
+`@o3co/auth-provider-core/testing`, which a reader's tests fill the slot with
+instead of importing the owner's package. The session
 package's modules provide theirs: the session module `loginEntry` and
 `csrfGuard`, the login-completion module `loginCompletion`, the session store's
 module `sessionCookiePolicy` and `csrfTokenSigner`. The oauth module provides
@@ -171,7 +171,7 @@ module `sessionCookiePolicy` and `csrfTokenSigner`. The oauth module provides
 `federationSettings` and `outboundPolicy` itself, from the configuration's
 `core.deployment.mode`, `core.tokenBinding`, `core.federations` and
 `core.outbound`, and reserves the keys. Nothing outside core provides those
-four, so their suites are core's own tests, not on the testing entry.
+four, so their suites are core's own tests, not published.
 The settings slots a module provides — `oauthTokenSettings`, `httpSettings`
 and `sessionCookiePolicy`; not `deploymentMode`, `tokenBindingSettings`,
 `federationSettings` or `outboundPolicy`, which no module provides — are
@@ -376,11 +376,11 @@ out-of-tree adapter can import and run:
 | `SupportsMfaEnrollmentWitness` (the `UserRepository` capability `markMfaEnrolled`, answered back as `User.mfaEnrolled` on `authenticate` and on `authenticateByToken`; run only for a repository that claims it) | `packages/test-kit/src/mfa/enrollmentWitness.contract.mts` (`mfaEnrollmentWitnessContract`), published on `@o3co/auth-provider-test-kit`; foundation runs it over `HttpUserRepository` against the kit's fake Store |
 | `SupportsSecondFactorUpdate` (the `UserSessionStore` step-up capability; run only for a store that claims it) | `packages/core/src/user-sessions/__tests__/userSessionStore.contract.mts` (`runSecondFactorUpdateContract`) |
 | `SessionLifecycleStore` | `packages/test-kit/src/sessionLifecycle/sessionLifecycleStore.contract.mts` (`sessionLifecycleStoreContract`), published on `@o3co/auth-provider-test-kit`, which the kit's own tests run over core's in-process store on a fake clock and on the real one; its `clock`, `forceExpire` and `unreachable` hooks are declared in `supports`, and `second` is a second instance on the same backend |
-| `RateLimiter` (`failMode` included) | `packages/core/src/testing/slots/rateLimiter.mts` (`rateLimiterContract`) |
+| `RateLimiter` (`failMode` included) | `packages/test-kit/src/rateLimit/rateLimiter.contract.mts` (`rateLimiterContract`), published on `@o3co/auth-provider-test-kit`, which the kit's own tests run over core's in-process limiter and over core's double, and the Redis package over its limiter |
 | `AttemptCounter` | `packages/test-kit/src/attempts/attemptCounter.contract.mts` (`attemptCounterContract`), published on `@o3co/auth-provider-test-kit`, which the kit's own tests run over core's in-process counter, and the redis package over its counter on a real Redis |
 | `MailSender` | `packages/test-kit/src/mail/mailSender.contract.mts` (`mailSenderContract`), published on `@o3co/auth-provider-test-kit`, over core's `createRecordingMailSender`, and the standard package's SMTP sender over a scripted relay and over Mailpit |
 | `MfaFactor` (a second factor contributed as `mfaFactors`; a contribution, not a slot) | `packages/test-kit/src/mfa/factor.contract.mts` (`mfaFactorContract`), over core's doubles `createTestMfaFactor` and `createTestMfaDigests` |
-| The slots of [what one module owns and others read](#what-one-module-owns-and-others-read) | `packages/core/src/testing/slots/` — one suite per slot a module provides, named in its row; the four slots core fills itself have theirs in core's own `deployment/`, `middleware/`, `federations/` and `net/` `__tests__/*.contract.mts` |
+| The slots of [what one module owns and others read](#what-one-module-owns-and-others-read) | `packages/test-kit/src/` (`sessionSlots/`, `tokenSettings/`, `deployment/`, `federationGrants/`) — one suite per slot a module provides, named in its row, published on `@o3co/auth-provider-test-kit`, which the kit's own tests run over core's doubles; the four slots core fills itself have theirs in core's own `deployment/`, `middleware/`, `federations/` and `net/` `__tests__/*.contract.mts` |
 
 Each is run against every in-repo implementation of its port, which is what
 makes it a description of the contract rather than of one adapter. There is one
@@ -390,12 +390,13 @@ against a real Redis. A contract file under `__tests__/` cannot be imported
 across a package boundary, so `packages/redis/__tests__/` runs copies of those
 core suites. A copy may differ from its core suite only above the first
 `export`, in comments and imports. The `*-parity.test.mts` tests there fail on
-any other difference, and on a copy that no Redis test calls. The suites under
-`packages/core/src/testing/slots/` are published on
-`@o3co/auth-provider-core/testing` instead, so another package's tests import
-them: the Redis rate limiter runs `rateLimiterContract` that way.
-`@o3co/auth-provider-test-kit` is a published package of suites of its own,
-which depends on core alone: the enrollment witness's suite is there, with a
+any other difference, and on a copy that no Redis test calls.
+`@o3co/auth-provider-test-kit` is a published package of suites, which
+depends on core alone, so another package's tests import them: the slots'
+suites are there — one per slot a module provides, and `sessionRequirementContract`,
+which every session requirement runs — which the kit's own tests run over
+core's doubles, and the Redis rate limiter runs `rateLimiterContract`; the
+enrollment witness's suite is there, with a
 fake Store it runs against, and foundation's tests run it; so is
 `MfaFactorStore`'s, `mfaFactorStoreContract`, which the kit's own tests run
 over core's in-process store, the Redis package's over its store (no copy),

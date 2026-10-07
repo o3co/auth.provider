@@ -1,6 +1,6 @@
 # auth.provider
 
-Last updated: 2026-10-06
+Last updated: 2026-10-07
 
 [![CI](https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.provider/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth-provider-core)](https://www.npmjs.com/package/@o3co/auth-provider-core)
@@ -149,7 +149,7 @@ Each package's README states what it owns and why it is separate. In brief:
 | [`packages/redis`](packages/redis/) | `@o3co/auth-provider-redis` | Redis implementations of core's store ports, for a deployment with more than one replica | Keeps a database driver out of core. The standalone template needs it in every deployment (its refresh-token families live in Redis); only a composition root of your own, on one replica, can leave it out |
 | [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | The HTTP user repository — the client of your user service ("the Store") | A production adapter for an external service, kept out of core |
 | [`packages/standard`](packages/standard/) | `@o3co/auth-provider-standard` | Standard, replaceable implementations of the duties outside the provider — for now the mail senders its one-time codes leave through: an SMTP sender's section and rendering, and a development sender that logs the code | Replaceable: a deployment installs it as it is or writes its own sender, and it depends on core alone |
-| [`packages/test-kit`](packages/test-kit/) | `@o3co/auth-provider-test-kit` | Contract suites for what code outside core implements — the MFA enrollment witness's — and the fakes they run against, such as a fake Store | For tests only: an adapter in this repository and a deployment's own implementation import the same suite, depending on core alone |
+| [`packages/test-kit`](packages/test-kit/) | `@o3co/auth-provider-test-kit` | Contract suites for what code outside core implements — the slots a module provides, a session requirement, the stores' ports, a second factor, a mail sender and the MFA enrollment witness — and the fakes they run against, such as a fake Store | For tests only: an adapter in this repository and a deployment's own implementation import the same suite, depending on core alone |
 | [`templates/standalone`](templates/standalone/) | — | The deployable composition root: module choice, config, logger, shutdown, Docker | Per-deployment choices, copied rather than imported; never published |
 | [`create-app`](create-app/) | `@o3co/create-auth-provider` | The `npx` scaffolder that copies a template (`--template`, default `standalone`) into a new project | Published on its own with a `bin` |
 

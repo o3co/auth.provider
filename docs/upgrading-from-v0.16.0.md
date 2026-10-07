@@ -55,9 +55,11 @@ Take the new template's `src/` whole, `src/__tests__/` included, and its
 `config/` (`reference.conf`, `application.conf`, `development.conf`), then
 re-apply your own edits. The new `src/` imports packages a v0.16.0 scaffold
 does not list, whatever `MFA_MODE` says: `@o3co/auth-provider-mfa`,
-`@o3co/auth-provider-standard` and `zod`. Merge the template's dependency
-changes into your scaffold's `package.json`, at their published versions
-rather than `workspace:*`, and refresh the lockfile. Then:
+`@o3co/auth-provider-standard` and `zod`, and its tests import the slots'
+contract suites from `@o3co/auth-provider-test-kit`, a dev dependency.
+Merge the template's dependency changes into your scaffold's `package.json`,
+at their published versions rather than `workspace:*`, and refresh the
+lockfile. Then:
 
 - `HTTP_PORT` set to the empty string, or to anything but decimal digits,
   refuses the boot; it used to boot on a random port (#948).
@@ -1940,6 +1942,19 @@ modules fills them.
   `…ContractInput` types), new since v0.16.0 and on `./testing` in the 0.17
   release candidates, leave core's `./testing` with no replacement (#1580): no module or host provides those slots, so
   there is no provider of yours to run them over. The slots' test doubles stay.
+- **The contract suites of the slots a module provides, and the session
+  requirement's** (`csrfGuardContract`, `csrfTokenSignerContract`,
+  `loginCompletionContract`, `loginEntryContract`,
+  `sessionCookiePolicyContract`, `httpSettingsContract`,
+  `oauthTokenSettingsContract`, `federationGrantPolicyContract`,
+  `rateLimiterContract` and `sessionRequirementContract`, their
+  `…ContractInput` types — the requirement's is `RequirementContractInput` —
+  and `ContractCase`), new since v0.16.0 and on `./testing` in the 0.17
+  release candidates, leave core's `./testing` for
+  `@o3co/auth-provider-test-kit` (#1582, #1595): import them from there, under
+  the same names, with the kit's own `ContractCase`. The slots' test doubles
+  (`createTestCsrfGuard`, `createRecordingLoginCompletion` and the rest) stay
+  on core's `./testing`.
 - **BREAKING: each federation package ships only its type module** (#1297,
   #1299, #1300, #1301). Removed, each with the `ComponentMap` slot it
   required: `googleFederationModule` and `googleFederationConfig` from
