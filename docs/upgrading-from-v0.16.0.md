@@ -786,14 +786,17 @@ The boot refusals you can meet, with their messages, are in
   `400 invalid_target` / `requested_resources_not_in_audience`. A subject
   token with no `aud` is read as naming the client's id only when it is the
   client's own (its `azp` is the client's id), and then still defaults to
-  it; a token of another client with no `aud` names no audience, so every
-  exchange of it is `400 invalid_target`, with or without an `audience`, and
+  it; a token of another client with no `aud` names no audience, so a
+  requested or default audience for it is `400 invalid_target` (a policy
+  that grants one is the existing `500 server_error`, and without
+  `allowExchangeOfTokensIssuedToOthers` such a token is refused earlier by
+  the caller binding, `400 invalid_request`), and
   `GrantPolicyRequest.originalAudience` is empty for it. A policy's
   `grantedAudience` replaces the default as before (#1602). A client
   registered with `allowExchangeOfTokensIssuedToOthers: true`, such as a
   gateway, is the one most often affected: it no longer receives a token for
-  its own id from a token issued to another client, whether that token names
-  an audience or none. **What to do:** grep for
+  its own id from a token issued to another client, when that token's
+  audience does not include the calling client's id (or it names none). **What to do:** grep for
   `token_exchange_audience_widening_rejected` against a staging copy. For a
   client it names, list the subject tokens' audience in the registration's
   `allowedAudiences` (an exchange naming no `audience` inherits a subject
