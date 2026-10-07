@@ -1184,9 +1184,10 @@ modules fills them.
   federation-grants routers, `RateLimitGuardOptions` and
   `RateLimitPolicyOptions`; `checkWithFailMode` takes a policy from
   `createRateLimitPolicy` and refuses any other object;
-  `createMemoryRateLimiter` and `createRedisRateLimiter` take no `budgets`,
-  `memoryRateLimiterModule` requires nothing and `redisRateLimiterModule`
-  only `rateLimiterClient`; set a prefix's limit as
+  `createMemoryRateLimiter`, `createRedisRateLimiter` and
+  `createRateLimitBudgetLookup` (`RateLimitBudgetLookupOptions`) take no
+  `budgets`, `memoryRateLimiterModule` requires nothing and
+  `redisRateLimiterModule` only `rateLimiterClient`; set a prefix's limit as
   `core-rate-limiter-memory.limits.<prefix>` or
   `redis-rate-limiter.limits.<prefix>` (#807).
 - **BREAKING: a `rateLimitBudgets` contribution is a prefix claim only
