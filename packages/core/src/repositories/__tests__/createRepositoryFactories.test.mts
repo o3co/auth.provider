@@ -16,8 +16,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdapterFactoryError } from "#/adapters/AdapterFactory.mjs";
+import type { Logger } from "#/logging/Logger.mjs";
 import { createRepositoryFactories } from "#/repositories/RepositoryFactory.mjs";
 
 describe("createRepositoryFactories", () => {
@@ -130,6 +131,36 @@ describe("createRepositoryFactories", () => {
 
 			expect(user).not.toBeNull();
 			expect(user?.username).toBe("alice");
+		});
+
+		it("warns user_repository_in_memory once for each repository it builds, under either name, wherever it runs", async () => {
+			const yamlPath = writeYaml(
+				"users-warned.yaml",
+				`alice:
+  password: "plainpass"
+`,
+			);
+			const logger = {
+				trace: vi.fn(),
+				debug: vi.fn(),
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn(),
+				fatal: vi.fn(),
+				child: vi.fn(),
+			};
+			const { userFactory } = createRepositoryFactories({ logger: logger as unknown as Logger });
+
+			await userFactory.create({ type: "yaml", path: yamlPath });
+			await userFactory.create({ type: "yaml", path: yamlPath });
+			await userFactory.create({ type: "static", path: yamlPath });
+
+			expect(logger.warn.mock.calls).toEqual([
+				[{ store: "userRepository", adapter: "yaml" }, "user_repository_in_memory"],
+				[{ store: "userRepository", adapter: "yaml" }, "user_repository_in_memory"],
+				[{ store: "userRepository", adapter: "static" }, "user_repository_in_memory"],
+			]);
+			expect(logger.error).not.toHaveBeenCalled();
 		});
 
 		it("refuses a users file entry the schema refuses, naming the file, the user and the field and never the value", async () => {

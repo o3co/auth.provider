@@ -758,7 +758,9 @@ a well-formed `$2a$`, `$2b$` or `$2y$` hash at a cost from 04 to 15 (a compare
 at 15 takes about 2 s, at 10 about 60 ms, on a thread of Node's libuv pool).
 Boot refuses an entry that breaks this, an empty `id`, two users with the same
 id, and a `username` key inside an entry, naming the user and the field and
-never the value. See
+never the value. Each start with the `yaml` backend logs
+`user_repository_in_memory` at warn, whatever the environment: the users file
+is meant for development and tests. See
 [the core package's README](../../packages/core/README.md#loading-clients-and-users-from-yaml).
 
 Both user-authentication URLs carry **plaintext user credentials** to the

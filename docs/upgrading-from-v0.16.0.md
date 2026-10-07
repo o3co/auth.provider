@@ -858,6 +858,10 @@ copy of the file to list what is left.
 - An unknown username, and a user with a plain-text password, pay a bcrypt
   compare at the highest cost among the file's hashes (cost 10 when it holds
   none), where it was cost 10 whatever the file held.
+- Each start that builds this repository logs `user_repository_in_memory`
+  at warn (`{ store: "userRepository", adapter: "yaml" }`, or `"static"`),
+  whatever the environment: the users file is meant for development and
+  tests.
 
 ### Redirect and logout URIs
 
