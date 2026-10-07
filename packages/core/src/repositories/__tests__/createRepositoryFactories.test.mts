@@ -202,6 +202,52 @@ bob:
 			}
 		});
 
+		it("refuses a users file whose bcrypt entries use more than one cost, under either name", async () => {
+			const body = "39.FBAWt.ck.rbQbPhmLOOPkwFxWEPZEYA3HR07Lr2k5OYqk.vRSi";
+			const yamlPath = writeYaml(
+				"users-two-costs.yaml",
+				`alice:
+  password: "$2b$10$${body}"
+bob:
+  password: "$2b$12$${body}"
+carol:
+  password: "plainpass"
+`,
+			);
+
+			const { userFactory } = createRepositoryFactories();
+
+			for (const type of ["yaml", "static"]) {
+				const refusal = await userFactory.create({ type, path: yamlPath }).then(
+					() => undefined,
+					(err: unknown) => (err as Error).message,
+				);
+				expect(refusal, type).toMatch(
+					/password: bcrypt entries use costs 10 and 12; every bcrypt entry must use one cost/,
+				);
+				expect(refusal, type).not.toContain(body);
+			}
+		});
+
+		it("builds a users file whose bcrypt entries share one cost", async () => {
+			const body = "39.FBAWt.ck.rbQbPhmLOOPkwFxWEPZEYA3HR07Lr2k5OYqk.vRSi";
+			const yamlPath = writeYaml(
+				"users-one-cost.yaml",
+				`alice:
+  password: "$2b$12$${body}"
+bob:
+  password: "$2y$12$${body}"
+carol:
+  password: "plainpass"
+`,
+			);
+
+			const { userFactory } = createRepositoryFactories();
+			const repo = await userFactory.create({ type: "yaml", path: yamlPath });
+
+			expect((await repo.authenticate("carol", "plainpass"))?.username).toBe("carol");
+		});
+
 		it("refuses a users file in which two users have the same id, naming both users", async () => {
 			const yamlPath = writeYaml(
 				"users-same-id.yaml",

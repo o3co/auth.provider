@@ -851,6 +851,10 @@ copy of the file to list what is left.
   usernames. The id is the entry's `id`, or its username when it sets none,
   so `alice: { id: bob }` beside a `bob` entry without an `id` is refused
   too. Give each user its own id.
+- **BREAKING: bcrypt entries at more than one cost refuse the boot**, naming
+  the field and the costs found (`password: bcrypt entries use costs 10 and
+  12; every bcrypt entry must use one cost`). Hash the passwords again so
+  every bcrypt entry uses one cost. Plain-text entries are unaffected.
 - **BREAKING: a `username` key inside an entry refuses the boot.** The entry's
   key is its username; the key inside used to replace it. Remove the key, or
   rename the entry.
@@ -858,10 +862,8 @@ copy of the file to list what is left.
   PHP's name, and is compared as `$2b$`. Such a user used to fail every login,
   so a users file migrated from `htpasswd -B` or PHP now works as it is.
 - An unknown username, and a user with a plain-text password, pay a bcrypt
-  compare at the highest cost among the file's hashes (cost 10 when it holds
-  none), where it was cost 10 whatever the file held. A file whose bcrypt
-  entries share one cost therefore takes the same time on every path: hash
-  every entry at one cost.
+  compare at the cost the file's hashes share (cost 10 when it holds none),
+  where it was cost 10 whatever the file held.
 - Each start that builds this repository logs `user_repository_in_memory`
   at warn (`{ store: "userRepository", adapter: "yaml" }`, or `"static"`),
   whatever the environment: the users file is meant for development and

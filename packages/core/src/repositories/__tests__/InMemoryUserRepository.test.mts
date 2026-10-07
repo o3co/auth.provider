@@ -150,6 +150,35 @@ describe("InMemoryUserRepository", () => {
 			).toBeUndefined();
 		});
 
+		it("refuses bcrypt entries at more than one cost, naming the field and the costs", () => {
+			for (const [costs, named] of [
+				[["10", "12"], "costs 10 and 12"],
+				[["12", "04", "10", "12"], "costs 04, 10 and 12"],
+			] as const) {
+				const users = new Map<string, Record<string, unknown>>(
+					costs.map((cost, i) => [`user${i}`, { password: shaped(cost, i % 2 ? "$2y$" : "$2b$") }]),
+				);
+				users.set("plain", { password: "plain-text" });
+				const refusal = refusalOf(users);
+				expect(refusal, named).toMatch(
+					new RegExp(`password: bcrypt entries use ${named}; every bcrypt entry must use one cost`),
+				);
+				expect(refusal, named).not.toContain(BODY.slice(0, 20));
+			}
+		});
+
+		it("holds bcrypt entries at one cost beside plain-text ones", () => {
+			expect(
+				refusalOf(
+					new Map([
+						["alice", { password: shaped("12") }],
+						["bob", { password: shaped("12", "$2a$") }],
+						["carol", { password: "plain-text" }],
+					]),
+				),
+			).toBeUndefined();
+		});
+
 		it("refuses an empty username, which would be an empty id, naming the field", () => {
 			for (const entry of [{ password: "plain" }, { password: "plain", id: "u1" }]) {
 				const refusal = refusalOf(new Map([["", entry]]));
@@ -265,7 +294,7 @@ describe("InMemoryUserRepository", () => {
 			expect(await repo.authenticate("alice", "correct horsE")).toBeNull();
 		});
 
-		it("pays the unknown-user and plain-text compares at the highest cost configured", async () => {
+		it("pays the unknown-user and plain-text compares at the entries' one cost", async () => {
 			const compareSpy = spyOnCompare().mockResolvedValue(false);
 			const dummyCostFor = async (
 				users: Map<string, { password: string }>,
@@ -276,13 +305,13 @@ describe("InMemoryUserRepository", () => {
 				return compareSpy.mock.calls[0]?.[1]?.slice(0, 7);
 			};
 			try {
-				const mixed = new Map([
-					["alice", { password: shaped("10") }],
+				const atTwelve = new Map([
+					["alice", { password: shaped("12") }],
 					["bob", { password: shaped("12", "$2y$") }],
 					["carol", { password: "plain" }],
 				]);
-				expect(await dummyCostFor(mixed, "nobody")).toBe("$2b$12$");
-				expect(await dummyCostFor(mixed, "carol")).toBe("$2b$12$");
+				expect(await dummyCostFor(atTwelve, "nobody")).toBe("$2b$12$");
+				expect(await dummyCostFor(atTwelve, "carol")).toBe("$2b$12$");
 				expect(await dummyCostFor(new Map([["alice", { password: shaped("04") }]]), "nobody")).toBe(
 					"$2b$04$",
 				);
@@ -296,13 +325,13 @@ describe("InMemoryUserRepository", () => {
 			}
 		});
 
-		it("runs the unknown-user and plain-text compares through bcrypt at the highest cost of the entries' real hashes", async () => {
+		it("runs the unknown-user and plain-text compares through bcrypt at the cost of the entries' real hashes", async () => {
 			const compareSpy = spyOnCompare();
 			try {
 				const repo = new InMemoryUserRepository(
 					new Map([
 						["alice", { password: await bcrypt.hash("alice-pass", 4) }],
-						["bob", { password: await bcrypt.hash("bob-pass", 5) }],
+						["bob", { password: await bcrypt.hash("bob-pass", 4) }],
 						["carol", { password: "carol-pass" }],
 					]),
 				);
@@ -313,9 +342,9 @@ describe("InMemoryUserRepository", () => {
 
 				const [unknownUser, plainText, known] = compareSpy.mock.calls.map(([, hash]) => hash);
 				// bcrypt reads the cost it then runs at from the hash it is handed.
-				expect(bcrypt.getRounds(unknownUser as string)).toBe(5);
-				expect(bcrypt.getRounds(plainText as string)).toBe(5);
-				expect(bcrypt.getRounds(known as string)).toBe(5);
+				expect(bcrypt.getRounds(unknownUser as string)).toBe(4);
+				expect(bcrypt.getRounds(plainText as string)).toBe(4);
+				expect(bcrypt.getRounds(known as string)).toBe(4);
 			} finally {
 				compareSpy.mockRestore();
 			}

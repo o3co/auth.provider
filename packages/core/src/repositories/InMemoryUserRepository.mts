@@ -79,11 +79,11 @@ function bcryptCostOf(password: string): number | undefined {
 }
 
 /**
- * The dummy at the highest cost among the entries' hashes, or at cost 10
- * when none holds one. An unknown user cannot be told by its compare's time
- * from a user at that cost, and a cost-10 dummy beside costlier entries
- * would let the time tell them apart. Only the cost field changes: bcrypt
- * pays the whole cost whatever the hash it compares against.
+ * The dummy at the entries' cost (every bcrypt entry has one, which
+ * {@link assertHoldable} holds them to; the highest, read here), or at cost
+ * 10 when none holds a hash. An unknown user's compare then takes as long as
+ * a known user's. Only the cost field changes: bcrypt pays the whole cost
+ * whatever the hash it compares against.
  */
 function dummyHashFor(entries: Iterable<UserEntry>): string {
 	let highest: number | undefined;
@@ -136,11 +136,14 @@ export type UserEntry = z.infer<typeof UserEntrySchema>;
 /**
  * Refuse a user map that could not be served as written: an empty username
  * (the entry's key, and its id where it sets none), an entry the schema
- * refuses, or two users with the same id (the `id`, or the username where none
- * is set). Each refusal names the users and the field, never a value.
+ * refuses, two users with the same id (the `id`, or the username where none
+ * is set), or bcrypt entries at more than one cost. Each refusal names the
+ * users and the field, never a value; the costs one refusal names are the
+ * cost fields, never a hash.
  */
 function assertHoldable(users: ReadonlyMap<string, UserEntry>): void {
 	const byId = new Map<string, string>();
+	const costs = new Set<number>();
 	for (const [username, entry] of users) {
 		if (username === "") {
 			throw new Error(
@@ -161,6 +164,16 @@ function assertHoldable(users: ReadonlyMap<string, UserEntry>): void {
 			);
 		}
 		byId.set(id, username);
+		const cost = bcryptCostOf(entry.password);
+		if (cost !== undefined) costs.add(cost);
+	}
+	// One cost for every bcrypt entry: the compare for an unknown or a
+	// plain-text user then runs at the cost every other compare runs at.
+	if (costs.size > 1) {
+		const named = [...costs].sort((a, b) => a - b).map(twoDigits);
+		throw new Error(
+			`InMemoryUserRepository: password: bcrypt entries use costs ${named.slice(0, -1).join(", ")} and ${named.at(-1)}; every bcrypt entry must use one cost`,
+		);
 	}
 }
 
