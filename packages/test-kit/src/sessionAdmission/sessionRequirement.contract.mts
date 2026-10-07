@@ -28,8 +28,8 @@
  * It reads core only through its public entries. Registration is core's
  * `resolverForTests`, which registers each requirement and seals its reach
  * as boot does: the cases that read what registration accepts register with
- * `allowAnyReach`, so a reach the seal refuses fails the reach case alone of
- * them. A requirement asked directly is handed admission's view of a live
+ * `allowAnyReach`, so a reach whose values the seal refuses fails the reach
+ * case alone of them (a reach that cannot be read at all fails them too). A requirement asked directly is handed admission's view of a live
  * session built here, as admission builds it over stores that cannot record
  * a second factor.
  */
@@ -208,7 +208,9 @@ export function sessionRequirementContract(
 		{
 			name: "reach holds non-empty strings, no primary's marker, no second-factor value unless the requirement declares the second-factor authority, and — in this release — nothing at all unless it does; stepUpPage is set when reach is not empty, and is valid when set",
 			// Registration validates the page; the seal boot runs, which the
-			// resolver runs too, holds the reach to its rules.
+			// resolver runs too, holds the reach to its rules. The resolver's
+			// refusal names its allowAnyReach option, which is for core's own
+			// tests: a requirement that keeps this case passes without it.
 			run: async () => {
 				resolverForTests([build()], issuer === undefined ? {} : { issuer });
 			},
