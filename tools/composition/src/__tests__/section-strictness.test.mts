@@ -149,8 +149,7 @@ function filledPaths(schema: z.ZodType): string[][] {
 		else if (def.type === "tuple") {
 			for (const item of def.items ?? []) next(item, [...path, "*"]);
 			if (def.rest) next(def.rest, [...path, "*"]);
-		}
-		else if (def.type === "union") for (const option of def.options ?? []) next(option);
+		} else if (def.type === "union") for (const option of def.options ?? []) next(option);
 		else if (def.type === "intersection") {
 			next(def.left);
 			next(def.right);
