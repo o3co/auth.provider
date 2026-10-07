@@ -41,7 +41,7 @@ import {
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
 import type { Request } from "express";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { type LoginCompletionContractInput, loginCompletionContract } from "#/index.mjs";
 
 const RULES = {
@@ -170,6 +170,17 @@ const operate = (req: Request, operation: "regenerate" | "save"): Promise<void> 
 			err ? reject(err) : resolve(),
 		);
 	});
+
+describe("loginCompletionContract — its input", () => {
+	it("takes an optional records count and an optional CSRF cookie name", () => {
+		expectTypeOf<LoginCompletionContractInput["records"]>().toEqualTypeOf<
+			(() => number) | undefined
+		>();
+		expectTypeOf<LoginCompletionContractInput["csrfCookieName"]>().toEqualTypeOf<
+			string | undefined
+		>();
+	});
+});
 
 describe("loginCompletionContract — the recording double", () => {
 	const cases = loginCompletionContract(inputOver());

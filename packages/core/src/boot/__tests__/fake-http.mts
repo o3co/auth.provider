@@ -20,8 +20,8 @@
  * to. A request carries headers, its own origin, a path, a parsed body and
  * an express session (`regenerate`, `save`, `sessionID`) whose regenerations
  * and saves are counted. A response records its status, body, headers and
- * cookies. A component that needs more of Express than this is outside the
- * contracts. Not on the testing entry.
+ * cookies. The boot tests of the csrfGuard slot use it; a slot's contract
+ * suite drives its component over the test kit's own copy.
  */
 
 import type { NextFunction, Request, RequestHandler, Response } from "express";
