@@ -45,6 +45,7 @@ import {
 const APPLE_CALLBACK_URL = "https://app.example.com/session/oauth/federation/apple/callback";
 const APPLE_STAGING_CALLBACK_URL =
 	"https://app.example.com/session/oauth/federation/apple-staging/callback";
+const APPLE_UPPER_CALLBACK_URL = "https://app.example.com/session/oauth/federation/Apple/callback";
 const QUERY_CALLBACK_URL = "https://app.example.com/session/oauth/federation/query-idp/callback";
 
 // ---------------------------------------------------------------------------
@@ -161,21 +162,25 @@ function buildApp(opts: { userRepository?: UserRepository } = {}) {
 	const apple = makeFakeApple();
 	// A second form_post federation, to show two in flight at once.
 	const appleStaging = makeFakeApple("apple-staging");
+	// A third whose name differs from the first's only in case.
+	const appleUpper = makeFakeApple("Apple");
 	const queryProvider = makeQueryProvider();
 	const harness = buildFederationApp({
 		providers: new Map<string, FederationProvider>([
 			["apple", apple],
 			["apple-staging", appleStaging],
+			["Apple", appleUpper],
 			["query-idp", queryProvider],
 		]),
 		providerCallbackUrls: new Map([
 			["apple", APPLE_CALLBACK_URL],
 			["apple-staging", APPLE_STAGING_CALLBACK_URL],
+			["Apple", APPLE_UPPER_CALLBACK_URL],
 			["query-idp", QUERY_CALLBACK_URL],
 		]),
 		...opts,
 	});
-	return { ...harness, apple, appleStaging, queryProvider };
+	return { ...harness, apple, appleStaging, appleUpper, queryProvider };
 }
 
 type StartedFlow = {
@@ -452,22 +457,22 @@ describe("the federation transaction cookie binds the callback to its browser", 
 		expect(clearedCookie(res, HARNESS_TRANSACTION_COOKIE_NAME)).toBe(true);
 	});
 
-	it("deletes the transaction record and clears its cookie after a failed callback", async () => {
+	it("keeps the transaction record and its cookie after a state mismatch", async () => {
 		const harness = buildApp();
 		const flow = await startFlow(harness);
-		// A state mismatch: the transaction is spent either way, so a wrong guess
-		// cannot be retried against the same record.
+		// A state mismatch spends nothing: the transaction is spent only once
+		// `state` matches, so the right state still completes it.
 		const res = await flow.post({ state: `${flow.state}-tampered`, code: "apple-code" });
 
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("invalid_state");
-		expect(harness.records.size).toBe(0);
-		expect(clearedCookie(res, HARNESS_TRANSACTION_COOKIE_NAME)).toBe(true);
+		expect(harness.records.size).toBe(1);
+		expect(clearedCookie(res, HARNESS_TRANSACTION_COOKIE_NAME)).toBe(false);
+		expect(harness.apple.calls).toHaveLength(0);
 
-		// And the spent transaction cannot then be completed with the right state.
-		const retry = await flow.post({ state: flow.state, code: "apple-code" });
-		expect(retry.status).toBe(400);
-		expect(retry.body.error).toBe("invalid_session");
+		const genuine = await flow.post({ state: flow.state, code: "apple-code" });
+		expect(genuine.status).toBe(302);
+		expect(harness.records.size).toBe(0);
 	});
 
 	it("deletes the transaction record even when the exchange fails downstream", async () => {
@@ -541,6 +546,100 @@ describe("a transaction id this host did not set for this browser is refused", (
 		expect(res.body.error).toBe("invalid_session");
 		expect(harness.apple.calls).toHaveLength(0);
 		expect(harness.appleStaging.calls).toHaveLength(0);
+	});
+});
+
+describe("the transaction cookie is read by exact name, first occurrence", () => {
+	it("selects the first of two cookies carrying the transaction cookie's name", async () => {
+		const harness = buildApp();
+		const flow = await startFlow(harness);
+		const id = encodeURIComponent(flow.transactionId as string);
+
+		const res = await request(harness.app)
+			.post("/oauth/federation/apple/callback")
+			.set(
+				"Cookie",
+				`${HARNESS_TRANSACTION_COOKIE_NAME}=${id}; ${HARNESS_TRANSACTION_COOKIE_NAME}=not-a-real-transaction`,
+			)
+			.type("form")
+			.send({ state: flow.state, code: "apple-code" });
+
+		expect(res.status).toBe(302);
+		expect(harness.apple.calls).toHaveLength(1);
+	});
+
+	it("does not fall through to a later cookie of the same name when the first names no transaction", async () => {
+		const harness = buildApp();
+		const flow = await startFlow(harness);
+		const id = encodeURIComponent(flow.transactionId as string);
+
+		const res = await request(harness.app)
+			.post("/oauth/federation/apple/callback")
+			.set(
+				"Cookie",
+				`${HARNESS_TRANSACTION_COOKIE_NAME}=not-a-real-transaction; ${HARNESS_TRANSACTION_COOKIE_NAME}=${id}`,
+			)
+			.type("form")
+			.send({ state: flow.state, code: "apple-code" });
+
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_session");
+		expect(harness.apple.calls).toHaveLength(0);
+	});
+
+	it("keeps federations whose names differ only in case apart", async () => {
+		const harness = buildApp();
+		const lower = await startFlow(harness, "apple");
+		const upper = await startFlow(harness, "Apple");
+
+		expect(harnessTransactionCookieName("Apple")).not.toBe(harnessTransactionCookieName("apple"));
+		expect(
+			setCookieNamed(upper.startResponse, harnessTransactionCookieName("Apple")),
+		).toBeDefined();
+		expect(
+			setCookieNamed(upper.startResponse, harnessTransactionCookieName("apple")),
+		).toBeUndefined();
+
+		// Each completes with its own.
+		const both = [
+			`${harnessTransactionCookieName("apple")}=${encodeURIComponent(lower.transactionId as string)}`,
+			`${harnessTransactionCookieName("Apple")}=${encodeURIComponent(upper.transactionId as string)}`,
+		].join("; ");
+		const upperDone = await request(harness.app)
+			.post("/oauth/federation/Apple/callback")
+			.set("Cookie", both)
+			.type("form")
+			.send({ state: upper.state, code: "upper-code" });
+		expect(upperDone.status).toBe(302);
+		expect(harness.appleUpper.calls).toHaveLength(1);
+		expect(clearedCookie(upperDone, harnessTransactionCookieName("apple"))).toBe(false);
+
+		const lowerDone = await request(harness.app)
+			.post("/oauth/federation/apple/callback")
+			.set("Cookie", both)
+			.type("form")
+			.send({ state: lower.state, code: "lower-code" });
+		expect(lowerDone.status).toBe(302);
+		expect(harness.apple.calls).toHaveLength(1);
+	});
+
+	it("does not accept the lower-case federation's transaction at the upper-case federation's callback", async () => {
+		const harness = buildApp();
+		const lower = await startFlow(harness, "apple");
+
+		const crossed = await request(harness.app)
+			.post("/oauth/federation/Apple/callback")
+			.set(
+				"Cookie",
+				`${harnessTransactionCookieName("Apple")}=${encodeURIComponent(lower.transactionId as string)}`,
+			)
+			.type("form")
+			.send({ state: lower.state, code: "apple-code" });
+
+		expect(crossed.status).toBe(400);
+		expect(crossed.body.error).toBe("invalid_session");
+		expect(harness.apple.calls).toHaveLength(0);
+		expect(harness.appleUpper.calls).toHaveLength(0);
 	});
 });
 
@@ -684,18 +783,25 @@ describe("a cross-site request cannot spend an in-flight transaction", () => {
 		expect(genuine.status).toBe(302);
 	});
 
-	it("still spends the transaction on a wrong state, which is a real attempt on it", async () => {
-		// The line between the two: an absent `state` claims nothing, a wrong
-		// `state` is a guess — and a guess must not get a second try.
+	it("leaves the transaction intact after a cross-site POST carrying a wrong state", async () => {
+		// An auto-submitting cross-site form with `state=wrong&code=x`: the
+		// victim's SameSite=None cookie rides it. Spending the transaction on
+		// the mismatch would cancel the victim's login, and the guess it would
+		// stop is worthless — `state` is 128 bits from the CSPRNG.
 		const harness = buildApp();
 		const flow = await startFlow(harness);
 
-		const attempt = await flow.post({ state: `${flow.state}-tampered`, code: "c" });
+		const attack = await flow.post({ state: "wrong", code: "x" });
 
-		expect(attempt.status).toBe(400);
-		expect(attempt.body.error).toBe("invalid_state");
-		expect(harness.records.size).toBe(0);
-		expect(clearedCookie(attempt, HARNESS_TRANSACTION_COOKIE_NAME)).toBe(true);
+		expect(attack.status).toBe(400);
+		expect(attack.body.error).toBe("invalid_state");
+		expect(harness.records.size).toBe(1);
+		expect(clearedCookie(attack, HARNESS_TRANSACTION_COOKIE_NAME)).toBe(false);
+
+		const genuine = await flow.post({ state: flow.state, code: "apple-code" });
+		expect(genuine.status).toBe(302);
+		expect(harness.apple.calls).toHaveLength(1);
+		expect(harness.apple.calls[0]?.code).toBe("apple-code");
 	});
 
 	it("keeps a query federation's envelope when its callback carries no state", async () => {

@@ -295,6 +295,17 @@ describe("a callback's parameters are read from an object only", () => {
 	});
 });
 
+/**
+ * Rewrite the stored transaction `id` to name another federation: the apple
+ * callback then refuses it as `invalid_session` and discards it, which is the
+ * path these tests drive. (A wrong `state` spends nothing.)
+ */
+function nameAnotherFederation(records: Map<string, unknown>, id: string): void {
+	const key = `${FEDERATION_TRANSACTION_KEY_PREFIX}${id}`;
+	const record = records.get(key) as { federation: Record<string, unknown> };
+	records.set(key, { ...record, federation: { ...record.federation, name: "query-idp" } });
+}
+
 describe("a refused form_post callback whose transaction cannot be discarded", () => {
 	it("writes one federation_cleanup_failed warn with the store, the step and the error's projection, then drops the session", async () => {
 		const { app, records } = buildApp();
@@ -310,6 +321,7 @@ describe("a refused form_post callback whose transaction cannot be discarded", (
 			trail,
 		});
 		for (const [key, value] of records) brokenRecords.set(key, value);
+		nameAnotherFederation(brokenRecords, flow.id);
 
 		const res = await request(broken)
 			.post("/oauth/federation/apple/callback")
@@ -318,7 +330,7 @@ describe("a refused form_post callback whose transaction cannot be discarded", (
 			.send({ state: "not-the-state", code: "c" });
 
 		expect(res.status).toBe(400);
-		expect(res.body.error).toBe("invalid_state");
+		expect(res.body.error).toBe("invalid_session");
 		expect(logger.warn).toHaveBeenCalledTimes(1);
 		const [context, name] = logger.warn.mock.calls[0] as [Record<string, unknown>, string];
 		expect(name).toBe("federation_cleanup_failed");
@@ -357,6 +369,7 @@ describe("a refused form_post callback whose transaction cannot be discarded", (
 				trail,
 			});
 			for (const [key, value] of records) brokenRecords.set(key, value);
+			nameAnotherFederation(brokenRecords, flow.id);
 
 			const res = await request(broken)
 				.post("/oauth/federation/apple/callback")
@@ -365,7 +378,7 @@ describe("a refused form_post callback whose transaction cannot be discarded", (
 				.send({ state: "not-the-state", code: "c" });
 
 			expect(res.status).toBe(400);
-			expect(res.body.error).toBe("invalid_state");
+			expect(res.body.error).toBe("invalid_session");
 			expect(logger.warn).toHaveBeenCalledTimes(1);
 			const [context, name] = logger.warn.mock.calls[0] as [Record<string, unknown>, string];
 			expect(name).toBe("federation_cleanup_failed");
@@ -379,6 +392,7 @@ describe("a refused form_post callback whose transaction cannot be discarded", (
 		const { app, records } = buildApp({ trail });
 		const flow = await startFormPost(app);
 		expect(records.has(`${FEDERATION_TRANSACTION_KEY_PREFIX}${flow.id}`)).toBe(true);
+		nameAnotherFederation(records, flow.id);
 
 		const res = await request(app)
 			.post("/oauth/federation/apple/callback")
@@ -387,7 +401,7 @@ describe("a refused form_post callback whose transaction cannot be discarded", (
 			.send({ state: "not-the-state", code: "c" });
 
 		expect(res.status).toBe(400);
-		expect(res.body.error).toBe("invalid_state");
+		expect(res.body.error).toBe("invalid_session");
 		expect(records.has(`${FEDERATION_TRANSACTION_KEY_PREFIX}${flow.id}`)).toBe(false);
 		expect(trail).toEqual([]);
 	});
@@ -402,6 +416,7 @@ describe("a refused form_post callback whose transaction cannot be discarded", (
 			dropThrows: true,
 		});
 		for (const [key, value] of records) brokenRecords.set(key, value);
+		nameAnotherFederation(brokenRecords, flow.id);
 
 		const res = await request(broken)
 			.post("/oauth/federation/apple/callback")

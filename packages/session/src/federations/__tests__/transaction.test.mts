@@ -120,6 +120,15 @@ describe("deriveFederationTransactionCookieName", () => {
 		const other = deriveFederationTransactionCookieName("auth.session", "apple-staging");
 		expect(apple).not.toBe(other);
 	});
+
+	it("keeps the federation's name as written, so names differing only in case stay distinct", () => {
+		expect(deriveFederationTransactionCookieName("auth.session", "Apple")).toBe(
+			"__Host-auth.session.federation.Apple",
+		);
+		expect(deriveFederationTransactionCookieName("auth.session", "Apple")).not.toBe(
+			deriveFederationTransactionCookieName("auth.session", "apple"),
+		);
+	});
 });
 
 describe("mintFederationTransactionId", () => {
