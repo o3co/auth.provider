@@ -4,6 +4,673 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.17.0] - 2026-10-08
+
+**Upgrade note.** Start with the upgrade guide,
+[docs/upgrading-from-v0.16.0.md](docs/upgrading-from-v0.16.0.md). It lists every breaking change below by
+area, with what to do. [docs/upgrading-required-record-keys.md](docs/upgrading-required-record-keys.md) covers
+the stores you implement. 0.x releases may break; 0.17.0 sets the public configuration and the module surface
+in one step, and removes the old paths instead of deprecating them. Every breaking change is listed under
+Breaking. Before upgrading, check these, each described in its entry:
+
+- **A rolling upgrade from 0.16.0 is not supported.** Stop every 0.16.0 replica, then start 0.17.0 on all of
+  them, with every `@o3co/auth-provider-*` package at 0.17.0.
+- **Every user signs in again.** A session established under 0.16.0 has no record in core's session lifecycle
+  and reads as closed. A refresh token bound to such a session is refused, and so is an unredeemed 0.16.0
+  authorization code. A `form_post` federation sign-in in progress across the upgrade is started again.
+- **Configuration moved under the name of the module that owns it, and sections are strict.** An old path,
+  an old variable name, or a key a section does not declare refuses the boot and names itself, so a start
+  against a staging copy lists what is left to fix.
+- **Every `core.federations` entry names its `type`**, and only the module that registers that type handles it.
+- **Client records are validated where they enter.** A record your `ClientRepository` answers that breaks a
+  registration rule is answered `503` until it is fixed. Registered redirect URIs are held to new query rules.
+- **Login and device verification count attempts on an attempt counter**, which fails closed. Several replicas
+  need a shared counter (`adapters.attemptCounter = "redis"` in the template).
+- **The Redis stores require `maxmemory-policy noeviction`.** Each store that keeps durable keys refuses to
+  boot on a server that reports another policy, or that cannot be read.
+- **The standalone template requires a second factor by default** (`MFA_MODE=required`). Set `MFA_MODE=off` to
+  keep 0.16.0's behaviour for the first start.
+
+**Release candidates.** `0.17.0-rc.1` to `0.17.0-rc.4` were pre-releases, published on npm under the `next`
+dist-tag. This section covers every change since 0.16.0 and supersedes them. Surfaces new in 0.17.0 (the MFA
+ports and stores, the mail port, the session lifecycle) also changed between the candidates: their entries
+describe the released form, and the upgrade guide names what a composition built on a candidate changes.
+
+New packages: `@o3co/auth-provider-mfa` (multi-factor authentication), `@o3co/auth-provider-standard` (an SMTP
+and a development mail sender) and `@o3co/auth-provider-test-kit` (conformance suites for the ports you
+implement).
+
+### Breaking
+
+#### Sessions and their lifecycle
+
+- **BREAKING: core's session lifecycle owns every session's joins and its close, and is required wherever a
+  user-session store is wired (`@o3co/auth-provider-core`, `-oauth`, `-session`, `-redis`, `-device-grant`,
+  `-federation-grants`, `-mfa`, `-webauthn`, `-oauth-token-exchange`, standalone template)**
+  ([#1030](https://github.com/o3co/auth.provider/issues/1030) — [#1351](https://github.com/o3co/auth.provider/pull/1351), [#1372](https://github.com/o3co/auth.provider/pull/1372), [#1374](https://github.com/o3co/auth.provider/pull/1374), [#1378](https://github.com/o3co/auth.provider/pull/1378), [#1382](https://github.com/o3co/auth.provider/pull/1382), [#1390](https://github.com/o3co/auth.provider/pull/1390), [#1392](https://github.com/o3co/auth.provider/pull/1392), [#1397](https://github.com/o3co/auth.provider/pull/1397), [#1400](https://github.com/o3co/auth.provider/pull/1400), [#1405](https://github.com/o3co/auth.provider/pull/1405), [#1413](https://github.com/o3co/auth.provider/pull/1413), [#1421](https://github.com/o3co/auth.provider/pull/1421),
+  [#1425](https://github.com/o3co/auth.provider/pull/1425)–[#1429](https://github.com/o3co/auth.provider/pull/1429), [#1435](https://github.com/o3co/auth.provider/pull/1435)–[#1437](https://github.com/o3co/auth.provider/pull/1437), [#1440](https://github.com/o3co/auth.provider/pull/1440), [#1441](https://github.com/o3co/auth.provider/pull/1441), [#1444](https://github.com/o3co/auth.provider/pull/1444), [#1447](https://github.com/o3co/auth.provider/pull/1447), [#1448](https://github.com/o3co/auth.provider/pull/1448), [#1455](https://github.com/o3co/auth.provider/pull/1455), [#1461](https://github.com/o3co/auth.provider/pull/1461)–[#1465](https://github.com/o3co/auth.provider/pull/1465), [#1468](https://github.com/o3co/auth.provider/pull/1468),
+  [#1476](https://github.com/o3co/auth.provider/pull/1476), [#1477](https://github.com/o3co/auth.provider/pull/1477), [#1488](https://github.com/o3co/auth.provider/pull/1488), [#1489](https://github.com/o3co/auth.provider/pull/1489), [#1494](https://github.com/o3co/auth.provider/pull/1494), [#1496](https://github.com/o3co/auth.provider/pull/1496), [#1497](https://github.com/o3co/auth.provider/pull/1497), [#1499](https://github.com/o3co/auth.provider/pull/1499), [#1501](https://github.com/o3co/auth.provider/pull/1501)–[#1503](https://github.com/o3co/auth.provider/pull/1503), [#1505](https://github.com/o3co/auth.provider/pull/1505)–[#1514](https://github.com/o3co/auth.provider/pull/1514), [#1516](https://github.com/o3co/auth.provider/pull/1516), [#1520](https://github.com/o3co/auth.provider/pull/1520)–[#1522](https://github.com/o3co/auth.provider/pull/1522),
+  [#1606](https://github.com/o3co/auth.provider/pull/1606)). A session's lifecycle record (active → closing → closed) is what makes it live. Logins, code
+  exchanges, federations and refresh-token families join the session through it. `/oauth/logout`,
+  `/session/logout` and subject revocation close the session through it: they revoke its refresh-token families
+  and notify its relying parties. Introspection, userinfo, the federation-token route and token exchange read
+  liveness from it, and a user session at or past its `expiresAt` is not live (introspection answers
+  `active: false`, `/oauth/userinfo` `401`) even while its store still returns the row. A session with no record
+  reads as closed. Wherever a `userSessionStore` is wired, the lifecycle store is required beside it, or the
+  boot is refused; the `authorization_code` grant also refuses to boot with `subjectRevocation` wired and no
+  `userSessionStore`. The per-session store ports (`SessionRPRegistry`, `SessionFamilyIndex`,
+  `SessionFederationIndex`), their memory and Redis adapters, and `cascadeLogout` are removed. The Redis session
+  stores module provides the session lifecycle store. The lifecycle sweeps closing records by default.
+  Upgrade guide: [Rolling out across a mixed fleet](docs/upgrading-from-v0.16.0.md#rolling-out-across-a-mixed-fleet),
+  which also lists the 0.16.0 Redis keys you may delete afterwards and the ones you must keep (`rtfam:*`).
+
+- **BREAKING: every consumer of the browser session goes through core's session admission
+  (`@o3co/auth-provider-core`, `-oauth`, `-session`, `-device-grant`, `-federation-grants`, `-webauthn`)**
+  ([#715](https://github.com/o3co/auth.provider/pull/715), [#716](https://github.com/o3co/auth.provider/pull/716), [#717](https://github.com/o3co/auth.provider/pull/717), [#718](https://github.com/o3co/auth.provider/pull/718), [#719](https://github.com/o3co/auth.provider/pull/719), [#734](https://github.com/o3co/auth.provider/pull/734), [#772](https://github.com/o3co/auth.provider/pull/772), [#793](https://github.com/o3co/auth.provider/pull/793), [#1065](https://github.com/o3co/auth.provider/pull/1065), [#1140](https://github.com/o3co/auth.provider/pull/1140), [#1187](https://github.com/o3co/auth.provider/pull/1187), [#1357](https://github.com/o3co/auth.provider/pull/1357), [#1412](https://github.com/o3co/auth.provider/pull/1412), [#1531](https://github.com/o3co/auth.provider/pull/1531),
+  [#1555](https://github.com/o3co/auth.provider/pull/1555)). `/authorize`, consent, the code, session and refresh grants, device verification, the federation
+  link start and WebAuthn registration admit a session through one decision point. The session must have
+  `isAuthenticated` set to exactly `true`, be within its `expiresAt` (read again after the store reads), and
+  have a `user.id` equal to its `sub`. With `subjectRevocation` wired, the subject's revocation boundary applies
+  at each of these. A store that cannot be read is answered as unavailable. A composition that installs the
+  oauth, session, device-grant or federation-grants module declares `core.sessionRequirements.expected` (`[]`
+  until a requirement is installed); without it the boot is refused (`session-requirements-undeclared`). Log
+  lines such as `authorize_session_liveness_unavailable` become `session_admission_unavailable`. Upgrade guide:
+  [Slots, admission and wiring](docs/upgrading-from-v0.16.0.md#slots-admission-and-wiring).
+
+- **BREAKING: sessions record how they were established, and an upstream IdP's `amr` counts only when the
+  federation is trusted (`@o3co/auth-provider-core`, `-session`, `-oauth`, `-redis`)** ([#707](https://github.com/o3co/auth.provider/pull/707), [#836](https://github.com/o3co/auth.provider/pull/836), [#923](https://github.com/o3co/auth.provider/pull/923),
+  [#1155](https://github.com/o3co/auth.provider/pull/1155)). `UserSession` gains `authentication`, `enrollmentFacts` and `renewalNonce`. A federated session's
+  `amr` is `["fed"]`, and the upstream's `amr` is kept as `authentication.upstreamAmr`. It reaches a token or
+  meets an `acr` only with `core.federations.<name>.trustUpstreamAmr = true`. A custom `UserSessionStore`
+  round-trips the new fields. `req.session.user` holds exactly the eight fields `User` declares, read by name
+  once ([#1100](https://github.com/o3co/auth.provider/pull/1100), [#1116](https://github.com/o3co/auth.provider/pull/1116), [#1206](https://github.com/o3co/auth.provider/pull/1206)). Upgrade guide:
+  [Passkeys, users and sessions](docs/upgrading-from-v0.16.0.md#passkeys-users-and-sessions).
+
+- **BREAKING: a federated login's freshness is the upstream's (`@o3co/auth-provider-core`, `-session`,
+  `-oauth`, `-mfa`, `-redis`, `-federation-oidc`, `-federation-google`, `-federation-apple`)** ([#1084](https://github.com/o3co/auth.provider/issues/1084) —
+  [#1407](https://github.com/o3co/auth.provider/pull/1407), [#1411](https://github.com/o3co/auth.provider/pull/1411), [#1414](https://github.com/o3co/auth.provider/pull/1414), [#1415](https://github.com/o3co/auth.provider/pull/1415), [#1417](https://github.com/o3co/auth.provider/pull/1417), [#1419](https://github.com/o3co/auth.provider/pull/1419), [#1420](https://github.com/o3co/auth.provider/pull/1420), [#1453](https://github.com/o3co/auth.provider/pull/1453), [#1454](https://github.com/o3co/auth.provider/pull/1454), [#1457](https://github.com/o3co/auth.provider/pull/1457), [#1458](https://github.com/o3co/auth.provider/pull/1458)). `prompt=login`,
+  `max_age` and the MFA first binding judge a federated session by the earlier of when this provider
+  established it and the upstream's verified `auth_time`. A federation whose upstream reports no `auth_time`
+  meets none of them, unless `core.federations.<name>.callbackMeetsFreshness = true` (the 0.16.0 behaviour).
+  The federation start reads optional `prompt` and `max_age` hints, and a malformed or repeated one is
+  `400 invalid_request`. The OIDC adapter forwards them to the upstream. `auth_time` in tokens is unchanged.
+  Upgrade guide: [`/authorize`, discovery and tokens](docs/upgrading-from-v0.16.0.md#authorize-discovery-and-tokens).
+
+- **BREAKING: `POST /session/logout` closes the session its cookie names (`@o3co/auth-provider-session`)**
+  ([#1464](https://github.com/o3co/auth.provider/pull/1464), [#1533](https://github.com/o3co/auth.provider/pull/1533), [#1597](https://github.com/o3co/auth.provider/pull/1597), [#1599](https://github.com/o3co/auth.provider/pull/1599)). It revokes the session's refresh-token families and notifies its relying
+  parties, as `/oauth/logout` does. It closes the record whenever the record's subject is the cookie session's
+  user; a record of another subject is not closed, and the logout answers `401 login_required` after ending
+  the cookie session. A close that cannot be committed, or a session record that cannot be read, is `503`,
+  closes nothing and keeps the browser session for a retry. A router without a user-session store only ends
+  the cookie session. Upgrade guide:
+  [Passkeys, users and sessions](docs/upgrading-from-v0.16.0.md#passkeys-users-and-sessions).
+
+#### Configuration
+
+- **BREAKING: every setting lives under the name of the module that owns it, and module names are kebab-case
+  (all packages, standalone template)** ([#728](https://github.com/o3co/auth.provider/issues/728) — [#736](https://github.com/o3co/auth.provider/pull/736), [#738](https://github.com/o3co/auth.provider/pull/738), [#743](https://github.com/o3co/auth.provider/pull/743), [#745](https://github.com/o3co/auth.provider/pull/745), [#758](https://github.com/o3co/auth.provider/pull/758), [#759](https://github.com/o3co/auth.provider/pull/759), [#780](https://github.com/o3co/auth.provider/pull/780), [#783](https://github.com/o3co/auth.provider/pull/783),
+  [#786](https://github.com/o3co/auth.provider/pull/786), [#796](https://github.com/o3co/auth.provider/pull/796), [#803](https://github.com/o3co/auth.provider/pull/803), [#804](https://github.com/o3co/auth.provider/pull/804), [#811](https://github.com/o3co/auth.provider/pull/811), [#827](https://github.com/o3co/auth.provider/pull/827), [#853](https://github.com/o3co/auth.provider/pull/853), [#1478](https://github.com/o3co/auth.provider/pull/1478), [#1547](https://github.com/o3co/auth.provider/pull/1547)). Core's own settings are under `core {}`;
+  `jwks {}`, `dpop {}`, `mtls {}`, `device-grant {}`, `oauth-token-exchange {}`, each store's section,
+  `federation-grants {}`, `session-store {}`, `oauth-session {}` and `oauth-authorization {}` are at the top
+  level. An old path refuses the boot (`config-path-relocated`) and names the new one. A renamed variable's old
+  name refuses the boot whenever it is set, even beside its new name at the same value
+  (`environment-variable-renamed`). Each refusal points at the upgrade guide. Grant switches read the same
+  boolean vocabulary as every other switch. `ModuleSpec.configSchema` and `ModuleSection.at` are removed: a
+  module's section is the top-level key of its name. Upgrade guide:
+  [Paths and variables that moved](docs/upgrading-from-v0.16.0.md#paths-and-variables-that-moved).
+
+- **BREAKING: a module's section refuses a key it does not declare (`@o3co/auth-provider-core`, `-oauth`,
+  `-mfa`, `-webauthn`, `-session`, `-federation-grants`, `-dpop`, `-device-grant`)** ([#1325](https://github.com/o3co/auth.provider/pull/1325), [#1328](https://github.com/o3co/auth.provider/pull/1328), [#1329](https://github.com/o3co/auth.provider/pull/1329),
+  [#1336](https://github.com/o3co/auth.provider/pull/1336), [#1339](https://github.com/o3co/auth.provider/pull/1339), [#1361](https://github.com/o3co/auth.provider/pull/1361), [#1362](https://github.com/o3co/auth.provider/pull/1362), [#1365](https://github.com/o3co/auth.provider/pull/1365)). A typo, or a key an older version read, refuses the boot
+  (`config-validation-failed`) and names its path; until now it was ignored. A key named after an
+  `Object.prototype` member is refused at any depth ([#1216](https://github.com/o3co/auth.provider/pull/1216)). A section whose module is not loaded is kept as
+  written and named at `warn` in `config_sections_ignored` or `config_sections_not_loaded` ([#1323](https://github.com/o3co/auth.provider/pull/1323), [#1354](https://github.com/o3co/auth.provider/pull/1354),
+  [#1495](https://github.com/o3co/auth.provider/pull/1495), [#1498](https://github.com/o3co/auth.provider/pull/1498)). Upgrade guide: [Configuration](docs/upgrading-from-v0.16.0.md#configuration).
+
+- **BREAKING: core's schema declares `core` alone, and section schemas take their defaults from
+  `reference.conf` alone (`@o3co/auth-provider-core`, `-mtls`, `-redis`, standalone template)** ([#1445](https://github.com/o3co/auth.provider/pull/1445),
+  [#1495](https://github.com/o3co/auth.provider/pull/1495), [#1500](https://github.com/o3co/auth.provider/pull/1500), [#1504](https://github.com/o3co/auth.provider/pull/1504), [#1577](https://github.com/o3co/auth.provider/pull/1577)). `AppConfigSchema`, `fullSectionsSchema`, `composeConfigSchema` and
+  `readTransitionalConfig` are removed. `AppConfig` is `CoreConfig & Readonly<Record<string, unknown>>`, and
+  `CoreConfig` no longer carries `oauth`. Each module parses its own section. The mtls, Redis store, in-process
+  rate limiter (`core-rate-limiter-memory`) and template `redis-clients` schemas fill no default; a composition
+  that layers `moduleReferences` sees no change, and a configuration built by hand writes every key of these
+  sections. `mtlsConfigSchema` parses an absent section as `undefined` (off). A configuration handed to
+  `createApp` must be plain JSON data. A written `cors` section that no loaded module reads refuses the boot;
+  CORS origins come from the `httpSettings` slot (`http.cors.allowedOrigins` in the template). A grant policy
+  needs a canonical `oauth.jwt.issuer`. Upgrade guide:
+  [Slots, admission and wiring](docs/upgrading-from-v0.16.0.md#slots-admission-and-wiring).
+
+- **BREAKING: keys removed (`@o3co/auth-provider-oauth`, `-webauthn`, `-mfa`, `-device-grant`, standalone
+  template)**. Each refuses the boot at any value where its module is installed, and points at the upgrade
+  guide. Delete it, or move it where the entry says. Upgrade guide:
+  [Keys removed](docs/upgrading-from-v0.16.0.md#keys-removed).
+  - `oauth.accessToken.expiresIn` and `OAUTH_ACCESS_TOKEN_EXPIRES_IN`: move the value to
+    `oauth.accessToken.defaultExpiresIn`. Without it the default is `3600` ([#1523](https://github.com/o3co/auth.provider/pull/1523)).
+  - `oauth.refreshToken.unknownFamilyPolicy` (and `OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY`): the refresh
+    grant always answers a token whose family no record holds with `400 invalid_grant` (`unknown_family`). A
+    deployment that ran `"accept"` signs out the holders of family-less chains at the upgrade.
+    `oauth.refreshToken.legacyRtPolicy` is removed, and a refresh token without `jti` or `family_id` is always
+    refused while family rotation is wired ([#1449](https://github.com/o3co/auth.provider/pull/1449), [#1570](https://github.com/o3co/auth.provider/pull/1570)).
+  - `oauth.jwt.legacyTypAccept` and `OAUTH_JWT_LEGACY_TYP_ACCEPT`: a token with no `typ` header is refused on
+    every route that verifies a token this provider signed, and tokens minted before v0.5.0 stop working.
+    `JwtVerifyOptions`, `OAuthTokenSettings`, `OAuthSection`/`OAuthTokenSection` and
+    `CreateSelfIssuedAccessTokenValidatorOptions` lose `legacyTypAccept` ([#1575](https://github.com/o3co/auth.provider/pull/1575)).
+  - `oauth.grants.authorization_code.pkce.*`: S256 is mandatory ([#827](https://github.com/o3co/auth.provider/pull/827)).
+  - `oauth.refreshToken.legacyTokenCompat`, `oauth.authorize.allowUnmarkedClients` and
+    `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS` are now refused by the oauth module ([#1493](https://github.com/o3co/auth.provider/pull/1493), [#1500](https://github.com/o3co/auth.provider/pull/1500)).
+  - `webauthn.allowCredentialsForKnownUser` ([#1217](https://github.com/o3co/auth.provider/pull/1217)) and `webauthn.rateLimit.*` ([#1403](https://github.com/o3co/auth.provider/pull/1403), [#1443](https://github.com/o3co/auth.provider/pull/1443)).
+  - `mfa.rateLimit.*` ([#1338](https://github.com/o3co/auth.provider/pull/1338)).
+  - `device-grant.store` and `oauth.deviceAuthorization.store` ([#1466](https://github.com/o3co/auth.provider/pull/1466)).
+  - `repositories.code.type`, `CLIENT_CODE_ENDPOINT_URI` and `CLIENT_CODE_PASSWORD` ([#853](https://github.com/o3co/auth.provider/pull/853)).
+
+- **BREAKING: values are read more strictly (all packages, standalone template)**. Number settings accept only
+  a number or a whole number in decimal digits, and an empty string is no longer read as `0` ([#1184](https://github.com/o3co/auth.provider/pull/1184),
+  [#1191](https://github.com/o3co/auth.provider/pull/1191)–[#1197](https://github.com/o3co/auth.provider/pull/1197), [#1199](https://github.com/o3co/auth.provider/pull/1199)–[#1201](https://github.com/o3co/auth.provider/pull/1201), [#1208](https://github.com/o3co/auth.provider/pull/1208)). Other refusals: an `oauth.jwt.issuer` that ends with a slash ([#1150](https://github.com/o3co/auth.provider/pull/1150));
+  an `oauth.authorize.acrValues` key that is not an RFC 6749 scope-token ([#1384](https://github.com/o3co/auth.provider/pull/1384), [#1385](https://github.com/o3co/auth.provider/pull/1385)); an empty
+  `oauth.consentPage.url` ([#1385](https://github.com/o3co/auth.provider/pull/1385)); an unknown key under `oauth.clientIdMetadataDocuments` ([#1151](https://github.com/o3co/auth.provider/pull/1151)); a
+  `cors.allowedOrigins` that is neither a string, a list nor `null` ([#748](https://github.com/o3co/auth.provider/pull/748)); a session cookie name, prefix or
+  domain that browsers would drop ([#785](https://github.com/o3co/auth.provider/pull/785)); an empty or non-numeric `HTTP_PORT` ([#948](https://github.com/o3co/auth.provider/pull/948)); and two enabled
+  federations that share a `callbackURL` ([#1319](https://github.com/o3co/auth.provider/pull/1319)). Upgrade guide:
+  [Values read more strictly](docs/upgrading-from-v0.16.0.md#values-read-more-strictly).
+
+#### Federations
+
+- **BREAKING: federations are handled by their `type` (`@o3co/auth-provider-core`, `-session`,
+  `-federation-oidc`, `-federation-google`, `-federation-github`, `-federation-apple`, standalone template)**
+  ([#1273](https://github.com/o3co/auth.provider/pull/1273), [#1282](https://github.com/o3co/auth.provider/pull/1282), [#1283](https://github.com/o3co/auth.provider/pull/1283), [#1287](https://github.com/o3co/auth.provider/pull/1287)–[#1289](https://github.com/o3co/auth.provider/pull/1289), [#1291](https://github.com/o3co/auth.provider/pull/1291), [#1297](https://github.com/o3co/auth.provider/pull/1297), [#1299](https://github.com/o3co/auth.provider/pull/1299)–[#1301](https://github.com/o3co/auth.provider/pull/1301), [#1309](https://github.com/o3co/auth.provider/pull/1309), [#1313](https://github.com/o3co/auth.provider/pull/1313), [#1314](https://github.com/o3co/auth.provider/pull/1314), [#1356](https://github.com/o3co/auth.provider/pull/1356),
+  [#1395](https://github.com/o3co/auth.provider/pull/1395)). Every `core.federations` entry names its `type`, enabled or not, and is a flat entry. Core
+  dispatches each enabled entry to the module that registers the type under `federationTypes`. An enabled
+  entry no module handles refuses the boot (`federation-type-unhandled`); in 0.16.0 its routes answered `404`.
+  With a federation enabled, boot builds all of its store providers and refuses one that yields nothing or
+  throws. `federations` and `federationRedirectPolicies` are core-owned contribution kinds. Each federation
+  package ships only its type module (`oidcFederationTypeModule()`, `googleFederationTypeModule()`,
+  `githubFederationTypeModule()`, `appleFederationTypeModule()`). The fixed-name modules, their config slots
+  and the template's federation config bridges are removed. `extractFederationSection` is removed from the
+  session package. A Google entry's `endSessionEndpoint` now takes effect. An Apple key goes inline as
+  `privateKey`. Upgrade guide: [Configuration](docs/upgrading-from-v0.16.0.md#configuration).
+
+- **BREAKING: a `form_post` federation's transaction cookie is `__Host-<session cookie name>.federation.<federation>`
+  (`@o3co/auth-provider-session`)** ([#1620](https://github.com/o3co/auth.provider/pull/1620)). It is issued with `Path=/` and no `Domain`, and the callback reads
+  only that cookie. `deriveFederationTransactionCookieName` takes the federation's name; the federation router
+  takes `sessionCookieName` in place of `federationTransactionCookieName`; the `no_callback_path`
+  misconfiguration reason is removed. A `form_post` callback with a wrong `state` is refused without spending
+  the transaction. A `form_post` sign-in in progress across the upgrade must be started again. Upgrade guide:
+  [docs/upgrading-from-v0.16.0.md](docs/upgrading-from-v0.16.0.md).
+
+- **BREAKING: the federation token and federation logout routes accept only a token issued to the client
+  (`@o3co/auth-provider-oauth`)** ([#1619](https://github.com/o3co/auth.provider/pull/1619)). `POST /oauth/federation/:name/token` and
+  `POST /oauth/federation/:name/logout` accept only an access token whose `aud` contains the client its `azp`
+  names (federation logout also refuses a malformed `azp`). A token whose audience a resource or the grant
+  policy chose, or a session-grant token of a client with `allowedAudiences`, is `401 invalid_token`. Upgrade
+  guide: [docs/upgrading-from-v0.16.0.md](docs/upgrading-from-v0.16.0.md).
+
+#### Clients, redirects and logout
+
+- **BREAKING: every client record is validated once, where it enters (`@o3co/auth-provider-core`,
+  `-oauth`)** ([#1095](https://github.com/o3co/auth.provider/issues/1095) — [#1120](https://github.com/o3co/auth.provider/pull/1120), [#1128](https://github.com/o3co/auth.provider/pull/1128), [#1142](https://github.com/o3co/auth.provider/pull/1142), [#1159](https://github.com/o3co/auth.provider/pull/1159), [#1167](https://github.com/o3co/auth.provider/pull/1167), [#1180](https://github.com/o3co/auth.provider/pull/1180), [#1183](https://github.com/o3co/auth.provider/pull/1183), [#1186](https://github.com/o3co/auth.provider/pull/1186), [#1202](https://github.com/o3co/auth.provider/pull/1202), [#1259](https://github.com/o3co/auth.provider/pull/1259),
+  [#1278](https://github.com/o3co/auth.provider/pull/1278)). Core installs its client-record boundary in the `clientRepository` slot. Every module reads the
+  fields `PublicClient` declares, by name, held to the rules a `yaml` or `static` client meets at boot, and
+  never `clientSecret`. A record the boundary refuses is answered `503 temporarily_unavailable`, warned
+  `client_record_refused` with the client id and the reasons, and never answered by a Client ID Metadata
+  Document. A record whose `clientId` is not exactly the id looked up is refused. Only the `/oauth` router
+  installs the Client ID Metadata Document fallback, from `oauth.clientIdMetadataDocuments`, and
+  `withClientIdMetadataDocuments` and `createClientIdMetadataDocumentResolver` are no longer exported. Run
+  against a staging copy and grep for `client_record_refused` before upgrading. Upgrade guide:
+  [Client records](docs/upgrading-from-v0.16.0.md#client-records-the-boundary-in-the-clientrepository-slot).
+
+- **BREAKING: back-channel logout tokens and `private_key_jwt` key sets are fetched through core's outbound
+  destination policy (`@o3co/auth-provider-oauth`)** ([#1616](https://github.com/o3co/auth.provider/pull/1616)). Upgrade guide:
+  [docs/upgrading-from-v0.16.0.md](docs/upgrading-from-v0.16.0.md).
+
+- **BREAKING: the Client ID Metadata Document fetch goes through core's outbound destination policy
+  (`@o3co/auth-provider-oauth`)** ([#1617](https://github.com/o3co/auth.provider/pull/1617)). Upgrade guide:
+  [docs/upgrading-from-v0.16.0.md](docs/upgrading-from-v0.16.0.md).
+
+- **BREAKING: Client ID Metadata Documents default to no stale-if-error window (`@o3co/auth-provider-oauth`)**
+  ([#1608](https://github.com/o3co/auth.provider/pull/1608)). `oauth.clientIdMetadataDocuments.staleIfErrorMs` defaults to `0` (was `300000`): an expired
+  document whose revalidation fails (timeout, DNS, 5xx, 429) is no longer served, and `/authorize` answers
+  `400 invalid_client` until a fetch succeeds. Set `staleIfErrorMs = 300000` to keep the previous behaviour.
+  Upgrade guide: [`/authorize`, discovery and tokens](docs/upgrading-from-v0.16.0.md#authorize-discovery-and-tokens).
+
+- **BREAKING: redirect, post-logout and grant return URIs are held to a query-name rule, and the
+  authorization response's parameter names are reserved (`@o3co/auth-provider-core`, `-oauth`,
+  `-federation-grants`)** ([#1044](https://github.com/o3co/auth.provider/pull/1044), [#1053](https://github.com/o3co/auth.provider/pull/1053), [#1157](https://github.com/o3co/auth.provider/pull/1157)). A query name outside `[A-Za-z0-9_-]`, an empty name, a
+  `;`, or a reserved name (`code`, `state`, `iss`, `error`, `error_description`; `grant_id` on a grant return
+  URI; `iss` and `sid` on a front-channel logout URI) is refused: at boot for `yaml` and `static` clients, and
+  otherwise where the URI is used. Carry a client's context in `state` or in the path. Upgrade guide:
+  [Redirect and logout URIs](docs/upgrading-from-v0.16.0.md#redirect-and-logout-uris).
+
+- **BREAKING: front-channel logout (`@o3co/auth-provider-oauth`)** ([#1096](https://github.com/o3co/auth.provider/pull/1096)). A `frontchannelLogoutUri` is held
+  to `http(s)` where it is used. A refused URI is left out and logged `logout_frontchannel_uri_refused`.
+  `renderFrontchannelLogoutHtml` takes `postLogoutRedirect: { uri, state? }` in place of
+  `postLogoutRedirectUri`. Upgrade guide:
+  [Redirect and logout URIs](docs/upgrading-from-v0.16.0.md#redirect-and-logout-uris).
+
+#### Authorization, tokens and grants
+
+- **BREAKING: an authorization code carries how its session had authenticated at `/authorize`
+  (`@o3co/auth-provider-core`, `-oauth`, `-redis`)** ([#932](https://github.com/o3co/auth.provider/pull/932), [#935](https://github.com/o3co/auth.provider/issues/935) — [#1515](https://github.com/o3co/auth.provider/pull/1515), [#1517](https://github.com/o3co/auth.provider/pull/1517), [#1518](https://github.com/o3co/auth.provider/pull/1518), [#1519](https://github.com/o3co/auth.provider/pull/1519)).
+  `/authorize` records the session's vouched `amr` and its authentication (`CodeData.amr`,
+  `CodeData.authentication`). The token endpoint stamps that `amr` and judges the code on that reading. Where a
+  user-session store is wired, a code without a readable `authentication` is refused (`400 invalid_grant`).
+  A custom `CodeRepository` round-trips both keys. An unredeemed code issued by 0.16.0 is refused, and the
+  relying party authorizes again. Upgrade guide:
+  [Stores and records you implement](docs/upgrading-from-v0.16.0.md#stores-and-records-you-implement).
+
+- **BREAKING: `/authorize` (`@o3co/auth-provider-oauth`, `@o3co/auth-provider-core`)** ([#706](https://github.com/o3co/auth.provider/pull/706), [#775](https://github.com/o3co/auth.provider/pull/775), [#992](https://github.com/o3co/auth.provider/pull/992),
+  [#1214](https://github.com/o3co/auth.provider/pull/1214)). Upgrade guide:
+  [`/authorize`, discovery and tokens](docs/upgrading-from-v0.16.0.md#authorize-discovery-and-tokens).
+  - `/oauth/authorize` and `/oauth/consent` exist only with the `authorization_code` grant.
+  - A `response_mode` other than `query`, or a repeated one, is `invalid_request`.
+  - An `acr_values` entry that nothing installed can satisfy is dropped from discovery and answered
+    `unmet_authentication_requirements`. A `claims` parameter that names `acr` is `invalid_request`.
+  - A `reauthenticate` verdict is one login trip that keeps the live session. A session still
+    `reauthenticate` on its return is refused at the redirect URI.
+
+- **BREAKING: the code exchange issues a refresh token only where the client can redeem one
+  (`@o3co/auth-provider-oauth`)** ([#1568](https://github.com/o3co/auth.provider/pull/1568)). The `authorization_code` grant issues a refresh token, and registers
+  its family, only when the `refresh_token` grant is registered and the client's `allowedGrantTypes` allow it.
+  Otherwise the response has no `refresh_token` and the access token carries no `family_id`.
+  `oauthAuthorizationGrantsModule` requires the synthetic `grantHandlerResolver`. Upgrade guide:
+  [`/authorize`, discovery and tokens](docs/upgrading-from-v0.16.0.md#authorize-discovery-and-tokens).
+
+- **BREAKING: a refresh keeps the audience of the token it presents (`@o3co/auth-provider-oauth`,
+  `@o3co/auth-provider-core`)** ([#1566](https://github.com/o3co/auth.provider/pull/1566), [#1567](https://github.com/o3co/auth.provider/pull/1567)). On `refresh_token`, the presented token's `aud` is the
+  ceiling and the default for the new tokens' audience, as its scope already is. A plain refresh keeps the
+  original `aud` instead of issuing for the client id. A `resource` outside it is `400 invalid_target`, even
+  when `allowedAudiences` lists it, and a policy's `grantedAudience` outside it is `500 server_error`. A refresh
+  whose original `aud` the registration no longer holds is `400 invalid_grant`. Narrowing applies to the access
+  token only; the rotated refresh token keeps the presented scope and audience. The policy receives the original
+  audience as `GrantPolicyRequest.originalAudience`. Upgrade guide:
+  [`/authorize`, discovery and tokens](docs/upgrading-from-v0.16.0.md#authorize-discovery-and-tokens).
+
+- **BREAKING: `grantPolicy` is consulted on every minting path, and only an exact `allow` mints
+  (`@o3co/auth-provider-core`, `-oauth`, `-device-grant`, `-oauth-token-exchange`)** ([#874](https://github.com/o3co/auth.provider/pull/874), [#972](https://github.com/o3co/auth.provider/pull/972), [#1017](https://github.com/o3co/auth.provider/pull/1017),
+  [#1168](https://github.com/o3co/auth.provider/pull/1168), [#1169](https://github.com/o3co/auth.provider/pull/1169), [#1258](https://github.com/o3co/auth.provider/pull/1258), [#1416](https://github.com/o3co/auth.provider/pull/1416)). A wired policy is consulted by the `session` grant, by `client_credentials`
+  with or without resource indicators, and by the device-code grant at the poll. A decision that is neither an
+  exact `allow` nor an exact `deny` is `500 server_error` (`policy_decision_invalid`). A policy that throws is
+  `503`. A deny answers token-endpoint error codes only. `/authorize` audits a deny (`policy_denied`) and a
+  decision past the client's ceiling (`policy_out_of_bounds`). Upgrade guide:
+  [`/authorize`, discovery and tokens](docs/upgrading-from-v0.16.0.md#authorize-discovery-and-tokens).
+
+- **BREAKING: token exchange (`@o3co/auth-provider-oauth-token-exchange`, `@o3co/auth-provider-core`)** ([#859](https://github.com/o3co/auth.provider/pull/859),
+  [#889](https://github.com/o3co/auth.provider/pull/889), [#1331](https://github.com/o3co/auth.provider/pull/1331), [#1537](https://github.com/o3co/auth.provider/pull/1537), [#1551](https://github.com/o3co/auth.provider/pull/1551), [#1569](https://github.com/o3co/auth.provider/pull/1569), [#1604](https://github.com/o3co/auth.provider/pull/1604)). Upgrade guide:
+  [`/authorize`, discovery and tokens](docs/upgrading-from-v0.16.0.md#authorize-discovery-and-tokens).
+  - The caller must be an audience of the subject token by default: the subject token's `azp` is the calling
+    client, or its `aud` contains it. An `actor_token` must name the calling client the same way, or the
+    exchange is `400 invalid_request` (warn `token_exchange_actor_not_for_client`). A client registration
+    with `allowExchangeOfTokensIssuedToOthers: true` exchanges tokens issued to others, for both tokens.
+  - The policy receives the subject token's audience as `GrantPolicyRequest.originalAudience`.
+  - A policy refusal with `access_denied` is `400`, not `403`. `token.issued.failure`'s `details.reason` is
+    the refusal's description or error code. `tokenExchangeModule` reads `oauthTokenSettings`, not the whole
+    configuration.
+
+- **BREAKING: two token-binding mechanisms that both succeed are refused (`@o3co/auth-provider-core`)**
+  ([#858](https://github.com/o3co/auth.provider/pull/858)). Under `core.tokenBinding.dispatchPolicy = "intent-explicit"`, such a `/oauth/token` request is
+  `400 invalid_request` and logged `token_binding_ambiguous`. Upgrade guide:
+  [`/authorize`, discovery and tokens](docs/upgrading-from-v0.16.0.md#authorize-discovery-and-tokens).
+
+- **BREAKING: the mTLS `envoy` dialect reads the XFCC header by its grammar (`@o3co/auth-provider-mtls`)**
+  ([#1618](https://github.com/o3co/auth.provider/pull/1618)). Elements and fields split only outside double-quoted values (with `\` escapes), and keys match in
+  any case. The first element must carry `Hash=`, the hex SHA-256 of the `Cert=` DER (compared
+  case-insensitively), and a `Cert=` that is one PEM block labelled `CERTIFICATE`. A header is refused as
+  `malformed_header` when `Hash=` is absent or does not match, or when `Hash`, `Cert`, `Chain` or `Subject`
+  repeats in the element; `By`, `URI` and `DNS` may repeat. The `plain-pem` value must hold exactly one PEM
+  block. With `mtls.source = "header"` and the `envoy` dialect, a proxy that omits `Hash=` must be configured
+  to write it. Upgrade guide: [docs/upgrading-from-v0.16.0.md](docs/upgrading-from-v0.16.0.md).
+
+- **BREAKING: WebAuthn assertions carry their owner's user handle, and the passkey grant applies
+  `oauth.requireEmailVerified` (`@o3co/auth-provider-webauthn`, `@o3co/auth-provider-core`)** ([#863](https://github.com/o3co/auth.provider/pull/863), [#1153](https://github.com/o3co/auth.provider/pull/1153),
+  [#1217](https://github.com/o3co/auth.provider/pull/1217), [#1583](https://github.com/o3co/auth.provider/pull/1583), [#1584](https://github.com/o3co/auth.provider/pull/1584)). An assertion without a user handle, or with one that is not the credential owner's,
+  is `400 invalid_grant`. Users on non-discoverable credentials re-enroll with discoverable ones. With
+  `oauth.requireEmailVerified` on, the passkey grant refuses a user whose email is not verified
+  (`400 invalid_grant`), reading the user through `UserRepository.findBySubject`, which the composition must
+  then provide. Upgrade guide:
+  [Passkeys, users and sessions](docs/upgrading-from-v0.16.0.md#passkeys-users-and-sessions).
+
+- **BREAKING: the JWT-bearer grant and assertion issuers (`@o3co/auth-provider-core`, `-oauth`)** ([#1387](https://github.com/o3co/auth.provider/pull/1387),
+  [#1388](https://github.com/o3co/auth.provider/pull/1388)). An assertion issuer entry caps a plain RFC 7523 assertion's lifetime at `maxLifetimeSeconds` (an
+  hour by default, a day at most). With subject revocation configured, an assertion must carry `iat` and is
+  refused if issued at or before a revocation of its subject. A store-backed `AssertionIssuerRegistry` returns
+  `maxLifetimeSeconds`, and a custom assertion verifier reports `issuedAt` and `expiresAt`. Upgrade guide:
+  [Stores and records you implement](docs/upgrading-from-v0.16.0.md#stores-and-records-you-implement).
+
+- **BREAKING: key stores refuse an unusable previous-key retirement date (`@o3co/auth-provider-core`)**
+  ([#1607](https://github.com/o3co/auth.provider/pull/1607)). `createAsymmetricKeyStore`, `createSymmetricKeyStore` and `createRemoteSigningKeyStore` refuse,
+  when built, a previous key's `expiresAt` that is not a `Date` holding a valid time, and read it once; a
+  previous key verifies only strictly before its retirement time. Upgrade guide:
+  [Exports removed, and signatures changed](docs/upgrading-from-v0.16.0.md#exports-removed-and-signatures-changed).
+
+#### Users and the Store
+
+- **BREAKING: the `yaml` / `static` users file is validated when it loads (`@o3co/auth-provider-core`)**
+  ([#1560](https://github.com/o3co/auth.provider/pull/1560)). Boot refuses a password starting with `$2` that is not a well-formed `$2a$`, `$2b$` or `$2y$` bcrypt
+  hash at a cost from 04 to 15 (including `$2$` and `$2x$`), bcrypt entries at more than one cost, an empty
+  `id` or username, two users with the same id, and a `username` key inside an entry; each refusal names the
+  field and the user or the costs, never a value. `$2y$` hashes are compared as `$2b$`, and an unknown or
+  plain-text user's bcrypt compare runs at the cost the file's bcrypt entries share (10 when there is none).
+  Upgrade guide:
+  [The users file](docs/upgrading-from-v0.16.0.md#the-users-file-the-yaml--static-user-repository).
+
+- **BREAKING: a Store user with an empty `id` or `username` is refused (`@o3co/auth-provider-foundation`)**
+  ([#862](https://github.com/o3co/auth.provider/pull/862)). `HttpUserRepository` refuses a `2xx` user whose `id` or `username` is an empty string as a malformed
+  answer, so every caller answers `503 temporarily_unavailable` (the jwt-bearer grant included, which answered
+  `400 invalid_grant` for an empty `id`). A Store that sends `username: ""` sends a stable label instead, such
+  as the e-mail address. Upgrade guide:
+  [Passkeys, users and sessions](docs/upgrading-from-v0.16.0.md#passkeys-users-and-sessions).
+
+#### Rate limits
+
+- **BREAKING: verifiers own their attempt limits, and a composition without a rate limiter says so
+  (`@o3co/auth-provider-core`, `-session`, `-device-grant`, `-mfa`, `-webauthn`, `-federation-grants`,
+  `-redis`, standalone template)** ([#807](https://github.com/o3co/auth.provider/issues/807) — [#782](https://github.com/o3co/auth.provider/pull/782), [#1324](https://github.com/o3co/auth.provider/pull/1324), [#1334](https://github.com/o3co/auth.provider/pull/1334), [#1338](https://github.com/o3co/auth.provider/pull/1338), [#1344](https://github.com/o3co/auth.provider/pull/1344)–[#1347](https://github.com/o3co/auth.provider/pull/1347), [#1349](https://github.com/o3co/auth.provider/pull/1349), [#1350](https://github.com/o3co/auth.provider/pull/1350),
+  [#1401](https://github.com/o3co/auth.provider/pull/1401), [#1403](https://github.com/o3co/auth.provider/pull/1403), [#1408](https://github.com/o3co/auth.provider/pull/1408), [#1434](https://github.com/o3co/auth.provider/pull/1434), [#1467](https://github.com/o3co/auth.provider/pull/1467), [#1585](https://github.com/o3co/auth.provider/pull/1585)). Upgrade guide:
+  [Slots, admission and wiring](docs/upgrading-from-v0.16.0.md#slots-admission-and-wiring).
+  - `POST /session/login` is limited by `session.rateLimit.login`, counted per client IP on the new
+    `attemptCounter` slot. `POST /oauth/device/verification` is limited by `device-grant.rateLimit`, counted
+    per subject. Both fail closed (`503`) while the counter cannot answer, whatever the limiter's `failMode`
+    says.
+  - Under `core.deployment.mode = "multi"` they need a shared counter: `redisAttemptCounterModule`, or
+    `adapters.attemptCounter = "redis"` in the template. Without one the boot is refused.
+  - A limiter's `limits.login` and `limits.device_verification` are refused.
+  - The MFA routes and WebAuthn's authentication options route are limited by the deployment's `rateLimiter`
+    alone, with no per-process fallback.
+  - A first-time federation-grant lodging is also limited per authenticated client.
+  - `rateLimitBudgets` contributions are prefix claims only (`null` or `verifierLimitClaim`); a budget object
+    refuses the boot. `rateLimitBudgetResolver`, `RateLimitBudgetResolver` and the contributed-budget tier are
+    removed: set budgets in the limiter's `limits`, else its `defaultLimit` applies.
+  - A composition with no `rateLimiter` lists it in `core.declaredAbsent`.
+  - A `RateLimiter` that declares no `failMode` fails closed.
+
+#### Compositions, slots and exports
+
+- **BREAKING: modules read their own section and core's slots, not the whole configuration (all packages)**
+  ([#728](https://github.com/o3co/auth.provider/issues/728) — [#757](https://github.com/o3co/auth.provider/pull/757), [#773](https://github.com/o3co/auth.provider/pull/773), [#1322](https://github.com/o3co/auth.provider/pull/1322), [#1330](https://github.com/o3co/auth.provider/pull/1330), [#1331](https://github.com/o3co/auth.provider/pull/1331), [#1337](https://github.com/o3co/auth.provider/pull/1337), [#1340](https://github.com/o3co/auth.provider/pull/1340), [#1355](https://github.com/o3co/auth.provider/pull/1355), [#1356](https://github.com/o3co/auth.provider/pull/1356), [#1358](https://github.com/o3co/auth.provider/pull/1358), [#1361](https://github.com/o3co/auth.provider/pull/1361), [#1362](https://github.com/o3co/auth.provider/pull/1362),
+  [#1365](https://github.com/o3co/auth.provider/pull/1365), [#1373](https://github.com/o3co/auth.provider/pull/1373), [#1430](https://github.com/o3co/auth.provider/pull/1430)–[#1432](https://github.com/o3co/auth.provider/pull/1432), [#1439](https://github.com/o3co/auth.provider/pull/1439), [#1479](https://github.com/o3co/auth.provider/pull/1479), [#1492](https://github.com/o3co/auth.provider/pull/1492), [#1576](https://github.com/o3co/auth.provider/pull/1576)). Grants and modules read the issuer and
+  lifetimes from `oauthTokenSettings`, the token-binding rule from `tokenBindingSettings`, the federations from
+  `federationSettings`, the federation grants' switch from `federationGrantPolicy`, the outbound limits from
+  `outboundPolicy`, and the deployment mode from `deploymentMode`, which core fills and no module may set
+  (`synthetic-key-collision`). The whole-configuration `config` slot is read by core's own modules alone: a
+  module outside core that lists it in `requires` or `optional` refuses the boot (`reserved-component-key`). A
+  composition without the oauth module fills `oauthTokenSettings` in `bootstrapComponents`.
+  `GrantDependencies.config` is removed. The `config` slot and every core-built projection are deeply frozen.
+  `createRedisFederationTokenStore`, `redisFederationTokenStoreBuilder` and
+  `resolveRedisFederationGrantStoreOptions` take the deployment mode. Boot checks the `csrfGuard` slot once
+  ([#1394](https://github.com/o3co/auth.provider/pull/1394)). Upgrade guide:
+  [Slots, admission and wiring](docs/upgrading-from-v0.16.0.md#slots-admission-and-wiring).
+
+- **BREAKING: CSRF and the login entry are slots the session package provides (`@o3co/auth-provider-core`,
+  `-session`, `-device-grant`, `-federation-grants`)** ([#739](https://github.com/o3co/auth.provider/pull/739), [#744](https://github.com/o3co/auth.provider/pull/744), [#746](https://github.com/o3co/auth.provider/pull/746), [#774](https://github.com/o3co/auth.provider/pull/774), [#784](https://github.com/o3co/auth.provider/pull/784), [#1089](https://github.com/o3co/auth.provider/pull/1089)).
+  `sessionModule` requires the `csrfTokenSigner` slot, which the session store's module fills;
+  `createCsrfProtection({ secret })` becomes `createCsrfProtection({ signer })`, and
+  `createSessionCsrfTokenSigner` refuses a secret under 32 bytes of key material. An enabled device grant
+  requires the `csrfGuard` slot, and `@o3co/auth-provider-session` is no longer its peer dependency. Enabled
+  federation grants reach the login page through the `loginEntry` slot. The federation-grants consent answer
+  is checked by the deployment's `csrfGuard`: a consent page must not be served under
+  `Referrer-Policy: no-referrer`, and the answer depends on `http.trustProxy` and the proxy's forwarded
+  headers. Upgrade guide:
+  [Slots, admission and wiring](docs/upgrading-from-v0.16.0.md#slots-admission-and-wiring) and
+  [Passkeys, users and sessions](docs/upgrading-from-v0.16.0.md#passkeys-users-and-sessions).
+
+- **BREAKING: one module per feature, switched by its section (`@o3co/auth-provider-oauth`, `-session`,
+  `-device-grant`, `-dpop`, `-mtls`, `-mfa`, `-federation-grants`, standalone template)** ([#1166](https://github.com/o3co/auth.provider/pull/1166),
+  [#1171](https://github.com/o3co/auth.provider/pull/1171)–[#1175](https://github.com/o3co/auth.provider/pull/1175), [#1337](https://github.com/o3co/auth.provider/pull/1337), [#1358](https://github.com/o3co/auth.provider/pull/1358), [#1365](https://github.com/o3co/auth.provider/pull/1365), [#1381](https://github.com/o3co/auth.provider/pull/1381), [#1451](https://github.com/o3co/auth.provider/pull/1451), [#1470](https://github.com/o3co/auth.provider/pull/1470)). A module whose switch is off registers
+  nothing. These factories are removed, and you list the module instead: `oauthModule({ config })` →
+  `oauthEndpointsModule`, `oauthSessionModule({ config })` → `oauthSessionGrantModule`,
+  `oauthAuthorizationModule({ config })` → `oauthAuthorizationGrantsModule`, `deviceGrantModule({ config })` →
+  `deviceAuthorizationGrantModule`, `sessionStoreModuleFor(config)` → `sessionStoreModule`. The template's
+  `storesModule` is removed. Upgrade guide:
+  [A module switched off registers nothing](docs/upgrading-from-v0.16.0.md#a-module-switched-off-registers-nothing).
+
+- **BREAKING: contribution kinds (`@o3co/auth-provider-core`)** ([#1327](https://github.com/o3co/auth.provider/pull/1327), [#1402](https://github.com/o3co/auth.provider/pull/1402)). A contribution's container
+  must have its kind's shape (`contribution-malformed`). The `grants` collector is `GrantCollector`, and a
+  grant factory may answer `null`. Upgrade guide:
+  [Slots, admission and wiring](docs/upgrading-from-v0.16.0.md#slots-admission-and-wiring).
+
+- **BREAKING: exports removed and types changed (`@o3co/auth-provider-core`)** ([#702](https://github.com/o3co/auth.provider/pull/702), [#734](https://github.com/o3co/auth.provider/pull/734), [#996](https://github.com/o3co/auth.provider/pull/996), [#1234](https://github.com/o3co/auth.provider/pull/1234),
+  [#1469](https://github.com/o3co/auth.provider/pull/1469), [#1471](https://github.com/o3co/auth.provider/pull/1471), [#1472](https://github.com/o3co/auth.provider/pull/1472)). The 42 undocumented names listed in [#1234](https://github.com/o3co/auth.provider/pull/1234); `isTrustedProxyEntry`;
+  `DEVICE_CODE_STORE_ABSENCE_POLICY`; `durationFromEnv` (use `wholeNumberFromEnv`); the testing entry's
+  `withUserRepositoryHttp` and `userRepositoryHttpOf`; and core's unwired MFA surface (`createMfaRouter`,
+  `MfaProvider`). `FederationGrantLodgingRefused` takes no type parameter, and `connection_not_configured` is
+  its own variant (`FederationGrantConnectionNotConfigured`). Upgrade guide:
+  [Exports removed, and signatures changed](docs/upgrading-from-v0.16.0.md#exports-removed-and-signatures-changed).
+
+#### Stores and ports you implement
+
+- **BREAKING: store ports (`@o3co/auth-provider-core`, `-redis`)**. Upgrade guide:
+  [Stores and records you implement](docs/upgrading-from-v0.16.0.md#stores-and-records-you-implement).
+  - `FederationTokenStore` writes conditionally (`getVersioned`, `replaceIf`, `removeIf`), with no `update`,
+    and `obtainedAt` is a required key ([#1013](https://github.com/o3co/auth.provider/pull/1013), [#1014](https://github.com/o3co/auth.provider/pull/1014), [#1018](https://github.com/o3co/auth.provider/pull/1018), [#1176](https://github.com/o3co/auth.provider/pull/1176), [#1189](https://github.com/o3co/auth.provider/pull/1189), [#1215](https://github.com/o3co/auth.provider/pull/1215)).
+  - `FederationGrantStore` implements `takeRotation` and `refundRotation` ([#1279](https://github.com/o3co/auth.provider/pull/1279), [#1310](https://github.com/o3co/auth.provider/pull/1310), [#1321](https://github.com/o3co/auth.provider/pull/1321)).
+    Callers give an access token's `effectiveExpiresAt` ([#1052](https://github.com/o3co/auth.provider/pull/1052), [#1078](https://github.com/o3co/auth.provider/pull/1078)).
+  - `DeviceCodeStore` records the approving session's `amr` and authentication time ([#1093](https://github.com/o3co/auth.provider/pull/1093)).
+  - Redis client wrappers implement `advanceRevocationBoundaries` ([#993](https://github.com/o3co/auth.provider/pull/993)).
+  - A custom Redis `ChallengeStoreClient` implements `get`; the challenge store records when a challenge was
+    issued ([#1391](https://github.com/o3co/auth.provider/pull/1391)).
+
+- **BREAKING: the Redis stores require `maxmemory-policy noeviction` (`@o3co/auth-provider-redis`,
+  standalone template)** ([#1268](https://github.com/o3co/auth.provider/pull/1268), [#1541](https://github.com/o3co/auth.provider/pull/1541), [#1545](https://github.com/o3co/auth.provider/pull/1545), [#1598](https://github.com/o3co/auth.provider/pull/1598), [#1612](https://github.com/o3co/auth.provider/pull/1612)). The attempt counter, the session lifecycle
+  store, the federation token store, the two MFA stores, the access-token denylist, the subject revocation
+  store, the refresh-token family store and the replay seen-set refuse to boot unless the server reports
+  `noeviction` (`RedisStoreEvictableError`, reason `<store>-evictable`, as the `cause` of the module's
+  `provides-factory-failed`). A policy that cannot be read refuses too, unless the clients are built with
+  `assumeNoEviction: true` (`makeIoredisClients(io, { assumeNoEviction: true })`; template:
+  `REDIS_CLIENTS_ASSUME_NO_EVICTION=true`). A server that cannot answer at boot fails the boot. These stores'
+  factories and builders return a `Promise`, and their clients gain `durability()`. Upgrade guide:
+  [Values read more strictly](docs/upgrading-from-v0.16.0.md#values-read-more-strictly).
+
+- **BREAKING: the Redis federation stores read the environment's name trimmed and in lower case
+  (`@o3co/auth-provider-redis`)** ([#1480](https://github.com/o3co/auth.provider/pull/1480)). `NODE_ENV=Production` now refuses `allow-plaintext`. Upgrade
+  guide: [Values read more strictly](docs/upgrading-from-v0.16.0.md#values-read-more-strictly).
+
+#### Standalone template and `create-app`
+
+- **BREAKING: the standalone template (standalone template, `@o3co/create-auth-provider`)** ([#783](https://github.com/o3co/auth.provider/pull/783), [#853](https://github.com/o3co/auth.provider/pull/853),
+  [#1177](https://github.com/o3co/auth.provider/pull/1177), [#1245](https://github.com/o3co/auth.provider/pull/1245), [#1264](https://github.com/o3co/auth.provider/pull/1264), [#1475](https://github.com/o3co/auth.provider/pull/1475), [#1482](https://github.com/o3co/auth.provider/pull/1482)).
+  - The template has its own `logging`, `http`, `cors`, `redis-clients` and `key-store` modules, and an
+    `adapters {}` section that selects the stores.
+  - `mfaMode` (`MFA_MODE`) defaults to `required`. Outside development the boot is refused until the MFA
+    stores, `MFA_ENCRYPTION_KEY` and a mail sender are set, or `MFA_MODE=off`. `create-app --no-mfa` writes the
+    switch off.
+  - The federation grant stores default to `none`.
+  - Refusals before boot are `BootError`s with reason codes.
+
+  Take the new `src/` and `config/` and re-apply your edits. Upgrade guide:
+  [Your scaffold](docs/upgrading-from-v0.16.0.md#your-scaffold).
+
+### Added
+
+- **Multi-factor authentication (`@o3co/auth-provider-mfa`, new; `@o3co/auth-provider-core`,
+  `-redis`, `-foundation`, `-webauthn`, `-test-kit`)** ([#702](https://github.com/o3co/auth.provider/pull/702), [#720](https://github.com/o3co/auth.provider/pull/720), [#721](https://github.com/o3co/auth.provider/pull/721), [#729](https://github.com/o3co/auth.provider/pull/729), [#730](https://github.com/o3co/auth.provider/pull/730), [#731](https://github.com/o3co/auth.provider/pull/731), [#749](https://github.com/o3co/auth.provider/pull/749), [#781](https://github.com/o3co/auth.provider/pull/781),
+  [#800](https://github.com/o3co/auth.provider/pull/800), [#809](https://github.com/o3co/auth.provider/pull/809), [#812](https://github.com/o3co/auth.provider/pull/812), [#813](https://github.com/o3co/auth.provider/pull/813), [#823](https://github.com/o3co/auth.provider/pull/823), [#828](https://github.com/o3co/auth.provider/pull/828), [#837](https://github.com/o3co/auth.provider/pull/837), [#850](https://github.com/o3co/auth.provider/pull/850), [#869](https://github.com/o3co/auth.provider/pull/869), [#897](https://github.com/o3co/auth.provider/pull/897), [#908](https://github.com/o3co/auth.provider/pull/908), [#909](https://github.com/o3co/auth.provider/pull/909), [#917](https://github.com/o3co/auth.provider/pull/917), [#920](https://github.com/o3co/auth.provider/pull/920)–[#922](https://github.com/o3co/auth.provider/pull/922), [#924](https://github.com/o3co/auth.provider/pull/924),
+  [#930](https://github.com/o3co/auth.provider/pull/930), [#939](https://github.com/o3co/auth.provider/pull/939), [#942](https://github.com/o3co/auth.provider/pull/942), [#973](https://github.com/o3co/auth.provider/pull/973), [#974](https://github.com/o3co/auth.provider/pull/974), [#978](https://github.com/o3co/auth.provider/pull/978), [#982](https://github.com/o3co/auth.provider/pull/982), [#999](https://github.com/o3co/auth.provider/pull/999), [#1000](https://github.com/o3co/auth.provider/pull/1000), [#1003](https://github.com/o3co/auth.provider/pull/1003), [#1007](https://github.com/o3co/auth.provider/pull/1007), [#1049](https://github.com/o3co/auth.provider/pull/1049), [#1069](https://github.com/o3co/auth.provider/pull/1069), [#1083](https://github.com/o3co/auth.provider/pull/1083), [#1086](https://github.com/o3co/auth.provider/pull/1086), [#1087](https://github.com/o3co/auth.provider/pull/1087), [#1112](https://github.com/o3co/auth.provider/pull/1112), [#1121](https://github.com/o3co/auth.provider/pull/1121), [#1129](https://github.com/o3co/auth.provider/pull/1129)–[#1132](https://github.com/o3co/auth.provider/pull/1132), [#1143](https://github.com/o3co/auth.provider/pull/1143), [#1160](https://github.com/o3co/auth.provider/pull/1160)–[#1162](https://github.com/o3co/auth.provider/pull/1162),
+  [#1165](https://github.com/o3co/auth.provider/pull/1165), [#1179](https://github.com/o3co/auth.provider/pull/1179), [#1181](https://github.com/o3co/auth.provider/pull/1181), [#1182](https://github.com/o3co/auth.provider/pull/1182), [#1213](https://github.com/o3co/auth.provider/pull/1213), [#1224](https://github.com/o3co/auth.provider/pull/1224), [#1233](https://github.com/o3co/auth.provider/pull/1233), [#1231](https://github.com/o3co/auth.provider/pull/1231), [#1232](https://github.com/o3co/auth.provider/pull/1232), [#1236](https://github.com/o3co/auth.provider/pull/1236), [#1238](https://github.com/o3co/auth.provider/pull/1238), [#1240](https://github.com/o3co/auth.provider/pull/1240), [#1244](https://github.com/o3co/auth.provider/pull/1244), [#1249](https://github.com/o3co/auth.provider/pull/1249), [#1262](https://github.com/o3co/auth.provider/pull/1262), [#1343](https://github.com/o3co/auth.provider/pull/1343), [#1406](https://github.com/o3co/auth.provider/pull/1406), [#1450](https://github.com/o3co/auth.provider/pull/1450), [#1452](https://github.com/o3co/auth.provider/pull/1452),
+  [#1527](https://github.com/o3co/auth.provider/pull/1527), [#1528](https://github.com/o3co/auth.provider/pull/1528), [#1535](https://github.com/o3co/auth.provider/pull/1535), [#1540](https://github.com/o3co/auth.provider/pull/1540), [#1543](https://github.com/o3co/auth.provider/pull/1543), [#1544](https://github.com/o3co/auth.provider/pull/1544), [#1549](https://github.com/o3co/auth.provider/pull/1549), [#1550](https://github.com/o3co/auth.provider/pull/1550), [#1552](https://github.com/o3co/auth.provider/pull/1552)–[#1554](https://github.com/o3co/auth.provider/pull/1554), [#1571](https://github.com/o3co/auth.provider/pull/1571), [#1573](https://github.com/o3co/auth.provider/pull/1573)). This adds the
+  `mfa` session requirement under `mfa.mode` `off`, `optional` or `required`, with TOTP, email, WebAuthn and
+  recovery-code factors. It covers the first binding at login, step-up, self-service enrollment and factor
+  management, recovery-code regeneration, the MFA lock with authorized release, and the operator reset
+  (`resetMfaForSubject`). The ports are `MfaFactor`, `MfaFactorStore` (fenced by a store generation:
+  `listVersioned`, `createIf`, `removeIf`) and `MfaTransactionStore` (the email-proof consume takes the
+  subject's lease, and a note of the first-binding mark answers the mark that stood before it). They come with
+  memory and Redis stores, the Store's MFA endpoints over HTTP (`HttpMfaFactorStore`, whose `timeout` is
+  bounded by the store write lifetime), the enrollment witness, and
+  `core.sessionRequirements.secondFactorAuthority`. A first factor bound without the account-email proof counts
+  from the next sign-in. The development sample key is accepted only when the environment names
+  `development` or `test`. The in-memory stores warn when built. "Turning MFA on" in the upgrade guide, and
+  the Store implementer checklist, say what to do before `required`.
+
+- **Mail senders (`@o3co/auth-provider-standard`, new; `@o3co/auth-provider-core`)** ([#810](https://github.com/o3co/auth.provider/pull/810), [#832](https://github.com/o3co/auth.provider/pull/832), [#1241](https://github.com/o3co/auth.provider/pull/1241),
+  [#1250](https://github.com/o3co/auth.provider/pull/1250), [#1536](https://github.com/o3co/auth.provider/pull/1536), [#1542](https://github.com/o3co/auth.provider/pull/1542)). The mail port carries the meaning of each message, and `normaliseMailAddress` keeps
+  an address's local part as written and lower-cases only the domain. `standard` ships an SMTP sender and a
+  development sender. The template installs a deployment's own sender through `overrides.mailSenderModules`,
+  and a Mailpit compose overlay, which reads its MFA key from `MFA_ENCRYPTION_KEY`.
+
+- **Conformance suites (`@o3co/auth-provider-test-kit`, new)** ([#799](https://github.com/o3co/auth.provider/pull/799), [#875](https://github.com/o3co/auth.provider/pull/875), [#903](https://github.com/o3co/auth.provider/pull/903), [#1102](https://github.com/o3co/auth.provider/pull/1102), [#1141](https://github.com/o3co/auth.provider/pull/1141), [#1163](https://github.com/o3co/auth.provider/pull/1163),
+  [#1235](https://github.com/o3co/auth.provider/pull/1235), [#1442](https://github.com/o3co/auth.provider/pull/1442), [#1580](https://github.com/o3co/auth.provider/pull/1580), [#1582](https://github.com/o3co/auth.provider/pull/1582), [#1586](https://github.com/o3co/auth.provider/pull/1586), [#1589](https://github.com/o3co/auth.provider/pull/1589), [#1590](https://github.com/o3co/auth.provider/pull/1590), [#1592](https://github.com/o3co/auth.provider/pull/1592)–[#1595](https://github.com/o3co/auth.provider/pull/1595)). Contract suites for the MFA factor, factor store, enrollment
+  witness and WebAuthn credential store, the generic conditional-write suites, the slots' contract suites
+  (`csrfGuardContract`, `csrfTokenSignerContract`, `loginCompletionContract`, `loginEntryContract`,
+  `sessionCookiePolicyContract`, `httpSettingsContract`, `oauthTokenSettingsContract`,
+  `federationGrantPolicyContract`, `rateLimiterContract`, `sessionRequirementContract`), and a fake Store.
+  `express` is an optional peer. Core's `./testing` keeps the slots' test doubles.
+
+- **Session lifecycle and its contracts (`@o3co/auth-provider-core`, `-redis`)** ([#1351](https://github.com/o3co/auth.provider/pull/1351), [#1372](https://github.com/o3co/auth.provider/pull/1372), [#1378](https://github.com/o3co/auth.provider/pull/1378),
+  [#1390](https://github.com/o3co/auth.provider/pull/1390)). The `SessionLifecycleStore` port, its in-process and Redis stores, the `SessionLifecycle`
+  service and module, and the `SessionCloseNotifier` contribution, each with a contract suite.
+
+- **Outbound fetch for client-supplied URLs (`@o3co/auth-provider-core`)** ([#1117](https://github.com/o3co/auth.provider/pull/1117), [#1147](https://github.com/o3co/auth.provider/pull/1147), [#1373](https://github.com/o3co/auth.provider/pull/1373)).
+  `createOutboundFetch` and `core.outbound`: one HTTP client for URLs taken from client metadata, which only
+  reaches the destinations the policy admits. Core provides the policy as the `outboundPolicy` component.
+
+- **RFC 9207 and RFC 9470 (`@o3co/auth-provider-oauth`)** ([#812](https://github.com/o3co/auth.provider/pull/812), [#1028](https://github.com/o3co/auth.provider/pull/1028)). Every authorization response
+  carries `iss`, and discovery advertises `authorization_response_iss_parameter_supported`. Tokens carry
+  `auth_time`, and introspection answers `acr`, `amr` and `auth_time`. An exchanged token carries the
+  subject's `acr`, `amr` and `auth_time` when this provider issued it ([#1485](https://github.com/o3co/auth.provider/pull/1485)). The device token carries the
+  approving session's `amr` and `auth_time` ([#1107](https://github.com/o3co/auth.provider/pull/1107)), and the passkey grant stamps `auth_time` from the
+  challenge's recorded issuance ([#1364](https://github.com/o3co/auth.provider/pull/1364), [#1389](https://github.com/o3co/auth.provider/pull/1389), [#1393](https://github.com/o3co/auth.provider/pull/1393)).
+
+- **Attempt counter (`@o3co/auth-provider-core`, `-redis`)** ([#1324](https://github.com/o3co/auth.provider/pull/1324), [#1334](https://github.com/o3co/auth.provider/pull/1334)). The `AttemptCounter`
+  port, `createAttemptGuard`, `redisAttemptCounterModule`, and a module's `verifierLimitClaim`.
+
+- **Federation grants (`@o3co/auth-provider-core`, `-federation-grants`, `-redis`)** ([#1279](https://github.com/o3co/auth.provider/pull/1279), [#1281](https://github.com/o3co/auth.provider/pull/1281), [#1285](https://github.com/o3co/auth.provider/pull/1285),
+  [#1302](https://github.com/o3co/auth.provider/pull/1302), [#1303](https://github.com/o3co/auth.provider/pull/1303), [#1317](https://github.com/o3co/auth.provider/pull/1317)). A per-grant rotation budget (`rotationBudget`, `rotationWindow`) bounds upstream
+  refresh-token rotations.
+
+- **Composition and core exports (`@o3co/auth-provider-core`)**. The `federationTypes` contribution kind and
+  `defineFederationType` ([#740](https://github.com/o3co/auth.provider/pull/740), [#1273](https://github.com/o3co/auth.provider/pull/1273)); `auditHooks`, fanned out beside the `auditSink` ([#1025](https://github.com/o3co/auth.provider/pull/1025));
+  `bootstrapComponents.configDefaults` ([#1323](https://github.com/o3co/auth.provider/pull/1323)); `replicaSafety` as a function of the module's section
+  ([#1371](https://github.com/o3co/auth.provider/pull/1371)); the `tokenBindingSettings`, `federationSettings` and `federationGrantPolicy` slots ([#1340](https://github.com/o3co/auth.provider/pull/1340), [#1356](https://github.com/o3co/auth.provider/pull/1356),
+  [#1432](https://github.com/o3co/auth.provider/pull/1432)); `checkOAuthTokenSettings` and `readCoreSection` ([#1322](https://github.com/o3co/auth.provider/pull/1322)); `moduleReferences` and `coreReference`
+  ([#743](https://github.com/o3co/auth.provider/pull/743)); `copyPlainJson` ([#1446](https://github.com/o3co/auth.provider/pull/1446)); `readUserSnapshot` ([#1205](https://github.com/o3co/auth.provider/pull/1205)); `validatedClientRepository` ([#1120](https://github.com/o3co/auth.provider/pull/1120));
+  `federationGrantAccessToken` ([#1072](https://github.com/o3co/auth.provider/pull/1072)); `isDevelopmentEnvironment` ([#1534](https://github.com/o3co/auth.provider/pull/1534)); `generateIdToken`'s issuance
+  instant ([#1360](https://github.com/o3co/auth.provider/pull/1360)); `subjectBoundaryCovers` ([#1377](https://github.com/o3co/auth.provider/pull/1377)); an assertion verifier's issue time ([#1370](https://github.com/o3co/auth.provider/pull/1370));
+  `GrantPolicyRequest.originalAudience` ([#1566](https://github.com/o3co/auth.provider/pull/1566)); the optional `UserRepository.findBySubject`, detected by
+  `supportsSubjectLookup`, and `createTestUserRepository` ([#1583](https://github.com/o3co/auth.provider/pull/1583)); the client registration field
+  `allowExchangeOfTokensIssuedToOthers` ([#1551](https://github.com/o3co/auth.provider/pull/1551)); and test fixtures (`federationTypeForTests`,
+  `createTestFederationSettings`, `sectionStrictnessProblems`) ([#1304](https://github.com/o3co/auth.provider/pull/1304), [#1325](https://github.com/o3co/auth.provider/pull/1325)).
+
+- **Templates by composition shape (`@o3co/create-auth-provider`)** ([#753](https://github.com/o3co/auth.provider/pull/753), [#1261](https://github.com/o3co/auth.provider/pull/1261), [#1546](https://github.com/o3co/auth.provider/pull/1546)). `--template`,
+  with every template shipped and tested, and `--no-mfa`, whose project passes its bundled tests.
+
+### Changed
+
+- **A token response's `expires_in` is the time the token has left (`@o3co/auth-provider-core`)** ([#1399](https://github.com/o3co/auth.provider/pull/1399)).
+  It may be below the configured lifetime.
+- **`auth_time` is never later than the clock that mints it (`@o3co/auth-provider-core`, `-oauth`)** ([#991](https://github.com/o3co/auth.provider/pull/991),
+  [#1015](https://github.com/o3co/auth.provider/pull/1015), [#1368](https://github.com/o3co/auth.provider/pull/1368)). The `authorization_code` grant signs all three tokens at one issuance instant.
+- **The federation token route stores a refreshed upstream token for at most `maxTokenLifetimeMs`, 24 hours by
+  default (`@o3co/auth-provider-oauth`)** ([#1060](https://github.com/o3co/auth.provider/pull/1060), [#1226](https://github.com/o3co/auth.provider/pull/1226), [#1227](https://github.com/o3co/auth.provider/pull/1227)).
+- **Federation grants (`@o3co/auth-provider-core`, `-federation-grants`)** ([#883](https://github.com/o3co/auth.provider/pull/883), [#963](https://github.com/o3co/auth.provider/pull/963), [#1021](https://github.com/o3co/auth.provider/pull/1021), [#1097](https://github.com/o3co/auth.provider/pull/1097),
+  [#1228](https://github.com/o3co/auth.provider/pull/1228)). `/reauthorize` answers a removed connection `403 access_denied/connection_not_permitted`.
+  An upstream answer's `expiresAt` and `expiresIn` are read together, and the earlier one ends the token.
+  A refresh answer without a `tokenType` is refused. A requirement's step-up at connect is a `303` to the
+  requirement's page.
+- **A login's custom claims are stored as their JSON form (`@o3co/auth-provider-core`, `-session`)**
+  ([#1116](https://github.com/o3co/auth.provider/pull/1116), [#1122](https://github.com/o3co/auth.provider/pull/1122)). A claim that cannot be serialised is dropped with a `login_claim_dropped` warning.
+- **Subject revocation stamps its boundary until a write settles (`@o3co/auth-provider-core`)** ([#1526](https://github.com/o3co/auth.provider/pull/1526)).
+  `revokeAllForSubject` and the subject revocation service stamp each boundary 250 ms ahead and write it
+  again, up to four writes, until one commits within 250 ms; when none does, the boundary stays in force and
+  `revoke_all_watermark_failed` is logged. New tokens may be refused for up to about a second longer after a
+  revocation. Hosts should slew their clocks rather than step them.
+- **A refused `yaml` or `static` client registration names the entry by list and position, and never quotes
+  the URI or scope (`@o3co/auth-provider-core`)** ([#1120](https://github.com/o3co/auth.provider/pull/1120)).
+- **Shutdown: a cleanup registers the allowance it needs (`@o3co/auth-provider-core`, standalone template)**
+  ([#797](https://github.com/o3co/auth.provider/pull/797)). `createApp` runs the providers' cleanups when boot is refused late ([#1491](https://github.com/o3co/auth.provider/pull/1491)).
+- **Production dependencies (most packages, standalone template)** ([#683](https://github.com/o3co/auth.provider/pull/683), [#1558](https://github.com/o3co/auth.provider/pull/1558)).
+  `pino` 10.4.0, `redis` 6.3.0, `nodemailer` 10.0.14, `js-yaml` 5.4.2, `zod` 4.6.5 and `pkijs` 3.4.1 (minor
+  and patch updates).
+
+### Fixed
+
+- **Logout and a concurrent code exchange no longer miss each other (`@o3co/auth-provider-oauth`,
+  `-core`, `-redis`)** ([#879](https://github.com/o3co/auth.provider/pull/879), [#891](https://github.com/o3co/auth.provider/pull/891), [#1026](https://github.com/o3co/auth.provider/pull/1026)). A code exchange refused at its second session read, or whose
+  client record is refused, revokes the refresh-token family it registered, and the code survives a refused
+  client record ([#1256](https://github.com/o3co/auth.provider/pull/1256), [#1525](https://github.com/o3co/auth.provider/pull/1525)).
+- **`/session/logout` and `/oauth/logout` expire the session cookie (`@o3co/auth-provider-session`)** ([#1561](https://github.com/o3co/auth.provider/pull/1561),
+  [#1564](https://github.com/o3co/auth.provider/pull/1564)). The session store module expires the cookie whenever the request's session is destroyed, with the
+  attributes it was set with. A failed destroy, a regenerated session, and a destroy after the response is
+  sent leave it alone.
+- **The front-channel logout page sets its own `Content-Security-Policy`, and continues to the upstream
+  end-session URL (`@o3co/auth-provider-oauth`)** ([#1574](https://github.com/o3co/auth.provider/pull/1574), [#1596](https://github.com/o3co/auth.provider/pull/1596)). The policy frames exactly the relying
+  parties' front-channel origins and allows the redirect script by hash, with everything else `'none'`, so the
+  page works under a host's strict global policy such as the standalone template's. When the session's
+  federation ends sessions upstream, the page redirects there as the `303` answer does, carrying the validated
+  `post_logout_redirect_uri` and `state`.
+- **A login takes an ORM entity, a getter-backed `User` or an ORM list of groups
+  (`@o3co/auth-provider-core`)** ([#1100](https://github.com/o3co/auth.provider/pull/1100), [#1116](https://github.com/o3co/auth.provider/pull/1116)).
+- **The federation token route writes only the record it read, never refreshes a removed record or a token
+  counted from its own call, and confirms the session and the record before it answers
+  (`@o3co/auth-provider-oauth`)** ([#1001](https://github.com/o3co/auth.provider/pull/1001), [#1067](https://github.com/o3co/auth.provider/pull/1067), [#1079](https://github.com/o3co/auth.provider/pull/1079), [#1190](https://github.com/o3co/auth.provider/pull/1190), [#1342](https://github.com/o3co/auth.provider/pull/1342), [#1486](https://github.com/o3co/auth.provider/pull/1486), [#1539](https://github.com/o3co/auth.provider/pull/1539), [#1610](https://github.com/o3co/auth.provider/pull/1610)). After an
+  upstream call, the route reads the session's liveness again and confirms the federation record again; a
+  session no longer live is `401 invalid_token`, a record removed meanwhile is `404 federation_not_linked`, and
+  a record rewritten meanwhile is answered as a conflict (`federation_token_serve_discarded`).
+- **The memory and Redis federation grant stores agree on numbers, reclaimed credentials, the lock's clock and
+  retention (`@o3co/auth-provider-core`, `-redis`)** ([#711](https://github.com/o3co/auth.provider/pull/711)).
+- **Federation-grant retrieval and the connect callback read an upstream answer once, by one rule
+  (`@o3co/auth-provider-core`, `-federation-grants`)** ([#1012](https://github.com/o3co/auth.provider/pull/1012), [#1047](https://github.com/o3co/auth.provider/pull/1047), [#1073](https://github.com/o3co/auth.provider/pull/1073), [#1230](https://github.com/o3co/auth.provider/pull/1230), [#1254](https://github.com/o3co/auth.provider/pull/1254), [#1257](https://github.com/o3co/auth.provider/pull/1257),
+  [#1280](https://github.com/o3co/auth.provider/pull/1280), [#1410](https://github.com/o3co/auth.provider/pull/1410)). The callback dates the exchanged token as retrieval does; a re-answer of the held token never
+  lengthens its life; retrieval reads the grant's id and version before the upstream refresh; and the memory
+  store stamps a failure report's fields read by name.
+- **An upstream `503` on a federation token refresh keeps its rotation counted (`@o3co/auth-provider-core`)**
+  ([#1530](https://github.com/o3co/auth.provider/pull/1530)). A sustained outage answered `503` spends the rotation budget like one answered `500`, `502` or
+  `504`.
+- **A stored device authorization, federation-grant date or status that is malformed is refused or answered
+  as an outage, never a `500` (`@o3co/auth-provider-device-grant`, `-core`, `-federation-grants`)**
+  ([#1185](https://github.com/o3co/auth.provider/pull/1185), [#1188](https://github.com/o3co/auth.provider/pull/1188), [#1218](https://github.com/o3co/auth.provider/pull/1218), [#1267](https://github.com/o3co/auth.provider/pull/1267), [#1271](https://github.com/o3co/auth.provider/pull/1271)).
+- **A federation callback refuses an exchange answer that names no instant, and refuses when retiring its
+  transaction fails (`@o3co/auth-provider-session`)** ([#1091](https://github.com/o3co/auth.provider/pull/1091), [#1133](https://github.com/o3co/auth.provider/pull/1133), [#1222](https://github.com/o3co/auth.provider/pull/1222)). An `expiresAt` that is not a
+  `Date` holding an instant is `502 exchange_failed`. A failed transaction delete is `503`, whatever the store
+  rejects with.
+- **A token-exchange validator's `familyId` or `sid` that is not a string is a failed validation
+  (`@o3co/auth-provider-oauth-token-exchange`)** ([#1223](https://github.com/o3co/auth.provider/pull/1223)).
+- **`/authorize` sends a session whose `authTime` cannot be read to log in, and logs a malformed deny code by
+  its type (`@o3co/auth-provider-oauth`)** ([#1418](https://github.com/o3co/auth.provider/pull/1418), [#1484](https://github.com/o3co/auth.provider/pull/1484)).
+- **WebAuthn registration and assertion (`@o3co/auth-provider-webauthn`)** ([#850](https://github.com/o3co/auth.provider/pull/850), [#941](https://github.com/o3co/auth.provider/pull/941), [#1529](https://github.com/o3co/auth.provider/pull/1529)). A framed
+  registration is accepted only from a top origin in `webauthn.topOrigin` (`400 top_origin_mismatch`). The
+  grant reads an assertion's client data as `@simplewebauthn/server` decodes it. Registration admits the
+  browser session once the request body has arrived, with the registration routes' own JSON parser and
+  100kb limit.
+- **The refresh-token family keeps its absolute expiry across slow replies, and the challenge store reports an
+  expiry no later than the one it issued (`@o3co/auth-provider-redis`)** ([#1376](https://github.com/o3co/auth.provider/pull/1376), [#1383](https://github.com/o3co/auth.provider/pull/1383)).
+- **A refresh-token family update whose Redis connection is lost between its read and its commit fails
+  (`@o3co/auth-provider-redis`)** ([#1611](https://github.com/o3co/auth.provider/pull/1611)). It no longer commits on a reconnected connection without its
+  `WATCH`, which could overwrite a concurrent revocation. The wait for the update's connection is bounded by
+  `commandTimeout`.
+- **The in-memory subject revocation keeps a subject's boundary when its clock answers no valid instant
+  (`@o3co/auth-provider-core`)** ([#1609](https://github.com/o3co/auth.provider/pull/1609)). The read or write fails with a `RangeError`, answered as
+  unavailable. The in-memory `SessionLifecycleStore` also refuses a clock reading outside the `Date` range.
+- **Host-name resolutions and Client ID Metadata Document fetches are bounded (`@o3co/auth-provider-core`,
+  `-oauth`)** ([#1621](https://github.com/o3co/auth.provider/pull/1621)). Host-name resolutions by the outbound fetch are bounded for the whole process at two
+  fewer than the libuv threadpool size (`UV_THREADPOOL_SIZE` read as libuv reads it, default 4, so 2), at
+  least one, counting ones whose request already timed out; URLs a request names hold at most one of those
+  resolutions (none when the bound is one); at most 64 calls wait, 48 of them for a request's URL; a call past
+  these bounds fails with `timeout` without starting a resolution. Requests waiting for a Client ID Metadata
+  Document fetch slot are bounded at four times `maxConcurrentFetches` and wait no longer than the fetch
+  deadline; a request no slot was free for, and a fetch that timed out, are not remembered as a refusal of the
+  client id.
+- **Boot reads a component slot holding `undefined` as unfilled, and checks only the working map's own keys
+  (`@o3co/auth-provider-core`)** ([#1270](https://github.com/o3co/auth.provider/pull/1270), [#1352](https://github.com/o3co/auth.provider/pull/1352), [#1359](https://github.com/o3co/auth.provider/pull/1359)). Such a slot is refused as missing, undeclared
+  absent or an incomplete federation store, naming the slot.
+- **The composed audit sink is frozen (`@o3co/auth-provider-core`)** ([#1532](https://github.com/o3co/auth.provider/pull/1532)). When a module contributes
+  `auditHooks`, a write to the fan-out the `auditSink` slot holds throws a `TypeError` in strict-mode code.
+- **`canonicalTokenType` answers `undefined` for a value longer than 4096 characters
+  (`@o3co/auth-provider-core`)** ([#1409](https://github.com/o3co/auth.provider/pull/1409)).
+- **A scaffolded project's suite is green on Node 26 and in a fresh clone, and the template logs only JSON at
+  startup (standalone template, `@o3co/create-auth-provider`)** ([#708](https://github.com/o3co/auth.provider/pull/708), [#1548](https://github.com/o3co/auth.provider/pull/1548)).
+- **GitHub's issuer is configured, and a callback's `iss` is compared with it
+  (`@o3co/auth-provider-federation-github`)** ([#1422](https://github.com/o3co/auth.provider/pull/1422)).
+- **The workspace overrides `proxy-addr` into the patched 2.0.8 line** ([#1487](https://github.com/o3co/auth.provider/pull/1487)).
+
+### Security
+
+- **Hardening of authorization codes, sessions and tokens (`@o3co/auth-provider-core`, `-oauth`, `-redis`,
+  `-device-grant`, `-webauthn`, `-oauth-token-exchange`)** ([#932](https://github.com/o3co/auth.provider/pull/932), [#969](https://github.com/o3co/auth.provider/pull/969), [#987](https://github.com/o3co/auth.provider/pull/987), [#992](https://github.com/o3co/auth.provider/pull/992), [#1341](https://github.com/o3co/auth.provider/pull/1341), [#1353](https://github.com/o3co/auth.provider/pull/1353),
+  [#1363](https://github.com/o3co/auth.provider/pull/1363), [#1366](https://github.com/o3co/auth.provider/pull/1366), [#1367](https://github.com/o3co/auth.provider/pull/1367), [#1369](https://github.com/o3co/auth.provider/pull/1369), [#1375](https://github.com/o3co/auth.provider/pull/1375), [#1379](https://github.com/o3co/auth.provider/pull/1379), [#1380](https://github.com/o3co/auth.provider/pull/1380), [#1386](https://github.com/o3co/auth.provider/pull/1386), [#1388](https://github.com/o3co/auth.provider/pull/1388), [#1396](https://github.com/o3co/auth.provider/pull/1396), [#1519](https://github.com/o3co/auth.provider/pull/1519)). Tokens minted from
+  an authorization code reflect the authentication `/authorize` admitted. The subject revocation boundary is
+  compared in whole seconds, on both a token's issuance time and its authentication time. Grants re-check
+  revocation and the session immediately before they sign.
+- **Hardening of client and redirect handling (`@o3co/auth-provider-core`, `-oauth`)** ([#750](https://github.com/o3co/auth.provider/pull/750), [#1044](https://github.com/o3co/auth.provider/pull/1044),
+  [#1053](https://github.com/o3co/auth.provider/pull/1053), [#1096](https://github.com/o3co/auth.provider/pull/1096), [#1128](https://github.com/o3co/auth.provider/pull/1128), [#1142](https://github.com/o3co/auth.provider/pull/1142), [#1157](https://github.com/o3co/auth.provider/pull/1157), [#1183](https://github.com/o3co/auth.provider/pull/1183)). See Breaking.
+
 ## [0.16.0] - 2026-09-26
 
 **Upgrade note.** Upgrade every `@o3co/auth-provider-*` package to 0.16.0

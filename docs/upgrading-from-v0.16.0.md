@@ -430,7 +430,7 @@ step 2, lists every retired key and what you see. New since v0.16.0:
 - **Unknown keys.** A key under `oauth.clientIdMetadataDocuments` that the
   oauth package's `reference.conf` does not list refuses the boot (#1151).
 - **BREAKING: `core.outbound` applies to the Client ID Metadata Document
-  fetch (#1136).** `oauth.clientIdMetadataDocuments.timeoutMs` and `maxBytes`
+  fetch (#1617).** `oauth.clientIdMetadataDocuments.timeoutMs` and `maxBytes`
   above `core.outbound.timeoutMs` and `maxResponseBytes` (5000 ms and 64 KiB
   by default) are lowered to them, said once at boot as `cimd_limit_capped`
   naming both keys; to keep the higher value, raise the `core.outbound` key
@@ -1402,7 +1402,7 @@ modules fills them.
   factories by hand carries `federationSettings` instead of `config`.
 - **BREAKING: the oauth module, device authorization and the
   federation-grant routes require the `outboundPolicy` slot, and
-  `createOAuthRouter` requires `outboundPolicy` (#1125).**
+  `createOAuthRouter` requires `outboundPolicy` (#1616).**
   `oauthEndpointsModule`, `deviceAuthorizationGrantModule` and
   `federationGrantsModule` require core's `outboundPolicy`, which core fills from `core.outbound` in
   every composition, so a composition booted with `createApp` sees no code
@@ -2377,7 +2377,7 @@ modules fills them.
   those adapters instead. `BuildModulesOverrides` has no seam for a session
   store of your own any more: compose it in your own module list.
 - **BREAKING: the key-set and back-channel fetch is passed in, with no
-  default (#1125).** `createClientAssertionVerifier` and
+  default (#1616).** `createClientAssertionVerifier` and
   `createClientAuthMiddleware` require `fetch`, and
   `createFederationGrantRouter` requires `fetch`.
   Pass `createOutboundFetch({ policy, source: "registration" })` over the
@@ -2385,7 +2385,7 @@ modules fills them.
   to build. `createClientAuthMiddleware` takes its options object only: pass
   `{ logger, fetch, … }` where a bare logger was passed.
 - **`createOAuthRouter`'s `clientIdMetadataDocuments` seam** takes `fetch`
-  and `now`; `lookup` is removed (#1136). A `fetch` passed there replaces
+  and `now`; `lookup` is removed (#1617). A `fetch` passed there replaces
   `core.outbound` for the document fetch, so it is for tests only.
 - **Signatures.** `renderFrontchannelLogoutHtml` takes
   `postLogoutRedirect: { uri, state? }` (#1096); `createDeviceCodeGrant`
