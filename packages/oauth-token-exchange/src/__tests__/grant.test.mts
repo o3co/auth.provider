@@ -1670,6 +1670,37 @@ describe("createTokenExchangeGrant — policy hook", () => {
 		expect(captured?.originalAudience).toEqual(["https://api.example.com", "client-a"]);
 	});
 
+	it("refuses a policy that wrote an audience into originalAudience to widen the exchange", async () => {
+		const widening: GrantPolicyHook = {
+			kind: "widen",
+			async evaluate(req) {
+				(req.originalAudience as string[]).push("https://other.example.com");
+				return { outcome: "allow", grantedAudience: ["https://other.example.com"] };
+			},
+		};
+		const g = buildGrant({
+			grantPolicy: widening,
+			clientRepository: mockClientRepository(
+				publicClient({
+					allowedAudiences: ["https://api.example.com", "https://other.example.com"],
+				}),
+			),
+		});
+		const token = await signSelfIssuedAccessToken({
+			aud: ["https://api.example.com", "client-a"],
+			family_id: "fam-1",
+		});
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({ status: 500, error: "server_error" });
+	});
+
 	it("rejects resource when it is missing from the issued-token audience", async () => {
 		const policy: GrantPolicyHook = {
 			kind: "resource-missing",
