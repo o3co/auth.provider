@@ -262,7 +262,7 @@ describe("the suite's records", () => {
 		for (const record of seen) expect(isMfaFactorId(record.id), record.id).toBe(true);
 	});
 
-	it("are typed as core's ContractCase, which the kit re-exports", () => {
+	it("are typed as the kit's ContractCase", () => {
 		expectTypeOf(
 			mfaFactorStoreContract({ build: async () => ({ store: createMemoryMfaFactorStore() }) }),
 		).toEqualTypeOf<readonly ContractCase[]>();

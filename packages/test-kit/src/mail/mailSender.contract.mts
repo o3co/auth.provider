@@ -48,7 +48,7 @@ import {
 	type MailSender,
 	mailSendOutcome,
 } from "@o3co/auth-provider-core";
-import type { ContractCase } from "@o3co/auth-provider-core/testing";
+import type { ContractCase } from "../contractCase.mjs";
 
 /** The ways a relay refuses a mail, each a case of the suite. `limit` is the one a sender answers rather than rejects. */
 export const MAIL_RELAY_REFUSALS = Object.freeze([
