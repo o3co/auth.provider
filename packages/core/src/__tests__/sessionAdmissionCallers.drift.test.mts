@@ -365,6 +365,13 @@ const ALLOWED: ReadonlyArray<AllowedSites> = [
 		sites: { revokedBefore: 1 },
 		why: "permanent: the subject-revocation boundary applied to a token by verifyJwt (D9), and to a claim a grant compares before signing through subjectBoundaryCovers; a token carrier's admission skips the boundary because this reads it",
 	},
+	// The test kit's session requirement suite, which asks a requirement
+	// directly.
+	{
+		file: "packages/test-kit/src/sessionAdmission/sessionRequirement.contract.mts",
+		sites: { claim: 1 },
+		why: "a contract suite building the input a requirement is asked with, not a claim: its `carrier` is the one admission hands a requirement for a cookie session, and the suite reads no session",
+	},
 ];
 
 /** The files whose prefixes may call `recordSecondFactor(`: the two bundled stores, and the MFA package (the session-admission ADR's D3, D10). */
