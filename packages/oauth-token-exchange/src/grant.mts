@@ -261,6 +261,8 @@ async function applyGrantPolicy(
 			requestedScope: requestedScope ?? undefined,
 			requestedAudience: requestedAudience ?? undefined,
 			originalScope: subjectScope.length > 0 ? subjectScope : undefined,
+			// A copy: the subject token's audience is the ceiling the answer is held to.
+			originalAudience: [...subjectAudienceSet],
 			subjectTokenType,
 			// Only when an actor_token was validated, so a type header alone cannot satisfy
 			// a policy gating on it.
