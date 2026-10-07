@@ -26,9 +26,10 @@
  * already typing a code.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApp } from "#/boot/create-app.mjs";
 import { BootError, type BootstrapMap } from "#/boot/types.mjs";
+import type { Logger } from "#/logging/Logger.mjs";
 import {
 	createMfaTransactionStoreFactory,
 	registerBuiltinMfaTransactionStores,
@@ -429,10 +430,13 @@ describe("createMemoryMfaTransactionStore — the live transactions one binding 
 	});
 });
 
+/** Takes the memory builder's in-process warning, which these tests do not read. */
+const quiet = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as Logger;
+
 describe("the MfaTransactionStore adapter factory — the memory adapter's cap", () => {
 	it("builds the memory adapter with the cap its config gives, and the default without one", async () => {
 		const factory = createMfaTransactionStoreFactory();
-		registerBuiltinMfaTransactionStores(factory);
+		registerBuiltinMfaTransactionStores(factory, quiet);
 		const capped = (await factory.create({
 			type: "memory",
 			maxEntries: 5,
@@ -449,7 +453,7 @@ describe("the MfaTransactionStore adapter factory — the memory adapter's cap",
 
 	it("refuses a cap it cannot use, naming the key", async () => {
 		const factory = createMfaTransactionStoreFactory();
-		registerBuiltinMfaTransactionStores(factory);
+		registerBuiltinMfaTransactionStores(factory, quiet);
 		for (const bad of [0, null, "lots"]) {
 			await expect(
 				factory.create({ type: "memory", maxEntries: bad }),

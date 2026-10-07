@@ -25,7 +25,7 @@ import { coreReference } from "../config/references.mjs";
 import { consoleLogger } from "../logging/consoleLogger.mjs";
 import { defineModule } from "../modules/manifest/index.mjs";
 import { configuredMaxEntries } from "../single-use/max-entries.mjs";
-import { warnMfaFactorStoreInMemory } from "./factory.mjs";
+import { warnMfaFactorStoreInMemory, warnMfaTransactionStoreInMemory } from "./factory.mjs";
 import { createMemoryMfaFactorStore } from "./memoryFactorStore.mjs";
 import { createMemoryMfaTransactionStore } from "./memoryTransactionStore.mjs";
 
@@ -55,7 +55,8 @@ export const memoryMfaFactorStoreModule = defineModule({
  * Provides the in-process {@link MfaTransactionStore}. A restart loses the
  * ceremonies in flight, lifts the subject lock state, and drops the email-proof
  * requirement an operator reset recorded, so beside a durable factor store a
- * password holder could then bind without the proof. Capped at
+ * password holder could then bind without the proof; the module warns once when
+ * built. Capped at
  * `core-mfa-transaction-store-memory.maxEntries`, its own section (adapter
  * default when unset); a value that is not a positive whole number refuses the
  * boot, naming the key. The section is strict; `mfaTransactionStore.memory`,
@@ -74,10 +75,14 @@ export const memoryMfaTransactionStoreModule = defineModule({
 		reason:
 			"MFA transactions and attempt limits fork per replica — a transaction started on one replica is unknown to the replica that receives the verification, and the attempt limits and the lockout are counted per replica; and a restart loses the email proof an operator reset required, so beside a durable factor store a password holder can then bind without it",
 	},
+	optional: ["logger"] as const,
 	provides: {
-		mfaTransactionStore: ({ section }) =>
-			createMemoryMfaTransactionStore(
+		mfaTransactionStore: ({ section, logger }) => {
+			const store = createMemoryMfaTransactionStore(
 				configuredMaxEntries(section?.maxEntries, "core-mfa-transaction-store-memory.maxEntries"),
-			),
+			);
+			warnMfaTransactionStoreInMemory(logger ?? consoleLogger);
+			return store;
+		},
 	},
 });
