@@ -829,16 +829,16 @@ describe("createRefreshTokenGrant — refreshTokenFamilyRotation forwarding", ()
 	});
 });
 
-describe("oauthAuthorizationGrantsModule — the refresh_token grant's unknown-family policy, from the section", () => {
+describe("oauthAuthorizationGrantsModule — the refresh_token grant refuses an unknown family", () => {
 	const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 
-	/** The status the module's refresh_token grant answers a token of a family no record holds, built over `refreshToken`. */
-	async function statusFor(refreshToken: Record<string, unknown>): Promise<number> {
+	/** The status the module's refresh_token grant answers a token of a family no record holds. */
+	async function statusFor(): Promise<number> {
 		const factory = oauthAuthorizationGrantsModule.contributes?.grants?.refresh_token;
 		if (factory === undefined) return expect.fail("the module contributes no refresh_token grant");
 		const handler = await factory({
 			section: oauthAuthorizationConfigSchema.parse({
-				grants: { refreshToken: { enabled: true, ...refreshToken } },
+				grants: { refreshToken: { enabled: true } },
 			}),
 			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			oauthTokenSettings,
@@ -878,18 +878,11 @@ describe("oauthAuthorizationGrantsModule — the refresh_token grant's unknown-f
 		return result.status;
 	}
 
-	it("accepts a family-less chain under grants.refreshToken.unknownFamilyPolicy = accept", async () => {
-		expect(await statusFor({ unknownFamilyPolicy: "accept" })).toBe(200);
+	it("answers 400 for a token of a family no record holds", async () => {
+		expect(await statusFor()).toBe(400);
 	});
 
-	it.each([
-		["reject", { unknownFamilyPolicy: "reject" }],
-		["absent", {}],
-	])("rejects it under %s", async (_what, refreshToken) => {
-		expect(await statusFor(refreshToken)).toBe(400);
-	});
-
-	it("requires no config: the section carries the policy", () => {
+	it("requires no config", () => {
 		expect(oauthAuthorizationGrantsModule.requires).not.toContain("config");
 		expect(oauthAuthorizationGrantsModule.optional ?? []).not.toContain("config");
 	});

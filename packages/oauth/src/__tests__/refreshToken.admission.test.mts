@@ -164,7 +164,6 @@ const makeGrant = (opts: {
 		readonly rotation: RefreshTokenFamilyRotation;
 		readonly revocation: RefreshTokenFamilyRevocation | null;
 	};
-	unknownFamilyPolicy?: "accept" | "reject";
 }) => {
 	const rotation = vi.fn(
 		opts.family?.rotation.rotate ?? (async () => ({ outcome: "rotated" as const })),
@@ -175,9 +174,6 @@ const makeGrant = (opts: {
 			: opts.family.revocation;
 	const handler = createRefreshTokenGrant({
 		...grantSettingsFrom(config),
-		...(opts.unknownFamilyPolicy === undefined
-			? {}
-			: { unknownFamilyPolicy: opts.unknownFamilyPolicy }),
 		keyStore: createSymmetricKeyStore(SECRET),
 		refreshTokenFamilyRotation: { register: vi.fn(async () => {}), rotate: rotation },
 		...(familyRevocation === null ? {} : { refreshTokenFamilyRevocation: familyRevocation }),
@@ -689,21 +685,6 @@ describe("the refresh grant — the subject's revocation and the session are rea
 			}),
 			"refresh_token_store_unavailable",
 		);
-	});
-
-	it("a refusal after an unknown family was accepted revokes nothing, since nothing was committed", async () => {
-		const revokeFamily = vi.fn(async () => {});
-		const ended = endedDuringRotation(async () => ({ outcome: "unknown_family" }));
-		const { handler } = makeGrant({
-			unknownFamilyPolicy: "accept",
-			userSessionStore: ended.store,
-			family: {
-				rotation: ended.rotation,
-				revocation: { revokeFamily, isFamilyRevoked: async () => false },
-			},
-		});
-		expect(await refused(handler, await refreshToken())).toEqual(SESSION_INVALID);
-		expect(revokeFamily).not.toHaveBeenCalled();
 	});
 
 	it("a family lifetime the re-checks spend mints nothing", async () => {

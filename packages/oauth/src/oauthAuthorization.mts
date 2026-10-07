@@ -34,10 +34,7 @@
  * `oauthTokenSettings` slot, required while the module is on: the oauth
  * module provides it, and a composition without that module fills it. The
  * refresh-token binding rule they read from core's `tokenBindingSettings`
- * slot. The refresh grant's unknown-family policy is the section's own
- * (`grants.refreshToken.unknownFamilyPolicy`), handed to the grant as boot
- * parsed it. The module reads nothing of the configuration beyond its
- * section.
+ * slot. The module reads nothing of the configuration beyond its section.
  */
 
 import {
@@ -62,24 +59,9 @@ import { createRefreshTokenGrant } from "./grants/refreshToken.mjs";
 const grantSwitch = z.object({ enabled: coerceBooleanFromEnv.optional() }).strict().optional();
 
 /**
- * The refresh_token grant's keys: its switch, and its policy for a refresh
- * token whose family no record holds. `"reject"` is the safe choice and what
- * absent reads as; `"accept"` is for a bounded migration window only.
- */
-const refreshTokenGrant = z
-	.object({
-		enabled: coerceBooleanFromEnv.optional(),
-		unknownFamilyPolicy: z.enum(["accept", "reject"]).optional(),
-	})
-	.strict()
-	.optional();
-
-/**
  * The schema of `oauth-authorization {}`, the module's own section, strict at
- * every level: the switch of each grant the module installs, under `grants`,
- * and the refresh_token grant's unknown-family policy beside its switch. It
- * fills no default: the package's `reference.conf` ships every switch off and
- * the policy `"reject"`.
+ * every level: the switch of each grant the module installs, under `grants`.
+ * It fills no default: the package's `reference.conf` ships every switch off.
  * Absent, the section is `undefined`, which reads as every grant off.
  */
 export const oauthAuthorizationConfigSchema = z
@@ -87,7 +69,7 @@ export const oauthAuthorizationConfigSchema = z
 		grants: z
 			.object({
 				authorizationCode: grantSwitch,
-				refreshToken: refreshTokenGrant,
+				refreshToken: grantSwitch,
 				clientCredentials: grantSwitch,
 				jwtBearer: grantSwitch,
 			})
@@ -119,13 +101,15 @@ const switchedOn = (section: OAuthAuthorizationSection, key: GrantKey): boolean 
  * The module's section, with the paths it moved from and the variables
  * renamed with them: each `oauth.grants.<grant>` refuses boot naming its key
  * under `oauth-authorization.grants`, and its variable is held to the new
- * name. The refresh_token grant's unknown-family policy moved from
- * `oauth.refreshToken.unknownFamilyPolicy` beside the grant's switch, its
- * variable renamed with it. The authorization_code grant's `pkce` block is
- * removed: PKCE with `S256` is mandatory for every authorization-code client,
- * so a key or variable still setting one refuses boot. Parsed whether or not a grant is
- * on, so a setting still written at an old path refuses boot rather than
- * reading as off.
+ * name. The authorization_code grant's `pkce` block is removed: PKCE with
+ * `S256` is mandatory for every authorization-code client, so a key or
+ * variable still setting one refuses boot. The refresh_token grant's
+ * unknown-family policy is removed, at its old path and its current one, with
+ * both variables: a refresh token whose family no record holds is always
+ * refused. The old `oauth.grants.refresh_token` block is mapped key by key, so
+ * its new path does not lie over the removed one. Parsed whether or not a
+ * grant is on, so a setting still written at an old path refuses boot rather
+ * than reading as off.
  */
 const SECTION = {
 	schema: oauthAuthorizationConfigSchema,
@@ -133,8 +117,9 @@ const SECTION = {
 	relocatedFrom: {
 		"oauth.grants.authorization_code": "grants.authorizationCode",
 		"oauth.grants.authorization_code.pkce": null,
-		"oauth.grants.refresh_token": "grants.refreshToken",
-		"oauth.refreshToken.unknownFamilyPolicy": "grants.refreshToken.unknownFamilyPolicy",
+		"oauth.grants.refresh_token.enabled": "grants.refreshToken.enabled",
+		"oauth.refreshToken.unknownFamilyPolicy": null,
+		"oauth-authorization.grants.refreshToken.unknownFamilyPolicy": null,
 		"oauth.grants.client_credentials": "grants.clientCredentials",
 		[`oauth.grants.${JWT_BEARER_GRANT_TYPE}`]: "grants.jwtBearer",
 	},
@@ -144,6 +129,8 @@ const SECTION = {
 			"oauth.grants.authorization_code.pkce.requireS256",
 		OAUTH_GRANTS_REFRESH_TOKEN_ENABLED: "oauth.grants.refresh_token.enabled",
 		OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "oauth.refreshToken.unknownFamilyPolicy",
+		OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY:
+			"oauth-authorization.grants.refreshToken.unknownFamilyPolicy",
 		OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED: "oauth.grants.client_credentials.enabled",
 		OAUTH_GRANTS_JWT_BEARER_ENABLED: `oauth.grants.${JWT_BEARER_GRANT_TYPE}.enabled`,
 	},
@@ -342,10 +329,7 @@ export const oauthAuthorizationGrantsModule = defineModule<
 				if (!switchedOn(deps.section, "refreshToken")) return null;
 				// Refused at boot, not at the first refresh: see the function.
 				requireRefreshTokenFamilies(deps);
-				return createRefreshTokenGrant({
-					...deps,
-					unknownFamilyPolicy: deps.section?.grants?.refreshToken?.unknownFamilyPolicy,
-				});
+				return createRefreshTokenGrant(deps);
 			},
 			// RFC 7523 jwt-bearer. Opt-in like every other grant, and additionally
 			// inert without an `assertionVerifier` — the module lists it optional so

@@ -1159,7 +1159,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 	});
 
-	describe("unknown_family policy", () => {
+	describe("an unknown family", () => {
 		const unknownFamilyRotation: RefreshTokenFamilyRotation = {
 			async register() {},
 			async rotate() {
@@ -1185,25 +1185,35 @@ describe("createRefreshTokenGrant", () => {
 				.sign(secretKey);
 		}
 
-		/** The grant over an unknown family, built with `policy` as its unknownFamilyPolicy. */
-		function depsWithPolicy(policy: unknown, warn = vi.fn()): RefreshTokenGrantDeps {
+		/** The grant over an unknown family, with `extra` handed over beside its deps. */
+		function unknownFamilyDeps(warn = vi.fn(), extra: object = {}): RefreshTokenGrantDeps {
 			return {
 				...mockDeps,
 				refreshTokenFamilyRotation: unknownFamilyRotation,
 				logger: makeStubLogger(warn),
-				...(policy === undefined
-					? {}
-					: { unknownFamilyPolicy: policy as RefreshTokenGrantDeps["unknownFamilyPolicy"] }),
-			};
+				...extra,
+			} as RefreshTokenGrantDeps;
 		}
 
-		it("rejects an unknown family when no policy is handed over: absent reads as reject", async () => {
+		it.each([
+			["nothing beside its deps", {}],
+			["a former policy value handed beside its deps", { unknownFamilyPolicy: "accept" }],
+			[
+				"a configuration naming a former policy",
+				{
+					config: {
+						oauth: {
+							...mockConfig.oauth,
+							refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "accept" },
+						},
+					},
+				},
+			],
+		])("refuses it, whatever is handed over: %s", async (_what, extra) => {
 			const warn = vi.fn();
-			const deps = depsWithPolicy(undefined, warn);
-			expect(deps).not.toHaveProperty("unknownFamilyPolicy");
 			const rt = await makeRtWithFamily();
 
-			const { result } = await createRefreshTokenGrant(deps).handle({
+			const { result } = await createRefreshTokenGrant(unknownFamilyDeps(warn, extra)).handle({
 				...baseCtx,
 				body: { refresh_token: rt },
 			});
@@ -1216,78 +1226,6 @@ describe("createRefreshTokenGrant", () => {
 				expect.objectContaining({ familyId: "fam-unknown" }),
 				"unknown_family_rejected",
 			);
-		});
-
-		it("issues tokens with unknownFamilyPolicy=accept, and warns that it did", async () => {
-			const warn = vi.fn();
-			const rt = await makeRtWithFamily("fam-legacy");
-
-			const { result } = await createRefreshTokenGrant(depsWithPolicy("accept", warn)).handle({
-				...baseCtx,
-				body: { refresh_token: rt },
-			});
-
-			expect(result.status).toBe(200);
-			expect(warn).toHaveBeenCalledWith(
-				expect.objectContaining({ familyId: "fam-legacy" }),
-				"unknown_family_accepted_legacy_mode",
-			);
-		});
-
-		it.each([
-			["reject", "reject"],
-			["any other string", "warn"],
-			["accept in another case", "ACCEPT"],
-			["null", null],
-			["true", true],
-		])("rejects an unknown family under %s: only accept accepts", async (_what, policy) => {
-			const warn = vi.fn();
-			const rt = await makeRtWithFamily("fam-unknown");
-
-			const { result } = await createRefreshTokenGrant(depsWithPolicy(policy, warn)).handle({
-				...baseCtx,
-				body: { refresh_token: rt },
-			});
-
-			expect(result.status).toBe(400);
-			if (!("error" in result)) expect.fail("Expected error in result");
-			expect(result.errorDescription).toBe("unknown_family");
-			expect(warn).toHaveBeenCalledWith(
-				expect.objectContaining({ familyId: "fam-unknown" }),
-				"unknown_family_rejected",
-			);
-			expect(warn).not.toHaveBeenCalledWith(
-				expect.anything(),
-				"unknown_family_accepted_legacy_mode",
-			);
-		});
-
-		it("reads the policy once, when it is built: a later change to its deps decides nothing", async () => {
-			const deps = { ...depsWithPolicy(undefined) };
-			const handler = createRefreshTokenGrant(deps);
-			(deps as { unknownFamilyPolicy?: string }).unknownFamilyPolicy = "accept";
-			const rt = await makeRtWithFamily();
-
-			const { result } = await handler.handle({ ...baseCtx, body: { refresh_token: rt } });
-
-			expect(result.status).toBe(400);
-		});
-
-		it("reads no policy from a configuration handed over beside it", async () => {
-			const config = {
-				oauth: {
-					...mockConfig.oauth,
-					refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "accept" },
-				},
-			};
-			const rt = await makeRtWithFamily();
-
-			const { result } = await createRefreshTokenGrant({
-				...depsWithPolicy(undefined),
-				config,
-			} as never).handle({ ...baseCtx, body: { refresh_token: rt } });
-
-			expect(result.status).toBe(400);
 		});
 
 		it("still answers replay_detected, not unknown_family, for a replayed outcome", async () => {
