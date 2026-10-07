@@ -66,18 +66,36 @@ devDependencies.
   [`src/rateLimit/rateLimiter.contract.mts`](src/rateLimit/rateLimiter.contract.mts);
 - `sessionRequirementContract`, the contract suite every session
   requirement's tests run, in
-  [`src/sessionAdmission/sessionRequirement.contract.mts`](src/sessionAdmission/sessionRequirement.contract.mts).
+  [`src/sessionAdmission/sessionRequirement.contract.mts`](src/sessionAdmission/sessionRequirement.contract.mts);
+- the contract suites of the session slots, which the session package's
+  modules fill or a deployment's own: `csrfGuardContract` (`csrfGuard`, whether
+  a browser's request may change state and a navigation start a flow),
+  `csrfTokenSignerContract` (`csrfTokenSigner`, the CSRF token's signing
+  key), `loginCompletionContract` (`loginCompletion`, establishing a session
+  and answering an interruption at the end of a login), `loginEntryContract`
+  (`loginEntry`, the login page and its `redirect_to`) and
+  `sessionCookiePolicyContract` (`sessionCookiePolicy`, the session
+  cookie's attributes), in [`src/sessionSlots/`](src/sessionSlots/), with
+  the fake Express request and response they drive a component over;
+- `ContractCase`, the `{ name, run }` case every suite of the kit answers,
+  in [`src/contractCase.mts`](src/contractCase.mts).
 
 **Does not own:** the ports, their types and the reading of the witness
 (core); the wire format of the Store's MFA endpoints (core's
 [`mfa/storeWire.mts`](../core/src/mfa/storeWire.mts)) and what each answer
 means ([`@o3co/auth-provider-foundation`](../foundation/README.md#the-stores-mfa-endpoints));
 any adapter, core's in-process ones included (the kit's own tests run
-`mfaFactorStoreContract`, `mfaFactorStoreConditionalContract`, `federationTokenStoreConditionalContract`, `webAuthnCredentialStoreContract`, `attemptCounterContract` and `sessionLifecycleStoreContract` over core's); the doubles a factor's tests use — `createTestMfaFactor`,
-`testMfaFactorProofs` and `createTestMfaDigests` — which stay on
-`@o3co/auth-provider-core/testing`, since core's own tests use them and core
-cannot depend on this package. The other ports' suites are core's, on
-`@o3co/auth-provider-core/testing` and in core's own tests.
+`mfaFactorStoreContract`, `mfaFactorStoreConditionalContract`, `federationTokenStoreConditionalContract`, `webAuthnCredentialStoreContract`, `attemptCounterContract`, `sessionLifecycleStoreContract` and `rateLimiterContract` over core's); the doubles a factor's tests use — `createTestMfaFactor`,
+`testMfaFactorProofs` and `createTestMfaDigests` — and the slots' doubles
+the kit's own tests run the slots' suites over — `createTestCsrfGuard`,
+`createTestCsrfTokenSigner`, `createRecordingLoginCompletion`,
+`createTestLoginEntry`, `createTestSessionCookiePolicy`,
+`createTestHttpSettings`, `createTestOAuthTokenSettings`,
+`createTestFederationGrantPolicy` and `createTestRateLimiter` — which stay
+on `@o3co/auth-provider-core/testing`, since core's own tests use them and
+core cannot depend on this package. The other
+ports' suites are core's, on `@o3co/auth-provider-core/testing` and in
+core's own tests.
 
 **Why a separate package.** Core's tests test core. A contract suite is the
 specification of a port implemented elsewhere, so it ships where every
@@ -90,13 +108,15 @@ depending on core alone, rather than copying it.
 npm install --save-dev @o3co/auth-provider-test-kit @o3co/auth-provider-core
 ```
 
-Peer dependency: `@o3co/auth-provider-core`. No dependency of its own.
+Peer dependencies: `@o3co/auth-provider-core`, and `express`, optional — the
+session slots' suites drive a component over Express's request and response
+types, as core's slots declare them. No dependency of its own.
 
 ## The enrollment witness's contract suite
 
-A suite is a list of `{ name, run }` cases (core's `ContractCase`, which the
-kit re-exports), as the slot suites on `@o3co/auth-provider-core/testing` are,
-so any test runner runs it:
+A suite is a list of `{ name, run }` cases (the kit's `ContractCase`, the
+shape of the slot suites on `@o3co/auth-provider-core/testing` too), so any
+test runner runs it:
 
 ```typescript
 import { mfaEnrollmentWitnessContract } from "@o3co/auth-provider-test-kit";
@@ -642,10 +662,6 @@ and holds it to what core's readers rely on:
   interruption answers that pass core's closed body. It registers through
   core's `resolverForTests`, as boot does.
 
-The doubles these slots' consumers fill them with (`createTestHttpSettings`,
-`createTestOAuthTokenSettings`, `createTestFederationGrantPolicy`,
-`createTestRateLimiter`) stay on `@o3co/auth-provider-core/testing`.
-
 ## The fake Store
 
 `startFakeStore({ users, bearerToken, now, requestNow })` starts an in-memory HTTP server on
@@ -709,7 +725,7 @@ too — for as long as it runs: give it test data only.
 
 Exported from [`src/index.mts`](src/index.mts):
 
-- `ContractCase`, core's type of a suite's case;
+- `ContractCase`, the kit's type of a suite's case;
 - `attemptCounterContract`, with `AttemptCounterContractInput`,
   `AttemptCounterHarness` and `REAL_CLOCK_TOLERANCE_MS`;
 - `conditionalRecordContract`, with `ConditionalRecordContractInput`,
@@ -737,6 +753,11 @@ Exported from [`src/index.mts`](src/index.mts):
 - `federationGrantPolicyContract`, with `FederationGrantPolicyContractInput`;
 - `rateLimiterContract`, with `RateLimiterContractInput`;
 - `sessionRequirementContract`, with `RequirementContractInput`;
+- `csrfGuardContract`, with `CsrfGuardContractInput`;
+- `csrfTokenSignerContract`, with `CsrfTokenSignerContractInput`;
+- `loginCompletionContract`, with `LoginCompletionContractInput`;
+- `loginEntryContract`, with `LoginEntryContractInput`;
+- `sessionCookiePolicyContract`, with `SessionCookiePolicyContractInput`;
 - `startFakeStore`, with `FAKE_STORE_MAX_BODY_BYTES`, `FakeStore`,
   `FakeStoreOptions`, `FakeStoreUser`, `FakeStoreUrls`, `FakeStoreEndpoint`,
   `FakeStoreRequest`, `FakeStoreAnswer` and `FakeStoreAnswerer`.
@@ -760,6 +781,11 @@ Exported from [`src/index.mts`](src/index.mts):
 | [`federationGrantPolicy.contract.test.mts`](src/federationGrants/__tests__/federationGrantPolicy.contract.test.mts) | the `federationGrantPolicy` suite over core's double, with every combination, and over what core's `checkFederationGrantPolicy` answers; a policy with a switch that is not a boolean, an allowance to keep grants while grants are off, or not frozen, refused by the case that names it |
 | [`rateLimiter.contract.test.mts`](src/rateLimit/__tests__/rateLimiter.contract.test.mts) | the `RateLimiter` suite over core's in-process limiter and over core's double, with either outage policy and none; the outage and budget cases left out when undeclared; a limiter with a `kind` that names nothing, a `failMode` outside the guard's two, a `defaultLimit` it cannot apply, a decision that is not one, an outage answered, a budget never spent, keys counted together, or a budget looked up on a plain object, refused by the case that names it |
 | [`sessionRequirement.contract.test.mts`](src/sessionAdmission/__tests__/sessionRequirement.contract.test.mts) | the session requirement suite over a well-formed fixture, with and without an issuer, a remediation or `admitPrimary`; a requirement with a name not its key, a fixture declaring the second-factor authority, a reach the seal refuses (failing the reach case alone of the registration cases), remediations not its own or repeated, a hint key that is reserved or not a hint name, an outage answered `met`, a `step_up` without a page or a verdict that is not one, or an interruption body with a reserved key or an address in a hint, refused by the case that names it; a primary the fixture establishes for, or handed to one that never interrupts, failing the interruption case; the view the suite hands `admit` frozen, with the members of admission's own view over the same stores |
+| [`csrfGuard.contract.test.mts`](src/sessionSlots/__tests__/csrfGuard.contract.test.mts) | the `csrfGuard` suite over core's double, trusting no origin but its own, beside a session cookie shared across subdomains or a `__Secure-` one, and marking a refusal through Express's header setters; the expiry and trusted-origin cases left out when undeclared; each broken guard — one that ignores the Referer, lets a token outweigh a foreign origin, reads the Referer before the Origin, waves through a request with no origin signal, holds a token to its cookie alone or accepts an unsigned or cookieless one, never reads its body field, never expires a token, sets the token cookie unreadable, elsewhere, looser than the session cookie or without attributes, throws on a malformed cookie, refuses unlike its `check` or without an RFC 6749 body, can be changed by a reader, or misjudges a navigation or a trusted origin — refused by the case that names it |
+| [`csrfTokenSigner.contract.test.mts`](src/sessionSlots/__tests__/csrfTokenSigner.contract.test.mts) | the `csrfTokenSigner` suite over core's double, the signature's length bounds, and the separation case left out without a session secret; each broken signer — one that repeats or base64-encodes its signature, signs every payload alike, accepts or refuses everything, compares a prefix, ignores the payload, keys itself on nothing it was built from or on the session secret itself, throws on or coerces what it verifies, carries its key, has a prototype other than `Object.prototype` or `null`, or is not frozen — refused by the case that names it |
+| [`loginCompletion.contract.test.mts`](src/sessionSlots/__tests__/loginCompletion.contract.test.mts) | the `loginCompletion` suite over core's recording double, over no session store, with no CSRF guard and with no records counted; the session-store case left out when undeclared; each broken completion — one that accepts what core did not build, signs in without regenerating the session id, for another subject, or before saving, answers established or renewed when saving failed, regenerates while the session store is down, renews wrongly, carries or loses fields, answers a stale nonce, writes a record at a renewal, opens a ceremony on the old session id, answers an interruption with anything but the requirement's answer, signs an interrupted login in, or answers a ceremony that cannot open other than with a reported 503 — refused by the case that names it |
+| [`loginEntry.contract.test.mts`](src/sessionSlots/__tests__/loginEntry.contract.test.mts) | the `loginEntry` suite over core's double; each broken entry — one answering another page, appending its target unencoded, after the fragment, under another name or a second `?`, keeping a `redirect_to` the page carried, or one a reader could change — refused by the case that names it |
+| [`sessionCookiePolicy.contract.test.mts`](src/sessionSlots/__tests__/sessionCookiePolicy.contract.test.mts) | the `sessionCookiePolicy` suite over core's double's policies, for a cookie sent cross-site over HTTPS under either prefix and one shared across subdomains over plain HTTP; each broken policy — a name that is not a cookie name, an attribute outside its vocabulary, a domain that is empty, `null` or one a cookie cannot carry, a cross-site or prefixed cookie that is not secure, a `__Host-` cookie naming a domain, a lifetime that is none, not whole or past the ceiling, or a policy a reader could change — refused by the case that names it |
 | [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, `authenticateByToken` answering the user a token names with the witness as `authenticate` does and `401` otherwise, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never; a create or a removal of one record without `expectedGeneration` refused `400` and writing nothing, the reset still applied; the factor set's generation: a list's, a conditional create's and a conditional removal's answers, an update keeping it and every membership write moving it, the tombstone a last removal or a reset leaves and its expiry on the Store's clock, a set held without a generation, a record held into a set dropping its generation, `400` for an expected generation or a `deadlineMs` that is none, a late conditional write answered `408` and not applied while one before its deadline is, a deadline checked on the request clock and never the tombstones', and one winner among concurrent conditional writes |
 
 ## See also

@@ -29,7 +29,7 @@ import {
 	isLifetimeSeconds,
 	type OAuthTokenSettings,
 } from "@o3co/auth-provider-core";
-import type { ContractCase } from "@o3co/auth-provider-core/testing";
+import type { ContractCase } from "../contractCase.mjs";
 import { unfrozenPath } from "../unfrozenPath.mjs";
 
 export interface OAuthTokenSettingsContractInput {

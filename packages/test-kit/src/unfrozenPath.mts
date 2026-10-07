@@ -15,7 +15,7 @@
  */
 
 /**
- * The one reading of "frozen all the way down" the settings slots' suites
+ * The one reading of "frozen all the way down" the slots' suites
  * hold a value to. Internal to the kit: not exported from its entry.
  */
 

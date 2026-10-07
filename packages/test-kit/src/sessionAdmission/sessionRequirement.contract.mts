@@ -54,7 +54,8 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { type ContractCase, resolverForTests } from "@o3co/auth-provider-core/testing";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import type { ContractCase } from "../contractCase.mjs";
 
 export interface RequirementContractInput {
 	/** The key the requirement is contributed under. */

@@ -702,12 +702,18 @@ importers:
       '@o3co/auth-provider-core':
         specifier: workspace:*
         version: link:../core
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
       '@types/node':
         specifier: ^26.6.4
         version: 26.6.4
       '@vitest/coverage-v8':
         specifier: ^5.0.3
         version: 5.0.3(vitest@5.0.3)
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
       typescript:
         specifier: ^6.0.3
         version: 6.0.3

@@ -58,7 +58,7 @@ import {
 	readMfaFactorSet,
 	type StoreGeneration,
 } from "@o3co/auth-provider-core";
-import type { ContractCase } from "@o3co/auth-provider-core/testing";
+import type { ContractCase } from "../contractCase.mjs";
 
 /** What one case runs over: a fresh, empty store, and what else the backend gives. */
 export interface MfaFactorStoreHarness {

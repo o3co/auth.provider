@@ -38,7 +38,7 @@ import {
 	type AttemptSpec,
 	readAttemptCount,
 } from "@o3co/auth-provider-core";
-import type { ContractCase } from "@o3co/auth-provider-core/testing";
+import type { ContractCase } from "../contractCase.mjs";
 
 /** What one case runs over. */
 export interface AttemptCounterHarness {

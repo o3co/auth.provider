@@ -40,7 +40,7 @@ import {
 	type RateLimitFailMode,
 	type RateLimitSpec,
 } from "@o3co/auth-provider-core";
-import type { ContractCase } from "@o3co/auth-provider-core/testing";
+import type { ContractCase } from "../contractCase.mjs";
 
 export interface RateLimiterContractInput {
 	/** A fresh limiter for each case, over a backend that answers. */
