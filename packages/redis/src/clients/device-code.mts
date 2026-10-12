@@ -177,6 +177,9 @@ export interface DeviceCodeStoreClient {
 	 * Required behaviour, in this order:
 	 *
 	 *   - absent → `not_found`
+	 *   - `clientId` given and not the record's `clientId` → `not_found`, and
+	 *     nothing is written: the record, its interval and `lastPolledAtMs`
+	 *     stay as they were
 	 *   - `expiresAtMs <= nowMs` → `expired`, and the pair is deleted. Measured
 	 *     against the caller's clock, not the key's TTL: a record still inside
 	 *     its TTL must answer `expired` once the timestamp has passed.
@@ -195,6 +198,7 @@ export interface DeviceCodeStoreClient {
 		deviceCode: string,
 		nowMs: number,
 		slowDownIncrementSeconds: number,
+		clientId?: string,
 	): Promise<DeviceCodePollReply>;
 	/** Delete the record and its index together. Absence is not an error. */
 	remove(keys: DeviceCodeKeyspace, deviceCode: string): Promise<void>;

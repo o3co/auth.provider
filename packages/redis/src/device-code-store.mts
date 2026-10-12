@@ -248,8 +248,14 @@ export function createRedisDeviceCodeStore(opts: RedisDeviceCodeStoreOptions): D
 			return decisionOutcome(await client.decide(keys, userCode, nowMs, { decision: "denied" }));
 		},
 
-		async poll(deviceCode, nowMs): Promise<DevicePollOutcome> {
-			const reply = await client.poll(keys, deviceCode, nowMs, SLOW_DOWN_INCREMENT_SECONDS);
+		async poll(deviceCode, nowMs, clientId): Promise<DevicePollOutcome> {
+			const reply = await client.poll(
+				keys,
+				deviceCode,
+				nowMs,
+				SLOW_DOWN_INCREMENT_SECONDS,
+				clientId,
+			);
 			switch (reply.kind) {
 				case "approved":
 					return { status: "approved", authorization: toAuthorization(reply.fields) };

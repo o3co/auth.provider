@@ -1,6 +1,6 @@
 # @o3co/auth-provider-redis
 
-Last updated: 2026-10-07
+Last updated: 2026-10-13
 
 Redis-backed implementations of the store ports `@o3co/auth-provider-core`
 declares, a `defineModule` manifest for each, and the wrappers that turn one
@@ -958,7 +958,10 @@ that is the case a `HGETALL`-then-`DEL` implementation fails. Both keys
 carry the authorization's `expiresAtMs`, rounded up to a whole millisecond,
 as their deadline so Redis reclaims them, but `poll` still answers `expired`
 from the record's own exact timestamp: a record inside its TTL whose deadline
-has passed on the caller's clock expires, and is dropped.
+has passed on the caller's clock expires, and is dropped. A poll handed a
+client id that is not the record's answers `not_found` in the same script,
+before any write, so another client's poll neither consumes the record nor
+moves its interval.
 
 *Rolling upgrade.* A record approved before an upgrade, or by a replica that
 has not been upgraded yet, holds none of the fields that release did not

@@ -291,9 +291,16 @@ export const createMemoryDeviceCodeStore = (
 			return { status: "ok", authorization: toAuthorization(entry) };
 		},
 
-		poll: async (deviceCode: string, nowMs: number): Promise<DevicePollOutcome> => {
+		poll: async (
+			deviceCode: string,
+			nowMs: number,
+			clientId?: string,
+		): Promise<DevicePollOutcome> => {
 			const entry = byDeviceCode.get(deviceCode);
 			if (entry === undefined) return { status: "not_found" };
+			// Ahead of every write, the expiry's drop included: another
+			// client's poll leaves the record as it found it.
+			if (clientId !== undefined && entry.clientId !== clientId) return { status: "not_found" };
 			if (entry.expiresAtMs <= nowMs) {
 				drop(entry);
 				return { status: "expired" };

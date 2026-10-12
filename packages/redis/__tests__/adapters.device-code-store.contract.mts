@@ -546,6 +546,85 @@ export const runDeviceCodeStoreContract = (
 			});
 		});
 
+		it("answers not_found to a poll by another client, and keeps the approval for the client it was issued to", async () => {
+			// Consuming first and comparing the client afterwards would let any
+			// client holding the device code spend the approval.
+			await withStore(async (store) => {
+				await store.create(seed);
+				await store.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW });
+
+				expect(await store.poll(seed.deviceCode, NOW + 10 * 1000, "another-app")).toEqual({
+					status: "not_found",
+				});
+				const right = await store.poll(seed.deviceCode, NOW + 10 * 1000, seed.clientId);
+				expect(right.status).toBe("approved");
+				if (right.status === "approved") expect(right.authorization.subject).toBe("user-1");
+			});
+		});
+
+		it("leaves the polling interval as it was when another client polls", async () => {
+			await withStore(async (store) => {
+				await store.create(seed);
+				expect(await store.poll(seed.deviceCode, NOW, seed.clientId)).toEqual({
+					status: "pending",
+				});
+
+				// Inside the interval, twice: either would be slow_down for the
+				// client the code was issued to.
+				for (const at of [NOW + 1_000, NOW + 2_000]) {
+					expect(await store.poll(seed.deviceCode, at, "another-app")).toEqual({
+						status: "not_found",
+					});
+				}
+
+				// Its own interval has passed since its own last poll.
+				expect(await store.poll(seed.deviceCode, NOW + 5_000, seed.clientId)).toEqual({
+					status: "pending",
+				});
+				// And the interval it is measured against was not widened.
+				expect(await store.poll(seed.deviceCode, NOW + 6_000, seed.clientId)).toEqual({
+					status: "slow_down",
+					intervalSeconds: 10,
+				});
+			});
+		});
+
+		it("keeps a denial, and an expiry, for the client the code was issued to", async () => {
+			await withStore(async (store) => {
+				await store.create(seed);
+				await store.deny(seed.userCode, NOW);
+				expect(await store.poll(seed.deviceCode, NOW + 10 * 1000, "another-app")).toEqual({
+					status: "not_found",
+				});
+				expect(await store.poll(seed.deviceCode, NOW + 10 * 1000, seed.clientId)).toEqual({
+					status: "denied",
+				});
+			});
+			await withStore(async (store) => {
+				await store.create(seed);
+				expect(await store.poll(seed.deviceCode, seed.expiresAtMs + 1, "another-app")).toEqual({
+					status: "not_found",
+				});
+				expect(await store.poll(seed.deviceCode, seed.expiresAtMs + 1, seed.clientId)).toEqual({
+					status: "expired",
+				});
+			});
+		});
+
+		it("hands the approval to the client it was issued to when another client's poll races it", async () => {
+			await withStore(async (store) => {
+				await store.create(seed);
+				await store.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW });
+
+				const [other, right] = await Promise.all([
+					store.poll(seed.deviceCode, NOW + 10 * 1000, "another-app"),
+					store.poll(seed.deviceCode, NOW + 10 * 1000, seed.clientId),
+				]);
+				expect(other).toEqual({ status: "not_found" });
+				expect(right.status).toBe("approved");
+			});
+		});
+
 		it("reports denial once, then forgets the authorization", async () => {
 			await withStore(async (store) => {
 				await store.create(seed);

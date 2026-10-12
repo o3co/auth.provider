@@ -93,12 +93,17 @@ export function makeIoredisDeviceCodeStoreClient(io: Redis): DeviceCodeStoreClie
 					return { kind: "not_found" };
 			}
 		},
-		async poll(keys, deviceCode, nowMs, slowDownIncrementSeconds) {
+		async poll(keys, deviceCode, nowMs, slowDownIncrementSeconds, clientId) {
 			const reply = (await runScript(
 				io,
 				DEVICE_CODE_POLL,
 				[keys.codeKeyPrefix + deviceCode],
-				[String(nowMs), keys.userKeyPrefix, String(slowDownIncrementSeconds)],
+				[
+					String(nowMs),
+					keys.userKeyPrefix,
+					String(slowDownIncrementSeconds),
+					...(clientId === undefined ? [] : [clientId]),
+				],
 			)) as [string, unknown?];
 			switch (reply[0]) {
 				case "approved":
