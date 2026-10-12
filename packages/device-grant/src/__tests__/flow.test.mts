@@ -1139,6 +1139,77 @@ describe("polling (RFC 8628 §3.5)", () => {
 		});
 	});
 
+	it("leaves the approval in place for the client it was issued to when another client polls", async () => {
+		const { app, poll, clock } = makeHarness();
+		const started = await startDevice(app);
+		const deviceCode = started.body.device_code as string;
+		await verify(app, { action: "approve", user_code: started.body.user_code });
+
+		clock.advance(10_000);
+		const other = { ...client, clientId: "another-app" } as AuthenticatedClient;
+		expect((await poll(deviceCode, other)).result).toMatchObject({
+			status: 400,
+			error: "invalid_grant",
+		});
+
+		const right = await poll(deviceCode);
+		expect(right.result.status).toBe(200);
+		expect("tokens" in right.result && right.result.tokens.access_token).toBeTruthy();
+	});
+
+	it("leaves the polling interval of the client it was issued to as it was when another client polls", async () => {
+		const { app, poll, clock } = makeHarness();
+		const started = await startDevice(app);
+		const deviceCode = started.body.device_code as string;
+		const other = { ...client, clientId: "another-app" } as AuthenticatedClient;
+
+		expect((await poll(deviceCode)).result).toMatchObject({ error: "authorization_pending" });
+		clock.advance(1_000);
+		expect((await poll(deviceCode, other)).result).toMatchObject({ error: "invalid_grant" });
+		clock.advance(1_000);
+		expect((await poll(deviceCode, other)).result).toMatchObject({ error: "invalid_grant" });
+
+		// Five seconds after its own last poll: its interval, unwidened.
+		clock.advance(3_000);
+		expect((await poll(deviceCode)).result).toMatchObject({ error: "authorization_pending" });
+	});
+
+	it("still refuses another client's poll on a store that does not compare the client, warned", async () => {
+		const inner = createMemoryDeviceCodeStore();
+		const store = {
+			...inner,
+			poll: (deviceCode: string, nowMs: number) => inner.poll(deviceCode, nowMs),
+		} as ReturnType<typeof createMemoryDeviceCodeStore>;
+		const logger = makeLogger();
+		const { app, poll, clock } = makeHarness({ store, logger });
+		const started = await startDevice(app);
+		await verify(app, { action: "approve", user_code: started.body.user_code });
+
+		clock.advance(10_000);
+		const other = { ...client, clientId: "another-app" } as AuthenticatedClient;
+		expect((await poll(started.body.device_code as string, other)).result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "device_code was not issued to this client",
+		});
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ expected: CLIENT_ID, presented: "another-app" },
+			"device_code_client_mismatch",
+		);
+	});
+
+	it("leaves a denial in place for the client it was issued to when another client polls", async () => {
+		const { app, poll, clock } = makeHarness();
+		const started = await startDevice(app);
+		const deviceCode = started.body.device_code as string;
+		await verify(app, { action: "deny", user_code: started.body.user_code });
+
+		clock.advance(10_000);
+		const other = { ...client, clientId: "another-app" } as AuthenticatedClient;
+		expect((await poll(deviceCode, other)).result).toMatchObject({ error: "invalid_grant" });
+		expect((await poll(deviceCode)).result).toMatchObject({ error: "access_denied" });
+	});
+
 	it("requires an authenticated client", async () => {
 		const { app, poll } = makeHarness();
 		const started = await startDevice(app);

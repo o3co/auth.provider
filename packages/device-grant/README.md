@@ -1,6 +1,6 @@
 # @o3co/auth-provider-device-grant
 
-Last updated: 2026-10-06
+Last updated: 2026-10-13
 
 OAuth 2.0 Device Authorization Grant ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)) for [`auth.provider`](https://github.com/o3co/auth.provider) — the device-code flow for input-constrained clients: TV apps, CLIs, IoT.
 
@@ -313,7 +313,7 @@ A store that cannot be read is none of the four: the poll answers `503 temporari
 
 `DeviceCodeStore.poll` reads the status **and consumes an approved authorization in the same operation**. A `find`-then-`delete` implementation passes a naive unit test and issues two access tokens from one human approval under concurrency; the shared conformance suite in core has a test that races two polls for exactly this reason.
 
-A device code is redeemable only by the client it was issued to, checked against the authenticated client identity rather than the request body. Without that, a leaked device code is redeemable by any other registered client — converting a leak into a full impersonation of the user's approval.
+A device code is redeemable only by the client it was issued to, checked against the authenticated client identity rather than the request body. Without that, a leaked device code is redeemable by any other registered client — converting a leak into a full impersonation of the user's approval. The grant hands `poll` the authenticated client, and the store compares it in the same atomic step, before any write: another client's poll is answered `400 invalid_grant`, as an unknown code is, and leaves the record as it was — the approval or denial is not consumed and the interval is not touched — so the device the code was issued to still receives its answer. A custom `DeviceCodeStore` that ignores the client it is handed has consumed the approval by the time the grant compares the client; the poll is still `400 invalid_grant`, warned as `device_code_client_mismatch`, and the device starts over.
 
 A client must also be **allowed the grant before it can start it**: `POST /oauth/device_authorization` answers `400 unauthorized_client` unless the client's `allowedGrantTypes` names `urn:ietf:params:oauth:grant-type:device_code` — deny by absence, as the token endpoint does for this grant (#326). Otherwise a client registered for nothing but `authorization_code` could still open a pending authorization and put a real-looking prompt in front of a user for a grant that can never complete.
 

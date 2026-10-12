@@ -196,8 +196,13 @@ export interface DeviceCodeStore {
 	 * Adapters MUST NOT implement this as a read followed by a write. Two
 	 * concurrent polls that both observe `approved` produce two access tokens
 	 * from one human approval.
+	 *
+	 * With `clientId`, a record issued to another client is answered
+	 * `not_found` and left as it was, in the same atomic step and before any
+	 * write: its approval or denial is not consumed and its polling interval
+	 * is not touched. Without it, the record's client is not compared.
 	 */
-	poll(deviceCode: string, nowMs: number): Promise<DevicePollOutcome>;
+	poll(deviceCode: string, nowMs: number, clientId?: string): Promise<DevicePollOutcome>;
 
 	/** Drop a decided or expired record early. Absence is not an error. */
 	remove(deviceCode: string): Promise<void>;

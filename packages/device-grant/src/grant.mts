@@ -28,7 +28,10 @@
  *   read-compare-write here would let concurrent polls both pass.
  * - A code is redeemable only by the client it was issued to, read from the
  *   authenticated client, never the attacker-controlled body; otherwise a
- *   leaked code lets another client redeem the user's approval.
+ *   leaked code lets another client redeem the user's approval. `poll` is
+ *   handed that client and answers `not_found` for another's code without
+ *   consuming it or moving its interval, so another client's poll is
+ *   `invalid_grant` and the device it was issued to keeps polling.
  * - A poll that presents a DPoP proof or client certificate gets a token
  *   bound to it (`ownedConfirmation`), and `generateTokenResponse` derives
  *   `token_type` from that binding (`DPoP` for `cnf.jkt`, RFC 9449 §5;
@@ -200,7 +203,7 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 
 			let answered: unknown;
 			try {
-				answered = await options.store.poll(deviceCode, now());
+				answered = await options.store.poll(deviceCode, now(), client.clientId);
 			} catch (err) {
 				reportDeviceCodeStoreOutage(options.logger, "device_code_grant_store_unavailable", err, {
 					clientId: client.clientId,
@@ -232,8 +235,8 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 			switch (outcome.status) {
 				case "not_found":
 					// Indistinguishable from a fabricated code, deliberately. An
-					// already-redeemed code lands here too, so a replayed one is
-					// answered exactly as an invented one is.
+					// already-redeemed code and another client's code land here
+					// too, so neither is told apart from an invented one.
 					return error(400, "invalid_grant", "unknown or already-used device_code");
 
 				case "expired":
@@ -281,12 +284,10 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 			}
 			const { authorization } = reading;
 
-			// The code has already been consumed by `poll` at this point, so a
-			// refusal here does not leave a redeemable authorization behind. That
-			// is the right direction to fail: a device whose client identity does
-			// not match gets nothing, and the legitimate device gets nothing
-			// either and starts over — rather than the code staying live for
-			// whoever else holds it.
+			// See the file header: `poll` compares the client before it writes.
+			// This holds for a store that does not, which has consumed the
+			// approval by now: the device starts over rather than the code
+			// staying live for whoever else holds it.
 			if (authorization.clientId !== client.clientId) {
 				options.logger?.warn(
 					{ expected: authorization.clientId, presented: client.clientId },
