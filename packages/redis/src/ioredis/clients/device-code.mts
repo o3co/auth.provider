@@ -98,12 +98,7 @@ export function makeIoredisDeviceCodeStoreClient(io: Redis): DeviceCodeStoreClie
 				io,
 				DEVICE_CODE_POLL,
 				[keys.codeKeyPrefix + deviceCode],
-				[
-					String(nowMs),
-					keys.userKeyPrefix,
-					String(slowDownIncrementSeconds),
-					...(clientId === undefined ? [] : [clientId]),
-				],
+				[String(nowMs), keys.userKeyPrefix, String(slowDownIncrementSeconds), clientId],
 			)) as [string, unknown?];
 			switch (reply[0]) {
 				case "approved":

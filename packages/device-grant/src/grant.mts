@@ -285,9 +285,9 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 			const { authorization } = reading;
 
 			// See the file header: `poll` compares the client before it writes.
-			// This holds for a store that does not, which has consumed the
-			// approval by now: the device starts over rather than the code
-			// staying live for whoever else holds it.
+			// This comparison is for a store that does not: such a store has
+			// consumed the approval by now, so the device starts over rather
+			// than the code staying live for whoever else holds it.
 			if (authorization.clientId !== client.clientId) {
 				options.logger?.warn(
 					{ expected: authorization.clientId, presented: client.clientId },

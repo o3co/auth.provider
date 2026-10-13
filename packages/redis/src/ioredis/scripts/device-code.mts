@@ -147,22 +147,24 @@ return {'ok', redis.call('HGETALL', codeKey)}
  * `poll`: the interval gate, the status read and the consumption of an approval in one step;
  * as `HGETALL` then `DEL`, two concurrent polls would turn one approval into two access tokens.
  * `KEYS[1]` = record; `ARGV[1]` = now (epoch ms), `ARGV[2]` = user-code index key prefix,
- * `ARGV[3]` = the `slow_down` increment (s), `ARGV[4]` (optional) = the polling client's id.
- * Returns `{'not_found'}`, `{'expired'}`, `{'slow_down', interval}`, `{'denied'}`, `{'pending'}`
- * or `{'approved', record}`.
+ * `ARGV[3]` = the `slow_down` increment (s), `ARGV[4]` = the polling client's id. Returns
+ * `{'not_found'}`, `{'expired'}`, `{'slow_down', interval}`, `{'denied'}`, `{'pending'}` or
+ * `{'approved', record}`.
  *
  * A record whose `clientId` is not `ARGV[4]` answers `{'not_found'}` before any write, so
- * another client's poll neither consumes the record nor moves its interval. Expiry is judged by `expiresAtMs` against the caller's `now`, not by the key's TTL. The gate
- * runs before the status read, and the increased interval is written back: RFC 8628 §3.5
- * applies it to "this and all subsequent requests", so the next gate measures against it.
- * `denied` and `approved` delete the pair, so a second poll sees `not_found`.
+ * another client's poll neither consumes the record, moves its interval nor drops it once
+ * expired; a missing `ARGV[4]` matches no record. Expiry is judged by `expiresAtMs` against
+ * the caller's `now`, not by the key's TTL. The gate runs before the status read, and the
+ * increased interval is written back: RFC 8628 §3.5 applies it to "this and all subsequent
+ * requests", so the next gate measures against it. `denied` and `approved` delete the pair,
+ * so a second poll sees `not_found`.
  */
 const LUA_DEVICE_CODE_POLL = `
 ${LUA_DEVICE_CODE_RECORD_OF}
 local flat = redis.call('HGETALL', KEYS[1])
 if #flat == 0 then return {'not_found'} end
 local r = record_of(flat)
-if ARGV[4] and r.clientId ~= ARGV[4] then return {'not_found'} end
+if r.clientId ~= ARGV[4] then return {'not_found'} end
 local now = tonumber(ARGV[1])
 local userKey = ARGV[2] .. r.userCode
 if tonumber(r.expiresAtMs) <= now then

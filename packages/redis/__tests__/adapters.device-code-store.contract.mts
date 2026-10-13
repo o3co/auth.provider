@@ -156,11 +156,15 @@ export const runDeviceCodeStoreContract = (
 				for (const bad of UNSTORABLE_EXPIRIES) {
 					await expect(store.create({ ...seed, expiresAtMs: bad })).rejects.toThrow(RangeError);
 					expect(await store.findPendingByUserCode(seed.userCode, NOW)).toBeNull();
-					expect(await store.poll(seed.deviceCode, NOW)).toEqual({ status: "not_found" });
+					expect(await store.poll(seed.deviceCode, NOW, seed.clientId)).toEqual({
+						status: "not_found",
+					});
 				}
 				// Nothing was recorded, so neither code collides.
 				await store.create(seed);
-				expect(await store.poll(seed.deviceCode, NOW)).toEqual({ status: "pending" });
+				expect(await store.poll(seed.deviceCode, NOW, seed.clientId)).toEqual({
+					status: "pending",
+				});
 			});
 		});
 
@@ -175,10 +179,12 @@ export const runDeviceCodeStoreContract = (
 					expiresAtMs,
 					status: "pending",
 				});
-				expect(await store.poll(seed.deviceCode, expiresAtMs - 0.25)).toEqual({
+				expect(await store.poll(seed.deviceCode, expiresAtMs - 0.25, seed.clientId)).toEqual({
 					status: "pending",
 				});
-				expect(await store.poll(seed.deviceCode, expiresAtMs)).toEqual({ status: "expired" });
+				expect(await store.poll(seed.deviceCode, expiresAtMs, seed.clientId)).toEqual({
+					status: "expired",
+				});
 			});
 		});
 
@@ -194,13 +200,17 @@ export const runDeviceCodeStoreContract = (
 		it("reports pending while nobody has answered", async () => {
 			await withStore(async (store) => {
 				await store.create(seed);
-				expect(await store.poll(seed.deviceCode, NOW)).toEqual({ status: "pending" });
+				expect(await store.poll(seed.deviceCode, NOW, seed.clientId)).toEqual({
+					status: "pending",
+				});
 			});
 		});
 
 		it("reports not_found for a device code that was never issued", async () => {
 			await withStore(async (store) => {
-				expect(await store.poll("never-issued", NOW)).toEqual({ status: "not_found" });
+				expect(await store.poll("never-issued", NOW, seed.clientId)).toEqual({
+					status: "not_found",
+				});
 			});
 		});
 
@@ -247,7 +257,7 @@ export const runDeviceCodeStoreContract = (
 						authTime: new Date(AUTH_TIME_MS),
 					}),
 				).toStrictEqual({ status: "ok", authorization: approved });
-				expect(await store.poll(seed.deviceCode, NOW + 10 * 1000)).toStrictEqual({
+				expect(await store.poll(seed.deviceCode, NOW + 10 * 1000, seed.clientId)).toStrictEqual({
 					status: "approved",
 					authorization: approved,
 				});
@@ -304,7 +314,7 @@ export const runDeviceCodeStoreContract = (
 				expect(
 					await store.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW }),
 				).toStrictEqual({ status: "ok", authorization: approved });
-				expect(await store.poll(seed.deviceCode, NOW + 10 * 1000)).toStrictEqual({
+				expect(await store.poll(seed.deviceCode, NOW + 10 * 1000, seed.clientId)).toStrictEqual({
 					status: "approved",
 					authorization: approved,
 				});
@@ -324,7 +334,7 @@ export const runDeviceCodeStoreContract = (
 					nowMs: approvedAt,
 				});
 				expect(decided.status === "ok" && decided.authorization.approvedAtMs).toBe(approvedAt);
-				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000);
+				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000, seed.clientId);
 				expect(polled.status === "approved" && polled.authorization.approvedAtMs).toBe(approvedAt);
 			});
 		});
@@ -346,7 +356,7 @@ export const runDeviceCodeStoreContract = (
 					status: "ok",
 					authorization: { amr: ["pwd", "hwk", "mfa"], authTimeMs: AUTH_TIME_MS },
 				});
-				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000);
+				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000, seed.clientId);
 				expect(polled).toMatchObject({
 					status: "approved",
 					authorization: { amr: ["pwd", "hwk", "mfa"], authTimeMs: AUTH_TIME_MS },
@@ -369,7 +379,7 @@ export const runDeviceCodeStoreContract = (
 					amr: undefined,
 					authTimeMs: undefined,
 				});
-				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000);
+				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000, seed.clientId);
 				expect(polled.status).toBe("approved");
 				if (polled.status === "approved") {
 					expect(polled.authorization).toHaveProperty("amr", undefined);
@@ -385,7 +395,7 @@ export const runDeviceCodeStoreContract = (
 				await store.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW, amr });
 				amr.push("mfa");
 				amr[0] = "fed";
-				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000);
+				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000, seed.clientId);
 				expect(polled.status === "approved" && polled.authorization.amr).toEqual(["pwd", "otp"]);
 			});
 		});
@@ -466,7 +476,7 @@ export const runDeviceCodeStoreContract = (
 					authTime: new Date(NOW + DEFAULT_CLOCK_SKEW_MS),
 				});
 				expect(decided.status === "ok" && decided.authorization.authTimeMs).toBe(NOW);
-				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000);
+				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000, seed.clientId);
 				expect(polled.status === "approved" && polled.authorization.authTimeMs).toBe(NOW);
 			});
 		});
@@ -480,7 +490,7 @@ export const runDeviceCodeStoreContract = (
 					nowMs: NOW + 0.5,
 					authTime: new Date(NOW + 1_000),
 				});
-				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000);
+				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000, seed.clientId);
 				expect(polled.status === "approved" && polled.authorization.authTimeMs).toBe(NOW);
 			});
 		});
@@ -517,14 +527,14 @@ export const runDeviceCodeStoreContract = (
 					nowMs: NOW,
 				});
 
-				const first = await store.poll(seed.deviceCode, NOW + 10 * 1000);
+				const first = await store.poll(seed.deviceCode, NOW + 10 * 1000, seed.clientId);
 				expect(first.status).toBe("approved");
 				if (first.status === "approved") {
 					expect(first.authorization.subject).toBe("user-1");
 					expect(first.authorization.grantedScope).toEqual(["openid"]);
 				}
 
-				const second = await store.poll(seed.deviceCode, NOW + 20 * 1000);
+				const second = await store.poll(seed.deviceCode, NOW + 20 * 1000, seed.clientId);
 				expect(second.status).toBe("not_found");
 			});
 		});
@@ -538,8 +548,8 @@ export const runDeviceCodeStoreContract = (
 				await store.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW });
 
 				const [a, b] = await Promise.all([
-					store.poll(seed.deviceCode, NOW + 10 * 1000),
-					store.poll(seed.deviceCode, NOW + 10 * 1000),
+					store.poll(seed.deviceCode, NOW + 10 * 1000, seed.clientId),
+					store.poll(seed.deviceCode, NOW + 10 * 1000, seed.clientId),
 				]);
 				const approvals = [a, b].filter((outcome) => outcome.status === "approved");
 				expect(approvals).toHaveLength(1);
@@ -611,16 +621,17 @@ export const runDeviceCodeStoreContract = (
 			});
 		});
 
-		it("hands the approval to the client it was issued to when another client's poll races it", async () => {
+		it("answers not_found to a poll that names no client, and leaves the record as it was", async () => {
+			// An untyped caller that leaves the client out is compared, not let
+			// through: nothing is consumed for it.
 			await withStore(async (store) => {
 				await store.create(seed);
 				await store.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW });
-
-				const [other, right] = await Promise.all([
-					store.poll(seed.deviceCode, NOW + 10 * 1000, "another-app"),
-					store.poll(seed.deviceCode, NOW + 10 * 1000, seed.clientId),
-				]);
-				expect(other).toEqual({ status: "not_found" });
+				const unnamed = store.poll as (deviceCode: string, nowMs: number) => Promise<unknown>;
+				expect(await unnamed.call(store, seed.deviceCode, NOW + 10 * 1000)).toEqual({
+					status: "not_found",
+				});
+				const right = await store.poll(seed.deviceCode, NOW + 10 * 1000, seed.clientId);
 				expect(right.status).toBe("approved");
 			});
 		});
@@ -629,8 +640,10 @@ export const runDeviceCodeStoreContract = (
 			await withStore(async (store) => {
 				await store.create(seed);
 				await store.deny(seed.userCode, NOW);
-				expect(await store.poll(seed.deviceCode, NOW + 10 * 1000)).toEqual({ status: "denied" });
-				expect(await store.poll(seed.deviceCode, NOW + 20 * 1000)).toEqual({
+				expect(await store.poll(seed.deviceCode, NOW + 10 * 1000, seed.clientId)).toEqual({
+					status: "denied",
+				});
+				expect(await store.poll(seed.deviceCode, NOW + 20 * 1000, seed.clientId)).toEqual({
 					status: "not_found",
 				});
 			});
@@ -639,7 +652,7 @@ export const runDeviceCodeStoreContract = (
 		it("reports expiry rather than pending once the window closes", async () => {
 			await withStore(async (store) => {
 				await store.create(seed);
-				expect(await store.poll(seed.deviceCode, seed.expiresAtMs + 1)).toEqual({
+				expect(await store.poll(seed.deviceCode, seed.expiresAtMs + 1, seed.clientId)).toEqual({
 					status: "expired",
 				});
 			});
@@ -648,8 +661,8 @@ export const runDeviceCodeStoreContract = (
 		it("answers slow_down when a device polls inside its interval", async () => {
 			await withStore(async (store) => {
 				await store.create(seed);
-				await store.poll(seed.deviceCode, NOW);
-				const tooSoon = await store.poll(seed.deviceCode, NOW + 1_000);
+				await store.poll(seed.deviceCode, NOW, seed.clientId);
+				const tooSoon = await store.poll(seed.deviceCode, NOW + 1_000, seed.clientId);
 				expect(tooSoon.status).toBe("slow_down");
 			});
 		});
@@ -661,17 +674,17 @@ export const runDeviceCodeStoreContract = (
 			// tells a compliant client to slow down forever.
 			await withStore(async (store) => {
 				await store.create(seed);
-				await store.poll(seed.deviceCode, NOW);
-				const first = await store.poll(seed.deviceCode, NOW + 1_000);
+				await store.poll(seed.deviceCode, NOW, seed.clientId);
+				const first = await store.poll(seed.deviceCode, NOW + 1_000, seed.clientId);
 				expect(first).toMatchObject({ status: "slow_down", intervalSeconds: 10 });
 
 				// 6s after the slow_down: inside the *new* 10s interval, so still
 				// too soon — and the interval grows again.
-				const second = await store.poll(seed.deviceCode, NOW + 7_000);
+				const second = await store.poll(seed.deviceCode, NOW + 7_000, seed.clientId);
 				expect(second).toMatchObject({ status: "slow_down", intervalSeconds: 15 });
 
 				// Past the widened interval: back to a normal answer.
-				const third = await store.poll(seed.deviceCode, NOW + 30_000);
+				const third = await store.poll(seed.deviceCode, NOW + 30_000, seed.clientId);
 				expect(third.status).toBe("pending");
 			});
 		});
@@ -723,7 +736,9 @@ export const runDeviceCodeStoreContract = (
 			await withStore(async (store) => {
 				await store.create(seed);
 				await store.remove(seed.deviceCode);
-				expect(await store.poll(seed.deviceCode, NOW)).toEqual({ status: "not_found" });
+				expect(await store.poll(seed.deviceCode, NOW, seed.clientId)).toEqual({
+					status: "not_found",
+				});
 				await expect(store.remove(seed.deviceCode)).resolves.toBeUndefined();
 			});
 		});

@@ -22,7 +22,8 @@
  * Methods run without interleaving on the event loop, but keep the shape a
  * Redis adapter must reproduce atomically in a script.
  *
- * Bounded three ways: every read path drops an expired record it finds;
+ * Bounded three ways: every read path drops an expired record it finds (but
+ * a poll by another client, which leaves the record as it found it);
  * `create` runs an amortized sweep every `sweepInterval` creates; `maxEntries`
  * caps the resident set. The optional timer only adds zero-lag reclamation.
  *
@@ -294,13 +295,13 @@ export const createMemoryDeviceCodeStore = (
 		poll: async (
 			deviceCode: string,
 			nowMs: number,
-			clientId?: string,
+			clientId: string,
 		): Promise<DevicePollOutcome> => {
 			const entry = byDeviceCode.get(deviceCode);
 			if (entry === undefined) return { status: "not_found" };
 			// Ahead of every write, the expiry's drop included: another
 			// client's poll leaves the record as it found it.
-			if (clientId !== undefined && entry.clientId !== clientId) return { status: "not_found" };
+			if (entry.clientId !== clientId) return { status: "not_found" };
 			if (entry.expiresAtMs <= nowMs) {
 				drop(entry);
 				return { status: "expired" };

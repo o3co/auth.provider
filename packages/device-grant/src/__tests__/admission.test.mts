@@ -144,7 +144,7 @@ const harness = async (options: HarnessOptions = {}) => {
 	const undecided = async () => (await store.findPendingByUserCode(USER_CODE, NOW)) !== null;
 	/** Who the seeded code was approved by, if it was. */
 	const approvedBy = async () => {
-		const polled = await store.poll(DEVICE_CODE, NOW);
+		const polled = await store.poll(DEVICE_CODE, NOW, "tv-app");
 		return polled.status === "approved" ? polled.authorization.subject : undefined;
 	};
 	return { verify, undecided, approvedBy, logger, store };
@@ -564,7 +564,7 @@ describe("an approval records the session's authentication", () => {
 			})),
 		});
 		expect((await verify({ action: "approve", user_code: USER_CODE })).status).toBe(200);
-		const polled = await store.poll(DEVICE_CODE, NOW);
+		const polled = await store.poll(DEVICE_CODE, NOW, "tv-app");
 		expect(polled.status === "approved" ? polled.authorization.authTimeMs : null).toBe(NOW);
 	});
 

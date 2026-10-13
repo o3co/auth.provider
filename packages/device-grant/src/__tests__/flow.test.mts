@@ -1178,7 +1178,8 @@ describe("polling (RFC 8628 §3.5)", () => {
 		const inner = createMemoryDeviceCodeStore();
 		const store = {
 			...inner,
-			poll: (deviceCode: string, nowMs: number) => inner.poll(deviceCode, nowMs),
+			// Answers every client as the one the code was issued to.
+			poll: (deviceCode: string, nowMs: number) => inner.poll(deviceCode, nowMs, CLIENT_ID),
 		} as ReturnType<typeof createMemoryDeviceCodeStore>;
 		const logger = makeLogger();
 		const { app, poll, clock } = makeHarness({ store, logger });
@@ -1274,8 +1275,8 @@ describe("the token carries the approving session's authentication", () => {
 		const inner = createMemoryDeviceCodeStore();
 		return {
 			...inner,
-			poll: async (code: string, nowMs: number) => {
-				const outcome = await inner.poll(code, nowMs);
+			poll: async (code: string, nowMs: number, clientId: string) => {
+				const outcome = await inner.poll(code, nowMs, clientId);
 				return outcome.status === "approved"
 					? { ...outcome, authorization: { ...outcome.authorization, ...fields(nowMs) } }
 					: outcome;
@@ -1443,8 +1444,8 @@ describe("the token carries the approving session's authentication", () => {
 		const inner = createMemoryDeviceCodeStore();
 		return {
 			...inner,
-			poll: async (code: string, nowMs: number) => {
-				const outcome = await inner.poll(code, nowMs);
+			poll: async (code: string, nowMs: number, clientId: string) => {
+				const outcome = await inner.poll(code, nowMs, clientId);
 				if (outcome.status !== "approved") return outcome;
 				const authorization = { ...outcome.authorization };
 				Object.defineProperty(authorization, field, {
@@ -1554,8 +1555,8 @@ describe("a record the store answers that cannot be read", () => {
 		const inner = createMemoryDeviceCodeStore();
 		const store = {
 			...inner,
-			poll: async (code: string, nowMs: number) => {
-				const outcome = await inner.poll(code, nowMs);
+			poll: async (code: string, nowMs: number, clientId: string) => {
+				const outcome = await inner.poll(code, nowMs, clientId);
 				return outcome.status === "approved"
 					? { status: "approved", authorization: null }
 					: outcome;
@@ -2483,8 +2484,8 @@ describe("a subject revocation between the approval and the poll", () => {
 		const inner = createMemoryDeviceCodeStore();
 		const legacy = {
 			...inner,
-			poll: async (code: string, nowMs: number) => {
-				const outcome = await inner.poll(code, nowMs);
+			poll: async (code: string, nowMs: number, clientId: string) => {
+				const outcome = await inner.poll(code, nowMs, clientId);
 				return outcome.status === "approved"
 					? { ...outcome, authorization: { ...outcome.authorization, approvedAtMs: undefined } }
 					: outcome;
@@ -2504,8 +2505,8 @@ describe("a subject revocation between the approval and the poll", () => {
 		const inner = createMemoryDeviceCodeStore();
 		const legacy = {
 			...inner,
-			poll: async (code: string, nowMs: number) => {
-				const outcome = await inner.poll(code, nowMs);
+			poll: async (code: string, nowMs: number, clientId: string) => {
+				const outcome = await inner.poll(code, nowMs, clientId);
 				return outcome.status === "approved"
 					? { ...outcome, authorization: { ...outcome.authorization, approvedAtMs: undefined } }
 					: outcome;
