@@ -444,7 +444,7 @@ describe("makeIoredisClients deviceCodeStoreClient — EVALSHA-first with NOSCRI
 		const { deviceCodeStoreClient } = makeIoredisClients(io);
 
 		// Warmup: whatever the script's residency flag was, it ends true.
-		await deviceCodeStoreClient.poll(keys, "dc", 1_000, 5);
+		await deviceCodeStoreClient.poll(keys, "dc", 1_000, 5, "tv");
 		const evalAfterWarmup = io.eval.mock.calls.length;
 
 		io.evalsha
@@ -452,11 +452,15 @@ describe("makeIoredisClients deviceCodeStoreClient — EVALSHA-first with NOSCRI
 			.mockRejectedValueOnce(new Error("NOSCRIPT No matching script. Please use EVAL."))
 			.mockResolvedValue(["pending"]);
 
-		expect(await deviceCodeStoreClient.poll(keys, "dc", 2_000, 5)).toEqual({ kind: "pending" });
+		expect(await deviceCodeStoreClient.poll(keys, "dc", 2_000, 5, "tv")).toEqual({
+			kind: "pending",
+		});
 		expect(io.evalsha.mock.calls.length).toBe(1);
 		expect(io.eval.mock.calls.length).toBe(evalAfterWarmup + 1);
 
-		expect(await deviceCodeStoreClient.poll(keys, "dc", 3_000, 5)).toEqual({ kind: "pending" });
+		expect(await deviceCodeStoreClient.poll(keys, "dc", 3_000, 5, "tv")).toEqual({
+			kind: "pending",
+		});
 		expect(io.evalsha.mock.calls.length).toBe(2);
 		expect(io.eval.mock.calls.length).toBe(evalAfterWarmup + 1);
 	});
@@ -467,12 +471,14 @@ describe("makeIoredisClients deviceCodeStoreClient — EVALSHA-first with NOSCRI
 			eval: vi.fn().mockResolvedValue(["pending"]),
 		});
 		const { deviceCodeStoreClient } = makeIoredisClients(io);
-		await deviceCodeStoreClient.poll(keys, "dc", 1_000, 5);
+		await deviceCodeStoreClient.poll(keys, "dc", 1_000, 5, "tv");
 		const evalAfterWarmup = io.eval.mock.calls.length;
 
 		io.evalsha.mockReset().mockRejectedValue(new Error("ECONNRESET: connection lost"));
 
-		await expect(deviceCodeStoreClient.poll(keys, "dc", 2_000, 5)).rejects.toThrow(/ECONNRESET/);
+		await expect(deviceCodeStoreClient.poll(keys, "dc", 2_000, 5, "tv")).rejects.toThrow(
+			/ECONNRESET/,
+		);
 		expect(io.eval.mock.calls.length).toBe(evalAfterWarmup);
 	});
 

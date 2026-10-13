@@ -16,13 +16,14 @@
 
 /** The in-memory `DeviceCodeStore` against the shared conformance suite. */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { DeviceCodeStoreError } from "#/device-authorization/errors.mjs";
 import {
 	createMemoryDeviceCodeStore,
 	DEFAULT_MEMORY_DEVICE_CODE_STORE_MAX_ENTRIES,
 	DEFAULT_MEMORY_DEVICE_CODE_STORE_SWEEP_INTERVAL,
 } from "#/device-authorization/memory.mjs";
+import type { DeviceCodeStore } from "#/device-authorization/types.mjs";
 import { runDeviceCodeStoreContract } from "./adapters.contract.mjs";
 
 runDeviceCodeStoreContract("memory", {
@@ -30,6 +31,14 @@ runDeviceCodeStoreContract("memory", {
 	destroy: (store) => {
 		(store as { dispose?: () => void }).dispose?.();
 	},
+});
+
+describe("the DeviceCodeStore port", () => {
+	it("requires the polling client on every poll", () => {
+		expectTypeOf<Parameters<DeviceCodeStore["poll"]>>().toEqualTypeOf<
+			[deviceCode: string, nowMs: number, clientId: string]
+		>();
+	});
 });
 
 describe("memory DeviceCodeStore — sweep", () => {
@@ -272,7 +281,7 @@ describe("memory DeviceCodeStore — eviction and decision edge cases", () => {
 			amr: ["pwd", "otp"],
 		});
 		expect(decided.status === "ok" && Object.isFrozen(decided.authorization.amr)).toBe(true);
-		const polled = await store.poll("edge-dc-4", base);
+		const polled = await store.poll("edge-dc-4", base, "c");
 		expect(polled.status === "approved" && polled.authorization.amr).toEqual(["pwd", "otp"]);
 	});
 

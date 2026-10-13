@@ -12,6 +12,7 @@ import type {
 	ChallengeStoreClient,
 	ConsentRecordFields,
 	ConsentStoreClient,
+	DeviceCodeKeyspace,
 	DeviceCodeStoreClient,
 	DisposableRefreshTokenFamilyClient,
 	FederationGrantStoreClient,
@@ -261,5 +262,19 @@ describe("the consent client's expiry, as a required key", () => {
 		type Probe = { readonly a?: string; readonly b: string | undefined };
 		expectTypeOf<IsRequiredKey<Probe, "a">>().toEqualTypeOf<false>();
 		expectTypeOf<IsRequiredKey<Probe, "b">>().toEqualTypeOf<true>();
+	});
+});
+
+describe("DeviceCodeStoreClient", () => {
+	it("requires the polling client on every poll", () => {
+		expectTypeOf<Parameters<DeviceCodeStoreClient["poll"]>>().toEqualTypeOf<
+			[
+				keys: DeviceCodeKeyspace,
+				deviceCode: string,
+				nowMs: number,
+				slowDownIncrementSeconds: number,
+				clientId: string,
+			]
+		>();
 	});
 });

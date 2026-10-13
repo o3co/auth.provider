@@ -121,7 +121,7 @@ describe("createRedisDeviceCodeStore — what is Redis-specific", () => {
 		const userKey = `${prefix}{devauth}:user:${seed.userCode}`;
 		expect(await raw.exists(codeKey, userKey)).toBe(2);
 
-		expect(await store.poll(seed.deviceCode, seed.expiresAtMs + 1)).toEqual({
+		expect(await store.poll(seed.deviceCode, seed.expiresAtMs + 1, seed.clientId)).toEqual({
 			status: "expired",
 		});
 		expect(await raw.exists(codeKey, userKey)).toBe(0);
@@ -136,7 +136,9 @@ describe("createRedisDeviceCodeStore — what is Redis-specific", () => {
 		await store.create(seed);
 		await store.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW });
 
-		expect((await store.poll(seed.deviceCode, NOW + 10_000)).status).toBe("approved");
+		expect((await store.poll(seed.deviceCode, NOW + 10_000, seed.clientId)).status).toBe(
+			"approved",
+		);
 		expect(await raw.exists(`${prefix}{devauth}:user:${seed.userCode}`)).toBe(0);
 	});
 
@@ -221,7 +223,7 @@ describe("redis DeviceCodeStore — the approving session's amr and authenticati
 			grantedScope: '["openid"]',
 			approvedAtMs: String(NOW),
 		});
-		const polled = await store.poll(seed.deviceCode, NOW + 10_000);
+		const polled = await store.poll(seed.deviceCode, NOW + 10_000, seed.clientId);
 		expect(polled.status).toBe("approved");
 		if (polled.status === "approved") {
 			expect(polled.authorization).toHaveProperty("amr", undefined);
@@ -235,7 +237,7 @@ describe("redis DeviceCodeStore — the approving session's amr and authenticati
 		const store = storeAt(freshPrefix());
 		await store.create(seed);
 		await store.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW, amr });
-		const polled = await store.poll(seed.deviceCode, NOW + 10_000);
+		const polled = await store.poll(seed.deviceCode, NOW + 10_000, seed.clientId);
 		expect(polled.status === "approved" && polled.authorization.amr).toEqual(amr);
 	});
 
@@ -254,7 +256,7 @@ describe("redis DeviceCodeStore — the approving session's amr and authenticati
 		await store.create(seed);
 		await store.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW, amr: ["pwd"] });
 		await raw.hset(keysAt(prefix).codeKey, "amr", value);
-		const polled = await store.poll(seed.deviceCode, NOW + 10_000);
+		const polled = await store.poll(seed.deviceCode, NOW + 10_000, seed.clientId);
 		expect(polled.status).toBe("approved");
 		if (polled.status === "approved") expect(polled.authorization).toHaveProperty("amr", undefined);
 	});
@@ -281,7 +283,7 @@ describe("redis DeviceCodeStore — the approving session's amr and authenticati
 			authTime: new Date(NOW - 60_000),
 		});
 		await raw.hset(keysAt(prefix).codeKey, "authTimeMs", value);
-		const polled = await store.poll(seed.deviceCode, NOW + 10_000);
+		const polled = await store.poll(seed.deviceCode, NOW + 10_000, seed.clientId);
 		expect(polled.status).toBe("approved");
 		if (polled.status === "approved") {
 			expect(polled.authorization).toHaveProperty("authTimeMs", undefined);
@@ -302,7 +304,7 @@ describe("redis DeviceCodeStore — the approving session's amr and authenticati
 			authTime: new Date(NOW - 60_000),
 		});
 		await raw.hset(keysAt(prefix).codeKey, "authTimeMs", value);
-		const polled = await store.poll(seed.deviceCode, NOW + 10_000);
+		const polled = await store.poll(seed.deviceCode, NOW + 10_000, seed.clientId);
 		expect(polled.status === "approved" && polled.authorization.authTimeMs).toBe(Number(value));
 	});
 });
