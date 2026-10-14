@@ -44,8 +44,8 @@
 		}
 	},
 	"dependencies": {
-		"nodemailer": "^10.0.14",
-		"zod": "^4.6.5"
+		"nodemailer": "^10.1.0",
+		"zod": "^4.6.6"
 	},
 	"peerDependencies": {
 		"@o3co/auth-provider-core": "workspace:^"

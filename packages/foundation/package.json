@@ -43,7 +43,7 @@
 		}
 	},
 	"dependencies": {
-		"zod": "^4.6.5"
+		"zod": "^4.6.6"
 	},
 	"peerDependencies": {
 		"@o3co/auth-provider-core": "workspace:^"

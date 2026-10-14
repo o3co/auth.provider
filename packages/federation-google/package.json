@@ -37,7 +37,7 @@
 	},
 	"dependencies": {
 		"openid-client": "^6.8.8",
-		"zod": "^4.6.5"
+		"zod": "^4.6.6"
 	},
 	"peerDependencies": {
 		"@o3co/auth-provider-core": "workspace:^",
@@ -48,7 +48,7 @@
 		"@o3co/auth-provider-session": "workspace:*",
 		"@types/express": "^5.0.6",
 		"@types/supertest": "^7.2.1",
-		"express": "^5.2.1",
+		"express": "^5.3.0",
 		"jose": "^6.2.12",
 		"supertest": "^7.3.1",
 		"typescript": "^6.0.3",

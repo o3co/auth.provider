@@ -38,7 +38,7 @@
 		"test:coverage": "vitest run --coverage"
 	},
 	"dependencies": {
-		"zod": "^4.6.5"
+		"zod": "^4.6.6"
 	},
 	"peerDependencies": {
 		"@o3co/auth-provider-core": "workspace:^",
@@ -63,7 +63,7 @@
 		"@types/express-session": "^1",
 		"@types/supertest": "^7.2.1",
 		"connect-redis": "^10.0.0",
-		"express": "^5.2.1",
+		"express": "^5.3.0",
 		"express-session": "^1.18.0",
 		"redis": "^6.3.0",
 		"supertest": "^7.3.1",

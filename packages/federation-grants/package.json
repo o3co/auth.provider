@@ -38,12 +38,12 @@
 		"test:coverage": "vitest run --coverage"
 	},
 	"dependencies": {
-		"zod": "^4.6.5"
+		"zod": "^4.6.6"
 	},
 	"peerDependencies": {
 		"@o3co/auth-provider-core": "workspace:^",
 		"@o3co/auth-provider-oauth": "workspace:^",
-		"express": "^5.0.0"
+		"express": "^5.3.0"
 	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
@@ -55,7 +55,7 @@
 		"@types/express": "^5.0.6",
 		"@types/supertest": "^7.2.1",
 		"@vitest/coverage-v8": "^5.0.3",
-		"express": "^5.0.0",
+		"express": "^5.3.0",
 		"ioredis": "^6.0.0",
 		"supertest": "^7.3.1",
 		"testcontainers": "^12.2.0",
