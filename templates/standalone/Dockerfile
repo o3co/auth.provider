@@ -3,7 +3,7 @@
 # rebuild (#289). The digest is the multi-arch index, so amd64 and arm64 both
 # resolve from it. Dependabot's `docker` ecosystem keeps the pair in step —
 # bump the tag and the digest together, never the tag alone.
-FROM node:26-alpine@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80 AS node-base
+FROM node:26-alpine@sha256:143494b1da2945f061539253adc65e4f1569ddf07da2d384c022c791a9d90a4a AS node-base
 
 ENV HOME=/home/node
 
