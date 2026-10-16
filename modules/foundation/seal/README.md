@@ -9,7 +9,7 @@
 
 ## Offers
 - `seal`: seal (plaintext and context, answering a sealed value) and open (sealed value and context, answering the plaintext, `stale` when a `previous` key sealed it, or refused).
-- Operator section: `current` (an id and a 32-byte base64 key) seals; `next` opens but never seals, so every host opens with it before it seals; `previous` keys open only. `keys`, a list read as `current` first and `previous` after, is taken instead of `current`, never beside it or `previous`.
+- Operator section: `current` (an id and a 32-byte base64 key) seals; `next` opens but never seals, so every host opens with it before it seals; `previous` keys open only.
 - Extension point `resealers`: a holder of long-lived sealed values, which walks its own and seals again what is stale, answering how many it sealed again and how many it could not open.
 - `resealing`: runs each resealer in name order and answers its counts, or that it failed (logged by name and kind); the rest still run. Counts alone, never an id or a value.
 - Test configuration builders (`./testing`), with one key per test file.
@@ -21,7 +21,7 @@
 - A value naming a key not in the ring is unavailable, not refused; putting the key back opens it.
 - Tampering, a malformed value, a part not written in its one form, a short tag and another context all give the same refusal.
 - A failed open never puts the stored content in its answer.
-- Boot is refused without a key, for a key `keys`' `secretBytes` refuses (not 32 bytes of strict base64, fewer than 8 byte values, a `REPLACE-` sample), for an id that is not 1–32 of letters, digits, `_` and `-`, for ids named alike anywhere in the ring, and for `keys` beside `current` or `previous`, or neither.
+- Boot is refused without `current`, for a key `keys`' `secretBytes` refuses (not 32 bytes of strict base64, fewer than 8 byte values, a `REPLACE-` sample), for an id that is not 1–32 of letters, digits, `_` and `-`, and for ids named alike anywhere in the ring.
 - No sample keys, and no plaintext kept.
 
 ## Depends on
