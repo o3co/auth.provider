@@ -1,2 +1,8 @@
 packages:
   - "modules/*/*"
+
+# pnpm holds back a version until it is a day old, against a hijacked
+# third-party release. The project's own packages are not a third party, so a
+# fresh @o3co release (ts.hocon) installs at once.
+minimumReleaseAgeExclude:
+  - "@o3co/*"
