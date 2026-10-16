@@ -1,0 +1,18 @@
+{
+	"name": "@mod/discovery",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/http": "workspace:*",
+		"@mod/issuer": "workspace:*",
+		"@mod/kernel": "workspace:*"
+	},
+	"devDependencies": {
+		"@mod/keys": "workspace:*"
+	}
+}

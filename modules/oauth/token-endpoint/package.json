@@ -1,0 +1,30 @@
+{
+	"name": "@mod/token-endpoint",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"exports": {
+		".": "./src/contract.ts",
+		"./testing": "./src/testing.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/audit": "workspace:*",
+		"@mod/client-allowance": "workspace:*",
+		"@mod/clients": "workspace:*",
+		"@mod/grants": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/issuer": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/rate-limit": "workspace:*",
+		"@mod/request-source": "workspace:*",
+		"@mod/sender-binding": "workspace:*",
+		"@mod/tokens": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"@mod/keys": "workspace:*",
+		"@mod/store": "workspace:*"
+	}
+}

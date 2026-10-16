@@ -1,0 +1,17 @@
+{
+	"name": "@mod/login-attributes",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"exports": {
+		".": "./src/contract.ts"
+	},
+	"dependencies": {
+		"@mod/users": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"vitest": "5.0.3"
+	}
+}

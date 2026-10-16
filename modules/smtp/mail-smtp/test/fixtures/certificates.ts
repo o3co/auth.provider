@@ -1,0 +1,55 @@
+// Test-only certificates (P-256, valid for a century). Keys here guard nothing.
+
+/** The authority the tests trust. */
+export const authority = `-----BEGIN CERTIFICATE-----
+MIIBYzCCAQigAwIBAgIJAJyWI1cVshUTMAoGCCqGSM49BAMCMCMxITAfBgNVBAMM
+GG1haWwtc210cCB0ZXN0IGF1dGhvcml0eTAgFw0yNjEwMTMyMTI2MTRaGA8yMTI2
+MDkxOTIxMjYxNFowIzEhMB8GA1UEAwwYbWFpbC1zbXRwIHRlc3QgYXV0aG9yaXR5
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAExqKbOlWzwyyVV3d02Y9Yak9Jq/8/
+oTXV1vbLnuzDX0AXi4tAwmtiSOWs/mD/l7LbKTYVCDR4eHh51KRfaQoLWKMjMCEw
+DwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMCAQYwCgYIKoZIzj0EAwIDSQAw
+RgIhAJ28GRlBkku3yIWzhiEVI1ELZfep9TMdwfdziGPUcj3vAiEAjsZGzdaRpv9q
+5n6dDdd68cdtMhtol2VZF71kl7kCn2U=
+-----END CERTIFICATE-----
+`;
+
+/** The relay's certificate for localhost, issued by the authority, and its key. */
+export const relay = {
+	cert: `-----BEGIN CERTIFICATE-----
+MIIBdzCCAR6gAwIBAgIJAOkJAF8cs7oiMAoGCCqGSM49BAMCMCMxITAfBgNVBAMM
+GG1haWwtc210cCB0ZXN0IGF1dGhvcml0eTAgFw0yNjEwMTMyMTI2MTRaGA8yMTI2
+MDkxOTIxMjYxNFowFDESMBAGA1UEAwwJbG9jYWxob3N0MFkwEwYHKoZIzj0CAQYI
+KoZIzj0DAQcDQgAEan9S2blKR0Zs3TSn3OkuQNRrKhsaabs9OY/nwR1sHllmLh1I
+JeKd7Eywo2RnA5QmGuuXnNQ1/kBGRZbWrMDvfKNIMEYwFAYDVR0RBA0wC4IJbG9j
+YWxob3N0MAkGA1UdEwQCMAAwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoGCCsG
+AQUFBwMBMAoGCCqGSM49BAMCA0cAMEQCIFZzlT3LjH8Qni/LxrNfyuLSU9UG9Dky
+p9oQjFd4edFtAiBHhBmRmCskl9o/xeTtd7GL5yyEvAwBm9ZBKNl7ncqXxQ==
+-----END CERTIFICATE-----
+`,
+	key: `-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgTVqPbOTqMiSHVXnp
+XHia7FtvsvL4P54U6+zMrsb/Ii+hRANCAARqf1LZuUpHRmzdNKfc6S5A1GsqGxpp
+uz05j+fBHWweWWYuHUgl4p3sTLCjZGcDlCYa65ec1DX+QEZFltaswO98
+-----END PRIVATE KEY-----
+`,
+};
+
+/** A certificate for localhost that no trusted authority issued, and its key. */
+export const stranger = {
+	cert: `-----BEGIN CERTIFICATE-----
+MIIBODCB36ADAgECAgkA2mzR0H4j3rowCgYIKoZIzj0EAwIwFDESMBAGA1UEAwwJ
+bG9jYWxob3N0MCAXDTI2MTAxMzIxMjYxNFoYDzIxMjYwOTE5MjEyNjE0WjAUMRIw
+EAYDVQQDDAlsb2NhbGhvc3QwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQKozE1
+X+Jab0HnYxQkwZa//lllpVTymncHbAlH+Vwj9TvZ5RamadBQ3asTrirPgrRglfje
+Hr36cuU+H828oRg3oxgwFjAUBgNVHREEDTALgglsb2NhbGhvc3QwCgYIKoZIzj0E
+AwIDSAAwRQIhAPQ6mCvoH0CjXpluMOA1N9UsVDzlqJPnhoc0DtH4GTsLAiBplOZD
+0yExXSjy8AmF6RF4qrEMCXiV+Tb9lzB+czIoSg==
+-----END CERTIFICATE-----
+`,
+	key: `-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgtc+ceLIG8xpkyxG0
+8Qg69m77ujTVP60jOrF+nzbrUuahRANCAAQKozE1X+Jab0HnYxQkwZa//lllpVTy
+mncHbAlH+Vwj9TvZ5RamadBQ3asTrirPgrRglfjeHr36cuU+H828oRg3
+-----END PRIVATE KEY-----
+`,
+};

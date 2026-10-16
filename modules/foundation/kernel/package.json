@@ -1,0 +1,15 @@
+{
+	"name": "@mod/kernel",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "common",
+	"exports": {
+		".": "./src/contract.ts",
+		"./testing": "./src/testing.ts"
+	},
+	"dependencies": {
+		"@o3co/ts.hocon": "1.14.1",
+		"zod": "4.6.5"
+	}
+}

@@ -1,30 +1,30 @@
 #!/usr/bin/env bash
-# Every workspace package the release publishes, one per line:
-# `<name><TAB><directory>`.
+# Every package the release publishes, one per line: `<name><TAB><directory>`.
 #
-# `pnpm -r publish` publishes each workspace package that is not private. This
-# asks pnpm for the same list rather than restating it, so a package added
-# tomorrow is on it the day it is added, wherever in the workspace it lives.
+# The workspace's packages are all private: what is published is what
+# `pnpm bundles` builds into dist/bundles, one bundle per concern directory
+# and the entrance `@o3co/create-auth-provider`. This reads that build rather
+# than restating it, so a bundle added tomorrow is on the list the day it is
+# built.
 #
-# Run from inside the workspace. Fails closed: a list pnpm cannot produce, or
-# one with nothing on it, is an error — never "nothing to publish".
+# Run from the workspace root after `pnpm bundles`. Fails closed: no build, or
+# a build with nothing in it, is an error — never "nothing to publish".
 #
 # Usage: published-packages.sh
 set -euo pipefail
 
-listing="$(pnpm -r ls --json --depth -1)"
-printf '%s' "$listing" | node -e '
-	let all;
-	try {
-		all = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
-	} catch {
-		console.error("::error::pnpm printed no workspace package list — run this from inside the workspace");
-		process.exit(2);
-	}
-	const published = all.filter((p) => p.private !== true);
-	if (published.length === 0) {
-		console.error("::error::pnpm lists no workspace package that the release would publish");
-		process.exit(2);
-	}
-	for (const p of published) console.log(`${p.name}\t${p.path}`);
-'
+if [ ! -d dist/bundles ]; then
+	echo "::error::dist/bundles is missing — run pnpm bundles first"
+	exit 2
+fi
+found=0
+for manifest in dist/bundles/*/package.json; do
+	[ -e "$manifest" ] || continue
+	name="$(node -p 'require(process.argv[1]).name' "$PWD/$manifest")"
+	printf '%s\t%s\n' "$name" "$PWD/$(dirname "$manifest")"
+	found=$((found + 1))
+done
+if [ "$found" -eq 0 ]; then
+	echo "::error::dist/bundles holds no package to publish"
+	exit 2
+fi

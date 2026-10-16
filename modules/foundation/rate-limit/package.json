@@ -1,0 +1,21 @@
+{
+	"name": "@mod/rate-limit",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "foundation",
+	"exports": {
+		".": "./src/contract.ts",
+		"./testing": "./src/testing.ts",
+		"./module": "./src/module.ts",
+		"./audit-events": "./src/audit-events.ts"
+	},
+	"dependencies": {
+		"@mod/audit": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/request-source": "workspace:*",
+		"@mod/store": "workspace:*",
+		"zod": "4.6.5"
+	}
+}

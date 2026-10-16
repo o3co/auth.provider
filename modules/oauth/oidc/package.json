@@ -1,0 +1,24 @@
+{
+	"name": "@mod/oidc",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"exports": {
+		".": "./src/contract.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/code-grant": "workspace:*",
+		"@mod/issuer": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/keys": "workspace:*",
+		"@mod/subject-attributes": "workspace:*",
+		"@mod/users": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"@mod/http": "workspace:*",
+		"@mod/session": "workspace:*"
+	}
+}

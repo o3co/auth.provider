@@ -1,0 +1,16 @@
+{
+	"name": "@mod/cookies",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "foundation",
+	"exports": {
+		".": "./src/contract.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/http": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/request-source": "workspace:*"
+	}
+}

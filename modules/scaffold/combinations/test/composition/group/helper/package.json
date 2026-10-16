@@ -1,0 +1,10 @@
+{
+	"name": "@c/helper",
+	"kind": "feature",
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@c/users": "workspace:*"
+	}
+}

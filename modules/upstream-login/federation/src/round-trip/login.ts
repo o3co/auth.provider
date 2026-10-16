@@ -1,0 +1,96 @@
+import { type Audit, audit } from "@mod/audit";
+import type { BuildContext } from "@mod/kernel";
+import { loginSource } from "@mod/login-attributes";
+import { type Logins, logins } from "@mod/login-gates";
+import type { UpstreamLogin } from "@mod/upstreams";
+import { type Users, userAttribute, users } from "@mod/users";
+import { type Handoff, handoff } from "../handoff/handoff.ts";
+import type { Settings } from "../section.ts";
+import {
+	answer,
+	type Continuation,
+	type Idp,
+	landingIn,
+	proves,
+	recorderOf,
+	secondOf,
+	sent,
+} from "./round-trip.ts";
+
+export interface LoginParts {
+	readonly logins: Pick<Logins, "login">;
+	readonly users: Pick<Users, "byUpstream">;
+	readonly audit: Pick<Audit, "record">;
+	readonly handoff: Pick<Handoff, "of">;
+	readonly landing: string;
+}
+
+export async function loginIn(c: BuildContext<Settings>): Promise<Continuation> {
+	return loginWith({
+		logins: await c.get(logins),
+		users: await c.get(users),
+		audit: await c.get(audit),
+		handoff: await c.get(handoff),
+		landing: await landingIn(c),
+	});
+}
+
+/** The login a round trip ends in: the local user the upstream identity is linked to, handed to `login-gates`. */
+export function loginWith(p: LoginParts): Continuation {
+	const record = recorderOf(p.audit, "federation.login");
+	return {
+		begin: async () => ({ carried: {} }),
+		failed: ({ name, reason, source }) => record("failed", name, { reason, source }),
+		complete: async ({ request, name, idp, upstreamLogin, transaction, source, cleared }) => {
+			const found = await p.users.byUpstream(name, upstreamLogin.subject);
+			if (found.kind !== "user") {
+				record("failed", name, { reason: "unknown_user", source });
+				return answer(401, { error: "unknown_user" }, cleared);
+			}
+			const mapped = upstreamLogin.amr.flatMap((value) => idp.upstreamAmr.get(value) ?? []);
+			const amr = [...new Set([...proves, ...mapped])];
+			const done =
+				transaction.redirectTo === undefined ? {} : { redirect_to: transaction.redirectTo };
+			const subject = found.user.subject;
+			const handing = p.handoff.of(name, subject, upstreamLogin.tokens);
+			const authenticatedAt = onOurClock(upstreamLogin.authenticatedAt, transaction.startedAt, idp);
+			const facts = { subject, amr, authenticatedAt, ...attributesOf(name, upstreamLogin.profile) };
+			const outcome = await p.logins.login(request, facts, done, handing?.from);
+			const held = outcome.kind === "held";
+			record(held ? "held" : "succeeded", name, { subject, source });
+			await handing?.after(outcome);
+			const cookies = [...cleared, ...outcome.cookies];
+			return held
+				? answer(403, outcome.answer, cookies)
+				: sent(transaction.redirectTo ?? p.landing, cookies);
+		},
+	};
+}
+
+/**
+ * When the upstream says the user logged in, on our clock: a time before the start's second but
+ * within the upstream's clock allowance was the round trip's own login, so it is the start's second.
+ */
+function onOurClock(at: number | undefined, startedAt: number, idp: Idp) {
+	if (at === undefined) return "unknown" as const;
+	const start = secondOf(startedAt);
+	return at < start && at + (idp.upstream.clockSkewMs ?? 0) >= start ? start : at;
+}
+
+/**
+ * The upstream's profile as the session keeps it, under the IdP's name and by users' attribute
+ * names. Read here, not passed on: the email is verified only where the type says so, and an
+ * upstream never names groups.
+ */
+function attributesOf(idp: string, profile: UpstreamLogin["profile"]) {
+	if (profile === undefined) return {};
+	const { email, emailVerified, name, picture } = profile;
+	const values = {
+		...(typeof email === "string"
+			? { email, [userAttribute.emailVerified]: emailVerified === true }
+			: {}),
+		...(typeof name === "string" ? { name } : {}),
+		...(typeof picture === "string" ? { picture } : {}),
+	};
+	return { attributes: { source: loginSource.upstream(idp), values } };
+}

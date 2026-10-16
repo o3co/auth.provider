@@ -1,0 +1,8 @@
+{
+	"name": "@c/redis",
+	"kind": "adapter",
+	"replaces": "@c/store",
+	"exports": {
+		"./module": "./src/module.ts"
+	}
+}

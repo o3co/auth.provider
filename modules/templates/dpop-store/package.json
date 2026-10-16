@@ -1,0 +1,17 @@
+{
+	"name": "@mod/dpop-store",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "wiring",
+	"wires": "@mod/dpop",
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/dpop": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/records": "workspace:*",
+		"@mod/store": "workspace:*"
+	}
+}

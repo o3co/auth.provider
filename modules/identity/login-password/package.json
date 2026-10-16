@@ -1,0 +1,29 @@
+{
+	"name": "@mod/login-password",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"exports": {
+		"./module": "./src/module.ts",
+		"./audit-events": "./src/audit-events.ts"
+	},
+	"dependencies": {
+		"@mod/audit": "workspace:*",
+		"@mod/csrf": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/login-attributes": "workspace:*",
+		"@mod/login-gates": "workspace:*",
+		"@mod/rate-limit": "workspace:*",
+		"@mod/request-source": "workspace:*",
+		"@mod/users": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"@mod/cookies": "workspace:*",
+		"@mod/session": "workspace:*",
+		"@mod/store": "workspace:*",
+		"@mod/subject-revocation": "workspace:*"
+	}
+}

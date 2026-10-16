@@ -1,0 +1,56 @@
+import { expect, it } from "vitest";
+import { section } from "../src/section.ts";
+
+const accepts = (rpId: string, origins: string[]) =>
+	section.safeParse({ "rp-id": rpId, "rp-name": "RP", origins }).success;
+
+it("takes a relying party ID equal to each origin's host, or a domain each one lies under", () => {
+	expect(accepts("rp.example", ["https://rp.example", "https://login.rp.example"])).toBe(true);
+	expect(accepts("localhost", ["http://localhost:3000"])).toBe(true);
+	expect(accepts("login.rp.example", ["https://login.rp.example"])).toBe(true);
+});
+
+it("refuses a relying party ID some origin's host does not end in, at a label", () => {
+	expect(accepts("rp.example", ["https://rp.example", "https://evil.example"])).toBe(false);
+	expect(accepts("rp.example", ["https://notrp.example"])).toBe(false);
+	expect(accepts("login.rp.example", ["https://rp.example"])).toBe(false);
+	expect(accepts("RP.example", ["https://rp.example"])).toBe(false);
+	expect(accepts("rp.example.", ["https://rp.example"])).toBe(false);
+});
+
+it("refuses a single label above an origin's host, which a browser holds a public suffix", () => {
+	expect(accepts("example", ["https://rp.example"])).toBe(false);
+});
+
+const app = "android:apk-key-hash:pNiP5iKyQ8JwgLTSKGZmcRHqvOUP1qGP8FfEcCQPvVI";
+
+it("takes an Android app origin beside the web ones, with no host to match the relying party ID", () => {
+	expect(accepts("rp.example", ["https://rp.example", app])).toBe(true);
+	expect(accepts("rp.example", [`android:apk-key-hash:-_${"a".repeat(40)}A`])).toBe(true);
+});
+
+it("refuses an Android app origin not written as the unpadded base64url SHA-256 alone", () => {
+	for (const entry of [
+		`${app}=`,
+		app.slice(0, -1),
+		`${app}A`,
+		`${app.slice(0, -1)}J`,
+		`android:apk-key-hash:${"9A".repeat(32)}`,
+		`${app}/path`,
+		"android:apk-key-hash:",
+		app.replace("android:", "Android:"),
+		app.replace("-key-", "-KEY-"),
+	]) {
+		expect(accepts("rp.example", ["https://rp.example", entry]), entry).toBe(false);
+	}
+});
+
+it("refuses an Android app origin as a top origin, since nothing frames an app", () => {
+	const parsed = section.safeParse({
+		"rp-id": "rp.example",
+		"rp-name": "RP",
+		origins: ["https://rp.example"],
+		"top-origins": [app],
+	});
+	expect(parsed.success).toBe(false);
+});

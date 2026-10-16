@@ -1,0 +1,22 @@
+{
+	"name": "@mod/verified-email",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"optIn": true,
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/kernel": "workspace:*",
+		"@mod/subject-attributes": "workspace:*",
+		"@mod/token-endpoint": "workspace:*",
+		"@mod/tokens": "workspace:*",
+		"@mod/users": "workspace:*"
+	},
+	"devDependencies": {
+		"@mod/session": "workspace:*",
+		"vitest": "5.0.3"
+	}
+}

@@ -1,0 +1,3 @@
+# webauthn-store
+
+Wires `webauthn`'s store interfaces to `records`. Passkeys are records kept without end in two spaces, one for credentials and one for subjects, each declaring a guarantee for each need `webauthn` states for them. Challenges are records under a secret, so a challenge never reaches the store, in a space declaring the other needs. A need with nothing mapped to it fails the type check, and `webauthn`'s store contracts, run on a store that loses what a missing guarantee allows, check what each guarantee means. The wiring only maps, with no branches or loops. Depends on `kernel`, `webauthn`, `records` and `store`.

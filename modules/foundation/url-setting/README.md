@@ -1,0 +1,29 @@
+# url-setting
+
+## Responsibilities
+- Decides which configured URLs boot, for every module that takes one by `urlSetting`.
+
+## Not here
+- What a module's URL means, and how it is compared (the module's).
+
+## Offers
+- `urlSetting`: a module's `UrlRules` → a schema part for a configured URL.
+- `UrlRules`: the schemes, whether a query may be part (default yes), and whether a trailing `/` is kept (default) or refused.
+
+## Invariants
+- A configured URL is written `<scheme>://` in lower case.
+- Its scheme is one of the schemes the module gives.
+- It has a host.
+- It holds no userinfo.
+- It holds no fragment, not even a bare `#`.
+- It holds no whitespace, control character or `\`.
+- It holds a query only when the module allows one.
+- It holds a trailing `/` unless the module refuses one.
+- It is taken only in the form the URL parser writes it: lower-case host, no default port; an empty path may stay empty.
+- A URL taken is kept exactly as written.
+- A refusal names the key path and the kind, never any part of the value.
+- The kinds of difference from the parser's form: a scheme not in lower case, whitespace or control characters, a backslash, host case, invisible or mapped characters, percent-encoding in the host, an IP address not in its shortest form, an empty port, a default port written, a leading zero in the port, dot segments, the path's ending (a last `.` or `..` segment), and characters the parser percent-encodes.
+- Any other difference is named only as a difference from the parser's form.
+
+## Depends on
+- `zod`; nothing in the workspace.

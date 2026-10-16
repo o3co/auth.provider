@@ -21,10 +21,9 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       # A prerelease tag — anything with a `-` identifier after the core
-      # version, e.g. v1.0.0-rc1 or v2.0.0-beta.2 — must neither move npm's
-      # `latest` dist-tag nor be listed as a full GitHub Release (#476). The tag
-      # is classified once here; every later step reads these outputs instead of
-      # re-deriving them from GITHUB_REF.
+      # version, e.g. v1.0.0-rc.1 — must neither move npm's `latest` dist-tag
+      # nor be listed as a full GitHub Release. The tag is classified once here;
+      # every later step reads these outputs.
       - name: Classify the tag
         id: release
         shell: bash
@@ -39,11 +38,24 @@ jobs:
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
+      # Every published package takes its version from the root package.json
+      # alone, so the tag must name that version: a tag that does not stops
+      # the release before anything is built.
+      - name: The tag names the workspace's version
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          stated="$(node -p "require('./package.json').version")"
+          if [ "$stated" != "$VERSION" ]; then
+            echo "::error::the tag is v${VERSION}, but the workspace's package.json states ${stated}"
+            exit 1
+          fi
+
       - name: Get pnpm store path
         id: pnpm-store
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
       - name: Cache pnpm store
         uses: actions/cache@v4
         with:
@@ -51,52 +63,77 @@ jobs:
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-
 
-      - name: Set version from tag
-        env:
-          VERSION: ${{ steps.release.outputs.version }}
-        run: pnpm -r exec pnpm version "$VERSION" --no-git-tag-version --no-commit-hooks
-
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
-      - run: pnpm -r --if-present run typecheck
-      - run: pnpm run test
+      - run: pnpm check
+      # Each pattern made from the packed tarballs alone, type-checked and booted.
+      - run: pnpm release:check
 
       # The tarballs of this tag, checked before a draft release is created or
-      # anything is published: every package `pnpm -r publish` is about to
-      # publish must be packed, and ship the root LICENSE and nothing in its
-      # place (the script says what pnpm takes for a licence file). CI's
-      # publish-readiness job packs with the same script and runs the same
-      # check on every PR; this run is the one that can stop a release.
-      - name: Refuse a tarball without the root LICENSE
+      # anything is published: every bundle and the entrance is packed, and
+      # each ships the root LICENSE word for word.
+      - name: Pack the bundles and refuse a tarball without the root LICENSE
         run: |
           set -euo pipefail
+          pnpm bundles
           .github/scripts/pack-published.sh "$RUNNER_TEMP/tarballs"
           .github/scripts/check-tarball-license.sh "$RUNNER_TEMP/tarballs" LICENSE
 
       - name: Create GitHub Release (draft)
+        id: draft
         uses: softprops/action-gh-release@v2
         with:
           draft: true
           prerelease: ${{ steps.release.outputs.prerelease == 'true' }}
           generate_release_notes: true
 
-      # pnpm publish skips per-package when the version is already on the registry,
-      # so the workflow is idempotent on retag and we don't need an upfront
-      # whole-job short-circuit. The previous core-only check caused partial
-      # publishes (e.g. trusted-publisher misconfig on one package) to be
-      # impossible to recover from via tag retag — once core was on the registry,
-      # rerun would skip the entire publish step and never retry the missing packages.
-      # `--tag` is the npm dist-tag: `latest` for a final release, `next` for a
-      # prerelease, so `npm install @o3co/<pkg>` never resolves to an RC. A final
-      # release after an RC moves `latest` forward as before.
+      # The checked tarballs, one by one, the bundles first and the entrance
+      # (`@o3co/create-auth-provider`, which depends on them) last. A name at
+      # this version already on npm is passed over, so a rerun after a partial
+      # publish publishes only what is missing. `--provenance` ties each to
+      # this workflow run; the manifests name this repository for it. A name
+      # not yet on npm cannot be bound to trusted publishing, so its first
+      # publish reads the NPM_TOKEN secret; once every name is bound, the
+      # secret is removed and npm authenticates through this run's OIDC token.
       - name: Publish packages
         env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_TAG: ${{ steps.release.outputs.npm_tag }}
-        run: pnpm -r publish --access public --no-git-checks --provenance --tag "$NPM_TAG"
+          VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          entrance="$RUNNER_TEMP/tarballs/o3co-create-auth-provider-${VERSION}.tgz"
+          for tgz in "$RUNNER_TEMP"/tarballs/*.tgz; do
+            [ "$tgz" = "$entrance" ] || set -- "$@" "$tgz"
+          done
+          set -- "$@" "$entrance"
+          for tgz in "$@"; do
+            name="$(tar -xzOf "$tgz" package/package.json | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).name')"
+            if npm view "${name}@${VERSION}" version >/dev/null 2>&1; then
+              echo "${name}@${VERSION} is on npm already; passed over"
+              continue
+            fi
+            echo "publishing ${name}@${VERSION}"
+            npm publish "$tgz" --access public --provenance --tag "$NPM_TAG"
+          done
 
+      # Publishes the release the draft step resolved for this tag, by id. A
+      # second tag lookup cannot see drafts and would create a second release.
+      # Refuses a release of any other tag; re-publishing is a no-op.
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: false
-          prerelease: ${{ steps.release.outputs.prerelease == 'true' }}
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.draft.outputs.id }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ steps.release.outputs.prerelease }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID:?the draft step returned no release id}"
+          release_tag="$(gh api "$endpoint" --jq .tag_name)"
+          if [[ "$release_tag" != "$TAG" ]]; then
+            echo "::error::release ${RELEASE_ID} is for tag ${release_tag}, not ${TAG}"
+            exit 1
+          fi
+          gh api --method PATCH "$endpoint" -F draft=false -F "prerelease=${PRERELEASE}" \
+            --jq '"\(.tag_name): draft=\(.draft) prerelease=\(.prerelease) \(.html_url)"'

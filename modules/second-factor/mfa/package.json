@@ -1,0 +1,31 @@
+{
+	"name": "@mod/mfa",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"storeWiring": true,
+	"exports": {
+		".": "./src/contract.ts",
+		"./testing": "./src/testing.ts",
+		"./module": "./src/module.ts",
+		"./audit-events": "./src/audit-events.ts"
+	},
+	"dependencies": {
+		"@mod/audit": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/login-gates": "workspace:*",
+		"@mod/seal": "workspace:*",
+		"@mod/session": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"@mod/http": "workspace:*",
+		"@mod/records": "workspace:*",
+		"@mod/subject-revocation": "workspace:*",
+		"vitest": "5.0.3"
+	},
+	"peerDependencies": {
+		"vitest": "5.0.3"
+	}
+}

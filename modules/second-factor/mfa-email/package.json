@@ -1,0 +1,24 @@
+{
+	"name": "@mod/mfa-email",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"optIn": true,
+	"exports": {
+		".": "./src/contract.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/kernel": "workspace:*",
+		"@mod/mail": "workspace:*",
+		"@mod/mfa": "workspace:*",
+		"@mod/mfa-binding-proof": "workspace:*",
+		"@mod/subject-attributes": "workspace:*",
+		"@mod/users": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"vitest": "5.0.3"
+	}
+}

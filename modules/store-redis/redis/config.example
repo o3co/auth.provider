@@ -1,0 +1,4 @@
+redis {
+	url = "rediss://redis.example.invalid:6379"
+	replication = replicas
+}

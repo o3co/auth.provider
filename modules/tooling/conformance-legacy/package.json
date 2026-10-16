@@ -1,0 +1,17 @@
+{
+	"name": "@mod/conformance-legacy",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "verification",
+	"exports": {
+		".": "./src/main.ts"
+	},
+	"scripts": {
+		"prepare-legacy": "node scripts/prepare-legacy.ts"
+	},
+	"dependencies": {
+		"@mod/conformance": "workspace:*"
+	},
+	"devDependencies": {}
+}

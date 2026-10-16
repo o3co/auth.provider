@@ -1,0 +1,28 @@
+{
+	"name": "@mod/tokens",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"storeWiring": true,
+	"exports": {
+		".": "./src/contract.ts",
+		"./testing": "./src/testing.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/http": "workspace:*",
+		"@mod/issuer": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/keys": "workspace:*",
+		"@mod/sender-binding": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"@mod/records": "workspace:*",
+		"vitest": "5.0.3"
+	},
+	"peerDependencies": {
+		"vitest": "5.0.3"
+	}
+}

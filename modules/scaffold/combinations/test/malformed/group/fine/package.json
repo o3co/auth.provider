@@ -1,0 +1,6 @@
+{
+	"name": "@t/fine",
+	"joins": [
+		"@t/string"
+	]
+}

@@ -1,0 +1,17 @@
+{
+	"name": "@mod/csrf",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"exports": {
+		".": "./src/contract.ts",
+		"./testing": "./src/testing.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/cookies": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/kernel": "workspace:*"
+	}
+}

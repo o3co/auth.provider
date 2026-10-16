@@ -1,0 +1,25 @@
+{
+	"name": "@mod/conformance-mtls",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "verification",
+	"exports": {
+		".": "./src/main.ts"
+	},
+	"scripts": {
+		"conformance": "vitest run --config vitest.config.ts"
+	},
+	"dependencies": {
+		"@mod/conformance": "workspace:*",
+		"@mod/conformance-keys": "workspace:*",
+		"@mod/conformance-legacy": "workspace:*",
+		"@mod/conformance-oauth": "workspace:*",
+		"asn1js": "3.0.10",
+		"pkijs": "3.4.1"
+	},
+	"devDependencies": {
+		"jose": "6.2.12",
+		"vitest": "5.0.3"
+	}
+}

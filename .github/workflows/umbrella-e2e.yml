@@ -8,20 +8,17 @@ name: umbrella-e2e
 # runs the suite at the umbrella's develop, with only PROVIDER_REV overridden:
 # auth.proxy and auth.policy-verifier stay at the umbrella's pins.
 #
-# It runs on every pull request to main — the develop → main pull request that
-# precedes a release tag — and by hand. It is a required check on main, so it
-# has no paths filter: a workflow filtered out never reports, and a required
-# check that never reports blocks the pull request. Feature pull requests to
-# develop do not run it.
+# While 0.18 is prepared it runs by hand only and is no required check: the
+# umbrella still builds the provider as 0.17 was laid out (packages/,
+# templates/standalone, `pnpm -r run build`), so it cannot pass against 0.18
+# until the umbrella moves. Once it does, put back the pull_request trigger on
+# main and the required check, together.
 #
 # Red means this change breaks the umbrella's contract — or the umbrella's
 # develop is itself red: check its latest e2e run first. For a broken contract,
-# fix the umbrella's tests/ first, or change this PR. AGENTS.md ("Umbrella
-# E2E") says how.
+# fix the umbrella's tests/ first, or change this PR.
 
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -98,9 +95,15 @@ jobs:
       - name: Provide npmrc secret file
         run: touch ~/.npmrc
 
+      # Docker Compose builds the images with the classic builder, not Bake.
+      # Bake refuses to read a secret file outside the working directory
+      # unless `--allow fs.read=<path>` grants it, and Compose passes that
+      # grant for build contexts only, never for the ~/.npmrc secret. The
+      # classic builder reads only the files the compose file declares.
       - name: Run the umbrella E2E suite with this change as auth.provider
         working-directory: umbrella
         env:
+          COMPOSE_BAKE: "false"
           PROVIDER_SHA: ${{ steps.revs.outputs.provider }}
         run: make test-e2e PROVIDER_REV="$PROVIDER_SHA"
 

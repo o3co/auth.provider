@@ -1,0 +1,7 @@
+{
+	"name": "@c/checks",
+	"kind": "verification",
+	"exports": {
+		"./module": "./src/module.ts"
+	}
+}

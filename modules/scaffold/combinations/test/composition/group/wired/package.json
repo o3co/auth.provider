@@ -1,0 +1,8 @@
+{
+	"name": "@c/wired",
+	"kind": "feature",
+	"optIn": true,
+	"exports": {
+		"./module": "./src/module.ts"
+	}
+}

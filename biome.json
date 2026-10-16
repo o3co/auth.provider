@@ -1,50 +1,16 @@
 {
-	"$schema": "https://biomejs.dev/schemas/2.4.4/schema.json",
+	"$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
 	"files": {
-		"includes": ["**", "!!**/dist", "!!**/node_modules"]
+		"includes": ["**", "!!**/node_modules", "!!**/dist", "!!**/coverage"]
 	},
 	"linter": {
 		"enabled": true,
 		"rules": {
-			"recommended": true,
-			"security": {
-				"recommended": true
-			}
+			"preset": "recommended"
 		}
 	},
 	"formatter": {
 		"enabled": true,
-		"indentStyle": "tab",
-		"indentWidth": 2,
 		"lineWidth": 100
-	},
-	"javascript": {
-		"formatter": {
-			"quoteStyle": "double",
-			"trailingCommas": "all",
-			"semicolons": "always"
-		}
-	},
-	"overrides": [
-		{
-			"includes": ["packages/redis/__tests__/**"],
-			"linter": {
-				"rules": {
-					"style": {
-						"noRestrictedImports": {
-							"level": "error",
-							"options": {
-								"patterns": [
-									{
-										"group": ["../**/src/**"],
-										"message": "A test imports its package's source through the `#/` subpath mapping, not a relative path into src/ (AGENTS.md, Module Resolution)."
-									}
-								]
-							}
-						}
-					}
-				}
-			}
-		}
-	]
+	}
 }

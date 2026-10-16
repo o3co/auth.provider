@@ -1,0 +1,23 @@
+{
+	"name": "@mod/logout",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"exports": {
+		"./module": "./src/module.ts",
+		"./audit-events": "./src/audit-events.ts"
+	},
+	"dependencies": {
+		"@mod/audit": "workspace:*",
+		"@mod/csrf": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/request-source": "workspace:*",
+		"@mod/session": "workspace:*"
+	},
+	"devDependencies": {
+		"@mod/cookies": "workspace:*",
+		"@mod/subject-revocation": "workspace:*"
+	}
+}

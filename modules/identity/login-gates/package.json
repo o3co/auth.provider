@@ -1,0 +1,21 @@
+{
+	"name": "@mod/login-gates",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"exports": {
+		".": "./src/contract.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/http": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/session": "workspace:*",
+		"@mod/url-setting": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"@mod/subject-revocation": "workspace:*"
+	}
+}

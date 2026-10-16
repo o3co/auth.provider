@@ -1,37 +1,9 @@
 version: 2
 updates:
-  # Each template pins its base image by digest. A digest never moves,
-  # which is the point — and also means it never picks up the CVE fixes that
-  # `node:26-alpine` rebuilds carry. This is the update path: Dependabot bumps
-  # tag and digest together, so the pin stays deliberate instead of stale.
+  # The workspace's one lockfile. 0.18 ships no Dockerfile of its own: the
+  # generated app's base image and its pnpm pin are TypeScript strings in
+  # create-app, which Dependabot cannot see, and are updated by hand.
   #
-  # Major bumps track the LTS lines, which is why `node:25` was declined
-  # (#388: odd-numbered, never enters LTS, EOL June 2026). `node:26` was taken
-  # in September 2026, a few weeks ahead of its October LTS date, as a
-  # deliberate call rather than a default: bcrypt — the one native dependency
-  # — is a Node-API addon whose alpine prebuild loads on 26 without
-  # compiling, and the whole suite was run on 26 before the bump landed.
-  # Since then CI's publish-readiness job builds the Dockerfile's `node-base`
-  # stage from the pinned digest and installs the dependency set on it, so a
-  # future major that breaks the image fails a check rather than an operator.
-  #
-  # Every template is covered by the glob, and one bump of an image is one pull
-  # request across all of them (`group-by: dependency-name`): the templates
-  # keep their Dockerfile identical (the composition templates ADR's D4,
-  # packages/core/docs/adr/2026-09-29-composition-templates.md), and a pull
-  # request that bumped it in one template only would break that.
-  - package-ecosystem: "docker"
-    directories:
-      - "/templates/*"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    groups:
-      base-image:
-        patterns:
-          - "*"
-        group-by: dependency-name
-
   # A release is proposed only once it has been public for `default-days`, so
   # a compromised release can be caught upstream before it reaches a lockfile.
   # Cooldown applies to version updates only: security updates stay immediate.
@@ -42,12 +14,9 @@ updates:
     cooldown:
       default-days: 3
     open-pull-requests-limit: 10
-    # Group routine minor/patch churn into few PRs. Many separate lockfile-
-    # touching PRs race at merge time: GitHub's server-side squash/merge does
-    # NOT honor the .gitattributes `merge=binary` driver, so a PR merged without
-    # first rebasing onto the updated base can duplicate pnpm-lock.yaml entries
-    # (ERR_PNPM_BROKEN_LOCKFILE). Fewer concurrent PRs = fewer such races. Majors
-    # stay ungrouped so each remains a deliberate review.
+    # Group routine minor/patch churn into few PRs: many lockfile-touching PRs
+    # race at merge time. Majors stay ungrouped so each remains a deliberate
+    # review.
     groups:
       dev-dependencies:
         dependency-type: "development"
@@ -60,34 +29,15 @@ updates:
           - "minor"
           - "patch"
     ignore:
-      # @simplewebauthn/server is pinned to an exact version (S12 discipline,
-      # see packages/webauthn/README.md). Only major bumps should surface as
-      # PRs so each upgrade is a deliberate security review.
+      # @simplewebauthn/server is pinned to an exact version
+      # (modules/passkey/webauthn). Only major bumps should surface as PRs, so
+      # each upgrade is a deliberate security review.
       - dependency-name: "@simplewebauthn/server"
         update-types:
           - "version-update:semver-minor"
           - "version-update:semver-patch"
-      # TypeScript major bumps require workspace-wide migration across the four
-      # auth.* OSS repos (auth.provider / auth.policy-verifier / auth.proxy /
-      # auth.utils). A per-repo Dependabot bump would split TS versions across
-      # the workspace and complicate dev-tool onboarding. TS major upgrades are
-      # handled as a deliberate cross-repo PR, not auto-bumped.
+      # TypeScript majors are taken across the auth.* repositories together,
+      # in one deliberate change, never auto-bumped in one of them.
       - dependency-name: "typescript"
         update-types:
           - "version-update:semver-major"
-
-  # The template's API test project is its own npm project with its own
-  # lockfile, outside the pnpm workspace, so the root entry never reaches it.
-  # Every scaffolded project inherits that lockfile.
-  - package-ecosystem: "npm"
-    directory: "/templates/standalone/tests"
-    schedule:
-      interval: "weekly"
-    cooldown:
-      default-days: 3
-    open-pull-requests-limit: 5
-    groups:
-      minor-patch:
-        update-types:
-          - "minor"
-          - "patch"
