@@ -8,8 +8,8 @@
 - What a record holds and how it changes: the feature's. Which feature it serves: the wiring's. Store implementations.
 
 ## Offers
-- Keyed records: create if absent, read while it lives, change from what it holds, remove; a lifetime is ms from the write, or endless.
-- Records under a secret: the same, kept under a name made from the secret, reached by secret or by name.
+- Keyed records: create if absent, read while it lives, change from what it holds, remove, and a scan of the keys of those living, by pages, as `store` walks (a scanned space holds records by key alone); a lifetime is ms from the write, or endless.
+- Records under a secret: the same but the scan, kept under a name made from the secret, reached by secret or by name. They hold short-lived values only, so a rotation waits them out and they need no scan.
 - Deferred work: add, done, and each, which hands the work over; work that fails stays and is counted.
 - Keyed sets: add a member for a lifetime (answering those pushed out over the cap), the members with their time left, remove a member; the members pushed out and awaiting, and settling one.
 - No contract of its own: the wiring builds each over a place, with the cap and `kernel`'s clock for keyed sets.

@@ -182,6 +182,42 @@ it("removes a record for good when the answer to its removal was lost and the st
 	expect(await records.read("gone")).toBeUndefined();
 });
 
+/** Every key a walk of the records lists, with how often each came. */
+async function walked(records: Records<Counted>): Promise<Map<string, number>> {
+	const seen = new Map<string, number>();
+	let cursor: string | undefined;
+	do {
+		const page = await records.scan(cursor);
+		for (const key of page.keys) seen.set(key, (seen.get(key) ?? 0) + 1);
+		cursor = page.cursor;
+	} while (cursor !== undefined);
+	return seen;
+}
+
+it("walks the keys of the records that live, over pages, and nothing else kept in the space", async () => {
+	const { records, deferred, place } = await open();
+	const keys = Array.from({ length: 150 }, (_, i) => `r${i}`);
+	for (const key of keys) await records.create(key, { n: 1 }, 60_000);
+	await records.change("r0", () => undefined);
+	await records.remove("r1");
+	await deferred.add("job");
+	await keyedSetsIn({ ...place, cap: 4, clock: runtime.clock }).add("s", "m", 60_000);
+	const seen = await walked(records);
+	expect([...seen.keys()].sort()).toEqual(keys.filter((key) => key !== "r1").sort());
+});
+
+it("walks what a failover kept: a record whose create was confirmed, not one never confirmed", async () => {
+	const { simulated, place, records } = await open();
+	simulated.loseNextReply();
+	await records.create("settled", { n: 1 }, 60_000);
+	const key = { space, partition: "unconfirmed", name: "record" };
+	await unconfirmed(simulated, () =>
+		place.store.putIfAbsent(key, { n: 1 }, { expiry: { kind: "never" } }),
+	);
+	await simulated.failover();
+	expect([...(await walked(records)).keys()]).toEqual(["settled"]);
+});
+
 it("gives up on a store that never answers once its pauses add up, as unavailable", async () => {
 	const { simulated, records } = await open();
 	await records.create("silent", { n: 1 }, 60_000);
@@ -239,6 +275,15 @@ async function endlessOutlivesTheClock(records: Records<Counted>, advance: (ms: 
 it("keeps a record made or changed to live without end, however far the store clock runs", async () => {
 	const { simulated, place } = await open();
 	await endlessOutlivesTheClock(recordsIn<Counted>(place), (ms) => simulated.shiftClock(ms));
+});
+
+it("offers records in memory that walk the records living, as records' do", async () => {
+	let now = 0;
+	const { records } = memoryRecords<Counted>(() => now, size);
+	await records.create("short", { n: 1 }, 10);
+	await records.create("long", { n: 1 }, 60_000);
+	now += 10;
+	expect((await records.scan()).keys).toEqual(["long"]);
 });
 
 it("offers records in memory that keep a record without end as records' do", async () => {
