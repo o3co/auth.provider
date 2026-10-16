@@ -7,7 +7,7 @@
 - What values mean, their shapes and rules; feature vocabulary; connections to outside infrastructure.
 
 ## Offers
-- The `store` contract: reads of one key, of many in one partition at one instant, or following a value to the keys it names, each answering value, version and the store clock's time.
+- The `store` contract: reads of one key, of many in one partition at one instant, or following a value to the keys it names, each answering value, version and the store clock's time; and a scan of a space's live value keys by pages, which lists each key living through the walk.
 - Writes: put, if absent, on a version, remove on a version or a value, take once, a batch in one partition under conditions, and `mutate`, whose pure function runs again on each retry.
 - Expiry after a duration, at a time, none, keep, or extend only; counting in a fixed window; sets with scores, a cap and an expiry.
 - The space declaration extension point, and the composition definition with `accept-volatile` (default false), which lets spaces needing durable or replicated boot on memory.
