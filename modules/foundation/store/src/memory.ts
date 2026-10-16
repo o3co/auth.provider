@@ -22,6 +22,7 @@ type Limits = { readonly deadline?: number; readonly idempotency?: string } | un
 export const idempotencySkewMs = 1000;
 export const idempotencyDefaultMs = 5 * 60_000;
 const sweepEvery = 256;
+const scanPage = 100;
 
 const id = (key: Key) => JSON.stringify([key.space.name, key.partition, key.name]);
 const partitionOf = (key: Key) => JSON.stringify([key.space.name, key.partition]);
@@ -297,6 +298,21 @@ export function memoryStore(
 				sets.get(id(key))?.members.delete(member);
 			},
 			now: async () => clock.now(),
+			scan: async (space, cursor) => {
+				const now = clock.now();
+				const ids = [...values]
+					.filter(([at, held]) => live(held, now) && JSON.parse(at)[0] === space.name)
+					.map(([at]) => at)
+					.filter((at) => cursor === undefined || at > cursor)
+					.sort();
+				const page = ids.slice(0, scanPage);
+				const keys = page.map((at) => {
+					const [, partition, name] = JSON.parse(at) as [string, string, string];
+					return { space, partition, name };
+				});
+				const last = page.at(-1);
+				return deepFreeze(ids.length > scanPage && last ? { keys, cursor: last } : { keys });
+			},
 		},
 		declared,
 	);
