@@ -36,7 +36,10 @@ it("assembles what combinations composes in full, each axis with one adapter, an
 	expect(await imports(target)).toEqual(modules);
 	const pkg = JSON.parse(await read(target, "package.json"));
 	expect(Object.keys(pkg.dependencies)).toEqual([kernel, ...modules]);
-	expect(pkg.scripts).toEqual({ start: "node --env-file-if-exists=.env src/main.ts" });
+	expect(pkg.scripts).toEqual({
+		start: "node --env-file-if-exists=.env src/main.ts",
+		reseal: "node --env-file-if-exists=.env src/reseal.ts",
+	});
 	const composed = modules.map(manifest);
 	const owners = composed.flatMap((m) => m.replaces ?? m.adapts ?? []);
 	expect(owners.length).toBeGreaterThan(0);

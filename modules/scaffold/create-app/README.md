@@ -6,7 +6,7 @@
 - Generates a pattern's deployment the same way, from what `combinations` composes of the pattern's selection and the operator's choice; its internal module `patterns` holds the patterns.
 - Maps each fragment's keys to the environment and the local layer: the boundary that keeps module words out of the environment's.
 - Adds one log sink to a listed app: `log-stdout`, unless the plan names another.
-- Writes a start script, and what git leaves out (`node_modules/`, local configuration files, and for full and a pattern the env files and key files).
+- Writes a start script, a `reseal` script with `seal` (built, not started, running its resealers; exit 1 on a failure, 2 if any is left), and what git leaves out (`node_modules/`, local configuration files, and for full and a pattern the env files and key files).
 - The app reads the configuration files `APP_CONFIG` lists, comma-separated, layered in order; the generated configuration file when unset.
 
 ## Not here
