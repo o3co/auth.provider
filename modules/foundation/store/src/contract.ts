@@ -182,7 +182,7 @@ export interface Store {
 	now(): Promise<number>;
 	/** A page of the space's live value keys (no counter or set) and the cursor on; none when done. */
 	// A key written or removed meanwhile may come, or twice, or not; one living through the walk comes.
-	scan?(
+	scan(
 		space: Space,
 		cursor?: string,
 	): Promise<{ readonly keys: readonly Key[]; readonly cursor?: string }>;
@@ -488,7 +488,6 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 			const name = text("space", fields("space", target, ["name", "guarantees"]).name);
 			const declaredSpace = known.get(name);
 			if (!declaredSpace) fail(`space ${name} is not declared`);
-			if (!inner.scan) throw new Error("this store cannot scan");
 			return inner.scan(declaredSpace, cursor === undefined ? undefined : text("cursor", cursor));
 		},
 		setRemove: async (k, member) => inner.setRemove(key(k), text("member", member)),

@@ -802,12 +802,10 @@ export function storeContract(name: string, harness: StoreHarness): void {
 
 		describe("scanning a space", () => {
 			const walk = async (s: Store, target: Space, between?: () => Promise<void>) => {
-				const scan = s.scan?.bind(s);
-				if (!scan) throw new Error("this store cannot scan");
 				const seen = new Map<string, number>();
 				let cursor: string | undefined;
 				do {
-					const page = await scan(target, cursor);
+					const page = await s.scan(target, cursor);
 					for (const k of page.keys) {
 						expect(k.space.name).toBe(target.name);
 						const id = `${k.partition}/${k.name}`;
@@ -819,10 +817,8 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				return seen;
 			};
 
-			it("lists each live value's key in the space, over pages, and no counter, set or other space", async (ctx) => {
+			it("lists each live value's key in the space, over pages, and no counter, set or other space", async () => {
 				const s = await harness.open();
-				// Until every implementation scans.
-				if (!s.scan) return ctx.skip();
 				const live = Array.from({ length: 250 }, (_, i) => fresh(space, `q${i % 7}`)(`k${i}`));
 				for (const k of live) await s.put(k, 1, never);
 				const { now } = await s.get(fresh()("probe"));
@@ -838,10 +834,8 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				expect([...(await walk(await harness.open(), space)).keys()]).toEqual([]);
 			});
 
-			it("lists every key that lives through the walk, whatever is written or removed meanwhile", async (ctx) => {
+			it("lists every key that lives through the walk, whatever is written or removed meanwhile", async () => {
 				const s = await harness.open();
-				// Until every implementation scans.
-				if (!s.scan) return ctx.skip();
 				const kept = Array.from({ length: 120 }, (_, i) => fresh(space, "w")(`kept${i}`));
 				const dropped = Array.from({ length: 120 }, (_, i) => fresh(space, "w")(`dropped${i}`));
 				for (const k of [...kept, ...dropped]) await s.put(k, 1, never);
@@ -854,11 +848,9 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				for (const k of kept) expect(seen.get(`w/${k.name}`), k.name).toBeGreaterThanOrEqual(1);
 			});
 
-			it("refuses a space that is not declared", async (ctx) => {
+			it("refuses a space that is not declared", async () => {
 				const s = await harness.open();
-				// Until every implementation scans.
-				if (!s.scan) return ctx.skip();
-				await expect(s.scan?.({ name: "undeclared", guarantees: [] })).rejects.toThrow();
+				await expect(s.scan({ name: "undeclared", guarantees: [] })).rejects.toThrow();
 			});
 		});
 
