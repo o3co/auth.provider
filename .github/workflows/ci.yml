@@ -231,6 +231,12 @@ jobs:
             pnpm --filter @mod/conformance-legacy run prepare-legacy
           fi
       - run: pnpm conformance
+      # The same scenes on the legacy system. A scene it cannot be set up for,
+      # or answers by a decided difference, is skipped; any other fails.
+      - name: Conformance on the legacy system
+        env:
+          CONFORMANCE_TARGET: legacy
+        run: pnpm conformance
       - run: pnpm conformance:patterns
 
   # On main and the release branches only: what a release would publish.
