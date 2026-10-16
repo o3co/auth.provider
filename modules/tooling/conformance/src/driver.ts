@@ -39,6 +39,18 @@ export function freePort(): Promise<number> {
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Starts a target at a free port, choosing again (up to `attempts`) where another took it first (EADDRINUSE). */
+export async function untilPortHeld(
+	start: (port: number) => Promise<Started>,
+	attempts: number,
+): Promise<Started> {
+	for (let attempt = 1; ; attempt++) {
+		const started = await start(await freePort());
+		const taken = started.kind === "refused" && started.output.includes("EADDRINUSE");
+		if (!taken || attempt >= attempts) return started;
+	}
+}
+
 export async function launch(spec: Launch, timeoutMs = 30_000): Promise<Started> {
 	const child = spawn(spec.command, [...spec.args], { cwd: spec.cwd, env: { ...spec.env } });
 	let output = "";
