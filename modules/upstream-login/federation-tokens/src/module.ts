@@ -3,6 +3,7 @@ import { clients, metadataSections } from "@mod/clients";
 import { routes, use } from "@mod/http";
 import { contract, defineModule } from "@mod/kernel";
 import { requestsPerSource } from "@mod/rate-limit";
+import { resealers } from "@mod/seal";
 import { participants, sessions } from "@mod/session";
 import { upstreamLoginReceivers, upstreams } from "@mod/upstreams";
 import { callerFrom } from "./caller/caller.ts";
@@ -12,6 +13,7 @@ import { type Renewal, renewalWith } from "./renewal/renewal.ts";
 import { base, clientSection, federationTokens } from "./routes.ts";
 import { section } from "./section.ts";
 import { refreshLocks, upstreamTokenStore } from "./store.ts";
+import { resealerOver } from "./vault/resealer.ts";
 import { vaultFrom } from "./vault/vault.ts";
 
 const name = "federation-tokens";
@@ -20,6 +22,9 @@ const kept = contract<Renewal>("federation-tokens.kept");
 
 export default defineModule({ name, section }, (m) => [
 	m.contribute(metadataSections).by(() => clientSection),
+	m
+		.contribute(resealers)
+		.by(async (c) => resealerOver(await c.get(upstreamTokenStore), await vaultFrom(c))),
 	m.provide(kept).by(async (c) => {
 		// Late: session collects this module's participant, which uses the keeper.
 		const lateSessions = c.late(sessions);

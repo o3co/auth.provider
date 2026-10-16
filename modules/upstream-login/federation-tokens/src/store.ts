@@ -24,7 +24,7 @@ export interface UpstreamTokenStore {
 	>;
 	remove(session: string): Promise<void>;
 	/** A page of the session handles whose records live, and the cursor on; none when done. A walk is no one instant. */
-	scan?(cursor?: string): Promise<{ readonly keys: readonly string[]; readonly cursor?: string }>;
+	scan(cursor?: string): Promise<{ readonly keys: readonly string[]; readonly cursor?: string }>;
 }
 
 export const upstreamTokenStore = contract<UpstreamTokenStore>(

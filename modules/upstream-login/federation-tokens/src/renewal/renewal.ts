@@ -157,7 +157,12 @@ export function renewalWith(parts: Parts) {
 		const entry = await entryOf(session, idp);
 		if (!entry) return undefined;
 		const kept = vault.open(session, idp, entry);
-		if (kept) return { entry, kept };
+		if (kept) {
+			// A past key's entry is sealed again in this read, which writes only over the version read.
+			const resealed = vault.resealed(session, idp, entry);
+			if (resealed && resealed !== entry) await rewrite(session, idp, resealed, entry.version);
+			return { entry, kept };
+		}
 		parts.log.warn("federation-tokens.record_unreadable", { idp });
 		await rewrite(session, idp, undefined, entry.version);
 		return undefined;

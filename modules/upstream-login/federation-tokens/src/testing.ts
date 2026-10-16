@@ -95,18 +95,15 @@ export function upstreamTokenStoreContract(
 			expect(await place.records.read(key)).toBeUndefined();
 		});
 
-		it("walks the sessions whose records live, over pages", async (context) => {
+		it("walks the sessions whose records live, over pages", async () => {
 			const place = await open();
-			const scan = place.records.scan?.bind(place.records);
-			// Until every implementation scans.
-			if (!scan) return context.skip();
 			const keys = Array.from({ length: 120 }, fresh);
 			for (const key of keys) await place.records.save(key, held({ n: 1 }), 60_000);
 			await place.records.remove(keys[0] as string);
 			const seen = new Set<string>();
 			let cursor: string | undefined;
 			do {
-				const page = await scan(cursor);
+				const page = await place.records.scan(cursor);
 				for (const session of page.keys) seen.add(session);
 				cursor = page.cursor;
 			} while (cursor !== undefined);

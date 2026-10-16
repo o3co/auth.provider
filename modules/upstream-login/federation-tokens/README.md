@@ -1,7 +1,7 @@
 # federation-tokens
 
 ## Responsibilities
-- Keeps the upstream tokens of a federation login, sealed, per session and IdP.
+- Keeps the upstream tokens of a federation login, sealed, per session and IdP, and seals again what a `previous` key sealed: when a read opens it, and for `seal`'s resealers (as `federation-tokens`, walking every record and counting an entry no key opens).
 - Hands a receiving client the session's upstream access token.
 - Refreshes that token when its end is near.
 - Logs a session out of one upstream: forgets that IdP's tokens, then sends the browser to the upstream's end of session.
@@ -27,7 +27,7 @@
 - Client metadata section `federation-tokens`: `receives` (default false), `post-logout-redirect-uris` (default none).
 - Operator section: `refresh-before-seconds` (default 30), `max-lifetime-seconds` (default 86400), `lock-seconds` (default 5), `requests` in `window-seconds`.
 - Store interfaces, which the assembly wires; the store never reads a record.
-  - Upstream tokens: one record per session handle, saved once, read, changed from what it holds with a new lifetime, removed. Needs: no eviction, never rolled back by failover.
+  - Upstream tokens: one record per session handle, saved once, read, changed from what it holds with a new lifetime or its own, removed, and the sessions whose records live walked by pages. Needs: no eviction, never rolled back by failover.
   - Refresh locks: held under their holder's mark unless held, for a lifetime, and changed only from the mark they hold. Needs: no eviction.
 - Audit events with the subject, `idp`, `client` and the source when determined: `federation.token.succeeded` (`refreshed`), `federation.token.failed` (`reason`), `federation.logout.succeeded` (`redirected`).
 - Test configuration builders and the contract test of both store interfaces (`./testing`).
