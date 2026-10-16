@@ -1,0 +1,24 @@
+{
+	"name": "@mod/metrics",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "foundation",
+	"joins": [
+		"@mod/http"
+	],
+	"exports": {
+		".": "./src/contract.ts",
+		"./testing": "./src/testing.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/kernel": "workspace:*"
+	},
+	"peerDependencies": {
+		"vitest": "5.0.3"
+	},
+	"devDependencies": {
+		"vitest": "5.0.3"
+	}
+}

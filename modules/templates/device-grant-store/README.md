@@ -1,0 +1,3 @@
+# device-grant-store
+
+Wires `device-grant`'s store interfaces to `records`: devices to records under a secret, by the name `records` makes from a device code, so a device code never reaches the store, and user codes to records. Each has its own space, so a device's name and a user code never meet, and each declares a guarantee for each need `device-grant` states. A need with nothing mapped to it, a guarantee or records under a secret, fails the type check, and `device-grant`'s store contract, run on a store that loses what a missing guarantee allows, checks what each guarantee means. The wiring only maps, with no branches or loops. Depends on `kernel`, `device-grant`, `records` and `store`.

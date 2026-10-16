@@ -1,0 +1,6 @@
+audit {
+	receivers = none
+}
+mail {
+	accept-unsent = true
+}

@@ -1,0 +1,7 @@
+{
+	"name": "@c/shapes",
+	"kind": "common",
+	"exports": {
+		".": "./src/contract.ts"
+	}
+}

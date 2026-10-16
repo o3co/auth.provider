@@ -1,0 +1,19 @@
+{
+	"name": "@mod/clients",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"exports": {
+		".": "./src/contract.ts",
+		"./testing": "./src/testing.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/http": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/secret-hash": "workspace:*",
+		"@standard-schema/spec": "1.1.0",
+		"zod": "4.6.5"
+	}
+}

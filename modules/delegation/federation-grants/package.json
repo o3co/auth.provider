@@ -1,0 +1,40 @@
+{
+	"name": "@mod/federation-grants",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"optIn": true,
+	"storeWiring": true,
+	"exports": {
+		".": "./src/contract.ts",
+		"./module": "./src/module.ts",
+		"./testing": "./src/testing.ts",
+		"./audit-events": "./src/audit-events.ts"
+	},
+	"dependencies": {
+		"@mod/audit": "workspace:*",
+		"@mod/clients": "workspace:*",
+		"@mod/csrf": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/rate-limit": "workspace:*",
+		"@mod/request-source": "workspace:*",
+		"@mod/seal": "workspace:*",
+		"@mod/session": "workspace:*",
+		"@mod/subject-revocation": "workspace:*",
+		"@mod/upstreams": "workspace:*",
+		"@mod/url-setting": "workspace:*",
+		"@mod/users": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"peerDependencies": {
+		"vitest": "5.0.3"
+	},
+	"devDependencies": {
+		"@mod/cookies": "workspace:*",
+		"@mod/records": "workspace:*",
+		"@mod/store": "workspace:*",
+		"vitest": "5.0.3"
+	}
+}

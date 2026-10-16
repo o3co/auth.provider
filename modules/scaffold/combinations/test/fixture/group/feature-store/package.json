@@ -1,0 +1,4 @@
+{
+	"name": "@t/feature-store",
+	"wires": "@t/feature"
+}

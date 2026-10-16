@@ -1,0 +1,19 @@
+{
+	"name": "@mod/distribution",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "assembly",
+	"scripts": {
+		"check": "node src/main.ts",
+		"bundles": "node src/bundles.ts",
+		"release-check": "node src/release-check.ts"
+	},
+	"exports": {
+		".": "./src/contract.ts"
+	},
+	"dependencies": {
+		"@mod/create-app": "workspace:*",
+		"typescript": "6.0.3"
+	}
+}

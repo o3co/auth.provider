@@ -1,0 +1,12 @@
+{
+	"name": "@o/session-lifecycle",
+	"kind": "adapter",
+	"replaces": "@o/session",
+	"default": true,
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@o/session": "workspace:*"
+	}
+}

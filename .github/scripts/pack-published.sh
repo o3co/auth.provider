@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Packs every workspace package the release publishes into <destination>, with
-# `pnpm pack` — what CI's publish-readiness job checks and what release.yml
-# checks before it publishes, so the two cannot pack different sets.
+# Packs every package the release publishes into <destination>, with
+# `pnpm pack` — what CI's release-check job checks and what release.yml
+# checks and then publishes, so the two cannot pack different sets.
 #
-# The list is `published-packages.sh`'s, the one `pnpm -r publish` publishes.
-# `pnpm pack`, not `npm pack`: pnpm rewrites `workspace:` ranges to real
-# versions and packs the root LICENSE into a package that has none, and npm
-# does neither.
+# The list is `published-packages.sh`'s: the bundles and the entrance that
+# `pnpm bundles` built. Each already holds the root LICENSE, which
+# `pnpm bundles` copies in, so any packer ships it.
 #
 # Each `pnpm pack` runs with stdin closed. The list is read line by line from
 # stdin, and a pack's lifecycle scripts (`prepack`, `prepare`, `postpack`)
@@ -15,7 +14,7 @@
 #
 # Fails closed: a list pnpm cannot produce, or a pack that fails, stops it.
 #
-# Usage (from inside the workspace): pack-published.sh <destination>
+# Usage (from the workspace root, after pnpm bundles): pack-published.sh <destination>
 set -euo pipefail
 
 destination="${1:?usage: pack-published.sh <destination>}"

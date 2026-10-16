@@ -1,0 +1,115 @@
+import { execFileSync, spawn } from "node:child_process";
+import { createServer } from "node:net";
+import type { AuditTrail } from "./audit/audit.ts";
+import type { Mailbox } from "./smtp.ts";
+
+export type Started =
+	| {
+			readonly kind: "running";
+			readonly baseUrl: string;
+			stop(): Promise<void>;
+			/** Makes the store unreachable, or reachable again; only where the scene asked for store faults. */
+			fault?(down: boolean): Promise<void>;
+			/** The audit events it sends, on a target that can meet the need. */
+			readonly audit?: AuditTrail;
+			/** The mail it sent, where the driver runs the relay it sends to. */
+			readonly mail?: Mailbox;
+	  }
+	| { readonly kind: "refused"; readonly output: string };
+
+export interface Launch {
+	readonly command: string;
+	readonly args: readonly string[];
+	readonly cwd: string;
+	readonly env: Readonly<Record<string, string>>;
+	/** The port the target was told to listen on; readiness is the first HTTP answer there. */
+	readonly port: number;
+}
+
+export function freePort(): Promise<number> {
+	return new Promise((resolve, reject) => {
+		const server = createServer();
+		server.once("error", reject);
+		server.listen(0, "127.0.0.1", () => {
+			const address = server.address();
+			server.close(() => resolve(typeof address === "object" && address ? address.port : 0));
+		});
+	});
+}
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export async function launch(spec: Launch, timeoutMs = 30_000): Promise<Started> {
+	const child = spawn(spec.command, [...spec.args], { cwd: spec.cwd, env: { ...spec.env } });
+	let output = "";
+	child.stdout.on("data", (chunk: Buffer) => {
+		output += chunk;
+	});
+	child.stderr.on("data", (chunk: Buffer) => {
+		output += chunk;
+	});
+	const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+	const stop = async () => {
+		if (child.exitCode === null && child.signalCode === null) {
+			child.kill("SIGTERM");
+			await exited;
+		}
+	};
+	const baseUrl = `http://127.0.0.1:${spec.port}`;
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (child.exitCode !== null || child.signalCode !== null) return { kind: "refused", output };
+		try {
+			await fetch(baseUrl, { signal: AbortSignal.timeout(500) });
+			return { kind: "running", baseUrl, stop };
+		} catch {
+			await Promise.race([pause(100), exited]);
+		}
+	}
+	child.kill("SIGKILL");
+	throw new Error(`target did not answer in ${timeoutMs}ms:\n${output}`);
+}
+
+export function baseEnv(): Record<string, string> {
+	return { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "" };
+}
+
+/** A throwaway Redis in a container, for the length of one scene. */
+export async function startRedis(
+	settings: readonly string[] = [],
+): Promise<{ url: string; stop(): Promise<void>; pause(paused: boolean): Promise<void> }> {
+	const port = await freePort();
+	const name = `conformance-redis-${port}`;
+	execFileSync("docker", [
+		"run",
+		"-d",
+		"--rm",
+		"--name",
+		name,
+		"-p",
+		`127.0.0.1:${port}:6379`,
+		"redis:7-alpine",
+		"redis-server",
+		...settings,
+	]);
+	for (let i = 0; i < 100; i++) {
+		try {
+			if (
+				execFileSync("docker", ["exec", name, "redis-cli", "ping"], { encoding: "utf8" }).trim() ===
+				"PONG"
+			)
+				break;
+		} catch {}
+		await new Promise((resolve) => setTimeout(resolve, 100));
+	}
+	return {
+		url: `redis://127.0.0.1:${port}`,
+		stop: async () => {
+			execFileSync("docker", ["rm", "-f", name], { stdio: "ignore" });
+		},
+		/** A paused server keeps its connections open and answers nothing, as a hung store does. */
+		pause: async (paused) => {
+			execFileSync("docker", [paused ? "pause" : "unpause", name], { stdio: "ignore" });
+		},
+	};
+}

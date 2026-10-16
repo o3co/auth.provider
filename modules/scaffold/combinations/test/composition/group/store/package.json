@@ -1,0 +1,7 @@
+{
+	"name": "@c/store",
+	"kind": "foundation",
+	"exports": {
+		"./module": "./src/module.ts"
+	}
+}

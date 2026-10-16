@@ -1,0 +1,17 @@
+{
+	"name": "@mod/log-stdout",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "adapter",
+	"adapts": "@mod/kernel",
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/kernel": "workspace:*"
+	},
+	"devDependencies": {
+		"vitest": "5.0.3"
+	}
+}

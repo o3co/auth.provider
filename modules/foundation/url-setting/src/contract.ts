@@ -1,0 +1,99 @@
+import { z } from "zod";
+
+/** What a configured URL may hold beyond a scheme and a host. */
+export interface UrlRules {
+	/** Lower case; the value must be written `<scheme>://`. */
+	readonly schemes: readonly ("https" | "http")[];
+	/**
+	 * "kept" (default): a path ending in `/` stays as written. "refused": refused, for identifiers
+	 * compared as strings.
+	 */
+	readonly trailingSlash?: "kept" | "refused";
+	/** Whether a query may be part of it (default true). */
+	readonly query?: boolean;
+}
+
+/** Why a value is not a URL these rules take; undefined when it is one. Names no part of the value. */
+function refusal(value: string, rules: UrlRules): string | undefined {
+	// Characters a URL parser drops or rereads, so the value would not mean what it says.
+	const control = [...value].some((c) => (c.codePointAt(0) ?? 0) < 0x20 || c === "\u007f");
+	if (control || /\s/.test(value)) return form("whitespace or control characters");
+	if (value.includes("\\")) return form("a backslash");
+	const scheme = rules.schemes.find((s) => value.startsWith(`${s}://`));
+	if (!scheme) {
+		const cased = rules.schemes.some((s) => value.toLowerCase().startsWith(`${s}://`));
+		if (cased) return form("a scheme not in lower case");
+		return `a URL: starting ${rules.schemes.map((s) => `${s}://`).join(" or ")}`;
+	}
+	const rest = value.slice(scheme.length + 3);
+	const authority = rest.split(/[/?#]/, 1)[0] ?? "";
+	if (authority === "" || !URL.canParse(value)) return "a URL: a host";
+	if (authority.includes("@")) return "a URL: no userinfo";
+	if (value.includes("#")) return "a URL: no fragment";
+	if (rules.query === false && value.includes("?")) return "a URL: no query";
+	const path = rest.slice(authority.length).split("?", 1)[0] ?? "";
+	if (rules.trailingSlash === "refused" && path.endsWith("/")) return "a URL: no trailing /";
+	const kind = difference(new URL(value), authority, path, value);
+	return kind && form(kind);
+}
+
+function form(kind: string): string {
+	return `a URL as the URL parser writes it; refused for ${kind}`;
+}
+
+/**
+ * How a value differs from the form the URL parser writes it in (an empty path may stay empty);
+ * undefined when it does not. Compared as written, so only that form is taken.
+ */
+function difference(url: URL, authority: string, path: string, value: string): string | undefined {
+	// The host ends at the port's `:`, past an IPv6 address's brackets.
+	const colon = authority.indexOf(":", authority.startsWith("[") ? authority.indexOf("]") : 0);
+	const host = colon < 0 ? authority : authority.slice(0, colon);
+	if (host !== url.hostname) {
+		if (host.toLowerCase() === url.hostname) return "host case";
+		if (/[^\x20-\x7e]/.test(host)) return "invisible or mapped characters";
+		if (host.includes("%")) return "percent-encoding in the host";
+		if (/^(\d+\.){3}\d+$|^\[/.test(url.hostname)) return "an IP address not in its shortest form";
+		return "a difference from the parser's form";
+	}
+	const port = colon < 0 ? undefined : authority.slice(colon + 1);
+	if (port === "") return "an empty port";
+	if (port !== undefined && port !== url.port) {
+		return url.port === "" ? "a default port written" : "a leading zero in the port";
+	}
+	// A `.` or `..` segment, also percent-encoded; the parser resolves it.
+	const segments = path.split("/");
+	const dot = segments.findIndex((s) => /^(\.|%2e){1,2}$/i.test(s));
+	if (dot >= 0) return dot === segments.length - 1 ? "the path's ending" : "dot segments";
+	const written = path === "" ? url.origin + url.href.slice(url.origin.length + 1) : url.href;
+	if (written === value) return undefined;
+	if (percentEncoded(value, written)) return "characters the parser percent-encodes";
+	return "a difference from the parser's form";
+}
+
+/** Whether `written` is `value` with some characters percent-encoded as UTF-8, and nothing else. */
+function percentEncoded(value: string, written: string): boolean {
+	let at = 0;
+	for (const c of value) {
+		if (written.startsWith(c, at)) {
+			at += c.length;
+			continue;
+		}
+		const bytes = [...new TextEncoder().encode(c)];
+		const encoded = bytes.map((b) => `%${b.toString(16).toUpperCase().padStart(2, "0")}`).join("");
+		if (!written.startsWith(encoded, at)) return false;
+		at += encoded.length;
+	}
+	return at === written.length;
+}
+
+/**
+ * A configured URL: one of the schemes, a host, no userinfo, no fragment, no whitespace or control
+ * characters, in the form the URL parser writes it; kept exactly as written.
+ */
+export function urlSetting(rules: UrlRules): z.ZodType<string> {
+	return z.string().superRefine((value, context) => {
+		const reason = refusal(value, rules);
+		if (reason) context.addIssue({ code: "custom", message: reason });
+	});
+}

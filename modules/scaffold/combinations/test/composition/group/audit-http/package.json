@@ -1,0 +1,12 @@
+{
+	"name": "@c/audit-http",
+	"kind": "adapter",
+	"adapts": "@c/audit",
+	"default": true,
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@c/outbound": "workspace:*"
+	}
+}

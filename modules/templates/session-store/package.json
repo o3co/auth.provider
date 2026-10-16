@@ -1,0 +1,24 @@
+{
+	"name": "@mod/session-store",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "wiring",
+	"wires": "@mod/session-lifecycle",
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/kernel": "workspace:*",
+		"@mod/records": "workspace:*",
+		"@mod/session-lifecycle": "workspace:*",
+		"@mod/store": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"@mod/cookies": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/session": "workspace:*",
+		"@mod/subject-revocation": "workspace:*"
+	}
+}

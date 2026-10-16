@@ -2,158 +2,68 @@ name: CI
 
 on:
   push:
-    branches: [develop, main]
+    branches: [develop, main, 'release/**']
   pull_request:
-    branches: [develop, main]
+    branches: [develop, main, 'release/**']
   # Daily audit (see the `audit` job). A `schedule` event runs on the
-  # repository's default branch — `develop` here — so this is a daily audit of
-  # develop only as long as develop stays the default branch. Nothing else runs
-  # on this trigger: every job that builds or tests is gated on the event.
+  # repository's default branch only; every job that builds or tests is gated
+  # on the event.
   schedule:
     - cron: '17 3 * * *'
 
-# Least privilege for GITHUB_TOKEN, which no job here calls the API with: every
-# job only checks out and reads this repository (the PR steps' `git fetch`
-# included). Codecov authenticates with its own CODECOV_TOKEN secret, not with
-# GITHUB_TOKEN, and nothing uploads artifacts or writes a release — that is
-# release.yml, which declares its own permissions. A job that needs more
-# declares its own `permissions:` block for just that job.
+# Least privilege for GITHUB_TOKEN: every job only checks out and reads this
+# repository. release.yml declares its own permissions.
 permissions:
   contents: read
 
-# A newer push to a pull request supersedes the run for its older commit:
-# that run is cancelled, which frees the runners it held, and its
-# `build-and-test` fails rather than passes. Every other event gets a group of
-# its own (the run id), so a merge to develop is never cancelled by the next
-# one and every develop commit is tested. Re-running a superseded pull-request
-# run joins the same group and cancels the head's run in turn: re-run the
-# head's instead.
+# A newer push to a pull request supersedes the run for its older commit; every
+# other event gets a group of its own, so no push to develop, main or a release
+# branch is cancelled by the next one.
 concurrency:
   group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Everything the required check asks of a change except its test suites:
-  # the lint, the build, the source guards and the typecheck. The suites run
-  # in `test`, beside this job; `build-and-test` reports both.
+  # Everything a change must pass on every pull request: typecheck, lint, the
+  # unit tests, guard and distribution's checks (`pnpm check`), and the source
+  # and history scans.
   checks:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    strategy:
+      # Each version reports, so a failure on one is told apart from one on both.
+      fail-fast: false
+      matrix:
+        # The lowest version engines admits, and the newest.
+        node: ['24', '26']
     steps:
       - uses: actions/checkout@v4
         with:
-          # Full history needed by the "No cross-project references or
-          # agent-workspace paths in PR commit messages" and "Every commit in
-          # the PR installs" steps below (both
-          # walk BASE..HEAD on the PR branch). Other steps don't depend on
-          # history depth.
+          # The commit-message scan and the per-commit install check walk the
+          # pull request's own commits.
           fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
-
+          node-version: ${{ matrix.node }}
       - name: Get pnpm store path
         id: pnpm-store
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
       - name: Cache pnpm store
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-
-
       - run: pnpm install --frozen-lockfile
-      - name: Assert every sibling is a workspace:^ peer, never a dependency
-        # Read on the source manifests, so it needs no build: a sibling
-        # @o3co/auth-provider-* package is a `workspace:^` peer with a
-        # `workspace:*` devDependency, and never a `dependencies` entry (a second
-        # copy of core is one that `declare module` augmentation does not
-        # reach). The script says why each rule holds. It runs here, in the
-        # checks the required build-and-test job reports, so a manifest that
-        # breaks the rule cannot merge; publish-readiness's packed-manifest step
-        # asserts what pnpm rewrote.
-        run: .github/scripts/check-sibling-deps.sh
-      - run: pnpm run lint
-      - run: pnpm run build
-      - name: Vendor leak guard
-        run: |
-          set -euo pipefail
-          # Match only module-import occurrences: `import ... from "vendor"` or `require("vendor")`.
-          # JSDoc prose mentioning vendor names is allowed (it's documentation, not a type leak).
-          VENDOR_NAMES='arctic|openid-client|oauth4webapi|passport'
-          PATTERN='(from[[:space:]]+["'"'"']('"$VENDOR_NAMES"')["'"'"']|require\([[:space:]]*["'"'"']('"$VENDOR_NAMES"')["'"'"']|import\([[:space:]]*["'"'"']('"$VENDOR_NAMES"')["'"'"'])'
-          LEAKED=$(find packages/*/dist \( -name '*.d.ts' -o -name '*.d.mts' \) -exec grep -l -E "$PATTERN" {} \; 2>/dev/null || true)
-          if [ -n "$LEAKED" ]; then
-            echo "::error::Vendor import statements leaked into the following public .d.mts files:"
-            echo "$LEAKED" | while read -r f; do
-              echo "---"
-              echo "file: $f"
-              grep -n -E "$PATTERN" "$f" || true
-            done
-            exit 1
-          fi
-          echo "No vendor import leaks found in public .d.mts."
-      - name: No redis client imports in core
-        run: |
-          set -euo pipefail
-          # Per A1 §11: redis client libs (ioredis, redis) are an optional peer
-          # of @o3co/auth-provider-redis ONLY. They MUST NOT appear in
-          # @o3co/auth-provider-core source — core stays backend-agnostic.
-          PATTERN='(from[[:space:]]+["'"'"'](ioredis|redis)["'"'"']|require\([[:space:]]*["'"'"'](ioredis|redis)["'"'"']|import\([[:space:]]*["'"'"'](ioredis|redis)["'"'"'])'
-          LEAKED=$(find packages/core/src \( -name '*.mts' -o -name '*.ts' \) -exec grep -l -E "$PATTERN" {} \; 2>/dev/null || true)
-          if [ -n "$LEAKED" ]; then
-            echo "::error::Redis client import leaked into packages/core/:"
-            echo "$LEAKED" | while read -r f; do
-              echo "---"
-              echo "file: $f"
-              grep -n -E "$PATTERN" "$f" || true
-            done
-            exit 1
-          fi
-          echo "OK: no redis client imports in packages/core/"
-      - name: No legacy v0.4.x slot type references
-        run: |
-          set -euo pipefail
-          # Phase 11 fence: removed v0.4.x slot types must not reappear in
-          # source. CHANGELOG.md, spec markdown, and audit markdown are
-          # excluded by the *.mts/*.ts include filter. Comment lines
-          # (`// ...`, `* ...`, `/* ...`) are also filtered — historical
-          # references in JSDoc and the X1/X2 invariant tests are legitimate
-          # and document why the slots are absent.
-          PATTERN='UserSessionStoreBase|RefreshTokenStoreBase|SingleUseTokenStore'
-          HITS=$(grep -rnE "$PATTERN" packages/ templates/ create-app/ --include='*.mts' --include='*.ts' 2>/dev/null | grep -v '/dist/' | grep -vE ':[[:space:]]*(//|\*|/\*)' || true)
-          if [ -n "$HITS" ]; then
-            echo "::error::Legacy v0.4.x slot types referenced in code (removed in v0.5.0):"
-            echo "$HITS"
-            exit 1
-          fi
-          echo "OK: no legacy v0.4.x slot types in source code"
-      - name: ComponentMap namespace policy
-        run: |
-          set -euo pipefail
-          # Per A1 §5.5: unnamespaced ComponentMap slot names are reserved for
-          # o3co-published packages. Third-party augmentations MUST use a
-          # namespace prefix (e.g. acme.cacheClient). This repo only contains
-          # o3co packages — so any dotted slot name is a policy violation.
-          OFFENDERS=$(grep -rnE 'readonly[[:space:]]+[a-zA-Z_$][a-zA-Z0-9_$]*\.[a-zA-Z_$][a-zA-Z0-9_$.]*[[:space:]]*\??:' packages/ --include='*.mts' --include='*.ts' 2>/dev/null | grep -v '/dist/' || true)
-          if [ -n "$OFFENDERS" ]; then
-            echo "::error::Namespaced ComponentMap slot found in o3co package (reserve unnamespaced names for o3co; third-party augmentations live outside this repo):"
-            echo "$OFFENDERS"
-            exit 1
-          fi
-          echo "OK: all in-repo ComponentMap slot names are unnamespaced"
+      - run: pnpm check
       - name: No cross-project references or agent-workspace paths
         run: |
           set -euo pipefail
-          # Forbid cross-project namespace references from leaking into auth.provider sources.
-          # CHANGELOG.md is intentionally NOT scanned: it carries the one-line
-          # historical record of the removed DID package.
           # The pattern is assembled from parts so this file does not match itself.
           PAT="$(printf '%s' 'dpla' 'as|@dpla' 'asio')"
-          PATHS=(packages create-app templates docs .github README.md README.ja.md)
+          PATHS=(modules docs .github README.md)
           for p in "${PATHS[@]}"; do
             if [ -e "$p" ] && grep -rEq "$PAT" "$p"; then
               echo "ERROR: prohibited cross-project reference in $p"
@@ -163,15 +73,9 @@ jobs:
           done
           echo "OK: no cross-project references in scanned paths"
 
-          # Nor a path into an agent's workspace: the hidden agent directory, its
-          # spec and plan folders, the workspace volume's absolute path. None of
-          # them is in this repository, so a link or a citation to one is dead
-          # for every reader — a CHANGELOG entry linked such a spec until it was
-          # caught by hand. So every tracked file is read, the CHANGELOG
-          # included; `git grep` reads tracked files only, never build output or
-          # node_modules. The PR's commit messages are read for the same pattern
-          # in the next step. Assembled from parts, like the pattern above, so
-          # this file does not match itself.
+          # Nor a path into an agent's workspace: none of them is in this
+          # repository, so a link to one is dead for every reader. `git grep`
+          # reads tracked files only.
           WORKSPACE_PAT="$(printf '%s' '\.clau' 'de/|superpowers/' '(specs|plans)/|/Volu' 'mes/Work' 'space/')"
           set +e
           HITS="$(git grep -nIE "$WORKSPACE_PAT")"
@@ -195,23 +99,13 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          # Scan PR commit messages for the same forbidden pattern.
-          # File-content scan misses leaks that only live in commit bodies
-          # (e.g. "moved to project X" lines), and squash-merge promotes those
-          # bodies into the merge commit which becomes immutable history.
-          # The pattern is assembled from parts so this workflow does not match itself.
           PAT="$(printf '%s' 'dpla' 'as|@dpla' 'asio')"
           if [ -z "${HEAD_SHA:-}" ] || [ -z "${GITHUB_BASE_REF:-}" ]; then
             echo "PR head SHA or base branch missing; skipping commit-message scan."
             exit 0
           fi
-          # The PR's own commits: those the head has and the base branch, as it
-          # stands now, does not. Not base.sha..head.sha — the event's base.sha
-          # can predate the base the PR was last rebased onto, and that range
-          # then takes in the base branch's own commits, which this PR cannot
-          # reword. The base branch is fetched here so its ref is present and
-          # current; the head is verified — if either is missing, fail loudly
-          # rather than silently passing.
+          # The pull request's own commits: those the head has and the base
+          # branch, as it stands now, does not.
           git fetch --no-tags --quiet origin "+refs/heads/${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}"
           if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
             echo "ERROR: commit $HEAD_SHA not present in checkout; cannot scan PR commit messages."
@@ -225,15 +119,9 @@ jobs:
             exit 1
           fi
           echo "OK: no cross-project references in PR commit messages"
-
-          # Nor a path into an agent workspace — the pattern of the file scan in
-          # the step above, assembled the same way. A squash merge promotes these
-          # bodies into develop's history, where a dead link cannot be fixed.
-          # Commit by commit, so the error names the commit to reword.
           WORKSPACE_PAT="$(printf '%s' '\.clau' 'de/|superpowers/' '(specs|plans)/|/Volu' 'mes/Work' 'space/')"
-          SHAS="$(git rev-list "${RANGE[@]}")"
           FOUND=0
-          for sha in $SHAS; do
+          for sha in $(git rev-list "${RANGE[@]}"); do
             if HITS="$(git log -1 --format=%B "$sha" | grep -nE "$WORKSPACE_PAT")"; then
               echo "ERROR: $(git log -1 --format='%h %s' "$sha") — its message names a path into an agent workspace:"
               echo "$HITS"
@@ -250,261 +138,107 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        # CI builds the head only; a rebase merge lands every commit. 2a2e2059
-        # shipped conflict markers in create-app/package.json behind a head
-        # that a later commit had repaired (v0.13.0 audit). Needs the full
-        # history fetched above.
         run: .github/scripts/check-commit-integrity.sh "$BASE_SHA" "$HEAD_SHA"
-      - name: Restrict ignoreExpiration use-site (Wave 1 spec §4.5 S9 security guardrail)
-        run: |
-          set -euo pipefail
-          # Per spec §4.5: ignoreExpiration: true MUST appear at exactly ONE
-          # call site — the /oauth/revoke AT path (packages/oauth/src/routes/revoke.mts).
-          # Any other production code passing ignoreExpiration: true bypasses
-          # token-lifetime enforcement and is a security regression.
-          #
-          # Exclusions:
-          #   src/routes/revoke  — the sole legitimate call site (added in T8)
-          #   __tests__          — test files legitimately exercise the option
-          #   comment lines      — JSDoc / inline comments referencing the option
-          #                        by name are documentation, not call sites
-          OFFENDERS=$(grep -rn "ignoreExpiration:[[:space:]]*true" packages/ \
-            --include="*.mts" --include="*.ts" \
-            | grep -v "src/routes/revoke" \
-            | grep -v "__tests__" \
-            | grep -vE ":[[:space:]]*(//|\*|/\*)" \
-            || true)
-          if [ -n "$OFFENDERS" ]; then
-            echo "::error::ignoreExpiration: true found outside the /oauth/revoke AT path:"
-            echo "$OFFENDERS"
-            exit 1
-          fi
-          echo "OK: no ignoreExpiration: true call sites outside revoke handler or tests"
-      - run: pnpm -r --if-present run typecheck
 
-  # The shards `test` runs, read from .github/scripts/test-shards.sh, where
-  # they are written down once.
-  test-plan:
+  # The tests that need Docker (Redis, and the generated apps' full runs).
+  integration:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    outputs:
-      shards: ${{ steps.plan.outputs.shards }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: .github/scripts
-      - id: plan
-        run: |
-          set -euo pipefail
-          shards="$(.github/scripts/test-shards.sh list)"
-          echo "shards=$shards" >> "$GITHUB_OUTPUT"
-
-  # Every workspace's test suite, once, split across parallel jobs.
-  #
-  # Once: a package's suite runs with coverage when the package wires it, and
-  # that run is its only one (.github/scripts/run-workspace-suite.sh). CI used
-  # to run every package twice, plain and then with coverage.
-  #
-  # Split: the suites grew about fourfold in September, and one job running
-  # them back to back was the long pole of every pull request. Each shard is a
-  # runner of its own. Inside a shard, packages still run one at a time: the
-  # runner is 2-vCPU, and running several packages' vitest workers (plus the
-  # Redis test containers) at once over-subscribes it and surfaces
-  # loaded-runner flakes (ephemeral-port pressure, timing-margin misses, slow
-  # container port binding). Within a package, vitest still parallelizes test
-  # files. Local `pnpm run test` stays fully parallel; both caps are CI-only.
-  test:
-    if: github.event_name != 'schedule'
-    needs: test-plan
-    name: test (${{ matrix.shard }})
-    runs-on: ubuntu-latest
-    # A shard takes two to three minutes. A hung container should fail the
-    # required check, not hold it pending for the runner's six hours.
-    timeout-minutes: 20
-    env:
-      # The packages whose coverage reports are uploaded below. The run step
-      # checks each report exists; codecov.yml's `after_n_builds` counts them.
-      UPLOADED_COVERAGE: core federation-grants foundation oauth session
     strategy:
-      # Every shard reports, so one red shard does not hide another's result.
+      # Each version reports, so a failure on one is told apart from one on both.
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(needs.test-plan.outputs.shards) }}
+        # The lowest version engines admits, and the newest.
+        node: ['24', '26']
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
-
+          node-version: ${{ matrix.node }}
       - name: Get pnpm store path
         id: pnpm-store
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
       - name: Cache pnpm store
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-
-
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
-      - name: Run each of the shard's workspaces' suites once
-        env:
-          SHARD: ${{ matrix.shard }}
-        run: |
-          set -euo pipefail
-          # Assigned first, so a failure of the script stops the step: inside
-          # `read … <<< "$(…)"` its exit status would be lost, and an empty
-          # selection would run every workspace.
-          filters="$(.github/scripts/test-shards.sh filters "$SHARD")"
-          read -r -a FILTERS <<< "$filters"
-          (( ${#FILTERS[@]} > 0 )) || { echo "::error::shard '$SHARD' has no pnpm selection"; exit 1; }
+      - run: pnpm test:integration
 
-          # A named shard finds every package it names. A renamed package is
-          # still tested, in `rest`; this keeps the shard from shrinking unseen.
-          expected="$(.github/scripts/test-shards.sh packages "$SHARD")"
-          names="$(pnpm -r "${FILTERS[@]}" exec node -p 'require("./package.json").name')"
-          for pkg in $expected; do
-            if ! grep -qxF "$pkg" <<< "$names"; then
-              echo "::error::shard '$SHARD' names $pkg, and no workspace has that name"
-              exit 1
-            fi
-          done
-
-          pnpm -r --workspace-concurrency=1 "${FILTERS[@]}" exec "$GITHUB_WORKSPACE/.github/scripts/run-workspace-suite.sh"
-
-          # Every report uploaded below that this shard produced exists. A
-          # missing one would skip its upload without a word, and codecov.yml's
-          # `after_n_builds` would then withhold every Codecov status. Matched
-          # on package names, which the selection above already listed.
-          for pkg in $UPLOADED_COVERAGE; do
-            if grep -qxF "@o3co/auth-provider-$pkg" <<< "$names" \
-              && [ ! -f "packages/$pkg/coverage/coverage-final.json" ]; then
-              echo "::error::packages/$pkg ran in this shard and wrote no coverage/coverage-final.json"
-              exit 1
-            fi
-          done
-
-      # #593: a package whose coverage is never uploaded is a package whose
-      # tests nobody's dashboard can see, and whose diff lines codecov has no
-      # data for. This list is hand-maintained; the other packages' reports are
-      # produced and not uploaded, because turning them on changes the project
-      # ratio for code a change does not touch, which is its own change. Each
-      # step runs in whichever shard produced the report, so moving a package
-      # between shards moves its upload with it. Adding one here also adds it to
-      # the job's UPLOADED_COVERAGE and raises codecov.yml's `after_n_builds`.
-      - name: Upload coverage to Codecov (core)
-        if: hashFiles('packages/core/coverage/coverage-final.json') != ''
-        uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: packages/core/coverage/coverage-final.json
-          flags: core
-          disable_search: true
-          fail_ci_if_error: false
-
-      - name: Upload coverage to Codecov (federation-grants)
-        if: hashFiles('packages/federation-grants/coverage/coverage-final.json') != ''
-        uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: packages/federation-grants/coverage/coverage-final.json
-          flags: federation-grants
-          disable_search: true
-          fail_ci_if_error: false
-
-      - name: Upload coverage to Codecov (foundation)
-        if: hashFiles('packages/foundation/coverage/coverage-final.json') != ''
-        uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: packages/foundation/coverage/coverage-final.json
-          flags: foundation
-          disable_search: true
-          fail_ci_if_error: false
-
-      - name: Upload coverage to Codecov (oauth)
-        if: hashFiles('packages/oauth/coverage/coverage-final.json') != ''
-        uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: packages/oauth/coverage/coverage-final.json
-          flags: oauth
-          disable_search: true
-          fail_ci_if_error: false
-
-      - name: Upload coverage to Codecov (session)
-        if: hashFiles('packages/session/coverage/coverage-final.json') != ''
-        uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: packages/session/coverage/coverage-final.json
-          flags: session
-          disable_search: true
-          fail_ci_if_error: false
-
-  # The one required status check. It reports `checks`, the shard plan and
-  # every `test` shard under the name branch protection requires, so the
-  # required-check setting does not change when the shards do. `always()`
-  # matters: a job skipped because something it needs failed would report
-  # "skipped", which a required check accepts as passing. Not `!cancelled()`,
-  # GitHub's usual advice: under it a cancelled run would leave this job
-  # skipped too, and so passing.
+  # The required check on every branch it guards: both jobs above passed, on
+  # every Node version of their matrix.
+  # Renaming this job leaves branch protection waiting for a check that never
+  # reports.
   build-and-test:
     if: always() && github.event_name != 'schedule'
-    needs: [checks, test-plan, test]
+    needs: [checks, integration]
     runs-on: ubuntu-latest
     steps:
-      - name: The checks and every test shard passed
+      - name: Both checks passed
         env:
           CHECKS: ${{ needs.checks.result }}
-          PLAN: ${{ needs.test-plan.result }}
-          TESTS: ${{ needs.test.result }}
+          INTEGRATION: ${{ needs.integration.result }}
         run: |
-          echo "checks: $CHECKS; test plan: $PLAN; test shards: $TESTS"
-          [ "$CHECKS" = success ] && [ "$PLAN" = success ] && [ "$TESTS" = success ]
+          echo "checks: ${CHECKS}, integration: ${INTEGRATION}"
+          [ "$CHECKS" = success ] && [ "$INTEGRATION" = success ]
 
-  # `pnpm audit --prod --audit-level=low` in its own job (#477). It used to be a
-  # step of build-and-test — the one required status check — so an outage of
-  # registry.npmjs.org's audit endpoint blocked every merge (three consecutive
-  # release-PR failures on ERR_SOCKET_TIMEOUT, 2026-09-04). The audit still runs
-  # on every push and pull request and shows on the PR, and additionally runs
-  # daily on the default branch (`develop`; `schedule` events always run there)
-  # so an advisory published between pushes is caught. It is
-  # deliberately not a required check: a finding on a PR is a red check the
-  # reviewer sees, not a merge held hostage to a third-party endpoint. The
-  # `--audit-level=low` floor and `--prod` scope are unchanged (`make audit`).
-  audit:
+  # On main and the release branches only: the new system's conformance and
+  # the legacy system's (0.17.0, built from this repository's own v0.17.0 tag),
+  # then the scenes on each pattern's app.
+  conformance:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      LEGACY_SOURCE: ${{ github.workspace }}
+      LEGACY_BRANCH: v0.17.0
     steps:
+      # The runner context is not available in a job's env, so the legacy
+      # build's directory is set here.
+      - run: echo "LEGACY_DIR=$RUNNER_TEMP/legacy-0.17.0" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
+        with:
+          # The legacy build clones the v0.17.0 tag from this checkout.
+          fetch-depth: 0
+          fetch-tags: true
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-
       - name: Get pnpm store path
         id: pnpm-store
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
       - name: Cache pnpm store
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-
-
+      - name: Cache the legacy build
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/legacy-0.17.0
+          key: legacy-0.17.0-${{ hashFiles('modules/tooling/conformance-legacy/scripts/**') }}
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run audit
+      - name: Build the legacy system
+        run: |
+          if [ ! -d "$LEGACY_DIR" ]; then
+            pnpm --filter @mod/conformance-legacy run prepare-legacy
+          fi
+      - run: pnpm conformance
+      - run: pnpm conformance:patterns
 
-  # Beside the other jobs rather than after them: it builds on its own, and
-  # waiting for the tests only lengthened every pull request.
-  publish-readiness:
-    if: github.event_name != 'schedule'
+  # On main and the release branches only: what a release would publish.
+  # `pnpm release:check` packs every bundle and the entrance, makes an app of
+  # each pattern from them, installs it from the tarballs alone, type-checks
+  # and boots it. The tarballs are then checked to ship the root LICENSE.
+  release-check:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -512,302 +246,35 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-
       - name: Get pnpm store path
         id: pnpm-store
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/cache@v4
+      - name: Cache pnpm store
+        uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-
-
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
-
-      - name: Pack every package the release publishes
+      - run: pnpm release:check
+      - name: Each tarball ships the root LICENSE
         run: |
           set -euo pipefail
-          # Simulate the post-publish state by tarballing every package
-          # `pnpm -r publish` would publish, and exercise every template
-          # against the tarballs (rather than the workspace:*
-          # resolution that local builds use). Catches "template references
-          # symbols not in the published tarball" before tag push.
-          #
-          # The same script packs for release.yml, so CI checks the set the
-          # release publishes — create-app included — and not a list of its
-          # own. It packs with `pnpm pack` (npm pack leaves `workspace:`
-          # ranges in place, which npm install in the scratch dir cannot
-          # resolve), and with each pack's stdin closed.
-          .github/scripts/pack-published.sh /tmp/tarballs
-          ls -la /tmp/tarballs
+          pnpm bundles
+          .github/scripts/pack-published.sh "$RUNNER_TEMP/tarballs"
+          .github/scripts/check-tarball-license.sh "$RUNNER_TEMP/tarballs" LICENSE
 
-      - name: Assert no __tests__ in published tarballs
-        run: |
-          set -euo pipefail
-          # Per CC-4 (SC-1 + SC-2 + SC-M2): compiled test artifacts must not ship
-          # in any published tarball. The scope is `dist/__tests__/` — legitimate
-          # scaffold content at `package/templates/<name>/src/__tests__/`
-          # (create-app tarball only) is consumer-facing template source and
-          # MUST stay shipped.
-          FAILED=0
-          for tgz in /tmp/tarballs/*.tgz; do
-            HITS=$(tar -tzf "$tgz" | grep -E '/dist/.*__tests__' || true)
-            if [ -n "$HITS" ]; then
-              echo "::error::$tgz contains __tests__ artifacts in dist/:"
-              echo "$HITS"
-              FAILED=1
-            fi
-          done
-          if [ "$FAILED" -eq 1 ]; then
-            exit 1
-          fi
-          echo "OK: no __tests__ artifacts in any published tarball's dist/"
-
-      - name: Assert no `#/` subpath imports in published tarballs
-        run: |
-          set -euo pipefail
-          # Per AGENTS.md "Module Resolution": shipped source uses relative
-          # specifiers and only test files use the `#/` alias. Node applies
-          # `--conditions` to every package on the graph, not just the root, so
-          # a `#/` specifier surviving into dist/ makes any consumer that runs
-          # with `--conditions=development` (Vitest, `tsx watch`) resolve it
-          # through this package's own `imports` map to `./src/*` — which no
-          # tarball ships. The workspace cannot see this (src is right there);
-          # it only breaks after publish, so assert it against the tarball.
-          FAILED=0
-          for tgz in /tmp/tarballs/*.tgz; do
-            for f in $(tar -tzf "$tgz" | grep -E '^package/dist/.*\.(mjs|d\.mts)$' || true); do
-              HITS=$(tar -xzOf "$tgz" "$f" | grep -nE '(from|import|require)[[:space:]]*\(?[[:space:]]*["'"'"']#/' || true)
-              if [ -n "$HITS" ]; then
-                echo "::error::$tgz: $f keeps a '#/' subpath import:"
-                echo "$HITS"
-                FAILED=1
-              fi
-            done
-          done
-          if [ "$FAILED" -eq 1 ]; then
-            echo "Shipped source must use a relative specifier (../…) — see AGENTS.md \"Module Resolution\"."
-            exit 1
-          fi
-          echo "OK: no '#/' subpath imports in any published tarball's dist/"
-
-      - name: Assert every package the release publishes was packed and ships the root LICENSE
-        # The root LICENSE is the only copy, and pnpm packs it only when nothing
-        # else it packs looks like a licence file (the script says what counts).
-        # Read on the tarballs, which is what a consumer downloads; release.yml
-        # runs the same script on the tag's tarballs before it publishes.
-        run: .github/scripts/check-tarball-license.sh /tmp/tarballs LICENSE
-
-      - name: Assert packed manifests carry ^<version> sibling peer ranges
-        run: |
-          set -euo pipefail
-          # The packed manifest is what a consumer installs, so assert the rewrite on
-          # it rather than trusting pnpm: every @o3co/auth-provider-* peer must be
-          # `^<version of that sibling's own tarball>`, and no `workspace:` protocol
-          # may survive in any dependency section (npm cannot install it —
-          # EUNSUPPORTEDPROTOCOL). Versions are read from the tarballs, not from the
-          # checkout, so the check holds at 0.0.0 on CI and at the tag version in a
-          # local release simulation alike.
-          TARBALL_DIR=/tmp/tarballs
-          node - "$TARBALL_DIR" <<'EOF'
-          const { execFileSync } = require("node:child_process");
-          const fs = require("node:fs");
-          const path = require("node:path");
-          const dir = process.argv[2];
-          const manifests = fs
-            .readdirSync(dir)
-            .filter((f) => f.endsWith(".tgz"))
-            .map((f) => JSON.parse(execFileSync("tar", ["-xzOf", path.join(dir, f), "package/package.json"], { encoding: "utf8" })));
-          const packed = new Map(manifests.map((m) => [m.name, m.version]));
-          const failures = [];
-          for (const m of manifests) {
-            for (const section of ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]) {
-              for (const [name, range] of Object.entries(m[section] ?? {})) {
-                if (String(range).startsWith("workspace:")) failures.push(`${m.name}@${m.version}: ${section}["${name}"] is "${range}" (workspace protocol survived packing)`);
-              }
-            }
-            for (const [name, range] of Object.entries(m.peerDependencies ?? {})) {
-              if (!name.startsWith("@o3co/auth-provider-")) continue;
-              const sibling = packed.get(name);
-              const expected = sibling === undefined ? undefined : `^${sibling}`;
-              if (expected === undefined) failures.push(`${m.name}@${m.version}: peer ${name} was not packed alongside it`);
-              else if (range !== expected) failures.push(`${m.name}@${m.version}: peerDependencies["${name}"] is "${range}", expected "${expected}"`);
-            }
-          }
-          if (manifests.length === 0) { console.error(`::error::no tarballs found in ${dir}`); process.exit(1); }
-          if (failures.length > 0) {
-            console.error("::error::published manifests would carry unsatisfiable or unresolvable sibling ranges:");
-            for (const f of failures) console.error(`  ${f}`);
-            process.exit(1);
-          }
-          console.log(`OK: ${manifests.length} packed manifests carry ^<version> sibling peer ranges and no workspace: protocol`);
-          EOF
-
-      - name: Check versions.json sync
-        run: node create-app/scripts/check-versions-json.mjs
-
-      - name: Build and test every template against packed tarballs
-        run: |
-          # -E: the ERR trap below reaches into wire_to_tarballs, so a failure
-          # there closes the template's log group too.
-          set -Eeuo pipefail
-          # The templates are what create-app's scripts/templates.mjs says they
-          # are — the rule the package is built by — so this builds and tests
-          # exactly the set that ships, each the way a scaffold of it runs. It
-          # refuses a templates/ holding none, or a misnamed one.
-          LIST=$(node --input-type=module -e 'const { listTemplates } = await import("./create-app/scripts/templates.mjs"); console.log(listTemplates("templates").join(" "));')
-          read -r -a TEMPLATES <<< "$LIST"
-          if [ "${#TEMPLATES[@]}" -eq 0 ]; then
-            echo "::error::no template under templates/"
-            exit 1
-          fi
-          SCRATCH=$(mktemp -d)
-          # Rewrite every @o3co dependency of the project in the current
-          # directory — workspace:* in a template, ^<version> in a scaffold —
-          # to its file: tarball URL AND add an `overrides` block pinning every
-          # workspace package to its tarball. The overrides block is required
-          # so transitive workspace deps (e.g. oauth -> core) resolve from
-          # /tmp/tarballs rather than being fetched from the public npm
-          # registry, where these versions do not exist yet.
-          wire_to_tarballs() {
-            node -e "
-              const fs = require('fs');
-              const path = require('path');
-              const dir = process.argv[1];
-              const tarballs = fs.readdirSync(dir).filter(f => f.endsWith('.tgz'));
-              const { execSync } = require('child_process');
-              const map = new Map();
-              for (const f of tarballs) {
-                const full = path.join(dir, f);
-                const pkgJson = execSync('tar -xzOf ' + full + ' package/package.json').toString();
-                map.set(JSON.parse(pkgJson).name, 'file:' + full);
-              }
-              const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-              for (const section of ['dependencies', 'peerDependencies', 'devDependencies']) {
-                if (!pkg[section]) continue;
-                for (const [name, spec] of Object.entries(pkg[section])) {
-                  if (map.has(name)) pkg[section][name] = map.get(name);
-                }
-              }
-              pkg.overrides = pkg.overrides || {};
-              for (const [name, spec] of map) pkg.overrides[name] = spec;
-              // pnpm reads its own block, not npm's: the image step below installs
-              // with pnpm, and its transitive @o3co deps must land on the tarballs too.
-              pkg.pnpm = { ...(pkg.pnpm || {}), overrides: Object.fromEntries(map) };
-              fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-            " /tmp/tarballs
-          }
-          # A failure inside a template's group closes it, so the error is not
-          # folded away under that template's collapsed log.
-          trap 'echo "::endgroup::"' ERR
-          for name in "${TEMPLATES[@]}"; do
-            echo "::group::templates/$name"
-            cp -R "templates/$name" "$SCRATCH/$name"
-            pushd "$SCRATCH/$name" >/dev/null
-            # The workspace copy carries node_modules symlinked to packages/*
-            # source. Drop it so every @o3co package below is the packed
-            # tarball under node_modules — the layout a scaffold runs in, and
-            # the one the shipped suite has to be green in (#512).
-            rm -rf node_modules dist
-            wire_to_tarballs
-            # Use npm rather than pnpm here: pnpm in workspace context would
-            # try to re-resolve; standalone npm install consumes the file:
-            # tarballs straight (with overrides forcing transitives too).
-            # Optional dependencies stay in: vitest's rolldown and esbuild ship
-            # their native bindings as optionalDependencies, and `--omit=optional`
-            # left `npm run test` below unable to start (#512).
-            npm install --no-package-lock
-            npm run build
-            # The suite that ships with a scaffold, run where a scaffold runs it:
-            # published packages under node_modules, project root not at
-            # templates/<name>. Green here means green after
-            # `create-auth-provider` (#512).
-            #
-            # And in the state a fresh clone of a scaffolded project is in (#704):
-            # the scaffold's `.gitignore` keeps `config/clients.yaml` out of that
-            # project's repository, so its CI, its second developer and its `test`
-            # image never have one. The workspace copy carries it; a suite green
-            # only with it is red for every consumer.
-            rm -f config/clients.yaml
-            npm run test
-            popd >/dev/null
-            echo "OK: templates/$name builds and tests against packed tarballs"
-            echo "::endgroup::"
-
-            # The same suite in a project `create-auth-provider --no-mfa`
-            # scaffolds from create-app's build: the scaffold's own
-            # files write the MFA switch off, and the suite asserts what the
-            # switch its files write implies, so it is green there too.
-            echo "::group::templates/$name, scaffolded with --no-mfa"
-            (cd "$SCRATCH" && node "$GITHUB_WORKSPACE/create-app/dist/cli.mjs" "$name-no-mfa" \
-              --template "$name" --no-lockfile --no-mfa)
-            pushd "$SCRATCH/$name-no-mfa" >/dev/null
-            wire_to_tarballs
-            npm install --no-package-lock
-            rm -f config/clients.yaml
-            npm run test
-            popd >/dev/null
-            echo "OK: templates/$name scaffolded with --no-mfa tests against packed tarballs"
-            echo "::endgroup::"
-          done
-          # The image step below reuses these tarball-wired copies.
-          echo "SCRATCH=$SCRATCH" >> "$GITHUB_ENV"
-          echo "TEMPLATES=${TEMPLATES[*]}" >> "$GITHUB_ENV"
-
-      - name: Build each template's base image and install its dependency set on it
-        run: |
-          set -euo pipefail
-          # Until this step, nothing in CI touched the Dockerfile: the suite ran on
-          # the runner's Node, so a broken base-image digest, a corepack pin that no
-          # longer installs, or a native addon with no musl prebuild for the pinned
-          # Node (#360, and the objection recorded on #388 / #435) surfaced only in
-          # an operator's first `docker build`.
-          #
-          # For each template the previous step built (TEMPLATES), the Dockerfile's
-          # own first stage, from the pinned digest: base image, tini, the corepack
-          # pin. Built as written — no CI-only Dockerfile.
-          #
-          # Then what its `deps` and `builder` stages do, run inside that image
-          # against the tarball-wired scaffold copy the previous step made — the
-          # published packages cannot be used here, because a PR's versions are
-          # not published yet, and the deps stage copies only the three manifest
-          # files, so the tarballs cannot ride along in a build context. The
-          # lockfile is generated first, as `create-auth-provider` does at scaffold
-          # time, and installed frozen, as the deps stage does — the same flags,
-          # because inside the image the scaffold is alone, as it is in the deps
-          # stage. The workspace file carries bcrypt's build allowlist, as the
-          # scaffolder writes it (#360).
-          # Finally bcrypt — the one native dependency — is loaded and exercised on
-          # the image's Node and libc, which is the check no runner-side test can
-          # make. It is a dependency of core, not of the scaffold, and pnpm does
-          # not hoist, so it is resolved from where core resolves it.
-          cat > "$SCRATCH/bcrypt-probe.cjs" <<'EOF'
-          const { createRequire } = require("node:module");
-          const core = require("node:fs").realpathSync("node_modules/@o3co/auth-provider-core");
-          const bcrypt = createRequire(`${core}/package.json`)("bcrypt");
-          if (!bcrypt.compareSync("probe", bcrypt.hashSync("probe", 4))) process.exit(1);
-          console.log("bcrypt loads on", process.version, process.platform, process.arch);
-          EOF
-          trap 'echo "::endgroup::"' ERR
-          for name in $TEMPLATES; do
-            echo "::group::templates/$name"
-            docker build --target node-base -t "scaffold-node-base-$name" "templates/$name"
-            rm -rf "$SCRATCH/$name/node_modules" "$SCRATCH/$name/dist"
-            printf 'onlyBuiltDependencies:\n  - bcrypt\n' > "$SCRATCH/$name/pnpm-workspace.yaml"
-            cp "$SCRATCH/bcrypt-probe.cjs" "$SCRATCH/$name/bcrypt-probe.cjs"
-            docker run --rm \
-              -v "$SCRATCH/$name":/work -v /tmp/tarballs:/tmp/tarballs -w /work \
-              -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
-              "scaffold-node-base-$name" sh -euc '
-                node --version
-                pnpm install --lockfile-only
-                pnpm install --frozen-lockfile
-                pnpm run build
-                node bcrypt-probe.cjs
-              '
-            echo "OK: templates/$name: the scaffold dependency set installs, builds and loads bcrypt on the pinned image"
-            echo "::endgroup::"
-          done
+  # Daily on the default branch, and on every push: known vulnerabilities in
+  # what an app installs.
+  audit:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod --audit-level=low

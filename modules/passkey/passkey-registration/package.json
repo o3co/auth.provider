@@ -1,0 +1,36 @@
+{
+	"name": "@mod/passkey-registration",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"optIn": true,
+	"joins": [
+		"@mod/webauthn",
+		"@mod/session"
+	],
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/csrf": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/rate-limit": "workspace:*",
+		"@mod/session": "workspace:*",
+		"@mod/webauthn": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"@mod/audit": "workspace:*",
+		"@mod/cookies": "workspace:*",
+		"@mod/login-gates": "workspace:*",
+		"@mod/mfa": "workspace:*",
+		"@mod/mfa-store": "workspace:*",
+		"@mod/seal": "workspace:*",
+		"@mod/store": "workspace:*",
+		"@mod/subject-revocation": "workspace:*",
+		"@mod/webauthn-store": "workspace:*",
+		"vitest": "5.0.3"
+	}
+}

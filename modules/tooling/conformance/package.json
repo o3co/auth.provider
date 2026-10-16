@@ -1,0 +1,19 @@
+{
+	"name": "@mod/conformance",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "verification",
+	"exports": {
+		".": "./src/main.ts",
+		"./testing": "./src/testing.ts"
+	},
+	"scripts": {
+		"patterns": "node src/patterns/patterns.ts"
+	},
+	"dependencies": {
+		"@mod/combinations": "workspace:*",
+		"@mod/create-app": "workspace:*",
+		"vitest": "5.0.3"
+	}
+}

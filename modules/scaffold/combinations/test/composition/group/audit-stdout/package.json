@@ -1,0 +1,8 @@
+{
+	"name": "@c/audit-stdout",
+	"kind": "adapter",
+	"adapts": "@c/audit",
+	"exports": {
+		"./module": "./src/module.ts"
+	}
+}

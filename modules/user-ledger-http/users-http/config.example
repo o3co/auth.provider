@@ -1,0 +1,3 @@
+users-http {
+	verify-url = "https://ledger.example.invalid/verify"
+}

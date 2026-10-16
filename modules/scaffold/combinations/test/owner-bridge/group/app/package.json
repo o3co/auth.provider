@@ -1,0 +1,10 @@
+{
+	"name": "@o/app",
+	"kind": "feature",
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@o/session": "workspace:*"
+	}
+}

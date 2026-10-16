@@ -1,0 +1,8 @@
+jwt-bearer {
+	issuers = [
+		{
+			issuer = "https://issuer.example.invalid"
+			jwks-uri = "https://issuer.example.invalid/jwks"
+		}
+	]
+}

@@ -1,0 +1,27 @@
+{
+	"name": "@mod/conformance-passkey",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "verification",
+	"exports": {
+		".": "./src/main.ts"
+	},
+	"scripts": {
+		"conformance": "vitest run --config vitest.config.ts"
+	},
+	"dependencies": {
+		"@mod/conformance": "workspace:*",
+		"@mod/conformance-legacy": "workspace:*",
+		"@mod/conformance-oauth": "workspace:*",
+		"vitest": "5.0.3"
+	},
+	"devDependencies": {
+		"@mod/conformance-code": "workspace:*",
+		"@mod/conformance-identity": "workspace:*",
+		"@mod/conformance-keys": "workspace:*",
+		"@mod/conformance-second-factor": "workspace:*",
+		"@mod/webauthn": "workspace:*",
+		"jose": "6.2.12"
+	}
+}

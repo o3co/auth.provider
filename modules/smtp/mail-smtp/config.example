@@ -1,0 +1,4 @@
+mail-smtp {
+	host = smtp.example.invalid
+	from = "auth@example.invalid"
+}

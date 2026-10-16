@@ -1,0 +1,23 @@
+{
+	"name": "@mod/audit-http",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "adapter",
+	"adapts": "@mod/audit",
+	"default": true,
+	"exports": {
+		"./testing": "./src/testing.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/audit": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/outbound": "workspace:*",
+		"@mod/url-setting": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"vitest": "5.0.3"
+	}
+}

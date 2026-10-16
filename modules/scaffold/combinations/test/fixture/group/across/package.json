@@ -1,0 +1,7 @@
+{
+	"name": "@t/across",
+	"joins": [
+		"@t/bridge",
+		"@t/feature"
+	]
+}

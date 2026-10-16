@@ -1,0 +1,106 @@
+import { resolve, sep } from "node:path";
+import ts from "typescript";
+
+export interface Surface {
+	readonly values: ReadonlySet<string>;
+	readonly types: ReadonlySet<string>;
+	/** Types declared in the package that a public signature uses but the entry does not export. */
+	readonly hidden: readonly string[];
+	/** The members of the exported interfaces and type aliases, together. */
+	readonly members: number;
+}
+
+const options: ts.CompilerOptions = {
+	target: ts.ScriptTarget.ES2022,
+	module: ts.ModuleKind.NodeNext,
+	moduleResolution: ts.ModuleResolutionKind.NodeNext,
+	allowImportingTsExtensions: true,
+	noEmit: true,
+	strict: true,
+	skipLibCheck: true,
+	types: [],
+};
+
+const named = (node: ts.Node) =>
+	ts.isInterfaceDeclaration(node) ||
+	ts.isTypeAliasDeclaration(node) ||
+	ts.isClassDeclaration(node) ||
+	ts.isEnumDeclaration(node);
+
+/** The parts of a declaration that make up its signature, without function bodies. */
+function signatureParts(node: ts.Node): ts.Node[] {
+	if (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) || ts.isArrowFunction(node)) {
+		return [...(node.typeParameters ?? []), ...node.parameters, ...(node.type ? [node.type] : [])];
+	}
+	if (ts.isVariableDeclaration(node)) return node.type ? [node.type] : [];
+	if (ts.isClassDeclaration(node)) {
+		return node.members.flatMap((member) =>
+			ts.isMethodDeclaration(member)
+				? signatureParts(member)
+				: ts.isPropertyDeclaration(member) && member.type
+					? [member.type]
+					: [],
+		);
+	}
+	return [node];
+}
+
+export function surfaceOf(entry: string, packageDir: string): Surface {
+	const program = ts.createProgram([entry], options);
+	const checker = program.getTypeChecker();
+	const source = program.getSourceFile(entry);
+	const moduleSymbol = source && checker.getSymbolAtLocation(source);
+	const values = new Set<string>();
+	const types = new Set<string>();
+	const hidden = new Set<string>();
+	if (!moduleSymbol) return { values, types, hidden: [], members: 0 };
+	let members = 0;
+	// A primitive, or a union of them, has no members of its own: the platform's own are not the contract's.
+	const primitives =
+		ts.TypeFlags.StringLike |
+		ts.TypeFlags.NumberLike |
+		ts.TypeFlags.BigIntLike |
+		ts.TypeFlags.BooleanLike |
+		ts.TypeFlags.ESSymbolLike |
+		ts.TypeFlags.Null |
+		ts.TypeFlags.Undefined |
+		ts.TypeFlags.Void;
+	const primitive = (type: ts.Type): boolean =>
+		type.isUnion() ? type.types.every(primitive) : (type.flags & primitives) !== 0;
+	const resolveAlias = (symbol: ts.Symbol) =>
+		symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
+	const exported = checker.getExportsOfModule(moduleSymbol);
+	const exportedDeclarations = new Set<ts.Node>();
+	for (const symbol of exported) {
+		const target = resolveAlias(symbol);
+		for (const declaration of target.declarations ?? []) exportedDeclarations.add(declaration);
+		(target.flags & ts.SymbolFlags.Value ? values : types).add(symbol.name);
+		if (target.flags & (ts.SymbolFlags.Interface | ts.SymbolFlags.TypeAlias)) {
+			const type = checker.getDeclaredTypeOfSymbol(target);
+			if (!primitive(type)) members += type.getProperties().length;
+		}
+	}
+	const inside = (node: ts.Node) => {
+		const file = resolve(node.getSourceFile().fileName);
+		return file.startsWith(resolve(packageDir) + sep) && !file.includes(`${sep}node_modules${sep}`);
+	};
+	for (const symbol of exported) {
+		for (const declaration of resolveAlias(symbol).declarations ?? []) {
+			if (!inside(declaration)) continue;
+			const visit = (node: ts.Node): void => {
+				if (ts.isTypeReferenceNode(node) || ts.isExpressionWithTypeArguments(node)) {
+					const name = ts.isTypeReferenceNode(node) ? node.typeName : node.expression;
+					const referenced = checker.getSymbolAtLocation(name);
+					for (const d of referenced ? (resolveAlias(referenced).declarations ?? []) : []) {
+						if (named(d) && inside(d) && !exportedDeclarations.has(d)) {
+							hidden.add(`${(d as ts.NamedDeclaration).name?.getText() ?? "?"} (${symbol.name})`);
+						}
+					}
+				}
+				ts.forEachChild(node, visit);
+			};
+			for (const part of signatureParts(declaration)) visit(part);
+		}
+	}
+	return { values, types, hidden: [...hidden].sort(), members };
+}

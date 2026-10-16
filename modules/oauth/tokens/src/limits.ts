@@ -1,0 +1,39 @@
+import type { Random } from "@mod/kernel";
+import type { AccessGrant } from "./contract.ts";
+
+/** An access token's lifetime where the section does not set one. */
+export const defaultLifetimeSeconds = 3600;
+
+export function lifetimeOf(asked: number | undefined, configured: number): number {
+	if (asked === undefined) return configured;
+	if (Number.isInteger(asked) && asked >= 1 && asked <= 86_400) return asked;
+	throw new RangeError("tokens: a lifetime asked is 1 to 86400 whole seconds");
+}
+
+/** iat and exp in epoch seconds: the lifetime from now, capped at `notAfter` (epoch ms), never before iat. */
+export function expiryOf(nowMs: number, lifetimeSeconds: number, notAfter?: number) {
+	const iat = Math.floor(nowMs / 1000);
+	const cap = notAfter === undefined ? Number.POSITIVE_INFINITY : Math.floor(notAfter / 1000);
+	return { iat, exp: Math.max(iat, Math.min(iat + lifetimeSeconds, cap)) };
+}
+
+/** A token's id: 16 random bytes in base64url. */
+export const tokenId = (random: Random) => Buffer.from(random.bytes(16)).toString("base64url");
+
+/** A grant as a token keeps it: no empty amr, no time it does not know, the time to the second and never after `iat`. */
+export function keptGrant(grant: AccessGrant, iat: number): AccessGrant {
+	const { amr, authenticatedAtUnknown, acr, ...known } = grant;
+	const { authenticatedAt: stated, ...rest } = known;
+	const authenticatedAt = authenticatedAtUnknown ? undefined : stated;
+	if (acr === "" || (authenticatedAt !== undefined && !Number.isFinite(authenticatedAt))) {
+		throw new RangeError("tokens: an acr is a name, and an authentication time a number");
+	}
+	return Object.freeze({
+		...rest,
+		...(amr && amr.length > 0 ? { amr } : {}),
+		...(authenticatedAt === undefined
+			? {}
+			: { authenticatedAt: Math.min(Math.floor(authenticatedAt / 1000), iat) * 1000 }),
+		...(acr === undefined ? {} : { acr }),
+	});
+}

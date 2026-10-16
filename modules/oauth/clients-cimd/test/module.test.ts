@@ -1,0 +1,408 @@
+import { redirects } from "@mod/authorize";
+import { clientAllowance } from "@mod/client-allowance";
+import { type Client, clients, metadataSections } from "@mod/clients";
+import clientsModule from "@mod/clients/module";
+import { publicClient } from "@mod/clients/testing";
+import { clientSection } from "@mod/consent";
+import { composedGrants } from "@mod/grants";
+import { metadata } from "@mod/issuer";
+import {
+	assemble,
+	BootRefused,
+	contract,
+	defineModule,
+	kernelConfig,
+	Unavailable,
+} from "@mod/kernel";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import {
+	DestinationRefused,
+	type Narrower,
+	type OutboundRequest,
+	type OutboundResponse,
+	OutboundUnavailable,
+	outbound,
+} from "@mod/outbound";
+import { beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
+import clientsCimd from "../src/module.ts";
+
+const id = "https://app.example/client.json";
+const document = {
+	client_id: id,
+	client_name: "  App  ",
+	client_uri: "https://app.example/",
+	redirect_uris: ["https://app.example/cb"],
+	scope: "read admin",
+};
+
+interface Sent {
+	readonly url: string;
+	readonly request: OutboundRequest | undefined;
+	readonly narrower: Narrower | undefined;
+}
+const sent: Sent[] = [];
+let answer: (url: string) => OutboundResponse | Promise<OutboundResponse> = () => json(document);
+let now = 1_000_000;
+
+function json(body: unknown, headers: Record<string, string> = {}, status = 200): OutboundResponse {
+	return {
+		status,
+		headers: new Map(Object.entries({ "content-type": "application/json", ...headers })),
+		body: new TextEncoder().encode(JSON.stringify(body)),
+	};
+}
+
+/** Outbound as a test stand-in: it records each request and answers from the script. */
+const outboundStandIn = defineModule({ name: "outbound" }, (m) => [
+	m.provide(outbound).by(() => ({
+		fetch: async (url, request, narrower) => {
+			sent.push({ url, request, narrower });
+			return answer(url);
+		},
+	})),
+]);
+
+/** The sections a document record carries, as their owners contribute them; client-allowance's taken as written. */
+const owners = defineModule({ name: "owners" }, (m) => [
+	m.contribute(metadataSections).by(() => redirects),
+	m.contribute(metadataSections).by(() => clientSection),
+	m.contribute(metadataSections).by(() => ({
+		name: "client-allowance",
+		schema: z.record(z.string(), z.unknown()),
+	})),
+]);
+
+/** Token-endpoint as a test stand-in: only the grant types it says are composed. */
+const tokenEndpointStandIn = (composed: readonly string[]) =>
+	defineModule({ name: "token-endpoint" }, (m) => [
+		m.provide(composedGrants).by(() => new Set(composed)),
+	]);
+
+const items = contract<readonly { name: string; value: unknown }[]>("test.metadata");
+const collector = defineModule({ name: "test-collector" }, (m) => [
+	m.provide(items).by((c) => c.collect(metadata)),
+]);
+
+async function boot(
+	settings: Record<string, unknown> = {},
+	options: { code?: boolean; registered?: unknown[] } = {},
+) {
+	const recording = recordingLog();
+	const app = await assemble({
+		modules: [
+			outboundStandIn,
+			clientsModule,
+			owners,
+			tokenEndpointStandIn(options.code === false ? [] : ["authorization_code"]),
+			clientsCimd,
+			collector,
+		],
+		config: {
+			...kernelConfig(),
+			clients: { registered: options.registered ?? [] },
+			"clients-cimd": { scopes: ["openid", "read"], ...settings },
+		},
+		runtime: quietRuntime({ clock: { now: () => now }, log: recording.log }),
+	});
+	return {
+		find: (given = id) => app.get(clients).find(given),
+		supported: () =>
+			app.get(items).find((item) => item.name === "client_id_metadata_document_supported")?.value,
+		lines: recording.lines,
+	};
+}
+
+/** The client the default boot finds for the default id, under the answer the test set. */
+const documentClient = async () => (await (await boot()).find()) as Client;
+
+beforeEach(() => {
+	sent.length = 0;
+	answer = () => json(document);
+	now = 1_000_000;
+});
+
+describe("clients-cimd: a document client", () => {
+	it("is a public client by none, never registered, from one GET asking for JSON within the caps", async () => {
+		const client = await documentClient();
+		expect(client).toMatchObject({ id, kind: "public", method: "none", registered: false });
+		expect(sent).toEqual([
+			{
+				url: id,
+				request: { headers: { accept: "application/json" } },
+				narrower: { maxBytes: 5120, timeoutMs: 5000 },
+			},
+		]);
+	});
+
+	it("keeps the scopes the document asks within the operator's, and refresh only when named", async () => {
+		const client = await documentClient();
+		expect(clientAllowance.allowsGrant(client, "authorization_code")).toBe(true);
+		expect(clientAllowance.allowsGrant(client, "refresh_token")).toBe(false);
+		expect(clientAllowance.covers(client, { scope: ["read"], audience: ["i"] }, "i")).toBe(true);
+		expect(clientAllowance.covers(client, { scope: ["admin"], audience: ["i"] }, "i")).toBe(false);
+		answer = () => json({ ...document, grant_types: ["authorization_code", "refresh_token"] });
+		const refreshing = await documentClient();
+		expect(clientAllowance.allowsGrant(refreshing, "refresh_token")).toBe(true);
+	});
+
+	it("shows the trimmed name cut to 200 characters, the page and the verified host", async () => {
+		answer = () => json({ ...document, client_name: ` ${"n".repeat(250)} ` });
+		const client = await documentClient();
+		expect(client.section(clientSection)).toEqual({
+			"first-party": false,
+			name: "n".repeat(200),
+			uri: "https://app.example/",
+			host: "app.example",
+		});
+	});
+
+	it("is said in the metadata, only with the code grant composed", async () => {
+		expect((await boot()).supported()).toBe(true);
+		expect((await boot({}, { code: false })).supported()).toBeUndefined();
+	});
+});
+
+describe("clients-cimd: none, without fetching", () => {
+	it("when the code grant is not composed", async () => {
+		expect(await (await boot({}, { code: false })).find()).toBeUndefined();
+		expect(sent).toEqual([]);
+	});
+
+	it("for an id that is not a document URL", async () => {
+		const app = await boot();
+		for (const given of [
+			"app",
+			"https://app.example./c",
+			"https://APP.example/c",
+			"https://localhost/c",
+		]) {
+			expect(await app.find(given)).toBeUndefined();
+		}
+		expect(sent).toEqual([]);
+	});
+
+	it("for a denied host, the names under a dotted entry included, deny before allow", async () => {
+		const app = await boot({ deny: [".example"], allow: ["app.example"] });
+		expect(await app.find()).toBeUndefined();
+		expect(await app.find("https://example/c")).toBeUndefined();
+		expect(sent).toEqual([]);
+	});
+
+	it("for a host outside a non-empty allow list, which also narrows outbound's hosts", async () => {
+		const app = await boot({ allow: [".corp.example"] });
+		expect(await app.find()).toBeUndefined();
+		expect(sent).toEqual([]);
+		await app.find("https://a.corp.example/c");
+		await app.find("https://corp.example/c");
+		expect(sent.map((one) => one.narrower?.hosts)).toEqual([[".corp.example"], [".corp.example"]]);
+	});
+
+	it("for a refused host, logging only the refusal and the id's host", async () => {
+		const app = await boot({ deny: ["app.example"], allow: [".corp.example"] });
+		await app.find(`${id}?`);
+		await app.find();
+		await app.find("https://other.example/c");
+		expect(app.lines()).toEqual([
+			{
+				level: "warn",
+				event: "clients-cimd.host_refused",
+				fields: { host: "app.example", reason: "denied" },
+			},
+			{
+				level: "warn",
+				event: "clients-cimd.host_refused",
+				fields: { host: "other.example", reason: "not allowed" },
+			},
+		]);
+	});
+
+	it("for the id of a registered client, which wins as registered", async () => {
+		const app = await boot({}, { registered: [publicClient({ id })] });
+		expect(await app.find()).toMatchObject({ id, registered: true });
+		expect(sent).toEqual([]);
+	});
+});
+
+describe("clients-cimd: a refused document", () => {
+	it.each([
+		["another status", () => json(document, {}, 404)],
+		["a content type not JSON", () => json(document, { "content-type": "text/plain" })],
+		["not one object", () => json([document])],
+		["a refused field", () => json({ ...document, client_secret: "s" })],
+		["a refused destination", () => Promise.reject(new DestinationRefused("special-address"))],
+		["an answer past the size", () => Promise.reject(new OutboundUnavailable("too-large"))],
+		["a host not reached", () => Promise.reject(new OutboundUnavailable("unreachable"))],
+		[
+			"an answer outbound does not take",
+			() => Promise.reject(new OutboundUnavailable("unsupported-answer")),
+		],
+	])("is none for %s, remembered for the refusal time", async (_, given) => {
+		answer = given;
+		const app = await boot();
+		expect(await app.find()).toBeUndefined();
+		now += 59_999;
+		expect(await app.find()).toBeUndefined();
+		expect(sent).toHaveLength(1);
+		now += 1;
+		await app.find();
+		expect(sent).toHaveLength(2);
+	});
+
+	it.each([
+		["plain http", "http://app.example/cb"],
+		["a fragment", "https://app.example/cb#f"],
+		["a response parameter in the query", "https://app.example/cb?code=1"],
+	])("is none as a whole for a redirect URI with %s", async (_, uri) => {
+		answer = () => json({ ...document, redirect_uris: ["https://app.example/ok", uri] });
+		expect(await (await boot()).find()).toBeUndefined();
+	});
+
+	it("is kept as found when only an owner's schema refuses it, none on every find, unlogged", async () => {
+		answer = () => json({ ...document, redirect_uris: ["http://app.example/cb"] });
+		const app = await boot();
+		expect(await app.find()).toBeUndefined();
+		now += 599_999;
+		expect(await app.find()).toBeUndefined();
+		expect(sent).toHaveLength(1);
+		expect(app.lines()).toEqual([]);
+	});
+
+	it("takes a JSON media type with parameters or a +json suffix", async () => {
+		answer = () => json(document, { "content-type": "application/json; charset=utf-8" });
+		expect(await (await boot()).find()).toBeDefined();
+		answer = () => json(document, { "content-type": "application/client+json" });
+		expect(await (await boot()).find()).toBeDefined();
+		answer = () => json(document, { "content-type": "Application/JSON" });
+		expect(await (await boot()).find()).toBeDefined();
+	});
+
+	it("is logged with the status for any status but 200", async () => {
+		answer = () => json(document, {}, 201);
+		const app = await boot();
+		expect(await app.find()).toBeUndefined();
+		expect(app.lines()[0]?.fields).toEqual({ client: id, reason: "status 201" });
+	});
+
+	it("is logged with the id cut and the reason", async () => {
+		// Long enough to be cut in the log, short enough that clients still asks the source (ids end at 256).
+		const long = `https://app.example/${"a".repeat(220)}`;
+		answer = () => json({ ...document, client_id: "other" });
+		const app = await boot();
+		await app.find(long);
+		await app.find(id);
+		const [line] = app.lines();
+		expect(line).toMatchObject({ level: "warn", event: "clients-cimd.document_refused" });
+		expect(line?.fields).toEqual({ client: long.slice(0, 200), reason: "client_id" });
+		expect(app.lines()[1]?.fields).toEqual({ client: id, reason: "client_id" });
+	});
+});
+
+describe("clients-cimd: a failed fetch", () => {
+	it.each([
+		["running out of time", new OutboundUnavailable("timeout")],
+		["outbound being busy", new OutboundUnavailable("busy")],
+		["an unavailable of no kind", new Unavailable("outbound")],
+	])("is none and not remembered for %s", async (_, error) => {
+		answer = () => Promise.reject(error);
+		const app = await boot();
+		expect(await app.find()).toBeUndefined();
+		await app.find();
+		expect(sent).toHaveLength(2);
+	});
+
+	it("is logged with the id alone", async () => {
+		answer = () => Promise.reject(new OutboundUnavailable("timeout"));
+		const app = await boot();
+		await app.find();
+		expect(app.lines()).toEqual([
+			{ level: "warn", event: "clients-cimd.fetch_failed", fields: { client: id } },
+		]);
+	});
+
+	it("never brings back an expired document", async () => {
+		answer = () => json(document, { "cache-control": "max-age=30" });
+		const app = await boot();
+		expect(await app.find()).toBeDefined();
+		now += 29_999;
+		expect(await app.find()).toBeDefined();
+		expect(sent).toHaveLength(1);
+		now += 1;
+		answer = () => Promise.reject(new OutboundUnavailable("timeout"));
+		expect(await app.find()).toBeUndefined();
+	});
+
+	it.each(["no-store", "no-cache"])("is not kept when the answer says %s", async (directive) => {
+		answer = () => json(document, { "cache-control": directive });
+		const app = await boot();
+		await app.find();
+		await app.find();
+		expect(sent).toHaveLength(2);
+	});
+
+	it("is kept for the cache time when the max age is not a count of seconds", async () => {
+		answer = () => json(document, { "cache-control": "max-age=1.5" });
+		const app = await boot();
+		await app.find();
+		now += 599_999;
+		expect(await app.find()).toBeDefined();
+		expect(sent).toHaveLength(1);
+	});
+});
+
+describe("clients-cimd: the operator's section", () => {
+	it.each([
+		["an allow entry with a wildcard", { allow: ["*.app.example"] }, "clients-cimd.allow.0"],
+		["a deny entry with a port", { deny: ["app.example:443"] }, "clients-cimd.deny.0"],
+		["an address", { deny: ["192.0.2.1"] }, "clients-cimd.deny.0"],
+		["an IPv6 address", { allow: ["[::1]"] }, "clients-cimd.allow.0"],
+		["a short IPv4 form", { deny: ["10.5"] }, "clients-cimd.deny.0"],
+		["a trailing dot", { allow: ["app.example."] }, "clients-cimd.allow.0"],
+		["an underscore", { allow: ["app_x.example"] }, "clients-cimd.allow.0"],
+		["a label led by a hyphen", { allow: ["-app.example"] }, "clients-cimd.allow.0"],
+		["a label ended by a hyphen", { deny: [".app-.example"] }, "clients-cimd.deny.0"],
+		[
+			"a label past 63 characters",
+			{ allow: [`${"a".repeat(64)}.example`] },
+			"clients-cimd.allow.0",
+		],
+		["a size of zero", { "max-bytes": 0 }, "clients-cimd.max-bytes"],
+		["no concurrency", { "max-concurrent": 0 }, "clients-cimd.max-concurrent"],
+	])("refuses boot for %s", async (_, settings, where) => {
+		const error = await boot(settings).catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(BootRefused);
+		expect((error as BootRefused).refusals.map((r) => r.where)).toContain(where);
+	});
+
+	it("takes host names, one beyond ASCII by its punycode, as outbound's hosts", async () => {
+		const allow = ["Bücher.example", "app", ".corp.example"];
+		const app = await boot({ allow });
+		await app.find("https://xn--bcher-kva.example/c");
+		expect(sent[0]?.narrower?.hosts).toEqual(allow);
+	});
+
+	it("keeps at most the cache entries", async () => {
+		answer = (url) => json({ ...document, client_id: url });
+		const app = await boot({ "cache-entries": 1 });
+		await app.find();
+		await app.find("https://app.example/other.json");
+		await app.find();
+		expect(sent).toHaveLength(3);
+	});
+
+	it("runs at most the concurrent fetches, the one past them none at once", async () => {
+		const { promise, resolve } = Promise.withResolvers<OutboundResponse>();
+		answer = () => promise;
+		const app = await boot({ "max-concurrent": 1 });
+		const first = app.find();
+		expect(await app.find("https://app.example/other.json")).toBeUndefined();
+		expect(sent).toHaveLength(1);
+		resolve(json(document));
+		expect(await first).toBeDefined();
+	});
+
+	it("narrows outbound by its own size and time", async () => {
+		await (await boot({ "max-bytes": 100, "timeout-ms": 50 })).find();
+		expect(sent[0]?.narrower).toEqual({ maxBytes: 100, timeoutMs: 50 });
+	});
+});

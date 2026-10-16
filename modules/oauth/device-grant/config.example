@@ -1,0 +1,3 @@
+device-grant {
+	verification-uri = "https://login.example.invalid/device"
+}

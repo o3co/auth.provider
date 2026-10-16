@@ -1,0 +1,6 @@
+{
+	"name": "@t/wired-list",
+	"wires": [
+		"@t/fine"
+	]
+}

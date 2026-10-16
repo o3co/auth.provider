@@ -1,0 +1,18 @@
+{
+	"name": "@c/app",
+	"kind": "feature",
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@c/kernel": "workspace:*",
+		"@c/store": "workspace:*",
+		"@c/audit": "workspace:*",
+		"@c/helper": "workspace:*",
+		"@c/shapes": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"@c/extra": "workspace:*"
+	}
+}

@@ -1,0 +1,17 @@
+{
+	"name": "@mod/secret-hash",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "foundation",
+	"exports": {
+		".": "./src/contract.ts",
+		"./testing": "./src/testing.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/kernel": "workspace:*",
+		"bcryptjs": "3.0.3",
+		"zod": "4.6.5"
+	}
+}

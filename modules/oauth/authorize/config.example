@@ -1,0 +1,3 @@
+authorize {
+	login-page = "https://login.example.invalid/login"
+}

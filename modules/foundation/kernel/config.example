@@ -1,0 +1,4 @@
+kernel {
+	deployment = single
+	stop-seconds = 30
+}
