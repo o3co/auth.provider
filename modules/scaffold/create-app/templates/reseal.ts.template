@@ -22,4 +22,7 @@ for (const holder of told) {
 	process.stdout.write(`${holder.name} ${counts}\n`);
 }
 // 1: a holder failed and should run again; 2: values no key opens remain, so no key may go yet.
-process.exit(told.some((h) => "failed" in h) ? 1 : told.some((h) => "left" in h && h.left > 0) ? 2 : 0);
+const code = told.some((h) => "failed" in h) ? 1 : told.some((h) => "left" in h && h.left > 0) ? 2 : 0;
+// Stopped, though never started, so its stop hooks run; a stop that fails keeps the code.
+await app.stop().catch(() => undefined);
+process.exit(code);

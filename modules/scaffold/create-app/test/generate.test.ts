@@ -113,6 +113,8 @@ it("writes a reseal script for an app that seals, which seals again through each
 	await generate({ target, modules: ["@mod/seal", "@mod/log-stdout"], workspace: root });
 	const manifest = JSON.parse(await readFile(join(target, "package.json"), "utf8"));
 	expect(manifest.scripts).toEqual({ start: "node src/main.ts", reseal: "node src/reseal.ts" });
+	// Stopped before it exits, so the stop hooks run (connections closed, buffered log lines out).
+	expect(await readFile(join(target, "src", "reseal.ts"), "utf8")).toMatch(/await app\.stop\(\)/);
 	await linked(target);
 	const key = Buffer.from(Array.from({ length: 32 }, (_, i) => i * 7 + 1)).toString("base64");
 	await writeFile(
