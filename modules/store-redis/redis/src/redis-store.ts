@@ -19,6 +19,8 @@ import * as scripts from "./scripts.ts";
 type Raw = { value: string; version: string; expiresAt: string | null };
 
 const enc = encodeURIComponent;
+/** A text matched literally by SCAN's pattern. */
+const literal = (text: string) => text.replace(/[*?[\]\\]/g, (c) => `\\${c}`);
 
 /** cjson turns empty or sparse Lua arrays into objects; rebuild them by count. */
 function list<T>(value: unknown, n: number): T[] {
@@ -291,6 +293,25 @@ export function redisStore(
 				await confirm(key, await run(scripts.setRemove, [setKey(key)], [member]));
 			},
 			now: async () => (await run(scripts.now, [], [])).now as number,
+			scan: async (space, cursor) => {
+				const head = `${prefix}:{${enc(space.name)}:`;
+				let reply: [string, string[]];
+				try {
+					reply = await client.scan(cursor ?? "0", "MATCH", `${literal(head)}*}:v:*`, "COUNT", 200);
+				} catch {
+					throw new Unavailable("store");
+				}
+				const [next, found] = reply;
+				const keys = found.map((at) => {
+					const [partition = "", name = ""] = at.slice(head.length).split("}:v:");
+					return {
+						space,
+						partition: decodeURIComponent(partition),
+						name: decodeURIComponent(name),
+					};
+				});
+				return next === "0" ? { keys } : { keys, cursor: next };
+			},
 		},
 		declared,
 	);
