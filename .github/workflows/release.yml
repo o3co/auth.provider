@@ -63,6 +63,20 @@ jobs:
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-
 
+      # npm publishes through trusted publishing (this run's OIDC token, no
+      # stored token) from 11.5.1 on.
+      - name: npm publishes through trusted publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          stated="$(npm --version)"
+          IFS=. read -r major minor patch <<< "${stated%%-*}"
+          if (( major < 11 || (major == 11 && (minor < 5 || (minor == 5 && patch < 1))) )); then
+            echo "::error::npm ${stated} cannot publish through trusted publishing; 11.5.1 or later can"
+            exit 1
+          fi
+          echo "npm ${stated}"
+
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       # Each pattern made from the packed tarballs alone, type-checked and booted.
@@ -89,14 +103,12 @@ jobs:
       # The checked tarballs, one by one, the bundles first and the entrance
       # (`@o3co/create-auth-provider`, which depends on them) last. A name at
       # this version already on npm is passed over, so a rerun after a partial
-      # publish publishes only what is missing. `--provenance` ties each to
-      # this workflow run; the manifests name this repository for it. A name
-      # not yet on npm cannot be bound to trusted publishing, so its first
-      # publish reads the NPM_TOKEN secret; once every name is bound, the
-      # secret is removed and npm authenticates through this run's OIDC token.
+      # publish publishes only what is missing. npm authenticates through this
+      # run's OIDC token (`id-token: write`), each name bound to this workflow
+      # as its trusted publisher; no token is stored. `--provenance` ties each
+      # to this run; the manifests name this repository for it.
       - name: Publish packages
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_TAG: ${{ steps.release.outputs.npm_tag }}
           VERSION: ${{ steps.release.outputs.version }}
         shell: bash
