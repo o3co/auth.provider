@@ -1,7 +1,7 @@
 # federation-tokens
 
 ## Responsibilities
-- Keeps the upstream tokens of a federation login, sealed, per session and IdP, and seals again what a `previous` key sealed: when a read opens it, and for `seal`'s resealers (as `federation-tokens`, walking every record and counting an entry no key opens).
+- Keeps the upstream tokens of a federation login, sealed, per session and IdP, and seals again what a `previous` key sealed: when a read opens it (a write that cannot be made leaves the read whole), and for `seal`'s resealers (as `federation-tokens`, walking every record and counting an entry no key opens).
 - Hands a receiving client the session's upstream access token.
 - Refreshes that token when its end is near.
 - Logs a session out of one upstream: forgets that IdP's tokens, then sends the browser to the upstream's end of session.

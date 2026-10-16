@@ -158,9 +158,14 @@ export function renewalWith(parts: Parts) {
 		if (!entry) return undefined;
 		const kept = vault.open(session, idp, entry);
 		if (kept) {
-			// A past key's entry is sealed again in this read, which writes only over the version read.
+			// A past key's entry is sealed again in passing, over the version read: a write that cannot
+			// be made leaves the read whole, for a later read or the resealer.
 			const resealed = vault.resealed(session, idp, entry);
-			if (resealed && resealed !== entry) await rewrite(session, idp, resealed, entry.version);
+			if (resealed && resealed !== entry) {
+				await rewrite(session, idp, resealed, entry.version).catch((error: unknown) => {
+					if (!isUnavailable(error)) throw error;
+				});
+			}
 			return { entry, kept };
 		}
 		parts.log.warn("federation-tokens.record_unreadable", { idp });

@@ -106,6 +106,15 @@ describe("a rotation", () => {
 		expect(await h.sealedNow()).toMatch(/^current\./);
 	});
 
+	it("answers a read whose sealing again cannot be written, leaving the past key's entry for later", async () => {
+		const h = await aged(past);
+		h.stores.down.failNext("update");
+		expect((await h.ask(h.token)).status).toBe(200);
+		expect(await h.sealedNow()).toMatch(/^past\./);
+		expect((await h.ask(h.token)).status).toBe(200);
+		expect(await h.sealedNow()).toMatch(/^current\./);
+	});
+
 	it("seals each stale entry again in a walk, and counts one no key opens as left", async () => {
 		const h = await aged(past);
 		const lost = await aged(gone);
