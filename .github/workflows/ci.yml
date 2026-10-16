@@ -183,8 +183,10 @@ jobs:
     env:
       LEGACY_SOURCE: ${{ github.workspace }}
       LEGACY_BRANCH: v0.17.0
-      LEGACY_DIR: ${{ runner.temp }}/legacy-0.17.0
     steps:
+      # The runner context is not available in a job's env, so the legacy
+      # build's directory is set here.
+      - run: echo "LEGACY_DIR=$RUNNER_TEMP/legacy-0.17.0" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           # The legacy build clones the v0.17.0 tag from this checkout.
