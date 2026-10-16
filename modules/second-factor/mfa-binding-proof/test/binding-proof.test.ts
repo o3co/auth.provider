@@ -73,6 +73,7 @@ async function serve(mode?: "never" | "when-available" | "always", proofs = [own
 			save: (key, record) => stand.records.create(key, record, "endless"),
 			read: stand.records.read,
 			update: stand.records.change,
+			scan: stand.records.scan,
 		})),
 	]);
 	const app = await assemble({
