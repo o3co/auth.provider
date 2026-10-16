@@ -30,6 +30,12 @@ jobs:
   checks:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    strategy:
+      # Each version reports, so a failure on one is told apart from one on both.
+      fail-fast: false
+      matrix:
+        # The lowest version engines admits, and the newest.
+        node: ['24', '26']
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,7 +45,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: ${{ matrix.node }}
       - name: Get pnpm store path
         id: pnpm-store
         shell: bash
@@ -138,12 +144,18 @@ jobs:
   integration:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    strategy:
+      # Each version reports, so a failure on one is told apart from one on both.
+      fail-fast: false
+      matrix:
+        # The lowest version engines admits, and the newest.
+        node: ['24', '26']
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: ${{ matrix.node }}
       - name: Get pnpm store path
         id: pnpm-store
         shell: bash
@@ -157,7 +169,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:integration
 
-  # The required check on every branch it guards: both jobs above passed.
+  # The required check on every branch it guards: both jobs above passed, on
+  # every Node version of their matrix.
   # Renaming this job leaves branch protection waiting for a check that never
   # reports.
   build-and-test:
