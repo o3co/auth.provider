@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv } from "node:crypto";
 import { defineModule, Unavailable } from "@mod/kernel";
-import { type Opened, seal } from "./contract.ts";
+import { type Opened, type Resealed, resealers, resealing, seal } from "./contract.ts";
 import { keyId, section } from "./section.ts";
 
 const algorithm = "aes-256-gcm";
@@ -20,9 +20,12 @@ const bound = (id: string, context: string) => Buffer.from(`${id}\n${context}`);
 
 export default defineModule({ name: "seal", section, replicaSafe: true }, (m) => [
 	m.provide(seal).by((c) => {
-		const ring = new Map(c.section.keys.map((k) => [k.id, Buffer.from(k.key, "base64")]));
-		// The section takes at least one key.
-		const currentId = (c.section.keys[0] as { id: string }).id;
+		const { current, next, previous } = c.section;
+		const opening = [current, ...(next ? [next] : []), ...previous];
+		const ring = new Map(opening.map((k) => [k.id, Buffer.from(k.key, "base64")]));
+		const currentId = current.id;
+		// Only a past key's values are stale: next is newer than current, as hosts move it up in turn.
+		const pastIds = new Set(previous.map((k) => k.id));
 		const currentKey = ring.get(currentId) as Buffer;
 		return Object.freeze({
 			seal: (plain: string, context: string) => {
@@ -47,11 +50,33 @@ export default defineModule({ name: "seal", section, replicaSafe: true }, (m) =>
 					decipher.setAAD(bound(id, context));
 					decipher.setAuthTag(tag);
 					const plain = Buffer.concat([decipher.update(body), decipher.final()]);
-					return { kind: "opened", plain: plain.toString("utf8") };
+					const opened = { kind: "opened" as const, plain: plain.toString("utf8") };
+					return pastIds.has(id) ? { ...opened, stale: true } : opened;
 				} catch {
 					return { kind: "refused" };
 				}
 			},
 		});
+	}),
+	m.provide(resealing).by(async (c) => {
+		const holders = [...(await c.collect(resealers))].sort((a, b) => (a.name < b.name ? -1 : 1));
+		return {
+			reseal: async () => {
+				const told: Resealed[] = [];
+				for (const holder of holders) {
+					try {
+						const { resealed, left } = await holder.reseal();
+						told.push({ name: holder.name, resealed, left });
+					} catch (error) {
+						c.log.warn("seal.reseal_failed", {
+							holder: holder.name,
+							kind: error instanceof Error ? error.name : typeof error,
+						});
+						told.push({ name: holder.name, failed: true });
+					}
+				}
+				return told;
+			},
+		};
 	}),
 ]);
