@@ -9,16 +9,23 @@ const encodedWord = /=\?.*\?=/;
 /** Letters, digits and hyphens, in labels between dots. */
 const ldh = /^[a-z0-9-]+(\.[a-z0-9-]+)*$/;
 
+/** An `xn--` label decodes to other letters and encodes back to itself; some Node versions pass one that does not. */
+function aLabelHolds(label: string): boolean {
+	if (!label.startsWith("xn--")) return true;
+	const unicode = domainToUnicode(label);
+	return unicode !== label && domainToASCII(unicode) === label;
+}
+
 /**
- * A domain read one way: IDNA's ASCII form of it is LDH, and it is that form or its Unicode
- * form, case aside. IDNA drops what follows `/`, `?` or `#` and maps full-width and compatibility
- * letters, so a sender sending the ASCII form would otherwise reach a domain other than the one
- * checked.
+ * A domain read one way: its IDNA ASCII form is LDH with every A-label holding, and it is that form
+ * or its Unicode form, case aside. IDNA drops what follows `/`, `?` or `#` and maps full-width
+ * letters, so sending the ASCII form would otherwise reach a domain other than the one checked.
  */
 function readsAsItself(domain: string): boolean {
 	const ascii = domainToASCII(domain);
 	const own = domain.toLowerCase();
-	return ldh.test(ascii) && (own === ascii || own === domainToUnicode(ascii));
+	if (!ldh.test(ascii) || !ascii.split(".").every(aLabelHolds)) return false;
+	return own === ascii || own === domainToUnicode(ascii);
 }
 
 /**

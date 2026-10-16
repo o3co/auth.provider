@@ -148,8 +148,14 @@ it("refuses a missing value and a value that breaks a line", () => {
 
 it("answers by the same rule for a sender's own addresses", () => {
 	expect(["a@example.test", "a@\u4f8b\u3048.jp"].map(isAddress)).toEqual([true, true]);
-	const refused = ["a@victim.test/x", "Name <a@example.test>", "a@example.test, b@example.test", 7];
-	expect(refused.map(isAddress)).toEqual([false, false, false, false]);
+	const refused = [
+		"a@victim.test/x",
+		"Name <a@example.test>",
+		"a@example.test, b@example.test",
+		7,
+		"a@xn--a.example",
+	];
+	expect(refused.map(isAddress)).toEqual([false, false, false, false, false]);
 });
 
 it("puts an address in one form: its domain in IDNA's ASCII form, lowercase, its local part as given", () => {
