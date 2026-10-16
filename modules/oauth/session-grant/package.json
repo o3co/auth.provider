@@ -21,6 +21,6 @@
 		"@mod/http": "workspace:*",
 		"@mod/session-tokens": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
-		"vitest": "5.0.3"
+		"vitest": "5.0.4"
 	}
 }

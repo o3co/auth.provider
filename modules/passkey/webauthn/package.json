@@ -14,15 +14,15 @@
 	"dependencies": {
 		"@mod/kernel": "workspace:*",
 		"@simplewebauthn/server": "14.0.1",
-		"zod": "4.6.5"
+		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"@mod/http": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/store": "workspace:*",
-		"vitest": "5.0.3"
+		"vitest": "5.0.4"
 	},
 	"peerDependencies": {
-		"vitest": "5.0.3"
+		"vitest": "5.0.4"
 	}
 }
