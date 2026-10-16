@@ -12,7 +12,7 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/mfa": "workspace:*",
 		"@mod/seal": "workspace:*",
-		"zod": "4.6.5"
+		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"@mod/audit": "workspace:*",
@@ -21,6 +21,6 @@
 		"@mod/records": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
-		"vitest": "5.0.3"
+		"vitest": "5.0.4"
 	}
 }

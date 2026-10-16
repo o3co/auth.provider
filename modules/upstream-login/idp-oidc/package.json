@@ -13,10 +13,10 @@
 		"@mod/outbound": "workspace:*",
 		"@mod/upstream-client": "workspace:*",
 		"@mod/upstreams": "workspace:*",
-		"zod": "4.6.5"
+		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"jose": "6.2.12",
-		"vitest": "5.0.3"
+		"vitest": "5.0.4"
 	}
 }
