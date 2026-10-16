@@ -63,17 +63,14 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 			expect((await place.factors.update(key, plus(1)))?.after).toEqual(asStored({ n: 21 }));
 		});
 
-		it("walks the keys it keeps, over pages", async (context) => {
+		it("walks the keys it keeps, over pages", async () => {
 			const place = await open();
-			const scan = place.factors.scan?.bind(place.factors);
-			// Until every implementation scans.
-			if (!scan) return context.skip();
 			const keys = Array.from({ length: 120 }, fresh);
 			for (const key of keys) await place.factors.save(key, asStored({ n: 1 }));
 			const seen = new Set<string>();
 			let cursor: string | undefined;
 			do {
-				const page = await scan(cursor);
+				const page = await place.factors.scan(cursor);
 				for (const key of page.keys) seen.add(key);
 				cursor = page.cursor;
 			} while (cursor !== undefined);

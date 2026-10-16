@@ -25,16 +25,23 @@ interface Claim {
 const hashOf = (value: string) => createHash("sha256").update(value).digest("base64url");
 export const sealContext = (subject: string, factor: string) => `${subject}\n${factor}`;
 
-const factorsOf = (record: StoredFactors | undefined): readonly Factor[] =>
+export const factorsOf = (record: StoredFactors | undefined): readonly Factor[] =>
 	(record as unknown as { factors: readonly Factor[] } | undefined)?.factors ?? [];
-const stored = (factors: readonly Factor[]) => ({ factors }) as unknown as StoredFactors;
+/** A list keeps its subject, so its secrets can be sealed again; none for one written before. */
+export const subjectOf = (record: StoredFactors | undefined): string | undefined => {
+	const subject = (record as unknown as { subject?: unknown } | undefined)?.subject;
+	return typeof subject === "string" ? subject : undefined;
+};
+export const storedList = (subject: string, factors: readonly Factor[]) =>
+	({ subject, factors }) as unknown as StoredFactors;
+export const listKeyOf = (subject: string) => `s-${hashOf(subject)}`;
 const claimOf = (record: StoredFactors | undefined) => record as unknown as Claim | undefined;
 const asClaim = (claim: Claim) => claim as unknown as StoredFactors;
 const sameClaim = (a: Claim | undefined, b: Claim) =>
 	a?.listKey === b.listKey && a.factor === b.factor;
 
 export function factorRecords(store: FactorStore) {
-	const keyOf = (subject: string) => `s-${hashOf(subject)}`;
+	const keyOf = listKeyOf;
 	/** Changes the factors from what they are, or saves a first list when none is held; none leaves them. */
 	const change = async (
 		subject: string,
@@ -43,11 +50,11 @@ export function factorRecords(store: FactorStore) {
 		const key = keyOf(subject);
 		const changing = (record: StoredFactors) => {
 			const after = next(factorsOf(record));
-			return after && { value: stored(after) };
+			return after && { value: storedList(subject, after) };
 		};
 		if (await store.update(key, changing)) return;
 		const first = next([]);
-		if (!first || (await store.save(key, stored(first))) === "created") return;
+		if (!first || (await store.save(key, storedList(subject, first))) === "created") return;
 		// Another request saved one first, yet it cannot be found.
 		if (!(await store.update(key, changing))) throw new Unavailable("mfa");
 	};

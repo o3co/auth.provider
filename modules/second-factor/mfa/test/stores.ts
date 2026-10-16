@@ -11,6 +11,7 @@ export function memoryFactors(now: () => number = () => 0) {
 		save: (key, record) => stand.records.create(key, record, "endless"),
 		read: stand.records.read,
 		update: stand.records.change,
+		scan: stand.records.scan,
 	});
 	const module = defineModule({ name: "factor-store" }, (m) => [
 		m.provide(factorStore).by(() => factors),
