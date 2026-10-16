@@ -25,7 +25,7 @@ export interface GrantStore {
 		change: (record: StoredGrant) => Rewrite<StoredGrant> | undefined,
 	): Promise<{ readonly before: StoredGrant; readonly after: StoredGrant } | undefined>;
 	/** A page of the ids of the grants that live, and the cursor on; none when done. A walk is no one instant. */
-	scan?(cursor?: string): Promise<{ readonly keys: readonly string[]; readonly cursor?: string }>;
+	scan(cursor?: string): Promise<{ readonly keys: readonly string[]; readonly cursor?: string }>;
 }
 
 export const grantStore = contract<GrantStore>("federation-grants.grant-store");

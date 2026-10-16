@@ -190,6 +190,12 @@ export function recordsWith(seal: Seal) {
 				return undefined;
 			}
 		},
+		resealed: (grant: Grant): Grant | undefined => {
+			if (grant.sealed === undefined) return grant;
+			const opened = seal.open(grant.sealed, contextOf(grant));
+			if (opened.kind !== "opened") return undefined;
+			return opened.stale ? { ...grant, sealed: seal.seal(opened.plain, contextOf(grant)) } : grant;
+		},
 		seal: (grant: Grant, credentials: Credentials) =>
 			seal.seal(JSON.stringify(credentialsShape.parse(credentials)), contextOf(grant)),
 	};

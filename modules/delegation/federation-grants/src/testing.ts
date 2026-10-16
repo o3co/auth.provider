@@ -71,17 +71,14 @@ export function grantStoreContract(name: string, open: () => Promise<GrantPlace>
 			expect(changed?.after).toEqual(grant({ n: 11 }));
 		});
 
-		it("walks the ids of the grants that live, over pages", async (context) => {
+		it("walks the ids of the grants that live, over pages", async () => {
 			const place = await open();
-			const scan = place.grants.scan?.bind(place.grants);
-			// Until every implementation scans.
-			if (!scan) return context.skip();
 			const ids = Array.from({ length: 120 }, fresh);
 			for (const id of ids) await place.grants.create(id, grant({ n: 1 }), 60_000);
 			const seen = new Set<string>();
 			let cursor: string | undefined;
 			do {
-				const page = await scan(cursor);
+				const page = await place.grants.scan(cursor);
 				for (const id of page.keys) seen.add(id);
 				cursor = page.cursor;
 			} while (cursor !== undefined);
