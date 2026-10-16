@@ -31,6 +31,7 @@
 - Versions are `server.epoch.n` and never repeat after a restart, a failover, or the end of the key counting them.
 - A command whose reply was lost is never sent again; a dropped connection fails at once, and nothing ends the process.
 - The store clock is Redis's time; values, counts and sets are kept in separate keys, values untouched.
+- A scan walks Redis's SCAN over the space's value keys alone, which one server holds (clusters are refused); a value at its very expiry may still be listed, and a read then finds none.
 - Outside the guarantees, the operator's: keeping a detached or lagging replica from promotion, replicas' disk writes, `CONFIG SET` after boot.
 
 ## Data
