@@ -83,6 +83,36 @@ export function upstreamTokenStoreContract(
 			expect(await place.records.read(key)).toBeUndefined();
 		});
 
+		it("keeps a record's lifetime through a change that names none", async () => {
+			const place = await open();
+			const key = fresh();
+			await place.records.save(key, held({ n: 1 }), 1000);
+			place.advance(500);
+			await place.records.update(key, (record) => ({ value: held({ n: counted(record) + 1 }) }));
+			place.advance(499);
+			expect(await place.records.read(key)).toEqual(held({ n: 2 }));
+			place.advance(1);
+			expect(await place.records.read(key)).toBeUndefined();
+		});
+
+		it("walks the sessions whose records live, over pages", async (context) => {
+			const place = await open();
+			const scan = place.records.scan?.bind(place.records);
+			// Until every implementation scans.
+			if (!scan) return context.skip();
+			const keys = Array.from({ length: 120 }, fresh);
+			for (const key of keys) await place.records.save(key, held({ n: 1 }), 60_000);
+			await place.records.remove(keys[0] as string);
+			const seen = new Set<string>();
+			let cursor: string | undefined;
+			do {
+				const page = await scan(cursor);
+				for (const session of page.keys) seen.add(session);
+				cursor = page.cursor;
+			} while (cursor !== undefined);
+			expect(keys.filter((key) => !seen.has(key))).toEqual([keys[0]]);
+		});
+
 		it("holds a lock under one mark, and changes it only from the mark it holds now", async () => {
 			const place = await open();
 			const { hold, update } = place.locks;
