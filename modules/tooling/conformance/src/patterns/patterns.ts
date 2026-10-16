@@ -30,9 +30,16 @@ export function runsOf(summaries: readonly PatternSummary[], args: readonly stri
 	return [{ pattern: named, areas: areas.length > 0 ? areas : run.areas }];
 }
 
+/** An ANSI escape sequence, as a terminal that colours output writes one (ESC, then CSI). */
+const ansiEscape = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
+
 /** An area's tests line with its scenes left out, failed on a failed test, an error or no tests. */
 export function areaResult(output: string, code: number | null, leftOut: readonly string[]) {
-	const tests = output.match(/Tests {2}.*$/gm)?.at(-1);
+	// Read as plain text, however the run coloured it.
+	const tests = output
+		.replace(ansiEscape, "")
+		.match(/Tests {2}.*$/gm)
+		?.at(-1);
 	const counts = Map.groupBy(leftOut, (reason) => reason);
 	return {
 		failed: code !== 0 || !tests || tests.includes("failed"),
@@ -48,6 +55,9 @@ function runArea(pattern: string, area: string) {
 		maxBuffer: 1 << 28,
 		env: {
 			...process.env,
+			// Uncoloured, so the tests line reads alike wherever it runs.
+			NO_COLOR: "1",
+			FORCE_COLOR: "0",
 			CONFORMANCE_TARGET: "new",
 			CONFORMANCE_PATTERN: pattern,
 			CONFORMANCE_NOT_IN_PATTERN_FILE: file,

@@ -43,6 +43,23 @@ describe("an area's result", () => {
 		});
 	});
 
+	it("reads a tests line its runner coloured, as a CI's terminal colours it", () => {
+		const esc = String.fromCharCode(27);
+		const coloured = (text: string) => text.replaceAll("^[", esc);
+		const passed = coloured(
+			"^[[2m      Tests ^[[22m ^[[1m^[[32m10 passed^[[39m^[[22m^[[90m (10)^[[39m",
+		);
+		expect(areaResult(`x\n${passed}\ny`, 0, [])).toEqual({
+			failed: false,
+			line: "Tests  10 passed (10) | not-in-pattern 0",
+			reasons: [],
+		});
+		const failing = coloured(
+			"^[[2m      Tests ^[[22m ^[[1m^[[31m1 failed^[[39m^[[22m^[[2m | ^[[22m^[[1m^[[32m2 passed^[[39m",
+		);
+		expect(areaResult(failing, 1, []).failed).toBe(true);
+	});
+
 	it("fails on a failed test, a non-zero exit or no tests line", () => {
 		expect(areaResult("      Tests  1 failed | 2 passed (3)", 1, []).failed).toBe(true);
 		expect(areaResult(tests, 1, []).failed).toBe(true);
