@@ -1,24 +1,33 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { patterns, trialSettings } from "@mod/create-app";
+import { patterns } from "@mod/create-app";
 import { buildBundles } from "./build.ts";
 import { readBundles } from "./contract.ts";
-import { refusalsIn } from "./refused.ts";
+import { dockerMissing, images, overridesFile } from "./image.ts";
 import { releaseOf } from "./workspace.ts";
 
 /**
  * Checks the release as an operator meets it: every bundle packed, an app of each pattern made by
  * the packed create-auth-provider, installed from the tarballs alone, its entry type-checked, and
- * booted on trial settings to readiness, or to its refusals where it needs a Redis it cannot reach.
+ * booted on trial settings in the image its Dockerfile builds, to readiness, or to its refusals
+ * where it needs a Redis it cannot reach.
  */
 const root = process.env.INIT_CWD ?? process.cwd();
 const workspace = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const out = join(root, "dist", "bundles");
 const say = (text: string) => process.stdout.write(`${text}\n`);
 const problems: string[] = [];
+
+// No boot is skipped: without Docker the release is not checked as it is deployed.
+const missing = dockerMissing();
+if (missing) {
+	console.error(
+		`release:check boots each app in its image, and Docker is not reachable: ${missing}`,
+	);
+	process.exit(1);
+}
 
 const { problems: unbuilt } = buildBundles({
 	bundles: readBundles(root),
@@ -49,18 +58,13 @@ for (const dir of readdirSync(out)) {
 	// npm and pnpm alike ship what the tarball holds: the license must be in it.
 	const held = execFileSync("tar", ["-tzf", tarball], { encoding: "utf8" }).split("\n");
 	if (!held.includes("package/LICENSE")) problems.push(`${name}: its tarball holds no LICENSE`);
-	overrides[name] = `file:${tarball}`;
+	overrides[name] = tarball;
 }
 say(`packed ${Object.keys(overrides).length}`);
 
 /** A project installing from the tarballs alone; any outside package comes from the store first. */
 const install = (dir: string) => {
-	writeFileSync(
-		join(dir, "pnpm-workspace.yaml"),
-		`overrides:\n${Object.entries(overrides)
-			.map(([name, spec]) => `  "${name}": "${spec}"`)
-			.join("\n")}\n`,
-	);
+	writeFileSync(join(dir, "pnpm-workspace.yaml"), overridesFile(overrides));
 	execFileSync("pnpm", ["install", "--prefer-offline", "--no-frozen-lockfile"], {
 		cwd: dir,
 		stdio: "pipe",
@@ -75,62 +79,12 @@ writeFileSync(
 	JSON.stringify({
 		name: "release-check-tool",
 		private: true,
-		dependencies: { [entrance]: overrides[entrance] },
+		dependencies: { [entrance]: `file:${overrides[entrance]}` },
 	}),
 );
 install(tool);
 
-const freePort = () =>
-	new Promise<number>((resolve) => {
-		const server = createServer();
-		server.listen(0, "127.0.0.1", () => {
-			const { port } = server.address() as { port: number };
-			server.close(() => resolve(port));
-		});
-	});
-
-/** Boots the app: ready at /readyz, or refused (exit 78) with every refusal it wrote; anything else fails. */
-async function booted(app: string): Promise<string> {
-	const port = await freePort();
-	const { env, local } = await trialSettings(app, { redisUrl: "redis://127.0.0.1:1", port });
-	writeFileSync(join(app, "config", "local.conf"), local);
-	const child = spawn(process.execPath, ["src/main.ts"], {
-		cwd: app,
-		env: {
-			...env,
-			PATH: process.env.PATH ?? "",
-			APP_CONFIG: "config/local.conf,config/application.conf",
-		},
-	});
-	let output = "";
-	child.stdout.on("data", (chunk) => {
-		output += chunk;
-	});
-	child.stderr.on("data", (chunk) => {
-		output += chunk;
-	});
-	const exited = new Promise<number | null>((resolve) =>
-		child.once("exit", (code) => resolve(code)),
-	);
-	for (let waited = 0; waited < 60_000; waited += 250) {
-		if (child.exitCode !== null) break;
-		const ready = await fetch(`http://127.0.0.1:${port}/readyz`).then(
-			(answer) => answer.status === 200,
-			() => false,
-		);
-		if (ready) {
-			child.kill("SIGTERM");
-			await exited;
-			return "ready";
-		}
-		await new Promise((resolve) => setTimeout(resolve, 250));
-	}
-	child.kill("SIGKILL");
-	const code = await exited;
-	const refusals = refusalsIn(output);
-	if (code === 78 && refusals.length > 0) return `refused: ${refusals.join("; ")}`;
-	throw new Error(`exited ${code}:\n${output}`);
-}
+const run = images(`release-check-${process.pid}`, { dir: tarballs, byName: overrides }, scratch);
 
 const tsc = join(root, "node_modules", ".bin", "tsc");
 for (const name of patterns().map((pattern) => pattern.name)) {
@@ -165,13 +119,15 @@ for (const name of patterns().map((pattern) => pattern.name)) {
 			],
 			{ cwd: app, stdio: "pipe" },
 		);
-		say(`${name}: ${await booted(app)}`);
+		say(`${name}: ${await run.booted(app, run.build(app, name))}`);
 	} catch (error) {
 		const told = error as { stdout?: Buffer; stderr?: Buffer; message: string };
 		problems.push(`${name}: ${told.stdout ?? ""}${told.stderr ?? ""}${told.message}`);
 		say(`${name}: failed`);
 	}
 }
+
+run.remove();
 
 for (const problem of problems) console.error(problem);
 say(problems.length === 0 ? `release: ok (${scratch})` : `release: ${problems.length}`);
