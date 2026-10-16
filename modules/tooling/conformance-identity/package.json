@@ -1,0 +1,22 @@
+{
+	"name": "@mod/conformance-identity",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "verification",
+	"exports": {
+		".": "./src/main.ts"
+	},
+	"scripts": {
+		"conformance": "vitest run --config vitest.config.ts"
+	},
+	"dependencies": {
+		"@mod/conformance": "workspace:*",
+		"@mod/conformance-legacy": "workspace:*",
+		"bcryptjs": "3.0.3"
+	},
+	"devDependencies": {
+		"@mod/conformance-keys": "workspace:*",
+		"vitest": "5.0.3"
+	}
+}

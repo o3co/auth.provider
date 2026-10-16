@@ -1,0 +1,6 @@
+audit-http {
+	url = "https://audit.example.invalid/events"
+	retry {
+		max-ms = 100
+	}
+}

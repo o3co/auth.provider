@@ -1,0 +1,8 @@
+seal {
+	keys = [
+		{
+			id = seal-1
+			key = "REPLACE-32-RANDOM-BYTES-BASE64"
+		}
+	]
+}

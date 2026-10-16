@@ -1,0 +1,7 @@
+{
+	"name": "@t/odd",
+	"joins": [
+		"@t/plain",
+		1
+	]
+}

@@ -1,0 +1,505 @@
+import { generateKeyPairSync, type KeyObject } from "node:crypto";
+import clientAllowanceModule from "@mod/client-allowance/module";
+import { allowancesFor } from "@mod/client-allowance/testing";
+import clientsModule from "@mod/clients/module";
+import { clientsConfig, confidentialClient } from "@mod/clients/testing";
+import externalJwtModule from "@mod/external-jwt/module";
+import { testSigner } from "@mod/external-jwt/testing";
+import { type GrantOutcome, targetRules } from "@mod/grants";
+import http from "@mod/http/module";
+import { httpConfig } from "@mod/http/testing";
+import issuerModule from "@mod/issuer/module";
+import { issuerConfig } from "@mod/issuer/testing";
+import {
+	assemble,
+	BootRefused,
+	defineModule,
+	kernelConfig,
+	type Module,
+	Unavailable,
+} from "@mod/kernel";
+import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
+import { type Narrower, type Outbound, outbound } from "@mod/outbound";
+import outboundModule from "@mod/outbound/module";
+import storeModule from "@mod/store/module";
+import { type SimulatedStore, simulatedStore, storeConfig } from "@mod/store/testing";
+import { revocations } from "@mod/subject-revocation";
+import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
+import { tokenEndpointLocation } from "@mod/token-endpoint";
+import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
+import { type IssuanceRequest, issuancePolicies, tokens } from "@mod/tokens";
+import { tokensStandIn } from "@mod/tokens/testing";
+import { SignJWT } from "jose";
+import { describe, expect, it } from "vitest";
+import jwtBearer from "../src/module.ts";
+
+const now = 1_800_000_000_000;
+/** The kernel's time, which a test may move and must put back. */
+const clock = { at: now };
+const runtime = quietRuntime({
+	clock: { now: () => clock.at },
+	random: { bytes: (n) => new Uint8Array(n).fill(3) },
+});
+const issuer = "https://as.example";
+const pem = (k: KeyObject, type: "pkcs8" | "spki") => k.export({ format: "pem", type }).toString();
+const upstream = generateKeyPairSync("ed25519");
+const stranger = generateKeyPairSync("ed25519");
+const grantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
+const trustedUpstream = [
+	{
+		issuer: "https://idp.example",
+		keys: [{ alg: "EdDSA", "public-key": pem(upstream.publicKey, "spki") }],
+	},
+];
+
+/** Where the token endpoint answers; null for a deployment without a public origin. */
+async function serve(
+	simulated?: SimulatedStore,
+	named = issuer,
+	located: string | null = `${issuer}/oauth/token`,
+	issuers: readonly Record<string, unknown>[] = trustedUpstream,
+	out: Module = outboundModule,
+	extra: readonly Module[] = [],
+) {
+	const location = defineModule({ name: "token-endpoint-location" }, (m) => [
+		m.provide(tokenEndpointLocation).by(() => ({ url: located ?? undefined })),
+	]);
+	const app = await assemble({
+		modules: [
+			location,
+			http,
+			tokensStandIn(),
+			issuerModule,
+			clientsModule,
+			grantCaller,
+			clientAllowanceModule,
+			out,
+			externalJwtModule,
+			simulated ? simulated.module : storeModule,
+			subjectRevocationStandIn,
+			jwtBearer,
+			...extra,
+		],
+		config: {
+			...kernelConfig(),
+			...httpConfig(),
+			...issuerConfig({ url: named }),
+			...(simulated ? {} : storeConfig()),
+			...clientsConfig([
+				confidentialClient({
+					id: "app",
+					sections: allowancesFor({
+						grants: [grantType],
+						scopes: ["read"],
+						"default-scopes": ["read"],
+					}),
+				}),
+			]),
+			"jwt-bearer": { issuers },
+		},
+		runtime,
+	});
+	/** Calls the grant as the token endpoint would for the client "app". */
+	const grant = (a: string, more: Record<string, string> = {}) =>
+		app.get(grantCalls).call(grantType, "app", { grant_type: grantType, assertion: a, ...more });
+	return {
+		grant,
+		verify: (token: string) => app.get(tokens).verifyAccess(token),
+		revoke: (subject: string, keepDelegations = false) =>
+			app.get(revocations).record(subject, { keepDelegations }),
+	};
+}
+
+function assertion(
+	claims: Record<string, unknown>,
+	key: KeyObject = upstream.privateKey,
+	header: { kid?: string } = {},
+) {
+	return new SignJWT({ jti: `j-${Math.random()}`, ...claims })
+		.setProtectedHeader({ alg: "EdDSA", ...header })
+		.sign(key);
+}
+const base = { iss: "https://idp.example", sub: "alice", aud: issuer, exp: now / 1000 + 120 };
+
+const errorOf = (outcome: GrantOutcome) => (outcome.kind === "error" ? outcome.error : "issued");
+const saidOf = (outcome: GrantOutcome) =>
+	outcome.kind === "error" ? `${outcome.error}: ${outcome.description}` : "issued";
+
+/** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
+const narrowing = defineModule({ name: "narrowing" }, (m) => [
+	m.contribute(targetRules).by(() => ({
+		target: ({ param, audience, within }) => {
+			const asked = param("resource");
+			if (!asked) return { kind: "audience", audience };
+			return within(asked)
+				? { kind: "audience", audience: [asked] }
+				: { kind: "error", error: "invalid_target", description: `not ${asked}` };
+		},
+		// A grant that takes no audience gets no resource.
+		untargeted: ({ param }) =>
+			param("resource")
+				? { kind: "error", error: "invalid_target", description: "takes no resource" }
+				: undefined,
+	})),
+]);
+
+describe("jwt-bearer", () => {
+	it("issues for the audience asked within the client's, refusing another before the jti is used up", async () => {
+		const s = await serve(
+			undefined,
+			issuer,
+			`${issuer}/oauth/token`,
+			trustedUpstream,
+			outboundModule,
+			[narrowing],
+		);
+		const signed = await assertion(base);
+		expect(saidOf(await s.grant(signed, { resource: "https://api" }))).toBe(
+			"invalid_target: not https://api",
+		);
+		const issued = await s.grant(signed, { resource: issuer });
+		if (issued.kind !== "issued") throw new Error(issued.error);
+		expect(await s.verify(String(issued.body.access_token))).toMatchObject({
+			kind: "valid",
+			grant: { audience: [issuer] },
+		});
+	});
+
+	it("takes a resource as a grant that asks it, where the rule refuses one to a grant that takes none", async () => {
+		const s = await serve(
+			undefined,
+			issuer,
+			`${issuer}/oauth/token`,
+			trustedUpstream,
+			outboundModule,
+			[narrowing],
+		);
+		expect(saidOf(await s.grant(await assertion(base), { resource: issuer }))).toBe("issued");
+	});
+
+	it("reads no resource where no rule is composed", async () => {
+		const s = await serve();
+		expect(errorOf(await s.grant(await assertion(base), { resource: "https://api" }))).toBe(
+			"issued",
+		);
+	});
+
+	it("still refuses a replay while the store clock runs ahead", async () => {
+		const simulated = simulatedStore();
+		const s = await serve(simulated);
+		simulated.shiftClock(200_000);
+		const signed = await assertion(base);
+		expect(errorOf(await s.grant(signed))).toBe("issued");
+		expect(errorOf(await s.grant(signed))).toBe("invalid_grant");
+	});
+
+	it("issues a token for the assertion's subject, capped at its expiry, once per jti", async () => {
+		const s = await serve();
+		const signed = await assertion(base);
+		const first = await s.grant(signed);
+		if (first.kind !== "issued") throw new Error(first.error);
+		expect(first.body.expires_in).toBe(120);
+		expect(await s.verify(String(first.body.access_token))).toMatchObject({
+			kind: "valid",
+			grant: { subject: "alice", issuedTo: "app", scope: ["read"] },
+		});
+		expect(errorOf(await s.grant(signed))).toBe("invalid_grant");
+	});
+
+	it("asks the issuance policies before the jti is used up, and again when issuing", async () => {
+		const asked: IssuanceRequest[] = [];
+		let refusing = new Set([1]);
+		const policy = defineModule({ name: "test-policy" }, (m) => [
+			m.contribute(issuancePolicies).by(() => ({
+				name: "test-policy",
+				judge: async (request) => {
+					asked.push(request);
+					return refusing.has(asked.length)
+						? { kind: "refused", reason: "test_reason", description: "refused here" }
+						: { kind: "allowed" };
+				},
+			})),
+		]);
+		const s = await serve(
+			undefined,
+			issuer,
+			`${issuer}/oauth/token`,
+			trustedUpstream,
+			outboundModule,
+			[policy],
+		);
+		const signed = await assertion(base);
+		expect(saidOf(await s.grant(signed))).toBe("invalid_grant: refused here");
+		// Refused before it was used up, the same assertion is taken once allowed.
+		expect(errorOf(await s.grant(signed))).toBe("issued");
+		expect(asked.map(({ grantType: type, session }) => [type, session])).toEqual([
+			[grantType, undefined],
+			[grantType, undefined],
+			[grantType, undefined],
+		]);
+		// Refused when issuing, the assertion stays used up.
+		refusing = new Set([5]);
+		const late = await assertion(base);
+		expect(saidOf(await s.grant(late))).toBe("invalid_grant: refused here");
+		expect(saidOf(await s.grant(late))).toBe("invalid_grant: assertion replayed");
+	});
+
+	it("gives no token for an assertion made before its subject's revocation, nor one that says not when once there is one", async () => {
+		const s = await serve();
+		const made = await assertion({ ...base, iat: now / 1000 });
+		const unsaid = await assertion(base);
+		await s.revoke("alice");
+		clock.at = now + 2000;
+		try {
+			expect(saidOf(await s.grant(made))).toBe("invalid_grant: assertion revoked");
+			expect(saidOf(await s.grant(unsaid))).toBe("invalid_grant: assertion revoked");
+			// An issue time ahead of this clock is taken as now, which the boundary's second still covers.
+			// Only `sessions` moves: the assertion answers to it.
+			await s.revoke("alice", true);
+			const ahead = await assertion({ ...base, iat: now / 1000 + 22 });
+			expect(saidOf(await s.grant(ahead))).toBe("invalid_grant: assertion revoked");
+			clock.at = now + 3000;
+			expect(errorOf(await s.grant(await assertion({ ...base, iat: now / 1000 + 3 })))).toBe(
+				"issued",
+			);
+			expect(errorOf(await s.grant(await assertion({ ...base, sub: "bob" })))).toBe("issued");
+			expect(errorOf(await s.grant(made))).toBe("invalid_grant");
+		} finally {
+			clock.at = now;
+		}
+	});
+
+	it("takes the token endpoint's own location as an audience, whatever path the issuer has", async () => {
+		const tenant = `${issuer}/tenant`;
+		const s = await serve(undefined, tenant);
+		const ok = async (aud: string) => (await s.grant(await assertion({ ...base, aud }))).kind;
+		expect(await ok(`${issuer}/oauth/token`)).toBe("issued");
+		expect(await ok(tenant)).toBe("issued");
+		expect(await ok(`${tenant}/oauth/token`)).toBe("error");
+		expect(await serve(undefined, issuer, null).catch((error) => error)).toBeInstanceOf(
+			BootRefused,
+		);
+	});
+
+	it("refuses assertions from strangers, for others, expired, too long-lived or missing claims", async () => {
+		const s = await serve();
+		const error = async (a: string) => errorOf(await s.grant(a));
+		expect(await error(await assertion(base, stranger.privateKey))).toBe("invalid_grant");
+		expect(await error(await assertion({ ...base, aud: "https://elsewhere" }))).toBe(
+			"invalid_grant",
+		);
+		expect(await error(await assertion({ ...base, exp: now / 1000 - 600 }))).toBe("invalid_grant");
+		expect(await error(await assertion({ ...base, exp: now / 1000 + 86_400 }))).toBe(
+			"invalid_grant",
+		);
+		expect(await error(await assertion({ ...base, sub: undefined }))).toBe("invalid_grant");
+		expect(await error(await assertion({ ...base, sub: "" }))).toBe("invalid_grant");
+		expect(await error(await assertion({ ...base, iss: "https://unknown.example" }))).toBe(
+			"invalid_grant",
+		);
+		expect(await error(await assertion({ ...base, jti: "j".repeat(257) }))).toBe("invalid_grant");
+		expect(await error(await assertion({ ...base, jti: "j".repeat(256) }))).toBe("issued");
+		expect(await error("not-a-jwt")).toBe("invalid_grant");
+		expect(await error(await assertion({ ...base, jti: "j-\udc00" }))).toBe("invalid_grant");
+		expect(await error("")).toBe("invalid_request");
+	});
+
+	it("refuses, rather than throws on, an assertion whose signed payload is no JSON", async () => {
+		const signer = await testSigner("EdDSA");
+		const s = await serve(undefined, issuer, `${issuer}/oauth/token`, [
+			{ issuer: "https://idp.example", keys: [{ alg: "EdDSA", "public-key": signer.pem }] },
+		]);
+		// The same key's JSON claims are granted, so the refusal below is the payload's.
+		expect(errorOf(await s.grant(await signer.sign({ ...base, jti: "j-json" })))).toBe("issued");
+		const signed = await signer.signBytes(Buffer.from(`{"iss":"https://idp.example"`));
+		expect(errorOf(await s.grant(signed))).toBe("invalid_grant");
+	});
+
+	it("takes the one key that fits: none or more than one is a refusal", async () => {
+		const two = [
+			{
+				issuer: "https://idp.example",
+				keys: [
+					{ alg: "EdDSA", "public-key": pem(stranger.publicKey, "spki") },
+					{ alg: "EdDSA", "public-key": pem(upstream.publicKey, "spki") },
+				],
+			},
+		];
+		const ambiguous = await serve(undefined, issuer, `${issuer}/oauth/token`, two);
+		expect(saidOf(await ambiguous.grant(await assertion(base)))).toBe(
+			"invalid_grant: untrusted signer",
+		);
+		const s = await serve();
+		// A header's `kid` takes only a key written with that `kid`.
+		expect(saidOf(await s.grant(await assertion(base, undefined, { kid: "k1" })))).toBe(
+			"invalid_grant: untrusted signer",
+		);
+		const named = [
+			{
+				issuer: "https://idp.example",
+				keys: [
+					{ kid: "k0", alg: "EdDSA", "public-key": pem(stranger.publicKey, "spki") },
+					{ kid: "k1", alg: "EdDSA", "public-key": pem(upstream.publicKey, "spki") },
+				],
+			},
+		];
+		const byKid = await serve(undefined, issuer, `${issuer}/oauth/token`, named);
+		expect(errorOf(await byKid.grant(await assertion(base, undefined, { kid: "k1" })))).toBe(
+			"issued",
+		);
+	});
+
+	it("refuses an assertion issued longer ago than the longest lifetime and the allowance", async () => {
+		const s = await serve();
+		const at = (iat: number) => assertion({ ...base, iat });
+		expect(errorOf(await s.grant(await at(now / 1000 - 3600 - 30)))).toBe("issued");
+		expect(errorOf(await s.grant(await at(now / 1000 - 3600 - 31)))).toBe("invalid_grant");
+	});
+
+	it("takes an audience list holding one of its audiences, and only strings", async () => {
+		const s = await serve();
+		const aud = async (list: unknown[]) =>
+			errorOf(await s.grant(await assertion({ ...base, aud: list })));
+		expect(await aud(["https://elsewhere", issuer])).toBe("issued");
+		expect(await aud([issuer, 5])).toBe("invalid_grant");
+	});
+
+	it("says why in its own words", async () => {
+		const s = await serve();
+		const said = async (a: string) => saidOf(await s.grant(a));
+		expect(await said(await assertion(base, stranger.privateKey))).toBe(
+			"invalid_grant: untrusted signer",
+		);
+		expect(await said(await assertion({ ...base, exp: now / 1000 - 600 }))).toBe(
+			"invalid_grant: expired",
+		);
+		expect(await said(await assertion({ ...base, aud: "https://elsewhere" }))).toBe(
+			"invalid_grant: wrong audience",
+		);
+		const late = now / 1000 + 600;
+		expect(await said(await assertion({ ...base, nbf: late }))).toBe(
+			"invalid_grant: not yet valid",
+		);
+		expect(await said(await assertion({ ...base, iat: late }))).toBe(
+			"invalid_grant: issued in the future",
+		);
+		expect(await said(await assertion({ ...base, exp: now / 1000 + 86_400 }))).toBe(
+			"invalid_grant: lives too long",
+		);
+		expect(await said(await assertion({ ...base, exp: undefined }))).toBe(
+			"invalid_grant: malformed assertion",
+		);
+		const ec = generateKeyPairSync("ec", { namedCurve: "P-256" });
+		const otherAlgorithm = await new SignJWT(base)
+			.setProtectedHeader({ alg: "ES256" })
+			.sign(ec.privateKey);
+		expect(await said(otherAlgorithm)).toBe("invalid_grant: algorithm not taken");
+	});
+
+	it("keeps each issuer's jti apart", async () => {
+		const both = [
+			...trustedUpstream,
+			{
+				issuer: "https://other.example",
+				keys: [{ alg: "EdDSA", "public-key": pem(stranger.publicKey, "spki") }],
+			},
+		];
+		const s = await serve(undefined, issuer, `${issuer}/oauth/token`, both);
+		const jti = "shared";
+		expect(errorOf(await s.grant(await assertion({ ...base, jti })))).toBe("issued");
+		const other = { ...base, iss: "https://other.example", jti };
+		expect(errorOf(await s.grant(await assertion(other, stranger.privateKey)))).toBe("issued");
+	});
+
+	it("refuses to boot with a private key written where a public key goes", async () => {
+		const secret = [
+			{
+				issuer: "https://idp.example",
+				keys: [{ alg: "EdDSA", "public-key": pem(upstream.privateKey, "pkcs8") }],
+			},
+		];
+		expect(
+			await serve(undefined, issuer, `${issuer}/oauth/token`, secret).catch((e) => e),
+		).toBeInstanceOf(BootRefused);
+	});
+
+	it("refuses an assertion whose signature differs only in its last character's unused bits", async () => {
+		const s = await serve();
+		const signed = await assertion({ ...base, jti: "j-canonical" });
+		const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+		// An Ed25519 signature leaves four unused bits in its last character; the lowest is one of them.
+		const last = signed.at(-1) ?? "";
+		const other = `${signed.slice(0, -1)}${alphabet[alphabet.indexOf(last) ^ 1]}`;
+		expect(errorOf(await s.grant(other))).toBe("invalid_grant");
+		expect(errorOf(await s.grant(signed))).toBe("issued");
+	});
+
+	it("refuses to boot with a key it cannot read", async () => {
+		const unreadable = [
+			{ issuer: "https://idp.example", keys: [{ alg: "EdDSA", "public-key": "not a PEM" }] },
+		];
+		expect(
+			await serve(undefined, issuer, `${issuer}/oauth/token`, unreadable).catch((e) => e),
+		).toBeInstanceOf(BootRefused);
+	});
+
+	describe("with a key set at a URL", () => {
+		const located = `${issuer}/oauth/token`;
+		const at = (uri: string, named = "https://idp.example") => [{ issuer: named, "jwks-uri": uri }];
+		/** An outbound answering the key set, keeping what it was asked. */
+		function keySetAt(keys: unknown[]) {
+			const asked: { url: string; narrower: Narrower | undefined }[] = [];
+			const module = defineModule({ name: "outbound-stand-in" }, (m) => [
+				m.provide(outbound).by(() => ({
+					fetch: async (url, _request, narrower) => {
+						asked.push({ url, narrower });
+						return {
+							status: 200,
+							headers: new Map(),
+							body: new TextEncoder().encode(JSON.stringify({ keys })),
+						};
+					},
+				})),
+			]);
+			return { module, asked };
+		}
+
+		it("checks the assertion with the issuer's key set, fetched only from the issuer's host", async () => {
+			const signer = await testSigner("ES256", "k1");
+			const set = keySetAt([signer.jwk]);
+			const s = await serve(undefined, issuer, located, at("https://idp.example/jwks"), set.module);
+			const signed = await signer.sign({ ...base, jti: "j-set" });
+			expect(errorOf(await s.grant(signed))).toBe("issued");
+			expect(set.asked).toEqual([
+				{ url: "https://idp.example/jwks", narrower: { hosts: ["idp.example"] } },
+			]);
+			expect(saidOf(await s.grant(await assertion(base)))).toBe("invalid_grant: untrusted signer");
+		});
+
+		it("is unavailable while no key set can be had", async () => {
+			const down = unavailableSwitch<Outbound>("outbound");
+			down.unavailable("fetch");
+			const out = switchedModule(keySetAt([]).module, outbound, down);
+			const s = await serve(undefined, issuer, located, at("https://idp.example/jwks"), out);
+			const signed = await (await testSigner("ES256")).sign(base);
+			await expect(s.grant(signed)).rejects.toBeInstanceOf(Unavailable);
+		});
+
+		it("refuses to boot with both keys and a key set, neither, or a key set not at https on the issuer's host", async () => {
+			const refused = (issuers: Record<string, unknown>[]) =>
+				serve(undefined, issuer, located, issuers, keySetAt([]).module).then(
+					() => "booted",
+					(error) => (error instanceof BootRefused ? "refused" : error),
+				);
+			expect(await refused(at("https://idp.example/jwks"))).toBe("booted");
+			expect(
+				await refused([{ ...trustedUpstream[0], "jwks-uri": "https://idp.example/jwks" }]),
+			).toBe("refused");
+			expect(await refused([{ issuer: "https://idp.example" }])).toBe("refused");
+			expect(await refused(at("https://keys.example/jwks"))).toBe("refused");
+			expect(await refused(at("http://idp.example/jwks"))).toBe("refused");
+			expect(await refused(at("https://sub.idp.example/jwks"))).toBe("refused");
+			expect(await refused(at("https://idp.example/jwks", "idp.example"))).toBe("refused");
+		});
+	});
+});

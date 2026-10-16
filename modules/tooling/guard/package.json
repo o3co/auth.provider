@@ -1,0 +1,17 @@
+{
+	"name": "@mod/guard",
+	"private": true,
+	"license": "Apache-2.0",
+	"kind": "verification",
+	"type": "module",
+	"scripts": {
+		"guard": "node src/main.ts"
+	},
+	"exports": {
+		".": "./src/contract.ts"
+	},
+	"dependencies": {
+		"@mod/combinations": "workspace:*",
+		"typescript": "6.0.3"
+	}
+}

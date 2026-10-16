@@ -1,0 +1,20 @@
+{
+	"name": "@mod/conformance-keys",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "verification",
+	"exports": {
+		".": "./src/main.ts"
+	},
+	"scripts": {
+		"conformance": "vitest run --config vitest.config.ts"
+	},
+	"dependencies": {
+		"@mod/conformance": "workspace:*",
+		"@mod/conformance-legacy": "workspace:*"
+	},
+	"devDependencies": {
+		"vitest": "5.0.3"
+	}
+}

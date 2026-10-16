@@ -1,0 +1,19 @@
+{
+	"name": "@mod/http-ops",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"joins": [
+		"@mod/http"
+	],
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/http": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/metrics": "workspace:*",
+		"zod": "4.6.5"
+	}
+}

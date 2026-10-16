@@ -1,0 +1,205 @@
+import {
+	createServer,
+	type IncomingMessage,
+	type Server,
+	type ServerResponse,
+	validateHeaderName,
+	validateHeaderValue,
+} from "node:http";
+import { ignoredCertificates } from "@mod/client-certificate";
+import { type Clock, isUnavailable, type Log } from "@mod/kernel";
+import { ignoredForwarding, sourceOf, type TrustedProxies } from "@mod/request-source";
+import { bodyOf } from "../bodies/body.ts";
+import { paramsOf, readOnly } from "../bodies/values.ts";
+import {
+	type HttpRequest,
+	type HttpResponse,
+	noStore,
+	type RequestEndObserver,
+} from "../contract.ts";
+import { crossOrigin, preflight } from "../cors/cors.ts";
+import { ending } from "../ending/ending.ts";
+import type { GuardedRoute } from "../guards/guards.ts";
+import { secured } from "../security-headers/security-headers.ts";
+
+/** The request as far as its route is known; the body is read as the route says. */
+type Head = Omit<HttpRequest, "form" | "json" | "fields">;
+
+/** What the server answers with. */
+export interface Serving {
+	readonly routes: readonly GuardedRoute[];
+	readonly proxies: TrustedProxies;
+	readonly origins: ReadonlySet<string>;
+	readonly ends: readonly RequestEndObserver[];
+	readonly log: Log;
+	readonly clock: Clock;
+}
+
+/** The request's head; undefined when the request target is not a URL. */
+function frozenHead(message: IncomingMessage, proxies: TrustedProxies): Head | undefined {
+	const url = URL.parse(message.url ?? "/", "http://placeholder");
+	if (url === null) return undefined;
+	const headers = new Map<string, string>();
+	for (const [key, value] of Object.entries(message.headers)) {
+		if (value !== undefined) headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+	}
+	return Object.freeze({
+		method: message.method ?? "GET",
+		path: url.pathname,
+		query: paramsOf(url.searchParams),
+		headers: readOnly(headers),
+		source: sourceOf(proxies, message.socket.remoteAddress ?? "", headers),
+	});
+}
+
+/** Writes the answer; one whose headers cannot be written becomes a bare 500, as does any failure. */
+function write(res: ServerResponse, response: HttpResponse, log: Log): void {
+	try {
+		const { headers, payload } = serialized(response);
+		for (const [name, value] of Object.entries(headers)) {
+			validateHeaderName(name);
+			for (const v of [value].flat()) validateHeaderValue(name, v);
+		}
+		res.writeHead(response.status, headers);
+		res.end(payload);
+	} catch (error) {
+		log.error("http.unwritable", { kind: error instanceof Error ? error.name : typeof error });
+		if (!res.headersSent) res.writeHead(500, secured(noStore));
+		res.end();
+	}
+}
+
+/** The answer as written: its header fields, security headers, cookies and length included, and its payload. */
+function serialized(response: HttpResponse) {
+	const headers: Record<string, string | string[]> = secured(
+		response.headers ?? {},
+		response.loads,
+	);
+	if (response.cookies?.length) headers["set-cookie"] = [...response.cookies];
+	const body = response.body;
+	const isJson = typeof body === "object" && "json" in body;
+	if (isJson) headers["content-type"] ??= "application/json";
+	const payload = isJson ? JSON.stringify(body.json) : body;
+	// Stated, not chunked, so a HEAD answer carries the length its GET would.
+	if (payload !== undefined) headers["content-length"] = String(Buffer.byteLength(payload));
+	return { headers, payload };
+}
+
+const bare = (status: number): HttpResponse => ({ status, headers: noStore });
+
+/** The routes a path reaches: those of exactly that path, or else of the longest `/*` above it. */
+function reaching(routes: readonly GuardedRoute[], path: string): readonly GuardedRoute[] {
+	const exact = routes.filter((r) => r.path === path);
+	if (exact.length > 0) return exact;
+	const under = routes.filter((r) => r.path.endsWith("/*") && path.startsWith(r.path.slice(0, -1)));
+	const longest = Math.max(0, ...under.map((r) => r.path.length));
+	return under.filter((r) => r.path.length === longest);
+}
+
+function routeFor(reached: readonly GuardedRoute[], method: string): GuardedRoute | undefined {
+	const route = reached.find((r) => r.method === method);
+	return route ?? (method === "HEAD" ? reached.find((r) => r.method === "GET") : undefined);
+}
+
+async function answer(
+	serving: Serving,
+	head: Head,
+	message: IncomingMessage,
+	nameRoute: (path: string) => void,
+): Promise<HttpResponse> {
+	const reaches = reaching(serving.routes, head.path);
+	const origin = head.headers.get("origin");
+	const asked = head.headers.get("access-control-request-method");
+	if (head.method === "OPTIONS" && asked !== undefined) {
+		const answered = preflight(reaches, asked, origin, serving.origins);
+		if (answered) return answered;
+	}
+	const route = routeFor(reaches, head.method);
+	if (!route) {
+		if (reaches.length === 0) return bare(404);
+		const allowed = reaches.flatMap((r) => (r.method === "GET" ? ["GET", "HEAD"] : [r.method]));
+		return { status: 405, headers: { ...noStore, allow: allowed.join(", ") } };
+	}
+	nameRoute(route.path);
+	const response = await handled(route, head, message, serving.log);
+	return route.cors ? crossOrigin(route.cors, origin, serving.origins, response) : response;
+}
+
+async function handled(
+	route: GuardedRoute,
+	head: Head,
+	message: IncomingMessage,
+	log: Log,
+): Promise<HttpResponse> {
+	const { refused, ...body } = await bodyOf(route.takes, message);
+	const request: HttpRequest = Object.freeze({ ...head, ...body });
+	try {
+		const guarded = (await route.guard?.(request)) ?? "pass";
+		if (guarded !== "pass") return guarded;
+		if (refused) return bare(refused);
+		return await route.handle(request);
+	} catch (error) {
+		if (isUnavailable(error)) {
+			log.warn("http.unavailable", { what: error.what });
+			return bare(503);
+		}
+		log.error("http.failed", { kind: error instanceof Error ? error.name : typeof error });
+		return bare(500);
+	}
+}
+
+/** Warns of the forwarded headers a request's peer sent and were ignored, in http's words. */
+function ignoredHeaders({ proxies, log, clock }: Serving) {
+	const forwarding = ignoredForwarding(proxies, clock);
+	const certificates = ignoredCertificates(proxies.certificate, clock);
+	return (head: Head, peer: string) => {
+		const fields = { peer: head.source.address };
+		if (forwarding(peer, head.headers)) log.warn("http.forwarded_from_untrusted_peer", fields);
+		if (certificates(head.headers, head.source.clientCertificate)) {
+			log.warn("http.client_certificate_ignored", fields);
+		}
+	};
+}
+
+export function serve(serving: Serving): Server {
+	const { proxies, log, clock } = serving;
+	const warn = ignoredHeaders(serving);
+	const server = createServer((req, res) => {
+		// Outside the chain, so it must never throw: it reads the clock and adds listeners; observers
+		// are told later. Every other step runs inside, so a throw there is answered.
+		const told = ending(serving.ends, clock, req, res);
+		let route: string | undefined;
+		const nameRoute = (path: string) => {
+			route = path;
+			told(path);
+		};
+		const reply = (response: HttpResponse) => {
+			const stopping = !server.listening;
+			if (stopping) res.setHeader("connection", "close");
+			write(res, response, log);
+		};
+		void Promise.resolve()
+			.then(() => {
+				const head = frozenHead(req, proxies);
+				if (head === undefined) return bare(400);
+				warn(head, req.socket.remoteAddress ?? "");
+				return answer(serving, head, req, nameRoute);
+			})
+			.then(reply)
+			.catch((error: unknown) => {
+				const kind = error instanceof Error ? error.name : typeof error;
+				log.warn("http.unexpected_failure", { ...(route && { route }), kind });
+				reply(bare(500));
+			});
+	});
+	return server;
+}
+
+/** Accepts nothing new and lets requests in flight finish; once `signal` aborts, closes the rest. */
+export function drain(server: Server, signal: AbortSignal): Promise<void> {
+	const closed = new Promise<void>((resolve) => server.close(() => resolve()));
+	const cut = () => server.closeAllConnections();
+	if (signal.aborted) cut();
+	else signal.addEventListener("abort", cut, { once: true });
+	return closed;
+}

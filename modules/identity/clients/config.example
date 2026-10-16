@@ -1,0 +1,9 @@
+clients {
+	registered = [
+		{
+			id = example-client
+			kind = public
+			method = none
+		}
+	]
+}

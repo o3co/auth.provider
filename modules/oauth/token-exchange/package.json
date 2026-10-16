@@ -1,0 +1,30 @@
+{
+	"name": "@mod/token-exchange",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"optIn": true,
+	"exports": {
+		".": "./src/contract.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/client-allowance": "workspace:*",
+		"@mod/clients": "workspace:*",
+		"@mod/grants": "workspace:*",
+		"@mod/issuer": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/refresh": "workspace:*",
+		"@mod/sender-binding": "workspace:*",
+		"@mod/session": "workspace:*",
+		"@mod/session-tokens": "workspace:*",
+		"@mod/tokens": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"@mod/http": "workspace:*",
+		"@mod/token-endpoint": "workspace:*",
+		"vitest": "5.0.3"
+	}
+}

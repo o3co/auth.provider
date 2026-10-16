@@ -1,0 +1,20 @@
+{
+	"name": "@mod/mail-smtp",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "adapter",
+	"replaces": "@mod/mail",
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/kernel": "workspace:*",
+		"@mod/mail": "workspace:*",
+		"nodemailer": "10.0.14",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"vitest": "5.0.3"
+	}
+}

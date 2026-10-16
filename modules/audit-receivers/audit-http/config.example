@@ -1,0 +1,4 @@
+audit-http {
+	url = "https://audit.example.invalid/events"
+	authorization = "REPLACE-AUTHORIZATION-HEADER-VALUE"
+}

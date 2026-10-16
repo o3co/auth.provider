@@ -1,0 +1,378 @@
+import { createHash, createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
+import { areaTarget, type Fake, fakeHttp, type Started } from "@mod/conformance";
+import type { ClientScene } from "@mod/conformance-oauth";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { type CodeScene, codeScene } from "../../main.ts";
+import { backChannel, browserAt } from "../../testing.ts";
+
+const issuer = "https://issuer.example";
+const back = "https://app.example/after";
+const pair = generateKeyPairSync("ed25519");
+const verifier = "v".repeat(43);
+const challenge = createHash("sha256").update(verifier).digest("base64url");
+const user = { username: "alice", password: "correct horse battery" };
+const client = (id: string, logout: ClientScene["logout"]): ClientScene => ({
+	id,
+	kind: "confidential",
+	method: "client_secret_post",
+	secret: `${id}-secret-0123456789abcdef`,
+	grants: ["authorization_code"],
+	scopes: ["openid"],
+	redirectUris: [`https://${id}.example/cb`],
+	firstParty: true,
+	...(logout ? { logout } : {}),
+});
+const sceneWith = (clients: readonly ClientScene[], allowed: readonly string[]): CodeScene => ({
+	issuer,
+	keys: {
+		signing: {
+			kid: "lo",
+			alg: "EdDSA",
+			privatePem: pair.privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+			publicPem: pair.publicKey.export({ format: "pem", type: "spki" }).toString(),
+		},
+	},
+	clients,
+	users: [{ identifier: user.username, password: user.password }],
+	discovery: true,
+	logout: { allowed },
+});
+
+/** The back channel of an allowed client, and of one the operator did not allow. */
+let told: Fake;
+let unlisted: Fake;
+let running: Started;
+let base = "";
+beforeAll(async () => {
+	told = await fakeHttp(() => ({ status: 200 }));
+	unlisted = await fakeHttp(() => ({ status: 200 }));
+	const app = client("app", {
+		postLogoutRedirectUris: [back],
+		frontchannelLogoutUri: "https://app.example/fc",
+		backchannelLogoutUri: `${told.base}/bc`,
+	});
+	const far = client("far", { backchannelLogoutUri: `${unlisted.base}/bc` });
+	// Clients that say outright whether their back channel needs the session.
+	const keen = client("keen", {
+		backchannelLogoutUri: `${told.base}/keen`,
+		backchannelLogoutSessionRequired: true,
+	});
+	const lean = client("lean", {
+		backchannelLogoutUri: `${told.base}/lean`,
+		backchannelLogoutSessionRequired: false,
+	});
+	running = await areaTarget().start(codeScene(sceneWith([app, far, keen, lean], [told.base])));
+	if (running.kind !== "running") throw new Error(`refused:\n${running.output}`);
+	base = running.baseUrl;
+});
+afterAll(async () => {
+	if (running?.kind === "running") await running.stop();
+	await told?.stop();
+	await unlisted?.stop();
+});
+
+const claimsOf = (token: unknown) =>
+	JSON.parse(Buffer.from(String(token).split(".")[1] ?? "", "base64url").toString());
+/** A token signed with the provider's key unless another is given, as anyone holding it could make one. */
+const signed = (header: object, claims: object, key = pair.privateKey) => {
+	const encode = (part: object) => Buffer.from(JSON.stringify(part)).toString("base64url");
+	const input = `${encode({ alg: "EdDSA", kid: "lo", ...header })}.${encode(claims)}`;
+	return `${input}.${sign(null, Buffer.from(input), key).toString("base64url")}`;
+};
+/** Waits until the allowed back channel has had a request since `before`, for up to five seconds. */
+const toldSince = async (before: number) => {
+	for (let i = 0; i < 100 && told.received.length === before; i++) {
+		await new Promise((resolve) => setTimeout(resolve, 50));
+	}
+};
+
+/** An authorization request for a client's code, with openid. */
+const codeRequest = (clientId: string) => ({
+	response_type: "code",
+	client_id: clientId,
+	redirect_uri: `https://${clientId}.example/cb`,
+	state: "s",
+	scope: "openid",
+	code_challenge: challenge,
+	code_challenge_method: "S256",
+});
+
+/** A browser signed in afresh, and the ID token and access token a client's code gives in its session. */
+async function signedIn(id = "app") {
+	const browser = browserAt(() => base, issuer, user);
+	const tokensFor = async (clientId: string) => {
+		const answer = await browser.authorize(codeRequest(clientId));
+		const res = await fetch(`${base}/oauth/token`, {
+			method: "POST",
+			headers: { ...backChannel, "content-type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams({
+				grant_type: "authorization_code",
+				client_id: clientId,
+				client_secret: `${clientId}-secret-0123456789abcdef`,
+				code: answer.at?.searchParams.get("code") ?? "",
+				redirect_uri: `https://${clientId}.example/cb`,
+				code_verifier: verifier,
+			}),
+		});
+		const body = (await res.json()) as { id_token?: string; access_token?: string };
+		return { idToken: String(body.id_token), accessToken: String(body.access_token) };
+	};
+	return { browser, ...(await tokensFor(id)), tokensFor };
+}
+type SignedIn = Awaited<ReturnType<typeof signedIn>>;
+
+/** Asks for a logout as a browser, by GET with a query or POST with a form. */
+async function logout(
+	at: SignedIn,
+	method: "GET" | "POST",
+	params: Record<string, string>,
+	extra: Record<string, string> = {},
+) {
+	const query = new URLSearchParams(params).toString();
+	const res = await fetch(`${base}/oauth/logout${method === "GET" ? `?${query}` : ""}`, {
+		method,
+		redirect: "manual",
+		headers: at.browser.headers({
+			cookie: await at.browser.login(),
+			...(method === "POST" ? { "content-type": "application/x-www-form-urlencoded" } : {}),
+			...extra,
+		}),
+		...(method === "POST" ? { body: query } : {}),
+	});
+	const text = await res.text();
+	const json = res.headers.get("content-type")?.includes("json") ? JSON.parse(text) : undefined;
+	return { status: res.status, headers: res.headers, text, json };
+}
+/** Whether the browser's session still gives a code. */
+const stillSignedIn = async (at: SignedIn) =>
+	(await at.browser.authorize(codeRequest("app"))).at?.searchParams.get("code") != null;
+
+describe("a logout the client starts", () => {
+	it("ends the session the hint names and sends the browser back with its state, by GET or POST", async () => {
+		for (const method of ["GET", "POST"] as const) {
+			const at = await signedIn();
+			expect(await stillSignedIn(at)).toBe(true);
+			const params = { id_token_hint: at.idToken, post_logout_redirect_uri: back, state: "s 1" };
+			const answer = await logout(at, method, params);
+			expect([answer.status, answer.headers.get("location")]).toEqual([303, `${back}?state=s+1`]);
+			expect(answer.headers.get("cache-control")).toContain("no-store");
+			expect(await stillSignedIn(at)).toBe(false);
+		}
+	});
+
+	it("answers a session already ended as logged out", async () => {
+		const at = await signedIn();
+		await logout(at, "POST", { id_token_hint: at.idToken });
+		const again = await logout(at, "POST", { id_token_hint: at.idToken });
+		expect([again.status, again.json]).toEqual([200, { logged_out: true }]);
+	});
+
+	// Open redirect: only a return the hint's client registered, compared exactly, is followed.
+	it("never sends the browser to a return the client did not register, and still ends the session", async () => {
+		for (const asked of [`${back}/x`, `${back}?x=1`, "https://other.example/after"]) {
+			const at = await signedIn();
+			const answer = await logout(at, "GET", {
+				id_token_hint: at.idToken,
+				post_logout_redirect_uri: asked,
+			});
+			expect([answer.status, answer.json]).toEqual([200, { logged_out: true }]);
+			expect(await stillSignedIn(at)).toBe(false);
+		}
+	});
+
+	it("refuses a request without a hint", async () => {
+		const at = await signedIn();
+		for (const method of ["GET", "POST"] as const) {
+			const answer = await logout(at, method, { post_logout_redirect_uri: back });
+			expect([answer.status, answer.json?.error]).toEqual([400, "invalid_request"]);
+		}
+		expect(await stillSignedIn(at)).toBe(true);
+	});
+
+	// A hint naming no session cannot say which session to end.
+	it("refuses a hint that names no session, leaving the session", async () => {
+		const at = await signedIn();
+		const { sid: _, ...claims } = claimsOf(at.idToken);
+		const answer = await logout(at, "GET", { id_token_hint: signed({ typ: "JWT" }, claims) });
+		expect([answer.status, answer.json?.error]).toEqual([400, "invalid_request"]);
+		expect(await stillSignedIn(at)).toBe(true);
+	});
+
+	// Token confusion: only an ID token is taken as the hint, never another kind the provider signs.
+	it("refuses as the hint a token of another kind, or one the provider did not sign", async () => {
+		const at = await signedIn();
+		const other = generateKeyPairSync("ed25519").privateKey;
+		const foreign = signed({ typ: "JWT" }, claimsOf(at.idToken), other);
+		for (const hint of [at.accessToken, foreign]) {
+			const answer = await logout(at, "GET", { id_token_hint: hint });
+			expect([answer.status, answer.json?.error]).toEqual([400, "invalid_token"]);
+		}
+		expect(await stillSignedIn(at)).toBe(true);
+	});
+});
+
+describe("hints past their time", () => {
+	/** The ID token re-signed with the provider's key, issued `ago` seconds ago and ended an hour ago. */
+	const aged = (idToken: string, ago: number) => {
+		const now = Math.floor(Date.now() / 1000);
+		return signed({ typ: "JWT" }, { ...claimsOf(idToken), iat: now - ago, exp: now - 3600 });
+	};
+	const unless = (difference: string) => it.runIf(!areaTarget().differs(difference));
+
+	unless("expired-logout-hint")("ends the session for a hint past its end", async () => {
+		const at = await signedIn();
+		const answer = await logout(at, "GET", { id_token_hint: aged(at.idToken, 7200) });
+		expect([answer.status, answer.json, await stillSignedIn(at)]).toEqual([
+			200,
+			{ logged_out: true },
+			false,
+		]);
+	});
+
+	unless("old-logout-hint-on-get")(
+		"refuses on a GET a hint issued over a day ago, not posted",
+		async () => {
+			const at = await signedIn();
+			const hint = aged(at.idToken, 90_000);
+			const answer = await logout(at, "GET", { id_token_hint: hint });
+			expect([answer.status, answer.json?.error, await stillSignedIn(at)]).toEqual([
+				400,
+				"invalid_token",
+				true,
+			]);
+			expect((await logout(at, "POST", { id_token_hint: hint })).status).toBe(200);
+			expect(await stillSignedIn(at)).toBe(false);
+		},
+	);
+});
+
+describe("telling the session's clients", () => {
+	it("frames each client's front channel with the issuer and session, on a page no one can frame", async () => {
+		const at = await signedIn();
+		const params = { id_token_hint: at.idToken, post_logout_redirect_uri: back, state: "s" };
+		const page = await logout(at, "GET", params, { accept: "text/html" });
+		expect(page.status).toBe(200);
+		expect(page.headers.get("content-type")).toMatch(/^text\/html/);
+		const src = (page.text.match(/<iframe[^>]*\ssrc="([^"]+)"/)?.[1] ?? "").replace(
+			/&amp;|&#38;/g,
+			"&",
+		);
+		const framed = new URL(src);
+		expect([framed.origin + framed.pathname, framed.searchParams.get("iss")]).toEqual([
+			"https://app.example/fc",
+			issuer,
+		]);
+		expect(framed.searchParams.get("sid")).toBe(claimsOf(at.idToken).sid);
+		const policy = page.headers.get("content-security-policy") ?? "";
+		expect(policy).toMatch(/frame-src [^;]*https:\/\/app\.example/);
+		expect(policy).toContain("frame-ancestors 'none'");
+	});
+
+	it("posts each client of the session a logout token signed by the provider", async () => {
+		const at = await signedIn();
+		const before = told.received.length;
+		await logout(at, "POST", { id_token_hint: at.idToken });
+		await toldSince(before);
+		const posted = told.received[before];
+		expect([posted?.method, posted?.path, posted?.headers["content-type"]]).toEqual([
+			"POST",
+			"/bc",
+			"application/x-www-form-urlencoded",
+		]);
+		const token = new URLSearchParams(posted?.body).get("logout_token") ?? "";
+		const [header = "", body = "", signature = ""] = token.split(".");
+		const key = createPublicKey(pair.publicKey.export({ format: "pem", type: "spki" }));
+		const valid = verify(
+			null,
+			Buffer.from(`${header}.${body}`),
+			key,
+			Buffer.from(signature, "base64url"),
+		);
+		expect(valid).toBe(true);
+		expect(JSON.parse(Buffer.from(header, "base64url").toString()).typ).toBe("logout+jwt");
+		const claims = claimsOf(token);
+		expect(claims).toMatchObject({ iss: issuer, aud: "app", sid: claimsOf(at.idToken).sid });
+		expect(Object.keys(claims.events)).toEqual([
+			"http://schemas.openid.net/event/backchannel-logout",
+		]);
+		expect(claims.nonce).toBeUndefined();
+	});
+
+	// OpenID Connect Back-Channel Logout 1.0 §2.4: a token without sid still names the subject.
+	it("puts the session in the logout token of a client that requires it, and leaves it out, naming the subject, for one that does not", async () => {
+		const at = await signedIn();
+		await at.tokensFor("keen");
+		await at.tokensFor("lean");
+		const before = told.received.length;
+		await logout(at, "POST", { id_token_hint: at.idToken });
+		for (let i = 0; i < 100 && told.received.length < before + 3; i++) {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		const tokenAt = (path: string) =>
+			claimsOf(
+				new URLSearchParams(told.received.slice(before).find((r) => r.path === path)?.body).get(
+					"logout_token",
+				),
+			);
+		const { sid, sub } = claimsOf(at.idToken);
+		const event = "http://schemas.openid.net/event/backchannel-logout";
+		expect(tokenAt("/keen")).toMatchObject({ iss: issuer, aud: "keen", sub, sid });
+		const lean = tokenAt("/lean");
+		expect(lean).toMatchObject({ iss: issuer, aud: "lean", sub });
+		expect(lean).not.toHaveProperty("sid");
+		expect(Object.keys(lean.events)).toEqual([event]);
+	});
+
+	// Outbound requests to client URLs: the back channel reaches only destinations the operator allows.
+	describe.runIf(!areaTarget().differs("back-channel-by-host-and-port"))(
+		"the back channel's destinations",
+		() => {
+			it("sends nothing to a client's back channel the operator did not allow", async () => {
+				const at = await signedIn();
+				await at.tokensFor("far");
+				const before = told.received.length;
+				await logout(at, "POST", { id_token_hint: at.idToken });
+				await toldSince(before);
+				await new Promise((resolve) => setTimeout(resolve, 500));
+				expect(told.received.length).toBe(before + 1);
+				expect(unlisted.received).toEqual([]);
+			});
+		},
+	);
+});
+
+it("names its endpoint and the channels it tells in the metadata document", async () => {
+	const res = await fetch(`${base}/.well-known/openid-configuration`, {
+		headers: { "x-forwarded-proto": "https", "x-forwarded-host": new URL(issuer).host },
+	});
+	expect(await res.json()).toMatchObject({
+		end_session_endpoint: `${issuer}/oauth/logout`,
+		frontchannel_logout_supported: true,
+		frontchannel_logout_session_supported: true,
+		backchannel_logout_supported: true,
+		backchannel_logout_session_supported: true,
+	});
+});
+
+// Reserved names: a client's front channel may not carry the issuer or session names the provider adds.
+it("refuses to start with a client whose return or front channel is not one it may register", async () => {
+	for (const logout of [
+		{ frontchannelLogoutUri: "https://app.example/fc?iss=x" },
+		{ frontchannelLogoutUri: "https://app.example/fc?sid=x" },
+		{ postLogoutRedirectUris: ["https://app.example/after#x"] },
+	]) {
+		const started = await areaTarget().start(codeScene(sceneWith([client("app", logout)], [])));
+		if (started.kind === "running") await started.stop();
+		expect(started.kind).toBe("refused");
+	}
+});
+
+it.skipIf(areaTarget().differs("frontchannel-within-redirect-origins"))(
+	"refuses to start with a client whose front channel is at none of its redirect URIs' origins (OpenID Connect Front-Channel Logout 1.0 §2)",
+	async () => {
+		const logout = { frontchannelLogoutUri: "https://elsewhere.example/fc" };
+		const started = await areaTarget().start(codeScene(sceneWith([client("app", logout)], [])));
+		if (started.kind === "running") await started.stop();
+		expect(started.kind).toBe("refused");
+	},
+);

@@ -2,19 +2,14 @@
 # Every package the release publishes goes out with the repository's LICENSE,
 # word for word, and none goes out unchecked.
 #
-# The root LICENSE is the only copy. The release packs and publishes with
-# pnpm, and pnpm adds the workspace root's LICENSE to a tarball only when
-# nothing it already packs for that package looks like a licence file to it.
-# Its test is loose: `/LICEN[CS]E(\..+)?/i` against every packed path,
-# unanchored — so a package's own LICENSE counts, but so would a
-# `templates/standalone/LICENSE` shipped inside create-app, or a
-# `dist/licenseKey.mjs`, and either leaves the root file out. So no package
-# keeps a LICENSE of its own, and no packed path may be named like one. (npm
-# adds no root LICENSE at all: `npm pack` in a package directory ships none.)
-# Nor does a package's `files` name `LICENSE`: the packer includes a
-# package-root LICENSE whatever `files` says, and the root file arrives through
-# pnpm, not through `files` — so the entry changed nothing in any tarball, and
-# only suggested a file of the package's own.
+# The root LICENSE is the only copy, and `pnpm bundles` copies it into each
+# bundle and the entrance it builds, so npm and pnpm alike ship it. pnpm would
+# also add the root file to a tarball that packs nothing it takes for a
+# licence file, but its test is loose: `/LICEN[CS]E(\..+)?/i` against every
+# packed path, unanchored — so a packed path named like one would make the
+# explicit copy the only thing that holds, and a package's own LICENSE would
+# replace it. So no packed path may be named like one, and the copy shipped
+# must be the root file, byte for byte.
 #
 # This reads the packed tarballs, which is what a consumer downloads:
 #   - each must hold `package/LICENSE`, byte for byte the root file; when one

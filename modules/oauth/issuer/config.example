@@ -1,0 +1,3 @@
+issuer {
+	url = "https://login.example.invalid"
+}

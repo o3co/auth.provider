@@ -1,0 +1,42 @@
+{
+	"name": "@mod/refresh",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"storeWiring": true,
+	"exports": {
+		".": "./src/contract.ts",
+		"./testing": "./src/testing.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/client-allowance": "workspace:*",
+		"@mod/clients": "workspace:*",
+		"@mod/code-grant": "workspace:*",
+		"@mod/grants": "workspace:*",
+		"@mod/issuer": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/sender-binding": "workspace:*",
+		"@mod/session": "workspace:*",
+		"@mod/subject-revocation": "workspace:*",
+		"@mod/token-control": "workspace:*",
+		"@mod/tokens": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"@mod/audit": "workspace:*",
+		"@mod/code-grant-store": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/issuer": "workspace:*",
+		"@mod/rate-limit": "workspace:*",
+		"@mod/records": "workspace:*",
+		"@mod/session-tokens": "workspace:*",
+		"@mod/store": "workspace:*",
+		"@mod/token-endpoint": "workspace:*",
+		"vitest": "5.0.3"
+	},
+	"peerDependencies": {
+		"vitest": "5.0.3"
+	}
+}

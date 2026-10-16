@@ -1,0 +1,20 @@
+{
+	"name": "@mod/federation-tokens-store",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "wiring",
+	"wires": "@mod/federation-tokens",
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/federation-tokens": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/records": "workspace:*",
+		"@mod/store": "workspace:*"
+	},
+	"devDependencies": {
+		"vitest": "5.0.3"
+	}
+}

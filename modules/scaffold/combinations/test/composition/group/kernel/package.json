@@ -1,0 +1,7 @@
+{
+	"name": "@c/kernel",
+	"kind": "common",
+	"exports": {
+		".": "./src/contract.ts"
+	}
+}

@@ -1,0 +1,21 @@
+{
+	"name": "@mod/idp-google",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/external-jwt": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/outbound": "workspace:*",
+		"@mod/upstream-client": "workspace:*",
+		"@mod/upstreams": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"vitest": "5.0.3"
+	}
+}

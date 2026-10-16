@@ -1,0 +1,3 @@
+# federation-tokens-store
+
+Wires `federation-tokens`' store interfaces to `records`. Each session's upstream tokens are one keyed record, in a space declaring a guarantee for each need `federation-tokens` states for them (no eviction, not rolled back by failover). Refresh locks are keyed records, holding their holder's mark, created only where none is held, for the lock's lifetime, and changed only over the version a change read, in a space declaring no eviction. A need with nothing mapped to it fails the type check, and `federation-tokens`' store contract, run on a store that loses what a missing guarantee allows, checks what each guarantee means. The wiring only maps, with no branches or loops. Depends on `kernel`, `federation-tokens`, `records` and `store`.

@@ -1,0 +1,26 @@
+{
+	"name": "@mod/session-grant",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/client-allowance": "workspace:*",
+		"@mod/csrf": "workspace:*",
+		"@mod/grants": "workspace:*",
+		"@mod/issuer": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/session": "workspace:*",
+		"@mod/tokens": "workspace:*"
+	},
+	"devDependencies": {
+		"@mod/clients": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/session-tokens": "workspace:*",
+		"@mod/token-endpoint": "workspace:*",
+		"vitest": "5.0.3"
+	}
+}

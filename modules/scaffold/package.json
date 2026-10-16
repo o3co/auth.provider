@@ -1,0 +1,10 @@
+{
+	"private": false,
+	"index": "index.json",
+	"entrances": {
+		"@o3co/create-auth-provider": {
+			"bin": "create-auth-provider",
+			"runs": "@mod/create-app"
+		}
+	}
+}

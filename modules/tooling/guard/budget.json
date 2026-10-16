@@ -1,0 +1,21 @@
+{
+	"readRangeBytes": 200000,
+	"sourceLines": 1500,
+	"testLines": 2000,
+	"contractValues": 12,
+	"commonContractValues": 20,
+	"contractMembers": 100,
+	"widerContractMembers": 140,
+	"dependencies": 10,
+	"cardLines": 60,
+	"cardBytes": 6000,
+	"narrowCardFanIn": 5,
+	"narrowCardLines": 40,
+	"dependencyCardBytes": 40000,
+	"commentShare": 0.1,
+	"commentFloor": 40,
+	"laidOutValues": 2,
+	"testFile": "(^|/)test/|\\.test\\.ts$|\\.case\\.ts$",
+	"fixtureFile": "(^|/)test/fixtures/|\\.vectors\\.ts$",
+	"integrationTestFile": "\\.integration\\.test\\.ts$"
+}

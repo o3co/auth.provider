@@ -1,0 +1,23 @@
+{
+	"name": "@mod/acr",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"exports": {
+		".": "./src/contract.ts",
+		"./testing": "./src/testing.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/issuer": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/login-gates": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"@mod/http": "workspace:*",
+		"@mod/session": "workspace:*",
+		"@mod/subject-revocation": "workspace:*"
+	}
+}

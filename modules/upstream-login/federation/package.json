@@ -1,0 +1,42 @@
+{
+	"name": "@mod/federation",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "adapter",
+	"replaces": "@mod/upstreams",
+	"default": true,
+	"storeWiring": true,
+	"exports": {
+		".": "./src/contract.ts",
+		"./module": "./src/module.ts",
+		"./testing": "./src/testing.ts",
+		"./audit-events": "./src/audit-events.ts"
+	},
+	"dependencies": {
+		"@mod/audit": "workspace:*",
+		"@mod/cookies": "workspace:*",
+		"@mod/csrf": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/login-attributes": "workspace:*",
+		"@mod/login-gates": "workspace:*",
+		"@mod/rate-limit": "workspace:*",
+		"@mod/request-source": "workspace:*",
+		"@mod/seal": "workspace:*",
+		"@mod/session": "workspace:*",
+		"@mod/upstreams": "workspace:*",
+		"@mod/url-setting": "workspace:*",
+		"@mod/users": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"peerDependencies": {
+		"vitest": "5.0.3"
+	},
+	"devDependencies": {
+		"@mod/records": "workspace:*",
+		"@mod/store": "workspace:*",
+		"@mod/subject-revocation": "workspace:*",
+		"vitest": "5.0.3"
+	}
+}

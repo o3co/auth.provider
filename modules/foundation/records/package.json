@@ -1,0 +1,16 @@
+{
+	"name": "@mod/records",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "capability",
+	"exports": {
+		".": "./src/records.ts",
+		"./testing": "./src/testing.ts"
+	},
+	"dependencies": {
+		"@mod/kernel": "workspace:*",
+		"@mod/store": "workspace:*"
+	},
+	"devDependencies": {}
+}

@@ -1,0 +1,7 @@
+webauthn {
+	rp-id = login.example.invalid
+	rp-name = "Example"
+	origins = [
+		"https://login.example.invalid"
+	]
+}

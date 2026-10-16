@@ -1,0 +1,61 @@
+import { expect, it } from "vitest";
+import { proxiesOf, sourceSettings } from "../src/contract.ts";
+
+const takes = (entry: string) => sourceSettings.safeParse({ "trusted-proxies": [entry] }).success;
+
+it("takes trusted proxies as IP addresses or CIDR blocks", () => {
+	for (const entry of ["10.0.0.1", "10.0.0.0/8", "0.0.0.0/0", "2001:db8::/32", "::1/128"]) {
+		expect(takes(entry), entry).toBe(true);
+	}
+	const { trusted } = proxiesOf(
+		sourceSettings.parse({ "trusted-proxies": ["10.0.0.0/8", "2001:db8::1"] }),
+	);
+	expect([trusted.check("10.9.9.9", "ipv4"), trusted.check("11.0.0.1", "ipv4")]).toEqual([
+		true,
+		false,
+	]);
+	expect(trusted.check("2001:db8::1", "ipv6")).toBe(true);
+});
+
+it("refuses an entry not of that shape", () => {
+	for (const entry of [
+		"10.0.0.0/8/32",
+		"10.0.0.0/",
+		"10.0.0.0/08",
+		"10.0.0.0/+8",
+		"10.0.0.0/33",
+		"::/129",
+		"/8",
+		"fe80::1%eth0",
+		"fe80::%eth0/64",
+		"010.0.0.1",
+		" 10.0.0.1",
+		"a.example",
+	]) {
+		expect(takes(entry), entry).toBe(false);
+	}
+});
+
+it("refuses to make a trusted list of an entry the schema refuses", () => {
+	expect(() => proxiesOf({ "trusted-proxies": ["10.0.0.0/8/32"], "proxy-hops": 1 })).toThrow(
+		/not a trusted proxy entry/,
+	);
+});
+
+it("takes hops from 1 to 10, and none trusted by default", () => {
+	const parses = (hops: number) => sourceSettings.safeParse({ "proxy-hops": hops }).success;
+	expect([1, 10, 0, 11, 1.5].map(parses)).toEqual([true, true, false, false, false]);
+	expect(sourceSettings.parse({})).toEqual({ "trusted-proxies": [], "proxy-hops": 1 });
+});
+
+it("trusts an address entry as that one address only", () => {
+	const { trusted } = proxiesOf(
+		sourceSettings.parse({ "trusted-proxies": ["10.0.0.1", "2001:db8::1"] }),
+	);
+	expect(trusted.check("10.0.0.2", "ipv4")).toBe(false);
+	expect(trusted.check("2001:db8::2", "ipv6")).toBe(false);
+});
+
+it("makes trusted proxies that cannot be changed", () => {
+	expect(Object.isFrozen(proxiesOf(sourceSettings.parse({})))).toBe(true);
+});

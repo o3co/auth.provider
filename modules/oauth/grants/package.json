@@ -1,0 +1,20 @@
+{
+	"name": "@mod/grants",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"exports": {
+		".": "./src/contract.ts"
+	},
+	"dependencies": {
+		"@mod/clients": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/sender-binding": "workspace:*",
+		"@mod/tokens": "workspace:*"
+	},
+	"devDependencies": {
+		"vitest": "5.0.3"
+	}
+}

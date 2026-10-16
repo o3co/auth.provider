@@ -1,0 +1,21 @@
+{
+	"name": "@mod/federation-grants-store",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "wiring",
+	"wires": "@mod/federation-grants",
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/federation-grants": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/records": "workspace:*",
+		"@mod/store": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"vitest": "5.0.3"
+	}
+}

@@ -1,0 +1,29 @@
+{
+	"name": "@mod/token-control",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"exports": {
+		".": "./src/contract.ts",
+		"./module": "./src/module.ts",
+		"./audit-events": "./src/audit-events.ts"
+	},
+	"dependencies": {
+		"@mod/audit": "workspace:*",
+		"@mod/client-allowance": "workspace:*",
+		"@mod/clients": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/issuer": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/rate-limit": "workspace:*",
+		"@mod/request-source": "workspace:*",
+		"@mod/token-endpoint": "workspace:*",
+		"@mod/tokens": "workspace:*",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"@mod/sender-binding": "workspace:*",
+		"@mod/store": "workspace:*"
+	}
+}

@@ -1,0 +1,15 @@
+{
+	"name": "@mod/mfa-totp",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/http": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/mfa": "workspace:*"
+	}
+}
