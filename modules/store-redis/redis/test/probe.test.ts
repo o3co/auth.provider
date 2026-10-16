@@ -72,15 +72,25 @@ function fakeRedis() {
 					resolve(typeof address === "object" && address ? address.port : 0);
 				}),
 			),
-		/** A reply no command asked for: the client reports it as an error event. */
+		/**
+		 * Bytes no reply starts with, so the client's parser refuses them and reports an error event
+		 * whatever command is waiting; a stray `+PONG` could be taken as one in flight's reply.
+		 */
 		stray: () => {
-			for (const socket of sockets) socket.write("+PONG\r\n");
+			for (const socket of sockets) socket.write("@\r\n");
 		},
 		down: () => {
 			server.close();
 			for (const socket of sockets) socket.destroy();
 		},
 	};
+}
+
+/** Waits until `holds`, checking every 10 ms, for 2 s at most: on the event, not on a guess of its time. */
+async function until(holds: () => boolean | Promise<boolean>) {
+	for (let tries = 0; tries < 200 && !(await holds()); tries++) {
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
 }
 
 let app: Assembly | undefined;
@@ -130,7 +140,7 @@ describe("the redis probe", () => {
 		const redis = fakeRedis();
 		const { ready } = await boot(await redis.listen());
 		redis.down();
-		await new Promise((resolve) => setTimeout(resolve, 20));
+		await until(async () => (await ready()) === "unready");
 		expect(await ready()).toBe("unready");
 	});
 
@@ -138,10 +148,10 @@ describe("the redis probe", () => {
 		const redis = fakeRedis();
 		const { warned, ready } = await boot(await redis.listen());
 		redis.stray();
-		await new Promise((resolve) => setTimeout(resolve, 20));
+		await until(() => warned().includes("redis.error"));
 		expect(warned()).toContain("redis.error");
 		redis.down();
-		await new Promise((resolve) => setTimeout(resolve, 20));
+		await until(async () => (await ready()) === "unready");
 		expect(await ready()).toBe("unready");
 	});
 });
