@@ -18,6 +18,8 @@ export interface FactorStore {
 		key: string,
 		change: (record: StoredFactors) => ChangedFactors | undefined,
 	): Promise<{ readonly before: StoredFactors; readonly after: StoredFactors } | undefined>;
+	/** A page of the keys holding a list or a claim, and the cursor on; none when done. A walk is no one instant. */
+	scan?(cursor?: string): Promise<{ readonly keys: readonly string[]; readonly cursor?: string }>;
 }
 
 export const factorStore = contract<FactorStore>("mfa.factor-store");
