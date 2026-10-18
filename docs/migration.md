@@ -23,7 +23,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 - **Stored state is not migrated, and 0.18 ships no migration tool.** 0.18 reads none of 0.17's records. Users sign in again, and what they set up is lost unless you move it yourself; see [What carries over](#what-carries-over).
 - **A drain that runs past its time exits as any other stop does.** 0.17 told it apart by its exit code; 0.18 does not, so a supervisor cannot tell a timed-out drain from a clean one.
 - **Client secrets stay hashed.** A client secret is a bcrypt hash, as in 0.17, or an scrypt hash (`$scrypt$ln=,r=,p=$salt$key`); existing bcrypt hashes work as they are. A plain secret refuses boot at `clients.registered.<i>.sections.client-secret.hash`, so hash it with bcrypt first.
-- **A user ledger served over HTTP must change its protocol** (see [users-http](#user-ledger-over-http)).
+- **A user ledger served over HTTP keeps 0.17's password call**, with a few answers read differently (see [users-http](#user-ledger-over-http)).
 
 ## Packages
 
@@ -197,7 +197,7 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 | `session.redirectAllowlist`, per-IdP `redirectAllowlist` | `login-gates.return-targets` | Exact https URLs, one list |
 | `session.csrf.trustedOrigins` | removed | Same-origin evidence is checked against `http.public-origin` |
 | `users.yaml` | `users.registered` (`identifier`, `subject`, `password-hash`, `attributes`, `upstream`) | Hashes are bcrypt or scrypt; plain passwords are refused |
-| `repositories.user.http.*` | `users-http.url`, `credential`, `timeout` | [Protocol changed](#user-ledger-over-http) |
+| `repositories.user.http.*` | `users-http.verify-url`, `credential`, `timeout` | [Some answers read differently](#user-ledger-over-http) |
 
 ### MFA and passkeys
 
@@ -518,7 +518,7 @@ Times and sizes are written with their unit (`30s`, `5m`, `64KiB`); a number wit
 - **acr**: an acr value that no composed way of logging in can meet.
 - **Outbound**: `ALL_PROXY`, and the lower-case proxy variables, now refuse boot as `HTTP_PROXY` and `HTTPS_PROXY` already did, unless `outbound.proxy` or `outbound.direct-despite-proxy` is written; the variables are never read.
 - **audit-http**: an `authorization` value with a URL that is not https, or a URL that outbound's policy refuses.
-- **users-http**: a URL that outbound's policy refuses, and a missing `credential`.
+- **users-http**: a `verify-url` that outbound's policy refuses.
 - **mail**: the logging-only sender without `mail.accept-unsent = true`.
 - **Revocation**: a composition that issues refresh tokens or codes while access tokens cannot be revoked.
 - **Redis**: a server that does not meet the [requirements](#redis).
@@ -555,17 +555,18 @@ These are requests 0.17 accepted, or answered differently, that 0.18 refuses or 
 
 #### User ledger over HTTP
 
-The ledger service called by `users-http` must speak the new protocol:
+`users-http` makes the same password call as 0.17's `authenticateUrl`; `verify-url` is that URL, used whole, with nothing added to it. Some answers are read differently:
 
 | | 0.17 | 0.18 |
 |---|---|---|
-| Verify a password | `POST {authenticateUrl}` with `{"email","password"}` | `POST {url}/verify` with `{"identifier","password"}` |
-| Find a user by subject | none | `GET {url}/subjects/{subject}` |
-| Success | any `2xx` with the user | `200` with `{"subject","attributes"?}` |
-| No such user, or a wrong password | `401` or `403` | `404` |
-| Anything else | | Treated as the ledger being unavailable: the login answers `503` |
+| Verify a password | `POST {authenticateUrl}` with `{"email","password"}` | `POST {verify-url}` with `{"email","password"}`, `Content-Type` and `Accept: application/json` |
+| Credential | | `Authorization: Bearer {credential}` when `credential` is set; none sent otherwise |
+| Find a user by subject | none | none: the ledger is never asked, and `users-http` answers every lookup by subject as one it cannot answer |
+| Success | any `2xx` with the user | `200` with a JSON object: `id` (the subject) and a non-empty `username`; `email`, `name`, `picture`, `groups` and a boolean `emailVerified` (only beside `email`) are kept as attributes, other fields dropped |
+| No such user, or a wrong password | `401` or `403` | `401` or `403`, unless a `credential` was sent and the answer carries a Bearer challenge: that refuses the credential, and reads as unavailable |
+| Anything else | | Any other status, `404` and other `2xx` included, or a `200` that is not such an object: the ledger is unavailable, and the login answers `503` |
 
-Every request carries `Authorization: Bearer <credential>`. Upstream links and MFA enrollment are no longer kept by the ledger.
+Upstream links and MFA enrollment are no longer kept by the ledger.
 
 ### MFA and federation
 
@@ -671,7 +672,7 @@ outbound {
   direct-hosts = [".corp.example"]
   internal-hosts = ["users.corp.example"]
 }
-users-http.url = "https://users.corp.example/ledger" // the new protocol: see users-http
+users-http.verify-url = "https://users.corp.example/authenticate" // the same call as authenticateUrl: see users-http
 ```
 
 The proxy resolves the names it carries and checks their addresses itself, and boot warns so. An internal destination is listed in `direct-hosts` as well as `internal-hosts`, as only a direct request has its addresses checked and let through to a private one.
