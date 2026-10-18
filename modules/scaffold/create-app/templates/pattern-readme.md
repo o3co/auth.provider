@@ -28,7 +28,7 @@ Both examples hold every value in a comment: a copy left as it is sets nothing, 
 A secret's placeholder begins `REPLACE-`; uncommented as it is, boot refuses it. Delete the line of an optional key left unset.
 
 Until every key the modules need is written, the app writes each refusal on standard error, one per line, and exits 78.
-SIGTERM or SIGINT stops it, draining what is under way, within `kernel.stop-seconds` (30 by default); give an orchestrator a grace period longer than `kernel.stop-seconds`.
+SIGTERM or SIGINT stops it, draining what is under way, within `kernel.stop-deadline` (`30s` by default); give an orchestrator a grace period longer than `kernel.stop-deadline`.
 
 ## Docker
 

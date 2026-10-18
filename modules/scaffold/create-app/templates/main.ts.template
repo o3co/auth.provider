@@ -18,7 +18,7 @@ const app = await loadConfig({ files, env: process.env })
 let started: Promise<void> = Promise.resolve();
 const stop = async () => {
 	await started.catch(() => undefined);
-	// Within the kernel's `stop-seconds`.
+	// Within the kernel's `stop-deadline`.
 	await app.stop();
 	process.exit(0);
 };
