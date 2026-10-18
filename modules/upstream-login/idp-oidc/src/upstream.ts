@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { ExternalJwt } from "@mod/external-jwt";
 import type { Clock, Log } from "@mod/kernel";
 import {
@@ -99,6 +100,31 @@ const given = (s: Settings): Endpoints => ({
 });
 
 /** Opens an OpenID Connect upstream; throws, refusing boot, wherever its description does not hold. */
+/** The digest an id_token's `at_hash` is taken with: its signature's, SHA-512 for EdDSA (Ed25519). */
+const atHashDigests: Readonly<Record<string, string>> = {
+	"256": "sha256",
+	"384": "sha384",
+	"512": "sha512",
+};
+
+/**
+ * Whether a checked id_token's `at_hash`, where it gives one, is the left half of the access token's
+ * digest (OpenID Connect Core §3.1.3.6); one that is not text, or under an unknown digest, does not hold.
+ */
+export function atHashHolds(idToken: string, atHash: unknown, accessToken: string): boolean {
+	if (atHash === undefined) return true;
+	if (typeof atHash !== "string") return false;
+	const [header = ""] = idToken.split(".");
+	const { alg } = JSON.parse(Buffer.from(header, "base64url").toString("utf8")) as {
+		alg?: unknown;
+	};
+	if (typeof alg !== "string") return false;
+	const digest = alg === "EdDSA" ? "sha512" : atHashDigests[alg.slice(-3)];
+	if (digest === undefined) return false;
+	const full = createHash(digest).update(accessToken, "ascii").digest();
+	return atHash === full.subarray(0, full.length / 2).toString("base64url");
+}
+
 export async function opened(
 	s: Settings,
 	reach: Reach,
@@ -127,9 +153,10 @@ export async function opened(
 		},
 		at.clock,
 	);
-	/** The upstream login an id_token says, once it holds for this client and login. */
-	const upstreamLoginOf = async (idToken: string, nonce: string) => {
+	/** The upstream login an id_token says, once it holds for this client, login and access token. */
+	const upstreamLoginOf = async (idToken: string, nonce: string, accessToken: string) => {
 		const { login, claims } = await idTokenOf(idToken, nonce);
+		if (!atHashHolds(idToken, claims.at_hash, accessToken)) throw new UpstreamRefused();
 		const read = amrClaim.safeParse(claims);
 		if (!read.success) throw new UpstreamRefused();
 		return { ...login, amr: read.data.amr ?? [] };
@@ -168,7 +195,7 @@ export async function opened(
 			});
 			const { tokens, idToken } = tokenAnswerOf(jsonObjectOf(answer), code.scopes);
 			if (!idToken) throw new UpstreamRefused();
-			const login = await upstreamLoginOf(idToken, code.nonce);
+			const login = await upstreamLoginOf(idToken, code.nonce, tokens.accessToken);
 			return { ...login, tokens: { ...tokens, idToken } };
 		});
 	const refreshed = (refreshToken: string, scope: readonly string[], resource?: string) =>
