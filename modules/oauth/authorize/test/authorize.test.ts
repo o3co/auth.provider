@@ -38,6 +38,7 @@ import gatesModule from "@mod/login-gates/module";
 import rateLimitModule from "@mod/rate-limit/module";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { memoryRecords } from "@mod/records/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import { type Session, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import bridgeModule from "@mod/session-tokens/module";
@@ -125,6 +126,7 @@ async function serve(
 			switchedModule(tokensStandIn({ revocable: options.revocable ?? true }), tokens, down.tokens),
 			issuerModule,
 			clientsModule,
+			secretHashModule,
 			grantCaller,
 			clientAllowanceModule,
 			sessionStandIn,
