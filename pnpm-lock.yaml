@@ -3162,6 +3162,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/keys':
+        specifier: workspace:*
+        version: link:../../foundation/keys
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
