@@ -638,6 +638,7 @@ A ledger can also be asked for a user by subject, so a user who signs in upstrea
 - **Generated apps**: the command is `create-auth-provider`, and a generated README names the audit receivers of the adapters composed; an app already generated needs no change.
 - **Configuration files**: a file that does not parse, or a substitution that does not resolve, is refused at its `file:line:col`; nothing to change.
 - **Audit events**: `introspect.store_unavailable` is now `introspection.unavailable`, with the same `source`; a receiver that matches the old name needs it. Introspection answered unavailable also logs the warning `token-control.unavailable` with `route: "introspect"`, as revocation does.
+- **Managing factors**: the routes `GET /session/mfa/factors`, `POST /session/mfa/factors/rename`, `POST /session/mfa/factors/remove` and `POST /session/mfa/recovery-codes` now come from the `mfa-management` module. An app generated with rc.1 that composes `mfa-flows` must also compose `mfa-management` to keep them; its POSTs are counted per source under `mfa-management.requests` and `window`, apart from `mfa-flows`' routes.
 
 ## Operational notes
 
