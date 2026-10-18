@@ -253,9 +253,9 @@ describe("records", () => {
 			null,
 			"b@example.com",
 		];
-		await stores.contacts.store.save("s", held as unknown as StoredContacts);
+		await stores.contacts.store.save("s", held as unknown as StoredContacts, "endless");
 		const one = { kind: "email", value: "c@example.com" };
-		await stores.contacts.store.save("t", one as unknown as StoredContacts);
+		await stores.contacts.store.save("t", one as unknown as StoredContacts, "endless");
 		expect(await u.contactsOf("s")).toEqual([{ kind: "email", value: "a@example.com" }]);
 		expect(await u.contactsOf("t")).toEqual([]);
 	});

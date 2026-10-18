@@ -7,7 +7,11 @@ export type StoredBoundary = { readonly [storedBoundary]: true };
 /** Boundaries by subject, each changed only from what it holds, kept without end. Every call throws Unavailable when the place cannot tell. */
 export interface BoundaryStore {
 	/** Keeps a subject's first boundary, unless the subject holds one. */
-	save(subject: string, record: StoredBoundary): Promise<"created" | "exists">;
+	save(
+		subject: string,
+		record: StoredBoundary,
+		lifetimeMs: "endless",
+	): Promise<"created" | "exists">;
 	read(subject: string): Promise<StoredBoundary | undefined>;
 	/** Writes the boundary from what it holds; `change` runs again on a race, so it is pure. Nothing when gone. */
 	update(

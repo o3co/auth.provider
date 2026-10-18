@@ -112,7 +112,7 @@ export function keptPasskeys(store: PasskeyStore) {
 		handleFor: async (subject: string, fresh: string): Promise<string> => {
 			if (!isCanonical(fresh, handleBytes)) throw new Error("a handle must be canonical");
 			const first = stored({ v: 1, handle: fresh, credentials: [] });
-			await store.subjects.save(subjectKey(subject), first);
+			await store.subjects.save(subjectKey(subject), first, "endless");
 			const kept = await holder(subject);
 			if (!kept) throw broken();
 			return kept.handle;
@@ -137,7 +137,7 @@ export function keptPasskeys(store: PasskeyStore) {
 			if (kept.credentials.length >= max) return "full";
 			const record = stored({ v: 1, subject, ...rest, ...(nickname ? { nickname } : {}) });
 			const key = credentialKey(id);
-			if ((await store.credentials.save(key, record)) === "exists") {
+			if ((await store.credentials.save(key, record, "endless")) === "exists") {
 				if (!(await takeUnlisted(id, record))) return "conflict";
 			}
 			const listed = await store.subjects.update(subjectKey(subject), (current) => {

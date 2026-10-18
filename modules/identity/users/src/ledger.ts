@@ -43,7 +43,8 @@ async function written<T>(
 ): Promise<{ readonly before: T | undefined; readonly after: T }> {
 	const changed = await store.update(key, change);
 	if (changed) return changed;
-	if ((await store.save(key, first)) === "created") return { before: undefined, after: first };
+	if ((await store.save(key, first, "endless")) === "created")
+		return { before: undefined, after: first };
 	const again = await store.update(key, change);
 	// The key held a record a moment ago, and records never end.
 	if (!again) throw new Unavailable("users");

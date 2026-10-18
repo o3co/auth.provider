@@ -16,7 +16,7 @@ export interface Changed<T> {
 /** Records by key, kept without end, each changed only from what it holds. Every call throws Unavailable when the store cannot tell. */
 export interface RecordStore<T> {
 	/** Keeps a new record, unless the key holds one. */
-	save(key: string, record: T): Promise<"created" | "exists">;
+	save(key: string, record: T, lifetimeMs: "endless"): Promise<"created" | "exists">;
 	read(key: string): Promise<T | undefined>;
 	/** Changes the record from what it holds, or leaves it on none; `change` runs again on a race, so it is pure. Nothing when gone. */
 	update(

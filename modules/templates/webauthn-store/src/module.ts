@@ -39,11 +39,11 @@ export default defineModule({ name: "webauthn-store" }, (m) => [
 	m.contribute(spaces).by(() => challenges),
 	m.provide(passkeyStore).by(async (c): Promise<PasskeyStore> => {
 		const place = { store: await c.get(store), log: c.log, random: c.random };
-		/** One space's records, kept without end. */
+		/** One space's records, kept as long as webauthn says. */
 		const passkeyRecordsIn = (space: Space) => {
 			const records = recordsIn<StoredPasskey>({ ...place, space });
 			return {
-				save: (key: string, record: StoredPasskey) => records.create(key, record, "endless"),
+				save: records.create,
 				read: records.read,
 				update: records.change,
 			};

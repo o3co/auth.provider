@@ -43,8 +43,8 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 			const { factors } = await open();
 			const key = fresh();
 			const odd = asStored({ state: "unheard-of", nested: { list: [1, "two"] } });
-			expect(await factors.save(key, odd)).toBe("created");
-			expect(await factors.save(key, asStored({ n: 1 }))).toBe("exists");
+			expect(await factors.save(key, odd, "endless")).toBe("created");
+			expect(await factors.save(key, asStored({ n: 1 }), "endless")).toBe("exists");
 			expect(await factors.read(key)).toEqual(odd);
 			expect(await factors.update(key, () => undefined)).toEqual({ before: odd, after: odd });
 			expect(await factors.update(fresh(), plus(1))).toBeUndefined();
@@ -54,7 +54,7 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 		it("changes a list only from what it holds, again after a racing writer", async () => {
 			const place = await open();
 			const key = fresh();
-			await place.factors.save(key, asStored({ n: 1 }));
+			await place.factors.save(key, asStored({ n: 1 }), "endless");
 			expect(await place.factors.update(key, plus(1))).toEqual({
 				before: asStored({ n: 1 }),
 				after: asStored({ n: 2 }),
@@ -66,7 +66,7 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 		it("walks the keys it keeps, over pages", async () => {
 			const place = await open();
 			const keys = Array.from({ length: 120 }, fresh);
-			for (const key of keys) await place.factors.save(key, asStored({ n: 1 }));
+			for (const key of keys) await place.factors.save(key, asStored({ n: 1 }), "endless");
 			const seen = new Set<string>();
 			let cursor: string | undefined;
 			do {
@@ -80,8 +80,8 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 		it("keeps a list without end, changed or not", async () => {
 			const place = await open();
 			const [kept, changed] = [fresh(), fresh()];
-			await place.factors.save(kept, asStored({ n: 1 }));
-			await place.factors.save(changed, asStored({ n: 1 }));
+			await place.factors.save(kept, asStored({ n: 1 }), "endless");
+			await place.factors.save(changed, asStored({ n: 1 }), "endless");
 			await place.factors.update(changed, plus(1));
 			place.advance(10 * 365 * 86_400_000);
 			expect(await place.factors.read(kept)).toEqual(asStored({ n: 1 }));
@@ -93,7 +93,7 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 			const { restart, pressMemory } = place;
 			if (!restart || !pressMemory) return context.skip();
 			const key = fresh();
-			await place.factors.save(key, asStored({ n: 1 }));
+			await place.factors.save(key, asStored({ n: 1 }), "endless");
 			// As a proof's state is changed: a used step must not come back.
 			await place.factors.update(key, plus(1));
 			await restart();
@@ -107,7 +107,7 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 			if (!lose || !failover) return context.skip();
 			const key = fresh();
 			lose();
-			expect(await place.factors.save(key, asStored({ n: 1 }))).toBe("created");
+			expect(await place.factors.save(key, asStored({ n: 1 }), "endless")).toBe("created");
 			lose();
 			expect((await place.factors.update(key, plus(1)))?.after).toEqual(asStored({ n: 2 }));
 			await failover();
@@ -126,7 +126,7 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 				await failover();
 				place.advance(60_000);
 			});
-			await place.factors.save(key, asStored({ n: 1 })).catch(() => undefined);
+			await place.factors.save(key, asStored({ n: 1 }), "endless").catch(() => undefined);
 			expect(seen).toEqual(asStored({ n: 1 }));
 			expect(await place.factors.read(key)).toEqual(seen);
 		});

@@ -54,7 +54,8 @@ export function factorRecords(store: FactorStore) {
 		};
 		if (await store.update(key, changing)) return;
 		const first = next([]);
-		if (!first || (await store.save(key, storedList(subject, first))) === "created") return;
+		if (!first || (await store.save(key, storedList(subject, first), "endless")) === "created")
+			return;
 		// Another request saved one first, yet it cannot be found.
 		if (!(await store.update(key, changing))) throw new Unavailable("mfa");
 	};
@@ -84,7 +85,7 @@ export function factorRecords(store: FactorStore) {
 		claim: async (subject: string, kind: string, value: string, factor: string) => {
 			const key = claimKey(kind, value);
 			const mine: Claim = { listKey: keyOf(subject), factor };
-			if ((await store.save(key, asClaim(mine))) === "created") return true;
+			if ((await store.save(key, asClaim(mine), "endless")) === "created") return true;
 			const held = claimOf(await store.read(key));
 			if (!held) throw new Unavailable("mfa");
 			if (await holding(held)) return false;
