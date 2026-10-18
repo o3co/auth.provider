@@ -40,7 +40,10 @@ export interface Budget {
 	readonly countedFixtureFile: string;
 	/** The bytes of the cards of the packages a unit's shipped code imports, together. */
 	readonly dependencyCardBytes: number;
-	/** Comment lines may reach this share of the source lines, or the floor, whichever is more. */
+	/**
+	 * Comment lines, but for the doc comments of the package's public surface, may reach this share
+	 * of the source lines, or the floor, whichever is more.
+	 */
 	readonly commentShare: number;
 	readonly commentFloor: number;
 	/** How many consecutive values of a configuration list a document may lay out in order. */
@@ -299,8 +302,10 @@ function budgetRules(
 				bytes += readFileSync(join(p.dir, file)).length;
 			}
 		}
+		const docs = surfaces.get(p.name)?.docs;
 		for (const file of s.sources(p).filter((f) => unitOf(f) === unit)) {
-			const counts = countLines(join(p.dir, file));
+			// The doc comments of the public surface are its contract, not comments on the implementation.
+			const counts = countLines(join(p.dir, file), docs?.get(file));
 			if (fixture.test(file)) continue;
 			if (budgetsAsTest(s, p, file)) testLines += counts.code;
 			else {

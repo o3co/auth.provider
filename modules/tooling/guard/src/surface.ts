@@ -1,4 +1,4 @@
-import { resolve, sep } from "node:path";
+import { relative, resolve, sep } from "node:path";
 import ts from "typescript";
 
 export interface Surface {
@@ -8,6 +8,8 @@ export interface Surface {
 	readonly hidden: readonly string[];
 	/** The members of the exported interfaces and type aliases, together. */
 	readonly members: number;
+	/** The doc comments on the exported declarations and their members, by file of the package: where each starts. */
+	readonly docs: ReadonlyMap<string, ReadonlySet<number>>;
 }
 
 const options: ts.CompilerOptions = {
@@ -53,7 +55,8 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 	const values = new Set<string>();
 	const types = new Set<string>();
 	const hidden = new Set<string>();
-	if (!moduleSymbol) return { values, types, hidden: [], members: 0 };
+	const docs = new Map<string, Set<number>>();
+	if (!moduleSymbol) return { values, types, hidden: [], members: 0, docs };
 	let members = 0;
 	// A primitive, or a union of them, has no members of its own: the platform's own are not the contract's.
 	const primitives =
@@ -69,21 +72,34 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 		type.isUnion() ? type.types.every(primitive) : (type.flags & primitives) !== 0;
 	const resolveAlias = (symbol: ts.Symbol) =>
 		symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
+	const inside = (node: ts.Node) => {
+		const file = resolve(node.getSourceFile().fileName);
+		return file.startsWith(resolve(packageDir) + sep) && !file.includes(`${sep}node_modules${sep}`);
+	};
+	const documented = (symbol: ts.Symbol) => {
+		for (const declaration of (symbol.declarations ?? []).filter(inside)) {
+			const file = relative(resolve(packageDir), resolve(declaration.getSourceFile().fileName));
+			const starts = docs.get(file) ?? new Set<number>();
+			for (const doc of ts.getJSDocCommentsAndTags(declaration).filter(ts.isJSDoc)) {
+				starts.add(doc.pos);
+			}
+			docs.set(file, starts);
+		}
+	};
 	const exported = checker.getExportsOfModule(moduleSymbol);
 	const exportedDeclarations = new Set<ts.Node>();
 	for (const symbol of exported) {
 		const target = resolveAlias(symbol);
 		for (const declaration of target.declarations ?? []) exportedDeclarations.add(declaration);
+		documented(target);
 		(target.flags & ts.SymbolFlags.Value ? values : types).add(symbol.name);
 		if (target.flags & (ts.SymbolFlags.Interface | ts.SymbolFlags.TypeAlias)) {
 			const type = checker.getDeclaredTypeOfSymbol(target);
-			if (!primitive(type)) members += type.getProperties().length;
+			if (primitive(type)) continue;
+			members += type.getProperties().length;
+			for (const member of type.getProperties()) documented(member);
 		}
 	}
-	const inside = (node: ts.Node) => {
-		const file = resolve(node.getSourceFile().fileName);
-		return file.startsWith(resolve(packageDir) + sep) && !file.includes(`${sep}node_modules${sep}`);
-	};
 	for (const symbol of exported) {
 		for (const declaration of resolveAlias(symbol).declarations ?? []) {
 			if (!inside(declaration)) continue;
@@ -102,5 +118,5 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 			for (const part of signatureParts(declaration)) visit(part);
 		}
 	}
-	return { values, types, hidden: [...hidden].sort(), members };
+	return { values, types, hidden: [...hidden].sort(), members, docs };
 }
