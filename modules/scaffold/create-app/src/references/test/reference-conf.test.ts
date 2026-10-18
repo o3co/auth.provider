@@ -167,7 +167,6 @@ const prefaultLater = new Set([
 	"token-control",
 	"token-endpoint",
 	"tokens",
-	"users",
 	"webauthn-login",
 ]);
 

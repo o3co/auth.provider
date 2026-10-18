@@ -45,11 +45,11 @@ export const record = z.strictObject({
 				});
 			}
 		})
-		.default({})
+		.prefault({})
 		.describe("The user's attributes by OIDC claim name, such as `email`, `name` or `groups`."),
 	upstream: z
 		.array(upstreamIdentity)
-		.default([])
+		.prefault([])
 		.describe("The upstream identities linked to the user."),
 });
 
