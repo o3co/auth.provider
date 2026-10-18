@@ -258,7 +258,7 @@ export const routeCases: readonly RouteCase[] = [
 		grant: "unknown",
 		step: "revoke",
 		said: "404 grant_not_found",
-		audited: "",
+		audited: "grant_not_found",
 	},
 	{ name: "revoke: a pending grant", grant: "pending", step: "revoke", said: "204" },
 
