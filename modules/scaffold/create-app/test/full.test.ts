@@ -99,6 +99,15 @@ it("puts the fragments' lists, and a value spanning sections, in the local layer
 	await writesListsLocally(await generated(), full());
 });
 
+it("runs the image on its own interface and port, whatever the .env of a run on the host names", async () => {
+	const target = await generated();
+	expect(await read(target, ".env.example")).toContain("# HTTP_HOST=127.0.0.1");
+	// -e after --env-file wins, so the container listens where the port mapping reaches.
+	expect(await read(target, "README.md")).toMatch(
+		/`docker run --env-file \.env -e HTTP_HOST=0\.0\.0\.0 -e HTTP_PORT=8080 [^`]* -p 8080:8080 auth-provider`/,
+	);
+});
+
 it("writes the image, and what git and the image leave out", async () => {
 	const target = await generated();
 	const docker = await read(target, "Dockerfile");

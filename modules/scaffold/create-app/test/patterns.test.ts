@@ -88,6 +88,7 @@ describe.each(named)("the pattern %s", (name) => {
 		const readme = await read(target, "README.md");
 		expect(readme).toContain(patternNamed(name).use);
 		for (const line of card.split("\n").slice(1)) expect(readme).toContain(line);
+		expect(readme).toContain("`docker run --env-file .env -e HTTP_HOST=0.0.0.0 -e HTTP_PORT=8080 ");
 	});
 
 	it("reads its fragments' scalars from env and writes their lists locally, holding no value", async () => {

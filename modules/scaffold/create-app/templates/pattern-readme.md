@@ -33,7 +33,9 @@ SIGTERM or SIGINT stops it, draining what is under way, within `kernel.stop-seco
 ## Docker
 
 1. `docker build -t auth-provider .`
-2. `docker run --env-file .env -e APP_CONFIG={{local}},{{application}} -v "$PWD/{{local}}:/app/{{local}}:ro" -p {{port}}:{{port}} auth-provider`
+2. `docker run --env-file .env -e {{hostEnv}}=0.0.0.0 -e {{portEnv}}={{port}} -e APP_CONFIG={{local}},{{application}} -v "$PWD/{{local}}:/app/{{local}}:ro" -p {{port}}:{{port}} auth-provider`
+
+An `-e` after `--env-file` wins over it: the container listens on every interface at {{port}}, where `-p` reaches it, whatever `.env` names for a run on the host.
 
 Docker reads one line per variable from an env file: write a value of several lines, such as a PEM key, in the local layer instead.
 The image runs as a user other than root and installs the locked production dependencies only. `tini` runs as process 1, so `docker stop` reaches the app and it stops cleanly.

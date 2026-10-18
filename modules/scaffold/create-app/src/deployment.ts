@@ -77,6 +77,8 @@ export async function writeDeployment(
 			...paths,
 			...guideLists(settings, writtenOf(fragments)),
 			port: String(httpPort),
+			hostEnv: envName("http.host"),
+			portEnv: envName("http.port"),
 			...readme.fill,
 		}),
 	});

@@ -219,3 +219,20 @@ it("runs the command on given arguments, answering a usage error as 64 and writi
 	expect(await run([], io)).toBe(64);
 	expect(said.join("")).toContain("usage: create-app <target>");
 });
+
+it("answers --help with the usage on standard output, and an option it does not know as a usage error", async () => {
+	const [out, err]: [string[], string[]] = [[], []];
+	const io = { out: (text: string) => out.push(text), err: (text: string) => err.push(text) };
+	expect(await run(["--help"], io)).toBe(0);
+	expect(out.join("")).toContain("usage: create-app <target>");
+	for (const args of [
+		["app", "--nope"],
+		["app", "--pattern"],
+	]) {
+		err.length = 0;
+		expect(await run(args, io), args.join(" ")).toBe(64);
+		expect(err.join(""), args.join(" ")).toMatch(
+			/^.*'--(nope|pattern).*\nusage: create-app <target>/s,
+		);
+	}
+});
