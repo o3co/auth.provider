@@ -18,7 +18,7 @@
   | `401` or `403` otherwise | none; kept for 0.17's ledgers, and to be read as a lookup's are once its owner says |
   | anything else, a `200` of another shape, `404` and other `2xx` included | unavailable |
 
-- A lookup, with the body it is given (`{"subject"}` by subject):
+- A lookup, with the body it is given (`{"subject"}` by subject, `{"idp", "subject"}` by upstream identity):
 
   | Answer | Read as |
   |---|---|

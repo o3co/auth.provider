@@ -21,7 +21,7 @@ function keyBytes(token: string): number {
 }
 
 /** The ledger's URLs, each an operator's setting, by the key that names it. */
-const urlKeys = ["verify-url", "subject-url"] as const;
+const urlKeys = ["verify-url", "subject-url", "upstream-url"] as const;
 const ledgerUrl = (what: string) =>
 	urlSetting({ schemes: ["https", "http"] })
 		.optional()
@@ -32,6 +32,9 @@ const section = z
 		"verify-url": ledgerUrl("Where a password is verified; without it, no password matches."),
 		"subject-url": ledgerUrl(
 			"Where a user is looked up by subject; without it, every lookup by subject is unanswerable.",
+		),
+		"upstream-url": ledgerUrl(
+			"Where a user is looked up by upstream identity; without it, users follows the links it keeps.",
 		),
 		credential: z
 			.string()
@@ -95,12 +98,23 @@ export default defineModule({ name: "users-http", section, replicaSafe: true }, 
 			narrowerOf,
 			warn: (event, fields) => c.log.warn(event, fields),
 		});
-		const { "verify-url": verifyUrl, "subject-url": subjectUrl } = c.section;
+		const {
+			"verify-url": verifyUrl,
+			"subject-url": subjectUrl,
+			"upstream-url": upstreamUrl,
+		} = c.section;
 		return {
 			verify: async (identifier, password) =>
 				verifyUrl === undefined ? none : ask.verify(verifyUrl, identifier, password),
 			bySubject: async (subject) =>
 				subjectUrl === undefined ? unanswerable : ask.lookup(subjectUrl, { subject }),
+			// Only a ledger asked by upstream identity answers it; users then reads no link of its own.
+			...(upstreamUrl === undefined
+				? {}
+				: {
+						byUpstream: async (idp: string, subject: string) =>
+							ask.lookup(upstreamUrl, { idp, subject }),
+					}),
 		};
 	}),
 ]);

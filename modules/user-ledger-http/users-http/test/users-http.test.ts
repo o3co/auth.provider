@@ -41,6 +41,7 @@ interface Answer {
  * The ledger in the request shape: alice at `/ledger/authenticate`, behind the credential. It refuses
  * an unknown identifier with 401 and a wrong password with 403, both without a Bearer challenge. At
  * `/ledger/subject` it finds alice, refuses the suspended `s-gone` with 410, and knows no one else.
+ * At `/ledger/upstream` it ties Apple's `apple-alice` to alice and refuses `apple-gone` with 410.
  */
 function aliceLedger(asked: Asked): Answer {
 	if (asked.headers.authorization !== `Bearer ${credential}`) {
@@ -55,6 +56,13 @@ function aliceLedger(asked: Asked): Answer {
 		const { subject } = JSON.parse(asked.body);
 		if (subject === "s-gone") return { status: 410 };
 		return subject === "s-alice" ? { status: 200, json: alice } : { status: 404 };
+	}
+	if (asked.method === "POST" && asked.path === "/ledger/upstream") {
+		const { idp, subject } = JSON.parse(asked.body);
+		if (idp === "apple" && subject === "apple-gone") return { status: 410 };
+		return idp === "apple" && subject === "apple-alice"
+			? { status: 200, json: alice }
+			: { status: 404 };
 	}
 	return { status: 404 };
 }
@@ -168,6 +176,31 @@ ledgerContract("users-http against a fake ledger", {
 		return { ledger: counted, checks };
 	},
 	unanswerableBySubject: true,
+});
+
+ledgerContract("users-http looking users up by subject and upstream identity", {
+	open: async () => {
+		const { ledger } = await open({
+			"subject-url": `http://${pair}/ledger/subject`,
+			"upstream-url": `http://${pair}/ledger/upstream`,
+		});
+		const checks: string[] = [];
+		return {
+			ledger: {
+				...ledger,
+				verify: async (identifier, password) => {
+					const before = received.length;
+					try {
+						return await ledger.verify(identifier, password);
+					} finally {
+						checks.push(...shapes(before));
+					}
+				},
+			},
+			checks,
+		};
+	},
+	upstreamOfAlice: { idp: "apple", subject: "apple-alice" },
 });
 
 async function linked() {
@@ -715,5 +748,68 @@ describe("users-http looking a user up by subject", () => {
 		await expect(boot({ "subject-url": "https://ledger.example/subject" })).rejects.toMatchObject({
 			refusals: [{ where: "users-http.subject-url", reason: expect.stringContaining("outbound") }],
 		});
+	});
+});
+
+describe("users-http looking a user up by upstream identity", () => {
+	const upstreamUrl = () => `http://${pair}/ledger/upstream`;
+
+	it("posts the IdP's name and the upstream subject apart to upstream-url as written, with the credential", async () => {
+		const { ledger } = await open({ "upstream-url": `${upstreamUrl()}?realm=a` });
+		script = () => ({ status: 200, json: alice });
+		await ledger.byUpstream?.("apple", "apple-alice");
+		const [asked] = received;
+		expect([asked?.method, asked?.path]).toEqual(["POST", "/ledger/upstream?realm=a"]);
+		expect(asked?.headers).toMatchObject({ authorization: `Bearer ${credential}` });
+		expect(JSON.parse(asked?.body ?? "")).toEqual({ idp: "apple", subject: "apple-alice" });
+	});
+
+	it("answers none to a 404 or a 410, and unavailable to a 401, a 403 or anything else it cannot read", async () => {
+		const { ledger } = await open({ "upstream-url": upstreamUrl() });
+		expect(await ledger.byUpstream?.("apple", "apple-nobody")).toEqual({ kind: "none" });
+		expect(await ledger.byUpstream?.("apple", "apple-gone")).toEqual({ kind: "none" });
+		for (const answer of [
+			{ status: 401 },
+			{ status: 403 },
+			{ status: 500 },
+			{ status: 200, json: {} },
+		]) {
+			script = () => answer;
+			await expect(
+				ledger.byUpstream?.("apple", "apple-alice"),
+				JSON.stringify(answer),
+			).rejects.toSatisfy(isUnavailable);
+		}
+	});
+
+	it("offers no lookup by upstream identity without upstream-url", async () => {
+		const { ledger } = await open({ "subject-url": `http://${pair}/ledger/subject` });
+		expect(ledger.byUpstream).toBeUndefined();
+	});
+
+	it("has users take the ledger's answer over a link users keeps", async () => {
+		const { users: u } = await open({ "upstream-url": upstreamUrl() });
+		await u.link("s-alice", { idp: "apple", subject: "apple-gone" });
+		expect(await u.byUpstream("apple", "apple-gone")).toEqual({ kind: "none" });
+		expect(await u.byUpstream("apple", "apple-alice")).toMatchObject({
+			kind: "user",
+			user: { subject: "s-alice" },
+		});
+	});
+
+	it("counts upstream-url among the URLs a credential is sent to", async () => {
+		const error = await boot(settings({ "upstream-url": `https://${pair}/ledger/upstream` })).then(
+			() => undefined,
+			(e: unknown) => e,
+		);
+		expect((error as BootRefused).refusals.map((r) => r.where)).toEqual(["users-http.credential"]);
+		await expect(boot({ "upstream-url": "https://ledger.example/upstream" })).rejects.toMatchObject(
+			{
+				refusals: [
+					{ where: "users-http.upstream-url", reason: expect.stringContaining("outbound") },
+				],
+			},
+		);
+		await expect(boot({ "upstream-url": upstreamUrl() })).resolves.toBeDefined();
 	});
 });
