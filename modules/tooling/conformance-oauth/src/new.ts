@@ -125,6 +125,7 @@ function setUp(part: OauthPart, scene: AreaScene): NewPart {
 						"jwt-bearer": {
 							issuers: part.jwtBearer.issuers.map((i) => ({
 								issuer: i.issuer,
+								subject: "as-is",
 								keys: [{ alg: i.alg, "public-key": i.publicPem }],
 							})),
 						},
