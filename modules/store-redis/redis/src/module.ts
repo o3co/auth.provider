@@ -273,9 +273,20 @@ export default defineModule({ name: "redis", section }, (m) => [
 			// On every boot: a crash loses these spaces' latest writes, as the operator stated.
 			c.log.warn("redis.durability_none", { spaces: checked.undurable.join(", ") });
 		}
-		c.onStop(async () => {
-			await client.quit().catch(() => client.disconnect());
-			await confirmer.quit().catch(() => confirmer.disconnect());
+		c.onStop(async (signal) => {
+			// Past the stop's deadline the connections are cut, not left waiting on QUIT.
+			const cut = () => {
+				client.disconnect();
+				confirmer.disconnect();
+			};
+			if (signal.aborted) return cut();
+			signal.addEventListener("abort", cut, { once: true });
+			try {
+				await client.quit().catch(() => client.disconnect());
+				await confirmer.quit().catch(() => confirmer.disconnect());
+			} finally {
+				signal.removeEventListener("abort", cut);
+			}
 		});
 		return { client, confirmer, declared };
 	}),
