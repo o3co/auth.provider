@@ -89,7 +89,6 @@ const describedLater = new Set([
 	"rp-logout",
 	"session",
 	"token-endpoint",
-	"token-exchange",
 	"users-http",
 	"webauthn",
 	"webauthn-login",

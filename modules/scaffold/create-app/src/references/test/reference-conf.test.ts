@@ -169,7 +169,6 @@ const prefaultLater = new Set([
 	"store",
 	"token-control",
 	"token-endpoint",
-	"token-exchange",
 	"tokens",
 	"users",
 	"webauthn",
