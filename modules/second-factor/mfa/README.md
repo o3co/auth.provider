@@ -7,7 +7,7 @@
 - Sets the entry requirements for a recent second factor.
 
 ## Not here
-- Judging a proof or sending a challenge (the kind). Transactions, routes and lockouts (`mfa-flows`). Sessions (`session`). Sealing (`seal`).
+- Judging a proof or sending a challenge (the kind). Transactions, enrollment and step-up routes, and lockouts (`mfa-flows`). The routes managing factors (`mfa-management`). Sessions (`session`). Sealing (`seal`).
 
 ## Offers
 - `factorKinds`: name; the amr it can add; `addsSecondFactor` (whether its proofs add `mfa`); `guessable`; `counts`; optional `uniqueSecret` (a value no two factors of the kind may hold); `enroll` (subject, its factors of the kind → secret and what to show once / limited / refused / duplicate); optional `challenge` (subject, factor, latest end → sent with what to show and what to keep / limited / refused); `verify` (secret, state, proof, what the challenge kept → valid with the next state, optional amr and optional remaining / invalid / replayed).
