@@ -1,6 +1,7 @@
 import type { HttpRequest } from "@mod/http";
 import { testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
+import secretHashModule from "@mod/secret-hash/module";
 import { testBcryptHash, testScryptHash } from "@mod/secret-hash/testing";
 import { expect, it, vi } from "vitest";
 import { type ClientRecord, type Clients, clientSources, clients } from "../src/contract.ts";
@@ -29,7 +30,7 @@ const confidential = (id: string, method: string, hash: string) => ({
 
 async function boot(list: unknown[], extra: readonly Module[] = []): Promise<Clients> {
 	const app = await assemble({
-		modules: [clientsModule, ...extra],
+		modules: [clientsModule, secretHashModule, ...extra],
 		config: { ...kernelConfig(), clients: { registered: list } },
 	});
 	return app.get(clients);

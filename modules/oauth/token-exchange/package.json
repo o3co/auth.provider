@@ -24,6 +24,7 @@
 	},
 	"devDependencies": {
 		"@mod/http": "workspace:*",
+		"@mod/secret-hash": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"vitest": "5.0.4"
 	}

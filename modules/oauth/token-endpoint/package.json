@@ -25,6 +25,7 @@
 	},
 	"devDependencies": {
 		"@mod/keys": "workspace:*",
+		"@mod/secret-hash": "workspace:*",
 		"@mod/store": "workspace:*"
 	}
 }

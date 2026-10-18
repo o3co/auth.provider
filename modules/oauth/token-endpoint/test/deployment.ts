@@ -6,6 +6,7 @@ import { issuerConfig } from "@mod/issuer/testing";
 import { kernelConfig, type Module } from "@mod/kernel";
 import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import senderBindingModule from "@mod/sender-binding/module";
 import tokensModule from "@mod/tokens/module";
 import { tokensConfig } from "@mod/tokens/testing";
@@ -19,6 +20,7 @@ export const endpointModules = (...extra: Module[]): Module[] => [
 	issuerModule,
 	senderBindingModule,
 	clientsModule,
+	secretHashModule,
 	tokenEndpoint,
 	...extra,
 ];

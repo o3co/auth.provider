@@ -14,6 +14,7 @@ import { assemble, BootRefused, defineModule, kernelConfig, type Module } from "
 import { quietRuntime } from "@mod/kernel/testing";
 import outboundModule from "@mod/outbound/module";
 import { lineage } from "@mod/refresh";
+import secretHashModule from "@mod/secret-hash/module";
 import { type Binding, senderBindings } from "@mod/sender-binding";
 import { sessions } from "@mod/session";
 import { stubSessions } from "@mod/session/testing";
@@ -105,6 +106,7 @@ const boot = (section: unknown, extra: readonly Module[] = []) =>
 			tokensStandIn(),
 			issuerModule,
 			clientsModule,
+			secretHashModule,
 			grantCaller,
 			clientAllowanceModule,
 			untied,

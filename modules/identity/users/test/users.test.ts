@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { switchedModule, unavailableSwitch } from "@mod/kernel/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import { recordingChecker, testBcryptHash } from "@mod/secret-hash/testing";
 import { describe, expect, it } from "vitest";
 import {
@@ -36,7 +37,7 @@ const named = defineModule({ name: "test-idps" }, (m) => [
 
 const boot = (registered: unknown[]) =>
 	assemble({
-		modules: [usersModule, memoryUsersStores().module, named],
+		modules: [usersModule, secretHashModule, memoryUsersStores().module, named],
 		config: { ...kernelConfig(), users: { registered } },
 	});
 
@@ -237,7 +238,11 @@ it("answers unavailable, never none, when written links cannot be read", async (
 	down.unavailable("save", "read", "update");
 	const u = (
 		await assemble({
-			modules: [usersModule, switchedModule(memoryUsersStores().module, linkStore, down)],
+			modules: [
+				usersModule,
+				secretHashModule,
+				switchedModule(memoryUsersStores().module, linkStore, down),
+			],
 			config: { ...kernelConfig(), users: { registered: [testUser("a", "p")] } },
 		})
 	).get(users);

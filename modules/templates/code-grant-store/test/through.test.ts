@@ -18,6 +18,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import senderBindingModule from "@mod/sender-binding/module";
 import { sessions } from "@mod/session";
 import sessionLifecycle from "@mod/session-lifecycle/module";
@@ -50,6 +51,7 @@ it("redeems a code once through code-grant wired to records, and revokes what it
 			issuerModule,
 			senderBindingModule,
 			clientsModule,
+			secretHashModule,
 			clientAllowanceModule,
 			tokenEndpoint,
 			rateLimitStandIn,

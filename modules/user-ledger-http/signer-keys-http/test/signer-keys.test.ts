@@ -23,6 +23,7 @@ import {
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import outboundModule from "@mod/outbound/module";
 import { memoryRecords } from "@mod/records/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import storeModule from "@mod/store/module";
 import { storeConfig } from "@mod/store/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
@@ -232,6 +233,7 @@ describe("signer-keys-http under jwt-bearer", () => {
 				tokensStandIn(),
 				issuerModule,
 				clientsModule,
+				secretHashModule,
 				grantCaller,
 				clientAllowanceModule,
 				outboundModule,

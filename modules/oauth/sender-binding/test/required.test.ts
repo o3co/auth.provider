@@ -6,6 +6,7 @@ import { httpConfig } from "@mod/http/testing";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, BootRefused, defineModule, kernelConfig } from "@mod/kernel";
+import secretHashModule from "@mod/secret-hash/module";
 import { describe, expect, it } from "vitest";
 import { type Binding, clientBindings, senderBindings } from "../src/contract.ts";
 import senderBindingModule from "../src/module.ts";
@@ -31,7 +32,7 @@ const kind = (member: string, name?: string) =>
 	]);
 const boot = (section: Readonly<Record<string, unknown>> = {}, kinds = [kind("jkt", "dpop")]) =>
 	assemble({
-		modules: [http, issuerModule, clientsModule, senderBindingModule, ...kinds],
+		modules: [http, issuerModule, clientsModule, secretHashModule, senderBindingModule, ...kinds],
 		config: {
 			...kernelConfig(),
 			...httpConfig(),

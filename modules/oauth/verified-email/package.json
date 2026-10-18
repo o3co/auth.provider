@@ -16,6 +16,7 @@
 		"@mod/users": "workspace:*"
 	},
 	"devDependencies": {
+		"@mod/secret-hash": "workspace:*",
 		"@mod/session": "workspace:*",
 		"vitest": "5.0.4"
 	}

@@ -28,6 +28,7 @@
 		"@mod/clients": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/records": "workspace:*",
+		"@mod/secret-hash": "workspace:*",
 		"@mod/store": "workspace:*",
 		"@mod/tokens": "workspace:*",
 		"vitest": "5.0.4"

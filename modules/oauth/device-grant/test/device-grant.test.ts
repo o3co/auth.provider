@@ -21,6 +21,7 @@ import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, contract, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime, recordingLog, unavailableSwitch } from "@mod/kernel/testing";
 import rateLimitModule from "@mod/rate-limit/module";
+import secretHashModule from "@mod/secret-hash/module";
 import { entryRequirements, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { simulatedStore } from "@mod/store/testing";
@@ -103,6 +104,7 @@ async function serve(
 		modules: [
 			http,
 			clientsModule,
+			secretHashModule,
 			issuerModule,
 			tokensStandIn(),
 			grantCaller,

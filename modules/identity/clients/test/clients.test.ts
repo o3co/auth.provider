@@ -1,6 +1,7 @@
 import type { HttpRequest } from "@mod/http";
 import { testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig, type Module, Unavailable } from "@mod/kernel";
+import secretHashModule from "@mod/secret-hash/module";
 import { testScryptHash } from "@mod/secret-hash/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -46,7 +47,7 @@ const registered: unknown[] = [
 
 async function boot(extra: readonly Module[] = [], list = registered): Promise<Clients> {
 	const app = await assemble({
-		modules: [clientsModule, grantsModule, ...extra],
+		modules: [clientsModule, secretHashModule, grantsModule, ...extra],
 		config: { ...kernelConfig(), clients: { registered: list } },
 	});
 	return app.get(clients);

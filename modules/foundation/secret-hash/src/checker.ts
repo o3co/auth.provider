@@ -5,13 +5,21 @@ import { decoyOf, type Hash, hashOf } from "./hashes.ts";
 /** The longest secret checked; a longer one never matches. */
 const maxSecretBytes = 1024;
 
-/** The checks under way in this process, every checker's together, and how many may be. */
+/** The checks under way that share a limit, and how many may be. */
+export interface Places {
+	max: number;
+	taken: number;
+}
+
 export const defaultMaxConcurrent = 8;
-const places = { max: defaultMaxConcurrent, taken: 0 };
+/** One assembly's places, shared by every checker it makes. */
+export const placesOf = (max: number): Places => ({ max, taken: 0 });
+/** The process's places, for checkers made apart from any assembly. */
+const processPlaces = placesOf(defaultMaxConcurrent);
 
 /** Sets how many checks this process runs at once; the module sets it from its section. */
 export function limitChecks(max: number): number {
-	places.max = max;
+	processPlaces.max = max;
 	return max;
 }
 
@@ -20,6 +28,7 @@ export function checkerWith(
 	inUse: Iterable<SecretHash>,
 	random: Random["bytes"],
 	matches: (hash: Hash, secret: string) => Promise<boolean>,
+	places: Places = processPlaces,
 ): SecretChecker {
 	const decoys = new Map<string, Hash>();
 	for (const hash of inUse) {
