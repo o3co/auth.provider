@@ -76,7 +76,7 @@ it("refuses an enrollment without a session, or naming a transaction that is no 
 });
 
 it("goes on with a session's enrollment only while the session may change credentials", async () => {
-	const s = await serve({ "manage-seconds": 60 });
+	const s = await serve({ "manage-within": "1m" });
 	await s.signIn("bea");
 	const begun = await s.call("POST", "/session/mfa/enrollment", { kind: "code" });
 	clock.shift += 61_000;
