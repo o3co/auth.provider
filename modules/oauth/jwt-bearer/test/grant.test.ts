@@ -503,3 +503,21 @@ describe("jwt-bearer", () => {
 		});
 	});
 });
+
+it("takes the lifetime cap and the clock allowance with their unit, in whole seconds, 1h and 30s unless set", () => {
+	const takes = (settings: object) => jwtBearer.section?.safeParse(settings).success;
+	expect(jwtBearer.section?.parse({})).toMatchObject({
+		"max-assertion-lifetime": 3600,
+		"clock-skew": 30,
+	});
+	expect([{ "max-assertion-lifetime": "1d" }, { "clock-skew": "0s" }].map(takes)).toEqual([
+		true,
+		true,
+	]);
+	const refused = [
+		{ "max-assertion-lifetime": 3600 },
+		{ "clock-skew": "301s" },
+		{ "clock-skew": "1500ms" },
+	];
+	expect(refused.map(takes)).toEqual([false, false, false]);
+});

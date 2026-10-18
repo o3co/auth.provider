@@ -27,7 +27,7 @@ const located = async (c: BuildContext<unknown>, path: string) => {
 
 /** Each route counts its own requests per source, in the window the section sets. */
 const limited = (c: BuildContext<z.output<typeof section>>, name: string) => {
-	const window = { limit: c.section.requests, ms: c.section["window-seconds"] * 1000 };
+	const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 	return [use(requestsPerSource, { name: `token-control.${name}`, window })];
 };
 

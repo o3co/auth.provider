@@ -16,7 +16,7 @@ export default defineModule({ name: "http-ops", section }, (m) => [
 	m
 		.provide(readiness)
 		.by((c) =>
-			sharedReadiness((ms) => c.readinessReport(ms), c.section["readiness-deadline-ms"], c.clock),
+			sharedReadiness((ms) => c.readinessReport(ms), c.section["readiness-deadline"], c.clock),
 		),
 	m.contribute(routes).by(async (c) => readyz(await c.get(readiness))),
 	m.contribute(instruments).by(async (c) =>

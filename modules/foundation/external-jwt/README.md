@@ -13,7 +13,7 @@
   - Key sources: JWKs written in; PEM keys, each for the algorithm it is given for; a key set at a URL, fetched through `outbound` from the caller's hosts.
   - Verifying answers valid (the header and claims, frozen), invalid with a reason, or unavailable when no key set can be had.
   - Reasons: `malformed`, `algorithm`, `no-key`, `ambiguous-key`, `signature`, `expired`, `not-yet`, `future-iat`, `too-long`, `issuer`, `audience`, `subject`. A caller maps them to its own words.
-- Composition definition, with the operator section `key-set-max-age-ms` (3600000–2592000000, default 86400000), how long after its fetch a key set is used while no new one can be had.
+- Composition definition, with the operator section `key-set-max-age` (written with its unit, `1h` to `30d`, default `1d`), how long after its fetch a key set is used while no new one can be had.
 - A test signer (`./testing`): a key pair as a JWK and PEM, signing claims or exact bytes with any header, as a sender might.
 
 ## Invariants
@@ -28,7 +28,7 @@
 - A key set is fetched when first needed and used an hour from when its fetch began; before then, only for a key it lacks, never for one it holds twice.
 - One fetch runs at a time, shared by every check waiting for it; fetches are at least a minute apart, whether they worked or not.
 - Only a `200` answer holding a `keys` list is a set; entries that are no public key are skipped.
-- While no set can be had, the last one is used until `key-set-max-age-ms` after its fetch; past that, or with none, the answer is unavailable.
+- While no set can be had, the last one is used until `key-set-max-age` after its fetch; past that, or with none, the answer is unavailable.
 - A refused destination, an unreachable host, or an answer that is no JSON is an outage; any other error is thrown.
 
 ## Data

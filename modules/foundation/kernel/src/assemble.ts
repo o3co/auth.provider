@@ -14,7 +14,7 @@ import { type KernelSettings, kernelSection } from "./settings.ts";
 export interface Assembly {
 	get<T>(contract: Contract<T>): T;
 	start(): Promise<void>;
-	/** Without a deadline, the kernel section's `stop-seconds`. */
+	/** Without a deadline, the kernel section's `stop-deadline`. */
 	stop(deadlineMs?: number): Promise<void>;
 }
 
@@ -40,7 +40,7 @@ class DependencyFailed extends Error {}
 export const KERNEL_SECTION = "kernel";
 
 /** The kernel's own section, a single deployment unless `settings` say otherwise; with none, all a new project needs. */
-export function kernelConfig(settings: Partial<KernelSettings> = {}) {
+export function kernelConfig(settings: Partial<z.input<typeof kernelSection>> = {}) {
 	return { [KERNEL_SECTION]: { deployment: "single", ...settings } };
 }
 
@@ -387,7 +387,7 @@ export async function assemble(input: AssemblyInput): Promise<Assembly> {
 			for (const hook of startHooks) await hook();
 			for (const task of periodics) task.start();
 		},
-		stop: async (deadlineMs = kernel["stop-seconds"] * 1000) => {
+		stop: async (deadlineMs = kernel["stop-deadline"] * 1000) => {
 			if (!isTimerMs(deadlineMs)) {
 				throw new TypeError("the stop deadline must be a whole number of ms, 1 to 2^31-1");
 			}

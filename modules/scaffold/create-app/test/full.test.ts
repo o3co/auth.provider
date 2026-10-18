@@ -270,7 +270,7 @@ it("stops within the kernel's own deadline, and tells the operator to give the o
 	expect(main).toContain("await app.stop();");
 	expect(main).not.toMatch(/stop\(\d/);
 	expect(await read(target, "README.md")).toMatch(
-		/grace period longer than `kernel\.stop-seconds`/,
+		/grace period longer than `kernel\.stop-deadline`/,
 	);
 });
 

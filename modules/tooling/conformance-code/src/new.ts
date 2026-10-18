@@ -45,7 +45,7 @@ onNew(codeArea, (part, scene) => {
 					}
 				: {}),
 			...(part.refresh?.lifetimeSeconds
-				? { refresh: { "lifetime-seconds": part.refresh.lifetimeSeconds } }
+				? { refresh: { lifetime: `${part.refresh.lifetimeSeconds}s` } }
 				: {}),
 		},
 	};

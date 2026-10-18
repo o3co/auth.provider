@@ -533,12 +533,16 @@ describe("private_key_jwt", () => {
 		expect(clientKeysFor([])).toEqual({ "client-assertion": { keys: [] } });
 	});
 
-	it("takes the operator's lifetime cap and clock allowance within their bounds, in whole seconds", () => {
+	it("takes the operator's lifetime cap and clock allowance within their bounds, in whole seconds written with their unit", () => {
 		const takes = (settings: Record<string, unknown>) => section.safeParse(settings).success;
-		for (const fits of [1, 86_400]) expect(takes({ "max-lifetime-seconds": fits })).toBe(true);
-		for (const fits of [0, 300]) expect(takes({ "clock-skew-seconds": fits })).toBe(true);
-		for (const not of [0, 86_401, 1.5]) expect(takes({ "max-lifetime-seconds": not })).toBe(false);
-		for (const not of [-1, 301, 0.5]) expect(takes({ "clock-skew-seconds": not })).toBe(false);
+		for (const fits of ["1s", "1d"]) expect(takes({ "max-lifetime": fits })).toBe(true);
+		for (const fits of ["0s", "5m"]) expect(takes({ "clock-skew": fits })).toBe(true);
+		for (const not of ["0s", "86401s", "1500ms", 3600, "3600"]) {
+			expect(takes({ "max-lifetime": not }), String(not)).toBe(false);
+		}
+		for (const not of ["301s", "500ms", 30])
+			expect(takes({ "clock-skew": not }), String(not)).toBe(false);
+		expect(section.parse({})).toEqual({ "max-lifetime": 3600, "clock-skew": 30 });
 		expect(takes({ other: 1 })).toBe(false);
 	});
 });

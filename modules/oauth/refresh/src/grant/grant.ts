@@ -217,7 +217,7 @@ export async function foundingIn(c: BuildContext<Settings>) {
 /** The refresh_token grant over the contracts the assembly gives; it sweeps the families to settle. */
 export async function grantOver(c: BuildContext<Settings>) {
 	const { stores, revoker } = await settlingIn(c);
-	c.every(c.section["sweep-seconds"] * 1000, () => revoker.sweep());
+	c.every(c.section["sweep-interval"] * 1000, () => revoker.sweep());
 	const checks = { sessions: await c.get(sessions), revocation: await c.get(subjectRevocation) };
 	const issuerUrl = (await c.get(issuer)).url;
 	return refreshGrant(stores, revoker, checks, c.random.bytes, issuerUrl, c.clock.now);

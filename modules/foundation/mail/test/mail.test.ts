@@ -18,6 +18,7 @@ import {
 	preparer,
 } from "../src/contract.ts";
 import mailModule from "../src/module.ts";
+import { section } from "../src/section.ts";
 import { contractTemplates, mailConfig, mailContract, remoteWords } from "../src/testing.ts";
 
 const recorded = recordingLog();
@@ -165,4 +166,8 @@ it("puts an address in one form: its domain in IDNA's ASCII form, lowercase, its
 	for (const refused of ["a@victim.test/x", "Name <a@example.test>", "no-at-sign"]) {
 		expect(canonicalAddress(refused), refused).toBeUndefined();
 	}
+});
+
+it("refuses the logging-only sender unless the operator accepts that it sends nothing", () => {
+	expect(section.parse({})).toEqual({ "accept-unsent": false });
 });

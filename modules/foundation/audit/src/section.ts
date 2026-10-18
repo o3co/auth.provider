@@ -15,6 +15,6 @@ export const section = z.strictObject({
 		.int()
 		.min(1)
 		.max(1_000_000)
-		.default(1000)
+		.prefault(1000)
 		.describe("Each receiver's deliveries under way at once; an event past it is lost."),
 });

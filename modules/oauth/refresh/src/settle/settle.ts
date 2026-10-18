@@ -105,7 +105,7 @@ export async function settlingIn(c: BuildContext<Settings>) {
 			"refresh tokens cannot be handled where access tokens cannot be revoked",
 		);
 	}
-	const lifetimeMs = c.section["lifetime-seconds"] * 1000;
+	const lifetimeMs = c.section.lifetime * 1000;
 	const revoker = settling(stores, issuing, c.log, c.clock.now, lifetimeMs);
 	return { stores, revoker, lifetimeMs };
 }

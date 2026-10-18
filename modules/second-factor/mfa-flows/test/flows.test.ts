@@ -713,7 +713,7 @@ describe("mfa in a session", () => {
 	});
 
 	it("asks a recent proof to change factors, and keeps the last counting factor under required mode", async () => {
-		const s = await serve({ mode: "required", "manage-seconds": 60 });
+		const s = await serve({ mode: "required", "manage-within": "1m" });
 		const { tx } = await s.heldLogin("dana");
 		const begun = await s.call("POST", "/session/mfa/enrollment", {
 			kind: "code",

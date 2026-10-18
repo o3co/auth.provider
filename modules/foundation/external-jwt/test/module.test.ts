@@ -87,7 +87,7 @@ it("uses a set it cannot renew for a day by default", async () => {
 });
 
 it("uses a set it cannot renew as long as the operator's section says", async () => {
-	const set = await composed({ "key-set-max-age-ms": 7_200_000 });
+	const set = await composed({ "key-set-max-age": "2h" });
 	expect(await set.checked()).toBe("valid");
 	set.downFor(7_199_000);
 	expect(await set.checked()).toBe("valid");
@@ -97,10 +97,11 @@ it("uses a set it cannot renew as long as the operator's section says", async ()
 
 it("refuses a section outside its bounds", async () => {
 	for (const refused of [
-		{ "key-set-max-age-ms": 3_599_999 },
-		{ "key-set-max-age-ms": 2_592_000_001 },
-		{ "key-set-max-age-ms": 3_600_000.5 },
+		{ "key-set-max-age": "3599999ms" },
+		{ "key-set-max-age": "2592000001ms" },
 		{ "key-set-max-age": 7_200_000 },
+		{ "key-set-max-age": "7200000" },
+		{ "key-set-max-age-ms": "2h" },
 	]) {
 		await expect(
 			assemble({

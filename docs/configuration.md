@@ -47,8 +47,8 @@ From `@mod/client-assertion`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `client-assertion.max-lifetime-seconds` | integer (1–86400) | `3600` |  |  |  | The longest lifetime a client assertion may have, in seconds. |
-| `client-assertion.clock-skew-seconds` | integer (0–300) | `30` |  |  |  | How far a client's clock may be off when an assertion's times are checked, in seconds. |
+| `client-assertion.max-lifetime` | string | `1h` |  |  |  | The longest lifetime a client assertion may have, from `1s` to `1d` in whole seconds. |
+| `client-assertion.clock-skew` | string | `30s` |  |  |  | How far a client's clock may be off when an assertion's times are checked, from `0s` to `5m` in whole seconds. |
 
 ## clients
 
@@ -102,7 +102,7 @@ From `@mod/consent`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `consent.page` | string |  |  | `CONSENT_PAGE` | `https://login.example.invalid/consent` | The deployment's consent page, with the challenge as its `challenge` query parameter; without it, nobody is asked. |
-| `consent.challenge-seconds` | integer (60–3600) | `600` |  |  |  | How long a pending consent challenge stays answerable, in seconds. |
+| `consent.challenge-lifetime` | string | `10m` |  |  |  | How long a pending consent challenge stays answerable, from `1m` to `1h` in whole seconds. |
 
 ## device-grant
 
@@ -112,12 +112,12 @@ From `@mod/device-grant`.
 |---|---|---|---|---|---|---|
 | `device-grant.verification-uri` | string |  | yes | `DEVICE_GRANT_VERIFICATION_URI` | `https://login.example.invalid/device` | The deployment's page where a user enters the code. |
 | `device-grant.complete-uri` | boolean | `false` |  |  |  | Whether to answer also the page's address with the code filled in. |
-| `device-grant.code-seconds` | integer (30–3600) | `600` |  |  |  | How long a device code and its user code live, in seconds. |
-| `device-grant.interval-seconds` | integer (1–60) | `5` |  |  |  | How long a device waits between polls of the token endpoint, in seconds. |
+| `device-grant.code-lifetime` | string | `10m` |  |  |  | How long a device code and its user code live, from `30s` to `1h` in whole seconds. |
+| `device-grant.interval` | string | `5s` |  |  |  | How long a device waits between polls of the token endpoint, from `1s` to `1m` in whole seconds. |
 | `device-grant.attempts` | integer (1–100) | `5` |  |  |  | Decisions a subject may try in each window, so codes cannot be guessed. |
-| `device-grant.attempts-window-seconds` | integer (60–86400) | `300` |  |  |  | The window `attempts` is counted over, in seconds. |
+| `device-grant.attempts-window` | string | `5m` |  |  |  | The window `attempts` is counted over, from `1m` to `1d` in whole seconds. |
 | `device-grant.requests` | integer (1–100000) | `60` |  |  |  | Device authorization requests per source in each window. |
-| `device-grant.window-seconds` | integer (1–86400) | `60` |  |  |  | The window `requests` is counted over, in seconds. |
+| `device-grant.window` | string | `1m` |  |  |  | The window `requests` is counted over, from `1s` to `1d` in whole seconds. |
 
 ## dpop
 
@@ -126,9 +126,9 @@ From `@mod/dpop`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `dpop.algorithms` | list of ES256 \| ES384 \| EdDSA \| RS256 | `["ES256","ES384","EdDSA","RS256"]` |  |  |  | The signing algorithms a DPoP proof may use. |
-| `dpop.proof-window-seconds` | integer (1–300) | `60` |  |  |  | How far a proof's `iat` may lie from the clock on either side, in seconds. |
+| `dpop.proof-window` | string | `1m` |  |  |  | How far a proof's `iat` may lie from the clock on either side, from `1s` to `5m` in whole seconds. |
 | `dpop.nonce.required` | never \| as \| as+rs | `never` |  | `DPOP_NONCE_REQUIRED` | `never` | Where a server-provided nonce is asked: never, at the token endpoint, or there and at resources. |
-| `dpop.nonce.ttl-seconds` | integer (1–3600) | `300` |  | `DPOP_NONCE_TTL_SECONDS` | `300` | How often the nonce changes, in seconds; one is taken for twice this. |
+| `dpop.nonce.ttl` | string | `5m` |  | `DPOP_NONCE_TTL` | `5m` | How often the nonce changes, from `1s` to `1h` in whole seconds; one is taken for twice this. |
 | `dpop.nonce.secret` | string |  |  | `DPOP_NONCE_SECRET` | `REPLACE-NONCE-SECRET-BASE64-32-BYTES` | The nonce's key, shared by every instance: base64 of 32 bytes or more; required unless never. |
 
 ## external-jwt
@@ -137,7 +137,7 @@ From `@mod/external-jwt`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `external-jwt.key-set-max-age-ms` | integer (3600000–2592000000) | `86400000` |  |  |  | How long after its fetch a key set is still used while no new one can be had, in milliseconds. |
+| `external-jwt.key-set-max-age` | string | `1d` |  |  |  | How long after its fetch a key set is still used while no new one can be had, from `1h` to `30d`. |
 
 ## federation
 
@@ -219,7 +219,7 @@ From `@mod/http-ops`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `http-ops.readiness-deadline-ms` | integer (1–2147483647) | `1000` |  |  |  | How long `GET /readyz` waits for the probes before it answers unready, in whole milliseconds; set it below the orchestrator's own timeout for the check. |
+| `http-ops.readiness-deadline` | string | `1s` |  |  |  | How long `GET /readyz` waits for the probes before it answers unready, in whole milliseconds (`1s`); set it below the orchestrator's own timeout for the check. |
 
 ## issuer
 
@@ -236,8 +236,8 @@ From `@mod/jwt-bearer`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `jwt-bearer.issuers` | list of map | `[]` |  |  | `[{"issuer":"https://issuer.example.invalid","jwks-uri":"https://issuer.example.invalid/jwks"}]` | The trusted issuers: each with its public keys (kid, alg, SPKI PEM), or its key set's URL at https on its host. |
-| `jwt-bearer.max-assertion-lifetime-seconds` | integer (1–86400) | `3600` |  |  |  | The longest lifetime an assertion may claim, in seconds. |
-| `jwt-bearer.clock-skew-seconds` | integer (0–300) | `30` |  |  |  | How far an assertion's times may be off this host's clock, in seconds. |
+| `jwt-bearer.max-assertion-lifetime` | string | `1h` |  |  |  | The longest lifetime an assertion may claim, from `1s` to `1d` in whole seconds. |
+| `jwt-bearer.clock-skew` | string | `30s` |  |  |  | How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds. |
 
 ## kernel
 
@@ -247,7 +247,7 @@ From `@mod/kernel`.
 |---|---|---|---|---|---|---|
 | `kernel.deployment` | single \| multi |  | yes | `KERNEL_DEPLOYMENT` | `single` | single or multi; multi refuses a module unsafe on multiple instances |
 | `kernel.logging.level` | trace \| debug \| info \| warn \| error \| fatal \| silent | `info` |  |  |  | the lowest level logged (trace to fatal), or silent for none |
-| `kernel.stop-seconds` | integer (1–3600) | `30` |  | `KERNEL_STOP_SECONDS` | `30` | whole seconds a stop given no deadline waits for its hooks; an orchestrator's grace period must be longer |
+| `kernel.stop-deadline` | string | `30s` |  | `KERNEL_STOP_DEADLINE` | `30s` | how long a stop given no deadline waits for its hooks, from `1s` to `1h` in whole seconds; an orchestrator's grace period must be longer |
 
 ## keys
 
@@ -322,7 +322,7 @@ From `@mod/mfa`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `mfa.mode` | optional \| required | `required` |  | `MFA_MODE` | `required` | "required" (the default) asks every login for a counting factor; "optional" only of those who hold one. |
-| `mfa.manage-seconds` | integer (30–3600) | `300` |  |  |  | How recently a second factor must have been proved to change credentials, in seconds. |
+| `mfa.manage-within` | string | `5m` |  |  |  | How recently a second factor must have been proved to change credentials, from `30s` to `1h` in whole seconds. |
 | `mfa.max-factors` | integer (2–50) | `10` |  |  |  | How many factors a subject may hold, recovery codes included. |
 
 ## mfa-binding-proof
@@ -456,8 +456,8 @@ From `@mod/refresh`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `refresh.lifetime-seconds` | integer (1–31536000) | `86400` |  |  |  | How long a refresh token family lives, in seconds. Shorter is only safer, so the floor is a second, which lets tests watch a family run out. |
-| `refresh.sweep-seconds` | integer (1–3600) | `30` |  |  |  | How often the sweep finishes revocations that stopped halfway, in seconds. |
+| `refresh.lifetime` | string | `1d` |  |  |  | How long a refresh token family lives, from `1s` to `365d` in whole seconds. Shorter is only safer, so the floor is a second, which lets tests watch a family run out. |
+| `refresh.sweep-interval` | string | `30s` |  |  |  | How often the sweep finishes revocations that stopped halfway, from `1s` to `1h` in whole seconds. |
 | `refresh.bind-confidential-clients` | boolean | `false` |  |  |  | Whether a confidential client's family is bound to its sender too. As 0.17's default: a confidential client already proves itself, so only a public one's is bound. |
 
 ## refresh-store
@@ -545,7 +545,7 @@ From `@mod/session-tokens`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `session-tokens.sweep-seconds` | integer (1–3600) | `30` |  |  |  | How often each host revokes the tokens of pushed-out references left unrevoked, in seconds. |
+| `session-tokens.sweep-interval` | string | `30s` |  |  |  | How often each host revokes the tokens of pushed-out references left unrevoked, from `1s` to `1h` in whole seconds. |
 | `session-tokens.push-out-margin` | integer (0–10000) | `8` |  |  |  | How far below a session's cap an add lists the session before it may push a reference out: the adds expected to come at once. A larger margin narrows the crash window, at one more write near the cap; it must stay below the cap. |
 
 ## session-tokens-store
@@ -573,7 +573,7 @@ From `@mod/token-control`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `token-control.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, on each route, before any client is authenticated. |
-| `token-control.window-seconds` | integer (1–86400) | `60` |  |  |  | The window `requests` is counted over, in seconds. |
+| `token-control.window` | string | `1m` |  |  |  | The window `requests` is counted over, from `1s` to `1d` in whole seconds. |
 
 ## token-endpoint
 
@@ -600,7 +600,7 @@ From `@mod/tokens`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `tokens.access-token-lifetime-seconds` | integer (1–86400) | `3600` |  |  |  | How long an access token lives, in seconds. |
+| `tokens.access-token-lifetime` | string | `1h` |  |  |  | How long an access token lives, from `1s` to `1d` in whole seconds. |
 | `tokens.revocation` | denylist \| unsupported |  | yes | `TOKENS_REVOCATION` | `denylist` | Whether revoked access tokens are kept in a denylist and refused, or revocation is not supported. |
 | `tokens.subject-check` | none |  |  |  |  | Stated where no module checks subject revocation on access tokens. |
 

@@ -117,7 +117,7 @@ export default defineModule({ name: "tokens", section }, (m) => [
 			c.clock,
 		);
 		const iss = (await c.get(issuer)).url;
-		const lifetime = c.section["access-token-lifetime-seconds"];
+		const lifetime = c.section["access-token-lifetime"];
 
 		/** Verifies everything but revocation; `allowanceMs` keeps a just-expired token valid. */
 		const check = async (token: string, allowanceMs = 0): Promise<Checked> => {

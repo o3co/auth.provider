@@ -32,6 +32,7 @@ import {
 	type Sending,
 } from "../src/contract.ts";
 import mfaModule from "../src/module.ts";
+import { section } from "../src/section.ts";
 import { type MfaSettings, mfaConfig } from "../src/testing.ts";
 import { memoryFactors } from "./stores.ts";
 
@@ -389,7 +390,7 @@ describe("decisions on the subject's factors", () => {
 			),
 		]);
 		const { decided, bindKind, idOf } = await serve(
-			{ "manage-seconds": 60 },
+			{ "manage-within": "1m" },
 			{ kinds: [code, backup, silent] },
 		);
 		const before = runtime.clock.now();
@@ -399,8 +400,8 @@ describe("decisions on the subject's factors", () => {
 		expect(await decided.guessableBoundAfter("ola", before + 500)).toBe(false);
 	});
 
-	it("tells whether a proof at a time is still recent, by manage-seconds on the kernel's clock", async () => {
-		const { decided } = await serve({ "manage-seconds": 60 });
+	it("tells whether a proof at a time is still recent, by manage-within on the kernel's clock", async () => {
+		const { decided } = await serve({ "manage-within": "1m" });
 		const now = runtime.clock.now();
 		expect(decided.recent(now - 60_000 + 1000)).toBe(true);
 		expect(decided.recent(now - 61_000)).toBe(false);
@@ -597,7 +598,7 @@ describe("the entry requirements mfa sets", () => {
 	});
 
 	it("asks a recent second factor to change credentials, and a second factor to use the session under required mode", async () => {
-		const { app, bindCode, signedIn } = await serve({ mode: "required", "manage-seconds": 60 });
+		const { app, bindCode, signedIn } = await serve({ mode: "required", "manage-within": "1m" });
 		const opened = app.get(sessions);
 		const bare = await signedIn("bea", ["pwd"]);
 		expect((await opened.enterFor(bare, "credentials")).kind).toBe("entered");
@@ -615,7 +616,7 @@ describe("the entry requirements mfa sets", () => {
 	});
 
 	it("never takes a sign-in at an unknown time as recent, a second factor it says it proved included", async () => {
-		const { app, signedIn } = await serve({ "manage-seconds": 60 });
+		const { app, signedIn } = await serve({ "manage-within": "1m" });
 		const opened = app.get(sessions);
 		// No counting factor: only a sign-in known to be recent opens credentials.
 		const unknown = await signedIn("dee", ["fed"], "unknown");
@@ -630,7 +631,7 @@ describe("the entry requirements mfa sets", () => {
 	});
 
 	it("takes only a raise that added a second factor as a recent second factor", async () => {
-		const { app, bindCode, signedIn } = await serve({ "manage-seconds": 60 });
+		const { app, bindCode, signedIn } = await serve({ "manage-within": "1m" });
 		const opened = app.get(sessions);
 		await bindCode("cid");
 		const request = await signedIn("cid", ["pwd"]);
@@ -900,4 +901,11 @@ describe("a gate contributed before a first counting factor", () => {
 		expect((await decided.begin("ann", "code")).kind).toBe("begun");
 		expect(asked).toEqual([]);
 	});
+});
+
+it("reads how recent a proof must be with its unit, in whole seconds, five minutes unless set", () => {
+	const within = (settings: object) => section.safeParse(settings).data?.["manage-within"];
+	expect([{}, { "manage-within": "10m" }].map(within)).toEqual([300, 600]);
+	const refused = [{ "manage-seconds": 60 }, { "manage-within": 60 }, { "manage-within": "2h" }];
+	expect(refused.map(within)).toEqual([undefined, undefined, undefined]);
 });
