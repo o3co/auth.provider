@@ -3106,6 +3106,9 @@ importers:
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store

@@ -14,6 +14,7 @@ import rateLimitModule from "@mod/rate-limit/module";
 import { memoryRecords } from "@mod/records/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import { type LoginFacts, type Session, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { simulatedStore } from "@mod/store/testing";
@@ -121,6 +122,7 @@ async function serve(setup: Setup = {}) {
 			...(setup.withoutCsrf ? [] : [csrfStandIn, cookiesModule]),
 			gatesModule,
 			usersModule,
+			secretHashModule,
 			memoryUsersStores().module,
 			sessionStandIn,
 			subjectRevocationStandIn,
