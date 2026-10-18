@@ -20,7 +20,7 @@ function ledgerConfig(ledger: LedgerScene) {
 		"users-http": {
 			"verify-url": ledger.verifyUrl,
 			credential: ledger.credential,
-			...(ledger.timeoutMs ? { "timeout-ms": ledger.timeoutMs } : {}),
+			...(ledger.timeoutMs ? { timeout: `${ledger.timeoutMs}ms` } : {}),
 		},
 		outbound: {
 			allow: [at.hostname],
