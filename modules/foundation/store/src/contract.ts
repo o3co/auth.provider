@@ -88,24 +88,13 @@ export type BatchWrite =
 	| { readonly key: Key; readonly put: Json; readonly expiry: Expiry }
 	| { readonly key: Key; readonly remove: true };
 
-export interface Member {
-	readonly member: string;
-	readonly score: number;
-}
-
 /**
- * In a replicated space, an answer of the written kinds (written, removed, taken, committed,
- * counted, a set change) confirms not only its own write but every state the same store held
- * before it, in any key or partition: confirmation waits for the replicas to reach the point the
- * store had reached, and replication keeps order. A refusing answer writes nothing, so it has
- * nothing to wait for and confirms nothing; an unavailable answer confirms nothing either.
+ * In a replicated space, a written answer (written, removed, taken, committed, counted) confirms
+ * every state the same store held before it, in any key or partition, as replication keeps order.
+ * A refusing answer writes nothing and confirms nothing; an unavailable answer confirms nothing.
  */
 export interface Store {
 	get(key: Key): Promise<Read>;
-	/** Entries of keys in one partition, read at one instant. Leaving: no caller reads it, so a store need not offer it. */
-	getMany?(
-		keys: readonly Key[],
-	): Promise<{ readonly entries: readonly (Entry | null)[]; readonly now: number }>;
 	put(key: Key, value: Json, options: WriteOptions): Promise<Written | Late | Reused>;
 	putIfAbsent(
 		key: Key,
@@ -133,10 +122,7 @@ export interface Store {
 		| { readonly kind: "conflict" }
 		| { readonly kind: "missing" }
 	>;
-	/**
-	 * Removes and returns the entry; of racing takers exactly one gets it. A resend with the same
-	 * mark gets the first answer, so a taker whose reply was lost can still learn it took.
-	 */
+	/** Removes and returns the entry, to exactly one of racing takers; a resend under its mark learns it took. */
 	take(
 		key: Key,
 		options?: Omit<WriteOptions, "expiry">,
@@ -165,23 +151,9 @@ export interface Store {
 		| Late
 		| Reused
 	>;
-	/**
-	 * Scores are expiry times on the store clock; a member keeps its highest score. Over the cap
-	 * the lowest scores go first, and among equal scores the member first in code point order.
-	 */
-	/** Leaving with `setMembers` and `setRemove`: no caller keeps a set, so a store need not offer them. */
-	setAdd?(
-		key: Key,
-		member: string,
-		score: number,
-		options: { readonly cap: number; readonly expiry: Expiry },
-	): Promise<{ readonly evicted: readonly string[] }>;
-	/** Live members in code point order. */
-	setMembers?(key: Key): Promise<{ readonly members: readonly Member[]; readonly now: number }>;
-	setRemove?(key: Key, member: string): Promise<void>;
 	/** The store clock's present time, the one every expiry and deadline is judged by. */
 	now(): Promise<number>;
-	/** A page of the space's live value keys (no counter or set) and the cursor on; none when done. */
+	/** A page of the space's live value keys (no counter) and the cursor on; none when done. */
 	// Any key may come twice; one living through the walk comes unless a failover or restart falls in it.
 	scan(
 		space: Space,
@@ -382,11 +354,6 @@ function readWriteOptions(value: unknown): WriteOptions {
 	};
 }
 
-function readSetOptions(value: unknown): { cap: number; expiry: Expiry } {
-	const read = fields("options", value, ["cap", "expiry"]);
-	return { cap: whole("cap", read.cap, 0, 1_000_000), expiry: readExpiry(read.expiry) };
-}
-
 function readWindow(value: unknown): { ms: number; limit: number } {
 	const read = fields("window", value, ["ms", "limit"]);
 	return {
@@ -439,10 +406,6 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 		if (new Set(names).size !== names.length) fail("a batch may write each key once");
 		return checked;
 	};
-	const getMany = inner.getMany?.bind(inner);
-	const setAdd = inner.setAdd?.bind(inner);
-	const setMembers = inner.setMembers?.bind(inner);
-	const setRemove = inner.setRemove?.bind(inner);
 	return {
 		get: async (k) => inner.get(key(k)),
 		put: async (k, v, o) => inner.put(key(k), json(v), readWriteOptions(o)),
@@ -466,18 +429,5 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 			return inner.scan(declaredSpace, cursor === undefined ? undefined : text("cursor", cursor));
 		},
 		now: () => inner.now(),
-		...(getMany && { getMany: async (keys: readonly Key[]) => getMany([...keys].map(key)) }),
-		...(setAdd && {
-			setAdd: async (
-				k: Key,
-				member: string,
-				score: number,
-				o: { readonly cap: number; readonly expiry: Expiry },
-			) => setAdd(key(k), text("member", member), whole("score", score, 0), readSetOptions(o)),
-		}),
-		...(setMembers && { setMembers: async (k: Key) => setMembers(key(k)) }),
-		...(setRemove && {
-			setRemove: async (k: Key, member: string) => setRemove(key(k), text("member", member)),
-		}),
 	};
 }
