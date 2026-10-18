@@ -7,13 +7,13 @@ export const section = z.strictObject({
 		.int()
 		.min(1)
 		.max(65_536)
-		.default(1024)
+		.prefault(1024)
 		.describe("How many shards the list of codes to revoke is spread over."),
 	"voids-per-shard": z
 		.number()
 		.int()
 		.min(1)
 		.max(10_000)
-		.default(1000)
+		.prefault(1000)
 		.describe("How many codes to revoke one shard holds at most."),
 });

@@ -7,7 +7,7 @@ export const section = z.strictObject({
 		.int()
 		.min(1)
 		.max(1000)
-		.default(16)
+		.prefault(16)
 		.describe(
 			"How many first-time intents a client may have waiting for one subject; past it, the one ending first is pushed out.",
 		),
@@ -16,7 +16,7 @@ export const section = z.strictObject({
 		.int()
 		.min(1)
 		.max(10_000)
-		.default(100)
+		.prefault(100)
 		.describe(
 			"How many grants a subject's listing keeps; past it, the one ending first is pushed out.",
 		),
