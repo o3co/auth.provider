@@ -8,7 +8,7 @@ export const name = "federation-grants";
 export const connectionName = z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/);
 /** A scope token (RFC 6749 §3.3). */
 const scope = z.string().regex(/^[\x21\x23-\x5b\x5d-\x7e]+$/);
-const page = urlSetting({ schemes: ["https"] });
+const page = urlSetting({ schemes: ["https"], loopbackHttp: true });
 
 /** A time read in whole seconds, written with its unit, within its bounds. */
 const seconds = (min: number, max: number) =>
@@ -32,12 +32,21 @@ const connection = z.strictObject({
 });
 
 export const section = z.strictObject({
-	/** The page that asks the user, on this deployment's origin. */
-	page: page.optional(),
-	/** Where a browser with no session is sent to log in, then back. */
-	"login-page": page.optional(),
-	/** Where a session that falls short of a requirement is sent once to raise it, then back. */
-	"step-up-page": page.optional(),
+	page: page
+		.optional()
+		.describe(
+			"The page that asks the user, on this deployment's origin: an https URL (http only on a loopback host).",
+		),
+	"login-page": page
+		.optional()
+		.describe(
+			"Where a browser with no session is sent to log in, then back: an https URL (http only on a loopback host).",
+		),
+	"step-up-page": page
+		.optional()
+		.describe(
+			"Where a session that falls short of a requirement is sent once to raise it, then back: an https URL (http only on a loopback host).",
+		),
 	connections: z.record(connectionName, connection).prefault({}),
 	"default-lifetime": seconds(60, 31_536_000)
 		.prefault("30d")
