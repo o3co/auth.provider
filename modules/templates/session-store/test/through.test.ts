@@ -41,7 +41,7 @@ async function boot() {
 		config: {
 			...kernelConfig(),
 			...httpConfig({ "public-origin": "https://as.example" }),
-			...sessionLifecycleConfig({ "lifetime-seconds": 60 }),
+			...sessionLifecycleConfig({ lifetime: "1m" }),
 		},
 		runtime,
 	});
