@@ -72,7 +72,6 @@ describe("when users answers for the subject", () => {
 		const app = await boot({ sessions: sessionsOf({ h: context("s-alice", "users") }, asked) });
 		expect(await app.get(subjectAttributes).of("s-alice", "h")).toEqual({
 			kind: "known",
-			source: "users",
 			vouched: true,
 			attributes: { [userAttribute.name]: "Alice", role: "x" },
 		});
@@ -84,7 +83,6 @@ describe("when users answers for the subject", () => {
 		const app = await boot({ sessions: sessionsOf({ h: context("s-bob", "users") }, asked) });
 		expect(await app.get(subjectAttributes).of("s-bob", "h")).toEqual({
 			kind: "known",
-			source: "users",
 			vouched: true,
 			attributes: {},
 		});
@@ -100,19 +98,15 @@ describe("when users cannot look the subject up", () => {
 			registered: false,
 		});
 
-	it("answers the session's login attributes under the source it kept, by users' names", async () => {
+	it("answers the session's login attributes by users' names, vouched by users' source alone", async () => {
 		const app = await unanswerable({
 			u: context("s-alice", "users"),
 			f: context("s-alice", loginSource.upstream("corp")),
 		});
 		const read = app.get(subjectAttributes);
-		expect(await read.of("s-alice", "u")).toEqual({
-			kind: "known",
-			source: "session:users",
-			vouched: true,
-			attributes: { email: "alice@login.example", email_verified: true },
-		});
-		expect(await read.of("s-alice", "f")).toMatchObject({ source: "session:upstream:corp" });
+		const attributes = { email: "alice@login.example", email_verified: true };
+		expect(await read.of("s-alice", "u")).toEqual({ kind: "known", vouched: true, attributes });
+		expect(await read.of("s-alice", "f")).toEqual({ kind: "known", vouched: false, attributes });
 	});
 
 	it("vouches for a login only under users' source, never an upstream's or another's", async () => {

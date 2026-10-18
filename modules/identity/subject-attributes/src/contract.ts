@@ -1,17 +1,12 @@
 import { contract } from "@mod/kernel";
 import { loginSource, type SourcedAttributes } from "@mod/login-attributes";
 
-/** Where an answer's attributes came from: `users`, or a session's login under the source it kept. */
-export type AttributesSource = "users" | `session:${string}`;
-
 export type AttributesAnswer =
 	/** By users' names (`userAttribute`), each value as its source holds it. */
 	| {
 			readonly kind: "known";
-			/** Where they came from; read `vouched` for whether users stands behind them. */
-			readonly source?: AttributesSource;
 			/** Whether users stands behind these attributes: false, nobody vouches for them. */
-			readonly vouched?: boolean;
+			readonly vouched: boolean;
 			readonly attributes: Readonly<Record<string, unknown>>;
 	  }
 	/** Neither users nor the session can say. */
