@@ -55,6 +55,6 @@ const testSecret = Buffer.from(Array.from({ length: 32 }, (_, i) => i + 1)).toSt
 /** The section for tests: nonces never asked, with a secret ready for a test that asks them. */
 export function dpopConfig(settings: Record<string, unknown> = {}) {
 	return {
-		dpop: { nonce: { required: "never", "ttl-seconds": 300, secret: testSecret }, ...settings },
+		dpop: { nonce: { required: "never", ttl: "5m", secret: testSecret }, ...settings },
 	};
 }
