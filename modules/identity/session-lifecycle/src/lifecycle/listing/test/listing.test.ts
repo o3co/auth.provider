@@ -7,10 +7,10 @@ import { participants, type Session, sessions } from "@mod/session";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { expect, it } from "vitest";
-import { memoryStores } from "../../../test/stores.ts";
-import sessionLifecycle from "../../module.ts";
-import type { StoredSession } from "../../store.ts";
-import { sessionLifecycleConfig } from "../../testing.ts";
+import { memoryStores } from "../../../../test/stores.ts";
+import sessionLifecycle from "../../../module.ts";
+import type { StoredSession } from "../../../store.ts";
+import { sessionLifecycleConfig } from "../../../testing.ts";
 
 let now = 1_800_000_000_000;
 const facts = () => ({ subject: "alice", amr: ["pwd"], authenticatedAt: now });
@@ -136,4 +136,22 @@ it("does not put back a pushed-out session already closed", async () => {
 	stores.down.listed.failNext("remove");
 	expect((await s.close(first)).kind).toBe("closed");
 	expect(await pushOutRefused(booted, first)).toBeUndefined();
+});
+
+it("ends a pushed-out session it cannot put back, so none stays open and unlisted", async () => {
+	const booted = await boot();
+	const { s, stores, login, withCookie } = booted;
+	const cookie = await login();
+	const first = ((await s.enter(withCookie(cookie))) as Session).id;
+	stores.down.sessions.failNext("read");
+	expect(await pushOutRefused(booted, first)).toBeUndefined();
+	expect(await s.enter(withCookie(cookie))).toBeUndefined();
+});
+
+it("puts a pushed-out session back though the opened one cannot be taken off", async () => {
+	const booted = await boot();
+	const { s, stores, login, withCookie } = booted;
+	const first = ((await s.enter(withCookie(await login()))) as Session).id;
+	stores.down.listed.failNext("remove");
+	expect(await pushOutRefused(booted, first)).toBeDefined();
 });

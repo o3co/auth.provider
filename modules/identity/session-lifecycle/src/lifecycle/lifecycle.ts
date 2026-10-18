@@ -22,6 +22,7 @@ import type {
 	SubjectSessions,
 } from "../store.ts";
 import { authenticatedAtOf } from "./authenticated.ts";
+import { listingOver } from "./listing/listing.ts";
 import { fromStored, type SessionRecord, toStored } from "./record.ts";
 
 export { fromStored, type SessionRecord, toStored };
@@ -99,17 +100,14 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 			return was?.state === "closing" ? { value: toStored({ ...was, retryAt }) } : undefined;
 		});
 	};
-	/** A closed session left listed costs only a later close, so a failed removal is logged and passed. */
-	const unlist = async (subject: string, handle: string) => {
-		try {
-			await listed.remove(subject, handle);
-		} catch (error) {
-			log.warn("session-lifecycle.listing_failed", {
-				step: "remove",
-				kind: error instanceof Error ? error.name : typeof error,
-			});
-		}
-	};
+	const listing = listingOver({
+		listed,
+		closings,
+		log,
+		leftOf: (handle) => leftOf(handle),
+		endOpen: (handle) => endOpen(handle),
+		close: (handle) => close(handle),
+	});
 	const random = () => Buffer.from(parts.random.bytes(32)).toString("base64url");
 	const secretIn = (request: HttpRequest) => {
 		const value = jar.read(request, "session");
@@ -189,7 +187,7 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 			}
 			await advance(handle, "closed");
 		}
-		if ("subject" in record) await unlist(record.subject, handle);
+		if ("subject" in record) await listing.unlist(record.subject, handle);
 		await closings.done(handle);
 		return { kind: "closed", cookies, ...moved };
 	};
@@ -201,25 +199,12 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		if (record.state === "closed") return 0;
 		return record.openedAt + lifetimeMs - clock.now();
 	};
-	/** Closes what a login's listing pushed out, each kept as a closing first, so the sweep finishes one that fails here; if the closings refuse, the listing is put back (each for what it has left, so it still ends first) and the login fails. */
-	const closePushedOut = async (subject: string, opening: string, handles: readonly string[]) => {
-		log.warn("session-lifecycle.listing_pushed_out", { count: handles.length });
-		try {
-			for (const handle of handles) await closings.add(handle);
-		} catch (error) {
-			await listed.remove(subject, opening);
-			for (const handle of handles) {
-				const left = await leftOf(handle);
-				if (left > 0) await listed.add(subject, handle, left);
-			}
-			throw error;
-		}
-		for (const handle of handles) {
-			try {
-				await close(handle);
-			} catch {}
-		}
-	};
+	/** Ends an open record there, calling no participants. */
+	const endOpen = (handle: string) =>
+		kept.update(handle, (stored) => {
+			const was = fromStored(stored);
+			return was?.state === "open" ? closedOf(was) : undefined;
+		});
 	const closeIn: Sessions["closeRequest"] = async (request) => {
 		const handle = await handleIn(request);
 		const closed = handle ? await close(handle) : { kind: "closed" as const };
@@ -250,10 +235,7 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		if (found?.state !== "open") return undefined;
 		// The lifetime in force decides; a session it ended is closed now, so a longer one never brings it back.
 		if (endedAt(found, clock.now())) {
-			await kept.update(handle, (stored) => {
-				const was = fromStored(stored);
-				return was?.state === "open" ? closedOf(was) : undefined;
-			});
+			await endOpen(handle);
 			return undefined;
 		}
 		const revoked = (await revocation.check(found.subject, found.openedAt)) === "revoked";
@@ -290,7 +272,7 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		await created(kept.save(handle, toStored(record), lifetimeMs));
 		// Listed before its cookie is made, so a revocation finds every session anyone can enter.
 		const { pushedOut } = await listed.add(facts.subject, handle, lifetimeMs);
-		if (pushedOut.length > 0) await closePushedOut(facts.subject, handle, pushedOut);
+		if (pushedOut.length > 0) await listing.closePushedOut(facts.subject, handle, pushedOut);
 		const { cookie } = await issueSecret(handle, lifetimeMs);
 		return { session: sessionOf(handle, context), cookies: [cookie] };
 	};
