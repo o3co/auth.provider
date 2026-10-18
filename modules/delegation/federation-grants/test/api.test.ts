@@ -195,6 +195,15 @@ describe("the client routes", () => {
 		}
 	});
 
+	it("erases the credentials of a grant past the longest life allowed now, after a restart that shortened it", async () => {
+		const before = await harness();
+		const { id } = await before.connected();
+		const after = await harness({ stores: before.stores, settings: { "max-lifetime": "1m" } });
+		after.advance(60_000);
+		await after.grantCall(id, "status");
+		expect(after.stores.peek(id)).not.toHaveProperty("sealed");
+	});
+
 	it("renews a grant through a new intent, keeping it usable until the renewal activates", async () => {
 		const h = await harness();
 		const { id } = await h.connected();
