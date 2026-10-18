@@ -26,6 +26,7 @@
 ## Invariants
 - A session's state only moves forward. A host that cannot read a record (one a newer host wrote, during a rolling upgrade) lets nobody in on it and answers a login or close over its cookie Unavailable; the cookie stays.
 - A login's authentication time is kept (a raise included), the opening time when it gives a later one; one it reports unknown is answered as `authenticatedAtUnknown` and never counts as fresh. The lifetime, the cookie and the subject's revocation boundary count from the opening instead.
+- A session's subject is the one its login gave while its record lives (a raise included), and a handle names one session only, so a caller that kept a handle with its subject never finds them disagree.
 - A login's attributes are kept as `login-attributes` keeps them, a frozen copy taken at login, kept unchanged (a raise included) until the session closes.
 
 ## Depends on
