@@ -69,7 +69,7 @@ export const cookieIndexNeeds = {
 	namesFromSecret: true,
 } as const;
 
-/** A revocation closes what the listing names, so it reads only confirmed members: a stale read would skip a session just opened. */
+/** A revocation closes what the listing names, so its reads must answer only from writes a failover keeps: a stale read would skip a session just opened. */
 export const subjectSessionsNeeds = {
 	neverEvicted: true,
 	survivesCrash: true,
