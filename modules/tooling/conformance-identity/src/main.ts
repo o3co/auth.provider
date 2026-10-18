@@ -7,6 +7,8 @@ export {
 	identityArea,
 	type LedgerScene,
 	ledgerBesideUsers,
+	ledgerRevocation,
+	type RevocationScene,
 	type UpstreamScene,
 	type UserScene,
 } from "./area.ts";

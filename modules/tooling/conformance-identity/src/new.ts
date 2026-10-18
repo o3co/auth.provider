@@ -41,10 +41,18 @@ const setUp = (part: IdentityPart, _: unknown, modules: readonly string[]): NewP
 		"@mod/audit",
 		"@mod/logout",
 		...(part.ledger ? ["@mod/outbound", "@mod/users-http"] : []),
+		...(part.revocations ? ["@mod/subject-revocation-http"] : []),
 	],
 	store: "volatile",
-	// A scene's own ledger is the whole users-http section: no trial value joins it.
-	...(part.ledger ? { whole: ["users-http"] } : {}),
+	// A scene's own ledger is the whole of its sections: no trial value joins them.
+	...(part.ledger || part.revocations
+		? {
+				whole: [
+					...(part.ledger ? ["users-http"] : []),
+					...(part.revocations ? ["subject-revocation-http"] : []),
+				],
+			}
+		: {}),
 	// Mail, where users brings it along, sends nothing in a scene.
 	...(modules.includes("@mod/mail") ? { fallback: { mail: { "accept-unsent": true } } } : {}),
 	config: {
@@ -82,6 +90,14 @@ const setUp = (part: IdentityPart, _: unknown, modules: readonly string[]): NewP
 				: {}),
 		},
 		...(part.ledger ? ledgerConfig(part.ledger) : {}),
+		...(part.revocations
+			? {
+					"subject-revocation-http": {
+						credential: part.revocations.credential,
+						sources: part.revocations.sources,
+					},
+				}
+			: {}),
 	},
 });
 

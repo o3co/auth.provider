@@ -5,6 +5,7 @@ import {
 	identityArea,
 	type LedgerScene,
 	ledgerBesideUsers,
+	ledgerRevocation,
 	type UpstreamScene,
 } from "./area.ts";
 
@@ -58,9 +59,9 @@ onLegacy(identityArea, {
 		settings: loginSettings(part) + corsSettings(part),
 		files: { "users.yaml": usersYaml(part) },
 	}),
-	// The legacy build cannot be set up so that its login fails with its store, and takes either
-	// its users file or a ledger over HTTP, never both.
-	cannot: ["store-fault:login", ledgerBesideUsers],
+	// The legacy build cannot be set up so that its login fails with its store, takes either
+	// its users file or a ledger over HTTP, never both, and has no route a ledger revokes through.
+	cannot: ["store-fault:login", ledgerBesideUsers, ledgerRevocation],
 	// Ours matches a bcrypt password on all its bytes, answers a login that repeats a field as a
 	// malformed request (400), and counts failed logins per identifier too, from any sender.
 	differs: ["bcrypt-all-bytes", "repeated-field-login-400", "login-attempts-per-account"],

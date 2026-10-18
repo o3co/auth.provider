@@ -30,6 +30,12 @@ export interface LedgerScene {
 	readonly timeoutMs?: number;
 }
 
+/** A ledger that revokes subjects over HTTP, from its sources with its credential. */
+export interface RevocationScene {
+	readonly credential: string;
+	readonly sources: readonly string[];
+}
+
 /** People who log in with a password at a public origin, and what a login may do. */
 export interface IdentityPart {
 	/** The origin browsers reach the deployment at, behind its proxy. */
@@ -49,6 +55,7 @@ export interface IdentityPart {
 		/** The longest an identifier waits between attempts. */
 		readonly accountMaxWaitSeconds?: number;
 	};
+	readonly revocations?: RevocationScene;
 	/** The https origins whose pages may read the routes that take cross-origin requests. */
 	readonly corsOrigins?: readonly string[];
 }
@@ -59,3 +66,5 @@ export const identityArea = area<IdentityPart>("identity");
 export const httpLedger = "identity:http-ledger";
 /** The need for such a ledger set beside users in the settings. */
 export const ledgerBesideUsers = "identity:ledger-beside-users";
+/** The need for a ledger that revokes subjects over HTTP. */
+export const ledgerRevocation = "identity:ledger-revocation";
