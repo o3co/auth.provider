@@ -235,12 +235,12 @@ describe("idp-apple", () => {
 		expect(pathsOf({ "private-key": signing["private-key"] })).toEqual([["team-id"], ["key-id"]]);
 	});
 
-	it("takes a signed secret's life of 60 to 15777000 whole seconds", () => {
-		const lifeOf = (seconds: number) =>
-			settings.safeParse({ "client-id": "com.example.web", ...signing, "secret-seconds": seconds })
+	it("takes a signed secret's life of 1m to 15777000s, whole seconds written with their unit", () => {
+		const lifeOf = (life: unknown) =>
+			settings.safeParse({ "client-id": "com.example.web", ...signing, "secret-lifetime": life })
 				.success;
-		expect([60, 15_777_000].map(lifeOf)).toEqual([true, true]);
-		expect([59, 15_777_001, 60.5].map(lifeOf)).toEqual([false, false, false]);
+		expect(["60s", "1m", "15777000s"].map(lifeOf)).toEqual([true, true, true]);
+		expect(["59s", "15777001s", "60.5s", 300, "300"].map(lifeOf)).toEqual(Array(5).fill(false));
 	});
 
 	it("asks only for name and email as scopes", () => {
@@ -261,13 +261,18 @@ describe("idp-apple", () => {
 		]);
 	});
 
-	it("takes a clock skew of whole seconds from 0 to 300, 30 when not given", () => {
+	it("takes a clock skew of whole seconds from 0s to 5m, written with its unit, 30s when not given", () => {
 		const both = { "client-id": "com.example.web", "client-secret": "x" };
-		expect(settings.parse(both)["clock-skew-seconds"]).toBe(30);
-		const skewOf = (seconds: number) =>
-			settings.safeParse({ ...both, "clock-skew-seconds": seconds }).success;
-		expect([0, 300].map(skewOf)).toEqual([true, true]);
-		expect([301, -1, 1.5].map(skewOf)).toEqual([false, false, false]);
+		expect(settings.parse(both)["clock-skew"]).toBe(30);
+		const skewOf = (skew: unknown) => settings.safeParse({ ...both, "clock-skew": skew }).success;
+		expect(["0s", "300s", "5m"].map(skewOf)).toEqual([true, true, true]);
+		expect(["301s", "-1s", "1.5s", 30, "30"].map(skewOf)).toEqual(Array(5).fill(false));
+	});
+
+	it("gives each default as an operator writes it, read through the key's own schema", () => {
+		const kindOf = (key: { _zod: { def: { type: string } } }) => key._zod.def.type;
+		const byDefault = Object.entries(settings.shape).filter(([, key]) => kindOf(key) === "default");
+		expect(byDefault.map(([name]) => name)).toEqual([]);
 	});
 
 	it("refuses at boot a client ID or fixed secret that is empty or not well-formed text", () => {
@@ -442,7 +447,7 @@ describe("idp-apple", () => {
 			expect(await taken(ahead), JSON.stringify(ahead)).toMatchObject({ subject: "001234.abcd" });
 		}
 		expect((await open()).upstream.clockSkewMs).toBe(30_000);
-		const narrow = await open(undefined, { "client-secret": "x", "clock-skew-seconds": 5 });
+		const narrow = await open(undefined, { "client-secret": "x", "clock-skew": "5s" });
 		expect(narrow.upstream.clockSkewMs).toBe(5_000);
 	});
 

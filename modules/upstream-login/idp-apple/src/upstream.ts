@@ -36,7 +36,7 @@ function secretFrom(s: Settings, clock: Clock): () => Promise<string> {
 	if (!pem.includes("-----BEGIN PRIVATE KEY-----") || curve !== "prime256v1") {
 		throw new Error("the private key is no P-256 key in PKCS8");
 	}
-	const lifetimeMs = s["secret-seconds"] * 1000;
+	const lifetimeMs = s["secret-lifetime"] * 1000;
 	const held = secretOf(
 		{ teamId, keyId, clientId: s["client-id"], key, lifetimeMs, audience: issuer },
 		clock,
@@ -57,7 +57,7 @@ export function opened(
 	}
 	const secret = secretFrom(s, at.clock);
 	const client = s["client-id"];
-	const skewMs = s["clock-skew-seconds"] * 1000;
+	const skewMs = s["clock-skew"] * 1000;
 	const hostOf = (url: string) => new URL(url).hostname;
 	const idTokenOf = idTokenReaderOf(
 		jwt,

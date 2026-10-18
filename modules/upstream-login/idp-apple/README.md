@@ -14,7 +14,7 @@
 
 ## Offers
 - Composition definition only (the IdP type `apple`, answering by `form_post`)
-- IdP settings (under `federation`'s `idps.<name>`): `client-id` (the Services ID), `client-secret`, `team-id`, `key-id`, `private-key` (PKCS8 PEM; all five well-formed text), `secret-seconds` (60–15777000, default 300), `scopes` (of `name` and `email`; default `email`), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (default Apple's own), `clock-skew-seconds` (0–300, default 30), `end-session-endpoint` (optional)
+- IdP settings (under `federation`'s `idps.<name>`): `client-id` (the Services ID), `client-secret`, `team-id`, `key-id`, `private-key` (PKCS8 PEM; all five well-formed text), `secret-lifetime` (1m–15777000s, default `5m`), `scopes` (of `name` and `email`; default `email`), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (default Apple's own), `clock-skew` (0s–5m, default `30s`), `end-session-endpoint` (optional)
 
 ## Invariants
 - Boot is refused for a callback that is not https or is on loopback (`localhost`, 127.0.0.0/8, `[::1]`).
@@ -32,8 +32,8 @@
 - The client's secret is never made for the authorization request.
 - Boot is refused, at its key, where `outbound`'s destination policy refuses `token-endpoint` or `jwks-uri` with its host alone.
 - Apple's own default endpoints are put to that policy too.
-- A signed secret lives `secret-seconds`, on `kernel`'s clock.
-- The id_token is checked with RS256 only, Apple's issuer exactly, the client among its audiences, and `clock-skew-seconds`.
+- A signed secret lives `secret-lifetime`, on `kernel`'s clock.
+- The id_token is checked with RS256 only, Apple's issuer exactly, the client among its audiences, and `clock-skew`.
 - The id_token's `azp`, which several audiences need, must be the client.
 - The id_token must also carry the login's nonce, a non-empty `sub` and a numeric `iat`.
 - Any reason `external-jwt` gives refuses the login.

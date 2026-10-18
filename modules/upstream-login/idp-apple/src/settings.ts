@@ -1,3 +1,4 @@
+import { setting } from "@mod/kernel";
 import type { OutboundPolicy } from "@mod/outbound";
 import {
 	clientSetting,
@@ -18,15 +19,18 @@ const section = clientSetting
 		"key-id": credentialSetting.optional(),
 		/** The team's P-256 key, as PKCS8 PEM. */
 		"private-key": credentialSetting.optional(),
-		/** How long a signed secret lives. */
-		"secret-seconds": z.number().int().min(60).max(15_777_000).default(300),
-		scopes: z.array(z.enum(["name", "email"])).default(["email"]),
+		/** How long a signed secret lives: 1m to 15777000s (about half a year). */
+		"secret-lifetime": setting
+			.duration("s")
+			.pipe(z.number().int().min(60).max(15_777_000))
+			.prefault("5m"),
+		scopes: z.array(z.enum(["name", "email"])).prefault(["email"]),
 		/** Apple's own unless the operator names others. */
-		"authorization-endpoint": endpoint.default("https://appleid.apple.com/auth/authorize"),
-		"token-endpoint": endpoint.default("https://appleid.apple.com/auth/token"),
-		"jwks-uri": endpoint.default("https://appleid.apple.com/auth/keys"),
-		/** How far Apple's clock may be from ours, for its id_token's times. */
-		"clock-skew-seconds": z.number().int().min(0).max(300).default(30),
+		"authorization-endpoint": endpoint.prefault("https://appleid.apple.com/auth/authorize"),
+		"token-endpoint": endpoint.prefault("https://appleid.apple.com/auth/token"),
+		"jwks-uri": endpoint.prefault("https://appleid.apple.com/auth/keys"),
+		/** How far Apple's clock may be from ours, for its id_token's times: 0s to 5m. */
+		"clock-skew": setting.duration("s").pipe(z.number().int().min(0).max(300)).prefault("30s"),
 		/** Where to end the upstream session; Apple has none of its own. */
 		"end-session-endpoint": endpoint.optional(),
 	})
