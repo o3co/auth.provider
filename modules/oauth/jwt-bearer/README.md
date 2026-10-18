@@ -8,11 +8,11 @@
 
 ## Offers
 - Composition definition only (grant, taking its audience from the request)
-- Operator section: `issuers` (list of `issuer` and either `keys` (`kid`, `alg`, `public-key` (SPKI PEM; a private key refuses boot)) or `jwks-uri` (where its key set is, at https on the issuer's host)), `max-assertion-lifetime-seconds` (default 3600), `clock-skew-seconds` (default 30)
+- Operator section: `issuers` (list of `issuer` and either `keys` (`kid`, `alg`, `public-key` (SPKI PEM; a private key refuses boot)) or `jwks-uri` (where its key set is, at https on the issuer's host)), `max-assertion-lifetime` (`1s` to `1d`, default `1h`), `clock-skew` (`0s` to `5m`, default `30s`), each written with its unit in whole seconds
 
 ## Invariants
 - Issued tokens do not outlive the assertion's expiry.
-- The assertion is checked by `external-jwt` with the keys of the trusted issuer it names, under this section's policy: the algorithms of that issuer's keys (any the grant takes, for a key set), `clock-skew-seconds` as the allowance, `max-assertion-lifetime-seconds` as the longest lifetime. `aud` is `issuer`'s URL or the token endpoint's absolute URL as `token-endpoint` tells it; without one, the boot is refused. `sub` is a non-empty string.
+- The assertion is checked by `external-jwt` with the keys of the trusted issuer it names, under this section's policy: the algorithms of that issuer's keys (any the grant takes, for a key set), `clock-skew` as the allowance, `max-assertion-lifetime` as the longest lifetime. `aud` is `issuer`'s URL or the token endpoint's absolute URL as `token-endpoint` tells it; without one, the boot is refused. `sub` is a non-empty string.
 - A key set is fetched only at https from its issuer's host; a `jwks-uri` not at https or on another host, or with an issuer that is no URL, refuses the boot. While no key set can be had, the grant is unavailable.
 - A refusal's reason is told in this grant's own words.
 - Usable only when the client explicitly allows it.

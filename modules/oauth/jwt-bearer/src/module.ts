@@ -2,7 +2,7 @@ import { clientAllowance } from "@mod/client-allowance";
 import { externalJwt } from "@mod/external-jwt";
 import { grants } from "@mod/grants";
 import { issuer } from "@mod/issuer";
-import { defineModule } from "@mod/kernel";
+import { defineModule, setting } from "@mod/kernel";
 import { publicPem } from "@mod/keys";
 import { withinHosts } from "@mod/outbound";
 import { type Space, spaces, store } from "@mod/store";
@@ -49,24 +49,22 @@ const section = z.strictObject({
 					),
 			]),
 		)
-		.default([])
+		.prefault([])
 		.describe(
 			"The trusted issuers: each with its public keys (kid, alg, SPKI PEM), or its key set's URL at https on its host.",
 		),
-	"max-assertion-lifetime-seconds": z
-		.number()
-		.int()
-		.min(1)
-		.max(86_400)
-		.default(3600)
-		.describe("The longest lifetime an assertion may claim, in seconds."),
-	"clock-skew-seconds": z
-		.number()
-		.int()
-		.min(0)
-		.max(300)
-		.default(30)
-		.describe("How far an assertion's times may be off this host's clock, in seconds."),
+	"max-assertion-lifetime": setting
+		.duration("s")
+		.pipe(z.number().int().min(1).max(86_400))
+		.prefault("1h")
+		.describe("The longest lifetime an assertion may claim, from `1s` to `1d` in whole seconds."),
+	"clock-skew": setting
+		.duration("s")
+		.pipe(z.number().int().min(0).max(300))
+		.prefault("30s")
+		.describe(
+			"How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds.",
+		),
 });
 
 const used: Space = {
@@ -88,7 +86,7 @@ export default defineModule({ name: "jwt-bearer", section }, (m) => [
 		const saved = await c.get(store);
 		const boundaries = await c.get(revocations);
 		const jwt = await c.get(externalJwt);
-		const skewMs = c.section["clock-skew-seconds"] * 1000;
+		const skewMs = c.section["clock-skew"] * 1000;
 		const trusted = new Map(
 			c.section.issuers.map((i) => [
 				i.issuer,
@@ -105,7 +103,7 @@ export default defineModule({ name: "jwt-bearer", section }, (m) => [
 					{
 						algorithms: "keys" in i ? [...new Set(i.keys.map((k) => k.alg))] : algorithms,
 						skewMs,
-						maxLifetimeMs: c.section["max-assertion-lifetime-seconds"] * 1000,
+						maxLifetimeMs: c.section["max-assertion-lifetime"] * 1000,
 						expect: { aud: [named, url] },
 					},
 				),

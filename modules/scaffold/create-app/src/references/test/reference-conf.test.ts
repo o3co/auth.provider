@@ -86,7 +86,6 @@ it("tells a key that reads time or size with its unit asked for from one that ta
 const unitsLater = new Set([
 	"code-grant",
 	"federation-grants",
-	"jwt-bearer",
 	"kernel",
 	"mail-smtp",
 	"mfa",
@@ -113,7 +112,6 @@ const prefaultLater = new Set([
 	"code-grant-store",
 	"federation-grants",
 	"federation-grants-store",
-	"jwt-bearer",
 	"kernel",
 	"mail-smtp",
 	"mfa",
