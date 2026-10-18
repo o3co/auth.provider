@@ -184,6 +184,16 @@ describe("upstream-client", () => {
 		expect(refreshAnswerOf(answer(400, { error: "invalid_grant" }), [], "idp")).toEqual({
 			kind: "invalid_grant",
 		});
+		for (const error of [
+			"interaction_required",
+			"login_required",
+			"consent_required",
+			"account_selection_required",
+		]) {
+			expect(refreshAnswerOf(answer(400, { error }), [], "idp"), error).toEqual({
+				kind: "interaction_required",
+			});
+		}
 		const limited = (after?: string) =>
 			refreshAnswerOf(
 				answer(429, {}, after === undefined ? [] : [["retry-after", after]]),
