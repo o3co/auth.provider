@@ -1,7 +1,14 @@
 import { defineModule } from "@mod/kernel";
 import { unavailableSwitch } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
-import { type StoredTransaction, type TransactionStore, transactionStore } from "../src/store.ts";
+import {
+	type StoredTransaction,
+	type TransactionListings,
+	type TransactionStore,
+	transactionListings,
+	transactionStore,
+	transactionsPerHolder,
+} from "../src/store.ts";
 
 /** mfa-flows' transaction store on the records stand-in, its lifetimes on the given clock, behind a switch. */
 export function memoryTransactions(now: () => number) {
@@ -22,8 +29,11 @@ export function memoryTransactions(now: () => number) {
 			return stand.records.change(key, change);
 		},
 	});
+	const listingsDown = unavailableSwitch<TransactionListings>("transaction listings");
+	const listings = listingsDown.wrap(stand.keyedSets(transactionsPerHolder));
 	const module = defineModule({ name: "transaction-store" }, (m) => [
 		m.provide(transactionStore).by(() => transactions),
+		m.provide(transactionListings).by(() => listings),
 	]);
 	/** Runs `run` before the next update, as another request would. */
 	const beforeNextUpdate = (run: () => Promise<void>) => {
@@ -32,8 +42,10 @@ export function memoryTransactions(now: () => number) {
 	return {
 		module,
 		transactions,
+		listings,
 		beforeNextUpdate,
 		down,
+		listingsDown,
 		/** How many transactions were saved. */
 		saves,
 		peek: stand.peek,

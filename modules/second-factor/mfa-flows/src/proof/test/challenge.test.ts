@@ -4,6 +4,7 @@ import type { Cookies } from "@mod/cookies";
 import type { HttpRequest, HttpResponse } from "@mod/http";
 import { testRequest } from "@mod/http/testing";
 import { isUnavailable, Unavailable } from "@mod/kernel";
+import { recordingLog } from "@mod/kernel/testing";
 import type { Challenged, Factors } from "@mod/mfa";
 import { expect, it } from "vitest";
 import { memoryTransactions } from "../../../test/stores.ts";
@@ -31,6 +32,8 @@ async function proved() {
 	const kept = memoryTransactions(() => now);
 	const transactions = transactionsOver({
 		store: kept.transactions,
+		listings: kept.listings,
+		log: recordingLog().log,
 		jar,
 		random: (n) => new Uint8Array(randomBytes(n)),
 		clock: { now: () => now },

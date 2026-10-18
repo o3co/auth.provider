@@ -33,6 +33,7 @@
 - A challenge sent is held sealed by `mfa`, and the next attempt takes it once; asking again voids it.
 - An attempt is used before the proof is judged, and success takes the transaction exactly once. A proof that cannot be judged (unavailable) is `503` and gives its attempt back. When `rate-limit` cannot settle a success once it is taken, the transaction stays spent and the answer is `503` (fail closed). Lockout counts only kinds where guessing works; while locked out, even a correct proof gets `429`.
 - If the subject was revoked after the transaction started, every route naming it answers `401 login_required`, and a POST ends it; a login opening meanwhile is closed. If the store cannot answer, `503`, never a negative verdict.
+- A transaction counts only while its holder's listing still holds it, read once each time it is used (`503` when the listing cannot tell). A holder keeps 5 at most, a constant: one more pushes out the one ending first, so a sixth device's held login can push out the first's. A taken one, or one out of attempts, leaves the listing; a removal that fails is logged and passed.
 - A step-up raises only the session that started it, under a new cookie.
 - A first factor bound after a binding proof passed counts at once: its login goes on, or its session is raised. Bound without one, it counts from the next sign-in.
 - Enrollment from a session enters the session at the credential-changing level (`mfa` contributes the requirement).
