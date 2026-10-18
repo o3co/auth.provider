@@ -50,11 +50,6 @@ it.each([
 	["max-backoff-seconds", "max-backoff"],
 	["budget-window-seconds", "budget-window"],
 	["memory-seconds", "memory"],
-])("reads %s, in seconds, in place of %s, within its bounds, never beside it", (old, key) => {
-	const read = section.parse(at(key, { [old]: 120 }));
-	expect([timeOf(read, key), old in read, old in read.lockout]).toEqual([120, false, false]);
-	// Both refuse even where the new name is written at its default.
-	const atDefault = `${{ ...times, ...lockoutTimes }[key as keyof typeof times]}s`;
-	const refused = [{ [old]: 0.5 }, { [key]: atDefault, [old]: 120 }].map((s) => parses(at(key, s)));
-	expect(refused).toEqual([false, false]);
+])("refuses %s, the name in seconds %s replaced", (old, key) => {
+	expect(parses(at(key, { [old]: 120 }))).toBe(false);
 });

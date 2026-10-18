@@ -374,13 +374,12 @@ describe("the operator's numbers", () => {
 		]);
 	});
 
-	it("refuses to boot with a time under both its names, or naming no unit", async () => {
-		const both = [
-			{ window: "5m", "window-seconds": 300 },
-			{ lockout: { backoff: "15m", "backoff-seconds": 900 } },
-		];
-		for (const settings of [...both, { window: 300 as unknown as string }]) {
-			await expect(serve(settings), JSON.stringify(settings)).rejects.toBeInstanceOf(BootRefused);
+	it("refuses to boot with a time under its name in seconds, or naming no unit", async () => {
+		const before = [{ "window-seconds": 300 }, { lockout: { "backoff-seconds": 900 } }];
+		for (const settings of [...before, { window: 300 as unknown as string }]) {
+			await expect(serve(settings as object), JSON.stringify(settings)).rejects.toBeInstanceOf(
+				BootRefused,
+			);
 		}
 	});
 

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
-import type { written } from "./section.ts";
+import type { section } from "./section.ts";
 import type { StoredTransaction, TransactionStore } from "./store.ts";
 
-export type FlowSettings = z.input<typeof written>;
+export type FlowSettings = z.input<typeof section>;
 
 export function flowsConfig(settings: Partial<FlowSettings> = {}) {
 	return { "mfa-flows": { ...settings } };

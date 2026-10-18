@@ -25,7 +25,7 @@ import { type Revocations, revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach } from "vitest";
 import flowsModule from "../src/module.ts";
-import { written } from "../src/section.ts";
+import { section } from "../src/section.ts";
 import { type FlowSettings, flowsConfig } from "../src/testing.ts";
 import { memoryTransactions } from "./stores.ts";
 
@@ -154,7 +154,7 @@ interface Call {
 
 /** Settings for both sections; each goes to the module that reads it. */
 type Settings = Partial<MfaSettings> & Partial<FlowSettings>;
-const flowKeys = Object.keys(written.shape);
+const flowKeys = Object.keys(section.shape);
 
 export async function serve(settings: Settings = {}, extra: Module[] = []) {
 	const pick = (own: boolean) =>

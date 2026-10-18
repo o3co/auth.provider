@@ -359,12 +359,6 @@ From `@mod/mfa-flows`.
 | `mfa-flows.lockout.budget-window` | string | `7d` |  |  |  | The window `budget` is counted over, in whole seconds, such as `7d`. |
 | `mfa-flows.lockout.hard-limit` | integer (-9007199254740991–9007199254740991) | `100` |  |  |  |  |
 | `mfa-flows.lockout.memory` | string | `1d` |  |  |  | How long a run of failures is remembered without one, in whole seconds, such as `1d`. |
-| `mfa-flows.lockout.backoff-seconds` | integer (-9007199254740991–9007199254740991) |  |  |  |  | Seconds, read in place of `backoff`, which replaces it; giving both refuses boot. |
-| `mfa-flows.lockout.max-backoff-seconds` | integer (-9007199254740991–9007199254740991) |  |  |  |  | Seconds, read in place of `max-backoff`, which replaces it; giving both refuses boot. |
-| `mfa-flows.lockout.budget-window-seconds` | integer (-9007199254740991–9007199254740991) |  |  |  |  | Seconds, read in place of `budget-window`, which replaces it; giving both refuses boot. |
-| `mfa-flows.lockout.memory-seconds` | integer (-9007199254740991–9007199254740991) |  |  |  |  | Seconds, read in place of `memory`, which replaces it; giving both refuses boot. |
-| `mfa-flows.transaction-seconds` | integer (60–1800) |  |  |  |  | Seconds, read in place of `transaction-lifetime`, which replaces it; giving both refuses boot. |
-| `mfa-flows.window-seconds` | integer (1–86400) |  |  |  |  | Seconds, read in place of `window`, which replaces it; giving both refuses boot. |
 
 ## mfa-webauthn
 
