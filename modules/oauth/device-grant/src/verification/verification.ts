@@ -1,5 +1,5 @@
 import { type Audit, audit, declaredAudit } from "@mod/audit";
-import { type HttpRequest, type HttpResponse, noStore } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import type { BuildContext, Runtime } from "@mod/kernel";
 import { attemptLimit, type RateLimit } from "@mod/rate-limit";
 import { determinedSource } from "@mod/request-source";
@@ -23,12 +23,6 @@ export interface Verifying {
 	readonly settings: Settings;
 	readonly tokens: Pick<Tokens, "admits">;
 }
-
-const jsonResponse = (status: number, json: Record<string, unknown>): HttpResponse => ({
-	status,
-	headers: noStore,
-	body: { json },
-});
 
 /**
  * RFC 8628 §3.3, as an interface for the deployment's page: a signed-in user looks up a code, and
@@ -59,7 +53,7 @@ export function verificationWith(v: Verifying) {
 		if (entry.kind === "absent") return oauthError(401, "login_required");
 		if (entry.kind === "short") {
 			const { requirement } = entry;
-			return jsonResponse(403, { error: "step_up_required", requirement, answer: entry.answer });
+			return jsonAnswer(403, { error: "step_up_required", requirement, answer: entry.answer });
 		}
 		const { context } = entry.session;
 		const from = determinedSource(request);
@@ -83,7 +77,7 @@ export function verificationWith(v: Verifying) {
 		const now = v.runtime.clock.now();
 		if (device.expiresAt <= now) return oauthError(410, "expired_token");
 		if (action === "lookup") {
-			return jsonResponse(200, {
+			return jsonAnswer(200, {
 				client_id: device.clientId,
 				scope: device.scope.join(" "),
 				expires_at: new Date(device.expiresAt).toISOString(),
@@ -107,7 +101,7 @@ export function verificationWith(v: Verifying) {
 			if (admitted.kind === "refused") {
 				const { policy, reason } = admitted;
 				audited("device.approval_refused", { client: device.clientId, policy, reason });
-				return jsonResponse(403, {
+				return jsonAnswer(403, {
 					error: "access_denied",
 					error_description: admitted.description,
 				});
@@ -145,7 +139,7 @@ export function verificationWith(v: Verifying) {
 			scope: device.scope.join(" "),
 		});
 		const status = action === "approve" ? "approved" : "denied";
-		return jsonResponse(200, { status, client_id: device.clientId });
+		return jsonAnswer(200, { status, client_id: device.clientId });
 	};
 	return answeringUnavailable(answer, (_request, { what }) => {
 		v.runtime.log.warn("device-grant.unavailable", { what, route: "verification" });
