@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { setting } from "@mod/kernel";
 import { parseString } from "@o3co/ts.hocon";
 import { expect, it, vi } from "vitest";
 import { root } from "../../../test/full-app.ts";
@@ -66,23 +67,19 @@ it("reads every section's prefault through the schema of its key", async () => {
 	expect(unread).toEqual([]);
 });
 
-/** A key of the marker's kind: how the time and size checks tell one. */
-const marker = (requireUnit: boolean): Node => ({
+/** A key that reads time with its unit, but takes a bare number too, in the default unit. */
+const unitOptional: Node = {
 	_zod: { def: { type: "pipe" } },
-	"~standard": {
-		validate: (value) =>
-			value === "1s"
-				? { value: 1 }
-				: requireUnit
-					? { issues: [{ params: { problem: "missing-unit" } }] }
-					: { value: 0.001 },
-	},
-});
+	"~standard": { validate: (value) => ({ value: value === "1s" ? 1 : 0.001 }) },
+};
 
 it("tells a key that reads time or size with its unit asked for from one that takes a bare number", async () => {
-	expect(await readsUnits(marker(true))).toBe(true);
-	expect(await refusesUnitless(marker(true))).toBe(true);
-	expect(await refusesUnitless(marker(false))).toBe(false);
+	const duration = setting.duration("s") as unknown as Node;
+	expect(await readsUnits(duration)).toBe(true);
+	expect(await refusesUnitless(duration)).toBe(true);
+	expect(await readsUnits(setting.size() as unknown as Node)).toBe(true);
+	expect(await readsUnits(unitOptional)).toBe(true);
+	expect(await refusesUnitless(unitOptional)).toBe(false);
 });
 
 /** Sections whose time and size keys still name their unit or take a bare number; a section leaves once its owner moves it, and never comes back. */
@@ -203,7 +200,7 @@ function outsideLater(found: { section: string; key: string }[], later: Set<stri
 }
 
 const unitRule =
-	"a time or a size is read by hocon.duration or hocon.bytes with { requireUnit: true }, under a name that carries no unit";
+	"a time or a size is read by kernel's setting.duration or setting.size, under a name that carries no unit";
 const prefaultRule =
 	"a default is given by .prefault(value), written as an operator writes it, never by .default()";
 
