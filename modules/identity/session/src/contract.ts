@@ -73,7 +73,15 @@ export interface Sessions {
 	>;
 	closeRequest(request: HttpRequest): Promise<CloseOutcome>;
 	close(id: string, request?: HttpRequest): Promise<CloseOutcome>;
+	/**
+	 * Whether an authentication at `at` (epoch ms, `kernel`'s clock) is still recent: the one window
+	 * every recent-authentication check counts in. The checker passes the time of what it judges.
+	 */
+	recent(at: number): boolean;
 }
+
+/** The longest window `recent` may count in. */
+export const longestRecentMs = 3_600_000;
 
 /** What a close answers: closed, or pending while a participant has not finished. */
 export interface CloseOutcome {
