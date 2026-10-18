@@ -590,7 +590,6 @@ From `@mod/token-exchange`.
 |---|---|---|---|---|---|---|
 | `token-exchange.max-actor-depth` | integer (1–10) | `3` |  |  |  | The longest chain of actors an exchanged token may carry. |
 | `token-exchange.max-lifetime` | string |  |  |  |  | The longest lifetime an exchange may ask for, from 1s to 1d, even past `tokens`' lifetime. |
-| `token-exchange.max-lifetime-seconds` | integer (1–86400) |  |  |  |  | Seconds; write `max-lifetime` instead. |
 
 ## tokens
 

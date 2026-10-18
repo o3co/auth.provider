@@ -695,24 +695,19 @@ describe("token-exchange: the lifetime asked", () => {
 		expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: "" }))).toBe(3600);
 	});
 
-	it.each([{ "max-lifetime": "10m" }, { "max-lifetime-seconds": 600 }])(
-		"cuts a longer expires_in to the operator's cap %o, and to the subject token's expiry",
-		async (settings) => {
-			const s = await serve({ settings });
-			const subject = subjectOf((await s.issue()).token);
-			expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: "7200" }))).toBe(600);
-			expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: "9999999999" }))).toBe(
-				600,
-			);
-			expect(lifetimeOf(await s.exchange("app", subject))).toBe(600);
-			const uncapped = await serve();
-			const own = subjectOf((await uncapped.issue()).token);
-			expect(lifetimeOf(await uncapped.exchange("app", { ...own, expires_in: "7200" }))).toBe(3600);
-			const short = await serve({ verifier: outside(() => outsideAnswer) });
-			const outsider = { ...subjectOf("outside", outsideType), expires_in: "600" };
-			expect(lifetimeOf(await short.exchange("app", outsider))).toBe(60);
-		},
-	);
+	it("cuts a longer expires_in to the operator's cap, and to the subject token's expiry", async () => {
+		const s = await serve({ settings: { "max-lifetime": "10m" } });
+		const subject = subjectOf((await s.issue()).token);
+		expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: "7200" }))).toBe(600);
+		expect(lifetimeOf(await s.exchange("app", { ...subject, expires_in: "9999999999" }))).toBe(600);
+		expect(lifetimeOf(await s.exchange("app", subject))).toBe(600);
+		const uncapped = await serve();
+		const own = subjectOf((await uncapped.issue()).token);
+		expect(lifetimeOf(await uncapped.exchange("app", { ...own, expires_in: "7200" }))).toBe(3600);
+		const short = await serve({ verifier: outside(() => outsideAnswer) });
+		const outsider = { ...subjectOf("outside", outsideType), expires_in: "600" };
+		expect(lifetimeOf(await short.exchange("app", outsider))).toBe(60);
+	});
 
 	it("lets a cap above tokens' lifetime extend the lifetime asked, never one left out", async () => {
 		const lasting = outside(() => ({ ...outsideAnswer, expiresAt: now + 86_400_000 }));
@@ -737,14 +732,10 @@ describe("token-exchange: the lifetime asked", () => {
 		expect(said(await s.exchange("app", { ...forged, expires_in: "0" }))).toEqual(malformed);
 	});
 
-	it("refuses a cap that is not a whole number of seconds within a day, or names no unit, at boot", async () => {
+	it("refuses a cap that is not a whole number of seconds within a day, names no unit, or goes by its name in seconds, at boot", async () => {
 		for (const cap of ["0s", "86401s", "1500ms", "600x", 600, "600"]) {
 			await expect(serve({ settings: { "max-lifetime": cap } })).rejects.toThrow(BootRefused);
 		}
-		for (const cap of [0, 86_401, 1.5]) {
-			await expect(serve({ settings: { "max-lifetime-seconds": cap } })).rejects.toThrow(
-				BootRefused,
-			);
-		}
+		await expect(serve({ settings: { "max-lifetime-seconds": 600 } })).rejects.toThrow(BootRefused);
 	});
 });

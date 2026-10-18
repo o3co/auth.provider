@@ -14,7 +14,7 @@
   - A verifier answers the token's subject, issuer, issued-to, audience, scope, expiry, binding, actor chain and `may_act`, or invalid. It throws unavailable when it cannot tell.
   - `issued` names a token this provider issued, so its family and session are found. Only the built-in verifier's `issued`, amr, authentication time and acr are read.
 - Client metadata section `token-exchange`: `others-tokens` (default false), whether the client may present tokens that do not name it.
-- Operator section: `max-actor-depth` (1–10, default 3); `max-lifetime` (1s–1d, optional, written with its unit), the longest lifetime an exchange may ask for, even past `tokens`' lifetime. `max-lifetime-seconds` is read in its place when given.
+- Operator section: `max-actor-depth` (1–10, default 3); `max-lifetime` (1s–1d, optional, written with its unit), the longest lifetime an exchange may ask for, even past `tokens`' lifetime.
 
 ## Invariants
 - Only a confidential client, explicitly allowed the grant. A public client is `401 invalid_client`.

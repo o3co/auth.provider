@@ -95,7 +95,6 @@ const unitsLater = new Set([
 	"rp-logout",
 	"session-lifecycle",
 	"token-endpoint",
-	"token-exchange",
 	"users-http",
 	"webauthn",
 	"webauthn-login",
