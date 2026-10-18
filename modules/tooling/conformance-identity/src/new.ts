@@ -70,13 +70,13 @@ const setUp = (part: IdentityPart, _: unknown, modules: readonly string[]): NewP
 		"login-gates": { "return-targets": part.login?.returnTargets ?? [] },
 		"login-password": {
 			...(part.login?.attempts ? { attempts: part.login.attempts } : {}),
-			...(part.login?.windowSeconds ? { "window-seconds": part.login.windowSeconds } : {}),
+			...(part.login?.windowSeconds ? { window: `${part.login.windowSeconds}s` } : {}),
 			...(part.login?.accountAttempts ? { "account-attempts": part.login.accountAttempts } : {}),
 			...(part.login?.accountWindowSeconds
-				? { "account-window-seconds": part.login.accountWindowSeconds }
+				? { "account-window": `${part.login.accountWindowSeconds}s` }
 				: {}),
 			...(part.login?.accountMaxWaitSeconds
-				? { "account-max-wait-seconds": part.login.accountMaxWaitSeconds }
+				? { "account-max-wait": `${part.login.accountMaxWaitSeconds}s` }
 				: {}),
 		},
 		...(part.ledger ? ledgerConfig(part.ledger) : {}),

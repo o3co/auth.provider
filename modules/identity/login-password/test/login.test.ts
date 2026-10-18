@@ -257,8 +257,13 @@ describe("login-password return targets", () => {
 		}
 	});
 
-	it("refuses to start with limits looser than its bounds", async () => {
-		for (const login of [{ attempts: 101 }, { "window-seconds": 59 }]) {
+	it("refuses to start with limits looser than its bounds, or a window that names no unit", async () => {
+		for (const login of [
+			{ attempts: 101 },
+			{ window: "59s" },
+			{ window: 900 },
+			{ window: "900" },
+		]) {
 			const refused = await serve({ login }).catch((error) => error);
 			expect(refused, JSON.stringify(login)).toBeInstanceOf(BootRefused);
 			expect(refused.refusals.map((r: { where: string }) => r.where).join()).toMatch(
@@ -276,7 +281,7 @@ describe("login-password return targets", () => {
 
 describe("login-password attempts", () => {
 	it("counts every attempt before checking it, successful or not, known user or not", async () => {
-		const { login } = await serve({ login: { attempts: 2, "window-seconds": 60 } });
+		const { login } = await serve({ login: { attempts: 2, window: "1m" } });
 		await login(right, from("198.51.100.1"));
 		await login({ username: "nobody", password: "x" }, from("198.51.100.1"));
 		const limited = await login(right, from("198.51.100.1"));
@@ -288,7 +293,7 @@ describe("login-password attempts", () => {
 	});
 
 	it("counts a malformed request too, after CSRF and before anything else is checked", async () => {
-		const { login } = await serve({ login: { attempts: 2, "window-seconds": 60 } });
+		const { login } = await serve({ login: { attempts: 2, window: "1m" } });
 		const sender = from("198.51.100.3");
 		expect((await login(right, { ...sender, origin: "" })).status).toBe(403);
 		expect((await login("username=a&username=b&password=c", sender)).status).toBe(400);
@@ -299,14 +304,14 @@ describe("login-password attempts", () => {
 	});
 
 	it("counts a request without credentials too", async () => {
-		const { login } = await serve({ login: { attempts: 1, "window-seconds": 60 } });
+		const { login } = await serve({ login: { attempts: 1, window: "1m" } });
 		const sender = from("198.51.100.4");
 		expect((await login({ username: "alice" }, sender)).status).toBe(400);
 		expect((await login(right, sender)).status).toBe(429);
 	});
 
 	it("counts an IPv6 sender by its /64, and a sender with a port as the sender", async () => {
-		const { login } = await serve({ login: { attempts: 1, "window-seconds": 60 } });
+		const { login } = await serve({ login: { attempts: 1, window: "1m" } });
 		await login(right, from("2001:db8::1"));
 		expect((await login(right, from("2001:DB8:0:0::2"))).status).toBe(429);
 		expect((await login(right, from("2001:db8:0:1::1"))).status).toBe(200);
@@ -318,7 +323,7 @@ describe("login-password attempts", () => {
 		const { login } = await serve({
 			trusted: [],
 			origin: "http://as.example",
-			login: { attempts: 1, "window-seconds": 60 },
+			login: { attempts: 1, window: "1m" },
 		});
 		await login(right, from("198.51.100.1"));
 		expect((await login(right, from("198.51.100.2"))).status).toBe(429);
@@ -485,8 +490,8 @@ it("reports the time it verified the password as the login's authentication time
 describe("login-password attempts per account", () => {
 	const budget = {
 		"account-attempts": 2,
-		"account-window-seconds": 3600,
-		"account-max-wait-seconds": 60,
+		"account-window": "1h",
+		"account-max-wait": "1m",
 	};
 	/** A sender of its own for each attempt, so only the attempts per account hold one back. */
 	let sender = 10;
@@ -563,13 +568,15 @@ describe("login-password attempts per account", () => {
 		expect((await login(wrong("alice"), elsewhere())).status).toBe(429);
 	});
 
-	it("refuses to boot on attempts, a window or a longest wait out of bounds", async () => {
+	it("refuses to boot on attempts, a window or a longest wait out of bounds, or a wait that names no unit", async () => {
 		for (const login of [
 			{ "account-attempts": 0 },
 			{ "account-attempts": 101 },
-			{ "account-window-seconds": 59 },
-			{ "account-max-wait-seconds": 0 },
-			{ "account-window-seconds": 600, "account-max-wait-seconds": 900 },
+			{ "account-window": "59s" },
+			{ "account-max-wait": "0s" },
+			{ "account-max-wait": "1.5s" },
+			{ "account-max-wait": 60 },
+			{ "account-window": "10m", "account-max-wait": "15m" },
 		]) {
 			await expect(serve({ login }), JSON.stringify(login)).rejects.toBeInstanceOf(BootRefused);
 		}
