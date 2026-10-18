@@ -1,6 +1,9 @@
 import type { ForwardedCertificate } from "@mod/client-certificate";
 
 export {
+	type AddressList,
+	addressesOf,
+	addressList,
 	proxiesOf,
 	type SourceSettings,
 	sourceSettings,

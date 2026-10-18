@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { proxiesOf, sourceSettings } from "../src/contract.ts";
+import { addressesOf, addressList, proxiesOf, sourceSettings } from "../src/contract.ts";
 
 const takes = (entry: string) => sourceSettings.safeParse({ "trusted-proxies": [entry] }).success;
 
@@ -62,4 +62,24 @@ it("makes trusted proxies that cannot be changed", () => {
 
 it("reads empty settings as no trusted proxy and one hop", () => {
 	expect(sourceSettings.parse({})).toEqual({ "trusted-proxies": [], "proxy-hops": 1 });
+});
+
+it("takes an address list as trusted-proxies are taken, and answers whether an address is in it", () => {
+	const schema = addressList();
+	expect(schema.safeParse(["192.0.2.1", "10.0.0.0/8", "2001:db8::/32"]).success).toBe(true);
+	for (const entry of ["10.0.0.0/08", "fe80::1%eth0", "10.0.0.0/33", "a.example"]) {
+		expect(schema.safeParse([entry]).success, entry).toBe(false);
+	}
+	const list = addressesOf(["192.0.2.1", "10.0.0.0/8", "2001:db8::/32"]);
+	expect(["192.0.2.1", "10.1.2.3", "2001:db8::9"].map((a) => list.has(a))).toEqual([
+		true,
+		true,
+		true,
+	]);
+	expect(
+		["192.0.2.2", "11.0.0.1", "2001:db9::1", "not an address"].map((a) => list.has(a)),
+	).toEqual([false, false, false, false]);
+	expect(addressesOf([]).has("192.0.2.1")).toBe(false);
+	expect(() => addressesOf(["10.0.0.0/08"])).toThrow(TypeError);
+	expect(Object.isFrozen(list)).toBe(true);
 });

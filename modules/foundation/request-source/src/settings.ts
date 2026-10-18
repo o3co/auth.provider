@@ -14,6 +14,39 @@ function blockOf(entry: string) {
 
 const block = z.string().refine((s) => blockOf(s) !== undefined, "an IP address or CIDR");
 
+/** A setting holding IP addresses without a zone, or CIDR blocks, as `trusted-proxies` takes them. */
+export const addressList = () => z.array(block);
+
+/** Addresses a setting lists, to ask of a canonical address. */
+export interface AddressList {
+	has(address: string): boolean;
+}
+
+/** The block list of entries a schema took. */
+function blockListOf(entries: readonly string[], what: string) {
+	const list = new BlockList();
+	for (const entry of entries) {
+		const read = blockOf(entry);
+		if (!read) throw new TypeError(`not ${what}; the section's schema refuses it`);
+		const { address, family, prefix } = read;
+		const type = family === 6 ? "ipv6" : "ipv4";
+		if (prefix === undefined) list.addAddress(address, type);
+		else list.addSubnet(address, prefix, type);
+	}
+	return list;
+}
+
+/** The addresses entries a schema took (by `addressList`) list: whether an address is among them. */
+export function addressesOf(entries: readonly string[]): AddressList {
+	const list = blockListOf(entries, "an address list entry");
+	return Object.freeze({
+		has: (address: string) => {
+			const family = isIP(address);
+			return family !== 0 && list.check(address, family === 6 ? "ipv6" : "ipv4");
+		},
+	});
+}
+
 /** The trusted proxies and the hops through them, as an operator's section takes them. */
 export const sourceSettings = z.strictObject({
 	"trusted-proxies": z
@@ -45,15 +78,7 @@ export function proxiesOf(
 	settings: SourceSettings,
 	certificate?: CertificateHeaders,
 ): TrustedProxies {
-	const trusted = new BlockList();
-	for (const entry of settings["trusted-proxies"]) {
-		const read = blockOf(entry);
-		if (!read) throw new TypeError("not a trusted proxy entry; the section's schema refuses it");
-		const { address, family, prefix } = read;
-		const type = family === 6 ? "ipv6" : "ipv4";
-		if (prefix === undefined) trusted.addAddress(address, type);
-		else trusted.addSubnet(address, prefix, type);
-	}
+	const trusted = blockListOf(settings["trusted-proxies"], "a trusted proxy entry");
 	return Object.freeze({
 		trusted,
 		hops: settings["proxy-hops"],
