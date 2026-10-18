@@ -60,6 +60,8 @@ Keeping a detached or lagging replica from being promoted is the operator's job,
 
 Nothing is queued or retried. A dropped connection fails at once, and the request that needed Redis answers 503 with `Cache-Control: no-store`; nothing ends the process. `/readyz` answers 503 while the `redis` probe (a `PING` on both connections) fails, and the gauge `auth_dependency_up{dependency="redis"}` shows which dependency is down.
 
+When an outage hits a login whose subject already holds as many sessions as the listing keeps, the sessions the login pushed out cannot be closed through their participants. Each is listed again for what it has left; one that cannot be, or that taking one back pushes out, is ended in its record without its participants. Access tokens issued in such a session stay valid until they expire (`tokens.access-token-lifetime`). Watch `session-lifecycle.listing_ended` and `session-lifecycle.listing_put_back_failed` (counts); to end those tokens at once, revoke the subject.
+
 Rate limits fail closed by default (`rate-limit.fail-mode = closed`), so an outage never lifts a limit. Attempt limits, such as login attempts, always answer 503 while they cannot count.
 
 ### Many instances
