@@ -75,17 +75,7 @@ it("holds, committed, the reference generated from the workspace as it is now", 
 });
 
 /** Sections whose keys are not all described yet; a section leaves once its owner describes it, and never comes back. */
-const describedLater = new Set([
-	"authorize",
-	"clients",
-	"clients-cimd",
-	"federation-grants",
-	"mail-smtp",
-	"mfa-flows",
-	"session",
-	"webauthn",
-	"webauthn-login",
-]);
+const describedLater = new Set(["mail-smtp", "webauthn", "webauthn-login"]);
 
 it("describes every key, but in the sections still listed as described later", async () => {
 	const sections = await sectionsIn(root);
