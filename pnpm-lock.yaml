@@ -2905,9 +2905,6 @@ importers:
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
-      '@mod/refresh':
-        specifier: workspace:*
-        version: link:../../oauth/refresh
       '@mod/request-source':
         specifier: workspace:*
         version: link:../../foundation/request-source

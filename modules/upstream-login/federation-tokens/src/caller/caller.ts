@@ -1,6 +1,5 @@
 import type { HttpRequest } from "@mod/http";
 import type { BuildContext } from "@mod/kernel";
-import { type Lineage, lineage } from "@mod/refresh";
 import { type SenderBindings, senderBinding } from "@mod/sender-binding";
 import { type Sessions, sessions } from "@mod/session";
 import { type SessionTokens, sessionTokens } from "@mod/session-tokens";
@@ -24,15 +23,14 @@ export type Caller =
 export interface Parts {
 	readonly senderBinding: SenderBindings;
 	readonly tokens: Tokens;
-	readonly lineage: Lineage;
 	readonly sessionTokens: SessionTokens;
 	readonly sessions: Sessions;
 }
 
 /**
- * Accepts the access token a request presents: admitted by `sender-binding`, its audience naming
- * the client it was issued to, its family not ended, and issued in a session still open for the
- * same subject. Every refusal past admission is the same `invalid_token`. Throws Unavailable when
+ * Accepts the access token a request presents: admitted by `sender-binding` (through `tokens`,
+ * every access condition holding, its family's among them), its audience naming the client it was
+ * issued to, and issued in a session still open for the same subject. Every refusal past admission is the same `invalid_token`. Throws Unavailable when
  * a check cannot tell.
  */
 export function callerWith(parts: Parts) {
@@ -47,7 +45,6 @@ export function callerWith(parts: Parts) {
 			headers: { "www-authenticate": `${tokenType} error="invalid_token"` },
 		};
 		if (!grant.audience.includes(grant.issuedTo)) return refused;
-		if ((await parts.lineage.of(id)).kind === "ended") return refused;
 		const bound = await parts.sessionTokens.sessionOf(id);
 		if (bound.kind !== "bound") return refused;
 		const open = await parts.sessions.openContext(bound.handle);
@@ -74,7 +71,6 @@ export async function callerFrom(c: Pick<BuildContext<unknown>, "get">): Promise
 	return callerWith({
 		senderBinding: await c.get(senderBinding),
 		tokens: await c.get(tokens),
-		lineage: await c.get(lineage),
 		sessionTokens: await c.get(sessionTokens),
 		sessions: await c.get(sessions),
 	});

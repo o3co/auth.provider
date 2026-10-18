@@ -9,7 +9,6 @@ import { issuer } from "@mod/issuer";
 import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
-import { lineage, type TokenFamily } from "@mod/refresh";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import { senderBindings } from "@mod/sender-binding";
@@ -18,7 +17,7 @@ import { type Session, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { sessionTokens } from "@mod/session-tokens";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
-import { tokens } from "@mod/tokens";
+import { accessConditions, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import {
 	type Upstream,
@@ -66,7 +65,7 @@ export async function harness(
 	const logged = recordingLog();
 	const runtime = quietRuntime({ clock: { now: () => now }, log: logged.log });
 	const bound = new Map<string, string>();
-	const families = new Map<string, TokenFamily["kind"]>();
+	const families = new Map<string, "family" | "ended">();
 	const stores = memoryStores(() => now);
 	const recorded = auditStandIn();
 	const offered: Record<string, Offered> = { corp: options.offered ?? {}, other: {} };
@@ -78,10 +77,10 @@ export async function harness(
 				return handle === undefined ? { kind: "unbound" } : { kind: "bound", handle };
 			},
 		})),
-		m.provide(lineage).by(() => ({
-			of: async (id) => ({ kind: families.get(id) ?? "none" }) as TokenFamily,
-			adopt: async () => "ended",
-			start: async () => undefined,
+		// As refresh's condition: a token whose family ended is revoked, in every check of it.
+		m.contribute(accessConditions).by(() => ({
+			name: "refresh",
+			holds: async ({ id }) => (families.get(id) === "ended" ? "revoked" : "holds"),
 		})),
 		m.provide(upstreams).by(() => ({ of: (idp) => offered[idp] })),
 		m.contribute(clientSources).by(() => ({
@@ -147,7 +146,7 @@ export async function harness(
 		client = receiver,
 		more: {
 			readonly audience?: readonly string[];
-			readonly family?: TokenFamily["kind"];
+			readonly family?: "family" | "ended";
 			readonly subject?: string;
 			readonly dpop?: boolean;
 		} = {},
