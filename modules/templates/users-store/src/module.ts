@@ -38,7 +38,7 @@ export default defineModule({ name: "users-store" }, (m) => [
 		const place = { store: await c.get(store), space: links, log: c.log, random: c.random };
 		const records = recordsIn<StoredLink>(place);
 		return {
-			save: (key, record) => records.create(key, record, "endless"),
+			save: records.create,
 			read: records.read,
 			update: records.change,
 		};
@@ -47,7 +47,7 @@ export default defineModule({ name: "users-store" }, (m) => [
 		const place = { store: await c.get(store), space: contacts, log: c.log, random: c.random };
 		const records = recordsIn<StoredContacts>(place);
 		return {
-			save: (key, record) => records.create(key, record, "endless"),
+			save: records.create,
 			read: records.read,
 			update: records.change,
 		};
