@@ -95,7 +95,7 @@ export async function handoffIn(c: BuildContext<Settings>): Promise<Handoff> {
 		clock: c.clock,
 		random: c.random,
 		log: c.log,
-		lifetimeMs: c.section["transaction-seconds"] * 1000,
+		lifetimeMs: c.section["transaction-lifetime"] * 1000,
 	});
 }
 
