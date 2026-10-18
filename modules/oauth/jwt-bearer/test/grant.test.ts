@@ -54,6 +54,7 @@ const grantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 const trustedUpstream = [
 	{
 		issuer: "https://idp.example",
+		subject: "as-is",
 		keys: [{ alg: "EdDSA", "public-key": pem(upstream.publicKey, "spki") }],
 	},
 ];
@@ -313,7 +314,11 @@ describe("jwt-bearer", () => {
 	it("refuses, rather than throws on, an assertion whose signed payload is no JSON", async () => {
 		const signer = await testSigner("EdDSA");
 		const s = await serve(undefined, issuer, `${issuer}/oauth/token`, [
-			{ issuer: "https://idp.example", keys: [{ alg: "EdDSA", "public-key": signer.pem }] },
+			{
+				issuer: "https://idp.example",
+				subject: "as-is",
+				keys: [{ alg: "EdDSA", "public-key": signer.pem }],
+			},
 		]);
 		// The same key's JSON claims are granted, so the refusal below is the payload's.
 		expect(errorOf(await s.grant(await signer.sign({ ...base, jti: "j-json" })))).toBe("issued");
@@ -325,6 +330,7 @@ describe("jwt-bearer", () => {
 		const two = [
 			{
 				issuer: "https://idp.example",
+				subject: "as-is",
 				keys: [
 					{ alg: "EdDSA", "public-key": pem(stranger.publicKey, "spki") },
 					{ alg: "EdDSA", "public-key": pem(upstream.publicKey, "spki") },
@@ -343,6 +349,7 @@ describe("jwt-bearer", () => {
 		const named = [
 			{
 				issuer: "https://idp.example",
+				subject: "as-is",
 				keys: [
 					{ kid: "k0", alg: "EdDSA", "public-key": pem(stranger.publicKey, "spki") },
 					{ kid: "k1", alg: "EdDSA", "public-key": pem(upstream.publicKey, "spki") },
@@ -407,6 +414,7 @@ describe("jwt-bearer", () => {
 			...trustedUpstream,
 			{
 				issuer: "https://other.example",
+				subject: "as-is",
 				keys: [{ alg: "EdDSA", "public-key": pem(stranger.publicKey, "spki") }],
 			},
 		];
@@ -421,6 +429,7 @@ describe("jwt-bearer", () => {
 		const secret = [
 			{
 				issuer: "https://idp.example",
+				subject: "as-is",
 				keys: [{ alg: "EdDSA", "public-key": pem(upstream.privateKey, "pkcs8") }],
 			},
 		];
@@ -442,7 +451,11 @@ describe("jwt-bearer", () => {
 
 	it("refuses to boot with a key it cannot read", async () => {
 		const unreadable = [
-			{ issuer: "https://idp.example", keys: [{ alg: "EdDSA", "public-key": "not a PEM" }] },
+			{
+				issuer: "https://idp.example",
+				subject: "as-is",
+				keys: [{ alg: "EdDSA", "public-key": "not a PEM" }],
+			},
 		];
 		expect(
 			await serve(undefined, issuer, `${issuer}/oauth/token`, unreadable).catch((e) => e),
@@ -451,7 +464,9 @@ describe("jwt-bearer", () => {
 
 	describe("with a key set at a URL", () => {
 		const located = `${issuer}/oauth/token`;
-		const at = (uri: string, named = "https://idp.example") => [{ issuer: named, "jwks-uri": uri }];
+		const at = (uri: string, named = "https://idp.example") => [
+			{ issuer: named, subject: "as-is", "jwks-uri": uri },
+		];
 		/** An outbound answering the key set, keeping what it was asked. */
 		function keySetAt(keys: unknown[]) {
 			const asked: { url: string; narrower: Narrower | undefined }[] = [];
@@ -501,7 +516,7 @@ describe("jwt-bearer", () => {
 			expect(
 				await refused([{ ...trustedUpstream[0], "jwks-uri": "https://idp.example/jwks" }]),
 			).toBe("refused");
-			expect(await refused([{ issuer: "https://idp.example" }])).toBe("refused");
+			expect(await refused([{ issuer: "https://idp.example", subject: "as-is" }])).toBe("refused");
 			expect(await refused(at("https://keys.example/jwks"))).toBe("refused");
 			expect(await refused(at("http://idp.example/jwks"))).toBe("refused");
 			expect(await refused(at("https://sub.idp.example/jwks"))).toBe("refused");
@@ -669,6 +684,16 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		]);
 	});
 
+	it("refuses to boot on an issuer that does not say how its subject is read, naming the key", async () => {
+		const unsaid = await serveWith(entry(), [signing(async () => ({ kind: "none" }))]).catch(
+			(error) => error,
+		);
+		expect(unsaid).toBeInstanceOf(BootRefused);
+		expect((unsaid as BootRefused).refusals.map((r) => r.where)).toEqual([
+			"jwt-bearer.issuers.0.subject",
+		]);
+	});
+
 	it("refuses to boot on keys both written and contributed, neither, an upstream with as-is, none with linked, linked with no resolver, or two resolvers", async () => {
 		const refused = async (issuers: Record<string, unknown>[], extra: Module[] = []) =>
 			serveWith(issuers, extra).then(
@@ -691,7 +716,11 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		const second = resolving(async () => ({ kind: "none" }), [], "another");
 		expect(await refused(linkedEntry, [contributed, resolver, second])).toBe("refused");
 		// A key set fetched here cannot tell which of its keys signed.
-		const fetched = { issuer: "https://idp.example", "jwks-uri": "https://idp.example/jwks" };
+		const fetched = {
+			issuer: "https://idp.example",
+			subject: "as-is",
+			"jwks-uri": "https://idp.example/jwks",
+		};
 		expect(await refused([{ ...fetched, "subject-is-key-thumbprint": true }])).toBe("refused");
 	});
 });
