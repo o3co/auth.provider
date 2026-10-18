@@ -9,9 +9,9 @@
 
 ## Offers
 - `GET /_healthcheck`: `200` `{"status":"ok"}`, checking no dependency; like `/readyz`, it uses no policy, takes no body (a body or a type is `415`, as anywhere) and answers `no-store`.
-- `GET /readyz`: `200` `{"status":"ready"}` or `503` `{"status":"unready"}` as the kernel's readiness answers within `readiness-deadline-ms`, never naming what failed; requests share one run, and an unready answer is reused for 1 s from its start. The gauge `auth_dependency_up` gives each probe 1 or 0 from that run, by the name its module chose (no series without probes).
+- `GET /readyz`: `200` `{"status":"ready"}` or `503` `{"status":"unready"}` as the kernel's readiness answers within `readiness-deadline`, never naming what failed; requests share one run, and an unready answer is reused for 1 s from its start. The gauge `auth_dependency_up` gives each probe 1 or 0 from that run, by the name its module chose (no series without probes).
 - The histogram `http_request_duration_seconds` counts each request once, answered or closed, by method (`other` outside the standard nine), the declared path of the route reached (`unmatched` when none) and the status written (`499` when the client closed first).
-- Section `http-ops`: `readiness-deadline-ms`, its key in the settings list.
+- Section `http-ops`: `readiness-deadline`, written with its unit, its key in the settings list.
 - Composition definition: comes by default with `http`.
 
 ## Invariants

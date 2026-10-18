@@ -219,7 +219,7 @@ From `@mod/http-ops`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `http-ops.readiness-deadline-ms` | integer (1–2147483647) | `1000` |  |  |  | How long `GET /readyz` waits for the probes before it answers unready, in whole milliseconds; set it below the orchestrator's own timeout for the check. |
+| `http-ops.readiness-deadline` | string | `1s` |  |  |  | How long `GET /readyz` waits for the probes before it answers unready, in whole milliseconds (`1s`); set it below the orchestrator's own timeout for the check. |
 
 ## issuer
 
