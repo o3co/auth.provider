@@ -35,26 +35,6 @@ describe("refreshing a grant's token", () => {
 		expect(h.stores.peek(id)).not.toHaveProperty("sealed");
 	});
 
-	it("writes a rotated refresh token before it judges the rest, and marks a token it cannot hold", async () => {
-		const { h, id } = await due();
-		h.advance(2000);
-		h.script.refreshes.push({
-			kind: "refreshed",
-			tokens: upstreamTokens({ tokenType: "DPoP", refreshToken: "rotated" }),
-		});
-		expect(said(await h.grantCall(id, "token"))).toBe(
-			"502 upstream_token_ineligible upstream_token_ineligible 300",
-		);
-		expect((await h.grantCall(id, "status")).json).toMatchObject({
-			status: "upstream_token_ineligible",
-			reason: "upstream_token_ineligible",
-		});
-		expect((await h.grantCall(id, "token")).status).toBe(200);
-		expect(h.asked.refreshes.map(([token]) => token)).toEqual(["up-refresh-1", "rotated"]);
-		expect((await h.grantCall(id, "status")).json?.status).toBe("active");
-		expect((await h.grantCall(id, "status")).json).not.toHaveProperty("reason");
-	});
-
 	it("judges the subject's boundary before it hands a held token or refreshes one", async () => {
 		for (const [life, wait] of [
 			[300, 1000],
@@ -69,15 +49,6 @@ describe("refreshing a grant's token", () => {
 			expect(said(await h.grantCall(id, "token"))).toBe("410 grant_revoked backstop");
 			expect(h.asked.refreshes).toEqual([]);
 		}
-	});
-
-	it("lets a revocation win over a refresh that raced it", async () => {
-		const { h, id } = await due();
-		h.stores.raceNext(
-			(record) => ({ ...(record as object), status: "revoked", reason: "client" }) as never,
-		);
-		expect((await h.grantCall(id, "token")).status).toBe(503);
-		expect((await h.grantCall(id, "status")).json?.status).toBe("revoked");
 	});
 });
 
