@@ -383,13 +383,13 @@ From `@mod/mtls`.
 | `mtls.revocation.on-unavailable` | reject \| allow |  |  |  |  | Required: whether an outage refuses the binding, or binds with a warning. |
 | `mtls.revocation.hosts` | list of string |  |  |  |  | Required: the only hosts revocation material is fetched from; `.name` covers the name and the names under it. |
 | `mtls.revocation.nonce` | boolean | `true` |  |  |  | Whether an OCSP request carries a nonce. |
-| `mtls.revocation.skew-seconds` | integer (0–3600) | `300` |  |  |  | How far ahead of this host's clock revocation material may say it was issued. |
-| `mtls.revocation.ocsp-fresh-seconds` | integer (1–86400) | `600` |  |  |  | How long an OCSP answer without a next update is taken. |
-| `mtls.revocation.crl-ttl-seconds` | integer (1–86400) | `3600` |  |  |  | How long a CRL is kept at most, its next update aside. |
-| `mtls.revocation.failure-seconds` | integer (1–3600) | `30` |  |  |  | How long a source that failed is not asked again. |
+| `mtls.revocation.skew` | string | `5m` |  |  |  | How far ahead of this host's clock revocation material may say it was issued, from 0s to 1h. |
+| `mtls.revocation.ocsp-fresh` | string | `10m` |  |  |  | How long an OCSP answer without a next update is taken, from 1s to 1d. |
+| `mtls.revocation.crl-ttl` | string | `1h` |  |  |  | How long a CRL is kept at most, its next update aside, from 1s to 1d. |
+| `mtls.revocation.failure-lifetime` | string | `30s` |  |  |  | How long a source that failed is not asked again, from 1s to 1h. |
 | `mtls.revocation.crl-entries` | integer (1–65536) | `256` |  |  |  | How many CRLs are kept. |
 | `mtls.revocation.ocsp-entries` | integer (1–65536) | `1024` |  |  |  | How many OCSP answers are kept. |
-| `mtls.revocation.timeout-ms` | integer (1–60000) | `3000` |  |  |  | How long one fetch may take. |
+| `mtls.revocation.timeout` | string | `3s` |  |  |  | How long one fetch may take, from 1ms to 1m. |
 | `mtls.revocation.max-fetches` | integer (1–64) | `4` |  |  |  | How many sources one check may fetch from; past them, what is left is unconfirmed. |
 
 ## oidc
@@ -410,9 +410,9 @@ From `@mod/outbound`.
 | `outbound.allow-any-public` | boolean | `false` |  |  |  | Whether requests may reach any host at a public address, instead of naming hosts in `allow`. |
 | `outbound.deny` | list of string | `[]` |  |  |  | The hosts requests never reach, checked before `allow`; `.name` covers the name and the names under it. |
 | `outbound.plain-loopback` | list of string | `[]` |  |  |  | The `host:port` pairs plain http may reach at loopback addresses. |
-| `outbound.max-response-bytes` | integer (1–16777216) | `65536` |  |  |  | The largest response body a request takes, in bytes. |
-| `outbound.signed-max-response-bytes` | integer (1–16777216) | `1048576` |  |  |  | The largest response body a request for signed material takes, in bytes. |
-| `outbound.timeout-ms` | integer (1–60000) | `5000` |  |  |  | The one deadline covering a request's resolving, connecting, headers and body, in milliseconds. |
+| `outbound.max-response-size` | string | `64KiB` |  |  |  | The largest response body a request takes, from 1B to 16MiB. |
+| `outbound.signed-max-response-size` | string | `1MiB` |  |  |  | The largest response body a request for signed material takes, from 1B to 16MiB. |
+| `outbound.timeout` | string | `5s` |  |  |  | The one deadline covering a request's resolving, connecting, headers and body, from 1ms to 1m. |
 | `outbound.max-concurrent` | integer (1–1024) | `16` |  |  |  | Requests under way at once; one more is unavailable at once. |
 | `outbound.direct-despite-proxy` | boolean | `false` |  |  |  | Whether to boot while a proxy variable is set and no proxy is configured; the variables are never read. |
 | `outbound.proxy` | string |  |  |  |  | The proxy every https request goes through by CONNECT, but to direct hosts; it resolves names and checks their addresses. |
@@ -445,9 +445,9 @@ From `@mod/redis`.
 |---|---|---|---|---|---|---|
 | `redis.url` | string |  | yes | `REDIS_URL` | `rediss://redis.example.invalid:6379` | The Redis server to connect to. |
 | `redis.prefix` | string | `store` |  |  |  | What every key the store writes begins with. |
-| `redis.connect-timeout-ms` | integer (100–9007199254740991) | `2000` |  |  |  | How long connecting to Redis may take, in milliseconds. |
-| `redis.replication-timeout-ms` | integer (1–60000) | `1000` |  |  |  | How long a confirmation waits for every replica to have a write, in milliseconds. |
-| `redis.command-timeout-ms` | integer (10–60000) | `1000` |  |  |  | How long one Redis command may take, in milliseconds. |
+| `redis.connect-timeout` | string | `2s` |  |  |  | How long connecting to Redis may take, at least 100ms. |
+| `redis.replication-timeout` | string | `1s` |  |  |  | How long a confirmation waits for every replica to have a write, from 1ms to 1m. |
+| `redis.command-timeout` | string | `1s` |  |  |  | How long one Redis command may take, from 10ms to 1m. |
 | `redis.replication` | none \| replicas |  |  | `REDIS_REPLICATION` | `replicas` | Required when a space asks for replication or confirmed reads. "replicas": every write must reach the replicas, and Redis itself must refuse writes without them. "none": the operator states there is no failover at all, accepting that a failover would lose writes. |
 
 ## refresh

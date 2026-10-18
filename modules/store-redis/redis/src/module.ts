@@ -1,4 +1,4 @@
-import { contract, defineModule, probes } from "@mod/kernel";
+import { contract, defineModule, probes, setting } from "@mod/kernel";
 import { type Space, spaces, store } from "@mod/store";
 import { Redis } from "ioredis";
 import { z } from "zod";
@@ -10,28 +10,23 @@ const section = z.strictObject({
 	prefix: z
 		.string()
 		.regex(/^[a-z0-9-]+$/)
-		.default("store")
+		.prefault("store")
 		.describe("What every key the store writes begins with."),
-	"connect-timeout-ms": z
-		.number()
-		.int()
-		.min(100)
-		.default(2000)
-		.describe("How long connecting to Redis may take, in milliseconds."),
-	"replication-timeout-ms": z
-		.number()
-		.int()
-		.min(1)
-		.max(60_000)
-		.default(1000)
-		.describe("How long a confirmation waits for every replica to have a write, in milliseconds."),
-	"command-timeout-ms": z
-		.number()
-		.int()
-		.min(10)
-		.max(60_000)
-		.default(1000)
-		.describe("How long one Redis command may take, in milliseconds."),
+	"connect-timeout": setting
+		.duration("ms")
+		.pipe(z.number().int().min(100))
+		.prefault("2s")
+		.describe("How long connecting to Redis may take, at least 100ms."),
+	"replication-timeout": setting
+		.duration("ms")
+		.pipe(z.number().int().min(1).max(60_000))
+		.prefault("1s")
+		.describe("How long a confirmation waits for every replica to have a write, from 1ms to 1m."),
+	"command-timeout": setting
+		.duration("ms")
+		.pipe(z.number().int().min(10).max(60_000))
+		.prefault("1s")
+		.describe("How long one Redis command may take, from 10ms to 1m."),
 	replication: z
 		.enum(["none", "replicas"])
 		.optional()
@@ -144,17 +139,17 @@ export default defineModule({ name: "redis", section }, (m) => [
 	m.provide(connections).by(async (c) => {
 		const client = new Redis(c.section.url, {
 			lazyConnect: true,
-			connectTimeout: c.section["connect-timeout-ms"],
+			connectTimeout: c.section["connect-timeout"],
 			maxRetriesPerRequest: 0,
 			enableOfflineQueue: false,
 			// A command whose reply was lost must not be sent again on a new connection: a resent
 			// WAIT would confirm nothing, and a resent script would run twice.
 			autoResendUnfulfilledCommands: false,
-			commandTimeout: c.section["command-timeout-ms"],
+			commandTimeout: c.section["command-timeout"],
 		});
 		client.on("error", () => c.log.warn("redis.error"));
 		const confirmer = client.duplicate({
-			commandTimeout: c.section["replication-timeout-ms"] + c.section["command-timeout-ms"],
+			commandTimeout: c.section["replication-timeout"] + c.section["command-timeout"],
 		});
 		confirmer.on("error", () => c.log.warn("redis.error"));
 		let problems: string[];
@@ -186,7 +181,7 @@ export default defineModule({ name: "redis", section }, (m) => [
 			confirmer,
 			{
 				prefix: c.section.prefix,
-				replicationTimeoutMs: c.section["replication-timeout-ms"],
+				replicationTimeoutMs: c.section["replication-timeout"],
 				replication: c.section.replication,
 			},
 			declared,
