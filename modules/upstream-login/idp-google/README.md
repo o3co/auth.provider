@@ -13,7 +13,7 @@
 
 ## Offers
 - Composition definition only (the IdP type `google`)
-- IdP settings (under `federation`'s `idps.<name>`): `client-id`, `client-secret` (both well-formed text), `access` (`offline` (default) or `online`), `require-iss` (default true), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (default Google's own), `clock-skew` (0s–5m, default `30s`), `end-session-endpoint` (optional)
+- IdP settings (under `federation`'s `idps.<name>`): `client-id`, `client-secret` (both well-formed text), `access` (`offline` (default) or `online`), `require-iss` (default true), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (default Google's own), `clock-skew` (0s–5m, default `30s`), `end-session-endpoint` (optional), `hosted-domains` (optional, lowercase domains)
 
 ## Invariants
 - Every request goes through `outbound`, narrowed to the one endpoint's host.
@@ -29,6 +29,7 @@
 - Any reason `external-jwt` gives refuses the login.
 - The upstream subject is `sub` as it is.
 - The upstream amr is empty.
+- With `hosted-domains`, an exchange is refused unless the checked id_token carries `hd` equal to one of them; neither the authorize request's `hd` hint nor the email's domain decides it. Every login and link goes through the exchange; this type offers no delegation.
 - `federation` gets the profile in the checked id_token: `email`, `name` and `picture` where they are text. No other claim (`hd` included).
 - The email is verified only where `email_verified` is the boolean `true`.
 - The request asks for `openid email profile`: Google puts the email and `email_verified` in the id_token only for `email`, and the name and picture only for `profile`.
