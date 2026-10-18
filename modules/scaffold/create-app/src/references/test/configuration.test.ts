@@ -82,7 +82,6 @@ const describedLater = new Set([
 	"federation-grants",
 	"mail-smtp",
 	"mfa-flows",
-	"mfa-webauthn",
 	"session",
 	"webauthn",
 	"webauthn-login",

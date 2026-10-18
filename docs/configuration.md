@@ -366,8 +366,8 @@ From `@mod/mfa-webauthn`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `mfa-webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  |  |
-| `mfa-webauthn.display-name` | string | `Account` |  |  |  |  |
+| `mfa-webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  | Whether the authenticator is asked to verify its user, as WebAuthn says it. |
+| `mfa-webauthn.display-name` | string | `Account` |  |  |  | The name an authenticator shows for an account with no name to show; it names no one. |
 
 ## mtls
 

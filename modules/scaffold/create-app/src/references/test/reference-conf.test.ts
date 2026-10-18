@@ -102,7 +102,6 @@ const prefaultLater = new Set([
 	"federation-grants",
 	"federation-grants-store",
 	"mfa-flows",
-	"mfa-webauthn",
 	"mtls",
 	"outbound",
 	"rate-limit",
