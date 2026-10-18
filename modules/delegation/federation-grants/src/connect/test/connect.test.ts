@@ -90,7 +90,7 @@ describe("the link", () => {
 		const after = await connector({
 			stores: before.stores,
 			settings: {
-				connections: { mail: { idp: "corp", scopes, "max-access-token-seconds": 3600 } },
+				connections: { mail: { idp: "corp", scopes, "max-access-token-lifetime": "1h" } },
 			},
 		});
 		expect((await after.open(kept.link, await after.login())).opened.status).toBe(403);
