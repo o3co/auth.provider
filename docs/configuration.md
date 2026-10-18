@@ -268,7 +268,7 @@ From `@mod/login-gates`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `login-gates.return-targets` | list of string | `[]` |  |  |  | The https URLs, matched as written, a login may return to besides the return paths modules contribute. |
+| `login-gates.return-targets` | list of string | `[]` |  |  |  | The https URLs (http only on a loopback host), matched as written, a login may return to besides the return paths modules contribute. |
 
 ## login-password
 

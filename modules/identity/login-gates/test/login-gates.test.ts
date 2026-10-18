@@ -212,7 +212,7 @@ it("answers whether the declared ways of logging in can prove every one of a set
 const path = (name: string, at: string) =>
 	defineModule({ name }, (m) => [m.contribute(returnPaths).by(() => ({ path: at }))]);
 
-it("lets a login return only to a listed https target exactly, or a contributed path on the public origin", async () => {
+it("lets a login return only to a listed target exactly, or a contributed path on the public origin", async () => {
 	const l = await boot([path("authorize", "/oauth/authorize"), path("device", "/device")], {
 		"return-targets": ["https://app.example/"],
 	});
@@ -265,7 +265,7 @@ it("refuses a return target with whitespace or a control character anywhere, tho
 	}
 });
 
-it("refuses to start with a return target that is not an https URL kept as written", async () => {
+it("refuses to start with a return target that is not an https URL (http only on a loopback host) kept as written", async () => {
 	for (const target of [
 		"javascript:alert(1)",
 		"http://app.example/",
@@ -274,6 +274,19 @@ it("refuses to start with a return target that is not an https URL kept as writt
 		"HTTPS://app.example/",
 	]) {
 		await expect(boot([], { "return-targets": [target] }), target).rejects.toThrow(BootRefused);
+	}
+});
+
+it("starts with a return target as http on a loopback host, and refuses http on any other host", async () => {
+	const local = ["http://localhost:3000/", "http://127.0.0.1:3000/home", "http://[::1]:3000/"];
+	const l = await boot([], { "return-targets": local });
+	for (const target of local) expect(l.returnAllowed(target), target).toBe(true);
+	for (const target of ["http://app.example/", "http://localhost./", "http://0.0.0.0:3000/"]) {
+		const refused = await boot([], { "return-targets": [target] }).catch((e: unknown) => e);
+		expect(refused, target).toBeInstanceOf(BootRefused);
+		expect((refused as BootRefused).refusals, target).toEqual([
+			{ where: "login-gates.return-targets.0", reason: "a URL: http only on a loopback host" },
+		]);
 	}
 });
 
