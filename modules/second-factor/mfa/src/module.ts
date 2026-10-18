@@ -2,7 +2,7 @@ import { audit } from "@mod/audit";
 import { defineModule } from "@mod/kernel";
 import { amrSources } from "@mod/login-gates";
 import { resealers, seal } from "@mod/seal";
-import { type AuthContext, entryRequirements } from "@mod/session";
+import { type AuthContext, entryRequirements, sessions } from "@mod/session";
 import {
 	factorKinds,
 	factorStore,
@@ -35,6 +35,7 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 		return { name: "mfa", amr: [...second, ...kinds.flatMap((k) => k.amr)] };
 	}),
 	m.provide(factors).by(async (c) => {
+		const open = c.late(sessions);
 		await c.collect(proofSteps);
 		const kinds = await c.collect(factorKinds);
 		if (c.section.mode === "required" && !kinds.some((k) => k.counts && addsMfa(k))) {
@@ -49,7 +50,7 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 			gates: await c.collect(firstBindingGates),
 			random: c.random.bytes,
 			now: c.clock.now,
-			recentMs: c.section["manage-within"] * 1000,
+			recent: (at) => open().recent(at),
 			audit: await c.get(audit),
 		});
 	}),
@@ -60,7 +61,7 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 		const records = factorRecords(await c.get(factorStore));
 		const kinds = byKind(await c.collect(factorKinds));
 		const required = c.section.mode === "required";
-		const recentMs = c.section["manage-within"] * 1000;
+		const open = c.late(sessions);
 		return {
 			name: "mfa",
 			// "use" only under "required"; credentials always.
@@ -70,13 +71,12 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 					return short("mfa_required");
 				}
 				if (level !== "credentials") return admit;
-				const now = c.clock.now();
 				const proven = secondFactorAt(context);
-				if (proven !== undefined && now - proven <= recentMs) return admit;
+				if (proven !== undefined && open().recent(proven)) return admit;
 				// With no counting factor yet, a recent sign-in is the strongest proof there is.
 				const none = counting(await records.list(context.subject), kinds).length === 0;
 				const signedIn = signedInAt(context);
-				if (none && signedIn !== undefined && now - signedIn <= recentMs) return admit;
+				if (none && signedIn !== undefined && open().recent(signedIn)) return admit;
 				return short("step_up_required");
 			},
 		};
