@@ -80,7 +80,6 @@ const describedLater = new Set([
 	"clients",
 	"clients-cimd",
 	"federation-grants",
-	"mail-smtp",
 	"mfa-flows",
 	"session",
 	"webauthn",

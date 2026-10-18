@@ -296,14 +296,14 @@ From `@mod/mail-smtp`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `mail-smtp.host` | string |  | yes | `MAIL_SMTP_HOST` | `smtp.example.invalid` |  |
-| `mail-smtp.port` | integer (1–65535) | `587` |  |  |  |  |
-| `mail-smtp.security` | starttls \| tls \| none | `starttls` |  |  |  |  |
-| `mail-smtp.from` | string |  | yes | `MAIL_SMTP_FROM` | `auth@example.invalid` |  |
-| `mail-smtp.user` | string |  |  |  |  |  |
-| `mail-smtp.password` | string |  |  |  |  |  |
+| `mail-smtp.host` | string |  | yes | `MAIL_SMTP_HOST` | `smtp.example.invalid` | The relay's host name or address. |
+| `mail-smtp.port` | integer (1–65535) | `587` |  |  |  | The relay's port, from 1 to 65535. |
+| `mail-smtp.security` | starttls \| tls \| none | `starttls` |  |  |  | How the connection is secured: STARTTLS after connecting, TLS from the first byte, or none, only to a loopback host. |
+| `mail-smtp.from` | string |  | yes | `MAIL_SMTP_FROM` | `auth@example.invalid` | The sender: one mailbox, alone or after a display name. |
+| `mail-smtp.user` | string |  |  |  |  | The account the relay signs in, beside `password`. |
+| `mail-smtp.password` | string |  |  |  |  | The account's password, beside `user`. |
 | `mail-smtp.deadline` | string | `40s` |  |  |  | How long a whole send may take, from 100ms to 10m. |
-| `mail-smtp.concurrent-sends` | integer (1–1000) | `20` |  |  |  |  |
+| `mail-smtp.concurrent-sends` | integer (1–1000) | `20` |  |  |  | Sends under way at once on a host, from 1 to 1000. |
 
 ## metrics-prometheus
 
