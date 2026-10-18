@@ -2590,6 +2590,9 @@ importers:
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
