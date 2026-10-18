@@ -270,6 +270,8 @@ export interface LedgerHarness {
 	 */
 	open(): Promise<{ readonly ledger: Ledger; readonly checks: readonly string[] }>;
 	readonly unanswerableBySubject?: boolean;
+	/** Set where the ledger looks users up by upstream identity: the one it ties to alice. */
+	readonly upstreamOfAlice?: { readonly idp: string; readonly subject: string };
 }
 
 /** The user ledger contract, run against any user ledger. */
@@ -289,6 +291,17 @@ export function ledgerContract(name: string, harness: LedgerHarness): void {
 			expect(bySubject.kind === "user" && bySubject.user.subject).toBe("s-alice");
 			expect(await ledger.bySubject("s-nobody")).toEqual({ kind: "none" });
 		});
+
+		it.runIf(harness.upstreamOfAlice !== undefined)(
+			"finds alice by the upstream identity it ties to her, and none for one it does not know",
+			async () => {
+				const { ledger } = await harness.open();
+				const { idp, subject } = harness.upstreamOfAlice ?? { idp: "", subject: "" };
+				const found = await ledger.byUpstream?.(idp, subject);
+				expect(found?.kind === "user" && found.user.subject).toBe("s-alice");
+				expect(await ledger.byUpstream?.(idp, `${subject}-nobody`)).toEqual({ kind: "none" });
+			},
+		);
 
 		it("does the same comparisons for an unknown identifier as for a known one", async () => {
 			const { ledger, checks } = await harness.open();

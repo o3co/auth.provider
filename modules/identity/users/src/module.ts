@@ -1,7 +1,7 @@
 import { defineModule } from "@mod/kernel";
 import { z } from "zod";
-import { ledgers, users } from "./contract.ts";
-import { contributedSource } from "./contributed.ts";
+import { ledgers, type UpstreamNames, upstreamNames, users } from "./contract.ts";
+import { contributedSource } from "./ledger/contributed.ts";
 import { ledgerUsers } from "./ledger.ts";
 import { keyOf, record, registeredUsers } from "./registered.ts";
 import { contactStore, linkStore } from "./store.ts";
@@ -32,8 +32,27 @@ const section = z
 		path: ["registered"],
 	});
 
+function namesRefused(declarations: readonly UpstreamNames[]): string[] {
+	const declared = declarations.flatMap((d) =>
+		d.names.map((n) => ({ ...n, declaredBy: d.declaredBy })),
+	);
+	const told = (n: (typeof declared)[number]) => `${n.issuer} (by ${n.declaredBy})`;
+	const empty = declared.filter((n) => n.name === "" || n.issuer === "");
+	const byName = Map.groupBy(declared, (n) => n.name);
+	const shared = [...byName].filter(([, all]) => new Set(all.map((n) => n.issuer)).size > 1);
+	return [
+		...empty.map((n) => `an IdP name and its issuer cannot be empty: "${n.name}" ${told(n)}`),
+		...shared.map(
+			([name, all]) =>
+				`the IdP name ${name} stands for more than one issuer: ${all.map(told).join(", ")}`,
+		),
+	];
+}
+
 export default defineModule({ name: "users", section }, (m) => [
 	m.provide(users).by(async (c) => {
+		const refused = namesRefused(await c.collect(upstreamNames));
+		if (refused.length > 0) return c.refuse("users", refused.join("; "));
 		const [ledger, ...more] = await c.collect(ledgers);
 		if (more.length > 0) return c.refuse("users", "more than one user ledger is contributed");
 		if (ledger && c.section.registered.length > 0) {

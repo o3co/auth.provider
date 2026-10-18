@@ -118,8 +118,18 @@ export interface Ledger {
 	/** None when no user matches, after the same work as for a known identifier; throws Unavailable when the ledger fails or refuses. */
 	verify(identifier: string, password: string): Promise<Verified>;
 	bySubject(subject: string): Promise<BySubject>;
+	byUpstream?(idp: string, upstreamSubject: string): Promise<Verified>;
+}
+
+/** The IdP names one module passes to `byUpstream`, each with the issuer it stands for (compared as written). */
+export interface UpstreamNames {
+	readonly declaredBy: string;
+	readonly names: readonly { readonly name: string; readonly issuer: string }[];
 }
 
 export const users = contract<Users>("users");
 export const ledgers = extensionPoint<Ledger>("users.ledgers", { multiplicity: "many" });
+export const upstreamNames = extensionPoint<UpstreamNames>("users.upstream-names", {
+	multiplicity: "many",
+});
 export * from "./store.ts";
