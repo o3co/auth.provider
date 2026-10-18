@@ -8,12 +8,12 @@
 - The attributes and their names (`users`). A login's attributes and their checks (`login-attributes`). What a caller does with attributes nobody vouches for (each caller decides).
 
 ## Offers
-- `subjectAttributes.of` (subject, optional session handle → known with its source, attributes and `vouched` when `users` vouches for them / unknown).
+- `subjectAttributes.of` (subject, optional session handle → known with its attributes and `vouched`, whether `users` vouches for them / unknown).
 - `vouches` (a login's sourced attributes → whether `users` vouches for them), the same rule for a login not yet in a session.
 
 ## Invariants
-- When `users` answers for the subject, the answer is its attributes under the source `users`, and the session is not read; a subject with no user has none.
-- Only when `users` cannot look the subject up, the answer is the login attributes of the session the handle names, under the source `session:<the login's source>`, if it is open and the subject's.
+- When `users` answers for the subject, the answer is its attributes, and the session is not read; a subject with no user has none.
+- Only when `users` cannot look the subject up, the answer is the login attributes of the session the handle names, if it is open and the subject's.
 - Vouched only when `users` states the attributes: its own answer (a subject with no user too), or a login kept under `login-attributes`' source name for users (`loginSource.users`). An upstream's login never is.
 - Sources are never mixed; with no such session or no attributes in it, the answer is unknown, never empty.
 - A `users` or `session` failure is unavailable.

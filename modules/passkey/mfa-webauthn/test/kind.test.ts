@@ -31,7 +31,7 @@ beforeEach(() => {
 });
 const known = (values: Record<string, unknown>): AttributesAnswer => ({
 	kind: "known",
-	source: "users",
+	vouched: true,
 	attributes: values,
 });
 const attributesStandIn = defineModule({ name: "subject-attributes" }, (m) => [

@@ -30,7 +30,7 @@ const releasedOver = (read: SubjectAttributes): ReleasedClaims => ({
 		const found = await read.of(subject, handle);
 		if (found.kind === "unknown") return nothing;
 		const { [userAttribute.emailVerified]: _, ...unvouched } = found.attributes;
-		return claimsOf(found.vouched === true ? found.attributes : unvouched, scope);
+		return claimsOf(found.vouched ? found.attributes : unvouched, scope);
 	},
 });
 
