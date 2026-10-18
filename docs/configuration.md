@@ -545,7 +545,7 @@ From `@mod/session-tokens`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `session-tokens.sweep-seconds` | integer (1–3600) | `30` |  |  |  | How often each host revokes the tokens of pushed-out references left unrevoked, in seconds. |
+| `session-tokens.sweep-interval` | string | `30s` |  |  |  | How often each host revokes the tokens of pushed-out references left unrevoked, from `1s` to `1h` in whole seconds. |
 | `session-tokens.push-out-margin` | integer (0–10000) | `8` |  |  |  | How far below a session's cap an add lists the session before it may push a reference out: the adds expected to come at once. A larger margin narrows the crash window, at one more write near the cap; it must stay below the cap. |
 
 ## session-tokens-store

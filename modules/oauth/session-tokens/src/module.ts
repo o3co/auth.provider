@@ -1,5 +1,12 @@
 import { sessionIssuances } from "@mod/grants";
-import { type BuildContext, contract, defineModule, type Log, Unavailable } from "@mod/kernel";
+import {
+	type BuildContext,
+	contract,
+	defineModule,
+	type Log,
+	setting,
+	Unavailable,
+} from "@mod/kernel";
 import { participants } from "@mod/session";
 import { referenceOf, type Tokens, tokens } from "@mod/tokens";
 import { z } from "zod";
@@ -14,21 +21,19 @@ import {
 } from "./store.ts";
 
 const section = z.strictObject({
-	"sweep-seconds": z
-		.number()
-		.int()
-		.min(1)
-		.max(3600)
-		.default(30)
+	"sweep-interval": setting
+		.duration("s")
+		.pipe(z.number().int().min(1).max(3600))
+		.prefault("30s")
 		.describe(
-			"How often each host revokes the tokens of pushed-out references left unrevoked, in seconds.",
+			"How often each host revokes the tokens of pushed-out references left unrevoked, from `1s` to `1h` in whole seconds.",
 		),
 	"push-out-margin": z
 		.number()
 		.int()
 		.min(0)
 		.max(10_000)
-		.default(8)
+		.prefault(8)
 		.describe(
 			"How far below a session's cap an add lists the session before it may push a reference out: the adds expected to come at once. A larger margin narrows the crash window, at one more write near the cap; it must stay below the cap.",
 		),
@@ -109,7 +114,7 @@ export default defineModule({ name: "session-tokens", section }, (m) => [
 	m.provide(sessionTokens).by(async (c) => {
 		const parts = await c.get(built);
 		const settle = settler(parts);
-		c.every(c.section["sweep-seconds"] * 1000, async () => {
+		c.every(c.section["sweep-interval"] * 1000, async () => {
 			const { failed } = await parts.sessions.each(settle);
 			if (failed > 0) c.log.warn("session-tokens.revoke_retry_failed", { count: failed });
 		});
