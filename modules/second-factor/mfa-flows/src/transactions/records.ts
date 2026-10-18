@@ -59,6 +59,9 @@ export type Transaction = Common & ByPurpose;
 export type Started = Pick<Common, "subject" | "pending" | "bindingChallenge"> & ByPurpose;
 
 export const hashOf = (value: string) => createHash("sha256").update(value).digest("base64url");
+/** Whose live transactions a transaction counts among: the session it is tied to, or the held login's subject. */
+export const holderOf = (t: Pick<Common, "subject"> & ByPurpose) =>
+	"handle" in t ? `session:${t.handle}` : `login:${t.subject}`;
 export const transactionOf = (record: StoredTransaction | undefined) =>
 	record as unknown as Transaction | undefined;
 export const stored = (transaction: Transaction) => transaction as unknown as StoredTransaction;

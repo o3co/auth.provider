@@ -121,6 +121,20 @@ export function sessionsContract(
 			expect(place.closed).toEqual(["alice"]);
 		});
 
+		it("keeps a session's subject for as long as it lives, a raise included, and never names another session by its handle", async () => {
+			const place = await open();
+			const first = await place.sessions.complete(place.request(), facts(place));
+			const raised = await place.sessions.raise(place.request(first.cookies), ["strong"]);
+			expect(raised?.session.context.subject).toBe("alice");
+			expect((await place.sessions.openContext(first.session.id))?.subject).toBe("alice");
+			const second = await place.sessions.complete(
+				place.request(raised?.cookies),
+				facts(place, "bob"),
+			);
+			expect(await place.sessions.openContext(first.session.id)).toBeUndefined();
+			expect((await place.sessions.openContext(second.session.id))?.subject).toBe("bob");
+		});
+
 		it("ends a session at its lifetime, and when its subject is revoked", async () => {
 			const place = await open();
 			const lived = await place.sessions.complete(place.request(), facts(place));
@@ -378,6 +392,21 @@ export function sessionsContract(
 			expect(await place.sessions.enter(place.request(done.cookies))).toBeUndefined();
 		});
 
+		it("destroys a session cookie sent twice, reading neither and closing no session for it", async () => {
+			const place = await open();
+			const done = await place.sessions.complete(place.request(), facts(place));
+			const once = done.cookies[0] as string;
+			const twice = place.request([once, once]);
+			expect(await place.sessions.enter(twice)).toBeUndefined();
+			const closed = await place.sessions.closeRequest(twice);
+			expect(closed).toMatchObject({
+				kind: "closed",
+				cookies: [expect.stringMatching(/Max-Age=0/i)],
+			});
+			expect(closed).not.toHaveProperty("session");
+			expect(await place.sessions.enter(place.request(done.cookies))).toBeDefined();
+		});
+
 		it("destroys a cookie that opens nothing, and closes no session for it", async () => {
 			const place = await open();
 			const done = await place.sessions.complete(place.request(), facts(place));
@@ -567,7 +596,12 @@ export const sessionStandIn = defineModule({ name: "session" }, (m) => [
 			const found = secret === undefined ? undefined : handles.get(secret);
 			return found && found.until > c.clock.now() ? found.handle : undefined;
 		};
-		const handleIn = (request: HttpRequest) => handleOf(jar.read(request, "session"));
+		/** The session cookie's value, when the request carries it once where it may be read. */
+		const secretIn = (request: HttpRequest) => {
+			const carried = jar.lookup(request, "session");
+			return carried.kind === "found" ? carried.value : undefined;
+		};
+		const handleIn = (request: HttpRequest) => handleOf(secretIn(request));
 		const sessionOf = (handle: string, found: Kept): Session =>
 			Object.freeze({ id: handle, context: found.context });
 		const liveAt = async (handle: string | undefined) => {
@@ -641,7 +675,7 @@ export const sessionStandIn = defineModule({ name: "session" }, (m) => [
 				};
 			},
 			raise: async (request, amr) => {
-				const secret = jar.read(request, "session");
+				const secret = secretIn(request);
 				const handle = handleOf(secret);
 				const found = await liveAt(handle);
 				if (!found || secret === undefined || handle === undefined) return undefined;
@@ -664,7 +698,7 @@ export const sessionStandIn = defineModule({ name: "session" }, (m) => [
 			},
 			closeRequest: async (request) => {
 				const handle = handleIn(request);
-				const carried = jar.read(request, "session") !== undefined;
+				const carried = jar.lookup(request, "session").kind !== "absent";
 				const removed = carried ? [jar.write("session", "", 0)] : [];
 				if (handle === undefined) return { kind: "closed", cookies: removed };
 				return { ...(await close(handle)), cookies: removed };

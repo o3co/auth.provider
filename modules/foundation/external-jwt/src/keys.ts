@@ -1,5 +1,11 @@
 import type { KeyObject } from "node:crypto";
-import { publicJwk, publicPem, verifiesUnder, verifyAlgorithms } from "@mod/keys";
+import {
+	isVerifyAlgorithm,
+	publicJwk,
+	publicPem,
+	verifiesUnder,
+	verifyAlgorithms,
+} from "@mod/keys";
 import type { Algorithm, Jwk, PemKey } from "./contract.ts";
 
 /** A key that may verify: as a JWK, for choosing it, and as the platform reads it. */
@@ -11,8 +17,7 @@ export interface Candidate {
 /** The asymmetric algorithms `keys` knows. */
 export const algorithms: readonly Algorithm[] = verifyAlgorithms;
 
-export const isAlgorithm = (alg: unknown): alg is Algorithm =>
-	typeof alg === "string" && algorithms.includes(alg);
+export const isAlgorithm = (alg: unknown): alg is Algorithm => isVerifyAlgorithm(alg);
 
 /** A public key `keys` reads from a JWK; none for anything else. */
 export const fromJwk = (jwk: Jwk): Candidate | undefined => publicJwk(jwk);

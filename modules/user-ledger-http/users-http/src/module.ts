@@ -1,24 +1,10 @@
 import { deepFreeze, defineModule, setting } from "@mod/kernel";
+import { bearerToken } from "@mod/keys";
 import { outbound, outboundPolicy } from "@mod/outbound";
 import { urlSetting } from "@mod/url-setting";
 import { type Ledger, ledgers } from "@mod/users";
 import { z } from "zod";
 import { calls } from "./calls/calls.ts";
-
-/** The fewest bytes of key material a token can be read as: its own, or as hex or base64 decodes them. */
-function keyBytes(token: string): number {
-	const hex = /^(?:[0-9a-fA-F]{2})+$/.test(token) ? token.length / 2 : undefined;
-	const body = token.replace(/=+$/, "");
-	const padding = token.length - body.length;
-	// Base64 as written: one alphabet, no lone sixth bit, and padding that completes the last four.
-	const alphabet = /^[A-Za-z0-9+/]+$/.test(body) || /^[A-Za-z0-9_-]+$/.test(body);
-	const rest = body.length % 4;
-	const base64 =
-		alphabet && padding <= 2 && rest !== 1 && (padding === 0 || rest + padding === 4)
-			? Math.floor((body.length * 3) / 4)
-			: undefined;
-	return Math.min(...[Buffer.byteLength(token), hex, base64].filter((n) => n !== undefined));
-}
 
 /** The ledger's URLs, each an operator's setting, by the key that names it. */
 const urlKeys = ["verify-url", "subject-url", "upstream-url"] as const;
@@ -36,10 +22,7 @@ const section = z
 		"upstream-url": ledgerUrl(
 			"Where a user is looked up by upstream identity; without it, users follows the links it keeps.",
 		),
-		credential: z
-			.string()
-			.regex(/^[A-Za-z0-9\-._~+/]+=*$/)
-			.refine((token) => keyBytes(token) >= 32, "at least 32 bytes of key material")
+		credential: bearerToken({ atLeast: 32 })
 			.optional()
 			.describe("A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material."),
 		timeout: setting

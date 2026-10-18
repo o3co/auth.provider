@@ -1,3 +1,4 @@
+import type { Algorithm } from "@mod/external-jwt";
 import { setting } from "@mod/kernel";
 import { hostEntryOf, type OutboundPolicy } from "@mod/outbound";
 import {
@@ -29,7 +30,7 @@ export function hostsOf(s: {
  * The section, taking only the asymmetric algorithms external-jwt knows: never none nor HMAC. Boot is
  * refused on a URL it sends to that outbound's destination policy refuses.
  */
-export const settingsOf = (asymmetric: readonly string[], policy: OutboundPolicy) =>
+export const settingsOf = (asymmetric: readonly Algorithm[], policy: OutboundPolicy) =>
 	clientSetting
 		.extend({
 			issuer: endpoint,
@@ -48,7 +49,12 @@ export const settingsOf = (asymmetric: readonly string[], policy: OutboundPolicy
 				.prefault(["openid"])
 				.refine((scopes) => scopes.includes("openid"), "scopes must hold openid"),
 			algorithms: z
-				.array(z.string().refine((alg) => asymmetric.includes(alg), "an asymmetric algorithm"))
+				.array(
+					z.custom<Algorithm>(
+						(alg) => typeof alg === "string" && (asymmetric as readonly string[]).includes(alg),
+						"an asymmetric algorithm",
+					),
+				)
 				.min(1)
 				.prefault(["RS256", "PS256", "ES256", "EdDSA"]),
 			/** Hosts besides the issuer's its endpoints may be on, as outbound reads a host list. */

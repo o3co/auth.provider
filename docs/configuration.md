@@ -129,6 +129,19 @@ From `@mod/dpop`.
 | `dpop.nonce.ttl` | string | `5m` |  | `DPOP_NONCE_TTL` | `5m` | How often the nonce changes, from `1s` to `1h` in whole seconds; one is taken for twice this. |
 | `dpop.nonce.secret` | string |  |  | `DPOP_NONCE_SECRET` | `REPLACE-NONCE-SECRET-BASE64-32-BYTES` | The nonce's key, shared by every instance: base64 of 32 bytes or more; required unless never. |
 
+## exchange-id-tokens
+
+From `@mod/exchange-id-tokens`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `exchange-id-tokens.max-age` | string | `10m` |  |  |  | The oldest an id_token may be, from its `iat`, from 1m to 1h. |
+| `exchange-id-tokens.clock-skew` | string | `30s` |  |  |  | How far an id_token's times may be off this host's clock, from 0s to 5m. |
+| `exchange-id-tokens.apple.upstream` | string | `apple` |  |  |  | The upstream's name, by which users finds the account an id_token's `sub` is linked to. |
+| `exchange-id-tokens.apple.clients` | map |  |  |  |  | This provider's client IDs, each with the id_tokens it may exchange. |
+| `exchange-id-tokens.google.upstream` | string | `google` |  |  |  | The upstream's name, by which users finds the account an id_token's `sub` is linked to. |
+| `exchange-id-tokens.google.clients` | map |  |  |  |  | This provider's client IDs, each with the id_tokens it may exchange. |
+
 ## external-jwt
 
 From `@mod/external-jwt`.
@@ -360,6 +373,15 @@ From `@mod/mfa-flows`.
 | `mfa-flows.lockout.hard-limit` | integer (-9007199254740991–9007199254740991) | `100` |  |  |  | Failures in one run after which the hold is fixed until released; a positive integer, no less than `budget`. |
 | `mfa-flows.lockout.memory` | string | `1d` |  |  |  | How long a run of failures is remembered without one, in whole seconds, such as `1d`. |
 
+## mfa-management
+
+From `@mod/mfa-management`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `mfa-management.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over every POST the routes take. |
+| `mfa-management.window` | string | `5m` |  |  |  | The window `requests` is counted over, from 1s to 1d in whole seconds, such as `5m`. |
+
 ## mfa-webauthn
 
 From `@mod/mfa-webauthn`.
@@ -563,6 +585,18 @@ From `@mod/session-tokens-store`.
 | `session-tokens-store.references-per-session` | integer (1–10000) | `1000` |  |  |  | How many token references a session's set keeps; past it, one is pushed out and its token revoked. |
 | `session-tokens-store.pending-shards` | integer (1–65536) | `64` |  |  |  | How many shards the sessions pending a push-out are spread over. |
 | `session-tokens-store.pending-per-shard` | integer (1–10000) | `1000` |  |  |  | How many pending sessions one shard holds; an add to a full shard is refused. |
+
+## signer-keys-http
+
+From `@mod/signer-keys-http`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `signer-keys-http.issuer` | string |  | yes | `SIGNER_KEYS_HTTP_ISSUER` | `https://devices.example.invalid` | The `iss` it answers for: one of jwt-bearer's `issuers` with no keys of its own. |
+| `signer-keys-http.keys-url` | string |  | yes | `SIGNER_KEYS_HTTP_KEYS_URL` | `https://ledger.example.invalid/signer-keys` | Where a signer's keys are looked up. Plain http is reached only where outbound's policy names it. |
+| `signer-keys-http.credential` | string |  |  |  |  | A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material. |
+| `signer-keys-http.timeout` | string |  |  |  |  | How long a lookup may take, from 1ms to 1m, narrowing outbound's cap. |
+| `signer-keys-http.max-response-size` | string |  |  |  |  | The largest answer read, from 1B to 16MiB, narrowing outbound's cap. |
 
 ## store
 

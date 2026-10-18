@@ -10,7 +10,6 @@ import { longestRecentMs, sessions } from "@mod/session";
 import { revocations, subjectRevocation } from "@mod/subject-revocation";
 import { mfaReset } from "./contract.ts";
 import { enrollmentOver } from "./enrollment/enrollment.ts";
-import { managementOver } from "./management/management.ts";
 import { permitsOver } from "./permits/permits.ts";
 import { gateOver, proofOver, resumeOver } from "./proof/proof.ts";
 import { releaseOver } from "./release/release.ts";
@@ -68,7 +67,7 @@ async function handlersOver(c: BuildContext<Settings>, policy: LockoutPolicy) {
 		audit: await c.get(audit),
 		log: c.log,
 	});
-	return { ...proof, ...enrollment, ...managementOver(shared), ...release };
+	return { ...proof, ...enrollment, ...release };
 }
 type HandlerName = keyof Awaited<ReturnType<typeof handlersOver>>;
 
@@ -80,10 +79,6 @@ const table = [
 	["POST", "/session/mfa/step-up", "stepUp"],
 	["POST", "/session/mfa/enrollment", "enroll"],
 	["POST", "/session/mfa/enrollment/complete", "complete"],
-	["GET", "/session/mfa/factors", "list"],
-	["POST", "/session/mfa/factors/rename", "rename"],
-	["POST", "/session/mfa/factors/remove", "remove"],
-	["POST", "/session/mfa/recovery-codes", "regenerate"],
 	["POST", "/session/mfa/lock/release", "release"],
 ] as const satisfies readonly (readonly ["GET" | "POST", string, HandlerName])[];
 

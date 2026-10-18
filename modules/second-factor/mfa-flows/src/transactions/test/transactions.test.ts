@@ -1,19 +1,26 @@
 import type { Cookies } from "@mod/cookies";
 import { testRequest } from "@mod/http/testing";
 import { isUnavailable } from "@mod/kernel";
+import { recordingLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { memoryTransactions } from "../../../test/stores.ts";
 import type { TransactionStore } from "../../store.ts";
 import type { Transaction } from "../records.ts";
 import { transactionsOver } from "../transactions.ts";
 
-const jar: Cookies = { read: () => undefined, write: (name) => name };
+const jar: Cookies = {
+	read: () => undefined,
+	lookup: () => ({ kind: "absent" }),
+	write: (name) => name,
+};
 const random = (n: number) => new Uint8Array(n).map(() => Math.floor(Math.random() * 256));
 /** Transactions of 60 seconds on the records stand-in, whose clock stands still: only deadlines end them. */
 const opened = (store?: (kept: TransactionStore) => TransactionStore) => {
 	const clock = { now: 0 };
 	const kept = memoryTransactions(() => 0);
 	const transactions = transactionsOver({
+		listings: kept.listings,
+		log: recordingLog().log,
 		store: store?.(kept.transactions) ?? kept.transactions,
 		jar,
 		random,

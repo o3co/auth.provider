@@ -104,6 +104,8 @@ describe("users ledgers", () => {
 		expect(await u.verify("", "correct horse")).toEqual(none);
 		expect(await u.verify("alice", "x".repeat(1025))).toEqual(none);
 		expect(await u.bySubject("")).toEqual(none);
+		expect(await u.bySubject("s-é")).toEqual(none);
+		expect(await u.bySubject("s".repeat(256))).toEqual(none);
 		expect(await u.claimedContacts("")).toEqual([]);
 		expect(calls).toEqual([]);
 	});
@@ -185,6 +187,8 @@ describe("users ledgers", () => {
 		});
 		const malformed: Record<string, unknown> = {
 			"empty subject": user(""),
+			"subject outside ASCII": user("s-é"),
+			"subject past 255": user("s".repeat(256)),
 			"subject not a string": user(7),
 			"attributes an array": user("s-alice", ["a"]),
 			"attributes null": user("s-alice", null),

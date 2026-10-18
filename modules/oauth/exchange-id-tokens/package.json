@@ -1,0 +1,36 @@
+{
+	"name": "@mod/exchange-id-tokens",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"optIn": true,
+	"exports": {
+		"./module": "./src/module.ts",
+		"./testing": "./src/testing.ts"
+	},
+	"dependencies": {
+		"@mod/clients": "workspace:*",
+		"@mod/external-jwt": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/store": "workspace:*",
+		"@mod/subject-revocation": "workspace:*",
+		"@mod/token-exchange": "workspace:*",
+		"@mod/users": "workspace:*",
+		"jose": "6.2.12",
+		"zod": "4.6.7"
+	},
+	"devDependencies": {
+		"@mod/client-allowance": "workspace:*",
+		"@mod/grants": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/issuer": "workspace:*",
+		"@mod/outbound": "workspace:*",
+		"@mod/refresh": "workspace:*",
+		"@mod/sender-binding": "workspace:*",
+		"@mod/session": "workspace:*",
+		"@mod/session-tokens": "workspace:*",
+		"@mod/token-endpoint": "workspace:*",
+		"@mod/tokens": "workspace:*"
+	}
+}

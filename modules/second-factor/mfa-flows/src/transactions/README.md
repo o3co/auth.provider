@@ -28,6 +28,8 @@ Internal module of `mfa-flows`: transactions over the package's store interface,
 - A transaction's record carries its deadline and, once taken, its mark.
 - Taking marks the transaction; a marked one is kept until its lifetime and read as gone.
 - A start whose identifier is already held is unavailable.
+- A start lists the transaction under its holder (the session it is tied to, or the held login's subject) by a digest of its identifier, after keeping it; a listing that cannot answer makes the start unavailable.
+- `find` answers a transaction only while its holder's listing holds it; taking it, or spending its last attempt, takes it off, logging `mfa-flows.listing_failed` when that fails.
 
 ## Depends on
 - `kernel` (the build context, the clock, unavailable); `http` (the request type); `cookies`; `session` (the login facts type); `mfa` (the type of whom it asks for); `subject-attributes` (`vouches`); the package's store interface

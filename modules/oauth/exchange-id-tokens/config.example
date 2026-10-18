@@ -1,0 +1,15 @@
+exchange-id-tokens {
+	apple {
+		clients {
+			ios-app { audiences = ["your-ios-bundle-id"] }
+		}
+	}
+	google {
+		clients {
+			android-app {
+				audiences = ["your-google-server-client-id"]
+				authorized-parties = ["your-google-android-client-id"]
+			}
+		}
+	}
+}

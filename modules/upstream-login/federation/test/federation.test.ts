@@ -358,7 +358,7 @@ describe("federation", () => {
 				throw new Error(`${read.issuer}:${read.port}`);
 			},
 		});
-		const at = { name: "a", redirectUri: "https://as.example/cb" };
+		const at = { idp: "a", redirectUri: "https://as.example/cb" };
 		await expect(type.open({ issuer: "i", port: 1 }, at)).rejects.toThrow("i:1");
 	});
 
@@ -414,6 +414,15 @@ describe("federation", () => {
 		);
 		expect(elsewhere.status).toBe(400);
 		expect((await s.callback(`code=good&state=${started.state}`, started.cookie)).status).toBe(302);
+	});
+
+	it("takes no transaction from its cookie sent twice, and leaves it for the browser's own callback", async () => {
+		const s = await serve();
+		const started = await s.begin();
+		const query = `code=good&state=${started.state}`;
+		const twice = await s.callback(query, `${started.cookie}; ${started.cookie}`);
+		expect([twice.status, twice.body]).toEqual([400, { error: "invalid_state" }]);
+		expect((await s.callback(query, started.cookie)).status).toBe(302);
 	});
 
 	it("ends a transaction at its lifetime", async () => {
@@ -753,6 +762,13 @@ describe("federation", () => {
 		expect(await refused({ a: { type: "test", issuer: 1 } })).toEqual(["federation.idps.a.issuer"]);
 		expect(await refused({ a: { type: "test", issuer: "https://mismatch.example" } })).toEqual([
 			"federation.idps.a",
+		]);
+		// The type's own reason, under the key it names in the IdP's settings.
+		const told = await serve({
+			federation: { idps: { a: { type: "test", issuer: "https://misdescribed.example" } } },
+		}).catch((error: BootRefused) => error.refusals);
+		expect(told).toEqual([
+			{ where: "federation.idps.a.issuer", reason: "the description names another issuer" },
 		]);
 		expect(
 			await refused({ "Bad.Name": { type: "test", issuer: "https://idp.example" } }),

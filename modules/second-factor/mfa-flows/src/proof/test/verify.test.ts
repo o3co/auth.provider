@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Cookies } from "@mod/cookies";
-import type { HttpResponse } from "@mod/http";
+import type { HttpRequest, HttpResponse } from "@mod/http";
 import { testRequest } from "@mod/http/testing";
 import { isUnavailable, Unavailable } from "@mod/kernel";
 import { recordingLog } from "@mod/kernel/testing";
@@ -13,13 +13,18 @@ import type { Started } from "../../transactions/records.ts";
 import { transactionsOver } from "../../transactions/transactions.ts";
 import { proofOver } from "../proof.ts";
 
+const carried = (request: HttpRequest, name: string) =>
+	request.headers
+		.get("cookie")
+		?.split("; ")
+		.find((c) => c.startsWith(`${name}=`))
+		?.slice(name.length + 1);
 const jar: Cookies = {
-	read: (request, name) =>
-		request.headers
-			.get("cookie")
-			?.split("; ")
-			.find((c) => c.startsWith(`${name}=`))
-			?.slice(name.length + 1),
+	read: carried,
+	lookup: (request, name) => {
+		const value = carried(request, name);
+		return value === undefined ? { kind: "absent" } : { kind: "found", value };
+	},
 	write: (name, value) => `${name}=${value}`,
 };
 const session: Session = { id: "h1", context: { subject: "sue", amr: ["pwd"] } as never };
@@ -30,6 +35,8 @@ function standIn() {
 	let now = 1_000_000;
 	const kept = memoryTransactions(() => now);
 	const transactions = transactionsOver({
+		listings: kept.listings,
+		log: recordingLog().log,
 		store: kept.transactions,
 		jar,
 		random: (n) => new Uint8Array(randomBytes(n)),

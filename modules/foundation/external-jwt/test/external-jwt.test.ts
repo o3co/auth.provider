@@ -53,7 +53,8 @@ describe("headers and keys", () => {
 		expect(await strict.verify(await signer.sign(fresh()))).toEqual(invalid("algorithm"));
 		const inherited = verifierOf(
 			{ inline: [signer.jwk] },
-			{ ...policy, algorithms: [...policy.algorithms, "toString"] },
+			// An untyped caller can still name one outside the list; it never verifies.
+			{ ...policy, algorithms: [...policy.algorithms, "toString" as Algorithm] },
 		);
 		expect(await inherited.verify(await signer.sign(fresh(), { alg: "toString" }))).toEqual(
 			invalid("algorithm"),
@@ -61,7 +62,7 @@ describe("headers and keys", () => {
 		// Even named by the caller, none and a shared secret never verify, whatever the token says.
 		const loose = verifierOf(
 			{ inline: [signer.jwk] },
-			{ ...policy, algorithms: [...policy.algorithms, "HS256", "none"] },
+			{ ...policy, algorithms: [...policy.algorithms, "HS256", "none"] as Algorithm[] },
 		);
 		const encoded = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
 		const body = encoded(fresh());
@@ -161,7 +162,7 @@ describe("headers and keys", () => {
 	it("takes a key only of the kind and curve its algorithm needs", async () => {
 		const ec = await testSigner("ES256");
 		const x25519 = { ...generateKeyPairSync("x25519").publicKey.export({ format: "jwk" }) };
-		const all = { ...policy, algorithms: ["RS256", "ES256", "ES384", "ES512", "EdDSA"] };
+		const all: Policy = { ...policy, algorithms: ["RS256", "ES256", "ES384", "ES512", "EdDSA"] };
 		for (const [alg, jwk] of [
 			["RS256", ec.jwk],
 			["ES384", ec.jwk],

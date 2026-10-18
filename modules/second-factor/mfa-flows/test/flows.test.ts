@@ -2,7 +2,7 @@ import { listening } from "@mod/http";
 import { testRequest } from "@mod/http/testing";
 import { BootRefused, defineModule } from "@mod/kernel";
 import { openedAfterHold } from "@mod/login-gates";
-import { type Enrolled, factorKinds } from "@mod/mfa";
+import { type Enrolled, factorKinds, factors } from "@mod/mfa";
 import { sessions } from "@mod/session";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { afterEach, describe, expect, it } from "vitest";
@@ -67,18 +67,25 @@ it("refuses a POST without same-origin evidence before anything else", async () 
 });
 
 it("limits the forms it takes per source, after the same-origin check, and never its pages", async () => {
-	const { call, signIn } = await serve({ requests: 2, window: "1m" });
+	const { call, signIn, heldLogin } = await serve({ requests: 2, window: "1m", mode: "required" });
+	const held = await heldLogin();
 	await signIn();
 	const crossSite = { headers: { origin: "https://elsewhere.example" } };
 	for (let i = 0; i < 2; i++) {
-		expect((await call("POST", "/session/mfa/factors/rename", {}, crossSite)).status).toBe(403);
+		expect((await call("POST", "/session/mfa/step-up", {}, crossSite)).status).toBe(403);
 	}
 	for (let i = 0; i < 2; i++) {
-		expect((await call("POST", "/session/mfa/factors/rename", {})).status).not.toBe(429);
+		expect((await call("POST", "/session/mfa/step-up", {})).status).not.toBe(429);
 	}
 	const limited = await call("POST", "/session/mfa/enrollment", { kind: "code" });
 	expect([limited.status, limited.body]).toEqual([429, { error: "rate_limited" }]);
-	expect((await call("GET", "/session/mfa/factors")).status).toBe(200);
+	const page = await call(
+		"GET",
+		"/session/mfa/transaction",
+		{ transaction_id: held.tx },
+		{ jar: held.jar },
+	);
+	expect(page.status).toBe(200);
 });
 
 describe("mfa at login", () => {
@@ -386,10 +393,10 @@ describe("the operator's numbers", () => {
 	it("counts the forms per source in a window of seconds", async () => {
 		const s = await serve({ requests: 1, window: "1s" });
 		await s.signIn();
-		const rename = () => s.call("POST", "/session/mfa/factors/rename", {});
-		expect([(await rename()).status, (await rename()).status]).toEqual([400, 429]);
+		const stepUp = () => s.call("POST", "/session/mfa/step-up", {});
+		expect([(await stepUp()).status, (await stepUp()).status]).toEqual([403, 429]);
 		s.lagStores(1100);
-		expect((await rename()).status).toBe(400);
+		expect((await stepUp()).status).toBe(403);
 	});
 });
 
@@ -723,40 +730,6 @@ describe("mfa in a session", () => {
 		await s.signIn("ola");
 		expect(await enroll()).toEqual({ status: 409, body: { error: "mfa_factor_duplicate" } });
 	});
-
-	it("asks a recent proof to change factors, and keeps the last counting factor under required mode", async () => {
-		const s = await serve({ mode: "required" });
-		const { tx } = await s.heldLogin("dana");
-		const begun = await s.call("POST", "/session/mfa/enrollment", {
-			kind: "code",
-			transaction_id: tx,
-		});
-		await s.call("POST", "/session/mfa/enrollment/complete", {
-			transaction_id: tx,
-			proof: `${begun.body.secret}:0`,
-		});
-		// The factor counts from the next sign-in, which proves it.
-		const next = await s.heldLogin("dana");
-		await s.call("POST", "/session/mfa/verify", {
-			transaction_id: next.tx,
-			factor_id: next.factor(),
-			proof: `${begun.body.secret}:1`,
-		});
-		const only = idOf(await s.call("GET", "/session/mfa/factors"), "code");
-		const rename = (label: string) =>
-			s.call("POST", "/session/mfa/factors/rename", { factor_id: only, label });
-		expect((await rename("phone")).status).toBe(200);
-		const last = await s.call("POST", "/session/mfa/factors/remove", { factor_id: only });
-		expect([last.status, last.body.error]).toEqual([409, "mfa_last_factor"]);
-		clock.shift += 400_000;
-		for (const path of ["factors/rename", "factors/remove", "recovery-codes"]) {
-			const stale = await s.call("POST", `/session/mfa/${path}`, { factor_id: only, label: "x" });
-			expect([path, stale.status, stale.body.error]).toEqual([path, 403, "step_up_required"]);
-		}
-		await s.signIn("eve");
-		const none = await s.call("POST", "/session/mfa/recovery-codes");
-		expect([none.status, none.body.error]).toEqual([409, "mfa_no_qualifying_factor"]);
-	});
 });
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -939,21 +912,12 @@ describe("mfa under races and misuse", () => {
 
 	it("refuses a recovery code whose set was replaced while it was being judged", async () => {
 		const s = await serve();
-		const { secret, done } = await s.enrollCode("rex");
+		const { done } = await s.enrollCode("rex");
 		const codes = done.body.recovery_codes as string[];
-		const started = await s.call("POST", "/session/mfa/step-up");
-		const step = String(started.body.transaction);
-		const factors = await s.call("GET", "/session/mfa/transaction", { transaction_id: step });
-		await s.call("POST", "/session/mfa/verify", {
-			transaction_id: step,
-			factor_id: idOf(factors, "code"),
-			proof: `${secret}:1`,
-		});
-		const manager = new Map(s.jar());
 		const one = await s.heldLogin("rex");
 		during.backup = async () => {
-			const reissued = await s.call("POST", "/session/mfa/recovery-codes", {}, { jar: manager });
-			expect(reissued.status).toBe(200);
+			const reissued = await s.app.get(factors).reissue("rex");
+			expect(reissued.kind).toBe("reissued");
 		};
 		const used = await s.call(
 			"POST",
@@ -1016,27 +980,29 @@ describe("mfa under races and misuse", () => {
 			);
 		const done = await Promise.all([complete(first, jar), complete(second, other)]);
 		expect(done.filter((d) => d.body.recovery_codes)).toHaveLength(1);
-		const list = await s.call("GET", "/session/mfa/factors", {}, { jar });
-		expect(
-			(list.body.factors as { kind: string }[]).filter((f) => f.kind === "backup"),
-		).toHaveLength(1);
+		const held = await s.app.get(factors).held("ray");
+		expect(held.filter((f) => f.kind === "backup")).toHaveLength(1);
 	});
 
 	it("takes only a raise that added a second factor as a recent second factor", async () => {
 		const s = await serve();
 		await s.enrollCode("rho");
-		const factors = (await s.call("GET", "/session/mfa/factors")).body.factors as { id: string }[];
 		clock.shift += 400_000;
 		const cookie = s.jar().get("__Host-session") ?? "";
 		const raised = await s.app
 			.get(sessions)
 			.raise(testRequest({ headers: new Map([["cookie", `__Host-session=${cookie}`]]) }), ["hwk"]);
-		s.jar().set("__Host-session", (raised?.cookies[0] ?? "").split(";")[0]?.split("=")[1] ?? "");
-		const rename = await s.call("POST", "/session/mfa/factors/rename", {
-			factor_id: factors[0]?.id ?? "",
-			label: "x",
+		const fresh = (raised?.cookies[0] ?? "").split(";")[0]?.split("=")[1] ?? "";
+		// Changing a factor enters the session at the credential-changing level.
+		const entry = await s.app
+			.get(sessions)
+			.enterFor(
+				testRequest({ headers: new Map([["cookie", `__Host-session=${fresh}`]]) }),
+				"credentials",
+			);
+		expect(entry.kind === "short" ? entry.answer : entry.kind).toEqual({
+			error: "step_up_required",
 		});
-		expect([rename.status, rename.body.error]).toEqual([403, "step_up_required"]);
 	});
 });
 
@@ -1085,16 +1051,6 @@ describe("mfa bodies", () => {
 		expect([right.status, right.body]).toEqual([200, { redirect_to: "https://app.example/back" }]);
 		const up = await s.call("POST", "/session/mfa/step-up", {}, json);
 		expect([up.status, typeof up.body.transaction]).toEqual([200, "string"]);
-		const rename = (body: Record<string, unknown>) =>
-			s.call("POST", "/session/mfa/factors/rename", body, json);
-		expect((await rename({ factor_id: id, label: "desk" })).status).toBe(200);
-		expect((await rename({ factor_id: { id }, label: "desk" })).status).toBe(404);
-		const codes = await s.call("POST", "/session/mfa/recovery-codes", {}, json);
-		expect([codes.status, (codes.body.recovery_codes as string[]).length]).toEqual([200, 2]);
-		const remove = (body: Record<string, unknown>) =>
-			s.call("POST", "/session/mfa/factors/remove", body, json);
-		expect((await remove({ factor_id: true })).status).toBe(404);
-		expect((await remove({ factor_id: id })).status).toBe(200);
 	});
 
 	it("refuses a label that is not a string or not of mfa's shape after the transaction checks and before the proof, and binds none when there is no label", async () => {
@@ -1131,8 +1087,8 @@ describe("mfa bodies", () => {
 			{ headers: { "mfa-transaction": tx } },
 		);
 		expect([done.status, (done.body.factor as { label?: string }).label]).toEqual([200, undefined]);
-		const listed = await s.call("GET", "/session/mfa/factors");
-		expect((listed.body.factors as object[]).filter((f) => "label" in f)).toEqual([]);
+		const held = await s.app.get(factors).held("nina");
+		expect(held.filter((f) => "label" in f)).toEqual([]);
 		const up = await s.call("POST", "/session/mfa/step-up", {}, json);
 		const pendingless = await complete({
 			transaction_id: String(up.body.transaction),
@@ -1145,47 +1101,6 @@ describe("mfa bodies", () => {
 		]);
 	});
 
-	it("renames only with a label of mfa's shape, judged after the session and before the factor", async () => {
-		const s = await serve();
-		const { secret } = await s.enrollCode("omar");
-		const { tx, factor } = await s.heldLogin("omar");
-		const id = factor();
-		await s.call("POST", "/session/mfa/verify", {
-			transaction_id: tx,
-			factor_id: id,
-			proof: `${secret}:1`,
-		});
-		const rename = async (body: Record<string, unknown>, how: { json?: boolean } = json) => {
-			const res = await s.call("POST", "/session/mfa/factors/rename", body, how);
-			const listed = await s.call("GET", "/session/mfa/factors");
-			return [res.status, res.body, listed.body.factors];
-		};
-		const named = await rename({ factor_id: id, label: "desk" });
-		expect(named.slice(0, 2)).toEqual([200, {}]);
-		const refused = [
-			400,
-			{ error: "invalid_request", error_description: "invalid label" },
-			named[2],
-		];
-		for (const label of [
-			undefined,
-			"",
-			null,
-			5,
-			{ name: "desk" },
-			["desk"],
-			"de\nsk",
-			"d".repeat(65),
-		]) {
-			expect([label, ...(await rename({ factor_id: id, label }))]).toEqual([label, ...refused]);
-		}
-		expect(await rename({ factor_id: id, label: "" }, {})).toEqual(refused);
-		expect((await rename({ factor_id: `${id}x` })).slice(0, 2)).toEqual(refused.slice(0, 2));
-		clock.shift += 400_000;
-		const stale = await rename({ factor_id: id });
-		expect([stale[0], (stale[1] as { error: string }).error]).toEqual([403, "step_up_required"]);
-	});
-
 	it("answers 415 to a POST whose body is neither a form nor JSON, or that has none", async () => {
 		const s = await serve();
 		await s.signIn("kim");
@@ -1196,9 +1111,6 @@ describe("mfa bodies", () => {
 			"/session/mfa/step-up",
 			"/session/mfa/enrollment",
 			"/session/mfa/enrollment/complete",
-			"/session/mfa/factors/rename",
-			"/session/mfa/factors/remove",
-			"/session/mfa/recovery-codes",
 		]) {
 			for (const body of [{ type: "text/plain", text: "kind=code" }, undefined]) {
 				const res = await fetch(`http://127.0.0.1:${port}${path}`, {

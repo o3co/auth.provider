@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { externalJwt } from "@mod/external-jwt";
+import { type Algorithm, externalJwt } from "@mod/external-jwt";
 import externalJwtModule from "@mod/external-jwt/module";
 import {
 	assemble,
@@ -28,6 +28,7 @@ import {
 	type IdpType,
 	idpTypes,
 	type Upstream,
+	UpstreamMismatch,
 	UpstreamRefused,
 } from "@mod/upstreams";
 import { CompactSign, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
@@ -37,7 +38,7 @@ import { settingsOf } from "../src/settings.ts";
 import { atHashHolds, opened } from "../src/upstream.ts";
 
 /** The asymmetric algorithms external-jwt knows, the defaults among them. */
-const asymmetric = ["RS256", "PS256", "ES256", "EdDSA"];
+const asymmetric: readonly Algorithm[] = ["RS256", "PS256", "ES256", "EdDSA"];
 const issuer = "https://idp.example";
 const start = 1_800_000_000_000;
 let now = start;
@@ -183,7 +184,7 @@ async function open(world: World = {}) {
 	const upstream = await opened(read, { outbound: stub.outbound, policy }, jwt, {
 		clock,
 		log: recorded.log,
-		name: "corp",
+		idp: "corp",
 	});
 	/** The warn lines while it opened. */
 	const warned = recorded
@@ -406,16 +407,21 @@ describe("idp-oidc", () => {
 		expect(settings.parse({ ...base, "endpoint-hosts": taken })["endpoint-hosts"]).toEqual(taken);
 	});
 
-	it("refuses at boot a description naming a token endpoint or key set outbound's policy refuses", async () => {
+	it("refuses at boot, under issuer and naming it, a description's token endpoint or key set outbound's policy refuses", async () => {
 		const cdn = "https://tokens.idp-cdn.example";
 		const named = { "endpoint-hosts": ["tokens.idp-cdn.example"] };
 		const refused = ["tokens.idp-cdn.example"];
-		for (const description of [{ token_endpoint: `${cdn}/token` }, { jwks_uri: `${cdn}/jwks` }]) {
-			const label = JSON.stringify(description);
-			await expect(open({ description, settings: named, refused }), label).rejects.toThrow(
-				/destination policy refuses/,
-			);
-			await expect(open({ description, settings: named }), label).resolves.toBeDefined();
+		for (const [name, description] of [
+			["token_endpoint", { token_endpoint: `${cdn}/token` }],
+			["jwks_uri", { jwks_uri: `${cdn}/jwks` }],
+		] as const) {
+			const thrown = await open({ description, settings: named, refused }).catch((e) => e);
+			expect(thrown, name).toBeInstanceOf(UpstreamMismatch);
+			expect([thrown.at, thrown.message], name).toEqual([
+				["issuer"],
+				`outbound's destination policy refuses the description's ${name}: not-allowed`,
+			]);
+			await expect(open({ description, settings: named }), name).resolves.toBeDefined();
 		}
 	});
 
@@ -1009,7 +1015,7 @@ describe("idp-oidc", () => {
 		const base = { issuer, "client-id": "client", "client-secret": "s" };
 		expect(oidc.settings.safeParse({ ...base, algorithms: ["HS256"] }).success).toBe(false);
 		await oidc.open(oidc.settings.parse(base), {
-			name: "corp",
+			idp: "corp",
 			redirectUri: "https://as.example/cb",
 		});
 		expect(

@@ -64,7 +64,7 @@ export interface Upstream {
 	/** Exchanges the code; throws UpstreamRefused for an answer that does not hold, Unavailable when unreachable. */
 	exchange(code: CodeExchange): Promise<UpstreamLogin>;
 	/** Throws as `exchange` does; an upstream that fails (5xx) is unavailable. */
-	refresh?(refreshToken: string, scope: readonly string[]): Promise<UpstreamRefresh>;
+	refresh?(refreshToken: string, scopes: readonly string[]): Promise<UpstreamRefresh>;
 	/** The upstream's end-session URL. */
 	endSession?(at: {
 		readonly idTokenHint?: string;
@@ -93,7 +93,7 @@ export interface Delegation {
 	): Promise<UpstreamLogin & { readonly issuer: string; readonly tokens: UpstreamTokens }>;
 	refresh(
 		refreshToken: string,
-		scope: readonly string[],
+		scopes: readonly string[],
 		resource?: string,
 	): Promise<UpstreamRefresh>;
 }
@@ -110,6 +110,19 @@ export interface DelegatedExchange extends CodeExchange {
 }
 
 /** The upstream refused, or its answer did not hold; never says why to the browser. */
+/**
+ * Why `open` refuses an IdP's settings, under `at`, the key path in the IdP's settings it is about
+ * (`issuer`, say). Its reason names no configuration value, so boot can tell it to the operator.
+ */
+export class UpstreamMismatch extends Error {
+	readonly at: readonly string[];
+	constructor(reason: string, at: readonly string[] = []) {
+		super(reason);
+		this.name = "UpstreamMismatch";
+		this.at = at;
+	}
+}
+
 export class UpstreamRefused extends Error {
 	constructor() {
 		super("upstream refused");
@@ -122,10 +135,14 @@ export interface IdpType<S extends z.ZodType = z.ZodType> {
 	readonly type: string;
 	/** The settings of one IdP of this type, beside `type` and the settings the implementation reads. */
 	readonly settings: S;
-	/** Refuses boot (throws) when the upstream's own description does not match its settings. */
+	/** Refuses boot (throws) when the upstream's own description does not match its settings; `UpstreamMismatch` says why. */
 	open(
 		settings: z.output<S>,
-		at: { readonly name: string; readonly redirectUri: string },
+		at: {
+			/** The IdP's name, as `upstreams.of` and the receivers take it. */
+			readonly idp: string;
+			readonly redirectUri: string;
+		},
 	): Promise<Upstream>;
 }
 

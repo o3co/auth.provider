@@ -1,6 +1,6 @@
 import { type Site, site } from "@mod/http";
 import type { BuildContext, Refusal } from "@mod/kernel";
-import { type IdpType, idpTypes } from "@mod/upstreams";
+import { type IdpType, idpTypes, type Upstream, UpstreamMismatch } from "@mod/upstreams";
 import { callbackPath, federationIdps, type Idp, proves } from "../round-trip/round-trip.ts";
 import type { Settings } from "../section.ts";
 
@@ -51,16 +51,19 @@ const amrSourceWith = (settings: Settings["idps"]) => ({
 
 export const amrSourceIn = (c: BuildContext<Settings>) => amrSourceWith(c.section.idps);
 
-/** The type's upstream for the settings, or nothing where the type refuses it (boot is then refused). */
+/** The type's upstream for the settings, or the refusal of boot under the IdP's key: the type's reason where it gives one. */
 async function openUpstream(
 	idpType: IdpType,
 	settings: unknown,
-	at: { name: string; redirectUri: string },
-) {
+	at: { idp: string; redirectUri: string; where: string },
+): Promise<{ readonly upstream: Upstream } | { readonly refusal: Refusal }> {
 	try {
-		return await idpType.open(settings, at);
-	} catch {
-		return undefined;
+		return { upstream: await idpType.open(settings, at) };
+	} catch (error) {
+		if (error instanceof UpstreamMismatch) {
+			return { refusal: { where: [at.where, ...error.at].join("."), reason: error.message } };
+		}
+		return { refusal: { where: at.where, reason: "the upstream does not match its settings" } };
 	}
 }
 
@@ -91,11 +94,13 @@ export async function openIdps(parts: Parts) {
 			continue;
 		}
 		const redirectUri = `${origin}${callbackPath(name)}`;
-		const upstream = await openUpstream(idpType, settings.data, { name, redirectUri });
-		if (!upstream) {
-			refusals.push({ where, reason: "the upstream does not match its settings" });
+		const at = { idp: name, redirectUri, where };
+		const opened = await openUpstream(idpType, settings.data, at);
+		if ("refusal" in opened) {
+			refusals.push(opened.refusal);
 			continue;
 		}
+		const { upstream } = opened;
 		const formPost = upstream.responseMode === "form_post";
 		if (formPost && !parts.site.secureCookies) {
 			refusals.push({ where, reason: "an answer in form_post needs secure cookies" });

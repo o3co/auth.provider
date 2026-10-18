@@ -18,6 +18,7 @@
 - `./testing`: contract tests for users, user ledgers and both Store interfaces, configuration builders, and both Store interfaces in memory.
 
 ## Invariants
+- A subject is 1 to 255 ASCII characters: one outside that refuses boot in the settings (the identifier's, where `subject` is left out), is unavailable in a ledger's answer, is none when looked up without asking the ledger, and throws TypeError on `link`.
 - Identifiers match exactly, never folded or trimmed, and a password as typed, with no Unicode normalization; an empty identifier or subject is none, and the ledger is not asked.
 - Boot is refused on identifiers that differ only in case, Unicode normal form or surrounding whitespace, on two identifiers with one subject, on an upstream identity linked to two users, and on more than one ledger or a ledger beside `registered` users.
 - Unanswerable is never read as none: a written link then finds its subject with no attributes, and claimed contacts are unanswerable.

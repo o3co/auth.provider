@@ -1,15 +1,21 @@
 import { type Cookies, cookies } from "@mod/cookies";
 import type { HttpRequest } from "@mod/http";
-import { type BuildContext, type Clock, isUnavailable, Unavailable } from "@mod/kernel";
+import { type BuildContext, type Clock, isUnavailable, type Log, Unavailable } from "@mod/kernel";
 import type { AskedFrom } from "@mod/mfa";
 import { vouches } from "@mod/subject-attributes";
 import type { Settings } from "../section.ts";
-import { type TransactionStore, transactionStore } from "../store.ts";
+import {
+	type TransactionListings,
+	type TransactionStore,
+	transactionListings,
+	transactionStore,
+} from "../store.ts";
 import {
 	type BindingChallenge,
 	type ByPurpose,
 	type Challenge,
 	hashOf,
+	holderOf,
 	live,
 	type Started,
 	stored,
@@ -29,7 +35,10 @@ export const askedFrom = (t: ByPurpose): AskedFrom => {
 
 export interface TransactionParts {
 	readonly store: TransactionStore;
+	/** Each holder's live transactions; one counts only while listed. */
+	readonly listings: TransactionListings;
 	readonly jar: Cookies;
+	readonly log: Log;
 	readonly random: (n: number) => Uint8Array;
 	readonly clock: Clock;
 	/** The package's `transaction-lifetime`, in ms. */
@@ -44,14 +53,32 @@ export type Transactions = ReturnType<typeof transactionsOver>;
 export const transactionsIn = async (c: BuildContext<Settings>) =>
 	transactionsOver({
 		store: await c.get(transactionStore),
+		listings: await c.get(transactionListings),
 		jar: await c.get(cookies),
+		log: c.log,
 		random: c.random.bytes,
 		clock: c.clock,
 		ttlMs: c.section["transaction-lifetime"] * 1000,
 		attempts: c.section["attempts-per-transaction"],
 	});
 
-export function transactionsOver({ store, jar, random, clock, ttlMs, attempts }: TransactionParts) {
+export function transactionsOver(parts: TransactionParts) {
+	const { store, listings, jar, random, clock, ttlMs, attempts } = parts;
+	/** Whether the transaction is still among its holder's live ones; a listing that cannot tell throws. */
+	const listed = async (id: string, t: Transaction) =>
+		(await listings.members(holderOf(t))).some(({ member }) => member === hashOf(id));
+	/** Takes a used transaction off its holder's listing; one that cannot be is logged and passed, as it ends at its lifetime. */
+	const unlist = async (id: string, t: Transaction | undefined) => {
+		if (!t) return;
+		try {
+			await listings.remove(holderOf(t), hashOf(id));
+		} catch (error) {
+			parts.log.warn("mfa-flows.listing_failed", {
+				step: "remove",
+				kind: error instanceof Error ? error.name : typeof error,
+			});
+		}
+	};
 	const text = (n: number) => Buffer.from(random(n)).toString("base64url");
 	/** Changes a transaction still in use; one gone, taken or past its deadline is left as it is. */
 	const changeLive = async (id: string, change: (t: Transaction) => Transaction | undefined) => {
@@ -84,6 +111,8 @@ export function transactionsOver({ store, jar, random, clock, ttlMs, attempts }:
 			};
 			const saved = await store.save(id, stored(value), ttlMs);
 			if (saved !== "created") throw new Unavailable("mfa-flows");
+			// Listed after it is kept, so a listed one is always found; past the cap the one ending first leaves.
+			await listings.add(holderOf(value), hashOf(id), ttlMs);
 			return {
 				id,
 				deadline: value.deadline,
@@ -95,11 +124,13 @@ export function transactionsOver({ store, jar, random, clock, ttlMs, attempts }:
 		nextDeadline: () => clock.now() + ttlMs,
 		/** The transaction, only for the browser that started it, while it is in use. */
 		find: async (request: HttpRequest, id: string | undefined) => {
-			const browser = jar.read(request, "mfa");
+			const carried = jar.lookup(request, "mfa");
+			const browser = carried.kind === "found" ? carried.value : undefined;
 			if (!id || !browser) return undefined;
 			const found = transactionOf(await store.read(id));
 			const now = clock.now();
 			if (!found || !live(found, now) || found.browser !== hashOf(browser)) return undefined;
+			if (!(await listed(id, found))) return undefined;
 			return { transaction: found, leftMs: found.deadline - now };
 		},
 		/**
@@ -110,9 +141,9 @@ export function transactionsOver({ store, jar, random, clock, ttlMs, attempts }:
 			const { before, after } = await changeLive(id, (t) =>
 				t.attemptsLeft > 0 ? { ...unchallenged(t), attemptsLeft: t.attemptsLeft - 1 } : undefined,
 			);
-			return before && after && after.attemptsLeft < before.attemptsLeft
-				? { left: after.attemptsLeft, challenge: before.challenge }
-				: undefined;
+			if (!before || !after || after.attemptsLeft >= before.attemptsLeft) return undefined;
+			if (after.attemptsLeft === 0) await unlist(id, after);
+			return { left: after.attemptsLeft, challenge: before.challenge };
 		},
 		/** Judges a proof on an attempt spent; one that cannot be judged (unavailable) gives the attempt back. */
 		judged: async <T>(id: string, judge: () => Promise<T>) => {
@@ -128,7 +159,9 @@ export function transactionsOver({ store, jar, random, clock, ttlMs, attempts }:
 		/** Takes the transaction; true only for the one request that took it. */
 		take: async (id: string) => {
 			const { before, after } = await changeLive(id, (t) => ({ ...t, taken: true }));
-			return !before?.taken && after?.taken === true;
+			const took = !before?.taken && after?.taken === true;
+			if (took) await unlist(id, after);
+			return took;
 		},
 		/** Holds the challenge sent, or none; false when the transaction is no longer in use. */
 		challenged: async (id: string, challenge?: Challenge) => {

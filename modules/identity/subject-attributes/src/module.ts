@@ -1,17 +1,10 @@
 import { defineModule } from "@mod/kernel";
 import { type AuthContext, sessions } from "@mod/session";
 import { users } from "@mod/users";
-import {
-	type AttributesAnswer,
-	type AttributesSource,
-	subjectAttributes,
-	vouches,
-} from "./contract.ts";
+import { type AttributesAnswer, subjectAttributes, vouches } from "./contract.ts";
 
-const fromUsers: AttributesSource = "users";
 const neither: AttributesAnswer = Object.freeze({ kind: "unknown" });
 const noAttributes = Object.freeze({});
-const vouched = Object.freeze({ vouched: true as const });
 
 /** The login attributes a session kept, under its source, when it is the subject's open session. */
 const fromLogin = (subject: string, context: AuthContext | undefined): AttributesAnswer =>
@@ -19,8 +12,7 @@ const fromLogin = (subject: string, context: AuthContext | undefined): Attribute
 		? neither
 		: {
 				kind: "known",
-				source: `session:${context.attributes.source}`,
-				...(vouches(context.attributes) ? vouched : {}),
+				vouched: vouches(context.attributes),
 				attributes: Object.freeze({ ...context.attributes.values }),
 			};
 
@@ -35,14 +27,12 @@ export default defineModule({ name: "subject-attributes" }, (m) => [
 					case "user":
 						return {
 							kind: "known",
-							source: fromUsers,
 							vouched: true,
 							attributes: found.user.attributes,
 						};
 					case "none":
 						return {
 							kind: "known",
-							source: fromUsers,
 							vouched: true,
 							attributes: noAttributes,
 						};

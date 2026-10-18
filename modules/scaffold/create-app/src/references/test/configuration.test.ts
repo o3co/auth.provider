@@ -74,18 +74,9 @@ it("holds, committed, the reference generated from the workspace as it is now", 
 	expect(readFileSync(referenceFile(root), "utf8")).toBe(referenceOf(await sectionsIn(root)));
 });
 
-/** Sections whose keys are not all described yet; a section leaves once its owner describes it, and never comes back. */
-const describedLater = new Set<string>();
-
-it("describes every key, but in the sections still listed as described later", async () => {
-	const sections = await sectionsIn(root);
-	const lacking = sections.flatMap(({ section, rows }) =>
-		describedLater.has(section) ? [] : rows.filter((r) => !r.description).map((r) => r.key),
+it("describes every key of every section", async () => {
+	const lacking = (await sectionsIn(root)).flatMap(({ rows }) =>
+		rows.filter((r) => !r.description).map((r) => r.key),
 	);
 	expect(lacking).toEqual([]);
-	// A listed section that describes every key leaves the list.
-	const done = sections.filter(
-		(s) => describedLater.has(s.section) && s.rows.every((r) => r.description),
-	);
-	expect(done.map((s) => s.section)).toEqual([]);
 });

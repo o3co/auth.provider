@@ -1,9 +1,10 @@
 import { contract } from "@mod/kernel";
+import type { VerifyAlgorithm } from "@mod/keys";
 
 export type Jwk = Readonly<Record<string, unknown>>;
 
-/** A JWS algorithm's name; only the asymmetric ones `algorithms` lists ever verify. */
-export type Algorithm = string;
+/** An asymmetric JWS algorithm, one of those `keys` verifies under and `algorithms` lists. */
+export type Algorithm = VerifyAlgorithm;
 
 /** A key set at a URL, fetched only from the hosts named. */
 export interface JwksSource {

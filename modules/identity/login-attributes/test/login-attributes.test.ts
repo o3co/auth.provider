@@ -48,15 +48,18 @@ describe("keeping a login's attributes", () => {
 	});
 
 	it("keeps only the named attributes within their caps, dropping each other one whole", () => {
+		// An address of that many bytes, its local part and each label within mail's limits.
+		const address = (n: number) =>
+			`${"a".repeat(64)}@${[..."bcd"].map((c) => c.repeat(61)).join(".")}.${"e".repeat(n - 251)}`;
 		const within = {
-			email: `${"a".repeat(242)}@example.com`,
+			email: address(254),
 			name: bytes(512),
 			picture: `https://p.example/${"a".repeat(2048 - 18)}`,
 			groups: [...groups(63), bytes(256)],
 		};
 		expect(keptOf("users", within)?.values).toEqual(within);
 		const over = {
-			email: `${"a".repeat(243)}@example.com`,
+			email: address(255),
 			name: bytes(513),
 			picture: `https://p.example/${"a".repeat(2048 - 17)}`,
 			groups: groups(65),

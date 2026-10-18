@@ -1,29 +1,19 @@
-import { type HttpRequest, type HttpResponse, noStore } from "@mod/http";
-import type { Sessions } from "@mod/session";
+import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
+import { refusedEntry, type Sessions } from "@mod/session";
 import type { SubjectRevocation } from "@mod/subject-revocation";
 import type { Transaction } from "./transactions/records.ts";
 
 /** What each internal module gives the package for one route. */
 export type Handler = (request: HttpRequest) => Promise<HttpResponse>;
 
-export const answer = (
-	status: number,
-	json: unknown,
-	extra: { cookies?: readonly string[]; headers?: Record<string, string> } = {},
-): HttpResponse => ({
-	status,
-	headers: { ...noStore, ...extra.headers },
-	body: { json },
-	...(extra.cookies?.length ? { cookies: extra.cookies } : {}),
-});
 /** One answer for every transaction that cannot be used, so it tells nothing about why. */
-export const unknownTransaction = answer(400, {
+export const unknownTransaction = jsonAnswer(400, {
 	error: "invalid_request",
 	error_description: "unknown or expired transaction",
 });
-export const loginRequired = answer(401, { error: "login_required" });
-export const unavailable = answer(503, { error: "temporarily_unavailable" });
-export const invalidLabel = answer(400, {
+export const loginRequired = jsonAnswer(401, { error: "login_required" });
+export const unavailable = jsonAnswer(503, { error: "temporarily_unavailable" });
+export const invalidLabel = jsonAnswer(400, {
 	error: "invalid_request",
 	error_description: "invalid label",
 });
@@ -50,6 +40,5 @@ export const revokedSince = async (revocation: Pick<SubjectRevocation, "check">,
 /** The session's entry for changing credentials, or the answer refusing it. */
 export const managing = async (sessions: Sessions, request: HttpRequest) => {
 	const entry = await sessions.enterFor(request, "credentials");
-	if (entry.kind === "entered") return entry.session;
-	return entry.kind === "absent" ? loginRequired : answer(403, entry.answer);
+	return entry.kind === "entered" ? entry.session : refusedEntry(entry);
 };

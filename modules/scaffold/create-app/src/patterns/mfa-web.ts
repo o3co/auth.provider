@@ -17,6 +17,7 @@ export const mfaWeb: Pattern = {
 		"second-factor": [
 			"@mod/mfa",
 			"@mod/mfa-flows",
+			"@mod/mfa-management",
 			"@mod/mfa-acr",
 			"@mod/mfa-totp",
 			"@mod/mfa-email",
