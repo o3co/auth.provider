@@ -525,9 +525,12 @@ From `@mod/session-lifecycle`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `session-lifecycle.lifetime-seconds` | integer (60–2592000) | `3600` |  |  |  | How long a session lasts, counted from its opening; its cookie lives as long. The lifetime in force decides on each read, so a shorter one ends sessions opened under a longer one. |
-| `session-lifecycle.sweep-seconds` | integer (1–3600) | `30` |  |  |  | How often each host goes on with pending closes; a close whose participants keep failing is retried after half its age, at least this, at most an hour. |
-| `session-lifecycle.credentials-seconds` | integer (30–3600) | `300` |  |  |  | Where no entry requirement judges changing credentials (no mfa), how recent a sign-in at a known time must be to do so. |
+| `session-lifecycle.lifetime` | string | `1h` |  |  |  | How long a session lasts, counted from its opening, from 1m to 30d, such as 8h; its cookie lives as long. The lifetime in force decides on each read, so a shorter one ends sessions opened under a longer one. |
+| `session-lifecycle.sweep-interval` | string | `30s` |  |  |  | How often each host goes on with pending closes, from 1s to 1h, such as 1m; a close whose participants keep failing is retried after half its age, at least this, at most an hour. |
+| `session-lifecycle.credentials-within` | string | `5m` |  |  |  | Where no entry requirement judges changing credentials (no mfa), how recent a sign-in at a known time must be to do so, from 30s to 1h, such as 10m. |
+| `session-lifecycle.lifetime-seconds` | integer (60–2592000) |  |  |  |  | Deprecated: seconds, as a bare number; write `lifetime` with its unit instead. |
+| `session-lifecycle.sweep-seconds` | integer (1–3600) |  |  |  |  | Deprecated: seconds, as a bare number; write `sweep-interval` with its unit instead. |
+| `session-lifecycle.credentials-seconds` | integer (30–3600) |  |  |  |  | Deprecated: seconds, as a bare number; write `credentials-within` with its unit instead. |
 
 ## session-store
 

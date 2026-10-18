@@ -120,7 +120,6 @@ const prefaultLater = new Set([
 	"rp-logout-store",
 	"secret-hash",
 	"sender-binding",
-	"session-lifecycle",
 	"session-store",
 	"session-tokens-store",
 	"store",
