@@ -25,6 +25,7 @@
 	},
 	"devDependencies": {
 		"@mod/clients": "workspace:*",
+		"@mod/secret-hash": "workspace:*",
 		"@mod/store": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"@mod/tokens": "workspace:*",

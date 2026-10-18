@@ -1962,6 +1962,9 @@ importers:
       '@mod/clients':
         specifier: workspace:*
         version: link:../../identity/clients
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
