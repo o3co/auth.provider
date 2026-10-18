@@ -41,7 +41,7 @@ const setUp = (part: SecondFactorPart): NewPart => ({
 					},
 				}
 			: {}),
-		seal: { keys: [{ id: "conformance", key: randomBytes(32).toString("base64") }] },
+		seal: { current: { id: "conformance", key: randomBytes(32).toString("base64") } },
 	},
 });
 

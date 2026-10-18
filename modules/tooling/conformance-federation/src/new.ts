@@ -82,7 +82,7 @@ onNew(federationArea, (part) => ({
 			landing: part.landing,
 		},
 		// Sealing, kept tokens' or a handoff's, takes a key of the scene's own.
-		seal: { keys: [{ id: "scene", key: randomBytes(32).toString("base64") }] },
+		seal: { current: { id: "scene", key: randomBytes(32).toString("base64") } },
 		...(part.grants ? { "federation-grants": grantsSection(part.grants) } : {}),
 		// Every upstream is named so outbound reaches it, and those on plain http at loopback as such.
 		outbound: {

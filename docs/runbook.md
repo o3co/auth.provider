@@ -73,11 +73,17 @@ An HS256 secret is not published and has no `previous` or `next` form: changing 
 
 ## Rotating the sealing key
 
-`seal` encrypts stored secrets with AES-256-GCM. `seal.keys` is a list of `{ id, key }`: the first key seals new values, and any key in the list opens a value that names it.
+`seal` encrypts stored secrets with AES-256-GCM under a key ring: `seal.current` seals new values; `seal.next` opens but never seals; `seal.previous` keys only open. Each sealed value names the key that sealed it.
 
-- **Switching to a new key works.** Put the new key first and restart every instance. New values are sealed with it; values sealed with the old key still open.
-- **Retiring an old key is not supported in 0.18.** There is no tool that seals stored values again under the new key. If you remove a key, every value sealed with it becomes unavailable (not refused): the requests that need it answer 503, and putting the key back opens it again.
-- Long-lived values keep the old key in use: TOTP factor secrets, upstream tokens kept by `federation-tokens`, and the credentials kept by `federation-grants` are not rewritten on their own, so their key cannot be removed while they live.
+1. **Add the new key as `next`** and restart every instance.
+2. **Make sure every instance runs with it** before going on: each now opens values the new key seals, before any instance seals with it.
+3. **Move it up.** Make it `current`, put the old `current` first in `previous`, and restart every instance. New values are sealed with the new key. A value read and written anyway (a renewed upstream token, a proved MFA factor) is sealed again with it as it is written.
+4. **Make sure every instance runs with the new `current`** before going on: an instance still sealing with the old key writes values a walk started meanwhile would miss.
+5. **Seal the rest again.** Run `pnpm run reseal` in the app, with its configuration. It builds the app without serving anything, walks every holder of long-lived sealed values (`federation-tokens`, `federation-grants`, `mfa`), seals again what a `previous` key sealed, and prints each holder's counts, never an id or a value. Running it while traffic flows is safe: each value is written only over what was read. Run it until it exits 0, which it does only when no holder failed, nothing was sealed again and nothing is left; it then prints `previous keys may be retired`. It exits 1 when a holder failed, and 3 when it sealed values again: run it again either way, as a walk across a failover or restart can miss a value, which the next run then seals.
+   - On 2, do not go on: a value sealed with a key no longer in the ring remains, left by an earlier rotation (or damaged). Put back the key you retired last as `previous`, restart every instance, and run `reseal` again until it exits 0.
+6. **Retire the old key** only after a `reseal` run that exited 0. Wait out short-lived values first: transactions and held logins sealed with the old key end within an hour (the longest `transaction-seconds`). Then remove it from `previous` and restart every instance. A value it still sealed becomes unavailable (503, not refused), and putting the key back opens it again.
+
+Only a value a `previous` key sealed is sealed again; one `next` sealed is newer than `current` and is left as it is, so values never move back while a rollout is under way.
 
 ## Upgrading
 

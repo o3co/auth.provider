@@ -7,5 +7,5 @@ export type SealSettings = z.input<typeof section>;
 const testKey = randomBytes(32).toString("base64");
 
 export function sealConfig(settings: Partial<SealSettings> = {}) {
-	return { seal: { keys: [{ id: "test", key: testKey }], ...settings } };
+	return { seal: { current: { id: "test", key: testKey }, ...settings } };
 }

@@ -10,7 +10,16 @@ import {
 	writtenOf,
 } from "./fragments.ts";
 import { packagesFor } from "./packages.ts";
-import { filled, mainSource, manifestOf, vacant, withKernel, writeProject } from "./project.ts";
+import {
+	filled,
+	mainSource,
+	manifestOf,
+	resealSource,
+	sealPackage,
+	vacant,
+	withKernel,
+	writeProject,
+} from "./project.ts";
 
 /** The files the generated project names in its guide, each written where the guide says. */
 const paths = {
@@ -61,12 +70,15 @@ export async function writeDeployment(
 	const packages = packagesFor(plan);
 	const fragments = await packages.fragments(names);
 	const settings = settingsOf(fragments);
+	const seals = names.includes(sealPackage);
 	await writeProject(plan.target, {
 		"package.json": manifestOf(
 			"node --env-file-if-exists=.env src/main.ts",
 			packages.dependencies(names),
+			seals ? "node --env-file-if-exists=.env src/reseal.ts" : undefined,
 		),
 		[paths.main]: await mainSource(modules, packages.importOf),
+		...(seals ? { "src/reseal.ts": await resealSource(modules, packages.importOf) } : {}),
 		[paths.application]: applicationConf(fragments),
 		[paths.localExample]: localConfExample(fragments),
 		".env.example": envExample(settings),

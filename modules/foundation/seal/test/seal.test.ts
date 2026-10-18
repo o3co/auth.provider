@@ -15,14 +15,14 @@ import sealModule from "../src/module.ts";
 const runtime = quietRuntime({ clock: { now: () => 0 } });
 const key = () => randomBytes(32).toString("base64");
 type Entry = { id: string; key: string };
-const boot = async (keys: unknown) =>
-	(
-		await assemble({
-			modules: [sealModule],
-			config: { ...kernelConfig(), seal: { keys } },
-			runtime,
-		})
+/** A ring of these keys: the first seals, the rest only open. */
+const boot = async (keys: readonly unknown[]) => {
+	const [current, ...previous] = keys;
+	const section = current === undefined ? { previous } : { current, previous };
+	return (
+		await assemble({ modules: [sealModule], config: { ...kernelConfig(), seal: section }, runtime })
 	).get(seal);
+};
 
 /** The text with its first character changed; a last one may hold only bits that decode to nothing. */
 const altered = (text: string) => `${text.startsWith("A") ? "B" : "A"}${text.slice(1)}`;
@@ -149,19 +149,11 @@ it("seals with current alone, opens with next and previous too, and marks only w
 	expect(ring.open(byC, "x")).toEqual({ kind: "opened", plain: "v" });
 });
 
-it("reads keys, until it is gone, as current first and previous after", async () => {
-	const [a, b] = ["a", "b"].map((id) => ({ id, key: key() })) as [Entry, Entry];
-	const byB = (await bootWith({ current: b })).get(seal).seal("v", "x");
-	const listed = (await bootWith({ keys: [a, b] })).get(seal);
-	expect(listed.seal("v", "x").startsWith("a.")).toBe(true);
-	expect(listed.open(byB, "x")).toEqual({ kind: "opened", plain: "v", stale: true });
-});
-
 it("refuses to start with keys beside current, with neither, or with an id twice across the ring", async () => {
 	const [a, b] = ["a", "b"].map((id) => ({ id, key: key() })) as [Entry, Entry];
 	const refused = {
-		"keys and current": { keys: [a], current: b },
-		"keys and previous": { keys: [a], previous: [b] },
+		"keys, which is gone": { keys: [a] },
+		"keys beside current": { keys: [a], current: b },
 		"no key": { previous: [a] },
 		"current again as next": { current: a, next: { ...b, id: "a" } },
 		"current again as previous": { current: a, previous: [{ ...b, id: "a" }] },

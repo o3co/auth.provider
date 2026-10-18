@@ -495,9 +495,8 @@ From `@mod/seal`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `seal.keys` | list of map |  |  |  | `[{"id":"seal-1","key":"REPLACE-32-RANDOM-BYTES-BASE64"}]` | Before current: the first seals, the rest open. Not beside current or previous. |
-| `seal.current.id` | string |  |  |  |  | The key's id, which heads every value it seals. |
-| `seal.current.key` | string |  |  |  |  | 32 bytes, base64, of at least 8 byte values. |
+| `seal.current.id` | string |  | yes | `SEAL_CURRENT_ID` | `seal-1` | The key's id, which heads every value it seals. |
+| `seal.current.key` | string |  | yes | `SEAL_CURRENT_KEY` | `REPLACE-32-RANDOM-BYTES-BASE64` | 32 bytes, base64, of at least 8 byte values. |
 | `seal.next.id` | string |  |  |  |  | The key's id, which heads every value it seals. |
 | `seal.next.key` | string |  |  |  |  | 32 bytes, base64, of at least 8 byte values. |
 | `seal.previous` | list of map | `[]` |  |  |  | Keys that only open what they sealed. |

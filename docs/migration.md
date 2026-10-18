@@ -14,6 +14,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 - [Configuration mapping](#configuration-mapping)
 - [Newly refused at boot](#newly-refused-at-boot)
 - [Behavior changes](#behavior-changes)
+- [From 0.18.0-rc.1](#from-0180-rc1)
 - [Operational notes](#operational-notes)
 
 ## Before you start
@@ -203,7 +204,7 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 | 0.17 | 0.18 | Notes |
 |---|---|---|
 | `mfaMode` / `mfa.mode` | `mfa.mode` (`optional` or `required`) | `required` by default, as before; for `off`, leave the MFA modules out |
-| `mfa.encryptionKeys` | `seal.keys` (`id`, `key`) | `id` is required |
+| `mfa.encryptionKeys` | `seal.current`, `seal.previous` (`id`, `key`) | The first key goes to `current`, the rest to `previous`; `id` is required |
 | `mfa.transactionTtlSeconds`, `maxAttemptsPerTransaction`, `lockout.*` | `mfa-flows.transaction-lifetime`, `attempts-per-transaction`, `lockout.*` | |
 | `mfa.manage.maxAgeSeconds`, `maxFactorsPerSubject` | `mfa.manage-within`, `mfa.max-factors` | |
 | `mfa-totp-factor.*`, `mfa-recovery-code-factor.*` | compose `mfa-totp`, `mfa-recovery` | Parameters are fixed (SHA-1, 6 digits, 30 s; 10 codes) |
@@ -252,13 +253,13 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 
 ### Federation tokens
 
-Compose `federation-tokens` beside `federation`. Its records go in the composition's store (`redis`, or the in-memory `store`) and are sealed with `seal.keys`.
+Compose `federation-tokens` beside `federation`. Its records go in the composition's store (`redis`, or the in-memory `store`) and are sealed with the `seal` key ring.
 
 | 0.17 | 0.18 | Notes |
 |---|---|---|
 | `adapters.federationTokenStore` (`memory` / `redis`) | compose `federation-tokens`; its store is `redis` or `store` | One store for every feature |
 | `redis-federation-token-store.keyPrefix` (`ft:`) | `redis.prefix` | One prefix |
-| `redis-federation-token-store.encryptionKey` | `seal.keys` (`id`, `key`) | One shared key ring, 32-byte base64 keys; `id` is required |
+| `redis-federation-token-store.encryptionKey` | `seal.current` (`id`, `key`) | One shared key ring, 32-byte base64 keys; `id` is required |
 | `redis-federation-token-store.encryptionMode`, `FEDERATION_TOKENS_ALLOW_INSECURE` | removed | Always sealed; plaintext is not possible |
 | `redis-federation-token-store.ttl` (86400 s) | removed | A record lives as long as its session |
 | upstream token lifetime cap (24 h, code only; refresh only) | `federation-tokens.max-lifetime` (default `1d`) | `1m` to `365d`; caps the upstream's stated lifetime at login and refresh, and stands for a refresh answer that states none |
@@ -291,7 +292,7 @@ Settings with no counterpart: `encryptionMode`, `FEDERATION_TOKENS_ALLOW_INSECUR
 
 ### Federation grants
 
-Compose `federation-grants` and its store, `federation-grants-store`; there is no `enabled` flag. Credentials are sealed with `seal.keys`, and connections need `http.public-origin`.
+Compose `federation-grants` and its store, `federation-grants-store`; there is no `enabled` flag. Credentials are sealed with the `seal` key ring, and connections need `http.public-origin`.
 
 | 0.17 | 0.18 | Notes |
 |---|---|---|
@@ -313,7 +314,7 @@ Compose `federation-grants` and its store, `federation-grants-store`; there is n
 | `connections.<name>.resource` | `connections.<name>.resource` | |
 | `connections.<name>.callbackURL` | removed | Fixed at `/session/federation-grants/callback/<name>` on `http.public-origin` |
 | `connections.<name>.boundary`, `identityClaims` | removed | |
-| `redis-federation-grant-store.encryptionKeys` | `seal.keys` | One ring for every sealed record |
+| `redis-federation-grant-store.encryptionKeys` | `seal.current`, `seal.previous` | One ring for every sealed record |
 | `redis-federation-grant-store.encryptionMode` | removed | Always sealed |
 | `redis-federation-grant-store.keyPrefix`, `redis-federation-grant-intent-store.keyPrefix` | `redis.prefix` | One prefix for every store |
 | `redis-federation-grant-store.listingAllowanceMs`, `tombstoneRetention`; `core-federation-grant-store-memory.tombstoneRetention` | removed | A revoked or ended grant answers its status for 30 days past the grant's end; fixed |
@@ -521,6 +522,7 @@ Times and sizes are written with their unit (`30s`, `5m`, `64KiB`); a number wit
 - **mail**: the logging-only sender without `mail.accept-unsent = true`.
 - **Revocation**: a composition that issues refresh tokens or codes while access tokens cannot be revoked.
 - **Redis**: a server that does not meet the [requirements](#redis).
+- **Seal**: `seal.keys`, the key list of earlier 0.18 previews, is refused as an unknown setting. Write its first key as `seal.current` and the rest as `seal.previous`; see [Rotating the sealing key](runbook.md#rotating-the-sealing-key).
 
 ## Behavior changes
 
@@ -606,6 +608,11 @@ Every request carries `Authorization: Bearer <credential>`. Upstream links and M
 
 - `/_healthcheck` still answers `200 {"status":"ok"}`, now with `Content-Type: application/json` (no charset) and `Cache-Control: no-store`. Probes that match the exact content type need updating.
 - `/readyz` answers `{"status":"ready"}` or `{"status":"unready"}` only; the `checks` list is gone.
+
+## From 0.18.0-rc.1
+
+- **Sealing keys**: `seal.keys` is refused at boot; write its first key as `seal.current` and the rest as `seal.previous`. Rotating a key now has a procedure, in the [runbook](runbook.md#rotating-the-sealing-key).
+- **MFA factor lists written by rc.1** hold no subject, so `reseal` cannot seal their secrets again and counts them as left (exit 2) until the user next proves or changes a factor, which writes the subject. While such lists remain, do not retire a `previous` key that sealed them.
 
 ## Operational notes
 
