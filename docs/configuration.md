@@ -635,9 +635,10 @@ From `@mod/webauthn`.
 | `webauthn.rp-name` | string |  | yes | `WEBAUTHN_RP_NAME` | `Example` |  |
 | `webauthn.origins` | list of string |  | yes |  | `["https://login.example.invalid"]` |  |
 | `webauthn.top-origins` | list of string | `[]` |  |  |  |  |
-| `webauthn.challenge-seconds` | integer (10–600) | `120` |  |  |  |  |
+| `webauthn.challenge-lifetime` | string | `2m` |  |  |  | How long a ceremony's challenge can be answered, from 10s to 10m. |
 | `webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  |  |
 | `webauthn.max-credentials` | integer (1–100) | `10` |  |  |  |  |
+| `webauthn.challenge-seconds` | integer (10–600) |  |  |  |  | Seconds; write `challenge-lifetime` instead. |
 
 ## webauthn-login
 
