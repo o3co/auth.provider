@@ -70,15 +70,13 @@ it("keeps no mark for a batch that names no key", async () => {
 	expect((await s.batch([], [], { deadline: start + 1, idempotency: "m" })).kind).toBe("committed");
 });
 
-it("keeps marks, counts and sets through the periodic sweep of what has expired", async () => {
+it("keeps marks and counts through the periodic sweep of what has expired", async () => {
 	const { s, key } = controlled();
 	const first = await s.put(key("a"), 1, { ...never, idempotency: "m" });
 	await s.count(key("hits"), { ms: 60_000, limit: 10 });
-	await s.setAdd(key("set"), "m", start + 60_000, { cap: 5, expiry: never.expiry });
 	for (let i = 0; i < 300; i++) await s.put(key("other"), i, never);
 	expect(await s.put(key("a"), 1, { ...never, idempotency: "m" })).toEqual(first);
 	expect(await s.count(key("hits"), { ms: 60_000, limit: 10 })).toMatchObject({ count: 2 });
-	expect((await s.setMembers(key("set"))).members.map((m) => m.member)).toEqual(["m"]);
 });
 
 it("answers frozen, so a caller cannot change the answer a resend gets", async () => {
@@ -128,21 +126,6 @@ it("starts a new window at its reset time, and refuses every hit under a limit o
 	expect(await s.count(key("hits"), { ms: 1000, limit: 1 })).toMatchObject({ kind: "counted" });
 	expect(await s.count(key("zero"), { ms: 1000, limit: 0 })).toMatchObject({ kind: "limited" });
 	expect(await s.count(key("zero"), { ms: 1000, limit: 1 })).toMatchObject({ count: 1 });
-});
-
-it("drops, before counting the cap, members whose score has come and sets that have expired", async () => {
-	const { clock, s, key } = controlled();
-	await s.setAdd(key("set"), "due", start + 10, { cap: 1, expiry: never.expiry });
-	await s.setAdd(key("ended"), "old", start + 60_000, {
-		cap: 5,
-		expiry: { kind: "after", ms: 10 },
-	});
-	clock.now = start + 10;
-	expect(
-		(await s.setAdd(key("set"), "new", start + 60_000, { cap: 1, expiry: never.expiry })).evicted,
-	).toEqual([]);
-	await s.setAdd(key("ended"), "new", start + 60_000, { cap: 5, expiry: never.expiry });
-	expect((await s.setMembers(key("ended"))).members.map((m) => m.member)).toEqual(["new"]);
 });
 
 const durable = defineModule({ name: "durable-owner" }, (m) => [

@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
-import {
-	getFollowing,
-	type Key,
-	mutate,
-	type Space,
-	type Store,
-	type Version,
-} from "./contract.ts";
+import { type Key, mutate, type Space, type Store, type Version } from "./contract.ts";
 import type { section } from "./section.ts";
 
 export { type SimulatedStore, simulatedStore } from "./simulated.ts";
@@ -165,9 +158,10 @@ export function storeContract(name: string, harness: StoreHarness): void {
 					],
 				);
 				expect(won.kind).toBe("committed");
-				expect(
-					(await s.getMany([key("a"), key("b")])).entries.map((e) => e?.value ?? null),
-				).toEqual([null, 2]);
+				expect([(await s.get(key("a"))).entry, (await s.get(key("b"))).entry?.value]).toEqual([
+					null,
+					2,
+				]);
 				await expect(
 					s.batch(
 						[],
@@ -198,34 +192,6 @@ export function storeContract(name: string, harness: StoreHarness): void {
 					version: null,
 				});
 				expect((await s.get(k)).entry).toBeNull();
-			});
-
-			it("reads a key and the keys it points to consistently", async () => {
-				const s = await harness.open();
-				const key = fresh();
-				await s.put(key("index"), "target", never);
-				await s.put(key("target"), { found: true }, never);
-				const read = await getFollowing(s, key("index"), (entry) =>
-					entry ? [key(entry.value as string)] : [],
-				);
-				expect("followed" in read && read.followed[0]?.value).toEqual({ found: true });
-			});
-
-			it("reads again when the first key moves before the keys it points to are read", async () => {
-				const s = await harness.open();
-				const key = fresh();
-				await s.put(key("index"), "old", never);
-				await s.put(key("old"), "was", never);
-				await s.put(key("new"), "is", never);
-				let follows = 0;
-				const read = await getFollowing(s, key("index"), (entry) => {
-					follows += 1;
-					// Another client points the index elsewhere after the first read.
-					if (follows === 1) void s.put(key("index"), "new", never);
-					return entry ? [key(entry.value as string)] : [];
-				});
-				expect(follows).toBe(2);
-				expect("followed" in read && read.followed[0]?.value).toBe("is");
 			});
 
 			it("answers a mutation that keeps with the entry, and reads again when a removal loses a race", async () => {
@@ -597,7 +563,7 @@ export function storeContract(name: string, harness: StoreHarness): void {
 		});
 
 		describe("concurrent connections", () => {
-			it("writes and reads several keys of a partition as one, under concurrent connections", async () => {
+			it("writes several keys of a partition as one, under concurrent connections", async () => {
 				const [s, t] = await both();
 				const key = fresh();
 				const writers = race(30, [s, t], (store, i) =>
@@ -609,11 +575,8 @@ export function storeContract(name: string, harness: StoreHarness): void {
 						],
 					),
 				);
-				const readers = race(30, [t, s], (store) => store.getMany([key("a"), key("b")]));
 				await writers;
-				for (const read of await readers) {
-					expect(read.entries[0]?.value ?? null).toEqual(read.entries[1]?.value ?? null);
-				}
+				expect((await t.get(key("a"))).entry?.value).toEqual((await s.get(key("b"))).entry?.value);
 			});
 
 			it("takes an entry exactly once among racing takers on two connections", async () => {
@@ -704,102 +667,6 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			});
 		});
 
-		describe("sets", () => {
-			it("drops a set member whose score the store clock has reached", async () => {
-				const s = await harness.open();
-				const key = fresh();
-				const { now } = await s.get(key("probe"));
-				const at = now + 30;
-				await s.setAdd(key("set"), "m", at, { cap: 10, expiry: never.expiry });
-				await expectPresentUntil(at, async () => {
-					const read = await s.setMembers(key("set"));
-					return { now: read.now, present: read.members.some((m) => m.member === "m") };
-				});
-			});
-
-			it("keeps the highest score, evicts the lowest over the cap and prunes on the store clock", async () => {
-				const s = await harness.open();
-				const k = fresh()("set");
-				const { now } = await s.get(k);
-				const options = { cap: 2, expiry: { kind: "after", ms: 60_000 } } as const;
-				await s.setAdd(k, "a", now + 50_000, options);
-				await s.setAdd(k, "a", now + 10_000, options);
-				await s.setAdd(k, "b", now + 20_000, options);
-				const added = await s.setAdd(k, "c", now + 30_000, options);
-				expect(added.evicted).toEqual(["b"]);
-				const { now: soon } = await s.get(k);
-				await s.setAdd(k, "d", soon + 300, { cap: 3, expiry: { kind: "after", ms: 60_000 } });
-				await sleep(400);
-				const read = await s.setMembers(k);
-				expect(read.members.map((m) => [m.member, m.score - now])).toEqual([
-					["a", 50_000],
-					["c", 30_000],
-				]);
-			});
-
-			it("gives a new set its expiry, even when extending or when every member had expired", async () => {
-				const s = await harness.open();
-				const key = fresh();
-				const { now } = await s.get(key("x"));
-				await s.setAdd(key("extended"), "m", now + 600_000, {
-					cap: 5,
-					expiry: { kind: "extend", ms: 150 },
-				});
-				await s.setAdd(key("revived"), "old", now + 100, {
-					cap: 5,
-					expiry: { kind: "after", ms: 600_000 },
-				});
-				await sleep(200);
-				await s.setAdd(key("revived"), "new", now + 600_000, {
-					cap: 5,
-					expiry: { kind: "after", ms: 150 },
-				});
-				await sleep(400);
-				expect((await s.setMembers(key("extended"))).members).toEqual([]);
-				expect((await s.setMembers(key("revived"))).members).toEqual([]);
-			});
-
-			it("keeps a set without expiry when a later add asks for one", async () => {
-				const s = await harness.open();
-				const k = fresh()("set");
-				const { now } = await s.get(k);
-				await s.setAdd(k, "a", now + 600_000, { cap: 5, expiry: { kind: "never" } });
-				await s.setAdd(k, "b", now + 600_000, { cap: 5, expiry: { kind: "after", ms: 100 } });
-				await sleep(300);
-				expect((await s.setMembers(k)).members.map((m) => m.member)).toEqual(["a", "b"]);
-			});
-
-			it("keeps a long set expiry when a later add asks for a short one", async () => {
-				const s = await harness.open();
-				const k = fresh()("set");
-				const { now } = await s.get(k);
-				await s.setAdd(k, "a", now + 600_000, { cap: 5, expiry: { kind: "after", ms: 600_000 } });
-				await s.setAdd(k, "b", now + 600_000, { cap: 5, expiry: { kind: "after", ms: 100 } });
-				await sleep(300);
-				expect((await s.setMembers(k)).members.map((m) => m.member)).toEqual(["a", "b"]);
-			});
-
-			it("evicts, among equal lowest scores, the member first in code point order", async () => {
-				const s = await harness.open();
-				const k = fresh()("set");
-				const { now } = await s.get(k);
-				const options = { cap: 2, expiry: { kind: "never" } } as const;
-				await s.setAdd(k, "b", now + 50_000, options);
-				await s.setAdd(k, "c", now + 50_000, options);
-				expect((await s.setAdd(k, "a", now + 50_000, options)).evicted).toEqual(["a"]);
-			});
-
-			it("removes a member from a set", async () => {
-				const s = await harness.open();
-				const k = fresh()("set");
-				const { now } = await s.get(k);
-				await s.setAdd(k, "a", now + 600_000, { cap: 5, expiry: { kind: "never" } });
-				await s.setAdd(k, "b", now + 600_000, { cap: 5, expiry: { kind: "never" } });
-				await s.setRemove(k, "a");
-				expect((await s.setMembers(k)).members.map((m) => m.member)).toEqual(["b"]);
-			});
-		});
-
 		describe("scanning a space", () => {
 			const walk = async (s: Store, target: Space, between?: () => Promise<void>) => {
 				const seen = new Map<string, number>();
@@ -827,7 +694,6 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				while ((await s.now()) <= ends) await sleep(5);
 				await s.put(fresh(replicated)("elsewhere"), 1, never);
 				await s.count(fresh()("counted"), { ms: 60_000, limit: 5 });
-				await s.setAdd(fresh()("set"), "m", now + 60_000, { cap: 1, expiry: never.expiry });
 				const seen = await walk(s, space);
 				expect([...seen.keys()].sort()).toEqual(live.map((k) => `${k.partition}/${k.name}`).sort());
 				expect([...(await walk(s, replicated)).keys()]).toHaveLength(1);
@@ -867,9 +733,6 @@ export function storeContract(name: string, harness: StoreHarness): void {
 					s.batch([], [{ key: k, put: 1, expiry: { kind: "after", ms: Number.NaN } }]),
 				).rejects.toThrow(TypeError);
 				await expect(s.count(k, { ms: 10.5, limit: 1 })).rejects.toThrow(TypeError);
-				await expect(s.setAdd(k, "m", 1.5, { cap: 1, expiry: { kind: "never" } })).rejects.toThrow(
-					TypeError,
-				);
 				expect((await s.get(k)).entry).toBeNull();
 			});
 
@@ -895,11 +758,7 @@ export function storeContract(name: string, harness: StoreHarness): void {
 						],
 					),
 				).rejects.toThrow(TypeError);
-				expect((await s.getMany([key("a"), key("b"), key("c")])).entries).toEqual([
-					null,
-					null,
-					null,
-				]);
+				for (const name of ["a", "b", "c"]) expect((await s.get(key(name))).entry).toBeNull();
 				await expect(
 					s.put(
 						{ space: { name: "undeclared", guarantees: [] }, partition: "p", name: "a" },
@@ -915,9 +774,6 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				await expect(s.replaceIf(k, "", 1, never)).rejects.toThrow(TypeError);
 				await expect(s.removeIf(k, { version: 1 as never })).rejects.toThrow(TypeError);
 				await expect(s.count(k, { ms: 1000, limit: -1 })).rejects.toThrow(TypeError);
-				await expect(s.setAdd(k, "m", 1, { cap: 1.5, expiry: { kind: "never" } })).rejects.toThrow(
-					TypeError,
-				);
 				await expect(s.take(k, { deadline: -1 })).rejects.toThrow(TypeError);
 			});
 
@@ -945,22 +801,9 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				await expect(s.put(key("a"), 1, { ...never, idempotency: lone })).rejects.toThrow(
 					TypeError,
 				);
-				await expect(
-					s.setAdd(key("set"), lone, 1, { cap: 1, expiry: { kind: "never" } }),
-				).rejects.toThrow(TypeError);
 				await s.put(key("é😀"), "é😀", never);
 				expect((await s.get(key("é😀"))).entry?.value).toBe("é😀");
 				expect((await s.get(key("e😀"))).entry).toBeNull();
-				const { now } = await s.get(key("x"));
-				for (const m of ["😀", "é", "a", "￿"]) {
-					await s.setAdd(key("set"), m, now + 600_000, { cap: 10, expiry: { kind: "never" } });
-				}
-				expect((await s.setMembers(key("set"))).members.map((m) => m.member)).toEqual([
-					"a",
-					"é",
-					"￿",
-					"😀",
-				]);
 			});
 
 			it("refuses values and arguments that are not plain data read once", async () => {
@@ -1025,7 +868,6 @@ export function storeContract(name: string, harness: StoreHarness): void {
 					"value expected by a removal": () => s.removeIf(k, { value: new Date(0) as never }),
 					"empty condition version": () => s.batch([{ key: k, version: "" }], []),
 					"condition with neither": () => s.batch([{ key: k } as never], []),
-					"empty member removed": () => s.setRemove(k, ""),
 				};
 				for (const [label, run] of Object.entries(refused)) {
 					await expect(run(), label).rejects.toThrow(TypeError);
@@ -1047,10 +889,6 @@ export function storeContract(name: string, harness: StoreHarness): void {
 					const version = versionOf(await s.put(at("r"), 1, never));
 					const vVersion = versionOf(await s.put(at("v"), 1, never));
 					await s.put(at("w"), 1, never);
-					await s.setAdd(at("set2"), "m", Date.now() + 600_000, {
-						cap: 5,
-						expiry: { kind: "never" },
-					});
 					const undo = await harness.stopReplicas?.();
 					try {
 						expect((await s.put(fresh()("plain"), 1, never)).kind).toBe("written");
@@ -1059,17 +897,11 @@ export function storeContract(name: string, harness: StoreHarness): void {
 							putIfAbsent: () => s.putIfAbsent(at("new"), 2, never),
 							replaceIf: () => s.replaceIf(at("v"), vVersion, 2, never),
 							"removeIf by value": () => s.removeIf(at("w"), { value: 1 }),
-							setRemove: () => s.setRemove(at("set2"), "m"),
 							"put with a key that hides the guarantee": () => s.put(disguised("c"), 2, never),
 							take: () => s.take(at("b")),
 							"removeIf by version": () => s.removeIf(at("r"), { version }),
 							batch: () => s.batch([], [{ key: at("d"), put: 1, expiry: { kind: "never" } }]),
 							count: () => s.count(at("hits"), { ms: 10_000, limit: 5 }),
-							setAdd: () =>
-								s.setAdd(at("set"), "m", Date.now() + 600_000, {
-									cap: 5,
-									expiry: { kind: "never" },
-								}),
 						};
 						for (const [label, run] of Object.entries(unconfirmed)) {
 							await expect(run(), label).rejects.toMatchObject({ name: "Unavailable" });
@@ -1112,14 +944,11 @@ export function storeContract(name: string, harness: StoreHarness): void {
 					const version = versionOf(await s.put(at("a"), 1, never));
 					await s.put(plain("a"), 1, never);
 					const { now } = await s.get(at("a"));
-					await s.setAdd(at("set"), "m", now + 600_000, { cap: 5, expiry: { kind: "never" } });
 					await s.count(at("hits"), { ms: 60_000, limit: 1 });
 					const undo = await harness.stopReplicas?.();
 					try {
 						const unconfirmed: Record<string, () => Promise<unknown>> = {
 							get: () => s.get(at("a")),
-							getMany: () => s.getMany([at("a"), at("b")]),
-							setMembers: () => s.setMembers(at("set")),
 							"putIfAbsent, exists": () => s.putIfAbsent(at("a"), 2, never),
 							"replaceIf, conflict": () => s.replaceIf(at("a"), `${version}x`, 2, never),
 							"take, missing": () => s.take(at("none")),

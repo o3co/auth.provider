@@ -2,7 +2,6 @@ import { deepFreeze, type Runtime } from "@mod/kernel";
 import {
 	canonicalJson,
 	checkedStore,
-	codePointOrder,
 	type Entry,
 	type Expiry,
 	idempotencyRequest,
@@ -51,18 +50,6 @@ export function resolveExpiry(
 	}
 }
 
-/** A set's expiry never shrinks; a fresh set takes what was asked. */
-export function setExpiry(
-	expiry: Expiry,
-	current: number | null | undefined,
-	now: number,
-): number | null {
-	const proposed = resolveExpiry(expiry, current, now);
-	if (current === undefined) return proposed;
-	if (current === null || proposed === null) return null;
-	return Math.max(current, proposed);
-}
-
 function entryOf(held: Held): Entry {
 	return deepFreeze({
 		value: structuredClone(held.value),
@@ -85,7 +72,6 @@ export function memoryStore(
 ): Store {
 	const values = new Map<string, Held>();
 	const counters = new Map<string, { count: number; resetAt: number }>();
-	const sets = new Map<string, { members: Map<string, number>; expiresAt: number | null }>();
 	const answers = new Map<string, { digest: string; answer: Answer; until: number }>();
 	let operations = 0;
 
@@ -94,7 +80,6 @@ export function memoryStore(
 		for (const [k, v] of values) if (!live(v, now)) values.delete(k);
 		for (const [k, v] of answers) if (v.until <= now) answers.delete(k);
 		for (const [k, v] of counters) if (v.resetAt <= now) counters.delete(k);
-		for (const [k, v] of sets) if (!live(v, now) || v.members.size === 0) sets.delete(k);
 	};
 	const current = (key: Key, now: number) => {
 		const held = values.get(id(key));
@@ -147,17 +132,6 @@ export function memoryStore(
 				const now = clock.now();
 				const held = current(key, now);
 				return { entry: held ? entryOf(held) : null, now };
-			},
-			getMany: async (keys) => {
-				samePartition(keys);
-				const now = clock.now();
-				return {
-					entries: keys.map((key) => {
-						const held = current(key, now);
-						return held ? entryOf(held) : null;
-					}),
-					now,
-				};
 			},
 			put: (key, value, options) =>
 				guarded(
@@ -262,41 +236,6 @@ export function memoryStore(
 						return { kind: "counted" as const, count: held.count, resetAt: held.resetAt };
 					},
 				),
-			setAdd: async (key, member, score, options) => {
-				const now = clock.now();
-				sweep(now);
-				const held = sets.get(id(key));
-				const members = new Map(
-					[...(held && live(held, now) ? held.members : [])].filter(([, s]) => s > now),
-				);
-				const fresh = members.size === 0;
-				members.set(member, Math.max(score, members.get(member) ?? Number.NEGATIVE_INFINITY));
-				const evicted = [...members]
-					.sort((a, b) => a[1] - b[1] || codePointOrder(a[0], b[0]))
-					.slice(0, Math.max(0, members.size - options.cap))
-					.map(([m]) => m);
-				for (const m of evicted) members.delete(m);
-				const expiresAt = setExpiry(
-					options.expiry,
-					fresh ? undefined : (held?.expiresAt ?? null),
-					now,
-				);
-				sets.set(id(key), { members, expiresAt });
-				return { evicted };
-			},
-			setMembers: async (key) => {
-				const now = clock.now();
-				const held = sets.get(id(key));
-				if (!held || !live(held, now)) return { members: [], now };
-				const members = [...held.members]
-					.filter(([, score]) => score > now)
-					.sort(([a], [b]) => codePointOrder(a, b))
-					.map(([member, score]) => ({ member, score }));
-				return { members, now };
-			},
-			setRemove: async (key, member) => {
-				sets.get(id(key))?.members.delete(member);
-			},
 			now: async () => clock.now(),
 			scan: async (space, cursor) => {
 				const now = clock.now();
