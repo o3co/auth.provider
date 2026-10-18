@@ -12,9 +12,24 @@ export const section = z.strictObject({
 		.describe(
 			"How long a transaction waits for its factor, from 1m to 30m in whole seconds, such as `10m`.",
 		),
-	"attempts-per-transaction": z.number().int().min(2).max(10).prefault(5),
-	/** Requests allowed per source in each window, over every form the flows take. */
-	requests: z.number().int().min(1).max(100_000).prefault(60),
+	"attempts-per-transaction": z
+		.number()
+		.int()
+		.min(2)
+		.max(10)
+		.prefault(5)
+		.describe(
+			"How many proofs one transaction takes, from 2 to 10; the one that uses up the last ends it.",
+		),
+	requests: z
+		.number()
+		.int()
+		.min(1)
+		.max(100_000)
+		.prefault(60)
+		.describe(
+			"POSTs allowed per source in each window, over every form this package's routes take, from 1 to 100000.",
+		),
 	window: setting
 		.duration("s")
 		.pipe(z.number().int().min(1).max(86_400))
@@ -24,18 +39,36 @@ export const section = z.strictObject({
 		),
 	lockout: z
 		.strictObject({
-			threshold: z.number().int().prefault(5),
+			threshold: z
+				.number()
+				.int()
+				.prefault(5)
+				.describe(
+					"Consecutive failures before the first hold; a positive integer, no more than `budget`.",
+				),
 			backoff: seconds()
 				.prefault("15m")
 				.describe("The first hold after `threshold` failures, in whole seconds, such as `15m`."),
 			"max-backoff": seconds()
 				.prefault("1d")
 				.describe("The longest hold, the first doubling up to it, in whole seconds, such as `1d`."),
-			budget: z.number().int().prefault(10),
+			budget: z
+				.number()
+				.int()
+				.prefault(10)
+				.describe(
+					"Failures allowed in any `budget-window`; a positive integer, from `threshold` to `hard-limit`.",
+				),
 			"budget-window": seconds()
 				.prefault("7d")
 				.describe("The window `budget` is counted over, in whole seconds, such as `7d`."),
-			"hard-limit": z.number().int().prefault(100),
+			"hard-limit": z
+				.number()
+				.int()
+				.prefault(100)
+				.describe(
+					"Failures in one run after which the hold is fixed until released; a positive integer, no less than `budget`.",
+				),
 			memory: seconds()
 				.prefault("1d")
 				.describe(
