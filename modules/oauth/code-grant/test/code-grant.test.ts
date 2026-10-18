@@ -25,6 +25,7 @@ import { sessionTokens } from "@mod/session-tokens";
 import bridgeModule from "@mod/session-tokens/module";
 import { sessionTokensInMemory } from "@mod/session-tokens/testing";
 import { simulatedStore } from "@mod/store/testing";
+import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { grantCaller, grantCalls, grantInput } from "@mod/token-endpoint/testing";
 import { type IssuanceRequest, type IssuedAccess, issuancePolicies, tokens } from "@mod/tokens";
@@ -487,6 +488,14 @@ it("refuses a request missing the code, the redirect URI or the verifier, or wit
 	expect((await s.redeem(code)).status).toBe(200);
 });
 
+it("refuses a code whose subject was revoked after it signed in", async () => {
+	const s = await serve();
+	const code = await s.issue();
+	shift = 1000;
+	await s.app.get(revocations).record("alice");
+	expect((await s.redeem(code)).body).toEqual(refusedBody);
+	expect(keptOf(s, code)?.token).toBeUndefined();
+});
 it("refuses a code issued to another client, or presented with another redirect URI", async () => {
 	const s = await serve();
 	const elsewhere = await s.app.get(codes).issue({ ...s.facts, clientId: "other" });
