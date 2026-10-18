@@ -18,19 +18,15 @@ export interface EndpointParts {
 	readonly log: Log;
 }
 
-type Reason =
-	| "https_required"
-	| "forbidden_source"
-	| "unauthenticated"
-	| "rate_limited"
-	| "rate_limit_unavailable"
-	| "invalid_request";
+/** What a refusal is recorded as; one past a window or in plain http is not, so no one can flood the audit. */
+type Reason = "forbidden_source" | "unauthenticated" | "rate_limit_unavailable" | "invalid_request";
 
 /** The ledger retries until it gets 200; a few seconds apart is soon enough. */
 const retryAfter = { "retry-after": "5" };
 const bearer = /^Bearer +([^\s]+)$/i;
 /** Of an ASCII subject, 0x00 to 0x1f and 0x7f. */
 const control = /\p{Cc}/u;
+const members = new Set(["subject", "delegations"]);
 
 /** A subject users takes, without ASCII control characters, as it goes into store keys and the audit. */
 const isSubject = (value: unknown): value is string =>
@@ -66,15 +62,10 @@ export function endpointOf(parts: EndpointParts) {
 			}
 			if (hit.kind === "allowed") return undefined;
 			const seconds = String(Math.ceil(hit.retryAfterMs / 1000));
-			return denied(
-				"rate_limited",
-				jsonAnswer(429, { error: "rate_limited" }, { headers: { "retry-after": seconds } }),
-			);
+			return jsonAnswer(429, { error: "rate_limited" }, { headers: { "retry-after": seconds } });
 		};
 
-		if (request.source.scheme !== "https") {
-			return denied("https_required", jsonAnswer(403, { error: "https_required" }));
-		}
+		if (request.source.scheme !== "https") return jsonAnswer(403, { error: "https_required" });
 		const authenticated = known(bearer.exec(request.headers.get("authorization") ?? "")?.[1]);
 		const inside = source !== undefined && parts.sources.has(source);
 		if (!inside || !authenticated) {
@@ -95,21 +86,27 @@ export function endpointOf(parts: EndpointParts) {
 		const limited = await counted(parts.requests, "subject-revocation-http.requests");
 		if (limited) return limited;
 
-		const { subject, delegations = "end" } = request.json ?? {};
-		if (!isSubject(subject) || (delegations !== "end" && delegations !== "keep")) {
+		const body = request.json ?? {};
+		const { subject, delegations = "end" } = body;
+		const unknown = Object.keys(body).some((member) => !members.has(member));
+		if (unknown || !isSubject(subject) || (delegations !== "end" && delegations !== "keep")) {
 			return denied("invalid_request", jsonAnswer(400, { error: "invalid_request" }));
 		}
+		const requested = (outcome: "complete" | "incomplete" | "unknown" | "failed") =>
+			audit.record("subject.revocation.requested", {
+				subject,
+				attributes: { delegations, outcome, source: told },
+			});
 		const outcome = await parts.revocations
 			.record(subject, { keepDelegations: delegations === "keep" })
 			.then(({ complete }) => (complete ? "complete" : "incomplete"))
 			.catch((error) => {
 				if (isUnavailable(error)) return "unknown" as const;
+				// Recorded before http answers it, so the attempt is not lost.
+				requested("failed");
 				throw error;
 			});
-		audit.record("subject.revocation.requested", {
-			subject,
-			attributes: { delegations, outcome, source: told },
-		});
+		requested(outcome);
 		if (outcome === "complete") return jsonAnswer(200, { complete: true });
 		parts.log.warn(`subject-revocation-http.${outcome}`, {});
 		return jsonAnswer(

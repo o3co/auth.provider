@@ -9,11 +9,12 @@
 
 ## Offers
 - `POST /ledger/subject-revocations`, JSON `{ "subject", "delegations"? }`: `delegations` `end` (the default) or `keep`.
-- Checked in order, all in the handler: `https` (else `403` `https_required`, the credential unread); the source in `sources` and the credential (`403` `forbidden_source` from outside, whatever the credential; `401` `unauthenticated` with `WWW-Authenticate: Bearer` from inside); the windows; the body (`400` `invalid_request`, its values never echoed).
+- Checked in order, all in the handler: `https` (else `403` `https_required`, the credential unread); the source in `sources` and the credential (`403` `forbidden_source` from outside, whatever the credential; `401` `unauthenticated` with `WWW-Authenticate: Bearer` from inside); the windows; the body (`400` `invalid_request`, also for a member it does not know, its values never echoed).
 - `200` `{ "complete": true }`: the boundary is written and every follower finished.
 - `503` `temporarily_unavailable` with `Retry-After: 5`: `state` `unknown` (the boundary's write was not confirmed), `incomplete` (written, so everything reading it refuses, but a follower did not finish), or no `state` where a window could not count.
 - `429` `rate_limited` with the wait: a source past its failure window (counting `403` and `401` alike), or past its request window (counting authenticated requests).
-- Audit events in `./audit-events`: `subject.revocation.requested` (subject, `delegations`, `outcome`, `source`) and `subject.revocation.denied` (`reason`, `source`).
+- Audit events in `./audit-events`: `subject.revocation.requested` (subject, `delegations`, `outcome` `complete`, `incomplete`, `unknown` or `failed`, `source`) and `subject.revocation.denied` (`reason` `forbidden_source`, `unauthenticated`, `rate_limit_unavailable` or `invalid_request`, `source`).
+- `./testing`: `subjectRevocationHttpConfig` and a test credential.
 - Operator section: `credential` and `previous-credential` (bare bearer tokens of at least 32 bytes of key material), `sources` (IP addresses or CIDR blocks, at least one), `failures` (10) per `failure-window` (`1m`), `requests` (600) per `window` (`1m`).
 
 ## Invariants
@@ -27,6 +28,8 @@
 - Recording again is safe and moves the boundary to now: the ledger resends until `200`. A resend that lands after the user is reinstated closes their new sessions, so the ledger cancels pending resends before reinstating.
 - Every subject sent keeps a boundary with no end, so the records grow with the subjects the ledger revokes.
 - Bodies http answers before the handler (`400` unreadable JSON, `413` too large, `415` not JSON) are neither counted nor recorded.
+- A request in plain http or past a window is not recorded, so no caller can flood the audit; the failures that filled the failure window were.
+- Another failure of recording is recorded as `failed`, then thrown for http to answer `500`.
 - `unknown` and `incomplete` are logged as warnings; credentials are never logged or recorded.
 - Complete says nothing of what lies outside this provider: an RP told of the logout, or a token handed upstream.
 - Left running: an access token unbound to a session where `tokens`' `subject-check` is `none`, a JWT a resource server checks itself, and an upstream token, each until it expires; a request already past its checks when the boundary was written.

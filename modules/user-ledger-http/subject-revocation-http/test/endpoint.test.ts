@@ -29,6 +29,15 @@ function windowCounter() {
 	return { limit, state, keys };
 }
 
+/** Request headers that note each name read. */
+class NotedHeaders extends Map<string, string> {
+	readonly read: string[] = [];
+	override get(name: string) {
+		this.read.push(name);
+		return super.get(name);
+	}
+}
+
 /** The endpoint over fakes: recordings of what it records, and switches for what fails. */
 function harness(
 	options: {
@@ -43,8 +52,16 @@ function harness(
 	const revoked: { subject: string; keepDelegations: boolean | undefined }[] = [];
 	const recording = { answer: "complete" as "complete" | "incomplete" | "unknown" | "broken" };
 	const logged = recordingLog();
+	// Notes each credential the endpoint reads, so a comparison that stops early shows.
+	const compared: number[] = [];
+	const credentials = new Proxy(options.previous ? [current, previous] : [current], {
+		get: (target, key, receiver) => {
+			if (typeof key === "string" && /^\d+$/.test(key)) compared.push(Number(key));
+			return Reflect.get(target, key, receiver);
+		},
+	});
 	const endpoint = endpointOf({
-		credentials: options.previous ? [current, previous] : [current],
+		credentials,
 		sources: addressesOf([`${inside}/32`, "2001:db8:1::/48"]),
 		failures: { limit: failures.limit, window: { limit: options.failures ?? 10, ms: 60_000 } },
 		requests: { limit: requests.limit, window: { limit: options.requests ?? 100, ms: 60_000 } },
@@ -72,23 +89,29 @@ function harness(
 		const credential = parts.credential === undefined ? current : parts.credential;
 		const authorization =
 			parts.authorization ?? (credential === null ? undefined : `Bearer ${credential}`);
-		const answer = await endpoint(
-			testRequest({
-				method: "POST",
-				path: "/ledger/subject-revocations",
-				json: parts.json ?? { subject: "alice" },
-				headers: new Map(authorization === undefined ? [] : [["authorization", authorization]]),
-				source: {
-					address: parts.address ?? inside,
-					scheme: parts.scheme ?? "https",
-					determined: parts.determined ?? true,
-				},
-			}),
+		const request = testRequest({
+			method: "POST",
+			path: "/ledger/subject-revocations",
+			json: parts.json ?? { subject: "alice" },
+			source: {
+				address: parts.address ?? inside,
+				scheme: parts.scheme ?? "https",
+				determined: parts.determined ?? true,
+			},
+		});
+		const headers = new NotedHeaders(
+			authorization === undefined ? [] : [["authorization", authorization]],
 		);
+		const answer = await endpoint({ ...request, headers });
 		const body = answer.body as { json: unknown } | undefined;
-		return { status: answer.status, headers: answer.headers ?? {}, json: body?.json };
+		return {
+			status: answer.status,
+			headers: answer.headers ?? {},
+			json: body?.json,
+			read: headers.read,
+		};
 	};
-	return { send, failures, requests, recorded, revoked, recording, logged };
+	return { send, failures, requests, recorded, revoked, recording, logged, compared };
 }
 
 const denied = (reason: string, source: string) => ({
@@ -97,17 +120,23 @@ const denied = (reason: string, source: string) => ({
 });
 
 describe("checking a request in order", () => {
-	it("refuses a request that did not come over https before looking at its credential, counting nothing", async () => {
-		const { send, failures, requests, recorded, revoked } = harness();
+	it("refuses a request that did not come over https before reading its credential, counting and recording nothing", async () => {
+		const { send, failures, requests, recorded, revoked, compared } = harness();
 		for (const credential of [current, "wrong", null]) {
 			const answer = await send({ credential, scheme: "http" });
-			expect([answer.status, answer.json]).toEqual([403, { error: "https_required" }]);
+			expect([answer.status, answer.json, answer.read]).toEqual([
+				403,
+				{ error: "https_required" },
+				[],
+			]);
 		}
-		expect([failures.keys, requests.keys, revoked]).toEqual([[], [], []]);
-		expect(recorded).toEqual([
-			denied("https_required", inside),
-			denied("https_required", inside),
-			denied("https_required", inside),
+		// Not recorded, so one sending in plain http cannot flood the audit.
+		expect([failures.keys, requests.keys, revoked, recorded, compared]).toEqual([
+			[],
+			[],
+			[],
+			[],
+			[],
 		]);
 	});
 
@@ -138,7 +167,7 @@ describe("checking a request in order", () => {
 	});
 
 	it("answers a missing and a wrong credential from inside alike, with a Bearer challenge", async () => {
-		const { send, failures, revoked } = harness();
+		const { send, failures, revoked, recorded } = harness();
 		const answers = [];
 		for (const parts of [
 			{ credential: null },
@@ -154,12 +183,16 @@ describe("checking a request in order", () => {
 			new Set([JSON.stringify([401, { error: "unauthenticated" }, "Bearer"])]),
 		);
 		expect([failures.keys.length, revoked]).toEqual([5, []]);
+		expect(recorded).toEqual(Array(5).fill(denied("unauthenticated", inside)));
 	});
 
-	it("takes the current credential, and the previous one only while it is set", async () => {
+	it("takes the current credential, and the previous one only while it is set, comparing both each time", async () => {
 		const both = harness({ previous: true });
 		expect((await both.send({ credential: current })).status).toBe(200);
+		expect(both.compared).toEqual([0, 1]);
 		expect((await both.send({ credential: previous })).status).toBe(200);
+		expect((await both.send({ credential: "wrong" })).status).toBe(401);
+		expect(both.compared).toEqual([0, 1, 0, 1, 0, 1]);
 		const one = harness();
 		expect((await one.send({ credential: current })).status).toBe(200);
 		expect((await one.send({ credential: previous })).status).toBe(401);
@@ -170,10 +203,13 @@ describe("checking a request in order", () => {
 		expect((await send({ authorization: `bearer ${current}` })).status).toBe(200);
 	});
 
-	it("keys an IPv6 source by its /64", async () => {
-		const { send, requests } = harness();
+	it("keys an IPv6 source by its /64, in both windows", async () => {
+		const { send, requests, failures } = harness();
 		expect((await send({ address: "2001:db8:1:2::9" })).status).toBe(200);
 		expect(requests.keys).toEqual(["2001:db8:1:2::/64"]);
+		expect((await send({ address: "2001:db8:1:2::a", credential: "wrong" })).status).toBe(401);
+		expect((await send({ address: "2001:db9::1" })).status).toBe(403);
+		expect(failures.keys).toEqual(["2001:db8:1:2::/64", "2001:db9:0:0::/64"]);
 	});
 });
 
@@ -186,7 +222,7 @@ describe("the two windows", () => {
 		expect((await send()).status).toBe(200);
 	});
 
-	it("answers a failure past the failure window 429 with the wait, recorded as rate limited", async () => {
+	it("answers a failure past the failure window 429 with the wait, recording no more", async () => {
 		const { send, recorded } = harness({ failures: 2 });
 		await send({ credential: "wrong" });
 		expect((await send({ address: outside })).status).toBe(403);
@@ -197,7 +233,14 @@ describe("the two windows", () => {
 			{ error: "rate_limited" },
 			"30",
 		]);
-		expect(recorded.at(-1)).toEqual(denied("rate_limited", outside));
+		// The failures that filled the window were recorded; the requests past it are not, so they cannot flood the audit.
+		expect(recorded).toEqual([
+			denied("unauthenticated", inside),
+			denied("forbidden_source", outside),
+			denied("forbidden_source", outside),
+		]);
+		expect((await send({ address: outside })).status).toBe(429);
+		expect(recorded).toHaveLength(3);
 	});
 
 	it("counts authenticated requests in the request window, past it 429, before reading the body", async () => {
@@ -210,7 +253,7 @@ describe("the two windows", () => {
 			"30",
 		]);
 		expect(revoked).toHaveLength(3);
-		expect(recorded.at(-1)).toEqual(denied("rate_limited", inside));
+		expect(recorded.map((e) => e.kind)).toEqual(Array(3).fill("subject.revocation.requested"));
 	});
 
 	it("refuses with 503 when either window cannot count, recorded as such", async () => {
@@ -273,6 +316,19 @@ describe("the body", () => {
 		]);
 	});
 
+	it("refuses a member it does not know, so a sender's mistake shows", async () => {
+		const { send, revoked, recorded } = harness();
+		for (const json of [
+			{ subject: "a", keepDelegations: true },
+			{ subject: "a", delegations: "keep", reason: "left" },
+		]) {
+			const answer = await send({ json });
+			expect([answer.status, answer.json]).toEqual([400, { error: "invalid_request" }]);
+		}
+		expect(revoked).toEqual([]);
+		expect(recorded.at(-1)).toEqual(denied("invalid_request", inside));
+	});
+
 	it("takes the widest subject users does, 255 ASCII characters", async () => {
 		const { send, revoked } = harness();
 		expect((await send({ json: { subject: "~".repeat(255) } })).status).toBe(200);
@@ -329,9 +385,16 @@ describe("recording", () => {
 		expect((await send({ json: { subject: "nobody-ever" } })).json).toEqual({ complete: true });
 	});
 
-	it("lets any other failure of recording through, so http answers it", async () => {
-		const { send, recording } = harness();
+	it("records any other failure of recording as failed, and lets it through, so http answers it", async () => {
+		const { send, recording, recorded } = harness();
 		recording.answer = "broken";
 		await expect(send()).rejects.toThrow("broken");
+		expect(recorded).toEqual([
+			{
+				kind: "subject.revocation.requested",
+				subject: "alice",
+				attributes: { delegations: "end", outcome: "failed", source: inside },
+			},
+		]);
 	});
 });

@@ -1,4 +1,4 @@
 subject-revocation-http {
 	credential = "REPLACE-RANDOM-BEARER-TOKEN-32-BYTES"
-	sources = ["192.0.2.10/32"]
+	sources = ["REPLACE-LEDGER-ADDRESS-OR-CIDR"]
 }

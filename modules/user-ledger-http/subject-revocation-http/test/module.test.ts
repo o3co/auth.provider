@@ -9,8 +9,8 @@ import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import revocationModule from "../src/module.ts";
+import { testCredential as credential, subjectRevocationHttpConfig } from "../src/testing.ts";
 
-const credential = "Kq3vX9pLm2Rt7Yw4Nc8Bz1Hd6Fj0Gs5Ua-Ve_Io2LxM";
 const runtime = quietRuntime();
 let stop = async () => {};
 afterEach(() => stop());
@@ -26,7 +26,7 @@ async function serve(
 		config: {
 			...kernelConfig(),
 			...httpConfig({ "trusted-proxies": [...proxies] }),
-			"subject-revocation-http": { credential, sources: ["198.51.100.0/24"], ...settings },
+			...subjectRevocationHttpConfig(settings),
 		},
 		runtime,
 	});
@@ -62,6 +62,28 @@ describe("subject-revocation-http", () => {
 				{ delegations: "end", outcome: "complete", source: "198.51.100.7" },
 			],
 		]);
+	});
+
+	it("refuses plain http, a wrong credential and an unlisted source through http as the handler does", async () => {
+		const { app, post, events } = await serve();
+		const body = JSON.stringify({ subject: "alice" });
+		const plain = await post(body, { "x-forwarded-proto": "http" });
+		const wrong = await post(body, { authorization: "Bearer wrong" });
+		const away = await post(body, { "x-forwarded-for": "203.0.113.9" });
+		expect([
+			[plain.status, await plain.json()],
+			[wrong.status, wrong.headers.get("www-authenticate"), await wrong.json()],
+			[away.status, await away.json()],
+		]).toEqual([
+			[403, { error: "https_required" }],
+			[401, "Bearer", { error: "unauthenticated" }],
+			[403, { error: "forbidden_source" }],
+		]);
+		expect(events.map((e) => e.attributes)).toEqual([
+			{ reason: "unauthenticated", source: "198.51.100.7" },
+			{ reason: "forbidden_source", source: "203.0.113.9" },
+		]);
+		expect(await app.get(revocations).compare("alice", 0, "sessions")).toBe("valid");
 	});
 
 	it("takes the previous credential while it is set, for moving the ledger to a new one", async () => {

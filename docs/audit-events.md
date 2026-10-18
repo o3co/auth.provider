@@ -109,8 +109,8 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `subject.revocation.denied` | `reason`, `source` | a request to revoke a subject was refused before anything was recorded |
-| `subject.revocation.requested` | `delegations`, `outcome`, `source` | the ledger's revocation of a subject was recorded, or its boundary not confirmed |
+| `subject.revocation.denied` | `reason`, `source` | a request to revoke a subject was refused for its source, credential or body, or as a window could not count |
+| `subject.revocation.requested` | `delegations`, `outcome`, `source` | the ledger's revocation of a subject was recorded, or its recording failed or was not confirmed |
 
 ## @mod/token-control
 
