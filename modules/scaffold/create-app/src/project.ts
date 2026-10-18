@@ -53,10 +53,10 @@ export function dependenciesOf(
 	return dependencies;
 }
 
-/** The project's manifest, starting the app with `start`. */
 /** The pnpm the workspace builds with, so the lockfile reads alike in the image. */
 const pnpm = "pnpm@11.3.0";
 
+/** The project's manifest, starting the app with `start`. */
 export const manifestOf = (start: string, dependencies: Record<string, string>) =>
 	`${JSON.stringify(
 		{
