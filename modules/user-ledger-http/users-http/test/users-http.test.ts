@@ -39,7 +39,8 @@ interface Answer {
 
 /**
  * The ledger in the request shape: alice at `/ledger/authenticate`, behind the credential. It refuses
- * an unknown identifier with 401 and a wrong password with 403, both without a Bearer challenge.
+ * an unknown identifier with 401 and a wrong password with 403, both without a Bearer challenge. At
+ * `/ledger/subject` it finds alice, refuses the suspended `s-gone` with 410, and knows no one else.
  */
 function aliceLedger(asked: Asked): Answer {
 	if (asked.headers.authorization !== `Bearer ${credential}`) {
@@ -49,6 +50,11 @@ function aliceLedger(asked: Asked): Answer {
 		const { email, password } = JSON.parse(asked.body);
 		if (email !== "alice") return { status: 401 };
 		return password === "correct horse" ? { status: 200, json: alice } : { status: 403 };
+	}
+	if (asked.method === "POST" && asked.path === "/ledger/subject") {
+		const { subject } = JSON.parse(asked.body);
+		if (subject === "s-gone") return { status: 410 };
+		return subject === "s-alice" ? { status: 200, json: alice } : { status: 404 };
 	}
 	return { status: 404 };
 }
@@ -114,12 +120,17 @@ const collected = contract<readonly Ledger[]>("test.ledgers");
 const collector = defineModule({ name: "test-collector" }, (m) => [
 	m.provide(collected).by((c) => c.collect(ledgers)),
 ]);
-const boot = (section: unknown, registered: unknown[] = [], allow = ["127.0.0.1"]) =>
+const boot = (
+	section: unknown,
+	registered: unknown[] = [],
+	allow = ["127.0.0.1"],
+	loopback = [pair],
+) =>
 	assemble({
 		modules: [outboundModule, usersModule, memoryUsersStores().module, usersHttp, collector],
 		config: {
 			...kernelConfig(),
-			outbound: { allow, "plain-loopback": [pair] },
+			outbound: { allow, "plain-loopback": loopback },
 			users: { registered },
 			...(section === undefined ? {} : { "users-http": section }),
 		},
@@ -596,5 +607,113 @@ describe("users-http", () => {
 
 	it("refuses to start beside users in the settings", async () => {
 		await expect(boot(settings(), [testUser("bob", "p")])).rejects.toBeInstanceOf(BootRefused);
+	});
+});
+
+describe("users-http looking a user up by subject", () => {
+	const subjectUrl = () => `http://${pair}/ledger/subject`;
+	const looking = (extra: Record<string, unknown> = {}) =>
+		open({ "subject-url": subjectUrl(), ...extra });
+
+	it("posts the subject alone to subject-url as written, with the credential", async () => {
+		const { ledger } = await looking({ "subject-url": `${subjectUrl()}?realm=a` });
+		script = () => ({ status: 200, json: alice });
+		await ledger.bySubject("s-alice");
+		const [asked] = received;
+		expect([asked?.method, asked?.path]).toEqual(["POST", "/ledger/subject?realm=a"]);
+		expect(asked?.headers).toMatchObject({
+			authorization: `Bearer ${credential}`,
+			accept: "application/json",
+			"content-type": "application/json",
+		});
+		expect(JSON.parse(asked?.body ?? "")).toEqual({ subject: "s-alice" });
+	});
+
+	it("hands over the user it finds, needing no username, and none for a 404 or a 410, unlogged", async () => {
+		const { ledger } = await looking();
+		expect(await ledger.bySubject("s-alice")).toEqual({
+			kind: "user",
+			user: {
+				subject: "s-alice",
+				attributes: { [userAttribute.name]: "Alice", [userAttribute.email]: "Alice@example.com" },
+			},
+		});
+		script = () => ({ status: 200, json: { id: "s-alice" } });
+		expect(await ledger.bySubject("s-alice")).toMatchObject({ kind: "user" });
+		script = aliceLedger;
+		expect(await ledger.bySubject("s-nobody")).toEqual({ kind: "none" });
+		expect(await ledger.bySubject("s-gone")).toEqual({ kind: "none" });
+		expect(logged).toEqual([]);
+	});
+
+	it("answers unavailable to a 401 or 403, challenged or not, and to every other answer it cannot read", async () => {
+		const { ledger } = await looking();
+		const answers: Answer[] = [
+			{ status: 401 },
+			{ status: 403 },
+			{ status: 401, headers: { "www-authenticate": "Bearer" } },
+			{ status: 201, json: alice },
+			{ status: 204 },
+			{ status: 429 },
+			{ status: 500 },
+			{ status: 302, headers: { location: `http://${pair}/ledger/elsewhere` } },
+			{ status: 200, json: { username: "alice" } },
+			{ status: 200, json: { id: "" } },
+			{ status: 200, json: ["s-alice"] },
+			{ status: 200, text: "s-alice" },
+		];
+		for (const answer of answers) {
+			script = () => answer;
+			await expect(ledger.bySubject("s-alice"), JSON.stringify(answer)).rejects.toSatisfy(
+				isUnavailable,
+			);
+		}
+		expect(received.map((r) => r.path).filter((path) => path !== "/ledger/subject")).toEqual([]);
+		expect(logged).toContainEqual(["users-http.ledger_failed", { status: 201 }]);
+	});
+
+	it("answers no password without verify-url, asking nothing", async () => {
+		const app = await boot({ "subject-url": subjectUrl(), credential });
+		const [ledger] = app.get(collected);
+		expect(await ledger?.verify("alice", "correct horse")).toEqual({ kind: "none" });
+		expect(received).toEqual([]);
+	});
+
+	it("gives users the address the ledger states for a subject", async () => {
+		const { users: u } = await looking();
+		expect(await u.claimedContacts("s-alice")).toEqual([
+			{ kind: "email", value: "Alice@example.com" },
+		]);
+	});
+
+	it("refuses to start with no URL, or with a credential and URLs at two origins", async () => {
+		// A second origin outbound takes: the next port at loopback, where nothing need answer.
+		const otherPair = `127.0.0.1:${Number(pair.split(":")[1]) + 1}`;
+		const other = `http://${otherPair}/ledger/subject`;
+		const bootBoth = (section: unknown) => boot(section, [], undefined, [pair, otherPair]);
+		for (const [section, where] of [
+			[{ credential }, "users-http"],
+			[settings({ "subject-url": other }), "users-http.credential"],
+			[settings({ "subject-url": `https://${pair}/ledger/subject` }), "users-http.credential"],
+		] as const) {
+			const error = await bootBoth(section).then(
+				() => undefined,
+				(e: unknown) => e,
+			);
+			expect(error, JSON.stringify(section)).toBeInstanceOf(BootRefused);
+			const refusals = (error as BootRefused).refusals;
+			expect(refusals.map((r) => r.where)).toEqual([where]);
+			expect(refusals.map((r) => r.reason).join()).not.toContain(credential);
+		}
+		await expect(boot(settings({ "subject-url": subjectUrl() }))).resolves.toBeDefined();
+		await expect(
+			bootBoth({ "verify-url": `http://${pair}/ledger/authenticate`, "subject-url": other }),
+		).resolves.toBeDefined();
+	});
+
+	it("refuses to start on a subject-url outbound's policy refuses, saying why", async () => {
+		await expect(boot({ "subject-url": "https://ledger.example/subject" })).rejects.toMatchObject({
+			refusals: [{ where: "users-http.subject-url", reason: expect.stringContaining("outbound") }],
+		});
 	});
 });

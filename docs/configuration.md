@@ -615,7 +615,8 @@ From `@mod/users-http`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `users-http.verify-url` | string |  | yes | `USERS_HTTP_VERIFY_URL` | `https://ledger.example.invalid/verify` | Where a password is verified. Plain http is reached only where outbound's policy names it. |
+| `users-http.verify-url` | string |  |  | `USERS_HTTP_VERIFY_URL` | `https://ledger.example.invalid/verify` | Where a password is verified; without it, no password matches. Plain http is reached only where outbound's policy names it. |
+| `users-http.subject-url` | string |  |  |  |  | Where a user is looked up by subject; without it, every lookup by subject is unanswerable. Plain http is reached only where outbound's policy names it. |
 | `users-http.credential` | string |  |  |  |  | A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material. |
 | `users-http.timeout` | string |  |  |  |  | How long a call may take, from 1ms to 1m, narrowing outbound's cap. |
 | `users-http.max-response-size` | string |  |  |  |  | The largest answer read, from 1B to 16MiB, narrowing outbound's cap. |
