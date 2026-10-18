@@ -210,42 +210,6 @@ end
 return out(remember(ikey, ARGV[4], answer, ARGV[3]))
 `;
 
-/** KEYS: set key. ARGV: member, score, cap, kind, arg. A set's expiry never shrinks. */
-export const setAdd = `${prelude}
-local key = KEYS[1]
-redis.call('ZREMRANGEBYSCORE', key, '-inf', num(now))
-local fresh = redis.call('EXISTS', key) == 0
-local current = redis.call('PEXPIRETIME', key)
-local proposed = expiry(ARGV[4], ARGV[5], fresh and -2 or current)
-local final
-if fresh then final = proposed
-elseif current == -1 or proposed == nil then final = nil
-else final = math.max(current, proposed) end
-redis.call('ZADD', key, 'GT', ARGV[2], ARGV[1])
-local evicted = {}
-local over = redis.call('ZCARD', key) - tonumber(ARGV[3])
-if over > 0 then
-  local popped = redis.call('ZPOPMIN', key, over)
-  for i = 1, #popped, 2 do table.insert(evicted, popped[i]) end
-end
-if redis.call('EXISTS', key) == 1 then
-  if final == nil then redis.call('PERSIST', key) else redis.call('PEXPIREAT', key, final) end
-end
-return out(cjson.encode({evicted = evicted, n = #evicted}))
-`;
-
-/** KEYS: set key. */
-export const setMembers = `${prelude}
-redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', num(now))
-return out(cjson.encode({now = num(now), members = redis.call('ZRANGE', KEYS[1], 0, -1, 'WITHSCORES')}))
-`;
-
-/** KEYS: set key. ARGV: member. */
-export const setRemove = `${prelude}
-redis.call('ZREM', KEYS[1], ARGV[1])
-return out(cjson.encode({kind = 'written'}))
-`;
-
 /** The store clock's present time. */
 export const now = `${prelude}
 return out(cjson.encode({now = num(now)}))

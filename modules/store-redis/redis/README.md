@@ -31,15 +31,15 @@
 - A confirmation writes the confirmation key on a connection of its own, then waits until every replica ROLE shows has it.
 - A timeout, too few replicas, or another server than the one that answered is unavailable, the answer then unknown.
 - A confirmation asked during a round rides on the next round.
-- Every script first deletes keys and set members whose expiry is at or before its time, as Redis still holds them then.
+- Every script first deletes keys whose expiry is at or before its time, as Redis still holds them then.
 - Versions are `server.epoch.n` and never repeat after a restart, a failover, or the end of the key counting them.
 - A command whose reply was lost is never sent again; a dropped connection fails at once, and nothing ends the process.
-- The store clock is Redis's time; values, counts and sets are kept in separate keys, values untouched.
+- The store clock is Redis's time; values and counts are kept in separate keys, values untouched.
 - A scan walks Redis's SCAN over the space's value keys alone, which one server holds (clusters are refused); a value at its very expiry may still be listed, and a read then finds none. A failover or restart during a walk loses its cursor's place, so a key may not come; a later walk lists it.
 - Outside the guarantees, the operator's: keeping a detached or lagging replica from promotion, replicas' disk writes, `CONFIG SET` after boot.
 
 ## Data
-- Keys under the prefix, one hash tag per space and partition, holding values, counts, sets, versions and marks.
+- Keys under the prefix, one hash tag per space and partition, holding values, counts, versions and marks.
 
 ## Depends on
 - `kernel`, `store`
