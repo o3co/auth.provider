@@ -11,6 +11,7 @@ import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import { senderBindings } from "@mod/sender-binding";
 import senderBindingModule from "@mod/sender-binding/module";
 import { type Session, sessions } from "@mod/session";
@@ -106,6 +107,7 @@ export async function harness(
 		modules: [
 			http,
 			clientsModule,
+			secretHashModule,
 			senderBindingModule,
 			tokensStandIn(),
 			sessionStandIn,
