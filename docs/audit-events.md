@@ -107,7 +107,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `introspect.store_unavailable` | `source` | introspection is answered unavailable |
+| `introspection.unavailable` | `source` | introspection is answered unavailable |
 | `token.revoked` | `client`, `source`, `token_type` | a revocation is written; `token_type` is the kind's hint |
 
 ## @mod/webauthn-login

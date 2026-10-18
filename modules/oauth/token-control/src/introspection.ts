@@ -2,6 +2,7 @@ import { type Audit, declaredAudit } from "@mod/audit";
 import { clientAllowance } from "@mod/client-allowance";
 import type { Clients } from "@mod/clients";
 import { type HttpRequest, type HttpResponse, noStore } from "@mod/http";
+import type { Log } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
 import { answeringUnavailable, authenticateClient, oauthError } from "@mod/token-endpoint";
 import type { AccessCheck, Tokens } from "@mod/tokens";
@@ -39,7 +40,13 @@ function activeAnswer(issuer: string, checked: Valid): HttpResponse {
 	};
 }
 
-export function introspection(clients: Clients, tokens: Tokens, issuer: string, audit: Audit) {
+export function introspection(
+	clients: Clients,
+	tokens: Tokens,
+	issuer: string,
+	audit: Audit,
+	log: Log,
+) {
 	const answer = async (request: HttpRequest): Promise<HttpResponse> => {
 		const authenticated = await authenticateClient(clients, request);
 		if (authenticated.kind === "refused") return authenticated.response;
@@ -57,9 +64,10 @@ export function introspection(clients: Clients, tokens: Tokens, issuer: string, 
 		}
 		return activeAnswer(issuer, checked);
 	};
-	return answeringUnavailable(answer, (request) => {
+	return answeringUnavailable(answer, (request, { what }) => {
+		log.warn("token-control.unavailable", { what, route: "introspect" });
 		const source = determinedSource(request);
-		declaredAudit(audit, events).record("introspect.store_unavailable", {
+		declaredAudit(audit, events).record("introspection.unavailable", {
 			attributes: source === undefined ? {} : { source },
 		});
 	});
