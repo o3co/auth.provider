@@ -129,6 +129,19 @@ From `@mod/dpop`.
 | `dpop.nonce.ttl` | string | `5m` |  | `DPOP_NONCE_TTL` | `5m` | How often the nonce changes, from `1s` to `1h` in whole seconds; one is taken for twice this. |
 | `dpop.nonce.secret` | string |  |  | `DPOP_NONCE_SECRET` | `REPLACE-NONCE-SECRET-BASE64-32-BYTES` | The nonce's key, shared by every instance: base64 of 32 bytes or more; required unless never. |
 
+## exchange-id-tokens
+
+From `@mod/exchange-id-tokens`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `exchange-id-tokens.max-age` | string | `10m` |  |  |  | The oldest an id_token may be, from its `iat`, from 1m to 1h. |
+| `exchange-id-tokens.clock-skew` | string | `30s` |  |  |  | How far an id_token's times may be off this host's clock, from 0s to 5m. |
+| `exchange-id-tokens.apple.upstream` | string | `apple` |  |  |  | The upstream's name, by which users finds the account an id_token's `sub` is linked to. |
+| `exchange-id-tokens.apple.clients` | map |  |  |  |  | This provider's client IDs, each with the id_tokens it may exchange. |
+| `exchange-id-tokens.google.upstream` | string | `google` |  |  |  | The upstream's name, by which users finds the account an id_token's `sub` is linked to. |
+| `exchange-id-tokens.google.clients` | map |  |  |  |  | This provider's client IDs, each with the id_tokens it may exchange. |
+
 ## external-jwt
 
 From `@mod/external-jwt`.
