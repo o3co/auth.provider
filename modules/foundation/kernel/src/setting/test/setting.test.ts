@@ -27,3 +27,12 @@ it("refuses a duration or a size that names no unit, as written or as an environ
 it("leaves bounds to the schema it is piped into", () => {
 	expect(section.safeParse({ ttl: "500ms" }).success).toBe(false);
 });
+
+it("describes a key by what the operator writes, so a section's schema can be told in JSON Schema", () => {
+	const told = section["~standard"].jsonSchema.input({ target: "draft-2020-12" });
+	expect(told.properties).toMatchObject({
+		ttl: { type: "string" },
+		body: { type: "string" },
+		wait: { type: "string", default: "2s" },
+	});
+});
