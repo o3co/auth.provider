@@ -55,6 +55,8 @@ const sameState = (a: unknown, b: unknown) =>
 interface Pending {
 	readonly kind: string;
 	readonly secret: string;
+	/** Begun while the subject held no counting factor: it binds only while it would still be the first. */
+	readonly first?: true;
 }
 
 const isWayBack = (kind: FactorKind) => !kind.counts && !guessing(kind);
@@ -95,7 +97,7 @@ export function factorDecisions(p: FactorParts): Factors {
 	const pendingOf = (subject: string, pending: string) => {
 		const value = JSON.parse(opened(pending, sealContext(subject, "pending"))) as Pending;
 		const kind = p.kinds.get(value.kind);
-		return kind ? { kind, secret: value.secret } : undefined;
+		return kind ? { kind, secret: value.secret, first: value.first === true } : undefined;
 	};
 	const recovery = async (subject: string) => {
 		const kind = [...p.kinds.values()].find(isWayBack);
@@ -196,7 +198,8 @@ export function factorDecisions(p: FactorParts): Factors {
 			if (!kind?.counts) return { kind: "unknown-kind" };
 			const all = await records.list(subject);
 			if (all.length >= p.maxFactors) return { kind: "full" };
-			if (p.gates.length > 0 && counting(all, p.kinds).length === 0) {
+			const first = counting(all, p.kinds).length === 0;
+			if (p.gates.length > 0 && first) {
 				const ask = { subject, kind: name, transaction, passed, from };
 				for (const gate of p.gates) {
 					if (!(await gate.admits(ask))) return { kind: "binding-proof-required" };
@@ -208,7 +211,11 @@ export function factorDecisions(p: FactorParts): Factors {
 			if (unique !== undefined && (await records.taken(kind.kind, unique))) {
 				return { kind: "duplicate" };
 			}
-			const value: Pending = { kind: kind.kind, secret: enrolled.secret };
+			const value: Pending = {
+				kind: kind.kind,
+				secret: enrolled.secret,
+				...(first ? { first } : {}),
+			};
 			const pending = p.seal.seal(JSON.stringify(value), sealContext(subject, "pending"));
 			return { kind: "begun", pending, show: enrolled.show };
 		},
@@ -235,13 +242,26 @@ export function factorDecisions(p: FactorParts): Factors {
 			// Made before the write, which must be pure; dropped when the subject already holds codes.
 			const codes = await recovery(subject);
 			// Decided on the factors as written: of two first bindings at once, one brings the codes.
-			const written = await records.decide<"full" | { brought: typeof codes }>(subject, (all) => {
-				const brought = codes && !all.some((f) => f.kind === codes.factor.kind) ? codes : undefined;
-				const added = [factor, ...(brought ? [brought.factor] : [])];
-				if (all.length + added.length > p.maxFactors) return { verdict: "full" };
-				return { next: [...all, ...added], verdict: { brought } };
-			});
+			const written = await records.decide<"full" | "closed" | { brought: typeof codes }>(
+				subject,
+				(all) => {
+					// A first binding another counting factor beat to the subject binds nothing: it was let begin as the first.
+					if (found.first && counting(all, p.kinds).length > 0) return { verdict: "closed" };
+					const brought =
+						codes && !all.some((f) => f.kind === codes.factor.kind) ? codes : undefined;
+					const added = [factor, ...(brought ? [brought.factor] : [])];
+					if (all.length + added.length > p.maxFactors) return { verdict: "full" };
+					return { next: [...all, ...added], verdict: { brought } };
+				},
+			);
 			if (written === "full") return { kind: "full" };
+			if (written === "closed") {
+				audited.record("mfa.first_binding_conflict", {
+					subject,
+					attributes: { kind: factor.kind },
+				});
+				return { kind: "first-binding-closed" };
+			}
 			const { brought } = written;
 			const unique = found.kind.uniqueSecret?.({ secret: found.secret, state });
 			if (unique !== undefined && !(await records.claim(subject, factor.kind, unique, fid))) {
