@@ -42,7 +42,7 @@ async function boot() {
 			...httpConfig(),
 			...keysConfig(),
 			...issuerConfig(),
-			...tokensConfig({ revocation: "denylist", "access-token-lifetime-seconds": 3600 }),
+			...tokensConfig({ revocation: "denylist", "access-token-lifetime": "1h" }),
 		},
 		runtime,
 	});
