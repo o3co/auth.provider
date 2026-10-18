@@ -6,7 +6,7 @@
 ## Not here
 - When codes are issued or reissued, and what is audited (`mfa`).
 - Sealing the set, storing it, and keeping two uses of one code from both winning (`mfa`).
-- Showing the codes to the user (`mfa-flows`).
+- Showing the codes to the user: on first enrollment (`mfa-flows`), on reissue (`mfa-management`).
 
 ## Offers
 - Composition definition only.
