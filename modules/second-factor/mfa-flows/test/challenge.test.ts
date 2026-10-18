@@ -17,7 +17,7 @@ const carried = (request: HttpRequest, name: string) =>
 		?.split("; ")
 		.find((c) => c.startsWith(`${name}=`))
 		?.slice(name.length + 1);
-const jar: Required<Cookies> = {
+const jar: Cookies = {
 	read: carried,
 	lookup: (request, name) => {
 		const value = carried(request, name);

@@ -95,7 +95,8 @@ export function transactionsOver({ store, jar, random, clock, ttlMs, attempts }:
 		nextDeadline: () => clock.now() + ttlMs,
 		/** The transaction, only for the browser that started it, while it is in use. */
 		find: async (request: HttpRequest, id: string | undefined) => {
-			const browser = jar.read(request, "mfa");
+			const carried = jar.lookup(request, "mfa");
+			const browser = carried.kind === "found" ? carried.value : undefined;
 			if (!id || !browser) return undefined;
 			const found = transactionOf(await store.read(id));
 			const now = clock.now();
