@@ -35,6 +35,8 @@ function standIn() {
 	let now = 1_000_000;
 	const kept = memoryTransactions(() => now);
 	const transactions = transactionsOver({
+		listings: kept.listings,
+		log: recordingLog().log,
 		store: kept.transactions,
 		jar,
 		random: (n) => new Uint8Array(randomBytes(n)),
