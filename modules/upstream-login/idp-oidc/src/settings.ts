@@ -1,3 +1,4 @@
+import { setting } from "@mod/kernel";
 import { hostEntryOf, type OutboundPolicy } from "@mod/outbound";
 import {
 	clientSetting,
@@ -34,9 +35,9 @@ export const settingsOf = (asymmetric: readonly string[], policy: OutboundPolicy
 			issuer: endpoint,
 			"token-auth": z
 				.enum(["client_secret_basic", "client_secret_post"])
-				.default("client_secret_basic"),
+				.prefault("client_secret_basic"),
 			/** Reads the endpoints from the issuer's own description, checking it names the issuer. */
-			discovery: z.boolean().default(true),
+			discovery: z.boolean().prefault(true),
 			"authorization-endpoint": endpoint.optional(),
 			"token-endpoint": endpoint.optional(),
 			"jwks-uri": endpoint.optional(),
@@ -44,20 +45,20 @@ export const settingsOf = (asymmetric: readonly string[], policy: OutboundPolicy
 			"end-session-endpoint": endpoint.optional(),
 			scopes: z
 				.array(scope)
-				.default(["openid"])
+				.prefault(["openid"])
 				.refine((scopes) => scopes.includes("openid"), "scopes must hold openid"),
 			algorithms: z
 				.array(z.string().refine((alg) => asymmetric.includes(alg), "an asymmetric algorithm"))
 				.min(1)
-				.default(["RS256", "PS256", "ES256", "EdDSA"]),
+				.prefault(["RS256", "PS256", "ES256", "EdDSA"]),
 			/** Hosts besides the issuer's its endpoints may be on, as outbound reads a host list. */
 			"endpoint-hosts": z
 				.array(z.string().refine((entry) => hostEntryOf(entry) !== undefined, "a host, or .name"))
-				.default([]),
+				.prefault([]),
 			/** Asks every callback for `iss`, even where the issuer's description does not offer it. */
-			"require-iss": z.boolean().default(false),
-			/** How far the upstream's clock may be from ours, for its id_token's times. */
-			"clock-skew-seconds": z.number().int().min(0).max(300).default(30),
+			"require-iss": z.boolean().prefault(false),
+			/** How far the upstream's clock may be from ours, for its id_token's times: 0s to 5m. */
+			"clock-skew": setting.duration("s").pipe(z.number().int().min(0).max(300)).prefault("30s"),
 		})
 		.refine(
 			(s) =>
