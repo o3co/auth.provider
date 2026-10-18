@@ -11,7 +11,11 @@ import { section } from "./settings/section.ts";
 export default defineModule({ name: "http", section }, (m) => [
 	m.provide(site).by((c) => {
 		const origin = c.section["public-origin"];
-		return Object.freeze({ origin, secureCookies: !origin?.startsWith("http:") });
+		return Object.freeze({
+			origin,
+			secureCookies: !origin?.startsWith("http:"),
+			proxied: c.section["trusted-proxies"].length > 0,
+		});
 	}),
 	m
 		.provide(certificateForwarding)
