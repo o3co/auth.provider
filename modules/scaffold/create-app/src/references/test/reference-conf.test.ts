@@ -90,7 +90,6 @@ const prefaultLater = new Set([
 	"federation-grants-store",
 	"refresh-store",
 	"rp-logout-store",
-	"session-store",
 	"session-tokens-store",
 ]);
 

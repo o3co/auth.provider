@@ -7,21 +7,21 @@ export const section = z.strictObject({
 		.int()
 		.min(1)
 		.max(65_536)
-		.default(1024)
+		.prefault(1024)
 		.describe("How many shards the list of sessions still closing is spread over."),
 	"closings-per-shard": z
 		.number()
 		.int()
 		.min(1)
 		.max(10_000)
-		.default(1000)
+		.prefault(1000)
 		.describe("How many sessions still closing one shard holds at most."),
 	"sessions-per-subject": z
 		.number()
 		.int()
 		.min(1)
 		.max(10_000)
-		.default(100)
+		.prefault(100)
 		.describe(
 			"How many sessions a subject's listing keeps; past it, the one ending first is pushed out and logged.",
 		),
