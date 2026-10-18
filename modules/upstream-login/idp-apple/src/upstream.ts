@@ -115,7 +115,7 @@ export function opened(
 				});
 				const { tokens, idToken } = tokenAnswerOf(jsonObjectOf(answer), s.scopes);
 				if (!idToken) throw new UpstreamRefused();
-				const { login } = await idTokenOf(idToken, exchange.nonce);
+				const { login } = await idTokenOf(idToken, exchange.nonce, tokens.accessToken);
 				return { ...login, amr: [], tokens: { ...tokens, idToken } };
 			}),
 		refresh: (refreshToken, scopes) =>
