@@ -456,6 +456,31 @@ describe("stop", () => {
 		await closed;
 	});
 
+	it("closes a connection whose answer was still being sent when stop began, once the answer is sent", async () => {
+		const body = "x".repeat(16 * 1024 * 1024);
+		const big = handlers([{ method: "GET", path: "/big", handle: () => ({ status: 200, body }) }]);
+		const { app, port } = await started([big]);
+		let length = 0;
+		const socket = connect(port, "127.0.0.1", () =>
+			socket.write("GET /big HTTP/1.1\r\nHost: x\r\n\r\n"),
+		);
+		socket.on("error", () => {});
+		// The answer starts as keep-alive, then waits on a reader that does not read.
+		socket.once("data", () => socket.pause());
+		socket.on("data", (chunk) => {
+			length += chunk.length;
+		});
+		const closed = new Promise((resolve) => socket.on("close", () => resolve("closed")));
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		const stopping = app.stop(10_000);
+		await hooksStarted();
+		socket.resume();
+		const held = new Promise((resolve) => setTimeout(() => resolve("held"), 2000));
+		expect(await Promise.race([closed, held])).toBe("closed");
+		expect(length).toBeGreaterThan(body.length);
+		await stopping;
+	});
+
 	it("closes at the stop deadline the connections still waiting for an answer", async () => {
 		const gate = gated();
 		const { app, port } = await started([gate.route]);
