@@ -91,7 +91,12 @@ export function opened(
 				);
 				const { tokens, idToken } = tokenAnswerOf(jsonObjectOf(answer), scopes);
 				if (!idToken) throw new UpstreamRefused();
-				const { login } = await idTokenOf(idToken, exchange.nonce);
+				const { login, claims } = await idTokenOf(idToken, exchange.nonce);
+				// The domain is the checked id_token's own claim: never the authorize hint, nor the email's.
+				const domains = s["hosted-domains"];
+				if (domains && !(typeof claims.hd === "string" && domains.includes(claims.hd))) {
+					throw new UpstreamRefused();
+				}
 				return { ...login, amr: [], tokens: { ...tokens, idToken } };
 			}),
 		refresh: (refreshToken, scope) =>

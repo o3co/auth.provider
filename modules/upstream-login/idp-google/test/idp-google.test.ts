@@ -275,6 +275,39 @@ describe("idp-google", () => {
 		for (const a of asked) expect(a.hosts, a.url).toEqual([new URL(a.url).hostname]);
 	});
 
+	it("takes, with hosted-domains, only an id_token whose own hd is one of them, exactly", async () => {
+		const settings = { "hosted-domains": ["corp.example", "lab.example"] };
+		const hdOf = async (claims: Record<string, unknown>) => {
+			const { upstream } = await open({ settings, token: async () => granted({}, claims) });
+			return outcome(upstream.exchange(exchange()));
+		};
+		expect(await hdOf({ hd: "corp.example" })).toMatchObject({ subject: "g-alice" });
+		expect(await hdOf({ hd: "lab.example" })).toMatchObject({ subject: "g-alice" });
+		for (const claims of [
+			{},
+			{ hd: "other.example" },
+			{ hd: "Corp.example" },
+			{ hd: "sub.corp.example" },
+			{ hd: ["corp.example"] },
+			{ email: "a@corp.example", email_verified: true },
+		]) {
+			expect(await hdOf(claims), JSON.stringify(claims)).toBe("refused");
+		}
+	});
+
+	it("takes any account without hosted-domains, and refuses an empty list or a domain not lowercase", async () => {
+		const { upstream } = await open({ token: async () => granted() });
+		expect(await upstream.exchange(exchange())).toMatchObject({ subject: "g-alice" });
+		const both = { "client-id": "client", "client-secret": "s3cr:et" };
+		for (const domains of [[], ["Corp.example"], [""], ["corp example"]]) {
+			expect(
+				settings.safeParse({ ...both, "hosted-domains": domains }).success,
+				String(domains),
+			).toBe(false);
+		}
+		expect(settings.safeParse({ ...both, "hosted-domains": ["corp.example"] }).success).toBe(true);
+	});
+
 	it("gives the profile in the checked id_token, its email verified only by a boolean true", async () => {
 		const said = { email: "a@gmail.example", name: "Alice", picture: "https://p.example/a" };
 		const profileOf = async (claims: Record<string, unknown>) => {

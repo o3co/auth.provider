@@ -16,6 +16,11 @@ const section = clientSetting.extend({
 	"clock-skew": setting.duration("s").pipe(z.number().int().min(0).max(300)).prefault("30s"),
 	/** Where to end the upstream session; without it, the browser goes back or to Google's logout page. */
 	"end-session-endpoint": endpoint.optional(),
+	/** The Google Workspace domains a login must be from, by its id_token's `hd`; any account when not given. */
+	"hosted-domains": z
+		.array(z.string().regex(/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/, "a domain, lowercase"))
+		.min(1)
+		.optional(),
 });
 
 /**
