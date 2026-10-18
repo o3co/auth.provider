@@ -21,6 +21,8 @@ const managing = async (sessions: Sessions, request: HttpRequest) => {
 	const entry = await sessions.enterFor(request, "credentials");
 	return entry.kind === "entered" ? entry.session : refusedEntry(entry);
 };
+/** As `session` words a step-up it asks for. */
+const stepUpRequired = jsonAnswer(403, { error: "step_up_required" });
 
 export function handlersOver(p: HandlerParts) {
 	const list: Handler = async (request) => {
@@ -41,8 +43,15 @@ export function handlersOver(p: HandlerParts) {
 		return renamed === "renamed" ? jsonAnswer(200, {}) : unknownFactor;
 	};
 
-	const remove: Handler = async (request) => {
+	/** Entered at the credential-changing level with a second factor proven recently: what a factor holds goes only to its proof, never to a sign-in judged before a factor was bound. */
+	const proving = async (request: HttpRequest) => {
 		const session = await managing(p.sessions, request);
+		if ("status" in session) return session;
+		return p.factors.provenRecently(session.context) ? session : stepUpRequired;
+	};
+
+	const remove: Handler = async (request) => {
+		const session = await proving(request);
 		if ("status" in session) return session;
 		const removed = await p.factors.remove(
 			session.context.subject,
@@ -53,7 +62,7 @@ export function handlersOver(p: HandlerParts) {
 	};
 
 	const regenerate: Handler = async (request) => {
-		const session = await managing(p.sessions, request);
+		const session = await proving(request);
 		if ("status" in session) return session;
 		const reissued = await p.factors.reissue(session.context.subject);
 		if (reissued.kind === "reissued") return jsonAnswer(200, { recovery_codes: reissued.codes });
