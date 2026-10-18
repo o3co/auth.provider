@@ -23,6 +23,7 @@ function trialValues(redisUrl: string): [section: string, key: string, value: st
 		["mtls", "mode", "self-signed"],
 		["mail-smtp", "host", "smtp.example.invalid"],
 		["mail-smtp", "from", "auth@example.invalid"],
+		["subject-revocation-http", "credential", randomBytes(32).toString("base64url")],
 	];
 }
 
@@ -76,6 +77,13 @@ function trialBlocks(
 			"jwt-bearer",
 			`jwt-bearer { issuers = [{ issuer = "https://devices.example.invalid", subject = as-is }] }`,
 		],
+		[
+			has("subject-revocation-http"),
+			"subject-revocation-http",
+			`subject-revocation-http { sources = ["192.0.2.0/24"] }`,
+		],
+		// subject-revocation-http boots only behind a trusted proxy: one no request comes through, so every source stays as sent.
+		[has("subject-revocation-http"), "http", `http { trusted-proxies = ["192.0.2.1"] }`],
 		[
 			has("http"),
 			"http",
