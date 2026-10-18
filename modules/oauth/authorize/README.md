@@ -15,7 +15,7 @@
 - Metadata section `authorize`: `redirect-uris` (default empty)
 - `registrable` (URI → whether a client may register it to be sent back to), for other returns a client registers
 - `redirectsAt` (client, origin → whether the origin is the scheme, host and port of one of its redirect URIs), for a URL another module frames for the client
-- Operator section: `login-page` (the login page. The return URL is added as `redirect_to`), `step-up-page` (the page that raises authentication. Optional); both https URLs by `url-setting`'s part for configured URLs, `oidc-mode` (`oidc-required` or `dual`), `requests` (requests per source in each window, over both methods), `window`
+- Operator section: `login-page` (the login page. The return URL is added as `redirect_to`), `step-up-page` (the page that raises authentication. Optional); both https URLs (http only on a loopback host) by `url-setting`'s part for configured URLs, `oidc-mode` (`oidc-required` or `dual`), `requests` (requests per source in each window, over both methods), `window`
 - Audit events (to `audit`):
   - `authorize.granted` when a code is given (the subject; `client`, `response_type` `code`).
   - `authorize.rejected` on a refusal decided for the client or its consent (no subject; `client`, `reason`: `grant_type_not_allowed`, `scope_omitted_without_default`, `client_not_first_party`, `consent_required` or an issuance policy's reason, with `policy` its name).

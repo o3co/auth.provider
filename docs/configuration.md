@@ -35,8 +35,8 @@ From `@mod/authorize`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `authorize.login-page` | string |  | yes | `AUTHORIZE_LOGIN_PAGE` | `https://login.example.invalid/login` |  |
-| `authorize.step-up-page` | string |  |  |  |  |  |
+| `authorize.login-page` | string |  | yes | `AUTHORIZE_LOGIN_PAGE` | `https://login.example.invalid/login` | The login page, given the return URL as `redirect_to`: an https URL (http only on a loopback host). |
+| `authorize.step-up-page` | string |  |  |  |  | Where a session that falls short of an acr is sent to raise its authentication: an https URL (http only on a loopback host). |
 | `authorize.oidc-mode` | oidc-required \| dual | `oidc-required` |  |  |  |  |
 | `authorize.requests` | integer (1–100000) | `60` |  |  |  |  |
 | `authorize.window` | string | `1m` |  |  |  | The rate limit's window: a duration with a unit, e.g. 1m. |

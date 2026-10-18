@@ -1298,7 +1298,7 @@ it("names among the issuer's metadata where it is, that it answers with a code, 
 	expect(items).toContainEqual({ name: "code_challenge_methods_supported", value: ["S256"] });
 });
 
-it("takes its pages only as https URLs kept as written: no userinfo, no fragment", () => {
+it("takes its pages only as https URLs (http only on a loopback host) kept as written: no userinfo, no fragment", () => {
 	const pages = (login: string, stepUp?: string) =>
 		section.safeParse({ "login-page": login, ...(stepUp ? { "step-up-page": stepUp } : {}) })
 			.success;
@@ -1310,6 +1310,27 @@ it("takes its pages only as https URLs kept as written: no userinfo, no fragment
 	]) {
 		expect(pages(value), value).toBe(false);
 		expect(pages("https://as.example/login", value), value).toBe(false);
+	}
+});
+
+it("boots with its pages at http on a loopback host, and refuses http on any other host", async () => {
+	const local = {
+		"login-page": "http://localhost:3000/login",
+		"step-up-page": "http://127.0.0.1:3000/raise",
+	};
+	await expect(serve({ authorize: local })).resolves.toBeDefined();
+	await expect(
+		serve({ authorize: { "step-up-page": "http://[::1]:3000/raise" } }),
+	).resolves.toBeDefined();
+	for (const key of ["login-page", "step-up-page"]) {
+		for (const target of ["http://as.example/x", "http://localhost./x", "http://0.0.0.0:3000/x"]) {
+			await expect(
+				serve({ authorize: { [key]: target } }),
+				`${key} ${target}`,
+			).rejects.toMatchObject({
+				refusals: [{ where: `authorize.${key}`, reason: "a URL: http only on a loopback host" }],
+			});
+		}
 	}
 });
 
