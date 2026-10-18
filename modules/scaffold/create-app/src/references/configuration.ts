@@ -71,24 +71,29 @@ function objectOf(s: JsonSchema): JsonSchema | undefined {
 	return { type: "object", properties, required };
 }
 
-/** Each key of a schema, objects with properties walked into; `at` reads the fragment's value and env. */
+/**
+ * Each key of a schema, objects with properties walked into; `at` reads the fragment's value and
+ * env. A key is required only where every object holding it is required too.
+ */
 export function rowsOf(
 	schema: JsonSchema,
 	path: readonly string[],
 	at: (key: string) => { readonly env?: string; readonly example?: unknown },
+	held = true,
 ): Row[] {
 	const object = objectOf(schema);
 	return Object.entries(object?.properties ?? {}).flatMap(([name, s]) => {
 		const keyPath = [...path, name];
+		const required = held && (object?.required ?? []).includes(name) && s.default === undefined;
 		const inner = objectOf(s);
-		if (inner) return rowsOf(inner, keyPath, at);
+		if (inner) return rowsOf(inner, keyPath, at, required);
 		const key = keyPath.join(".");
 		return [
 			{
 				key,
 				type: typeOf(s),
 				...(s.default === undefined ? {} : { default: s.default }),
-				required: (object?.required ?? []).includes(name) && s.default === undefined,
+				required,
 				...at(key),
 				...(s.description ? { description: s.description } : {}),
 			},

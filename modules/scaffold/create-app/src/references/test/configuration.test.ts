@@ -39,6 +39,15 @@ it("describes each key by its schema: type and bounds, default, whether required
 	).toContain("| `s.mode` | a \\| b | `a` |  |  |  |  |");
 });
 
+it("requires a key inside an object only when the object is required too", () => {
+	const key = { type: "object", required: ["id"], properties: { id: { type: "string" } } };
+	const schema = { type: "object", required: ["current"], properties: { current: key, next: key } };
+	expect(rowsOf(schema, ["k"], () => ({}))).toEqual([
+		{ key: "k.current.id", type: "string", required: true },
+		{ key: "k.next.id", type: "string", required: false },
+	]);
+});
+
 it("merges the keys of a union of objects, required only where every variant requires them", () => {
 	const schema = {
 		oneOf: [

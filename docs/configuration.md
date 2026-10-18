@@ -207,7 +207,7 @@ From `@mod/http`.
 | `http.cors-origins` | list of string | `[]` |  |  |  | The https origins whose pages may read cross-origin routes: exact, without a pattern. |
 | `http.insecure-origin` | boolean | `false` |  |  |  | Accepts a plain-http `public-origin`, knowing its cookies cannot be made secure: an http `public-origin` boots only with it. |
 | `http.proxy-hops` | integer (1–10) | `1` |  |  |  | How many trusted proxies, at most, a request passes through. |
-| `http.client-certificate.dialect` | rfc9440 \| pem \| xfcc |  | yes |  |  | The form a trusted proxy forwards the client's certificate in: `rfc9440` (byte sequences) with `header` and `chain-header`, `pem` (one PEM block, URL-encoded or not) with `header`, or `xfcc` (Envoy's form, the chain in the same header) with `header`. |
+| `http.client-certificate.dialect` | rfc9440 \| pem \| xfcc |  |  |  |  | The form a trusted proxy forwards the client's certificate in: `rfc9440` (byte sequences) with `header` and `chain-header`, `pem` (one PEM block, URL-encoded or not) with `header`, or `xfcc` (Envoy's form, the chain in the same header) with `header`. |
 | `http.client-certificate.header` | string | `client-cert` |  |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
 | `http.client-certificate.chain-header` | string | `client-cert-chain` |  |  |  | The header holding the chain behind the certificate, for `rfc9440`: lower-case letters, digits and `-`. |
 
@@ -257,9 +257,9 @@ From `@mod/keys`.
 | `keys.signing.alg` | EdDSA \| ES256 \| RS256 \| HS256 |  | yes | `KEYS_SIGNING_ALG` | `EdDSA` | The algorithm the provider signs with. |
 | `keys.signing.private-key` | string |  |  | `KEYS_SIGNING_PRIVATE_KEY` | `REPLACE-PKCS8-PEM-PRIVATE-KEY` | The signing key, as a PKCS8 PEM. |
 | `keys.signing.secret` | string |  |  |  |  | The HMAC secret for HS256: at least 32 bytes, in hex or base64, of at least 8 byte values. |
-| `keys.next.kid` | string |  | yes |  |  | The key id of the key that signs next, unique in the ring. |
-| `keys.next.alg` | EdDSA \| ES256 \| RS256 |  | yes |  |  | The algorithm the next key will sign with. |
-| `keys.next.public-key` | string |  | yes |  |  | The next key's public half, as PEM; a private PEM is taken too. |
+| `keys.next.kid` | string |  |  |  |  | The key id of the key that signs next, unique in the ring. |
+| `keys.next.alg` | EdDSA \| ES256 \| RS256 |  |  |  |  | The algorithm the next key will sign with. |
+| `keys.next.public-key` | string |  |  |  |  | The next key's public half, as PEM; a private PEM is taken too. |
 | `keys.previous` | list of map | `[]` |  |  |  | Past signing keys that still verify tokens until each one's `expires-at`. |
 
 ## login-gates
@@ -377,7 +377,7 @@ From `@mod/mtls`.
 | `mtls.anchors` | list of string |  |  |  |  | The trust anchors, as PEM text holding one certificate each. |
 | `mtls.max-intermediates` | integer (0–14) | `4` |  |  |  | At most this many certificates between the leaf and an anchor. |
 | `mtls.min-rsa-bits` | integer (2048–16384) | `2048` |  |  |  | The fewest bits an RSA key in the path may have; 2048 at least. |
-| `mtls.revocation.mode` | disabled \| crl \| ocsp \| both |  | yes |  |  | Where revocation is asked: `disabled` confirms none; `crl`, `ocsp` or `both` ask what a certificate names. |
+| `mtls.revocation.mode` | disabled \| crl \| ocsp \| both |  |  |  |  | Where revocation is asked: `disabled` confirms none; `crl`, `ocsp` or `both` ask what a certificate names. |
 | `mtls.revocation.on-unavailable` | reject \| allow |  |  |  |  | Required: whether an outage refuses the binding, or binds with a warning. |
 | `mtls.revocation.hosts` | list of string |  |  |  |  | Required: the only hosts revocation material is fetched from; `.name` covers the name and the names under it. |
 | `mtls.revocation.nonce` | boolean | `true` |  |  |  | Whether an OCSP request carries a nonce. |
