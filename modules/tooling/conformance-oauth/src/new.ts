@@ -71,7 +71,13 @@ function clientsSection(part: OauthPart): Record<string, unknown> {
 
 function setUp(part: OauthPart, scene: AreaScene): NewPart {
 	const assertions = part.clients.some((c) => c.method === "private_key_jwt");
-	const keySets = part.clients.flatMap((c) => (c.jwksUri ? [new URL(c.jwksUri)] : []));
+	const linked = part.jwtBearer
+		? part.jwtBearer.issuers.flatMap((i) => ("linked" in i ? [i] : []))
+		: [];
+	const keySets = [
+		...part.clients.flatMap((c) => (c.jwksUri ? [new URL(c.jwksUri)] : [])),
+		...linked.map((i) => new URL(i.linked.keysUrl)),
+	];
 	return {
 		modules: [
 			"@mod/clients",
@@ -83,6 +89,7 @@ function setUp(part: OauthPart, scene: AreaScene): NewPart {
 			// The token endpoint and token-control limit requests per source.
 			"@mod/rate-limit",
 			...(part.jwtBearer ? ["@mod/jwt-bearer"] : []),
+			...(linked.length > 0 ? ["@mod/signer-keys-http", "@mod/jwt-bearer-users"] : []),
 			...(part.introspection || part.revocation ? ["@mod/token-control"] : []),
 			...(part.dpop ? ["@mod/dpop"] : []),
 			...(part.resourceIndicators ? ["@mod/resource-indicators"] : []),
@@ -108,6 +115,13 @@ function setUp(part: OauthPart, scene: AreaScene): NewPart {
 						outbound: {
 							allow: [...new Set(keySets.map((url) => url.hostname))],
 							"plain-loopback": [...new Set(keySets.map((url) => url.host))],
+							...(linked.length > 0
+								? {
+										"internal-hosts": [
+											...new Set(linked.map((i) => new URL(i.linked.keysUrl).hostname)),
+										],
+									}
+								: {}),
 						},
 					}
 				: {}),
@@ -123,12 +137,21 @@ function setUp(part: OauthPart, scene: AreaScene): NewPart {
 			...(part.jwtBearer
 				? {
 						"jwt-bearer": {
-							issuers: part.jwtBearer.issuers.map((i) => ({
-								issuer: i.issuer,
-								subject: "as-is",
-								keys: [{ alg: i.alg, "public-key": i.publicPem }],
-							})),
+							issuers: part.jwtBearer.issuers.map((i) =>
+								"linked" in i
+									? { issuer: i.issuer, subject: "linked", upstream: i.linked.upstream }
+									: {
+											issuer: i.issuer,
+											subject: "as-is",
+											keys: [{ alg: i.alg, "public-key": i.publicPem }],
+										},
+							),
 						},
+					}
+				: {}),
+			...(linked[0]
+				? {
+						"signer-keys-http": { issuer: linked[0].issuer, "keys-url": linked[0].linked.keysUrl },
 					}
 				: {}),
 		},
