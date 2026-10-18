@@ -11,7 +11,6 @@ import {
 const fromUsers: AttributesSource = "users";
 const neither: AttributesAnswer = Object.freeze({ kind: "unknown" });
 const noAttributes = Object.freeze({});
-const vouched = Object.freeze({ vouched: true as const });
 
 /** The login attributes a session kept, under its source, when it is the subject's open session. */
 const fromLogin = (subject: string, context: AuthContext | undefined): AttributesAnswer =>
@@ -20,7 +19,7 @@ const fromLogin = (subject: string, context: AuthContext | undefined): Attribute
 		: {
 				kind: "known",
 				source: `session:${context.attributes.source}`,
-				...(vouches(context.attributes) ? vouched : {}),
+				vouched: vouches(context.attributes),
 				attributes: Object.freeze({ ...context.attributes.values }),
 			};
 

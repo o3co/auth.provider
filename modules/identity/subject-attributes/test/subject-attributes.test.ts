@@ -123,8 +123,7 @@ describe("when users cannot look the subject up", () => {
 		const read = app.get(subjectAttributes);
 		for (const handle of ["f", "x"]) {
 			const found = await read.of("s-alice", handle);
-			expect(found, handle).toMatchObject({ kind: "known" });
-			expect(found, handle).not.toHaveProperty("vouched");
+			expect(found, handle).toMatchObject({ kind: "known", vouched: false });
 		}
 	});
 

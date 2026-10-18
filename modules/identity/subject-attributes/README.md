@@ -8,7 +8,7 @@
 - The attributes and their names (`users`). A login's attributes and their checks (`login-attributes`). What a caller does with attributes nobody vouches for (each caller decides).
 
 ## Offers
-- `subjectAttributes.of` (subject, optional session handle → known with its source, attributes and `vouched` when `users` vouches for them / unknown).
+- `subjectAttributes.of` (subject, optional session handle → known with its source, attributes and `vouched`, whether `users` vouches for them / unknown).
 - `vouches` (a login's sourced attributes → whether `users` vouches for them), the same rule for a login not yet in a session.
 
 ## Invariants
