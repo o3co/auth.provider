@@ -23,7 +23,8 @@ export interface FactorParts {
 	readonly gates: readonly FirstBindingGate[];
 	readonly random: (n: number) => Uint8Array;
 	readonly now: () => number;
-	readonly recentMs: number;
+	/** Whether a time is within `session`'s recent-authentication window. */
+	readonly recent: (at: number) => boolean;
 	readonly audit: Audit;
 }
 
@@ -139,7 +140,7 @@ export function factorDecisions(p: FactorParts): Factors {
 				if (kind === undefined) return false;
 				return !guessing(kind) || (f.boundAt !== undefined && f.boundAt > after);
 			}),
-		recent: (at) => p.now() - at <= p.recentMs,
+		recent: p.recent,
 		challenge: async (subject, target, until, from) => {
 			const factor = (await records.list(subject)).find((f) => f.id === target);
 			const kind = factor && p.kinds.get(factor.kind);

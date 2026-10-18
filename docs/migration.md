@@ -191,7 +191,7 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 |---|---|---|
 | `session-store.secret`, `name`, `secure`, `sameSite`, `domain` | removed | The cookie is fixed: `session`, `__Host-` and `Secure` on https, `SameSite=Lax` |
 | `session-store.maxAge` (ms) | `session-lifecycle.lifetime` | Written with its unit |
-| (none) | `session-lifecycle.recent-authentication` | Default `5m`, `30s` to `1h`; used only where `mfa` is not composed |
+| (none) | `session-lifecycle.recent-authentication` | Default `5m`, `30s` to `1h`; the one window every recent-authentication check counts in, `mfa`'s included |
 | `core.sessionRequirements.expected`, `secondFactorAuthority` | removed | Without `mfa`, changing credentials needs a sign-in at a known time within `session-lifecycle.recent-authentication`; with `mfa`, it judges both using a session and changing credentials |
 | `session.loginPage.url` | `authorize.login-page` | Absolute https URL, required |
 | `session.rateLimit.login` | `login-password.attempts`, `window` | Written with its unit |
@@ -208,7 +208,7 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 | `mfaMode` / `mfa.mode` | `mfa.mode` (`optional` or `required`) | `required` by default, as before; for `off`, leave the MFA modules out |
 | `mfa.encryptionKeys` | `seal.current`, `seal.previous` (`id`, `key`) | The first key goes to `current`, the rest to `previous`; `id` is required |
 | `mfa.transactionTtlSeconds`, `maxAttemptsPerTransaction`, `lockout.*` | `mfa-flows.transaction-lifetime`, `attempts-per-transaction`, `lockout.*` | |
-| `mfa.manage.maxAgeSeconds`, `maxFactorsPerSubject` | `mfa.manage-within`, `mfa.max-factors` | |
+| `mfa.manage.maxAgeSeconds`, `maxFactorsPerSubject` | `session-lifecycle.recent-authentication`, `mfa.max-factors` | A second factor is recent by the session's one window |
 | `mfa-totp-factor.*`, `mfa-recovery-code-factor.*` | compose `mfa-totp`, `mfa-recovery` | Parameters are fixed (SHA-1, 6 digits, 30 s; 10 codes) |
 | `webauthn.rpId`, `rpName`, `origin`, `topOrigin` | `webauthn.rp-id`, `rp-name`, `origins`, `top-origins` | `origins` is a list |
 | `webauthn.challengeTtlMs` | `webauthn.challenge-lifetime` | Written with its unit |
@@ -477,7 +477,7 @@ Times and sizes are written with their unit (`30s`, `5m`, `64KiB`); a number wit
 | `login-password.account-window-seconds` | `login-password.account-window` | a duration, `1m` to `1d`, default `1h` |  |
 | `login-password.account-max-wait-seconds` | `login-password.account-max-wait` | a duration, `1s` to `1h`, default `5m` |  |
 | `mail-smtp.deadline-ms` | `mail-smtp.deadline` | a duration, `100ms` to `10m`, default `40s` |  |
-| `mfa.manage-seconds` | `mfa.manage-within` | a duration, `30s` to `1h`, default `5m` |  |
+| `mfa.manage-seconds` | `session-lifecycle.recent-authentication` | a duration, `30s` to `1h`, default `5m` |  |
 | `mfa-email.code-seconds` | `mfa-email.code-lifetime` | a duration, `1m` to `30m`, default `10m` |  |
 | `mfa-flows.transaction-seconds` | `mfa-flows.transaction-lifetime` | a duration, `1m` to `30m`, default `10m` |  |
 | `mfa-flows.window-seconds` | `mfa-flows.window` | a duration, `1s` to `1d`, default `5m` |  |
@@ -665,7 +665,7 @@ A user who signs in with a passkey can satisfy the WebAuthn second factor with a
 
 ### Changing credentials without mfa
 
-Without `mfa`, registering a passkey or linking an upstream account (`?link=1`) needs a sign-in at a known time within `session-lifecycle.recent-authentication`. With `mfa`, its rule decides.
+Without `mfa`, registering a passkey or linking an upstream account (`?link=1`) needs a sign-in at a known time within `session-lifecycle.recent-authentication`. With `mfa`, its rule decides, counting in the same window.
 
 ### Outbound requests
 
