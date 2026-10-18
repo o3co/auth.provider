@@ -97,6 +97,7 @@ What auth-provider 0.18 guarantees, and what it leaves to the deployment. Each g
 ## Upstream identity providers
 
 - **Guaranteed:** an upstream login proves only the amr values its IdP's `upstream-amr` maps; nothing is mapped by default.
+- **Exchanged id_tokens (`exchange-id-tokens`):** only a public client must prove a holder key (DPoP, the key's digest as the id_token's `nonce`); a confidential client exchanges an id_token by its own authentication alone. A leaked id_token can be exchanged once, within `max-age` (default `10m`), by a confidential client allowed for that app's id_tokens.
 - **Left to you:** mapping an upstream value to a local amr in `federation.idps.<name>.upstream-amr` (to `mfa`, say) trusts that IdP's claim for the amr, and for any acr it meets (such as `urn:o3co:acr:mfa`). Map only what you trust the IdP to have checked.
 
 ## Outbound requests
