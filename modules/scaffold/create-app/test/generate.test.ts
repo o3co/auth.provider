@@ -128,7 +128,7 @@ it("writes a reseal script for an app that seals, which seals again through each
 			encoding: "utf8",
 		});
 	const done = reseal("config/application.conf,config/seal.conf");
-	expect([done.status, done.stdout]).toEqual([0, ""]);
+	expect([done.status, done.stdout]).toEqual([0, "previous keys may be retired\n"]);
 	expect(reseal("config/application.conf").status).toBe(78);
 });
 
