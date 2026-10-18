@@ -1051,9 +1051,6 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
-      '@mod/store':
-        specifier: workspace:*
-        version: link:../../foundation/store
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -1066,6 +1063,9 @@ importers:
       jose:
         specifier: 6.2.12
         version: 6.2.12
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -1085,6 +1085,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
       '@mod/refresh':
         specifier: workspace:*
         version: link:../refresh
@@ -2359,6 +2362,21 @@ importers:
         specifier: workspace:*
         version: link:../../foundation/store
 
+  modules/templates/exchange-id-tokens-store:
+    dependencies:
+      '@mod/exchange-id-tokens':
+        specifier: workspace:*
+        version: link:../../oauth/exchange-id-tokens
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+
   modules/templates/federation-grants-store:
     dependencies:
       '@mod/federation-grants':
@@ -3290,6 +3308,40 @@ importers:
       jose:
         specifier: 6.2.12
         version: 6.2.12
+
+  modules/user-ledger-http/subject-revocation-http:
+    dependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/keys':
+        specifier: workspace:*
+        version: link:../../foundation/keys
+      '@mod/rate-limit':
+        specifier: workspace:*
+        version: link:../../foundation/rate-limit
+      '@mod/request-source':
+        specifier: workspace:*
+        version: link:../../foundation/request-source
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
+      '@mod/users':
+        specifier: workspace:*
+        version: link:../../identity/users
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
 
   modules/user-ledger-http/users-http:
     dependencies:

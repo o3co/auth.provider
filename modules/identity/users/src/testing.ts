@@ -44,6 +44,17 @@ export interface UsersHarness {
 
 /** The users contract, run against any implementation. */
 export function usersContract(name: string, harness: UsersHarness): void {
+	/** Who a link stands for, as a lookup by it finds: unavailable where the users cannot answer by subject. */
+	const holderOf = async (u: Users, idp: string, upstreamSubject: string) => {
+		if (!harness.unanswerableBySubject) {
+			const found = await u.byUpstream(idp, upstreamSubject);
+			return found.kind === "user" ? found.user.subject : found.kind;
+		}
+		await expect(u.byUpstream(idp, upstreamSubject)).rejects.toSatisfy(isUnavailable);
+		return "unavailable";
+	};
+	/** What `holderOf` finds for a link to `subject`. */
+	const held = (subject: string) => (harness.unanswerableBySubject ? "unavailable" : subject);
 	describe(`users contract: ${name}`, () => {
 		it("finds a user by identifier and password, and hands over a frozen copy", async () => {
 			const found = await (await harness.open()).verify("alice", "correct horse");
@@ -78,8 +89,7 @@ export function usersContract(name: string, harness: UsersHarness): void {
 					expect(await u.bySubject(subject), subject).toEqual({ kind: "unanswerable" });
 				}
 				expect(await u.claimedContacts("s-alice")).toEqual({ kind: "unanswerable" });
-				const found = await u.byUpstream("example", "u-alice");
-				expect(found).toEqual({ kind: "user", user: { subject: "s-alice", attributes: {} } });
+				expect(await holderOf(u, "example", "u-alice")).toBe("unavailable");
 			},
 		);
 
@@ -118,9 +128,11 @@ export function usersContract(name: string, harness: UsersHarness): void {
 
 		it("finds a user by an upstream identity exactly, never by a part of it", async () => {
 			const u = await harness.open();
-			const found = await u.byUpstream("example", "u-alice");
-			expect(found.kind === "user" && found.user.subject).toBe("s-alice");
-			expect(found.kind === "user" && Object.isFrozen(found.user)).toBe(true);
+			expect(await holderOf(u, "example", "u-alice")).toBe(held("s-alice"));
+			if (!harness.unanswerableBySubject) {
+				const found = await u.byUpstream("example", "u-alice");
+				expect(found.kind === "user" && Object.isFrozen(found.user)).toBe(true);
+			}
 			for (const [idp, subject] of [
 				["example", "u-other"],
 				["other", "u-alice"],
@@ -138,9 +150,7 @@ export function usersContract(name: string, harness: UsersHarness): void {
 			const added = { idp: "example", subject: "u-added" };
 			expect(await u.byUpstream("example", "u-added")).toEqual({ kind: "none" });
 			expect(await u.link("s-alice", added)).toBe("linked");
-			expect(await u.byUpstream("example", "u-added")).toEqual(
-				await u.byUpstream("example", "u-alice"),
-			);
+			expect(await holderOf(u, "example", "u-added")).toBe(held("s-alice"));
 			expect(await u.link("s-alice", added)).toBe("already");
 			expect(await u.link("s-bob", added)).toBe("conflict");
 			for (const [idp, subject] of [
@@ -152,14 +162,15 @@ export function usersContract(name: string, harness: UsersHarness): void {
 			}
 		});
 
-		it("finds a written link's subject as the users answer it: none outweighs the link", async () => {
+		it("finds a written link's subject as the users answer it: none outweighs the link, unanswerable is unavailable", async () => {
 			const u = await harness.open();
 			expect(await u.link("s-new", { idp: "other", subject: "u-new" })).toBe("linked");
-			const found = await u.byUpstream("other", "u-new");
-			// Only where the users cannot answer by subject does the link stand for its subject alone.
-			const alone = { kind: "user", user: { subject: "s-new", attributes: {} } };
-			expect(found).toEqual(harness.unanswerableBySubject ? alone : { kind: "none" });
-			expect(found.kind !== "user" || Object.isFrozen(found.user.attributes)).toBe(true);
+			if (harness.unanswerableBySubject) {
+				// Nothing can say who the link stands for, so it is neither none nor a user.
+				await expect(u.byUpstream("other", "u-new")).rejects.toSatisfy(isUnavailable);
+				return;
+			}
+			expect(await u.byUpstream("other", "u-new")).toEqual({ kind: "none" });
 			expect(await u.link("s-alice", { idp: "other", subject: "u-alice" })).toBe("linked");
 			const held = await u.byUpstream("other", "u-alice");
 			expect(held.kind === "user" && held.user.subject).toBe("s-alice");
@@ -184,8 +195,7 @@ export function usersContract(name: string, harness: UsersHarness): void {
 			const upstream = { idp: "example", subject: "u-moved" };
 			await u.link("s-alice", upstream);
 			expect(await u.unlink("s-bob", upstream)).toBe("none");
-			const kept = await u.byUpstream("example", "u-moved");
-			expect(kept.kind === "user" && kept.user.subject).toBe("s-alice");
+			expect(await holderOf(u, "example", "u-moved")).toBe(held("s-alice"));
 			expect(await u.unlink("s-alice", upstream)).toBe("unlinked");
 			expect(await u.unlink("s-alice", upstream)).toBe("none");
 			expect(await u.byUpstream("example", "u-moved")).toEqual({ kind: "none" });

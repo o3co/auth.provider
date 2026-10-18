@@ -3,7 +3,6 @@ import { Unavailable } from "@mod/kernel";
 import {
 	canonicalJson,
 	checkedStore,
-	codePointOrder,
 	type Entry,
 	type Expiry,
 	idempotencyRequest,
@@ -62,7 +61,6 @@ export function redisStore(
 	const slot = (key: Key) => `${prefix}:{${enc(key.space.name)}:${enc(key.partition)}}`;
 	const valueKey = (key: Key) => `${slot(key)}:v:${enc(key.name)}`;
 	const counterKey = (key: Key) => `${slot(key)}:c:${enc(key.name)}`;
-	const setKey = (key: Key) => `${slot(key)}:s:${enc(key.name)}`;
 	const versionKey = (key: Key) => `${slot(key)}:#version`;
 	const markKey = (key: Key, mark: string | undefined) => `${slot(key)}:#mark:${enc(mark ?? "")}`;
 	/** Runs a script; every answer comes with the run id of the server that computed it. */
@@ -148,7 +146,7 @@ export function redisStore(
 	const marked = (options: { idempotency?: string } | undefined) =>
 		options?.idempotency ? "1" : "0";
 	const writeWith = async (
-		mode: "put" | "putIfAbsent" | "replaceIf",
+		mode: "putIfAbsent" | "replaceIf",
 		key: Key,
 		value: Json,
 		expected: string,
@@ -180,14 +178,6 @@ export function redisStore(
 				const read = await confirm(key, await run(scripts.read, [valueKey(key)], []));
 				return { entry: entry(list<Raw | false>(read.entries, 1)[0]), now: read.now };
 			},
-			getMany: async (keys) => {
-				samePartition(keys);
-				const read = await run(scripts.read, keys.map(valueKey), []);
-				const [first] = keys;
-				if (first) await confirm(first, read);
-				return { entries: list<Raw | false>(read.entries, read.n).map(entry), now: read.now };
-			},
-			put: (key, value, options) => writeWith("put", key, value, "", options),
 			putIfAbsent: (key, value, options) => writeWith("putIfAbsent", key, value, "", options),
 			replaceIf: (key, version, value, options) =>
 				writeWith("replaceIf", key, value, version, options),
@@ -267,30 +257,6 @@ export function redisStore(
 					],
 				);
 				return confirm(key, answer);
-			},
-			setAdd: async (key, member, score, options) => {
-				const [kind, arg] = expiryArgs(options.expiry);
-				const answer = await run(
-					scripts.setAdd,
-					[setKey(key)],
-					[member, score, options.cap, kind, arg],
-				);
-				// A set's add always writes.
-				await confirmOn(key, true, answer);
-				return { evicted: list<string>(answer.evicted, answer.n) };
-			},
-			setMembers: async (key) => {
-				const answer = await confirm(key, await run(scripts.setMembers, [setKey(key)], []));
-				const flat: string[] = Array.isArray(answer.members) ? answer.members : [];
-				const members = [];
-				for (let i = 0; i < flat.length; i += 2) {
-					members.push({ member: flat[i] as string, score: Number(flat[i + 1]) });
-				}
-				members.sort((a, b) => codePointOrder(a.member, b.member));
-				return { members, now: answer.now };
-			},
-			setRemove: async (key, member) => {
-				await confirm(key, await run(scripts.setRemove, [setKey(key)], [member]));
 			},
 			now: async () => (await run(scripts.now, [], [])).now as number,
 			scan: async (space, cursor) => {

@@ -607,6 +607,20 @@ From `@mod/store`.
 |---|---|---|---|---|---|---|
 | `store.accept-volatile` | boolean | `false` |  | `STORE_ACCEPT_VOLATILE` | `true` | Whether spaces that need durable or replicated storage may boot on memory. |
 
+## subject-revocation-http
+
+From `@mod/subject-revocation-http`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `subject-revocation-http.credential` | string |  | yes | `SUBJECT_REVOCATION_HTTP_CREDENTIAL` | `REPLACE-RANDOM-BEARER-TOKEN-32-BYTES` | The bearer token the ledger sends: a bare b64token (RFC 6750) of at least 32 bytes of key material. |
+| `subject-revocation-http.previous-credential` | string |  |  |  |  | The token being replaced, still taken while the ledger moves to the new one; remove it once it has. |
+| `subject-revocation-http.sources` | list of string |  | yes |  | `["REPLACE-LEDGER-ADDRESS-OR-CIDR"]` | The IP addresses or CIDR blocks the ledger sends from, as request-source tells a request's source. |
+| `subject-revocation-http.failures` | integer (1–1000) | `10` |  |  |  | Refused requests (a wrong source or credential) allowed per source in each failure-window, from 1 to 1000. |
+| `subject-revocation-http.failure-window` | string | `1m` |  |  |  | The window a source's refused requests are counted in: a duration with a unit, from 1s to 1h, e.g. 1m. |
+| `subject-revocation-http.requests` | integer (1–100000) | `600` |  |  |  | Authenticated requests allowed per source in each window, from 1 to 100000. |
+| `subject-revocation-http.window` | string | `1m` |  |  |  | The window a source's authenticated requests are counted in: a duration with a unit, from 1s to 1h, e.g. 1m. |
+
 ## token-control
 
 From `@mod/token-control`.

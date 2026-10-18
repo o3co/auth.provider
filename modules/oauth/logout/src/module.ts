@@ -1,17 +1,10 @@
 import { audit, declaredAudit } from "@mod/audit";
 import { csrfChecked } from "@mod/csrf";
-import { type HttpRequest, type HttpResponse, noStore, routes, use } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer, routes, use } from "@mod/http";
 import { defineModule, isUnavailable } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
 import { sessions } from "@mod/session";
 import events from "./audit-events.ts";
-
-const answer = (status: number, json: unknown, cookies: readonly string[] = []): HttpResponse => ({
-	status,
-	headers: noStore,
-	body: { json },
-	...(cookies.length > 0 ? { cookies } : {}),
-});
 
 export default defineModule({ name: "logout" }, (m) => [
 	m.contribute(routes).by(async (c) => {
@@ -30,8 +23,8 @@ export default defineModule({ name: "logout" }, (m) => [
 			});
 			// Pending means a participant has not finished; the session already lets nobody in.
 			return closed.kind === "closed"
-				? answer(200, {}, closed.cookies)
-				: answer(503, { error: "temporarily_unavailable" }, closed.cookies);
+				? jsonAnswer(200, {}, { cookies: closed.cookies })
+				: jsonAnswer(503, { error: "temporarily_unavailable" }, { cookies: closed.cookies });
 		};
 		return {
 			method: "POST",
@@ -42,7 +35,7 @@ export default defineModule({ name: "logout" }, (m) => [
 				try {
 					return await logout(request);
 				} catch (error) {
-					if (isUnavailable(error)) return answer(503, { error: "temporarily_unavailable" });
+					if (isUnavailable(error)) return jsonAnswer(503, { error: "temporarily_unavailable" });
 					throw error;
 				}
 			},

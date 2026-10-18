@@ -1,4 +1,4 @@
-import { type HttpRequest, type HttpResponse, noStore } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import type { ReleasedClaims } from "@mod/oidc";
 import { challengeOf, type SenderBindings } from "@mod/sender-binding";
 import type { Sessions } from "@mod/session";
@@ -13,15 +13,8 @@ export interface UserinfoParts {
 	readonly claims: Pick<ReleasedClaims, "of">;
 }
 
-const answer = (
-	status: number,
-	json: unknown,
-	headers: Record<string, string> = {},
-): HttpResponse => ({
-	status,
-	headers: { ...noStore, ...headers },
-	body: { json },
-});
+const answer = (status: number, json: unknown, headers: Record<string, string> = {}) =>
+	jsonAnswer(status, json, { headers });
 /** A check or the claims could not tell: never a refusal, never a claim. */
 export const unavailable = answer(503, { error: "temporarily_unavailable" });
 

@@ -95,7 +95,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `rate_limit.unavailable` | `limit`, `name`, `source` | a policy cannot count |
+| `rate_limit.unavailable` | `limit`, `name`, `source`, `outcome` | a policy cannot count |
 
 ## @mod/rp-logout
 
@@ -104,6 +104,13 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | `logout.cascade_failed` | `sid`, `source`, `userAgent`, `store` | a logout a client started could not close the session (`store`: the module whose close failed) |
 | `logout.close_pending` | `sid`, `source` | the session is closed but some of its close work is left for later |
 | `logout.success` | `sid`, `source`, `userAgent` | a logout a client started closed the session it names |
+
+## @mod/subject-revocation-http
+
+| Kind | Attributes | Recorded when |
+|---|---|---|
+| `subject.revocation.denied` | `reason`, `source` | a request to revoke a subject was refused for its source, credential or body, or as a window could not count |
+| `subject.revocation.requested` | `delegations`, `outcome`, `source` | the ledger's revocation of a subject was recorded, or its recording failed or was not confirmed |
 
 ## @mod/token-control
 

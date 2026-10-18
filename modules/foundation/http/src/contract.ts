@@ -125,6 +125,8 @@ export interface Site {
 	readonly origin: string | undefined;
 	/** Whether cookies can be made secure (`__Host-` and Secure): false only for a plain-http origin. */
 	readonly secureCookies: boolean;
+	/** Whether it is reached through a proxy it trusts (`trusted-proxies` names one): only then can a request's scheme be https or its source be told past the proxy. */
+	readonly proxied: boolean;
 }
 
 export const site = contract<Site>("http.site");

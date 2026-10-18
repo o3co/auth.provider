@@ -70,6 +70,12 @@ function trialBlocks(
 			"signer-keys-http",
 			`signer-keys-http { issuer = "https://devices.example.invalid", keys-url = "https://ledger.example.invalid/signer-keys" }`,
 		],
+		// jwt-bearer refuses keys contributed for an issuer it does not name; signer-keys-http contributes these.
+		[
+			has("jwt-bearer") && has("signer-keys-http"),
+			"jwt-bearer",
+			`jwt-bearer { issuers = [{ issuer = "https://devices.example.invalid", subject = as-is }] }`,
+		],
 		[
 			has("http"),
 			"http",

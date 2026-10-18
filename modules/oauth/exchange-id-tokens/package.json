@@ -5,7 +5,9 @@
 	"type": "module",
 	"kind": "feature",
 	"optIn": true,
+	"storeWiring": true,
 	"exports": {
+		".": "./src/contract.ts",
 		"./module": "./src/module.ts",
 		"./testing": "./src/testing.ts"
 	},
@@ -13,11 +15,11 @@
 		"@mod/clients": "workspace:*",
 		"@mod/external-jwt": "workspace:*",
 		"@mod/kernel": "workspace:*",
-		"@mod/store": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/token-exchange": "workspace:*",
 		"@mod/users": "workspace:*",
 		"jose": "6.2.12",
+		"vitest": "5.0.4",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
@@ -26,6 +28,7 @@
 		"@mod/http": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/outbound": "workspace:*",
+		"@mod/records": "workspace:*",
 		"@mod/refresh": "workspace:*",
 		"@mod/sender-binding": "workspace:*",
 		"@mod/session": "workspace:*",

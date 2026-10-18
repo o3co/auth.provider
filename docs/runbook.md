@@ -9,6 +9,7 @@ How to run auth-provider 0.18: Redis, rotating keys, and upgrading. The settings
 - [Rotating the signing key](#rotating-the-signing-key)
 - [Rotating the sealing key](#rotating-the-sealing-key)
 - [Upgrading](#upgrading)
+- [Revoking a user from the ledger](#revoking-a-user-from-the-ledger)
 - [Stopping](#stopping)
 
 ## Before you deploy
@@ -109,6 +110,34 @@ Only a value a `previous` key sealed is sealed again; one `next` sealed is newer
 - Changing `redis.prefix` starts from empty state: every key, sessions, refresh tokens, the denylist, lockouts and MFA factors included, lives under the prefix.
 - `create-app` never writes into a non-empty directory. To add a feature to an existing app, generate again (`create-app <target> --add <feature>`) and carry your configuration over.
 - A boot that refuses exits with status 78 and prints each refusal on stderr, by setting path and never by value. Fix every refusal it lists; they are reported together.
+
+## Revoking a user from the ledger
+
+When the outside user ledger suspends a user, its answers stop new logins and grants, but sessions already open and tokens already issued go on. To stop those too, compose `subject-revocation-http` and have the ledger call it.
+
+**Setting it up.**
+
+- The provider must sit behind a proxy it trusts (`http.trusted-proxies`), which ends TLS. Without one, boot is refused: no request can be told as https. The network between that proxy and the provider must be your own.
+- Make the credential random, at least 32 bytes (for example `openssl rand -base64 32`), and set it as `subject-revocation-http.credential`. The ledger sends it as `Authorization: Bearer`.
+- List the ledger's addresses in `subject-revocation-http.sources` (IP addresses or CIDR blocks). Addresses of your trusted proxies there are never matched: a request's source is told past them.
+- Throttle floods at the proxy. Bodies the provider cannot read (`400`, `413`, `415`) are answered before any count.
+- Compose an audit receiver that keeps what it is given, such as `audit-http`, to keep each revocation's result and source. Events a receiver does not take are counted in `auth_audit_events_lost_total`.
+
+**Calling it.** `POST /ledger/subject-revocations` with `{"subject": "...", "delegations": "end"}` (`keep` leaves delegations to `federation-grants.keep-on-subject-revocation`).
+
+- `200 {"complete": true}`: recorded, and every follower finished.
+- `503` with `state: "incomplete"`: recorded (everything that reads the revocation now refuses), but a follower did not finish. `state: "unknown"`: whether it was recorded is not known. No `state`: the rate limits could not count. Resend after `Retry-After` in every case until `200`; recording again is safe.
+- `429`: wait as `Retry-After` says. `401`, `403`, `400`: fix the call; resending the same will not help.
+
+**Reinstating a user.** A resend that arrives after reinstatement revokes again and closes the new sessions. Cancel the ledger's pending resends before reinstating.
+
+**Rotating the credential.** Put the old value in `previous-credential` and the new one in `credential`, roll out, switch the ledger to the new one, then remove `previous-credential`.
+
+**What it stops, and what it leaves.**
+
+- Stopped: the subject's open sessions (and with them the session's refresh tokens, its access tokens, and the local copy of its upstream tokens; relying parties are sent logout notices), and from then on every refresh, device poll, JWT bearer grant, exchange, passkey login and second-factor step; access tokens too where `subject-tokens` is composed. With `delegations: "end"`, federation grants end.
+- Left until they expire: access tokens not bound to a session where `tokens.subject-check = none`, JWTs a resource server checks itself, and tokens already handed to an upstream. A request already past its checks when the revocation is recorded may finish.
+- Every subject revoked keeps its record with no end, so the records grow with the subjects you revoke.
 
 ## Stopping
 

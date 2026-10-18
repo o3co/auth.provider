@@ -233,6 +233,9 @@ usersContract("users with users-http against a fake ledger", {
 	unanswerableBySubject: true,
 });
 
+/** Tokens cut from this hold many byte values, so only their length and form are at stake. */
+const varied = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
 describe("users-http", () => {
 	it("asks the ledger in the stated shape, the password only in the body", async () => {
 		const { ledger } = await open();
@@ -540,11 +543,11 @@ describe("users-http", () => {
 			settings({ credential: `Bearer ${credential}` }),
 			settings({ credential: `${credential}\n` }),
 			settings({ credential: `${credential}é` }),
-			settings({ credential: "ab".repeat(31) }),
+			settings({ credential: "0123456789abcdef".repeat(4).slice(0, 62) }),
 			settings({ credential: `REPLACE-${"x".repeat(60)}` }),
 			settings({ credential: `${credential}@` }),
-			settings({ credential: "Z".repeat(42) }),
-			settings({ credential: "Zz0".repeat(11).slice(0, 32) }),
+			settings({ credential: varied.slice(0, 42) }),
+			settings({ credential: varied.slice(0, 32) }),
 			settings({ "verify-url": `http://${pair}/ledger/authenticate#x` }),
 			settings({ "verify-url": `http://user:secret-9@${pair}/ledger/authenticate` }),
 			settings({ "verify-url": `ftp://${pair}/ledger/authenticate` }),
@@ -622,17 +625,17 @@ describe("users-http", () => {
 
 	it("starts with a bare token of at least 32 bytes of key material, read in its least form", async () => {
 		const taken = [
-			"ab".repeat(32),
-			"A".repeat(43),
-			`${"A".repeat(43)}=`,
-			"-_".repeat(22),
-			"~".repeat(32),
-			`${"x".repeat(31)}.=`,
-			`${"A".repeat(43)}===`,
-			`${"Z".repeat(40)}====`,
-			`${"Z".repeat(40)}=`,
-			"Z".repeat(41),
-			`${"Z".repeat(40)}+_`,
+			"0123456789abcdef".repeat(4),
+			varied.slice(0, 43),
+			`${varied.slice(0, 43)}=`,
+			varied.slice(20),
+			`~${varied.slice(0, 30)}~`,
+			`${varied.slice(0, 31)}.=`,
+			`${varied.slice(0, 43)}===`,
+			`${varied.slice(0, 40)}====`,
+			`${varied.slice(0, 40)}=`,
+			varied.slice(0, 41),
+			`${varied.slice(0, 40)}+_`,
 		];
 		for (const token of taken) {
 			await expect(boot(settings({ credential: token })), token).resolves.toBeDefined();

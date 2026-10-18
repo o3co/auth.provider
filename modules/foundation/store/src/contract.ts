@@ -58,9 +58,8 @@ export interface WriteOptions {
 }
 
 /**
- * Opaque; versions are compared for equality only and never repeat for a key. Counters go back on
- * restart, failover or expiry, so a version names which counter of which store; giving versions
- * an order would lose that.
+ * Opaque, compared for equality only, never repeating for a key. Counters go back on restart,
+ * failover or expiry, so a version names which counter of which store, and has no order.
  */
 export type Version = string;
 
@@ -88,25 +87,13 @@ export type BatchWrite =
 	| { readonly key: Key; readonly put: Json; readonly expiry: Expiry }
 	| { readonly key: Key; readonly remove: true };
 
-export interface Member {
-	readonly member: string;
-	readonly score: number;
-}
-
 /**
- * In a replicated space, an answer of the written kinds (written, removed, taken, committed,
- * counted, a set change) confirms not only its own write but every state the same store held
- * before it, in any key or partition: confirmation waits for the replicas to reach the point the
- * store had reached, and replication keeps order. A refusing answer writes nothing, so it has
- * nothing to wait for and confirms nothing; an unavailable answer confirms nothing either.
+ * In a replicated space, a written answer (written, removed, taken, committed, counted) confirms
+ * every state the same store held before it, in any key or partition, as replication keeps order.
+ * A refusing answer writes nothing and confirms nothing; an unavailable answer confirms nothing.
  */
 export interface Store {
 	get(key: Key): Promise<Read>;
-	/** Entries of keys in one partition, read at one instant. */
-	getMany(
-		keys: readonly Key[],
-	): Promise<{ readonly entries: readonly (Entry | null)[]; readonly now: number }>;
-	put(key: Key, value: Json, options: WriteOptions): Promise<Written | Late | Reused>;
 	putIfAbsent(
 		key: Key,
 		value: Json,
@@ -133,10 +120,7 @@ export interface Store {
 		| { readonly kind: "conflict" }
 		| { readonly kind: "missing" }
 	>;
-	/**
-	 * Removes and returns the entry; of racing takers exactly one gets it. A resend with the same
-	 * mark gets the first answer, so a taker whose reply was lost can still learn it took.
-	 */
+	/** Removes and returns the entry, to exactly one of racing takers; a resend under its mark learns it took. */
 	take(
 		key: Key,
 		options?: Omit<WriteOptions, "expiry">,
@@ -165,22 +149,9 @@ export interface Store {
 		| Late
 		| Reused
 	>;
-	/**
-	 * Scores are expiry times on the store clock; a member keeps its highest score. Over the cap
-	 * the lowest scores go first, and among equal scores the member first in code point order.
-	 */
-	setAdd(
-		key: Key,
-		member: string,
-		score: number,
-		options: { readonly cap: number; readonly expiry: Expiry },
-	): Promise<{ readonly evicted: readonly string[] }>;
-	/** Live members in code point order. */
-	setMembers(key: Key): Promise<{ readonly members: readonly Member[]; readonly now: number }>;
-	setRemove(key: Key, member: string): Promise<void>;
 	/** The store clock's present time, the one every expiry and deadline is judged by. */
 	now(): Promise<number>;
-	/** A page of the space's live value keys (no counter or set) and the cursor on; none when done. */
+	/** A page of the space's live value keys (no counter) and the cursor on; none when done. */
 	// Any key may come twice; one living through the walk comes unless a failover or restart falls in it.
 	scan(
 		space: Space,
@@ -238,32 +209,6 @@ export async function mutate(
 			return { kind: "done", value: decision.value, version: written.version };
 		}
 		// exists, conflict or missing: the entry moved since the read; read again.
-	}
-	return { kind: "contended" };
-}
-
-/** Reads a key, then the keys its entry points to, and retries until the first did not move. */
-export async function getFollowing(
-	target: Store,
-	first: Key,
-	follow: (entry: Entry | null) => readonly Key[],
-	attempts = 8,
-): Promise<
-	| {
-			readonly first: Entry | null;
-			readonly followed: readonly (Entry | null)[];
-			readonly now: number;
-	  }
-	| { readonly kind: "contended" }
-> {
-	for (let attempt = 0; attempt < attempts; attempt++) {
-		const head = await target.get(first);
-		const keys = follow(head.entry);
-		const read = await target.getMany([first, ...keys]);
-		const [again, ...followed] = read.entries;
-		if ((again?.version ?? null) === (head.entry?.version ?? null)) {
-			return { first: again ?? null, followed, now: read.now };
-		}
 	}
 	return { kind: "contended" };
 }
@@ -407,11 +352,6 @@ function readWriteOptions(value: unknown): WriteOptions {
 	};
 }
 
-function readSetOptions(value: unknown): { cap: number; expiry: Expiry } {
-	const read = fields("options", value, ["cap", "expiry"]);
-	return { cap: whole("cap", read.cap, 0, 1_000_000), expiry: readExpiry(read.expiry) };
-}
-
 function readWindow(value: unknown): { ms: number; limit: number } {
 	const read = fields("window", value, ["ms", "limit"]);
 	return {
@@ -466,8 +406,6 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 	};
 	return {
 		get: async (k) => inner.get(key(k)),
-		getMany: async (keys) => inner.getMany([...keys].map(key)),
-		put: async (k, v, o) => inner.put(key(k), json(v), readWriteOptions(o)),
 		putIfAbsent: async (k, v, o) => inner.putIfAbsent(key(k), json(v), readWriteOptions(o)),
 		replaceIf: async (k, version, v, o) =>
 			inner.replaceIf(key(k), text("version", version), json(v), readWriteOptions(o)),
@@ -481,16 +419,12 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 				readLimits(o),
 			),
 		count: async (k, window, o) => inner.count(key(k), readWindow(window), readLimits(o)),
-		setAdd: async (k, member, score, o) =>
-			inner.setAdd(key(k), text("member", member), whole("score", score, 0), readSetOptions(o)),
-		setMembers: async (k) => inner.setMembers(key(k)),
 		scan: async (target, cursor) => {
 			const name = text("space", fields("space", target, ["name", "guarantees"]).name);
 			const declaredSpace = known.get(name);
 			if (!declaredSpace) fail(`space ${name} is not declared`);
 			return inner.scan(declaredSpace, cursor === undefined ? undefined : text("cursor", cursor));
 		},
-		setRemove: async (k, member) => inner.setRemove(key(k), text("member", member)),
 		now: () => inner.now(),
 	};
 }

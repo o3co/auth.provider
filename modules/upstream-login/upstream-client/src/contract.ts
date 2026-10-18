@@ -110,6 +110,14 @@ function errorOf(answer: OutboundResponse): unknown {
 	return body.kind === "object" ? body.value.error : undefined;
 }
 
+/** The errors by which an upstream asks the user to act there first (OpenID Connect Core §3.1.2.6). */
+const asksTheUser = new Set([
+	"interaction_required",
+	"login_required",
+	"consent_required",
+	"account_selection_required",
+]);
+
 /** `retry-after` as delta-seconds only (RFC 9110 §10.2.3); an empty or other value is none. */
 function retryAfterOf(value: string | undefined): number | undefined {
 	if (value === undefined || !/^[0-9]+$/.test(value)) return undefined;
@@ -131,7 +139,9 @@ export function refreshAnswerOf(
 		return { kind: "limited", ...(seconds === undefined ? {} : { retryAfterSeconds: seconds }) };
 	}
 	if (answer.status >= 500) throw new Unavailable(what);
-	if (errorOf(answer) === "invalid_grant") return { kind: "invalid_grant" };
+	const error = errorOf(answer);
+	if (error === "invalid_grant") return { kind: "invalid_grant" };
+	if (typeof error === "string" && asksTheUser.has(error)) return { kind: "interaction_required" };
 	return { kind: "refreshed", tokens: tokenAnswerOf(jsonObjectOf(answer), asked).tokens };
 }
 

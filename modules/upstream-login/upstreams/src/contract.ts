@@ -79,6 +79,8 @@ export interface Upstream {
 export type UpstreamRefresh =
 	| { readonly kind: "refreshed"; readonly tokens: UpstreamTokens }
 	| { readonly kind: "invalid_grant" }
+	/** The grant stands, but the upstream asks the user to act there (log in, consent, choose an account) first. */
+	| { readonly kind: "interaction_required" }
 	| { readonly kind: "limited"; readonly retryAfterSeconds?: number };
 
 /** A delegation's start the upstream does not take, such as scopes it does not delegate. */

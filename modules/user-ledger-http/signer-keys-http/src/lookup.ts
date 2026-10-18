@@ -61,6 +61,8 @@ export function keysAt(parts: LookupParts): SignerKeys {
 			if (answer.status !== 200) throw failed({ status: answer.status });
 			const read = jsonObjectOf(answer);
 			const parsed = read.kind === "object" ? answerShape.safeParse(read.value) : undefined;
+			// The ledger says the signer holds no key now.
+			if (parsed?.success && parsed.data.keys.length === 0) return { kind: "none" };
 			const keys = parsed?.success
 				? parsed.data.keys.filter((jwk) => !privateMembers.some((m) => Object.hasOwn(jwk, m)))
 				: [];

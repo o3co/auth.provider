@@ -1,5 +1,5 @@
 import { csrfChecked } from "@mod/csrf";
-import { type HttpRequest, type HttpResponse, noStore, type Route, use } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer, type Route, use } from "@mod/http";
 import { isUnavailable } from "@mod/kernel";
 import { requestsPerSource, type Window } from "@mod/rate-limit";
 import type { Sessions } from "@mod/session";
@@ -34,13 +34,8 @@ const descriptionOf: Partial<Record<RegistrationRefusal, string>> = {
 	unreadable: "unreadable client data",
 };
 
-const answer = (status: number, json: unknown): HttpResponse => ({
-	status,
-	headers: noStore,
-	body: { json },
-});
 const invalid = (description: string) =>
-	answer(400, { error: "invalid_request", error_description: description });
+	jsonAnswer(400, { error: "invalid_request", error_description: description });
 
 /** A nickname is 1 to 64 UTF-16 code units. */
 const isNickname = (value: unknown): value is string =>
@@ -64,18 +59,18 @@ export function registrationRoutes(p: RouteParts): {
 		handle: async (request) => {
 			try {
 				const entry = await p.sessions.enterFor(request, "credentials");
-				if (entry.kind === "absent") return answer(401, { error: "unauthorized" });
-				if (entry.kind === "short") return answer(403, entry.answer);
+				if (entry.kind === "absent") return jsonAnswer(401, { error: "unauthorized" });
+				if (entry.kind === "short") return jsonAnswer(403, entry.answer);
 				return await handle(request, entry.session.context.subject);
 			} catch (error) {
-				if (isUnavailable(error)) return answer(503, { error: "temporarily_unavailable" });
+				if (isUnavailable(error)) return jsonAnswer(503, { error: "temporarily_unavailable" });
 				throw error;
 			}
 		},
 	});
 
 	const options = post("/oauth/webauthn/registration/options", async (_request, subject) =>
-		answer(200, (await p.registrations.creation(subject)).options),
+		jsonAnswer(200, (await p.registrations.creation(subject)).options),
 	);
 
 	const verify = post("/oauth/webauthn/registration/verify", async (request, subject) => {
@@ -87,13 +82,13 @@ export function registrationRoutes(p: RouteParts): {
 		const kept = await p.registrations.register(subject, response, nickname);
 		if (kept.kind === "refused") {
 			const description = descriptionOf[kept.reason];
-			return answer(400, {
+			return jsonAnswer(400, {
 				error: errorOf[kept.reason],
 				...(description ? { error_description: description } : {}),
 			});
 		}
 		const { credential } = kept;
-		return answer(200, {
+		return jsonAnswer(200, {
 			credentialId: credential.id,
 			...(credential.transports ? { transports: credential.transports } : {}),
 			backedUp: credential.backedUp,

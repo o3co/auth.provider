@@ -1,0 +1,27 @@
+{
+	"name": "@mod/subject-revocation-http",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"optIn": true,
+	"exports": {
+		"./testing": "./src/testing.ts",
+		"./module": "./src/module.ts",
+		"./audit-events": "./src/audit-events.ts"
+	},
+	"dependencies": {
+		"@mod/audit": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/keys": "workspace:*",
+		"@mod/rate-limit": "workspace:*",
+		"@mod/request-source": "workspace:*",
+		"@mod/subject-revocation": "workspace:*",
+		"@mod/users": "workspace:*",
+		"zod": "4.6.7"
+	},
+	"devDependencies": {
+		"vitest": "5.0.4"
+	}
+}

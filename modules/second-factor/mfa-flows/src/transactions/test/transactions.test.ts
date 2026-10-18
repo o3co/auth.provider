@@ -9,7 +9,6 @@ import type { Transaction } from "../records.ts";
 import { transactionsOver } from "../transactions.ts";
 
 const jar: Cookies = {
-	read: () => undefined,
 	lookup: () => ({ kind: "absent" }),
 	write: (name) => name,
 };

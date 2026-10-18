@@ -19,7 +19,6 @@ export const budget: Budget = {
 	cardBytes: 6500,
 	narrowCardFanIn: 5,
 	narrowCardLines: 45,
-	narrowCardBytes: 5000,
 	cardItemBytes: 500,
 	countedFixtureFile: "(^|/)test/fixtures/",
 	dependencyCardBytes: 40_000,

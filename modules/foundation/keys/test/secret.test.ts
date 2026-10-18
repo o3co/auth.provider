@@ -65,6 +65,13 @@ it("takes a bearer token whose fewest bytes of key material, as written, hex or 
 	for (const token of taken) expect(issues(schema, token), token).toEqual([]);
 });
 
+it("refuses a bearer token of enough bytes but few byte values, read any way", () => {
+	const schema = bearerToken({ atLeast: 32 });
+	for (const weak of ["A".repeat(43), "0".repeat(64), "ab".repeat(32), "abcdefg".repeat(7)]) {
+		expect(issues(schema, weak), weak).toEqual(["a weak key: fewer than 8 byte values"]);
+	}
+});
+
 it("refuses a bearer token that is no b64token, too short read any way, or a sample, never naming it", () => {
 	const schema = bearerToken({ atLeast: 32 });
 	const token = randomBytes(32).toString("hex");

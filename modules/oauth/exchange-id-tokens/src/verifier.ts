@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import type { Verifier as JwtVerifier } from "@mod/external-jwt";
 import { Unavailable } from "@mod/kernel";
-import type { Space, Store } from "@mod/store";
 import type { Revocations } from "@mod/subject-revocation";
 import type { ExchangeVerifier } from "@mod/token-exchange";
 import { isWellFormedSubject, type Users } from "@mod/users";
 import { decodeJwt } from "jose";
 import { z } from "zod";
 import type { ClientEntry, Kind } from "./section.ts";
+import type { UsedIdTokens } from "./store.ts";
 
 export const idTokenType = "urn:ietf:params:oauth:token-type:id_token";
 
@@ -24,8 +24,7 @@ export interface VerifierParts {
 	readonly taken: readonly Taken[];
 	readonly users: Pick<Users, "byUpstream">;
 	readonly revocations: Pick<Revocations, "compare">;
-	readonly store: Pick<Store, "putIfAbsent">;
-	readonly used: Space;
+	readonly used: UsedIdTokens;
 	readonly now: () => number;
 	readonly maxAgeMs: number;
 	readonly skewMs: number;
@@ -109,13 +108,10 @@ export function idTokens(parts: VerifierParts): ExchangeVerifier {
 			const signed = token.split(".").slice(0, 2).join(".");
 			const name = createHash("sha256").update(signed).digest("base64url");
 			const lastTaken = Math.min(exp * 1000, iat * 1000 + parts.maxAgeMs) + parts.skewMs;
-			const first = await parts.store.putIfAbsent(
-				{ space: parts.used, partition: taken.kind, name },
-				true,
-				// Relative, since the store judges expiry by its own clock.
-				{ expiry: { kind: "after", ms: lastTaken - parts.now() + usedAllowanceMs } },
-			);
-			return first.kind === "written" ? "consumed" : "replayed";
+			// Relative, since the place judges a lifetime by its own clock.
+			const lifetimeMs = lastTaken - parts.now() + usedAllowanceMs;
+			const saved = await parts.used.save(taken.kind, name, lifetimeMs);
+			return saved === "created" ? "consumed" : "replayed";
 		},
 	};
 }

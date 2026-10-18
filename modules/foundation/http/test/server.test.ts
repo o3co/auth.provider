@@ -507,6 +507,11 @@ describe("stop", () => {
 	});
 });
 
+it("says it is reached through a proxy only when it trusts one", async () => {
+	expect((await boot()).get(site).proxied).toBe(false);
+	expect((await boot({ "trusted-proxies": ["10.0.0.0/8"] })).get(site).proxied).toBe(true);
+});
+
 it("states the public origin it was given, and refuses one with a path", async () => {
 	const app = await boot({ "public-origin": "https://as.example" });
 	expect(app.get(site).origin).toBe("https://as.example");

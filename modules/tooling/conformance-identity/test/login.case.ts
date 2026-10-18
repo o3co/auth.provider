@@ -407,7 +407,12 @@ describe.runIf(areaTarget().can("store-fault:login") && areaTarget().can(auditEv
 				{
 					kind: "rate_limit.unavailable",
 					at: expect.any(Number),
-					attributes: { name: expect.stringMatching(/./), limit: "attempts", source: from },
+					attributes: {
+						name: expect.stringMatching(/./),
+						limit: "attempts",
+						source: from,
+						outcome: "refused",
+					},
 				},
 			]);
 		});

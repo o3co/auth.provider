@@ -8,14 +8,14 @@
 - Verifying the assertion, the subject's shape, and the algorithms the grant takes (`jwt-bearer`). Whether the ledger may be reached, redirects, and the caps on size and time (`outbound`). Which devices hold which keys (the ledger's).
 
 ## Offers
-- Composition definition only (a contribution to `jwt-bearer.signer-keys`, keyed by its issuer).
+- Composition definition only (a contribution to `jwt-bearer.signer-keys`, keyed by its issuer). Opt-in: no axis's default, so composing `jwt-bearer` alone never brings it.
 - Operator section: `issuer` (required: the `iss` it answers for, one of `jwt-bearer`'s `issuers` with no keys of its own); `keys-url` (required: the URL whole, https or a plain-http pair outbound names, no fragment); `credential` (optional: `keys`' `bearerToken` of at least 32 bytes of key material, never a `REPLACE-` sample), sent on every call; `timeout` and `max-response-size`, each narrowing outbound's cap, written with its unit.
 - The call: `POST {keys-url}` with the URL as written, nothing added; `Content-Type` and `Accept: application/json`; `Authorization: Bearer {credential}` when one is set, none otherwise; the body `{"issuer", "subject", "kid"}`, `kid` only where the assertion names one.
 
   | Answer | Read as |
   |---|---|
   | `200`, a JSON object with `keys`, a list of JWKs, and `algorithms`, optional, among `EdDSA`, `ES256` and `RS256` | the keys with no private member, and the algorithms, or all three when none are named |
-  | `404` (not known) or `410` (known, and revoked) | none |
+  | `404` (not known) or `410` (known, and revoked), or a `200` whose `keys` is empty (no key now) | none |
   | anything else, a `200` whose keys are all private or whose algorithms the grant does not take included | unavailable |
 
 ## Invariants

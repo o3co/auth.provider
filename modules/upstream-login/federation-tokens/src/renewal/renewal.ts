@@ -14,7 +14,14 @@ export type Current =
 			readonly scope: readonly string[];
 			readonly refreshed: boolean;
 	  }
-	| { readonly kind: "not_linked" | "ineligible" | "refresh_absent" | "reauthenticate" }
+	| {
+			readonly kind:
+				| "not_linked"
+				| "ineligible"
+				| "refresh_absent"
+				| "reauthenticate"
+				| "interaction_required";
+	  }
 	| { readonly kind: "limited"; readonly retryAfterSeconds?: number }
 	| { readonly kind: "failed"; readonly reason: string }
 	| { readonly kind: "not_supported" | "lock_timeout" | "unavailable" };
@@ -197,7 +204,15 @@ export function renewalWith(parts: Parts) {
 			await rewrite(session, idp, undefined, entry.version);
 			return { kind: "reauthenticate" } as const;
 		}
-		const said = answer.tokens as unknown as Partial<Record<keyof UpstreamTokens, unknown>>;
+		// Forgotten too, so no refresh is asked again until the user logs in there anew.
+		if (answer.kind === "interaction_required") {
+			await rewrite(session, idp, undefined, entry.version);
+			return { kind: "interaction_required" } as const;
+		}
+		// Only a refresh that handed tokens is read on; an answer of another kind is a failure.
+		const refreshed = answer.kind === "refreshed" ? answer : undefined;
+		if (!refreshed) return failed("unknown");
+		const said = refreshed.tokens as unknown as Partial<Record<keyof UpstreamTokens, unknown>>;
 		// A rotated refresh token is kept even when the rest of the answer is refused.
 		const refreshToken = text(said.refreshToken) ?? kept.refreshToken;
 		// None said is the whole grant again; one wider than the grant, or unreadable, changes nothing.

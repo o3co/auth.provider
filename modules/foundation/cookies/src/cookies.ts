@@ -40,10 +40,6 @@ export function cookiesFor(secure: boolean, log?: Pick<Log, "warn">): Cookies {
 		return { kind: "found", value: only.slice(name.length + 1) };
 	};
 	return Object.freeze({
-		read: (request: HttpRequest, base: string) => {
-			const looked = lookup(request, base);
-			return looked.kind === "found" ? looked.value : undefined;
-		},
 		lookup,
 		write: (
 			base: string,

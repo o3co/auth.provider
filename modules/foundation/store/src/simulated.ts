@@ -10,17 +10,7 @@ import {
 } from "./contract.ts";
 import { memoryStore } from "./memory.ts";
 
-const writes = new Set<string>([
-	"put",
-	"putIfAbsent",
-	"replaceIf",
-	"removeIf",
-	"take",
-	"batch",
-	"count",
-	"setAdd",
-	"setRemove",
-]);
+const writes = new Set<string>(["putIfAbsent", "replaceIf", "removeIf", "take", "batch", "count"]);
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const writtenKinds = new Set(["written", "removed", "taken", "committed", "counted"]);
 
@@ -64,8 +54,6 @@ export interface SimulatedStore {
 
 function spaceOf(name: string, args: readonly unknown[]): Space | undefined {
 	switch (name) {
-		case "getMany":
-			return (args[0] as readonly Key[])[0]?.space;
 		case "batch": {
 			const [conditions, written] = args as [readonly { key: Key }[], readonly { key: Key }[]];
 			return (conditions[0] ?? written[0])?.key.space;
@@ -184,8 +172,7 @@ export function simulatedStore(): SimulatedStore {
 		} finally {
 			applying = undefined;
 		}
-		const written =
-			writtenKinds.has(answer?.kind ?? "") || name === "setAdd" || name === "setRemove";
+		const written = writtenKinds.has(answer?.kind ?? "");
 		// A refusing answer is kept too: a resend under its mark must get it again on a replica.
 		const logged: Logged = { name, args, at: writtenAt, versions: minted };
 		state.pending.push(logged);

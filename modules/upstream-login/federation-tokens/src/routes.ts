@@ -47,6 +47,7 @@ const refusals: Record<Exclude<Current["kind"], "handed" | "limited">, [number, 
 	ineligible: [502, "upstream_token_ineligible"],
 	refresh_absent: [410, "refresh_token_absent"],
 	reauthenticate: [410, "re_authentication_required"],
+	interaction_required: [403, "upstream_interaction_required"],
 	failed: [500, "refresh_failed"],
 	// The upstream offers no refresh, or the settings no longer hold the IdP: it never will, so log in again.
 	not_supported: [410, "refresh_not_supported"],
