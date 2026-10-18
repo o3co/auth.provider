@@ -30,3 +30,32 @@ export const transactionStoreNeeds = {
 	/** Names derive from the identifier, so the place never keeps it in clear. */
 	namesFromSecret: true,
 } as const;
+
+/**
+ * Each holder's live transactions, by a key mfa-flows names (a session's handle, or a held login's
+ * subject), each listed by a digest of its identifier for its lifetime. Every call throws Unavailable
+ * when the place cannot tell.
+ */
+export interface TransactionListings {
+	/** Lists the member for its lifetime; answers the others pushed out over the cap, never the one being added. */
+	add(
+		key: string,
+		member: string,
+		lifetimeMs: number,
+	): Promise<{ readonly pushedOut: readonly string[] }>;
+	members(key: string): Promise<readonly { readonly member: string }[]>;
+	remove(key: string, member: string): Promise<void>;
+}
+
+export const transactionListings = contract<TransactionListings>("mfa-flows.transaction-listings");
+
+/** The live transactions one holder keeps; one more pushes out the one ending first. A constant, not a setting. */
+export const transactionsPerHolder = 5;
+
+/** A transaction counts only while listed, so a listing that loses or misreads a member refuses a live one. */
+export const transactionListingsNeeds = {
+	neverEvicted: true,
+	survivesCrash: true,
+	survivesFailover: true,
+	readsConfirmed: true,
+} as const;

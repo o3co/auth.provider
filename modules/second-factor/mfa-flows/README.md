@@ -21,7 +21,8 @@
 - Operator section: `transaction-lifetime` (1m–30m, default `10m`), `attempts-per-transaction` (2–10, default 5), `requests` (POSTs per source in each window, over every route, 1–100000, default 60), `window` (1s–1d, default `5m`).
 - `lockout` in the section holds the lockout numbers (`budget` 10 by default, `budget-window` `7d`); `rate-limit` judges their shape, refusing boot when it does not fit.
 - Store interface for transactions by their unguessable identifier, never kept in clear: save for a lifetime, read, change from what it holds (the lifetime stays). Contents are not shown to it. Its needs: never evicted, survives a crash, never back after a failover.
-- `./testing`: test configuration builders, and the store interface's contract test for every implementation (see `transactions`' card).
+- Store interface for each holder's live transactions (a session's handle, or a held login's subject), each by a digest of its identifier for its lifetime: add (answering those pushed out past 5, a constant), members, remove. Its needs: never evicted, survives a crash and a failover, confirmed reads.
+- `./testing`: test configuration builders, and the store interfaces' contract tests for every implementation (see `transactions`' card).
 
 ## Invariants
 - Internal modules: `transactions` keeps transactions; `proof` holds a login (the gate) or a session (step-up) until a factor is proved; `enrollment` binds a new factor; `reset` is the operator's reset; `release` the user's, by `permits`; `recording` records a request's audit events. `transactions` takes its own contracts; the package's module gives the others only what they use, and declares the routes.
