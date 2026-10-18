@@ -12,6 +12,7 @@ import {
 } from "@mod/kernel";
 import { type Narrower, outbound, outboundPolicy } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
+import secretHashModule from "@mod/secret-hash/module";
 import { type Ledger, ledgers, userAttribute, users } from "@mod/users";
 import usersModule from "@mod/users/module";
 import { ledgerContract, memoryUsersStores, testUser, usersContract } from "@mod/users/testing";
@@ -135,7 +136,14 @@ const boot = (
 	loopback = [pair],
 ) =>
 	assemble({
-		modules: [outboundModule, usersModule, memoryUsersStores().module, usersHttp, collector],
+		modules: [
+			outboundModule,
+			usersModule,
+			secretHashModule,
+			memoryUsersStores().module,
+			usersHttp,
+			collector,
+		],
 		config: {
 			...kernelConfig(),
 			outbound: { allow, "plain-loopback": loopback },
@@ -599,7 +607,14 @@ describe("users-http", () => {
 			})),
 		]);
 		const app = await assemble({
-			modules: [recording, usersModule, memoryUsersStores().module, usersHttp, collector],
+			modules: [
+				recording,
+				usersModule,
+				secretHashModule,
+				memoryUsersStores().module,
+				usersHttp,
+				collector,
+			],
 			config: { ...kernelConfig(), users: { registered: [] }, "users-http": settings() },
 			runtime,
 		});
