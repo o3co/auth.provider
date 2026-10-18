@@ -37,12 +37,15 @@ import { type MfaSettings, mfaConfig } from "../src/testing.ts";
 import { memoryFactors } from "./stores.ts";
 
 let shift = 0;
+/** Where set, the clock stands at this time (before the shift), so a test can judge a window's very edge. */
+let stopped: number | undefined;
 /** `session`'s recent-authentication window, as its stand-in counts it. */
 const recentMs = sessionRules.credentialsSecondsDefault * 1000;
-const runtime = quietRuntime({ clock: { now: () => Date.now() + shift } });
+const runtime = quietRuntime({ clock: { now: () => (stopped ?? Date.now()) + shift } });
 let stop = async () => {};
 afterEach(async () => {
 	shift = 0;
+	stopped = undefined;
 	await stop();
 });
 
@@ -643,8 +646,11 @@ describe("the entry requirements mfa sets", () => {
 		const raised = await opened.raise(proved, ["pwd"]);
 		const fresh = withCookie(raised?.cookies[0] ?? "");
 		expect((await opened.enterFor(fresh, "credentials")).kind).toBe("short");
-		expect(app.get(factors).recent(runtime.clock.now() - recentMs)).toBe(true);
-		expect(app.get(factors).recent(runtime.clock.now() - recentMs - 1)).toBe(false);
+		// The window's edge, judged on a clock that stands still between reading it and asking.
+		stopped = Date.now();
+		const now = runtime.clock.now();
+		expect(app.get(factors).recent(now - recentMs)).toBe(true);
+		expect(app.get(factors).recent(now - recentMs - 1)).toBe(false);
 	});
 });
 
