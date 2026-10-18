@@ -1009,6 +1009,30 @@ describe("mfa under races and misuse", () => {
 		expect(kept.filter((f) => f.kind === "code")).toHaveLength(1);
 	});
 
+	it("binds nothing from a login's first binding begun after another factor was bound, on the password alone", async () => {
+		const s = await serve({ mode: "required" });
+		// Taken while the subject held no factor: the transaction allows a first binding alone.
+		const { tx } = await s.heldLogin("lou");
+		const held = new Map(s.jar());
+		await s.enrollCode("lou");
+		const begun = await s.call(
+			"POST",
+			"/session/mfa/enrollment",
+			{ kind: "code", transaction_id: tx },
+			{ jar: held },
+		);
+		expect([begun.status, begun.body.error]).toEqual([401, "login_required"]);
+		const done = await s.call(
+			"POST",
+			"/session/mfa/enrollment/complete",
+			{ transaction_id: tx, proof: `${begun.body.secret}:0` },
+			{ jar: held },
+		);
+		expect(done.status).not.toBe(200);
+		const kept = await s.app.get(factors).held("lou");
+		expect(kept.filter((f) => f.kind === "code")).toHaveLength(1);
+	});
+
 	it("takes only a raise that added a second factor as a recent second factor", async () => {
 		const s = await serve();
 		await s.enrollCode("rho");
