@@ -23,7 +23,7 @@ const setUp = (part: PasskeyPart): NewPart => ({
 			? {
 					"webauthn-login": {
 						requests: part.login.requests,
-						"window-seconds": part.login.windowSeconds,
+						window: `${part.login.windowSeconds}s`,
 					},
 				}
 			: {}),
