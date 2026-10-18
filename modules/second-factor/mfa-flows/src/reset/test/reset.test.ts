@@ -1,4 +1,6 @@
+import { testRequest } from "@mod/http/testing";
 import { isUnavailable, Unavailable } from "@mod/kernel";
+import { sessions } from "@mod/session";
 import { revocations } from "@mod/subject-revocation";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
@@ -59,8 +61,9 @@ describe("a reset by an operator", () => {
 			},
 		]);
 		expect(resetLines()).toEqual([{ level: "info", event: "mfa-flows.reset", fields: {} }]);
-		const listed = await s.call("GET", "/session/mfa/factors", {}, { jar: signedIn });
-		expect([listed.status, listed.body]).toEqual([401, { error: "login_required" }]);
+		const cookie = `__Host-session=${signedIn.get("__Host-session") ?? ""}`;
+		const request = testRequest({ headers: new Map([["cookie", cookie]]) });
+		expect(await s.app.get(sessions).enter(request)).toBeUndefined();
 		const verify = { transaction_id: pending.tx, factor_id: pending.factor(), proof: "x:2" };
 		expect((await s.call("POST", "/session/mfa/verify", verify, { jar: pending.jar })).status).toBe(
 			401,

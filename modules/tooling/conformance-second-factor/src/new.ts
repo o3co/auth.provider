@@ -8,6 +8,7 @@ const setUp = (part: SecondFactorPart): NewPart => ({
 		"@mod/mfa",
 		"@mod/mfa-binding-proof",
 		"@mod/mfa-flows",
+		"@mod/mfa-management",
 		"@mod/mfa-totp",
 		"@mod/mfa-recovery",
 		// The wording is mfa-email's default adapter, which the scene names as it names the rest.

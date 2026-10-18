@@ -1,12 +1,11 @@
 import type { Audit } from "@mod/audit";
-import type { HttpRequest, HttpResponse } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import { type AskedFrom, type Factors, isLabel } from "@mod/mfa";
 import type { BindingProofs } from "@mod/mfa-binding-proof";
 import type { Sessions } from "@mod/session";
 import type { SubjectRevocation } from "@mod/subject-revocation";
 import { auditedBy } from "../recording/recording.ts";
 import {
-	answer,
 	field,
 	type Handler,
 	invalidLabel,
@@ -20,7 +19,10 @@ import {
 import type { BindingChallenge, Transaction } from "../transactions/records.ts";
 import { askedFrom, type Transactions } from "../transactions/transactions.ts";
 
-const unknownKind = answer(400, { error: "invalid_request", error_description: "unknown kind" });
+const unknownKind = jsonAnswer(400, {
+	error: "invalid_request",
+	error_description: "unknown kind",
+});
 /** The kinds of `mfa`'s answer to a call, but the one named. */
 type Refused<T extends (...args: never[]) => Promise<{ readonly kind: string }>, Done> = Exclude<
 	Awaited<ReturnType<T>>["kind"],
@@ -29,11 +31,11 @@ type Refused<T extends (...args: never[]) => Promise<{ readonly kind: string }>,
 type Refusal = Refused<Factors["begin"], "begun"> | Refused<Factors["bind"], "bound">;
 /** What `mfa` refuses a binding with, as answered here; anything else refuses it too. */
 const refusals: Readonly<Partial<Record<Refusal, HttpResponse>>> = {
-	full: answer(409, { error: "mfa_factor_limit" }),
-	duplicate: answer(409, { error: "mfa_factor_duplicate" }),
-	limited: answer(429, { error: "rate_limited" }),
-	refused: answer(403, { error: "mfa_factor_refused" }),
-	"binding-proof-required": answer(403, { error: "mfa_binding_proof_required" }),
+	full: jsonAnswer(409, { error: "mfa_factor_limit" }),
+	duplicate: jsonAnswer(409, { error: "mfa_factor_duplicate" }),
+	limited: jsonAnswer(429, { error: "rate_limited" }),
+	refused: jsonAnswer(403, { error: "mfa_factor_refused" }),
+	"binding-proof-required": jsonAnswer(403, { error: "mfa_binding_proof_required" }),
 };
 
 export interface EnrollmentParts {
@@ -123,8 +125,8 @@ export function enrollmentOver(p: EnrollmentParts) {
 	const sendBinding = async (subject: string, until: number, from: AskedFrom) => {
 		const sent = await p.bindingProof.challenge(subject, until, from);
 		if (sent.kind === "none") return undefined;
-		if (sent.kind === "limited") return answer(429, { error: "rate_limited" });
-		if (sent.kind === "refused") return answer(403, { error: "mfa_binding_proof_unavailable" });
+		if (sent.kind === "limited") return jsonAnswer(429, { error: "rate_limited" });
+		if (sent.kind === "refused") return jsonAnswer(403, { error: "mfa_binding_proof_unavailable" });
 		const challenge = { proof: sent.proof, sealed: sent.sealed };
 		return { shown: { ...sent.show, proof: sent.proof }, challenge };
 	};
@@ -159,7 +161,7 @@ export function enrollmentOver(p: EnrollmentParts) {
 		if (left === 0) await p.transactions.take(id);
 		return passed
 			? unknownTransaction
-			: answer(401, { error: "mfa_invalid", attempts_remaining: left });
+			: jsonAnswer(401, { error: "mfa_invalid", attempts_remaining: left });
 	};
 
 	/** The pass for the binding proof, kept or passed now; nothing when none is asked after all; else the answer. */
@@ -189,7 +191,7 @@ export function enrollmentOver(p: EnrollmentParts) {
 			transaction: kept.id,
 			expires_in: kept.expiresIn,
 		};
-		return answer(403, { ...sent.shown, ...asked }, { cookies: kept.cookies });
+		return jsonAnswer(403, { ...sent.shown, ...asked }, { cookies: kept.cookies });
 	};
 
 	/** The challenge route in an enrollment's transaction: sends its binding proof again. */
@@ -203,14 +205,14 @@ export function enrollmentOver(p: EnrollmentParts) {
 		const sent = t.bindingPassed
 			? undefined
 			: await sendBinding(t.subject, t.deadline, askedFrom(t));
-		if (sent === undefined) return answer(200, {});
+		if (sent === undefined) return jsonAnswer(200, {});
 		if ("status" in sent) return sent;
 		if (!(await p.transactions.bindingSent(id, sent.challenge))) return unknownTransaction;
 		audited("challenge.sent", t.subject, request, {
 			kind: sent.challenge.proof,
 			purpose: t.purpose,
 		});
-		return answer(200, sent.shown);
+		return jsonAnswer(200, sent.shown);
 	};
 
 	const enroll: Handler = async (request) => {
@@ -234,7 +236,7 @@ export function enrollmentOver(p: EnrollmentParts) {
 		const kept = await keep(e, { pending: begun.pending });
 		if (!kept) return unknownTransaction;
 		const at = { transaction: kept.id, expires_in: kept.expiresIn };
-		return answer(200, { ...begun.show, ...at }, { cookies: kept.cookies });
+		return jsonAnswer(200, { ...begun.show, ...at }, { cookies: kept.cookies });
 	};
 
 	const complete: Handler = async (request) => {
@@ -264,7 +266,7 @@ export function enrollmentOver(p: EnrollmentParts) {
 		if (proved.kind === "unknown") return unknownTransaction;
 		if (proved.kind !== "valid") {
 			if (left === 0) await p.transactions.take(txId);
-			return answer(401, { error: "mfa_invalid", attempts_remaining: left });
+			return jsonAnswer(401, { error: "mfa_invalid", attempts_remaining: left });
 		}
 		if (!(await p.transactions.take(txId))) return unknownTransaction;
 		const bound = await p.factors.bind(t.subject, pending, proved.state, label);
@@ -273,12 +275,12 @@ export function enrollmentOver(p: EnrollmentParts) {
 		const body = { factor: bound.factor, ...codes };
 		// A first factor bound on the password alone counts from the next sign-in: binding it during a
 		// login never finishes that login.
-		if (!t.proved) return answer(200, body, { cookies: [p.transactions.cleared()] });
+		if (!t.proved) return jsonAnswer(200, body, { cookies: [p.transactions.cleared()] });
 		// Bound on a binding proof, it counts at once by its first proof: the login goes on, or the session is raised.
 		if (t.purpose === "enroll-login") return p.resume(request, t, proved.amr, body);
 		const raised = await p.sessions.raise(request, proved.amr);
 		const cookies = [...(raised?.cookies ?? []), p.transactions.cleared()];
-		return answer(200, body, { cookies });
+		return jsonAnswer(200, body, { cookies });
 	};
 
 	return { enroll, complete, challengeBinding };

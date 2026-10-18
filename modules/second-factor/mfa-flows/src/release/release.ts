@@ -1,13 +1,13 @@
 import type { Audit } from "@mod/audit";
+import { jsonAnswer } from "@mod/http";
 import type { Log } from "@mod/kernel";
 import type { Factors } from "@mod/mfa";
 import type { LockoutPolicy, Lockouts, Released, ReleaseTerms } from "@mod/rate-limit";
-import type { Sessions } from "@mod/session";
-import { longestRecentMs } from "@mod/session";
+import { longestRecentMs, refusedEntry, type Sessions } from "@mod/session";
 import type { SubjectRevocation } from "@mod/subject-revocation";
 import type { PermitResult, Permits } from "../permits/permits.ts";
 import { auditedBy } from "../recording/recording.ts";
-import { answer, type Handler, loginRequired, unavailable } from "../routing.ts";
+import { type Handler, unavailable } from "../routing.ts";
 import { lockoutName } from "../section.ts";
 
 export interface ReleaseParts {
@@ -27,7 +27,7 @@ const marginMs = 5 * 60_000;
 /** The boundary is compared in whole seconds: a second more keeps the rounding from loosening the margin. */
 const roundingMs = 1000;
 
-const exemptRequired = answer(403, {
+const exemptRequired = jsonAnswer(403, {
 	error: "mfa_exempt_proof_required",
 	error_description: "Verify a recovery code or a passkey first, then release",
 });
@@ -46,8 +46,8 @@ const resultOf = (done: Released): PermitResult =>
 /** The answer to an applied release, in 0.17's words; the same however often it is asked. */
 const answerOf = (result: PermitResult) =>
 	result.lock === "released"
-		? answer(200, { lock: "released" })
-		: answer(200, {
+		? jsonAnswer(200, { lock: "released" })
+		: jsonAnswer(200, {
 				lock: "held",
 				hold: "hard",
 				description: heldText,
@@ -71,8 +71,7 @@ export function releaseOver(p: ReleaseParts) {
 	};
 	const release: Handler = async (request) => {
 		const entry = await p.sessions.enterFor(request, "credentials");
-		if (entry.kind === "absent") return loginRequired;
-		if (entry.kind === "short") return answer(403, entry.answer);
+		if (entry.kind !== "entered") return refusedEntry(entry);
 		const { id: handle, context } = entry.session;
 		const { subject } = context;
 		// A boundary written by a host whose clock runs ahead cannot vouch for a revocation: as 0.17, nothing is judged.
@@ -101,7 +100,7 @@ export function releaseOver(p: ReleaseParts) {
 			// A refusal spends nothing: the permit stays for a release once the account is set right.
 			p.log.info("mfa-flows.lock_release", { outcome: "refused" });
 			const rebind = done.fixedAt === undefined ? {} : { rebind_after: rebindAfter(done.fixedAt) };
-			return answer(409, { ...refused, ...rebind });
+			return jsonAnswer(409, { ...refused, ...rebind });
 		}
 		if (done.kind === "released") {
 			// 0.17's name for the budget.

@@ -1,6 +1,6 @@
 import { testRequest } from "@mod/http/testing";
 import { defineModule, Unavailable } from "@mod/kernel";
-import { factorKinds, type Sending } from "@mod/mfa";
+import { factorKinds, factors, type Sending } from "@mod/mfa";
 import { bindingProofs } from "@mod/mfa-binding-proof";
 import { sessions } from "@mod/session";
 import { afterEach, describe, expect, it } from "vitest";
@@ -111,9 +111,13 @@ describe("a binding proof before a first factor", () => {
 		expect(done.status).toBe(200);
 		expect(s.jar().get("__Host-session")).not.toBe(old);
 		expect(await amrOf(s)).toEqual(["pwd", "otp", "mfa"]);
-		const factor_id = (done.body.factor as { id: string }).id;
-		const renamed = await s.call("POST", "/session/mfa/factors/rename", { factor_id, label: "a" });
-		expect(renamed.status).toBe(200);
+		const factor = (done.body.factor as { id: string }).id;
+		// Changing a factor enters the session at the credential-changing level, then asks mfa.
+		const cookie = `__Host-session=${s.jar().get("__Host-session") ?? ""}`;
+		const request = testRequest({ headers: new Map([["cookie", cookie]]) });
+		const entry = await s.app.get(sessions).enterFor(request, "credentials");
+		expect(entry.kind).toBe("entered");
+		expect(await s.app.get(factors).rename("ora", factor, "a")).toBe("renamed");
 	});
 
 	it("asks it before a session's first factor begins, counts a wrong one as an attempt, and begins once it passes", async () => {
