@@ -25,7 +25,7 @@
 - `./testing`: test configuration builders, and the store interfaces' contract tests for every implementation (see `transactions`' card).
 
 ## Invariants
-- Internal modules: `transactions` keeps transactions; `proof` holds a login (the gate) or a session (step-up) until a factor is proved; `enrollment` binds a new factor; `reset` is the operator's reset; `release` the user's, by `permits`; `recording` records a request's audit events. `transactions` takes its own contracts; the package's module gives the others only what they use, and declares the routes.
+- Internal modules, and what each is given: `wiring`'s card. The package's module declares the routes.
 - Every POST declares `csrf`'s policy, then `rate-limit`'s requests per source, and takes a form or JSON body read by name, a JSON member that is not a string being absent.
 - A `proof` sent as a JSON object (a WebAuthn response, say) reaches the kind as its JSON text; an array, number or other non-string is absent.
 - The gate asks `mfa` what login requires: nothing lets the login through; a proof or a first enrollment starts a transaction and holds it.
