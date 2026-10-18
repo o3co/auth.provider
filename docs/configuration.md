@@ -299,14 +299,14 @@ From `@mod/mail-smtp`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `mail-smtp.host` | string |  | yes | `MAIL_SMTP_HOST` | `smtp.example.invalid` |  |
-| `mail-smtp.port` | integer (1–65535) | `587` |  |  |  |  |
-| `mail-smtp.security` | starttls \| tls \| none | `starttls` |  |  |  |  |
-| `mail-smtp.from` | string |  | yes | `MAIL_SMTP_FROM` | `auth@example.invalid` |  |
-| `mail-smtp.user` | string |  |  |  |  |  |
-| `mail-smtp.password` | string |  |  |  |  |  |
+| `mail-smtp.host` | string |  | yes | `MAIL_SMTP_HOST` | `smtp.example.invalid` | The relay's host name or address. |
+| `mail-smtp.port` | integer (1–65535) | `587` |  |  |  | The relay's port, from 1 to 65535. |
+| `mail-smtp.security` | starttls \| tls \| none | `starttls` |  |  |  | How the connection is secured: STARTTLS after connecting, TLS from the first byte, or none, only to a loopback host. |
+| `mail-smtp.from` | string |  | yes | `MAIL_SMTP_FROM` | `auth@example.invalid` | The sender: one mailbox, alone or after a display name. |
+| `mail-smtp.user` | string |  |  |  |  | The account the relay signs in, beside `password`. |
+| `mail-smtp.password` | string |  |  |  |  | The account's password, beside `user`. |
 | `mail-smtp.deadline` | string | `40s` |  |  |  | How long a whole send may take, from 100ms to 10m. |
-| `mail-smtp.concurrent-sends` | integer (1–1000) | `20` |  |  |  |  |
+| `mail-smtp.concurrent-sends` | integer (1–1000) | `20` |  |  |  | Sends under way at once on a host, from 1 to 1000. |
 
 ## metrics-prometheus
 
@@ -636,13 +636,13 @@ From `@mod/webauthn`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `webauthn.rp-id` | string |  | yes | `WEBAUTHN_RP_ID` | `login.example.invalid` |  |
-| `webauthn.rp-name` | string |  | yes | `WEBAUTHN_RP_NAME` | `Example` |  |
-| `webauthn.origins` | list of string |  | yes |  | `["https://login.example.invalid"]` |  |
-| `webauthn.top-origins` | list of string | `[]` |  |  |  |  |
+| `webauthn.rp-id` | string |  | yes | `WEBAUTHN_RP_ID` | `login.example.invalid` | The relying party ID: each web origin's host, or a domain each one lies under. |
+| `webauthn.rp-name` | string |  | yes | `WEBAUTHN_RP_NAME` | `Example` | The relying party's name, as an authenticator shows it. |
+| `webauthn.origins` | list of string |  | yes |  | `["https://login.example.invalid"]` | The origins ceremonies may come from, matched exactly: https web origins (http only on localhost), or Android app origins. |
+| `webauthn.top-origins` | list of string | `[]` |  |  |  | The pages that may frame a ceremony; none by default, so any ceremony in a frame is refused. |
 | `webauthn.challenge-lifetime` | string | `2m` |  |  |  | How long a ceremony's challenge can be answered, from 10s to 10m. |
-| `webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  |  |
-| `webauthn.max-credentials` | integer (1–100) | `10` |  |  |  |  |
+| `webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  | Whether the authenticator is asked to verify its user, as WebAuthn says it. |
+| `webauthn.max-credentials` | integer (1–100) | `10` |  |  |  | The most passkeys a subject may hold, from 1 to 100. |
 
 ## webauthn-login
 
@@ -650,5 +650,5 @@ From `@mod/webauthn-login`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `webauthn-login.requests` | integer (1–100000) | `60` |  |  |  |  |
+| `webauthn-login.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, on the options route, from 1 to 100000. |
 | `webauthn-login.window` | string | `1m` |  |  |  | The window `requests` is counted over, from 1s to 1d in whole seconds, written with its unit, such as `1m`. |
