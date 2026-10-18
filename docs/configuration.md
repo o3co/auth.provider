@@ -147,9 +147,9 @@ From `@mod/federation`.
 |---|---|---|---|---|---|---|
 | `federation.idps` | map | `{}` |  |  |  | Each IdP by name (1 to 32 lowercase letters, digits and `-`, not starting with `-`): its `type`, `upstream-amr` (the upstream's amr values mapped to ours; none by default; mapping one to `mfa`, say, trusts the upstream's claim for that amr and any acr it satisfies, such as `urn:o3co:acr:mfa`) and the type's own settings. |
 | `federation.landing` | string |  |  |  |  | The https URL a login lands on when it named no return target; the public origin's root by default. |
-| `federation.transaction-seconds` | integer (60–3600) | `600` |  |  |  | How long a round trip, or a held login's tokens, may wait. |
+| `federation.transaction-lifetime` | string | `10m` |  |  |  | How long a round trip, or a held login's tokens, may wait, from 1m to 1h. |
 | `federation.requests` | integer (1–1000) | `60` |  |  |  | Starts and callbacks allowed per source in each window. |
-| `federation.window-seconds` | integer (1–3600) | `60` |  |  |  | The window `requests` counts in. |
+| `federation.window` | string | `1m` |  |  |  | The window `requests` counts in, from 1s to 1h. |
 
 ## federation-grants
 
@@ -190,11 +190,11 @@ From `@mod/federation-tokens`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `federation-tokens.refresh-before-seconds` | integer (0–3600) | `30` |  |  |  |  |
-| `federation-tokens.max-lifetime-seconds` | integer (60–31536000) | `86400` |  |  |  |  |
-| `federation-tokens.lock-seconds` | integer (1–60) | `5` |  |  |  |  |
-| `federation-tokens.requests` | integer (1–1000) | `60` |  |  |  |  |
-| `federation-tokens.window-seconds` | integer (1–3600) | `60` |  |  |  |  |
+| `federation-tokens.refresh-before` | string | `30s` |  |  |  | A token this close to its end is refreshed before it is handed over, from 0s to 1h. |
+| `federation-tokens.max-lifetime` | string | `1d` |  |  |  | The longest a token is taken to live, from 1m to 365d: caps what an upstream says, and stands for an answer that says nothing. |
+| `federation-tokens.lock-lifetime` | string | `5s` |  |  |  | How long one refresh holds its lock, and how long another request waits for it, from 1s to 1m. |
+| `federation-tokens.requests` | integer (1–1000) | `60` |  |  |  | Requests allowed per source in each window. |
+| `federation-tokens.window` | string | `1m` |  |  |  | The window `requests` counts in, from 1s to 1h. |
 
 ## http
 

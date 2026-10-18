@@ -25,7 +25,7 @@ export function opened(
 	at: { readonly clock: Clock },
 ): Upstream {
 	const client = s["client-id"];
-	const skewMs = s["clock-skew-seconds"] * 1000;
+	const skewMs = s["clock-skew"] * 1000;
 	const hostOf = (url: string) => new URL(url).hostname;
 	const idTokenOf = idTokenReaderOf(
 		jwt,

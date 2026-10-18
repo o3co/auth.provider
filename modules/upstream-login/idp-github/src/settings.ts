@@ -15,13 +15,13 @@ export const hostsOf = (s: { readonly "token-endpoint": string; readonly api: st
 ];
 
 const section = clientSetting.extend({
-	scopes: z.array(scope).default(["read:user"]),
+	scopes: z.array(scope).prefault(["read:user"]),
 	/** GitHub's own unless the operator names another (GitHub Enterprise). */
-	"authorization-endpoint": endpoint.default("https://github.com/login/oauth/authorize"),
-	"token-endpoint": endpoint.default("https://github.com/login/oauth/access_token"),
-	api: endpoint.default("https://api.github.com"),
+	"authorization-endpoint": endpoint.prefault("https://github.com/login/oauth/authorize"),
+	"token-endpoint": endpoint.prefault("https://github.com/login/oauth/access_token"),
+	api: endpoint.prefault("https://api.github.com"),
 	/** The `iss` a callback carries, where it carries one (RFC 9207). */
-	issuer: z.string().min(1).default("https://github.com/login/oauth"),
+	issuer: z.string().min(1).prefault("https://github.com/login/oauth"),
 });
 
 /** The section; boot is refused on a URL it sends to that outbound's destination policy refuses. */

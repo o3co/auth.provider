@@ -35,6 +35,8 @@ import idpOidc from "../src/module.ts";
 import { settingsOf } from "../src/settings.ts";
 import { opened } from "../src/upstream.ts";
 
+/** The asymmetric algorithms external-jwt knows, the defaults among them. */
+const asymmetric = ["RS256", "PS256", "ES256", "EdDSA"];
 const issuer = "https://idp.example";
 const start = 1_800_000_000_000;
 let now = start;
@@ -360,7 +362,7 @@ describe("idp-oidc", () => {
 	});
 
 	it("refuses at boot, at its key, an endpoint outbound's policy refuses, asking with the hosts it sends to", async () => {
-		const settings = settingsOf(["RS256"], policyRefusing(["idp.example"]));
+		const settings = settingsOf(asymmetric, policyRefusing(["idp.example"]));
 		const base = { issuer, "client-id": "c", "client-secret": "s" };
 		const refusalsOf = (more: Record<string, unknown>) =>
 			settings.safeParse({ ...base, ...more }).error?.issues.map((i) => [i.path, i.message]);
@@ -390,7 +392,7 @@ describe("idp-oidc", () => {
 	});
 
 	it("refuses at boot an endpoint-hosts entry that is no host, `*` included", () => {
-		const settings = settingsOf(["RS256"], policyRefusing());
+		const settings = settingsOf(asymmetric, policyRefusing());
 		const base = { issuer, "client-id": "c", "client-secret": "s" };
 		for (const entry of ["*.idp-cdn.example", "*", "idp.example:443", "https://idp.example"]) {
 			const issues = settings.safeParse({ ...base, "endpoint-hosts": [entry] }).error?.issues;
@@ -451,13 +453,21 @@ describe("idp-oidc", () => {
 		expect(settings.safeParse({ ...base, algorithms: [] }).success).toBe(false);
 	});
 
-	it("takes a clock skew of whole seconds from 0 to 300", () => {
-		const settings = settingsOf(["RS256"], policyRefusing());
+	it("takes a clock skew of whole seconds from 0s to 5m, written with its unit", () => {
+		const settings = settingsOf(asymmetric, policyRefusing());
 		const base = { issuer, "client-id": "c", "client-secret": "s" };
-		const skewOf = (seconds: number) =>
-			settings.safeParse({ ...base, "clock-skew-seconds": seconds }).success;
-		expect([0, 300].map(skewOf)).toEqual([true, true]);
-		expect([301, -1, 1.5].map(skewOf)).toEqual([false, false, false]);
+		const skewOf = (skew: unknown) => settings.safeParse({ ...base, "clock-skew": skew }).success;
+		expect(["0s", "300s", "5m"].map(skewOf)).toEqual([true, true, true]);
+		expect(["301s", "-1s", "1.5s", 30, "30"].map(skewOf)).toEqual(Array(5).fill(false));
+	});
+
+	it("gives each default as an operator writes it, read through the key's own schema", () => {
+		const { shape } = settingsOf(asymmetric, policyRefusing());
+		const byDefault = Object.entries(shape).filter(([, key]) => key._zod.def.type === "default");
+		expect(byDefault.map(([name]) => name)).toEqual([]);
+		// A default algorithm external-jwt does not know is refused, as one the operator wrote is.
+		const base = { issuer, "client-id": "c", "client-secret": "s" };
+		expect(settingsOf(["RS256"], policyRefusing()).safeParse(base).success).toBe(false);
 	});
 
 	it("exchanges the code with its verifier and the client's secret, and answers the id_token's subject", async () => {

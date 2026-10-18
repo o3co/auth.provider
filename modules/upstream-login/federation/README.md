@@ -22,7 +22,7 @@
 - Success is a 302 to the return target or the landing; a held login is a 403 with the gate's answer and cookies.
 
 ## Invariants
-- A login's state, nonce and PKCE verifier (S256) are kept server-side in its transaction for `transaction-seconds`. Only a callback at the same IdP carrying its state takes it, once, before the code is exchanged; a callback from elsewhere spends nothing.
+- A login's state, nonce and PKCE verifier (S256) are kept server-side in its transaction for `transaction-lifetime`. Only a callback at the same IdP carrying its state takes it, once, before the code is exchanged; a callback from elsewhere spends nothing.
 - The transaction is kept under a random cookie named per IdP. The cookie, state, nonce and PKCE verifier are 256 random bits each.
 - The start refuses a return target `login-gates` does not allow (`invalid_redirect`) and a `max_age` that is not 1 to 9 digits. A repeated parameter is refused after the path and method.
 - A start finding a transaction under its cookie is unavailable.
@@ -42,8 +42,8 @@
 - Of what an upstream says of the user, only its profile's email, name and picture reach the session, as strings, under the IdP's source name (`loginSource.upstream`).
 - Its email is verified only where the type says the upstream verified it in the type's own form; otherwise it is unverified.
 - Groups and other claims never reach the session.
-- A held login's tokens are kept for `transaction-seconds` from the hold; if they cannot be kept, the callback is unavailable.
-- A held login resumes within `transaction-seconds` of the callback.
+- A held login's tokens are kept for `transaction-lifetime` from the hold; if they cannot be kept, the callback is unavailable.
+- A held login resumes within `transaction-lifetime` of the callback.
 - An IdP's redirect URI is the public origin plus its callback path.
 - Boot is refused for an unknown type, settings the type refuses, an upstream that does not match its settings, or no public origin, one reason per issue, all at once.
 - An IdP that answers in a posted form has a cross-site cookie, so only `__Host-` and Secure; it refuses boot where cookies cannot be secure.

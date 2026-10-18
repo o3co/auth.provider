@@ -417,7 +417,7 @@ describe("federation", () => {
 	});
 
 	it("ends a transaction at its lifetime", async () => {
-		const s = await serve({ federation: { "transaction-seconds": 60 } });
+		const s = await serve({ federation: { "transaction-lifetime": "1m" } });
 		const started = await s.begin();
 		now += 60_000;
 		expect((await s.callback(`code=good&state=${started.state}`, started.cookie)).status).toBe(400);
