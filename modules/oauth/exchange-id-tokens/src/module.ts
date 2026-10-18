@@ -1,0 +1,70 @@
+import { clients } from "@mod/clients";
+import { externalJwt } from "@mod/external-jwt";
+import { defineModule } from "@mod/kernel";
+import { type Space, spaces, store } from "@mod/store";
+import { revocations } from "@mod/subject-revocation";
+import { exchangeVerifiers } from "@mod/token-exchange";
+import { upstreamNames, users } from "@mod/users";
+import { fixedIssuers, type Issuers } from "./issuers.ts";
+import { kinds, section } from "./section.ts";
+import { idTokens, type Taken } from "./verifier.ts";
+
+/** The id_tokens used up, by kind; kept whenever the module is composed, which the operator chose. */
+const used: Space = {
+	name: "exchange-id-tokens.used",
+	guarantees: ["no-eviction", "durable", "replicated"],
+};
+
+/** The module over the given issuers; the composed one is over the fixed issuers alone. */
+export const exchangeIdTokensOver = (issuers: Issuers) =>
+	defineModule({ name: "exchange-id-tokens", section }, (m) => [
+		m.contribute(spaces).by(() => used),
+		// Each kind taken, under its upstream's name and issuer, so users counts it once among every module's.
+		m.contribute(upstreamNames).by((c) => ({
+			declaredBy: "exchange-id-tokens",
+			names: kinds.flatMap((kind) => {
+				const settings = c.section[kind];
+				return settings === undefined
+					? []
+					: [{ name: settings.upstream, issuer: issuers[kind].iss[0] }];
+			}),
+		})),
+		m.contribute(exchangeVerifiers).by(async (c) => {
+			const known = await c.get(clients);
+			for (const kind of kinds) {
+				for (const id of Object.keys(c.section[kind]?.clients ?? {})) {
+					if ((await known.find(id)) === undefined) {
+						return c.refuse(`exchange-id-tokens.${kind}.clients.${id}`, "is no registered client");
+					}
+				}
+			}
+			const jwt = await c.get(externalJwt);
+			const skewMs = c.section["clock-skew"] * 1000;
+			const taken: Taken[] = kinds.flatMap((kind) => {
+				const settings = c.section[kind];
+				if (settings === undefined) return [];
+				const { iss, keys } = issuers[kind];
+				return [
+					{
+						kind,
+						upstream: settings.upstream,
+						iss,
+						jwt: jwt.verifierOf(keys, { algorithms: ["RS256"], skewMs }),
+						clients: Object.entries(settings.clients),
+					},
+				];
+			});
+			return idTokens({
+				taken,
+				users: await c.get(users),
+				revocations: await c.get(revocations),
+				store: await c.get(store),
+				used,
+				now: c.clock.now,
+				maxAgeMs: c.section["max-age"] * 1000,
+				skewMs,
+			});
+		}),
+	]);
+
+export default exchangeIdTokensOver(fixedIssuers);

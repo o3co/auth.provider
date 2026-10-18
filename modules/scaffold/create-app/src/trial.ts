@@ -26,6 +26,9 @@ function trialValues(redisUrl: string): [section: string, key: string, value: st
 	];
 }
 
+/** The trial's own client that exchanges id_tokens, where exchange-id-tokens is composed: it needs one registered. */
+const idTokenClient = { id: "trial-id-tokens", kind: "public", method: "none", sections: {} };
+
 /** The local layer's blocks, by section: each kept where the app composes the module it is for. */
 function trialBlocks(
 	modules: readonly string[],
@@ -48,6 +51,7 @@ function trialBlocks(
 			? `, plain-loopback = [${added.plainLoopback.map((h) => JSON.stringify(h)).join(", ")}]`
 			: "";
 	const receivers = auditReceiversOf((module) => has(module.slice("@mod/".length)));
+	const clients = [...added.clients, ...(has("exchange-id-tokens") ? [idTokenClient] : [])];
 	const blocks: [boolean, string, string][] = [
 		[true, "kernel", `kernel { deployment = ${deployment} }`],
 		[true, "audit", `audit { receivers = [${receivers.join(", ")}] }`],
@@ -87,9 +91,14 @@ function trialBlocks(
 		],
 		// Lists replace each other across layers, so the caller's clients join the trial's one list.
 		[
-			has("clients") && added.clients.length > 0,
+			has("clients") && clients.length > 0,
 			"clients",
-			`clients { registered = ${JSON.stringify(added.clients)} }`,
+			`clients { registered = ${JSON.stringify(clients)} }`,
+		],
+		[
+			has("exchange-id-tokens"),
+			"exchange-id-tokens",
+			`exchange-id-tokens { google { clients { ${idTokenClient.id} { audiences = ["trial-google-server-client-id"] } } } }`,
 		],
 		[
 			has("seal"),

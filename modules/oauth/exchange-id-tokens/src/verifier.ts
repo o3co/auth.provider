@@ -1,0 +1,121 @@
+import { createHash } from "node:crypto";
+import type { Verifier as JwtVerifier } from "@mod/external-jwt";
+import { Unavailable } from "@mod/kernel";
+import type { Space, Store } from "@mod/store";
+import type { Revocations } from "@mod/subject-revocation";
+import type { ExchangeVerifier } from "@mod/token-exchange";
+import { isWellFormedSubject, type Users } from "@mod/users";
+import { decodeJwt } from "jose";
+import { z } from "zod";
+import type { ClientEntry, Kind } from "./section.ts";
+
+export const idTokenType = "urn:ietf:params:oauth:token-type:id_token";
+
+/** One kind taken: its upstream's name, its issuers, its keys' verifier, and the clients it serves. */
+export interface Taken {
+	readonly kind: Kind;
+	readonly upstream: string;
+	readonly iss: readonly [string, ...string[]];
+	readonly jwt: JwtVerifier;
+	readonly clients: readonly (readonly [string, ClientEntry])[];
+}
+
+export interface VerifierParts {
+	readonly taken: readonly Taken[];
+	readonly users: Pick<Users, "byUpstream">;
+	readonly revocations: Pick<Revocations, "compare">;
+	readonly store: Pick<Store, "putIfAbsent">;
+	readonly used: Space;
+	readonly now: () => number;
+	readonly maxAgeMs: number;
+	readonly skewMs: number;
+}
+
+/** Kept past the last moment a token is taken by this much, so clock differences never let one back. */
+const usedAllowanceMs = 60_000;
+
+const claimsShape = z.object({
+	iss: z.string(),
+	sub: z.string().refine(isWellFormedSubject),
+	aud: z.union([z.string(), z.array(z.string())]),
+	azp: z.string().optional(),
+	iat: z.number(),
+	exp: z.number(),
+	nonce: z.string().optional(),
+});
+/** A nonce that can name a key: the 43 characters of a SHA-256 digest in base64url. */
+const digestShape = /^[A-Za-z0-9_-]{43}$/;
+
+/** Whether a client takes an id_token for `aud` from `azp`. */
+const takes = (entry: ClientEntry, aud: string, azp: string | undefined) =>
+	entry.audiences.includes(aud) &&
+	(entry["authorized-parties"].length === 0
+		? azp === undefined || azp === aud
+		: azp !== undefined && entry["authorized-parties"].includes(azp));
+
+/** The id_token verifier for token-exchange: one per token type, choosing the kind by `iss`. */
+export function idTokens(parts: VerifierParts): ExchangeVerifier {
+	const invalid = { kind: "invalid" } as const;
+	const kindOf = (token: string) => {
+		try {
+			const { iss } = decodeJwt(token);
+			return parts.taken.find((taken) => typeof iss === "string" && taken.iss.includes(iss));
+		} catch {
+			return undefined;
+		}
+	};
+	return {
+		tokenType: idTokenType,
+		async verify(token) {
+			const taken = kindOf(token);
+			if (!taken) return invalid;
+			const verified = await taken.jwt.verify(token);
+			if (verified.kind === "unavailable") throw new Unavailable("exchange-id-tokens");
+			if (verified.kind === "invalid") return invalid;
+			const read = claimsShape.safeParse(verified.claims);
+			if (!read.success) return invalid;
+			const { sub, aud, azp, iat, exp, nonce } = read.data;
+			if (parts.now() - iat * 1000 > parts.maxAgeMs + parts.skewMs) return invalid;
+			const audiences = typeof aud === "string" ? [aud] : aud;
+			const clients = taken.clients
+				.filter(([, entry]) => audiences.some((one) => takes(entry, one, azp)))
+				.map(([id]) => id);
+			// One app's id_token is one client's; an id_token two clients would take is no one's.
+			if (clients.length !== 1) return invalid;
+			const found = await parts.users.byUpstream(taken.upstream, sub);
+			if (found.kind !== "user") return invalid;
+			const subject = found.user.subject;
+			if ((await parts.revocations.compare(subject, iat * 1000, "sessions")) === "revoked") {
+				return invalid;
+			}
+			return {
+				subject,
+				issuer: taken.iss[0],
+				audience: [],
+				scope: [],
+				expiresAt: exp * 1000,
+				clients,
+				ceiling: "client",
+				...(nonce !== undefined && digestShape.test(nonce) ? { holderDigest: nonce } : {}),
+			};
+		},
+		async consume(token) {
+			const taken = kindOf(token);
+			const { iat, exp } = decodeJwt(token);
+			if (!taken || typeof iat !== "number" || typeof exp !== "number") {
+				throw new Unavailable("exchange-id-tokens");
+			}
+			// The signed part alone, so the same token under another signature is the same token.
+			const signed = token.split(".").slice(0, 2).join(".");
+			const name = createHash("sha256").update(signed).digest("base64url");
+			const lastTaken = Math.min(exp * 1000, iat * 1000 + parts.maxAgeMs) + parts.skewMs;
+			const first = await parts.store.putIfAbsent(
+				{ space: parts.used, partition: taken.kind, name },
+				true,
+				// Relative, since the store judges expiry by its own clock.
+				{ expiry: { kind: "after", ms: lastTaken - parts.now() + usedAllowanceMs } },
+			);
+			return first.kind === "written" ? "consumed" : "replayed";
+		},
+	};
+}
