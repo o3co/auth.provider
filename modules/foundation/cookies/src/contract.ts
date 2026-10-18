@@ -12,8 +12,6 @@ export type CookieLookup =
 
 /** This deployment's cookies, named and set by one rule. */
 export interface Cookies {
-	/** The cookie the request carries once under this name; none when sent twice, or over plain http where cookies are secure. */
-	read(request: HttpRequest, name: string): string | undefined;
 	/** The cookie the request carries under this name, none, or why it is withheld; a withheld one warns once a request and name. */
 	lookup(request: HttpRequest, name: string): CookieLookup;
 	/**
