@@ -6,6 +6,7 @@ import {
 	validateHeaderName,
 	validateHeaderValue,
 } from "node:http";
+import type { Socket } from "node:net";
 import { ignoredCertificates } from "@mod/client-certificate";
 import { type Clock, isUnavailable, type Log } from "@mod/kernel";
 import { ignoredForwarding, sourceOf, type TrustedProxies } from "@mod/request-source";
@@ -164,10 +165,24 @@ function ignoredHeaders({ proxies, log, clock }: Serving) {
 export function serve(serving: Serving): Server {
 	const { proxies, log, clock } = serving;
 	const warn = ignoredHeaders(serving);
+	/** Each connection's requests in flight; one with none is ended once stop begins, after what it still has to send. */
+	const inFlight = new Map<Socket, number>();
+	const open = new Set<Socket>();
+	const endIfDone = (socket: Socket) => {
+		if (!server.listening && !inFlight.has(socket)) socket.end();
+	};
 	const server = createServer((req, res) => {
 		// Outside the chain, so it must never throw: it reads the clock and adds listeners; observers
 		// are told later. Every other step runs inside, so a throw there is answered.
 		const told = ending(serving.ends, clock, req, res);
+		const socket = req.socket;
+		inFlight.set(socket, (inFlight.get(socket) ?? 0) + 1);
+		res.once("close", () => {
+			const left = (inFlight.get(socket) ?? 1) - 1;
+			if (left > 0) inFlight.set(socket, left);
+			else inFlight.delete(socket);
+			endIfDone(socket);
+		});
 		let route: string | undefined;
 		const nameRoute = (path: string) => {
 			route = path;
@@ -192,6 +207,18 @@ export function serve(serving: Serving): Server {
 				reply(bare(500));
 			});
 	});
+	server.on("connection", (socket: Socket) => {
+		open.add(socket);
+		socket.once("close", () => {
+			open.delete(socket);
+			inFlight.delete(socket);
+		});
+	});
+	// Node's own, which close() calls before the server stops listening, destroys an idle connection at
+	// once, cutting an answer still being sent.
+	server.closeIdleConnections = () => {
+		for (const socket of open) if (!inFlight.has(socket)) socket.end();
+	};
 	return server;
 }
 
