@@ -648,5 +648,5 @@ From `@mod/webauthn-login`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `webauthn-login.requests` | integer (1–100000) | `60` |  |  |  |  |
+| `webauthn-login.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, on the options route, from 1 to 100000. |
 | `webauthn-login.window` | string | `1m` |  |  |  | The window `requests` is counted over, from 1s to 1d in whole seconds, written with its unit, such as `1m`. |

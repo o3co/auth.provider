@@ -82,7 +82,6 @@ const describedLater = new Set([
 	"federation-grants",
 	"mfa-flows",
 	"session",
-	"webauthn-login",
 ]);
 
 it("describes every key, but in the sections still listed as described later", async () => {
