@@ -4,7 +4,7 @@
 - Asks a subject with no counting second factor for another proof, such as owning a contact, before a first counting factor is bound, and gives the pass `mfa`'s `begin` takes.
 
 ## Not here
-- What a proof checks, and sending it (each binding proof). Factors, and whether one is held (`mfa`). Transactions and routes (`mfa-flows`). Sealing (`seal`).
+- What a proof checks, and sending it (each binding proof). Factors, and whether one is held (`mfa`). Transactions and enrollment routes (`mfa-flows`). The routes managing factors (`mfa-management`). Sealing (`seal`).
 
 ## Offers
 - Extension point `bindingProofs`, keyed by name: `available` (subject, where it was asked from), `send` (subject, latest end, where from → as a kind's challenge), `check` (subject, what was kept, proof).
