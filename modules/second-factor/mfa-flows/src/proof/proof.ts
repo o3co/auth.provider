@@ -1,5 +1,5 @@
 import type { Audit } from "@mod/audit";
-import type { HttpRequest, HttpResponse } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import { isUnavailable, type Log } from "@mod/kernel";
 import type { LoginGate, Logins } from "@mod/login-gates";
 import type { Factors } from "@mod/mfa";
@@ -9,7 +9,6 @@ import type { SubjectRevocation } from "@mod/subject-revocation";
 import type { Permits } from "../permits/permits.ts";
 import { auditedBy } from "../recording/recording.ts";
 import {
-	answer,
 	field,
 	type Handler,
 	loginRequired,
@@ -75,11 +74,12 @@ export function resumeOver(p: ResumeParts) {
 		const authenticatedAt = facts.authenticatedAt ?? "unknown";
 		const resuming = { ...facts, amr, authenticatedAt };
 		const resumed = await p.logins.resume(request, resuming, "mfa", t.done, t.from);
-		if (resumed.kind === "held") return answer(403, resumed.answer, { cookies: resumed.cookies });
+		if (resumed.kind === "held")
+			return jsonAnswer(403, resumed.answer, { cookies: resumed.cookies });
 		// Any other outcome opened nothing (a resume past its caller's deadline): refused as a gate would.
 		if (resumed.kind !== "opened") {
 			p.log.warn("mfa-flows.login_expired", {});
-			return answer(403, { error: "login_required" });
+			return jsonAnswer(403, { error: "login_required" });
 		}
 		// A revocation landing between the proof and the opening ends the session before its cookie goes out.
 		if (await revokedSince(p.revocation, t)) {
@@ -89,7 +89,7 @@ export function resumeOver(p: ResumeParts) {
 		await opened?.(resumed.session.id);
 		const cookies = [...resumed.cookies, p.transactions.cleared()];
 		const done = carried ? { ...(t.done as object | undefined), ...carried } : (t.done ?? {});
-		return answer(200, done, { cookies });
+		return jsonAnswer(200, done, { cookies });
 	};
 }
 
@@ -114,7 +114,7 @@ const proved = (t: Transaction): t is Transaction & { readonly purpose: "login" 
 /** The challenge route also takes an enrollment's transaction. */
 const anyPurpose = (_: Transaction): _ is Transaction => true;
 
-const unknownFactor = answer(400, {
+const unknownFactor = jsonAnswer(400, {
 	error: "invalid_request",
 	error_description: "unknown factor",
 });
@@ -163,17 +163,17 @@ export function proofOver(p: ProofParts) {
 		if (asked.kind === "unknown") return unknownFactor;
 		const sent = asked.kind === "sent" ? { factor, sealed: asked.sealed } : undefined;
 		if (!(await p.transactions.challenged(id, sent))) return unknownTransaction;
-		if (asked.kind === "limited") return answer(429, { error: "rate_limited" });
+		if (asked.kind === "limited") return jsonAnswer(429, { error: "rate_limited" });
 		if (asked.kind === "refused") {
 			const refused = { kind: asked.factorKind, purpose: t.purpose };
 			if (asked.reason === "contact-changed")
 				audited("email_address_mismatch", t.subject, request, refused);
-			return answer(403, { error: "mfa_factor_refused" });
+			return jsonAnswer(403, { error: "mfa_factor_refused" });
 		}
-		if (asked.kind === "none") return answer(200, {});
+		if (asked.kind === "none") return jsonAnswer(200, {});
 		const sentOf = { kind: asked.factorKind, purpose: t.purpose };
 		audited("challenge.sent", t.subject, request, sentOf);
-		return answer(200, asked.show);
+		return jsonAnswer(200, asked.show);
 	};
 
 	const verify: Handler = async (request) => {
@@ -195,7 +195,7 @@ export function proofOver(p: ProofParts) {
 				reserved.retryAfterMs === undefined
 					? {}
 					: { "retry-after": String(Math.ceil(reserved.retryAfterMs / 1000)) };
-			return answer(429, { error: "mfa_locked", hold: reserved.hold }, { headers: retry });
+			return jsonAnswer(429, { error: "mfa_locked", hold: reserved.hold }, { headers: retry });
 		}
 		// The reservation is settled once a wrong guess keeps it or `succeeded` hands it back;
 		// anything else, a throw included, hands it back below.
@@ -218,7 +218,7 @@ export function proofOver(p: ProofParts) {
 					audited("locked.first", t.subject, request, { ...judging, hold: reserved.holds });
 				}
 				if (left === 0) await p.transactions.take(txId);
-				return answer(401, { error: "mfa_invalid", attempts_remaining: left });
+				return jsonAnswer(401, { error: "mfa_invalid", attempts_remaining: left });
 			}
 			// Taken once: of two proofs racing on one transaction, only one goes on.
 			if (!(await p.transactions.take(txId))) return unknownTransaction;
@@ -260,10 +260,10 @@ export function proofOver(p: ProofParts) {
 		const raised = await p.sessions.raise(request, amr);
 		if (!raised) return loginRequired;
 		if (!raised.raised)
-			return answer(503, { error: "temporarily_unavailable" }, { cookies: raised.cookies });
+			return jsonAnswer(503, { error: "temporarily_unavailable" }, { cookies: raised.cookies });
 		await raisedAs?.(raised.session.id);
 		const cookies = [...raised.cookies, p.transactions.cleared()];
-		return answer(200, { step_up: "verified" }, { cookies });
+		return jsonAnswer(200, { step_up: "verified" }, { cookies });
 	};
 
 	const transaction: Handler = async (request) => {
@@ -271,7 +271,7 @@ export function proofOver(p: ProofParts) {
 		const found = await p.transactions.find(request, txId);
 		if (!found) return unknownTransaction;
 		if (await revokedSince(p.revocation, found.transaction)) return loginRequired;
-		return answer(200, {
+		return jsonAnswer(200, {
 			purpose: found.transaction.purpose,
 			factors: await p.factors.held(found.transaction.subject),
 			attempts_remaining: found.transaction.attemptsLeft,
@@ -283,14 +283,14 @@ export function proofOver(p: ProofParts) {
 		const session = await p.sessions.enter(request);
 		if (!session) return loginRequired;
 		if ((await p.factors.held(session.context.subject)).length === 0) {
-			return answer(403, { error: "mfa_no_qualifying_factor" });
+			return jsonAnswer(403, { error: "mfa_no_qualifying_factor" });
 		}
 		const started = await p.transactions.start({
 			subject: session.context.subject,
 			handle: session.id,
 			purpose: "step-up",
 		});
-		return answer(
+		return jsonAnswer(
 			200,
 			{ transaction: started.id, expires_in: started.expiresIn },
 			{ cookies: started.cookies },
