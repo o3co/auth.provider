@@ -12,7 +12,7 @@
 - Whether signing is asymmetric, the `alg` it signs with, and the path of the public key set, a route contributed to `http` that answers its listed origins.
 - `publicJwk`: a JWK the platform reads as a public key, kept as given.
 - `publicPem`: a public key written as PEM.
-- `verifiesUnder`: whether a JWK may verify, under an algorithm or any of `verifyAlgorithms`.
+- `verifiesUnder`: whether a JWK may verify, under an algorithm or any of `verifyAlgorithms`, typed as `VerifyAlgorithm`; `isVerifyAlgorithm` tells one from any other name.
 - `publicMembers`: a JWK rebuilt from its type's public members alone, without reading it.
 - `isCanonicalJws`: whether a compact JWS is written in its one form; `verify` answers any other as `malformed`. `secretBytes` (exactly or at least n): the setting of a secret's bytes every module takes, strict base64 of at least 8 byte values, never a `REPLACE-` sample; a refusal never names the value.
 - Operator section: `signing` (`kid`, `alg`, and a PKCS8 PEM `private-key`, or for HS256 a hex or base64 `secret`), `next` (`kid`, `alg`, `public-key`), `previous` (`kid`, `alg`, `public-key`, `expires-at`).
