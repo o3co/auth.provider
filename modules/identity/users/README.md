@@ -20,7 +20,7 @@
 ## Invariants
 - A subject is 1 to 255 ASCII characters: one outside that refuses boot in the settings (the identifier's, where `subject` is left out), is unavailable in a ledger's answer, is none when looked up without asking the ledger, and throws TypeError on `link`.
 - Identifiers match exactly, never folded or trimmed, and a password as typed, with no Unicode normalization; an empty identifier or subject is none, and the ledger is not asked.
-- Boot is refused on identifiers that differ only in case, Unicode normal form or surrounding whitespace, on two identifiers with one subject, on an upstream identity linked to two users, and on more than one ledger or a ledger beside `registered` users.
+- Boot is refused on identifiers that differ only in case, Unicode normal form or surrounding whitespace, on two identifiers with one subject, on an upstream identity linked to two users, on one whose IdP name no module declares (at its `idp`), and on more than one ledger or a ledger beside `registered` users.
 - Unanswerable is never read as none: a written link then finds its subject with no attributes, and claimed contacts are unanswerable.
 - An upstream identity matches exactly, by IdP name and whole upstream subject, never by email, is never created on the fly, and links to one subject at most, also when two ask at once.
 - Only an explicit link links; unlinking removes only the subject's own link, and a written link finds its subject's user, or none where the ledger answers none for the subject: the ledger's none outweighs the link.

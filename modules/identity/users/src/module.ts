@@ -49,10 +49,33 @@ function namesRefused(declarations: readonly UpstreamNames[]): string[] {
 	];
 }
 
+/** Each registered link through an IdP no module declares a name for: nothing would ever look it up. */
+function undeclaredLinks(
+	registered: z.output<typeof section>["registered"],
+	declarations: readonly UpstreamNames[],
+) {
+	const declared = new Set(declarations.flatMap((d) => d.names.map((n) => n.name)));
+	return registered.flatMap((user, i) =>
+		user.upstream.flatMap((link, j) =>
+			declared.has(link.idp)
+				? []
+				: [
+						{
+							where: `users.registered.${i}.upstream.${j}.idp`,
+							reason: `no module declares the IdP name ${link.idp}`,
+						},
+					],
+		),
+	);
+}
+
 export default defineModule({ name: "users", section }, (m) => [
 	m.provide(users).by(async (c) => {
-		const refused = namesRefused(await c.collect(upstreamNames));
+		const declarations = await c.collect(upstreamNames);
+		const refused = namesRefused(declarations);
 		if (refused.length > 0) return c.refuse("users", refused.join("; "));
+		const undeclared = undeclaredLinks(c.section.registered, declarations);
+		if (undeclared.length > 0) return c.refuseAll(undeclared);
 		const [ledger, ...more] = await c.collect(ledgers);
 		if (more.length > 0) return c.refuse("users", "more than one user ledger is contributed");
 		if (ledger && c.section.registered.length > 0) {
