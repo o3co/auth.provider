@@ -1,17 +1,21 @@
+import { cookies } from "@mod/cookies";
 import { listening } from "@mod/http";
 import { testRequest } from "@mod/http/testing";
-import { BootRefused, defineModule } from "@mod/kernel";
+import { BootRefused, contract, defineModule } from "@mod/kernel";
 import { openedAfterHold } from "@mod/login-gates";
 import { type Enrolled, factorKinds, factors } from "@mod/mfa";
+import { seal } from "@mod/seal";
 import { sessions } from "@mod/session";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { afterEach, describe, expect, it } from "vitest";
+import { transactionListings, transactionStore } from "../src/store.ts";
 import {
 	type HeldFacts,
 	stored,
 	type Transaction,
 	transactionOf,
 } from "../src/transactions/records.ts";
+import { transactionsOver } from "../src/transactions/transactions.ts";
 import { clock, during, serve } from "./harness.ts";
 
 /** A kind that sends a challenge, and takes what the challenge kept as the proof after it. */
@@ -1028,7 +1032,48 @@ describe("mfa under races and misuse", () => {
 			{ transaction_id: tx, proof: `${begun.body.secret}:0` },
 			{ jar: held },
 		);
-		expect(done.status).not.toBe(200);
+		// The start held no pending, so there is nothing to complete.
+		expect([done.status, done.body.error]).toEqual([400, "invalid_request"]);
+		const kept = await s.app.get(factors).held("lou");
+		expect(kept.filter((f) => f.kind === "code")).toHaveLength(1);
+	});
+
+	it("binds nothing from a login's pending sealed before mfa was told logins, once another factor counts", async () => {
+		/** Holds a pending in a transaction, as one sealed by an earlier release, without its first mark. */
+		const forging =
+			contract<(tx: string, subject: string, secret: string) => Promise<boolean>>("test.forging");
+		const forger = defineModule({ name: "forger" }, (m) => [
+			m.provide(forging).by(async (c) => {
+				const sealed = await c.get(seal);
+				const held = transactionsOver({
+					store: await c.get(transactionStore),
+					listings: await c.get(transactionListings),
+					jar: await c.get(cookies),
+					log: c.log,
+					random: c.random.bytes,
+					clock: c.clock,
+					ttlMs: 300_000,
+					attempts: 5,
+				});
+				return (tx, subject, secret) =>
+					held.hold(
+						tx,
+						sealed.seal(JSON.stringify({ kind: "code", secret }), `${subject}\npending`),
+					);
+			}),
+		]);
+		const s = await serve({ mode: "required" }, [forger]);
+		const { tx } = await s.heldLogin("lou");
+		const held = new Map(s.jar());
+		await s.enrollCode("lou");
+		expect(await s.app.get(forging)(tx, "lou", "forged")).toBe(true);
+		const done = await s.call(
+			"POST",
+			"/session/mfa/enrollment/complete",
+			{ transaction_id: tx, proof: "forged:0" },
+			{ jar: held },
+		);
+		expect([done.status, done.body.error]).toEqual([401, "login_required"]);
 		const kept = await s.app.get(factors).held("lou");
 		expect(kept.filter((f) => f.kind === "code")).toHaveLength(1);
 	});
