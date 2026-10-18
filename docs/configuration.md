@@ -383,13 +383,13 @@ From `@mod/mtls`.
 | `mtls.revocation.on-unavailable` | reject \| allow |  |  |  |  | Required: whether an outage refuses the binding, or binds with a warning. |
 | `mtls.revocation.hosts` | list of string |  |  |  |  | Required: the only hosts revocation material is fetched from; `.name` covers the name and the names under it. |
 | `mtls.revocation.nonce` | boolean | `true` |  |  |  | Whether an OCSP request carries a nonce. |
-| `mtls.revocation.skew-seconds` | integer (0–3600) | `300` |  |  |  | How far ahead of this host's clock revocation material may say it was issued. |
-| `mtls.revocation.ocsp-fresh-seconds` | integer (1–86400) | `600` |  |  |  | How long an OCSP answer without a next update is taken. |
-| `mtls.revocation.crl-ttl-seconds` | integer (1–86400) | `3600` |  |  |  | How long a CRL is kept at most, its next update aside. |
-| `mtls.revocation.failure-seconds` | integer (1–3600) | `30` |  |  |  | How long a source that failed is not asked again. |
+| `mtls.revocation.skew` | string | `5m` |  |  |  | How far ahead of this host's clock revocation material may say it was issued, from 0s to 1h. |
+| `mtls.revocation.ocsp-fresh` | string | `10m` |  |  |  | How long an OCSP answer without a next update is taken, from 1s to 1d. |
+| `mtls.revocation.crl-ttl` | string | `1h` |  |  |  | How long a CRL is kept at most, its next update aside, from 1s to 1d. |
+| `mtls.revocation.failure-lifetime` | string | `30s` |  |  |  | How long a source that failed is not asked again, from 1s to 1h. |
 | `mtls.revocation.crl-entries` | integer (1–65536) | `256` |  |  |  | How many CRLs are kept. |
 | `mtls.revocation.ocsp-entries` | integer (1–65536) | `1024` |  |  |  | How many OCSP answers are kept. |
-| `mtls.revocation.timeout-ms` | integer (1–60000) | `3000` |  |  |  | How long one fetch may take. |
+| `mtls.revocation.timeout` | string | `3s` |  |  |  | How long one fetch may take, from 1ms to 1m. |
 | `mtls.revocation.max-fetches` | integer (1–64) | `4` |  |  |  | How many sources one check may fetch from; past them, what is left is unconfirmed. |
 
 ## oidc

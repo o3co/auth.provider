@@ -16,7 +16,7 @@
 - Operator section, each value explained in its schema:
   - `mode`: `self-signed`, or `pki` with `anchors`, `max-intermediates` (4), `min-rsa-bits` (2048) and `revocation`.
   - `revocation.mode`: `disabled`, `crl`, `ocsp` or `both`, with `on-unavailable` and `hosts`.
-  - `revocation` limits: `nonce` (true), `skew-seconds` (300), `ocsp-fresh-seconds` (600), `crl-ttl-seconds` (3600), `failure-seconds` (30), `crl-entries` (256), `ocsp-entries` (1024), `timeout-ms` (3000), `max-fetches` (4).
+  - `revocation` limits: `nonce` (true), `skew` (`5m`), `ocsp-fresh` (`10m`), `crl-ttl` (`1h`), `failure-lifetime` (`30s`), `crl-entries` (256), `ocsp-entries` (1024), `timeout` (`3s`), `max-fetches` (4); times written with their unit, a bare number refused.
 
 ## Invariants
 - The binding is the base64url SHA-256 of the leaf's DER, the same at issuance and at a resource.
