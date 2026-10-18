@@ -1456,6 +1456,9 @@ importers:
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
       '@mod/subject-attributes':
         specifier: workspace:*
         version: link:../../identity/subject-attributes

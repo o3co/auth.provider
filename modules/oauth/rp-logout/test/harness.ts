@@ -17,6 +17,7 @@ import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
 import oidc from "@mod/oidc/module";
 import { type Outbound, type OutboundRequest, outbound } from "@mod/outbound";
+import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import subjectAttributes from "@mod/subject-attributes/module";
@@ -113,6 +114,7 @@ export async function harness(
 			issuerModule,
 			memoryUsersStores().module,
 			usersModule,
+			secretHashModule,
 			oidc,
 			subjectAttributes,
 			clientsModule,
