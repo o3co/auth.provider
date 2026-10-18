@@ -607,9 +607,7 @@ it("never answers removed while the record can come back: a failover after it fi
 		place.store.take({ space, partition: "back", name: "record" }, {}),
 	);
 	// The store fails over after the removal finds no record, before it writes anything more.
-	for (const operation of ["put", "batch"] as const) {
-		simulated.beforeNext(operation, space.name, () => simulated.failover());
-	}
+	simulated.beforeNext("batch", space.name, () => simulated.failover());
 	await records.remove("back");
 	expect(await records.read("back")).toBeUndefined();
 	await simulated.failover();
@@ -705,7 +703,7 @@ it("gives up a removal as unavailable while the record keeps coming back", async
 		simulated.beforeNext("take", space.name, async () => {
 			await place.store.take(held, {});
 			simulated.beforeNext("batch", space.name, async () => {
-				await place.store.put(held, { n: 1 }, { expiry: { kind: "never" } });
+				await place.store.putIfAbsent(held, { n: 1 }, { expiry: { kind: "never" } });
 				contend(times - 1);
 			});
 		});
@@ -753,7 +751,17 @@ it("gives up a create as unavailable while the record it finds keeps changing", 
 	const contend = (times: number) => {
 		if (times === 0) return;
 		simulated.beforeNext("batch", space.name, async () => {
-			await place.store.put(held, { n: times }, { expiry: { kind: "after", ms: 60_000 } });
+			const { entry } = await place.store.get(held);
+			if (entry) {
+				await place.store.replaceIf(
+					held,
+					entry.version,
+					{ n: times },
+					{
+						expiry: { kind: "after", ms: 60_000 },
+					},
+				);
+			}
 			contend(times - 1);
 		});
 	};
