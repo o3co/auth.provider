@@ -10,7 +10,7 @@ import {
 	kernelConfig,
 	type Runtime,
 } from "@mod/kernel";
-import { type Narrower, outbound, outboundPolicy } from "@mod/outbound";
+import { credentialPolicy, type Narrower, outbound, outboundPolicy } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Ledger, ledgers, userAttribute, users } from "@mod/users";
@@ -605,6 +605,7 @@ describe("users-http", () => {
 					return undefined;
 				},
 			})),
+			m.provide(credentialPolicy).by(() => ({ refusalOf: () => undefined })),
 		]);
 		const app = await assemble({
 			modules: [
