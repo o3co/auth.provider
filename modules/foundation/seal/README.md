@@ -31,3 +31,6 @@
 - key ring: the current sealing key, the next key (opening before it seals), and past keys used only for opening.
 - stale: sealed by a `previous` key; its holder seals it again when it writes it anyway. A value `next` sealed is newer, never stale.
 - context: a name for the owner of a sealed value, decided by the using side.
+
+## Rules for operators
+- Retire a `previous` key only after a reseal run in which no holder failed and every holder answered `resealed` 0 and `left` 0. A walk may miss a value across a failover or restart; the next run then seals it again, so its `resealed` is not 0.
