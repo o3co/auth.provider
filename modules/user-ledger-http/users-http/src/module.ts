@@ -1,4 +1,4 @@
-import { deepFreeze, defineModule, Unavailable } from "@mod/kernel";
+import { deepFreeze, defineModule, setting, Unavailable } from "@mod/kernel";
 import {
 	DestinationRefused,
 	jsonObjectOf,
@@ -32,16 +32,39 @@ function keyBytes(token: string): number {
 }
 
 const section = z.strictObject({
-	/** Where a password is verified. Plain http is reached only where outbound's policy names it. */
-	"verify-url": urlSetting({ schemes: ["https", "http"] }),
-	/** A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material. */
+	"verify-url": urlSetting({ schemes: ["https", "http"] }).describe(
+		"Where a password is verified. Plain http is reached only where outbound's policy names it.",
+	),
 	credential: z
 		.string()
 		.regex(/^[A-Za-z0-9\-._~+/]+=*$/)
 		.refine((token) => keyBytes(token) >= 32, "at least 32 bytes of key material")
-		.optional(),
-	"timeout-ms": z.number().int().min(1).max(60_000).optional(),
-	"max-response-bytes": z.number().int().min(1).max(16_777_216).optional(),
+		.optional()
+		.describe("A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material."),
+	timeout: setting
+		.duration("ms")
+		.pipe(z.number().int().min(1).max(60_000))
+		.optional()
+		.describe("How long a call may take, from 1ms to 1m, narrowing outbound's cap."),
+	"max-response-size": setting
+		.size()
+		.pipe(z.number().int().min(1).max(16_777_216))
+		.optional()
+		.describe("The largest answer read, from 1B to 16MiB, narrowing outbound's cap."),
+	"timeout-ms": z
+		.number()
+		.int()
+		.min(1)
+		.max(60_000)
+		.optional()
+		.describe("Milliseconds; write `timeout` instead."),
+	"max-response-bytes": z
+		.number()
+		.int()
+		.min(1)
+		.max(16_777_216)
+		.optional()
+		.describe("Bytes; write `max-response-size` instead."),
 });
 
 const none: Verified = deepFreeze({ kind: "none" });
@@ -91,12 +114,9 @@ function userOf(answer: Readonly<Record<string, unknown>>) {
 
 export default defineModule({ name: "users-http", section, replicaSafe: true }, (m) => [
 	m.contribute(ledgers).by(async (c): Promise<Ledger> => {
-		const {
-			"verify-url": url,
-			credential,
-			"max-response-bytes": maxBytes,
-			"timeout-ms": timeoutMs,
-		} = c.section;
+		const { "verify-url": url, credential } = c.section;
+		const maxBytes = c.section["max-response-bytes"] ?? c.section["max-response-size"];
+		const timeoutMs = c.section["timeout-ms"] ?? c.section.timeout;
 		// The operator's own URL: a host in `internal-hosts` is reached at a private address.
 		const narrower = {
 			hosts: [new URL(url).hostname],
