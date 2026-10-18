@@ -16,7 +16,7 @@ const setUp = (part: PasskeyPart): NewPart => ({
 			origins: [...part.origins],
 			...(part.topOrigins ? { "top-origins": [...part.topOrigins] } : {}),
 			...(part.userVerification ? { "user-verification": part.userVerification } : {}),
-			...(part.challengeSeconds ? { "challenge-seconds": part.challengeSeconds } : {}),
+			...(part.challengeSeconds ? { "challenge-lifetime": `${part.challengeSeconds}s` } : {}),
 			...(part.maxCredentials ? { "max-credentials": part.maxCredentials } : {}),
 		},
 		...(part.login
