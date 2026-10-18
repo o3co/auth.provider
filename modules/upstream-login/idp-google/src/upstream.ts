@@ -99,14 +99,14 @@ export function opened(
 				}
 				return { ...login, amr: [], tokens: { ...tokens, idToken } };
 			}),
-		refresh: (refreshToken, scope) =>
+		refresh: (refreshToken, scopes) =>
 			guarded(async () => {
 				const form = new URLSearchParams({
 					grant_type: "refresh_token",
 					refresh_token: refreshToken,
 				});
-				if (scope.length > 0) form.set("scope", scope.join(" "));
-				return refreshAnswerOf(await post(form), scope, "idp-google");
+				if (scopes.length > 0) form.set("scope", scopes.join(" "));
+				return refreshAnswerOf(await post(form), scopes, "idp-google");
 			}),
 		endSession: (at) => {
 			const configured = s["end-session-endpoint"];

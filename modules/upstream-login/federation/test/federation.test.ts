@@ -358,7 +358,7 @@ describe("federation", () => {
 				throw new Error(`${read.issuer}:${read.port}`);
 			},
 		});
-		const at = { name: "a", redirectUri: "https://as.example/cb" };
+		const at = { idp: "a", redirectUri: "https://as.example/cb" };
 		await expect(type.open({ issuer: "i", port: 1 }, at)).rejects.toThrow("i:1");
 	});
 

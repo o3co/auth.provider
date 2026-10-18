@@ -55,7 +55,7 @@ export const amrSourceIn = (c: BuildContext<Settings>) => amrSourceWith(c.sectio
 async function openUpstream(
 	idpType: IdpType,
 	settings: unknown,
-	at: { name: string; redirectUri: string; where: string },
+	at: { idp: string; redirectUri: string; where: string },
 ): Promise<{ readonly upstream: Upstream } | { readonly refusal: Refusal }> {
 	try {
 		return { upstream: await idpType.open(settings, at) };
@@ -94,7 +94,8 @@ export async function openIdps(parts: Parts) {
 			continue;
 		}
 		const redirectUri = `${origin}${callbackPath(name)}`;
-		const opened = await openUpstream(idpType, settings.data, { name, redirectUri, where });
+		const at = { idp: name, redirectUri, where };
+		const opened = await openUpstream(idpType, settings.data, at);
 		if ("refusal" in opened) {
 			refusals.push(opened.refusal);
 			continue;

@@ -12,6 +12,7 @@
 ## Offers
 - Extension point `idpTypes`: type name → settings schema, and opening an IdP at boot → upstream; `idpType` types what `open` receives by the type's schema
   - A type sees only its own settings, never `type` or the others the implementation reads.
+  - `open` gets the IdP's name as `idp`, the word `upstreams.of` and the receivers use, and its redirect URI.
   - `open` throws `UpstreamMismatch(reason, at)` to say why it refuses the settings and at which of their keys; the reason names no configuration value.
 - An upstream: how it answers (in the query or a posted form), its clock allowance, authorization URL, and code exchange → upstream login, with its tokens and profile if the type gives them
   - The code exchange gets the verifier, nonce, redirect URI and the callback's `iss`.

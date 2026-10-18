@@ -118,10 +118,10 @@ export function opened(
 				const { login } = await idTokenOf(idToken, exchange.nonce);
 				return { ...login, amr: [], tokens: { ...tokens, idToken } };
 			}),
-		refresh: (refreshToken, scope) =>
+		refresh: (refreshToken, scopes) =>
 			guarded(async () => {
 				const answer = await post({ grant_type: "refresh_token", refresh_token: refreshToken });
-				return refreshAnswerOf(answer, scope, "idp-apple");
+				return refreshAnswerOf(answer, scopes, "idp-apple");
 			}),
 		...(end ? { endSession: (ending) => endSessionUrl(end, ending) } : {}),
 	};
