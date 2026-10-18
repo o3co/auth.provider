@@ -63,6 +63,7 @@ ledgerContract("settings", {
 		const { source, checks } = counting();
 		return { ledger: source, checks };
 	},
+	upstreamOfAlice: { idp: "example", subject: "u-alice" },
 });
 
 it("matches a password of exactly 1024 bytes", async () => {

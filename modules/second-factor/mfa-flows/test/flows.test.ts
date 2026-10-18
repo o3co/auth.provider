@@ -1,6 +1,6 @@
 import { listening } from "@mod/http";
 import { testRequest } from "@mod/http/testing";
-import { type BootRefused, defineModule } from "@mod/kernel";
+import { BootRefused, defineModule } from "@mod/kernel";
 import { openedAfterHold } from "@mod/login-gates";
 import { type Enrolled, factorKinds } from "@mod/mfa";
 import { sessions } from "@mod/session";
@@ -67,7 +67,7 @@ it("refuses a POST without same-origin evidence before anything else", async () 
 });
 
 it("limits the forms it takes per source, after the same-origin check, and never its pages", async () => {
-	const { call, signIn } = await serve({ requests: 2, "window-seconds": 60 });
+	const { call, signIn } = await serve({ requests: 2, window: "1m" });
 	await signIn();
 	const crossSite = { headers: { origin: "https://elsewhere.example" } };
 	for (let i = 0; i < 2; i++) {
@@ -126,7 +126,7 @@ describe("mfa at login", () => {
 
 	it("holds a subject after repeated failures even for the right proof, but a way back works and ends the run", async () => {
 		const s = await serve({
-			lockout: { threshold: 2, "backoff-seconds": 900, budget: 10, "hard-limit": 100 },
+			lockout: { threshold: 2, backoff: "15m", budget: 10, "hard-limit": 100 },
 		});
 		const { secret, done } = await s.enrollCode();
 		const codes = done.body.recovery_codes as string[];
@@ -343,7 +343,7 @@ describe("mfa at login", () => {
 
 describe("the operator's numbers", () => {
 	/** A wrong guess at a held login of a subject with a code factor, then a right one after `ms` on the places' clocks. */
-	const guessed = async (lockout: Record<string, number>, ms: number) => {
+	const guessed = async (lockout: Record<string, number | string>, ms: number) => {
 		const s = await serve({ lockout });
 		const { secret } = await s.enrollCode();
 		const { tx, factor } = await s.heldLogin();
@@ -353,14 +353,17 @@ describe("the operator's numbers", () => {
 		s.lagStores(ms);
 		return [wrong.status, (await verify(`${secret}:1`)).body.hold];
 	};
-	const quick = { "backoff-seconds": 1, "max-backoff-seconds": 1 };
+	const quick = { backoff: "1s", "max-backoff": "1s" };
 	it.each([
-		["backoff", { threshold: 1, "backoff-seconds": 2 }, 1500],
-		["budget", { ...quick, threshold: 1, budget: 1, "budget-window-seconds": 10 }, 1500],
+		["backoff", { threshold: 1, backoff: "2s" }, 1500],
+		["budget", { ...quick, threshold: 1, budget: 1, "budget-window": "10s" }, 1500],
 		["hard", { ...quick, threshold: 1, budget: 1, "hard-limit": 1 }, 0],
-	])("holds by the lockout's numbers, its times in seconds: %s", async (hold, lockout, ms) => {
-		expect(await guessed(lockout, ms)).toEqual([401, hold]);
-	});
+	])(
+		"holds by the lockout's numbers, its times written with their unit: %s",
+		async (hold, lockout, ms) => {
+			expect(await guessed(lockout, ms)).toEqual([401, hold]);
+		},
+	);
 
 	it("refuses to boot with lockout numbers rate-limit cannot use", async () => {
 		await serve();
@@ -371,8 +374,17 @@ describe("the operator's numbers", () => {
 		]);
 	});
 
+	it("refuses to boot with a time under its name in seconds, or naming no unit", async () => {
+		const before = [{ "window-seconds": 300 }, { lockout: { "backoff-seconds": 900 } }];
+		for (const settings of [...before, { window: 300 as unknown as string }]) {
+			await expect(serve(settings as object), JSON.stringify(settings)).rejects.toBeInstanceOf(
+				BootRefused,
+			);
+		}
+	});
+
 	it("counts the forms per source in a window of seconds", async () => {
-		const s = await serve({ requests: 1, "window-seconds": 1 });
+		const s = await serve({ requests: 1, window: "1s" });
 		await s.signIn();
 		const rename = () => s.call("POST", "/session/mfa/factors/rename", {});
 		expect([(await rename()).status, (await rename()).status]).toEqual([400, 429]);
@@ -419,7 +431,7 @@ describe("audit events", () => {
 
 	it("records each refusal of a held subject, and a way back as a recovery code used and verified", async () => {
 		const s = await serve({
-			lockout: { threshold: 1, "backoff-seconds": 900, budget: 10, "hard-limit": 100 },
+			lockout: { threshold: 1, backoff: "15m", budget: 10, "hard-limit": 100 },
 		});
 		const { done } = await s.enrollCode();
 		const first = await s.heldLogin();
@@ -470,7 +482,7 @@ describe("audit events", () => {
 
 	it("records the start of a hold with the wrong guess that starts it, never with a proof right once", async () => {
 		const s = await serve({
-			lockout: { threshold: 2, "backoff-seconds": 900, budget: 10, "hard-limit": 100 },
+			lockout: { threshold: 2, backoff: "15m", budget: 10, "hard-limit": 100 },
 		});
 		const { secret } = await s.enrollCode();
 		const first = await s.heldLogin();
@@ -502,7 +514,7 @@ describe("audit events", () => {
 
 describe("transactions on the kernel's clock", () => {
 	it("ends a transaction at its deadline on the kernel's clock, whatever the store's clock says", async () => {
-		const s = await serve({ "transaction-seconds": 60 });
+		const s = await serve({ "transaction-lifetime": "1m" });
 		await s.enrollCode();
 		const { tx } = await s.heldLogin();
 		s.lagStores(-600_000);
@@ -582,7 +594,7 @@ describe("transactions on the kernel's clock", () => {
 	});
 
 	it("holds no binding in a login's transaction whose lifetime ends before the hold writes", async () => {
-		const s = await serve({ mode: "required", "transaction-seconds": 60 });
+		const s = await serve({ mode: "required", "transaction-lifetime": "1m" });
 		const { tx } = await s.heldLogin("carol");
 		s.kept.beforeNextUpdate(async () => {
 			clock.shift += 60_000;
@@ -595,7 +607,7 @@ describe("transactions on the kernel's clock", () => {
 	});
 
 	it("keeps a taken transaction until its lifetime, read as unknown", async () => {
-		const s = await serve({ "transaction-seconds": 60 });
+		const s = await serve({ "transaction-lifetime": "1m" });
 		const { secret } = await s.enrollCode();
 		const { tx, factor } = await s.heldLogin();
 		const own = new Map(s.jar());

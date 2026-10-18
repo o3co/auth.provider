@@ -8,11 +8,11 @@
 
 ## Offers
 - `urlSetting`: a module's `UrlRules` → a schema part for a configured URL.
-- `UrlRules`: the schemes, whether a query may be part (default yes), and whether a trailing `/` is kept (default) or refused.
+- `UrlRules`: the schemes, whether plain `http` is also taken, on a loopback host only (`loopbackHttp`, default no), whether a query may be part (default yes), and whether a trailing `/` is kept (default) or refused.
 
 ## Invariants
 - A configured URL is written `<scheme>://` in lower case.
-- Its scheme is one of the schemes the module gives.
+- Its scheme is one of the schemes the module gives; with `loopbackHttp`, also `http`, on a loopback host only: `localhost`, an IPv4 address in 127.0.0.0/8 or `[::1]`, judged on the host as the parser writes it. Any other host over `http` is refused, `localhost.`, a subdomain of `localhost`, `0.0.0.0` and an IPv4-mapped address among them.
 - It has a host.
 - It holds no userinfo.
 - It holds no fragment, not even a bare `#`.

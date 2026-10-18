@@ -18,8 +18,8 @@
 - Each reference is held to the committed file; a file that differs fails, naming the command.
 - A key with no description fails, outside the sections listed as described later.
 - Every `.prefault` value reads through its key's own schema.
-- Outside the sections listed for later: a time or size key is read by `kernel`'s `setting.duration` or `setting.size` (a bare number refused) under a name with no unit (`-seconds`, `-ms`, `-bytes`), and a default is a `.prefault`, never a `.default()`.
-- A section that keeps a rule leaves its list, and never comes back. Each failure names the key and the rule it breaks.
+- In every section, a time or size key is read by `kernel`'s `setting.duration` or `setting.size` (a bare number refused) under a name with no unit (`-seconds`, `-ms`, `-bytes`), and a default is a `.prefault`, never a `.default()`.
+- A section listed as described later leaves the list once it describes every key, and never comes back. A failure of the time, size and prefault rules names the key and the rule it breaks.
 - A kind two modules declare must be declared alike in the audit event reference.
 
 ## Depends on

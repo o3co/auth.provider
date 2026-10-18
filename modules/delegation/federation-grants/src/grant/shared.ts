@@ -38,14 +38,14 @@ export async function sharedOver(c: BuildContext<Settings>) {
 			c.refuse(`${name}.connections.${connection}`, `the IdP ${idp} offers no delegation`);
 		}
 	}
-	const maxMs = c.section["max-seconds"] * 1000;
+	const maxMs = c.section["max-lifetime"] * 1000;
 	return {
 		origin: origin ?? "",
 		records: await recordsOver(c),
 		judge: judgeWith(await c.get(revocations), {
 			keep: c.section["keep-on-subject-revocation"],
 			maxMs,
-			allowanceMs: c.section["revocation-skew-seconds"] * 1000,
+			allowanceMs: c.section["revocation-skew"] * 1000,
 		}),
 		listed: listingWith(await c.get(subjectGrants), c.log),
 	};

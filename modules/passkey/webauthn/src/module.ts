@@ -6,8 +6,8 @@ import { freshHandle, keptChallenges, keptPasskeys } from "./records.ts";
 import { registrationsOver } from "./registration/registrations.ts";
 import { type Settings, section } from "./section.ts";
 
-/** The challenge's lifetime, by the name in seconds where it is still given. */
-const challengeMs = (s: Settings) => (s["challenge-seconds"] ?? s["challenge-lifetime"]) * 1000;
+/** The challenge's lifetime. */
+const challengeMs = (s: Settings) => s["challenge-lifetime"] * 1000;
 
 const relyingParty = (s: Settings) => ({
 	id: s["rp-id"],

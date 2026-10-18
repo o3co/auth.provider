@@ -8,7 +8,7 @@ const section = z.strictObject({
 		.int()
 		.min(1)
 		.max(1024)
-		.default(defaultMaxConcurrent)
+		.prefault(defaultMaxConcurrent)
 		.describe(
 			"Secret checks under way at once in this process, every caller's together; one more is unavailable at once, before any hashing.",
 		),

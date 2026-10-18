@@ -2,9 +2,9 @@ import type { AuditEvent } from "@mod/audit";
 import { testRequest } from "@mod/http/testing";
 import { isUnavailable, Unavailable } from "@mod/kernel";
 import { recordingLog } from "@mod/kernel/testing";
-import { longestRecentMs } from "@mod/mfa";
 import type { LockoutPolicy, Released, ReleaseTerms, Standing } from "@mod/rate-limit";
 import type { Answer, AuthContext, Entry } from "@mod/session";
+import { longestRecentMs } from "@mod/session";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { describe, expect, it } from "vitest";
 import { clock, serve } from "../../../test/harness.ts";
@@ -310,7 +310,7 @@ describe("a user's own release of the second-factor lockout", () => {
 
 	it("releases the real lockout for a session a recovery code let in, once, answering the same again", async () => {
 		const s = await serve({
-			lockout: { threshold: 2, "backoff-seconds": 900, budget: 10, "hard-limit": 100 },
+			lockout: { threshold: 2, backoff: "15m", budget: 10, "hard-limit": 100 },
 		});
 		const { done } = await s.enrollCode("bea");
 		const codes = (done.body.recovery_codes ?? []) as string[];

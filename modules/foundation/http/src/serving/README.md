@@ -23,10 +23,11 @@ Internal module of `http`: the server that answers each request with the route i
 - The request a policy or handler gets is frozen, and its maps cannot be written to.
 - A policy's or handler's failure is logged by its kind only, never its message.
 - Any other failure is answered `500` and logged as a warning, `http.unexpected_failure`, by the route reached (when known) and its kind only, never its message.
-- A request target that is not a URL gets `400`.
+- A request target that is not a URL, or whose query is not well-formed UTF-8, gets `400` before any route.
 - An answer whose headers cannot be written gets `500`, with none of its own headers.
 - An answer's length is stated in bytes, so a HEAD answer carries the length its GET would.
 - Stop refuses new connections and closes idle ones.
+- A connection is closed only after what it still has to send, so stop never cuts an answer already written; one sent as keep-alive before stop is closed once it is sent.
 - Requests in flight finish (`Connection: close`) until stop's deadline cuts them.
 
 ## Depends on

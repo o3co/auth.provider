@@ -82,70 +82,15 @@ it("tells a key that reads time or size with its unit asked for from one that ta
 	expect(await refusesUnitless(unitOptional)).toBe(false);
 });
 
-/** Sections whose time and size keys still name their unit or take a bare number; a section leaves once its owner moves it, and never comes back. */
-const unitsLater = new Set([
-	"code-grant",
-	"federation-grants",
-	"mail-smtp",
-	"mfa-email",
-	"mfa-flows",
-	"mtls",
-	"outbound",
-	"passkey-registration",
-	"redis",
-	"rp-logout",
-	"session-lifecycle",
-	"token-endpoint",
-	"token-exchange",
-	"users-http",
-	"webauthn",
-	"webauthn-login",
-]);
-/** Sections whose schema still gives a default by `.default()`; a section leaves once its owner moves it, and never comes back. */
-const prefaultLater = new Set([
-	"code-grant-store",
-	"federation-grants",
-	"federation-grants-store",
-	"mail-smtp",
-	"mfa-email",
-	"mfa-flows",
-	"mfa-webauthn",
-	"mtls",
-	"outbound",
-	"passkey-registration",
-	"rate-limit",
-	"redis",
-	"refresh-store",
-	"rp-logout",
-	"rp-logout-store",
-	"secret-hash",
-	"sender-binding",
-	"session-lifecycle",
-	"session-store",
-	"session-tokens-store",
-	"store",
-	"token-endpoint",
-	"webauthn-login",
-]);
-
-/** Each place a rule is broken: the key path, in its section. */
-async function broken(breaks: (placed: Placed) => Promise<boolean>) {
-	const found: { section: string; key: string }[] = [];
+/** Each place that breaks `rule`, by its key path. */
+async function breaking(rule: string, breaks: (placed: Placed) => Promise<boolean>) {
+	const found: string[] = [];
 	for (const s of await sections) {
 		for (const placed of nodes(s)) {
-			if (await breaks(placed)) found.push({ section: s.section, key: placed.path.join(".") });
+			if (await breaks(placed)) found.push(`${placed.path.join(".")}: ${rule}`);
 		}
 	}
 	return found;
-}
-
-/** The places that break `rule` outside the sections listed for later, and each listed section that no longer does. */
-function outsideLater(found: { section: string; key: string }[], later: Set<string>, rule: string) {
-	const left = [...later].filter((s) => !found.some((f) => f.section === s));
-	return [
-		...found.filter((f) => !later.has(f.section)).map((f) => `${f.key}: ${rule}`),
-		...left.map((s) => `${s}: keeps the rule now, so leaves the list for later`),
-	];
 }
 
 const unitRule =
@@ -153,17 +98,18 @@ const unitRule =
 const prefaultRule =
 	"a default is given by .prefault(value), written as an operator writes it, never by .default()";
 
-it("reads time and size by a marker asked for its unit, under a name without one, but in the sections still listed", async () => {
-	const found = await broken(
+it("reads time and size in every section by a marker asked for its unit, under a name without one", async () => {
+	const found = await breaking(
+		unitRule,
 		async ({ node, path, key }) =>
 			key &&
 			(/-(seconds|ms|bytes)$/.test(path.at(-1) ?? "") ||
 				((await readsUnits(node)) && !(await refusesUnitless(node)))),
 	);
-	expect(outsideLater(found, unitsLater, unitRule)).toEqual([]);
+	expect(found).toEqual([]);
 });
 
-it("gives each default by `.prefault`, read as an operator's value is, but in the sections still listed", async () => {
-	const found = await broken(async ({ node }) => node._zod.def.type === "default");
-	expect(outsideLater(found, prefaultLater, prefaultRule)).toEqual([]);
+it("gives each default in every section by `.prefault`, read as an operator's value is", async () => {
+	const found = await breaking(prefaultRule, async ({ node }) => node._zod.def.type === "default");
+	expect(found).toEqual([]);
 });

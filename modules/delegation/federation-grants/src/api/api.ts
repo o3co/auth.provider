@@ -184,7 +184,7 @@ export function apiWith(p: ApiParts) {
 		const seconds = body.number("expires_in");
 		if (seconds === 0) return refused("invalid_request", "invalid_expires_in");
 		const lifetimeMs =
-			Math.min(seconds ?? settings["default-seconds"], settings["max-seconds"]) * 1000;
+			Math.min(seconds ?? settings["default-lifetime"], settings["max-lifetime"]) * 1000;
 		const expectedUpstream = body.text("upstream_sub");
 		const now = p.clock.now();
 		const intent: Intent = {
@@ -196,7 +196,7 @@ export function apiWith(p: ApiParts) {
 			lifetimeMs,
 			...(expectedUpstream ? { expectedUpstream } : {}),
 			startedAt: now,
-			endsAt: now + settings["connect-seconds"] * 1000,
+			endsAt: now + settings["connect-lifetime"] * 1000,
 		};
 		return { kind: "intent", intent };
 	};
@@ -209,12 +209,12 @@ export function apiWith(p: ApiParts) {
 			grant: grant.id,
 			intent: intent.id,
 		});
-		await p.steps.create(handle, step, settings["connect-seconds"] * 1000);
+		await p.steps.create(handle, step, settings["connect-lifetime"] * 1000);
 		return answer(201, {
 			grant_id: grant.id,
 			status,
 			connect_uri: `${p.origin}/session/federation-grants/connect?request=${handle}`,
-			connect_expires_in: settings["connect-seconds"],
+			connect_expires_in: settings["connect-lifetime"],
 			expires_in: intent.lifetimeMs / 1000,
 		});
 	};
@@ -254,7 +254,7 @@ export function apiWith(p: ApiParts) {
 		}
 		const { intent } = asked;
 		// Counted per client, whatever subject it names, so no client fills the store.
-		const window = { limit: settings.lodges, ms: settings["lodge-window-seconds"] * 1000 };
+		const window = { limit: settings.lodges, ms: settings["lodge-window"] * 1000 };
 		const counted = await p.lodges.hit("federation-grants.lodges", client.id, window);
 		if (counted.kind === "limited") {
 			denied("rate_limited");
@@ -275,7 +275,7 @@ export function apiWith(p: ApiParts) {
 			version: secret(),
 			rotations: { from: now, count: 0 },
 		};
-		const connectMs = settings["connect-seconds"] * 1000;
+		const connectMs = settings["connect-lifetime"] * 1000;
 		await p.grants.create(grant.id, records.stored(grant), connectMs + retentionMs);
 		await p.listed(grant, connectMs);
 		// Past the pair's cap, the intents that end first are pushed out, and end.
@@ -380,7 +380,7 @@ export function apiWith(p: ApiParts) {
 		if ((asked !== undefined && !scope) || (scope && !within(scope, grant.scopes)))
 			return refuse("invalid_scope", error(400, "invalid_scope"));
 		const minTtl = body.number("min_ttl") ?? 0;
-		const maxAccessMs = connection["max-access-token-seconds"] * 1000;
+		const maxAccessMs = connection["max-access-token-lifetime"] * 1000;
 		if (minTtl * 1000 > maxAccessMs) {
 			const refusal = error(400, "invalid_request", "min_ttl_out_of_range");
 			return refuse("min_ttl_out_of_range", refusal);
@@ -488,8 +488,8 @@ export function apiWith(p: ApiParts) {
 		readonly numbers?: readonly string[];
 		/** Whether its subject's boundary is judged first; a revocation is answered whatever the state. */
 		readonly judged: boolean;
-		/** Whether each refusal is audited, as a token refusal. */
-		readonly audited: boolean;
+		/** The event each refusal is audited as, if any. */
+		readonly denied?: "federation.grant.token.denied" | "federation.grant.revoke.denied";
 		readonly handle: (
 			request: HttpRequest,
 			client: Client,
@@ -505,7 +505,6 @@ export function apiWith(p: ApiParts) {
 				texts: ["sub", "connection", "redirect_uri", "state", "scope", "upstream_sub"],
 				numbers: ["expires_in"],
 				judged: true,
-				audited: false,
 				handle: reauthorize,
 			},
 		],
@@ -515,24 +514,24 @@ export function apiWith(p: ApiParts) {
 				texts: ["sub", "scope", "connection", "resource"],
 				numbers: ["min_ttl"],
 				judged: true,
-				audited: true,
+				denied: "federation.grant.token.denied",
 				handle: token,
 			},
 		],
+		["status", { texts: ["sub"], judged: true, handle: (_r, c, grant) => status(c, grant) }],
 		[
-			"status",
-			{ texts: ["sub"], judged: true, audited: false, handle: (_r, c, grant) => status(c, grant) },
+			"revoke",
+			{ texts: ["sub"], judged: false, denied: "federation.grant.revoke.denied", handle: revoke },
 		],
-		["revoke", { texts: ["sub"], judged: false, audited: false, handle: revoke }],
 	]);
 	const byId = async (request: HttpRequest, client: Client, id: string, step: string) => {
 		const route = byIdRoutes.get(step);
 		if (!route) return error(404, "not_found");
 		// Before the grant's owner is known, a refusal is audited by the client only.
 		const early = (why: string, refusal: HttpResponse) => {
-			if (route.audited) {
+			if (route.denied) {
 				const attributes = { client: client.id, reason: why };
-				record("federation.grant.token.denied", undefined, attributes, request);
+				record(route.denied, undefined, attributes, request);
 			}
 			return refusal;
 		};
@@ -575,7 +574,7 @@ export function apiWith(p: ApiParts) {
 			if (id === "" || rest.length > 0) return error(404, "not_found");
 			return await byId(request, client, id, step);
 		} catch (thrown) {
-			if (isUnavailable(thrown)) return error(503, "temporarily_unavailable", "storage");
+			if (isUnavailable(thrown)) return error(503, "temporarily_unavailable");
 			throw thrown;
 		}
 	};

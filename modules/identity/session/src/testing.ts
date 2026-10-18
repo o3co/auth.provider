@@ -30,6 +30,7 @@ export function stubSessions(parts: Partial<Sessions> = {}): Sessions {
 		stillOpen: async () => false,
 		openContext: async () => undefined,
 		endsAt: async () => undefined,
+		recent: () => false,
 		...parts,
 	};
 }
@@ -82,6 +83,16 @@ export function sessionsContract(
 			expect(await entering("unknown")).toBe("short");
 			expect(await entering(place.now() - 301_000)).toBe("short");
 			expect(await entering(place.now())).toBe("entered");
+		});
+
+		it("tells whether a time is recent by one window, 300 seconds unless set otherwise", async () => {
+			const place = await open();
+			const window = sessionRules.credentialsSecondsDefault * 1000;
+			expect([
+				place.sessions.recent(place.now()),
+				place.sessions.recent(place.now() - window),
+				place.sessions.recent(place.now() - window - 1),
+			]).toEqual([true, true, false]);
 		});
 
 		it("opens a session on login behind a new cookie, which enters it", async () => {
@@ -600,6 +611,7 @@ export const sessionStandIn = defineModule({ name: "session" }, (m) => [
 			return { kind: "closed" as const, cookies: removed, session };
 		};
 		const stand: Sessions = {
+			recent: (at) => c.clock.now() - at <= sessionRules.credentialsSecondsDefault * 1000,
 			enter: async (request) => (await enteredAt(handleIn(request)))?.session,
 			enterFor: (request, level) => enterAt(handleIn(request), level),
 			stillOpen: async (handle) => (await enteredAt(handle)) !== undefined,

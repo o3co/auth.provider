@@ -40,6 +40,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | `federation.grant.reauthorized` | `client`, `connection`, `outcome`, `source` | the user connects a renewal, with the identity check that applied (`outcome`) |
 | `federation.grant.request.denied` | `client`, `outcome`, `source` | a client's intent is refused, with why (`outcome`) |
 | `federation.grant.requested` | `client`, `connection`, `outcome`, `source` | a client lodges an intent, for a new grant (`initial`) or a renewal (`reauthorization`) |
+| `federation.grant.revoke.denied` | `client`, `reason`, `source` | a client's revoke is refused before the grant is found, with why (`reason`), by the client only |
 | `federation.grant.revoked` | `client`, `connection`, `outcome`, `source` | a grant ends, revoked by its client or by the subject's revocation (`outcome`) |
 | `federation.grant.token.denied` | `client`, `connection`, `reason`, `source` | a client is refused a grant's token or renewal, with why (`reason`); by the client only before the grant is found |
 | `federation.grant.token.success` | `client`, `connection`, `refreshed`, `source` | a client is handed a grant's upstream token, refreshed first or not (`refreshed`) |

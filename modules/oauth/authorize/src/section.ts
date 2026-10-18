@@ -2,10 +2,17 @@ import { setting } from "@mod/kernel";
 import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
 
+const page = urlSetting({ schemes: ["https"], loopbackHttp: true });
+
 export const section = z.strictObject({
-	"login-page": urlSetting({ schemes: ["https"] }),
-	/** Where a session that falls short of an acr is sent to raise its authentication. */
-	"step-up-page": urlSetting({ schemes: ["https"] }).optional(),
+	"login-page": page.describe(
+		"The login page, given the return URL as `redirect_to`: an https URL (http only on a loopback host).",
+	),
+	"step-up-page": page
+		.optional()
+		.describe(
+			"Where a session that falls short of an acr is sent to raise its authentication: an https URL (http only on a loopback host).",
+		),
 	/** Whether every request names `openid` in its own scope (`dual` also serves plain OAuth clients). */
 	"oidc-mode": z.enum(["oidc-required", "dual"]).prefault("oidc-required"),
 	/** Requests allowed per source in each window, over both methods. */

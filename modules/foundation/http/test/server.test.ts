@@ -189,6 +189,32 @@ describe("http", () => {
 		expect(forms).toEqual([{ a: ["1", "2"], b: [" x"] }, {}]);
 	});
 
+	it("answers 400 to a query whose percent-escapes are not UTF-8, and reads one that is", async () => {
+		const seen: unknown[] = [];
+		const base = await serveWith(
+			handlers([
+				{
+					method: "GET",
+					path: "/q",
+					handle: (request) => {
+						seen.push(Object.fromEntries(request.query));
+						return { status: 204 };
+					},
+				},
+			]),
+		);
+		for (const query of ["a=%C3%28", "a=%E9", "%E9=1"]) {
+			const res = await fetch(`${base}/q?${query}`);
+			expect([res.status, res.headers.get("cache-control"), await res.text()], query).toEqual([
+				400,
+				"no-store",
+				"",
+			]);
+		}
+		expect((await fetch(`${base}/q?a=%C3%A9&b=x+y&c=&d=%zz`)).status).toBe(204);
+		expect(seen).toEqual([{ a: ["é"], b: ["x y"], c: [""], d: ["%zz"] }]);
+	});
+
 	it("answers 400 to a request target it cannot read as a URL, and keeps serving", async () => {
 		const base = await serveWith(
 			handlers([{ method: "GET", path: "/x", handle: () => ({ status: 204 }) }]),
@@ -428,6 +454,31 @@ describe("stop", () => {
 		const held = new Promise((resolve) => setTimeout(() => resolve("held"), 2000));
 		expect(await Promise.race([app.stop(10_000).then(() => "stopped"), held])).toBe("stopped");
 		await closed;
+	});
+
+	it("closes a connection whose answer was still being sent when stop began, once the answer is sent", async () => {
+		const body = "x".repeat(16 * 1024 * 1024);
+		const big = handlers([{ method: "GET", path: "/big", handle: () => ({ status: 200, body }) }]);
+		const { app, port } = await started([big]);
+		let length = 0;
+		const socket = connect(port, "127.0.0.1", () =>
+			socket.write("GET /big HTTP/1.1\r\nHost: x\r\n\r\n"),
+		);
+		socket.on("error", () => {});
+		// The answer starts as keep-alive, then waits on a reader that does not read.
+		socket.once("data", () => socket.pause());
+		socket.on("data", (chunk) => {
+			length += chunk.length;
+		});
+		const closed = new Promise((resolve) => socket.on("close", () => resolve("closed")));
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		const stopping = app.stop(10_000);
+		await hooksStarted();
+		socket.resume();
+		const held = new Promise((resolve) => setTimeout(() => resolve("held"), 2000));
+		expect(await Promise.race([closed, held])).toBe("closed");
+		expect(length).toBeGreaterThan(body.length);
+		await stopping;
 	});
 
 	it("closes at the stop deadline the connections still waiting for an answer", async () => {
@@ -890,7 +941,8 @@ describe("request bodies", () => {
 		}
 		expect(await post("/json", "application/json", large)).toBe(413);
 		expect(await post("/form", "application/json", object)).toBe(415);
-		expect(gated).toEqual([0, 0, 0, 0, 0, 0, 0]);
+		expect(await post("/form", "application/x-www-form-urlencoded", "a=%C3%28")).toBe(400);
+		expect(gated).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
 		expect(await post("/json", "application/json", object, { "x-shut": "1" })).toBe(403);
 		expect(await post("/json", "application/json", "{nope", { "x-shut": "1" })).toBe(403);
 		expect(handled).toEqual([]);

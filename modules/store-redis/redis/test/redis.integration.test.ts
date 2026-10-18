@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createConnection, createServer, type Socket } from "node:net";
 import { assemble, BootRefused, defineModule, kernelConfig } from "@mod/kernel";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { spaces, store } from "@mod/store";
 import { contractSpaces, storeContract } from "@mod/store/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -482,5 +483,84 @@ describe("redis", () => {
 			},
 		});
 		await expect(app).rejects.toBeInstanceOf(BootRefused);
+	});
+});
+
+describe("settings the server will not show", () => {
+	let blocked = "";
+	let blockedUrl = "";
+	beforeAll(async () => {
+		const port = await freePort();
+		const args = ["redis-server", "--rename-command", "CONFIG", ""];
+		blocked = docker("run", "-d", "--rm", "-p", `127.0.0.1:${port}:6379`, image, ...args);
+		blockedUrl = `redis://127.0.0.1:${port}`;
+		await waitFor(() => pings(blocked));
+	}, 60_000);
+	afterAll(() => {
+		if (blocked) docker("rm", "-f", blocked);
+	});
+	const kept = defineModule({ name: "kept-owner" }, (m) => [
+		m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["durable", "no-eviction"] })),
+	]);
+	const boot = (redis: object, through = blockedUrl, recorded = recordingLog()) =>
+		assemble({
+			modules: [redisModule, kept],
+			config: { ...kernelConfig(), redis: { url: through, prefix: `d${++opened}`, ...redis } },
+			runtime: quietRuntime({ log: recorded.log }),
+		});
+	const refusedFor = async (redis: object, through?: string) => {
+		const refused = await boot(redis, through).catch((error) => error);
+		expect(refused).toBeInstanceOf(BootRefused);
+		return (refused as BootRefused).refusals.map((r) => r.reason).join("; ");
+	};
+
+	it("names each setting it needs that the operator has not declared", async () => {
+		const reasons = await refusedFor({});
+		for (const name of ["maxmemory-policy", "appendonly", "appendfsync"]) {
+			expect(reasons, name).toContain(`declare ${name} in redis.server-settings`);
+		}
+	});
+
+	it("judges declared settings as it judges those it reads", async () => {
+		const declared = {
+			"maxmemory-policy": "allkeys-lru",
+			appendonly: "yes",
+			appendfsync: "always",
+		};
+		expect(await refusedFor({ "server-settings": declared })).toContain("noeviction");
+	});
+
+	it("boots on declared settings, warning on each boot that they hold as declared, unchecked", async () => {
+		const recorded = recordingLog();
+		const declared = { "maxmemory-policy": "noeviction", appendonly: "yes", appendfsync: "always" };
+		const app = await boot({ "server-settings": declared }, blockedUrl, recorded);
+		stops.push(() => app.stop(1000));
+		const warned = recorded.lines().filter((line) => line.event === "redis.settings_declared");
+		expect(warned.map((line) => line.fields.settings)).toEqual([
+			"maxmemory-policy, appendonly, appendfsync",
+		]);
+	});
+
+	it("takes durability none in place of append-only settings", async () => {
+		const app = await boot({
+			durability: "none",
+			"server-settings": { "maxmemory-policy": "noeviction" },
+		});
+		stops.push(() => app.stop(1000));
+	});
+
+	it("refuses a declared setting that differs from what a server answering CONFIG GET holds", async () => {
+		const differs = { "server-settings": { "maxmemory-policy": "allkeys-lru" } };
+		expect(await refusedFor(differs, url)).toContain(
+			"redis.server-settings.maxmemory-policy differs",
+		);
+		const recorded = recordingLog();
+		const app = await boot(
+			{ "server-settings": { "maxmemory-policy": "noeviction" } },
+			url,
+			recorded,
+		);
+		stops.push(() => app.stop(1000));
+		expect(recorded.lines().map((line) => line.event)).not.toContain("redis.settings_declared");
 	});
 });

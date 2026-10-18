@@ -838,6 +838,24 @@ describe("a binding begun", () => {
 	});
 });
 
+it("refuses to start under required when no composed kind both counts and adds the second factor", async () => {
+	const told = defineModule({ name: "kind-told" }, (m) => [
+		m.contribute(factorKinds).by(() => ({
+			kind: "told",
+			amr: ["sms"],
+			addsSecondFactor: false,
+			guessable: false,
+			counts: true,
+			enroll: async () => ({ secret: "s", show: {} }),
+			verify: async () => ({ kind: "valid" as const, state: null }),
+		})),
+	]);
+	const refused = await serve({ mode: "required" }, { kinds: [told, backup] }).catch((e) => e);
+	expect(refused).toBeInstanceOf(BootRefused);
+	expect((refused as BootRefused).refusals.map((r) => r.where)).toEqual(["mfa.mode"]);
+	await expect(serve({ mode: "optional" }, { kinds: [told, backup] })).resolves.toBeDefined();
+});
+
 it("refuses to start without a step that proves factors, naming what it lacks", async () => {
 	const refused = await serve({}, { steps: [] }).catch((error) => error);
 	expect(refused).toBeInstanceOf(BootRefused);

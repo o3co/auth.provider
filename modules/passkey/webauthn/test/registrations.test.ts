@@ -179,23 +179,24 @@ it("offers registrations in a composition without a session, and serves no route
 	}
 });
 
-it.each([{ "challenge-lifetime": "30s" }, { "challenge-seconds": 30 }])(
-	"gives a ceremony the challenge lifetime %o sets",
-	async (settings) => {
-		const app = await assemble({
-			modules: [http, memoryStores().module, webauthn],
-			config: { ...kernelConfig(), ...httpConfig(), ...webauthnConfig(settings) },
-			runtime: quietRuntime(),
-		});
-		await app.start();
-		try {
-			const { options } = await app.get(registrations).creation("sam");
-			expect(options).toMatchObject({ timeout: 30_000 });
-		} finally {
-			await app.stop(1000);
-		}
-	},
-);
+it("gives a ceremony the challenge lifetime the operator sets", async () => {
+	const app = await assemble({
+		modules: [http, memoryStores().module, webauthn],
+		config: {
+			...kernelConfig(),
+			...httpConfig(),
+			...webauthnConfig({ "challenge-lifetime": "30s" }),
+		},
+		runtime: quietRuntime(),
+	});
+	await app.start();
+	try {
+		const { options } = await app.get(registrations).creation("sam");
+		expect(options).toMatchObject({ timeout: 30_000 });
+	} finally {
+		await app.stop(1000);
+	}
+});
 
 it("refuses a challenge past its end on kernel's clock, whatever the store's clock says", async () => {
 	let shift = 0;

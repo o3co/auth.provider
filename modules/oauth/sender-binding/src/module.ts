@@ -11,7 +11,7 @@ import { requirementsOver } from "./requirement.ts";
 const section = z.strictObject({
 	dispatch: z
 		.enum(["intent-explicit", "strict-mutual-exclusion"])
-		.default("intent-explicit")
+		.prefault("intent-explicit")
 		.describe(
 			"How a request proving two bindings is read: an explicit kind wins over ambient ones, or any two are refused.",
 		),

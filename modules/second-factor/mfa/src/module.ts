@@ -36,9 +36,13 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 	}),
 	m.provide(factors).by(async (c) => {
 		await c.collect(proofSteps);
+		const kinds = await c.collect(factorKinds);
+		if (c.section.mode === "required" && !kinds.some((k) => k.counts && addsMfa(k))) {
+			return c.refuse("mfa.mode", "required needs a factor kind that counts and adds mfa");
+		}
 		return factorDecisions({
 			stored: await c.get(factorStore),
-			kinds: byKind(await c.collect(factorKinds)),
+			kinds: byKind(kinds),
 			seal: await c.get(seal),
 			required: c.section.mode === "required",
 			maxFactors: c.section["max-factors"],

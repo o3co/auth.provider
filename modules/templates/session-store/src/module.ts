@@ -37,6 +37,7 @@ const listedGuaranteeFor: Record<keyof typeof subjectSessionsNeeds, Guarantee> =
 	neverEvicted,
 	survivesCrash,
 	survivesFailover,
+	readsConfirmed: guaranteeFor.readsConfirmed,
 };
 const subjects: Space = {
 	name: "session-store.subjects",

@@ -26,7 +26,7 @@ export default defineModule({ name, section, replicaSafe: true }, (m) => [
 		const held = await c.get(sessionClients);
 		// Late: session's own build asks the participants, this module among them.
 		const open = c.late(sessions);
-		const rememberMs = c.section["remember-seconds"] * 1000;
+		const rememberMs = c.section["remember-for"] * 1000;
 		return {
 			name,
 			redeemed: async (session, client) => {
@@ -41,7 +41,7 @@ export default defineModule({ name, section, replicaSafe: true }, (m) => [
 	}),
 	m.provide(shared).by(async (c) => {
 		const notices = await noticesFrom(c);
-		c.every(c.section["sweep-seconds"] * 1000, async () => {
+		c.every(c.section["sweep-interval"] * 1000, async () => {
 			const { failed } = await notices.sweep();
 			if (failed > 0) c.log.warn("rp-logout.notices_kept", { count: failed });
 		});

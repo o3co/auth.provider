@@ -86,7 +86,16 @@ export async function started(
 					"always",
 				])
 			: undefined;
-	const { outbound: given, ...sections } = config;
+	const { outbound: given, ...named } = config;
+	// The trial's clients block takes the scene's registered clients, as its outbound block takes the hosts.
+	const trialClients = trial !== undefined && !trial.leave.includes("clients");
+	const { registered, ...clientsRest } = named.clients ?? {};
+	const sections: Sections = trialClients
+		? {
+				...Object.fromEntries(Object.entries(named).filter(([name]) => name !== "clients")),
+				...(Object.keys(clientsRest).length > 0 ? { clients: clientsRest } : {}),
+			}
+		: named;
 	const { allow, "plain-loopback": loopback, ...outbound } = given ?? {};
 	const reached = [new URL(sink.url), ...parties.map((p) => new URL(p.base))];
 	const reach = {
@@ -124,6 +133,7 @@ export async function started(
 				port,
 				leave: trial.leave,
 				...(trialLists ? reach : {}),
+				...(trialClients && Array.isArray(registered) ? { clients: registered } : {}),
 			});
 			const local = join(scratch, "local.conf");
 			await writeFile(local, given.local);

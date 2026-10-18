@@ -34,7 +34,18 @@ The `redis` module checks the server once, at boot, and refuses to start when an
 - With `redis.replication = replicas`: `min-replicas-to-write` and `min-replicas-max-lag` of at least 1.
 - With `redis.replication = none`: no replica connected.
 
-The check reads the server's settings with `CONFIG GET`. A managed Redis that blocks `CONFIG` cannot pass it.
+The check reads the server's settings with `CONFIG GET`, and `ROLE` and `INFO` always.
+
+### A managed Redis that refuses `CONFIG`
+
+Where the server refuses `CONFIG GET`, declare its settings in `redis.server-settings` (`maxmemory-policy`, `appendonly`, `appendfsync`, `min-replicas-to-write`, `min-replicas-max-lag`). The check then takes them as declared and judges them as it judges the ones it reads; a setting it needs and you left out refuses boot, naming it. Every boot logs `redis.settings_declared` with the names taken from the declaration, since nothing confirmed them.
+
+Declare only what the server really has: a declaration is your statement, and the check cannot see past it. Where `CONFIG GET` does answer, a declared value that differs refuses boot.
+
+A server that does not fsync every write cannot give the durable guarantee. Set `redis.durability = none` to state so and accept the loss: a crash then loses the latest writes, among them spent assertion and DPoP proof ids (a replay window) and lockout records. Without it, boot is refused.
+
+- Amazon ElastiCache: append-only files are not available, so declare `appendonly no` and set `durability = none` where a durable space is composed.
+- Other managed services: check in each service's documentation which of these settings you can set and what they hold before declaring them.
 
 Connect with `rediss://` for TLS. The password goes in the URL. The URL is never logged, and a refusal never quotes it.
 
@@ -81,7 +92,7 @@ An HS256 secret is not published and has no `previous` or `next` form: changing 
 4. **Make sure every instance runs with the new `current`** before going on: an instance still sealing with the old key writes values a walk started meanwhile would miss.
 5. **Seal the rest again.** Run `pnpm run reseal` in the app, with its configuration. It builds the app without serving anything, walks every holder of long-lived sealed values (`federation-tokens`, `federation-grants`, `mfa`), seals again what a `previous` key sealed, and prints each holder's counts, never an id or a value. Running it while traffic flows is safe: each value is written only over what was read. Run it until it exits 0, which it does only when no holder failed, nothing was sealed again and nothing is left; it then prints `previous keys may be retired`. It exits 1 when a holder failed, and 3 when it sealed values again: run it again either way, as a walk across a failover or restart can miss a value, which the next run then seals.
    - On 2, do not go on: a value sealed with a key no longer in the ring remains, left by an earlier rotation (or damaged). Put back the key you retired last as `previous`, restart every instance, and run `reseal` again until it exits 0.
-6. **Retire the old key** only after a `reseal` run that exited 0. Wait out short-lived values first: transactions and held logins sealed with the old key end within an hour (the longest `transaction-seconds`). Then remove it from `previous` and restart every instance. A value it still sealed becomes unavailable (503, not refused), and putting the key back opens it again.
+6. **Retire the old key** only after a `reseal` run that exited 0. Wait out short-lived values first: transactions and held logins sealed with the old key end within an hour (the longest `transaction-lifetime`). Then remove it from `previous` and restart every instance. A value it still sealed becomes unavailable (503, not refused), and putting the key back opens it again.
 
 Only a value a `previous` key sealed is sealed again; one `next` sealed is newer than `current` and is left as it is, so values never move back while a rollout is under way.
 

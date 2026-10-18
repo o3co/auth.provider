@@ -122,7 +122,7 @@ export function webauthnKind(p: KindParts): FactorKind {
 			);
 			return { secret: JSON.stringify({ handle, challenge, until }), show: options as object };
 		},
-		// Good until webauthn's end (`challenge-seconds`) or the caller's, whichever comes first.
+		// Good until webauthn's end (`challenge-lifetime`) or the caller's, whichever comes first.
 		challenge: async (_subject, factor, latest) => {
 			const credential = credentialIn(factor.state);
 			const { options, challenge, until } = p.ceremonies.request([credential], p.verification);

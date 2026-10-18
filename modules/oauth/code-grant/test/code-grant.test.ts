@@ -459,19 +459,16 @@ it("writes a code's record in format 2, and still redeems one a host before it w
 	expect((await s.redeem(code)).status).toBe(200);
 });
 
-it.each([{ "sweep-interval": "1s" }, { "sweep-seconds": 1 }])(
-	"drops a listed void whose record it does not know, as one it cannot revoke, sweeping as %o says",
-	async (codeGrant) => {
-		const s = await serve({ codeGrant });
-		const code = await s.issue();
-		await s.stores.records.change(nameOf(code), (kept) => ({
-			value: overwritten(kept, { state: "pending" }),
-		}));
-		await s.stores.deferred.add(nameOf(code));
-		await afterSweep();
-		expect(s.stores.pending()).toEqual([]);
-	},
-);
+it("drops a listed void whose record it does not know, as one it cannot revoke, at the next sweep", async () => {
+	const s = await serve();
+	const code = await s.issue();
+	await s.stores.records.change(nameOf(code), (kept) => ({
+		value: overwritten(kept, { state: "pending" }),
+	}));
+	await s.stores.deferred.add(nameOf(code));
+	await afterSweep();
+	expect(s.stores.pending()).toEqual([]);
+});
 
 it("refuses a request missing the code, the redirect URI or the verifier, or with a malformed verifier, leaving the code unused", async () => {
 	const s = await serve();
@@ -508,17 +505,14 @@ it("issues nothing for a code whose session closed before the exchange", async (
 	expect(keptOf(s, code)?.token).toBeUndefined();
 });
 
-it.each([{ "code-lifetime": "10s" }, { "code-seconds": 10 }])(
-	"keeps an unused code for the lifetime %o gives, and no longer",
-	async (codeGrant) => {
-		const s = await serve({ codeGrant });
-		const code = await s.issue();
-		shift = 9000;
-		expect(keptOf(s, code)).toBeDefined();
-		shift = 11_000;
-		expect(keptOf(s, code)).toBeUndefined();
-	},
-);
+it("keeps an unused code for code-lifetime, and no longer", async () => {
+	const s = await serve({ codeGrant: { "code-lifetime": "10s" } });
+	const code = await s.issue();
+	shift = 9000;
+	expect(keptOf(s, code)).toBeDefined();
+	shift = 11_000;
+	expect(keptOf(s, code)).toBeUndefined();
+});
 
 it("keeps a redeemed code's record past its token's end by the allowance for clock drift", async () => {
 	const s = await serve();

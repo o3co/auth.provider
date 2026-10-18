@@ -6,6 +6,7 @@ import {
 	validateHeaderName,
 	validateHeaderValue,
 } from "node:http";
+import type { Socket } from "node:net";
 import { ignoredCertificates } from "@mod/client-certificate";
 import { type Clock, isUnavailable, type Log } from "@mod/kernel";
 import { ignoredForwarding, sourceOf, type TrustedProxies } from "@mod/request-source";
@@ -35,10 +36,11 @@ export interface Serving {
 	readonly clock: Clock;
 }
 
-/** The request's head; undefined when the request target is not a URL. */
+/** The request's head; undefined when the request target is not a URL, or its query not UTF-8. */
 function frozenHead(message: IncomingMessage, proxies: TrustedProxies): Head | undefined {
 	const url = URL.parse(message.url ?? "/", "http://placeholder");
-	if (url === null) return undefined;
+	const query = url && paramsOf(url.search.slice(1));
+	if (!url || !query) return undefined;
 	const headers = new Map<string, string>();
 	for (const [key, value] of Object.entries(message.headers)) {
 		if (value !== undefined) headers.set(key, Array.isArray(value) ? value.join(", ") : value);
@@ -46,7 +48,7 @@ function frozenHead(message: IncomingMessage, proxies: TrustedProxies): Head | u
 	return Object.freeze({
 		method: message.method ?? "GET",
 		path: url.pathname,
-		query: paramsOf(url.searchParams),
+		query,
 		headers: readOnly(headers),
 		source: sourceOf(proxies, message.socket.remoteAddress ?? "", headers),
 	});
@@ -164,10 +166,24 @@ function ignoredHeaders({ proxies, log, clock }: Serving) {
 export function serve(serving: Serving): Server {
 	const { proxies, log, clock } = serving;
 	const warn = ignoredHeaders(serving);
+	/** Each connection's requests in flight; one with none is ended once stop begins, after what it still has to send. */
+	const inFlight = new Map<Socket, number>();
+	const open = new Set<Socket>();
+	const endIfDone = (socket: Socket) => {
+		if (!server.listening && !inFlight.has(socket)) socket.end();
+	};
 	const server = createServer((req, res) => {
 		// Outside the chain, so it must never throw: it reads the clock and adds listeners; observers
 		// are told later. Every other step runs inside, so a throw there is answered.
 		const told = ending(serving.ends, clock, req, res);
+		const socket = req.socket;
+		inFlight.set(socket, (inFlight.get(socket) ?? 0) + 1);
+		res.once("close", () => {
+			const left = (inFlight.get(socket) ?? 1) - 1;
+			if (left > 0) inFlight.set(socket, left);
+			else inFlight.delete(socket);
+			endIfDone(socket);
+		});
 		let route: string | undefined;
 		const nameRoute = (path: string) => {
 			route = path;
@@ -192,6 +208,18 @@ export function serve(serving: Serving): Server {
 				reply(bare(500));
 			});
 	});
+	server.on("connection", (socket: Socket) => {
+		open.add(socket);
+		socket.once("close", () => {
+			open.delete(socket);
+			inFlight.delete(socket);
+		});
+	});
+	// Node's own, which close() calls before the server stops listening, destroys an idle connection at
+	// once, cutting an answer still being sent.
+	server.closeIdleConnections = () => {
+		for (const socket of open) if (!inFlight.has(socket)) socket.end();
+	};
 	return server;
 }
 

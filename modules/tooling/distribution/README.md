@@ -13,9 +13,12 @@
 ## Offers
 - `pnpm distribution`: prints each problem and exits 1, or prints `distribution: ok`.
 - `pnpm bundles`: builds each shipped bundle into `dist/bundles/<concern directory>` at the workspace's `version`: its members compiled to JS and declarations (tests and test tools left out), named publicly, with their other files, and its manifest. Prints each problem and exits 1, or how many it built.
-- `pnpm release:check`: packs every bundle and entrance, refusing a tarball without its `LICENSE`, makes an app of each pattern with the packed `create-auth-provider`, installs it from the tarballs alone, type-checks it, and boots it to `/readyz` or to its refusals, each told, in the image its Dockerfile builds; only the `deps` stage is replaced, by the same `--prod` install from the tarballs in the `base` stage, as the registry has none of them yet. Exits 1 on any problem, and at once without Docker: no boot is skipped.
+- `pnpm release:check`: packs every bundle and entrance, makes an app of each pattern with the packed `create-auth-provider`, installs it from the tarballs alone, type-checks it, and boots it to `/readyz` or to its refusals, each told. Exits 1 on any problem.
 
 ## Invariants
+- The release check refuses a tarball without its `LICENSE`.
+- The release check boots each app in the image its Dockerfile builds; only the `deps` stage is replaced, by the same `--prod` install from the tarballs in the `base` stage, as the registry has none of them yet.
+- Without Docker, the release check exits 1 at once: no boot is skipped.
 - Bundles come only from the directory structure and the bundle manifests.
 - A bundle and an entrance carry the workspace's `license` and `engines` in their manifest, and its `LICENSE` file beside it, so npm and pnpm alike ship it.
 - Their manifest names the workspace's `repository` (a bundle's with its `modules/<concern directory>`), for provenance; a README beside it points there and ends with the root README's copyright line.

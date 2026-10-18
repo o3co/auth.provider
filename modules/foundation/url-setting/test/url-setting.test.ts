@@ -201,3 +201,84 @@ it("refuses to boot with a configured URL it does not take", async () => {
 	await expect(boot("https://u@a.example")).rejects.toThrow(BootRefused);
 	await expect(boot("https://a.example")).resolves.toBeDefined();
 });
+
+it("takes plain http beside the schemes only on a loopback host, where the rules allow it", () => {
+	const local = urlSetting({ schemes: ["https"], loopbackHttp: true });
+	for (const value of [
+		"http://localhost",
+		"http://localhost:3000/login",
+		"http://127.0.0.1:3000/login?x=1",
+		"http://127.255.0.1/",
+		"http://[::1]:3000/login",
+		"https://a.example/login",
+	]) {
+		expect(local.parse(value)).toBe(value);
+	}
+	// Without the rule, a loopback host is no exception.
+	for (const value of ["http://localhost:3000/login", "http://127.0.0.1/", "http://[::1]/"]) {
+		expect(takes(https, value), value).toBe(false);
+	}
+});
+
+it("decides plain http's loopback host on the parser's form only, each edge refused", () => {
+	const local = urlSetting({ schemes: ["https"], loopbackHttp: true });
+	const reason = (value: string) => local.safeParse(value).error?.issues[0]?.message;
+	const form = "a URL as the URL parser writes it; refused for";
+	const cases: [string, string[]][] = [
+		[
+			"a URL: http only on a loopback host",
+			[
+				// A name that only resolves to a loopback address, or may not.
+				"http://localhost./",
+				"http://a.localhost/",
+				"http://localhost.localdomain/",
+				"http://127.0.0.1.nip.io/",
+				// Every address, not a loopback one.
+				"http://0.0.0.0/",
+				"http://[::]/",
+				// An IPv4-mapped IPv6 loopback address, in the parser's form.
+				"http://[::ffff:7f00:1]/",
+				"http://126.255.255.255/",
+				"http://128.0.0.1/",
+				"http://10.0.0.1/",
+				"http://a.example/",
+			],
+		],
+		// The parser rewrites these to a loopback address, so they are not in its form.
+		[
+			`${form} an IP address not in its shortest form`,
+			[
+				"http://127.1/",
+				"http://127.0.0.1./",
+				"http://0177.0.0.1/",
+				"http://2130706433/",
+				"http://[0:0:0:0:0:0:0:1]/",
+				"http://[::ffff:127.0.0.1]/",
+			],
+		],
+		[`${form} host case`, ["http://LOCALHOST/", "http://LocalHost:3000/"]],
+		[`${form} percent-encoding in the host`, ["http://loc%61lhost/"]],
+		["a URL: no userinfo", ["http://localhost@a.example/", "http://a@localhost/"]],
+		[`${form} a scheme not in lower case`, ["HTTP://localhost/"]],
+		[
+			"a URL: starting https:// or http:// on a loopback host",
+			["ftp://localhost/", "ws://127.0.0.1/", "localhost:3000"],
+		],
+	];
+	for (const [expected, values] of cases) {
+		for (const value of values) expect(reason(value), value).toBe(expected);
+	}
+});
+
+it("names no part of a plain http URL it refuses for its host", async () => {
+	const section = z.strictObject({ page: urlSetting({ schemes: ["https"], loopbackHttp: true }) });
+	const using = defineModule({ name: "using", section }, () => []);
+	const boot = (page: string) =>
+		assemble({ modules: [using], config: { ...kernelConfig(), using: { page } } });
+	await expect(boot("http://localhost:3000/login")).resolves.toBeDefined();
+	const refused = await boot(`http://${marker}.example/${marker}`).catch((e: unknown) => e);
+	expect(refused).toBeInstanceOf(BootRefused);
+	expect((refused as BootRefused).refusals).toEqual([
+		{ where: "using.page", reason: "a URL: http only on a loopback host" },
+	]);
+});

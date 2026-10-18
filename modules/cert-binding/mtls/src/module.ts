@@ -35,7 +35,7 @@ export default defineModule({ name: "mtls", section }, (m) => [
 								policy: revocationPolicyOf(r),
 								sources: sourcesOver(
 									await c.get(signedOutbound),
-									{ hosts: r.hosts, timeoutMs: r["timeout-ms"] },
+									{ hosts: r.hosts, timeoutMs: r.timeout },
 									{ now: () => c.clock.now(), random: (n) => c.random.bytes(n) },
 								),
 							}),

@@ -9,7 +9,7 @@
 ## Offers
 - Contribution to `mfa`'s factor kinds: `webauthn`, adding `mfa`, not guessable, counting.
   - Enrolment: creation options for a credential that need not be discoverable, excluding the subject's WebAuthn factors, for the subject's user handle, showing its name (`subject-attributes`; well formed, 1 to 64 code points, no control or format character), never its email, else `display-name`; its first proof is the attestation.
-  - Challenge: request options for the factor's credential, good until `webauthn`'s end (`challenge-seconds`, 120 by default) or the caller's when earlier; its proof is the assertion, as JSON. A binding's creation is good until `webauthn`'s end.
+  - Challenge: request options for the factor's credential, good until `webauthn`'s end (`challenge-lifetime`, `2m` by default) or the caller's when earlier; its proof is the assertion, as JSON. A binding's creation is good until `webauthn`'s end.
 - Operator section: `user-verification` (`required`, `preferred` by default, or `discouraged`), `display-name` (the name an authenticator shows for an account with none to show, naming no one; default `Account`).
 
 ## Invariants

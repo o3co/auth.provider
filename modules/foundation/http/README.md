@@ -2,7 +2,7 @@
 
 ## Responsibilities
 - Owns the HTTP entry point: it connects the routes that modules contribute and applies the policies each route declares.
-- Reads what a request sends (query, form, JSON, headers) once at the boundary into read-only maps.
+- Reads what a request sends (query, form, JSON, headers) once at the boundary into read-only maps; a query or form whose percent-escapes decode to invalid UTF-8 is refused with `400`.
 - Answers unavailable with `503`: retryable, with no body, kept out of caches (`noStore`: `no-store`, `Pragma: no-cache`).
 
 ## Not here

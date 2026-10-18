@@ -98,6 +98,16 @@ describe("clients", () => {
 		});
 	});
 
+	it("throws for a section no module contributed, never answering undefined", async () => {
+		const c = await boot();
+		const client = clientOf(await outcome(c, basic("conf", "s3cret"), {}));
+		const stray: Section<{ on: boolean }> = {
+			name: "stray",
+			schema: z.strictObject({ on: z.boolean() }),
+		};
+		expect(() => client.section(stray)).toThrow(/stray/);
+	});
+
 	it("form-decodes the Basic id and secret", async () => {
 		const id = "a+b %c";
 		const c = await boot(

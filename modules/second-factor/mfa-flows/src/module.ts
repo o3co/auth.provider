@@ -3,10 +3,10 @@ import { csrfChecked } from "@mod/csrf";
 import { type Route, routes, use } from "@mod/http";
 import { type BuildContext, defineModule, isUnavailable } from "@mod/kernel";
 import { loginGates, logins } from "@mod/login-gates";
-import { factors, longestRecentMs, proofSteps } from "@mod/mfa";
+import { factors, proofSteps } from "@mod/mfa";
 import { bindingProof } from "@mod/mfa-binding-proof";
 import { type LockoutPolicy, lockoutProblem, lockouts, requestsPerSource } from "@mod/rate-limit";
-import { sessions } from "@mod/session";
+import { longestRecentMs, sessions } from "@mod/session";
 import { revocations, subjectRevocation } from "@mod/subject-revocation";
 import { mfaReset } from "./contract.ts";
 import { enrollmentOver } from "./enrollment/enrollment.ts";
@@ -22,12 +22,12 @@ import { transactionsIn } from "./transactions/transactions.ts";
 
 const policyOf = (s: Settings): LockoutPolicy => ({
 	threshold: s.lockout.threshold,
-	backoffMs: s.lockout["backoff-seconds"] * 1000,
-	maxBackoffMs: s.lockout["max-backoff-seconds"] * 1000,
+	backoffMs: s.lockout.backoff * 1000,
+	maxBackoffMs: s.lockout["max-backoff"] * 1000,
 	budget: s.lockout.budget,
-	budgetWindowMs: s.lockout["budget-window-seconds"] * 1000,
+	budgetWindowMs: s.lockout["budget-window"] * 1000,
 	hardLimit: s.lockout["hard-limit"],
-	memoryMs: s.lockout["memory-seconds"] * 1000,
+	memoryMs: s.lockout.memory * 1000,
 });
 
 /** Pulls the contracts and gives each internal module only the interfaces it uses. */
@@ -124,7 +124,7 @@ export default defineModule({ name: "mfa-flows", section, replicaSafe: true }, (
 			if (problem) return c.refuse("mfa-flows", `lockout policy: ${problem}`);
 			const handle = withUnavailable((await handlersOver(c, policy))[name]);
 			if (method === "GET") return { method, path, handle };
-			const window = { limit: c.section.requests, ms: c.section["window-seconds"] * 1000 };
+			const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 			return {
 				method,
 				path,

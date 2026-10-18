@@ -11,6 +11,8 @@ export interface UrlRules {
 	readonly trailingSlash?: "kept" | "refused";
 	/** Whether a query may be part of it (default true). */
 	readonly query?: boolean;
+	/** Whether plain `http` is taken beside the schemes, on a loopback host only (default false). */
+	readonly loopbackHttp?: boolean;
 }
 
 /** Why a value is not a URL these rules take; undefined when it is one. Names no part of the value. */
@@ -19,11 +21,16 @@ function refusal(value: string, rules: UrlRules): string | undefined {
 	const control = [...value].some((c) => (c.codePointAt(0) ?? 0) < 0x20 || c === "\u007f");
 	if (control || /\s/.test(value)) return form("whitespace or control characters");
 	if (value.includes("\\")) return form("a backslash");
-	const scheme = rules.schemes.find((s) => value.startsWith(`${s}://`));
+	const schemes: readonly string[] = rules.loopbackHttp
+		? [...rules.schemes, "http"]
+		: rules.schemes;
+	const scheme = schemes.find((s) => value.startsWith(`${s}://`));
 	if (!scheme) {
-		const cased = rules.schemes.some((s) => value.toLowerCase().startsWith(`${s}://`));
+		const cased = schemes.some((s) => value.toLowerCase().startsWith(`${s}://`));
 		if (cased) return form("a scheme not in lower case");
-		return `a URL: starting ${rules.schemes.map((s) => `${s}://`).join(" or ")}`;
+		const starts = rules.schemes.map((s) => `${s}://`);
+		const local = rules.loopbackHttp ? ["http:// on a loopback host"] : [];
+		return `a URL: starting ${[...starts, ...local].join(" or ")}`;
 	}
 	const rest = value.slice(scheme.length + 3);
 	const authority = rest.split(/[/?#]/, 1)[0] ?? "";
@@ -33,8 +40,22 @@ function refusal(value: string, rules: UrlRules): string | undefined {
 	if (rules.query === false && value.includes("?")) return "a URL: no query";
 	const path = rest.slice(authority.length).split("?", 1)[0] ?? "";
 	if (rules.trailingSlash === "refused" && path.endsWith("/")) return "a URL: no trailing /";
-	const kind = difference(new URL(value), authority, path, value);
-	return kind && form(kind);
+	const url = new URL(value);
+	const kind = difference(url, authority, path, value);
+	if (kind) return form(kind);
+	// Decided on the parser's form only, which the value now is, so no other spelling reaches here.
+	if (!rules.schemes.some((s) => s === scheme) && !loopback(url.hostname)) {
+		return "a URL: http only on a loopback host";
+	}
+	return undefined;
+}
+
+/**
+ * Whether a host, as the parser writes it, is a loopback one: `localhost`, an IPv4 address in
+ * 127.0.0.0/8 (the parser writes every IPv4 address as four decimal parts), or `[::1]`.
+ */
+function loopback(hostname: string): boolean {
+	return hostname === "localhost" || hostname === "[::1]" || /^127(\.\d{1,3}){3}$/.test(hostname);
 }
 
 function form(kind: string): string {

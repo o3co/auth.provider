@@ -11,6 +11,7 @@ Internal module of `session-lifecycle`: a session's record, its cookie, and its 
 - What `session` offers callers (`session`).
 - How `session-lifecycle` maps that onto these steps.
 - Raising a session (`raise`).
+- Taking a session off its listing, and what a login's listing pushed out (`listing`).
 - The store interfaces and their needs (`session-lifecycle`'s root).
 
 ## Offers
@@ -48,12 +49,8 @@ Internal module of `session-lifecycle`: a session's record, its cookie, and its 
 - Cookie index, by the cookie's secret: the handle, for the session's lifetime.
 - Each subject's listing: the handle, for the session's lifetime from login.
 - A session is listed after its record and before its cookie; a login that cannot list it is unavailable.
-- A session is taken off its listing once closed; a failed removal is logged and passed.
-- Sessions pushed out over the cap are closed by the login that pushed them out, and logged by count only.
-- Each pushed-out session is kept as a closing before any is closed, so the sweep finishes a close that fails.
-- If the closings refuse them, the login is unavailable and the listing is put back: the opened session off, and the pushed-out ones on for what each has left of the lifetime in force, from its opening.
 - The listing never pushes out the session being opened.
 - The index needs confirmed reads: an entry after a raise or a close decides on what another request wrote.
 
 ## Depends on
-- `kernel`, `http` (the request type), `cookies`, `subject-revocation`, `login-attributes` (the form kept attributes are read back in); `session`'s contract and rules; `session-lifecycle`'s store interfaces.
+- `kernel`, `http` (the request type), `cookies`, `subject-revocation`, `login-attributes` (the form kept attributes are read back in); `session`'s contract and rules; `session-lifecycle`'s store interfaces; `listing`.

@@ -32,7 +32,7 @@ export interface TransactionParts {
 	readonly jar: Cookies;
 	readonly random: (n: number) => Uint8Array;
 	readonly clock: Clock;
-	/** The package's `transaction-seconds`, in ms. */
+	/** The package's `transaction-lifetime`, in ms. */
 	readonly ttlMs: number;
 	/** The package's `attempts-per-transaction`. */
 	readonly attempts: number;
@@ -47,7 +47,7 @@ export const transactionsIn = async (c: BuildContext<Settings>) =>
 		jar: await c.get(cookies),
 		random: c.random.bytes,
 		clock: c.clock,
-		ttlMs: c.section["transaction-seconds"] * 1000,
+		ttlMs: c.section["transaction-lifetime"] * 1000,
 		attempts: c.section["attempts-per-transaction"],
 	});
 

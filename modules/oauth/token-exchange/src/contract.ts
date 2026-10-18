@@ -26,12 +26,20 @@ export interface Exchanged {
 	readonly acr?: string;
 	/** The id of a token this provider issued, by which its family and session are found. */
 	readonly issued?: string;
+	/** The clients that may exchange it; when given, in place of the token naming the calling client. */
+	readonly clients?: readonly string[];
+	/** "client": the scope and audience are the client's allowance alone, the token's own unread. */
+	readonly ceiling?: "client";
+	/** BASE64URL(SHA-256(the holder's key thumbprint)); read only for a public client. */
+	readonly holderDigest?: string;
 }
 
 /** Verifies one token type; throws Unavailable when it cannot tell. */
 export interface ExchangeVerifier {
 	readonly tokenType: string;
 	verify(token: string): Promise<Exchanged | { readonly kind: "invalid" }>;
+	/** Records a once-only token, once, after the second check and the policies' leave; throws Unavailable when it cannot tell. */
+	consume?(token: string): Promise<"consumed" | "replayed">;
 }
 
 /** The verifiers of the tokens a client may exchange, one per token type. */

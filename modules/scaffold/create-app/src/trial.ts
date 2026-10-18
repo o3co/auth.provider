@@ -3,6 +3,7 @@ import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { envName } from "./fragments.ts";
+import { auditReceiversOf } from "./patterns/chosen.ts";
 
 /** Every key an app may read from its variable, by section, with a trial value; one the app does not read is left unread. */
 function trialValues(redisUrl: string): [section: string, key: string, value: string][] {
@@ -30,7 +31,11 @@ function trialBlocks(
 	modules: readonly string[],
 	deployment: string,
 	port: number | undefined,
-	added: { readonly allow: readonly string[]; readonly plainLoopback: readonly string[] },
+	added: {
+		readonly allow: readonly string[];
+		readonly plainLoopback: readonly string[];
+		readonly clients: readonly unknown[];
+	},
 ) {
 	const has = (name: string) => modules.includes(name);
 	const hosts = [
@@ -42,9 +47,10 @@ function trialBlocks(
 		added.plainLoopback.length > 0
 			? `, plain-loopback = [${added.plainLoopback.map((h) => JSON.stringify(h)).join(", ")}]`
 			: "";
+	const receivers = auditReceiversOf((module) => has(module.slice("@mod/".length)));
 	const blocks: [boolean, string, string][] = [
 		[true, "kernel", `kernel { deployment = ${deployment} }`],
-		[true, "audit", `audit { receivers = [${has("audit-http") ? "http" : "log"}] }`],
+		[true, "audit", `audit { receivers = [${receivers.join(", ")}] }`],
 		[
 			has("authorize"),
 			"authorize",
@@ -74,6 +80,12 @@ function trialBlocks(
 			"webauthn",
 			'webauthn { rp-id = login.example.invalid, rp-name = "Trial", origins = ["https://login.example.invalid"] }',
 		],
+		// Lists replace each other across layers, so the caller's clients join the trial's one list.
+		[
+			has("clients") && added.clients.length > 0,
+			"clients",
+			`clients { registered = ${JSON.stringify(added.clients)} }`,
+		],
 		[
 			has("seal"),
 			"seal",
@@ -98,6 +110,8 @@ export async function trialSettings(
 		/** Hosts the caller's own layer needs reached, merged into the trial's one outbound block. */
 		readonly allow?: readonly string[];
 		readonly plainLoopback?: readonly string[];
+		/** Clients the caller's own layer registers, merged into the trial's one `clients.registered`. */
+		readonly clients?: readonly unknown[];
 	},
 ): Promise<{ readonly env: Record<string, string>; readonly local: string }> {
 	// The modules the entry imports, by their directory's name, as the workspace or a bundle names them.
@@ -111,7 +125,11 @@ export async function trialSettings(
 			.filter(([section]) => kept(section))
 			.map(([section, key, value]) => [envName(`${section}.${key}`), value]),
 	);
-	const added = { allow: settings.allow ?? [], plainLoopback: settings.plainLoopback ?? [] };
+	const added = {
+		allow: settings.allow ?? [],
+		plainLoopback: settings.plainLoopback ?? [],
+		clients: settings.clients ?? [],
+	};
 	const blocks = trialBlocks(modules, settings.deployment ?? "single", settings.port, added).filter(
 		(b) => kept(b.section),
 	);

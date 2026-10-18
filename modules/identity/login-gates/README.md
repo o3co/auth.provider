@@ -18,7 +18,7 @@
 - Extension point `amrSources`: the amr that a way of logging in or a gate can prove, under its name.
 - Extension point `returnPaths`: a path on the public origin that its owner lets a login return to.
 - Extension point `openedAfterHold`: a caller to tell, with its carry, when a held login it asked for opens.
-- Operator section `return-targets`: https URLs, checked by `url-setting`, that a login may return to (default none).
+- Operator section `return-targets`: https URLs (http only on a loopback host), checked by `url-setting`, that a login may return to (default none).
 
 ## Invariants
 - Gates run one at a time, sorted by name in code units, and the first that holds stops the login.

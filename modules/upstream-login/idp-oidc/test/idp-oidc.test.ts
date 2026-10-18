@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { externalJwt } from "@mod/external-jwt";
 import externalJwtModule from "@mod/external-jwt/module";
 import {
@@ -33,7 +34,7 @@ import { CompactSign, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import idpOidc from "../src/module.ts";
 import { settingsOf } from "../src/settings.ts";
-import { opened } from "../src/upstream.ts";
+import { atHashHolds, opened } from "../src/upstream.ts";
 
 /** The asymmetric algorithms external-jwt knows, the defaults among them. */
 const asymmetric = ["RS256", "PS256", "ES256", "EdDSA"];
@@ -468,6 +469,44 @@ describe("idp-oidc", () => {
 		// A default algorithm external-jwt does not know is refused, as one the operator wrote is.
 		const base = { issuer, "client-id": "c", "client-secret": "s" };
 		expect(settingsOf(["RS256"], policyRefusing()).safeParse(base).success).toBe(false);
+	});
+
+	it("takes an id_token's at_hash only as the access token's, by its signature's digest", async () => {
+		const half = (digest: string, token: string) => {
+			const full = createHash(digest).update(token).digest();
+			return full.subarray(0, full.length / 2).toString("base64url");
+		};
+		const exchangedAt = async (claims: Record<string, unknown>) => {
+			const token = await idToken(claims);
+			const { upstream } = await open({ token: () => granted(token) });
+			return outcome(upstream.exchange(codeExchange()));
+		};
+		const taken = { subject: "u-alice" };
+		expect(await exchangedAt({ at_hash: half("sha256", "at") })).toMatchObject(taken);
+		expect(await exchangedAt({})).toMatchObject(taken);
+		for (const claims of [
+			{ at_hash: half("sha256", "another") },
+			{ at_hash: half("sha384", "at") },
+			{ at_hash: half("sha256", "at").slice(1) },
+			{ at_hash: 7 },
+			{ at_hash: "" },
+		]) {
+			expect(await exchangedAt(claims), JSON.stringify(claims)).toBe("refused");
+		}
+	});
+
+	it("takes the digest of the signature's algorithm for at_hash, SHA-512 for EdDSA, and holds none under one it does not know", () => {
+		const headed = (alg: string) =>
+			`${Buffer.from(JSON.stringify({ alg })).toString("base64url")}.payload.signature`;
+		const full = createHash("sha512").update("at").digest();
+		const atHash = full.subarray(0, 32).toString("base64url");
+		expect(atHashHolds(headed("EdDSA"), atHash, "at")).toBe(true);
+		expect(atHashHolds(headed("ES512"), atHash, "at")).toBe(true);
+		expect(atHashHolds(headed("HS1"), atHash, "at")).toBe(false);
+		const sha384 = createHash("sha384").update("at").digest().subarray(0, 24).toString("base64url");
+		expect(atHashHolds(headed("PS384"), sha384, "at")).toBe(true);
+		expect(atHashHolds(headed("RS256"), sha384, "at")).toBe(false);
+		expect(atHashHolds(headed("EdDSA"), undefined, "at")).toBe(true);
 	});
 
 	it("exchanges the code with its verifier and the client's secret, and answers the id_token's subject", async () => {

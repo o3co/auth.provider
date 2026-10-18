@@ -4,6 +4,7 @@ import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import {
 	assemble,
+	BootRefused,
 	defineModule,
 	isUnavailable,
 	kernelConfig,
@@ -33,7 +34,7 @@ const secretIn = (setCookie: string | undefined) => pair(setCookie).split("=")[1
 const listed = async (stores: ReturnType<typeof memoryStores>, subject: string) =>
 	(await stores.listed.members(subject)).map(({ member }) => member).sort();
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-/** Long enough for one sweep at "sweep-seconds": 1. */
+/** Long enough for one sweep at "sweep-interval": "1s". */
 const oneSweep = () => pause(1300);
 /** Long enough for a whole sweep to start and finish after the clock moves. */
 const nextSweep = () => pause(2300);
@@ -119,8 +120,16 @@ describe("session cookies", () => {
 		expect(stores.kept.peek(secret)).toBeUndefined();
 	});
 
+	it("refuses to boot on a time that names no unit", async () => {
+		const refused = await boot({ lifetime: 3600 as unknown as string }).catch((error) => error);
+		expect(refused).toBeInstanceOf(BootRefused);
+		expect((refused as BootRefused).refusals.map((r) => r.where)).toEqual([
+			"session-lifecycle.lifetime",
+		]);
+	});
+
 	it("uses the lifetime it is given, to the millisecond", async () => {
-		const { s, withCookie, jar } = await boot({ "lifetime-seconds": 120 });
+		const { s, withCookie, jar } = await boot({ lifetime: "2m" });
 		const { cookies: set } = await s.complete(testRequest(), facts());
 		expect(set[0]).toBe(jar.write("session", secretIn(set[0]), 120));
 		const started = now;
@@ -295,7 +304,7 @@ describe("session entry", () => {
 		const { s, withCookie, stores, closer, login, handleOf, configured } = await boot();
 		const cookie = await login();
 		const handle = await handleOf(cookie);
-		const shorter = (await configured({ "lifetime-seconds": 60 })).get(sessions);
+		const shorter = (await configured({ lifetime: "1m" })).get(sessions);
 		now += 100_000;
 		expect(await shorter.enter(withCookie(cookie))).toBeUndefined();
 		expect(stores.kept.peek(handle)).toMatchObject({ state: "closed" });
@@ -308,7 +317,7 @@ describe("session entry", () => {
 		const { stores, withCookie, login, handleOf, configured } = await boot();
 		const cookie = await login();
 		const handle = await handleOf(cookie);
-		const shorter = (await configured({ "lifetime-seconds": 60 })).get(sessions);
+		const shorter = (await configured({ lifetime: "1m" })).get(sessions);
 		now += 60_000;
 		stores.kept.raceNextChange(
 			(r) => ({ ...(r as object), state: "closing" }) as unknown as StoredSession,
@@ -395,8 +404,8 @@ describe("session entry", () => {
 		expect(await s.enter(withCookie(first))).toBeDefined();
 	});
 
-	it("lets a session change credentials, where no requirement judges that, within credentials-seconds of its sign-in", async () => {
-		const { s, withCookie, login } = await boot({ "credentials-seconds": 60 });
+	it("lets a session change credentials, where no requirement judges that, when its sign-in is as recent as recent-authentication asks", async () => {
+		const { s, withCookie, login } = await boot({ "recent-authentication": "1m" });
 		const cookie = await login();
 		now += 60_000;
 		expect((await s.enterFor(withCookie(cookie), "credentials")).kind).toBe("entered");
@@ -521,8 +530,8 @@ describe("session closing", () => {
 
 	it("keeps a pending closing past the session's lifetime and finishes it without the user", async () => {
 		const { s, closer, login, app, handleOf } = await boot({
-			"lifetime-seconds": 60,
-			"sweep-seconds": 1,
+			lifetime: "1m",
+			"sweep-interval": "1s",
 		});
 		const cookie = await login();
 		const handle = await handleOf(cookie);
@@ -559,7 +568,7 @@ describe("session closing", () => {
 	it("calls no participants when closing a session the lifetime in force has ended, as by expiry", async () => {
 		const { stores, closer, login, handleOf, configured } = await boot();
 		const handle = await handleOf(await login());
-		const shorter = (await configured({ "lifetime-seconds": 60 })).get(sessions);
+		const shorter = (await configured({ lifetime: "1m" })).get(sessions);
 		now += 60_000;
 		expect((await shorter.close(handle)).kind).toBe("closed");
 		expect(closer.calls).toBe(0);
@@ -577,7 +586,7 @@ describe("session closing", () => {
 	});
 
 	it("keeps a closed record for the lifetime from its closing, then lets it go", async () => {
-		const { s, stores, login, handleOf } = await boot({ "lifetime-seconds": 60 });
+		const { s, stores, login, handleOf } = await boot({ lifetime: "1m" });
 		const handle = await handleOf(await login());
 		now += 30_000;
 		expect((await s.close(handle)).kind).toBe("closed");
@@ -633,7 +642,7 @@ describe("session closing", () => {
 
 	it("puts off a closing whose record it cannot read, as one whose participants fail", async () => {
 		const recorded = recordingLog();
-		const { s, stores, login, app, handleOf } = await boot({ "sweep-seconds": 1 }, [], {
+		const { s, stores, login, app, handleOf } = await boot({ "sweep-interval": "1s" }, [], {
 			log: recorded.log,
 		});
 		const failures = () =>
@@ -661,7 +670,7 @@ describe("session closing", () => {
 
 	it("counts a closing's age afresh once a sweep finds it finished, when its record cannot be read again", async () => {
 		const recorded = recordingLog();
-		const { s, stores, login, app, handleOf } = await boot({ "sweep-seconds": 1 }, [], {
+		const { s, stores, login, app, handleOf } = await boot({ "sweep-interval": "1s" }, [], {
 			log: recorded.log,
 		});
 		const ages = () =>
@@ -699,7 +708,7 @@ describe("session closing", () => {
 	});
 
 	it("sweeps at once a kept closing that stopped before it had a retry time", async () => {
-		const { s, stores, closer, login, app, handleOf } = await boot({ "sweep-seconds": 1 });
+		const { s, stores, closer, login, app, handleOf } = await boot({ "sweep-interval": "1s" });
 		const handle = await handleOf(await login());
 		stores.down.sessions.failNext("update");
 		await expect(s.close(handle)).rejects.toSatisfy(isUnavailable);
@@ -712,7 +721,7 @@ describe("session closing", () => {
 
 	it("puts off a closing that keeps failing by half its age, up to an hour, and sweeps it only once due", async () => {
 		const { s, closer, stores, login, app, handleOf } = await boot({
-			"sweep-seconds": 1,
+			"sweep-interval": "1s",
 		});
 		const handle = await handleOf(await login());
 		const retryAt = () => (stores.kept.peek(handle) as unknown as { retryAt: number }).retryAt;
@@ -736,7 +745,7 @@ describe("session closing", () => {
 	});
 
 	it("stops sweeping when the host stops, once the closing under way is done", async () => {
-		const { s, closer, login, app, handleOf } = await boot({ "sweep-seconds": 1 });
+		const { s, closer, login, app, handleOf } = await boot({ "sweep-interval": "1s" });
 		closer.failing = true;
 		for (const subject of ["alice", "bob"]) {
 			const handle = await handleOf(await login(subject));
@@ -755,7 +764,7 @@ describe("session closing", () => {
 	});
 
 	it("lets a login succeed when the earlier session cannot be closed yet, and finishes that closing later", async () => {
-		const { s, withCookie, closer, login, app } = await boot({ "sweep-seconds": 1 });
+		const { s, withCookie, closer, login, app } = await boot({ "sweep-interval": "1s" });
 		const first = await login();
 		closer.failing = true;
 		const second = await login("alice", withCookie(first));
@@ -771,7 +780,7 @@ describe("session closing", () => {
 
 	it("goes on with the other pending closings when one fails in a sweep", async () => {
 		const { s, stores, closer, login, app, handleOf } = await boot({
-			"sweep-seconds": 1,
+			"sweep-interval": "1s",
 		});
 		const handles = [];
 		for (const subject of ["alice", "bob"]) {
@@ -850,7 +859,7 @@ describe("session raise", () => {
 	it("ends a session at the lifetime in force, even one opened under a longer one", async () => {
 		const { withCookie, login, configured } = await boot();
 		const cookie = await login();
-		const later = await configured({ "lifetime-seconds": 600 });
+		const later = await configured({ lifetime: "10m" });
 		now += 599_999;
 		expect(await later.get(sessions).enter(withCookie(cookie))).toBeDefined();
 		now += 1;
@@ -861,7 +870,7 @@ describe("session raise", () => {
 	it("writes a raised cookie by the policy in force, not the one at login", async () => {
 		const { s, withCookie, login, configured } = await boot();
 		const cookie = await login();
-		const later = await configured({ "lifetime-seconds": 600 });
+		const later = await configured({ lifetime: "10m" });
 		now += 5000;
 		const raised = await later.get(sessions).raise(withCookie(cookie), ["otp"]);
 		const jar = later.get(cookies);
@@ -881,7 +890,7 @@ describe("session raise", () => {
 	});
 
 	it("gives a raised cookie at least a second, even at the session's end", async () => {
-		const { s, withCookie, login, jar } = await boot({ "lifetime-seconds": 60 });
+		const { s, withCookie, login, jar } = await boot({ lifetime: "1m" });
 		const cookie = await login();
 		now += 59_500;
 		const raised = await s.raise(withCookie(cookie), ["otp"]);
@@ -906,7 +915,7 @@ describe("session raise", () => {
 		const stores = memoryStores();
 		const other = await assemble({
 			modules: [http, cookiesModule, sessionLifecycle, moving, stores.module],
-			config: configWith({ "lifetime-seconds": 60 }),
+			config: configWith({ lifetime: "1m" }),
 			runtime: quietRuntime({ clock: { now: () => now }, random }),
 		});
 		const s = other.get(sessions);
@@ -923,7 +932,7 @@ describe("session raise", () => {
 	});
 
 	it("gives a raised cookie what is left of the session's lifetime, and no more", async () => {
-		const { s, withCookie, stores, login } = await boot({ "lifetime-seconds": 60 });
+		const { s, withCookie, stores, login } = await boot({ lifetime: "1m" });
 		const cookie = await login();
 		now += 20_000;
 		const raised = await s.raise(withCookie(cookie), ["otp"]);
@@ -960,7 +969,7 @@ describe("session raise", () => {
 
 describe("each subject's sessions", () => {
 	it("lists each login's session under its subject for its lifetime, and takes it off once closed", async () => {
-		const { s, stores, login, handleOf } = await boot({ "lifetime-seconds": 60 });
+		const { s, stores, login, handleOf } = await boot({ lifetime: "1m" });
 		const first = await handleOf(await login());
 		const second = await handleOf(await login());
 		const other = await handleOf(await login("bob"));
@@ -974,9 +983,9 @@ describe("each subject's sessions", () => {
 
 	it("lets no session in past its listing, even once the lifetime in force is longer", async () => {
 		const { stores, configured } = await boot();
-		const shorter = await configured({ "lifetime-seconds": 60 });
+		const shorter = await configured({ lifetime: "1m" });
 		const { session } = await shorter.get(sessions).complete(testRequest(), facts());
-		const longer = (await configured({ "lifetime-seconds": 3600 })).get(sessions);
+		const longer = (await configured({ lifetime: "1h" })).get(sessions);
 		now += 59_999;
 		expect(await longer.stillOpen(session.id)).toBe(true);
 		now += 1;
@@ -1096,7 +1105,7 @@ describe("revoking a subject", () => {
 	});
 
 	it("lets the login in when a pushed-out close cannot finish yet, and the sweep finishes it", async () => {
-		const { app, s, stores, closer, login, withCookie } = await boot({ "sweep-seconds": 1 });
+		const { app, s, stores, closer, login, withCookie } = await boot({ "sweep-interval": "1s" });
 		const first = await login();
 		closer.failing = true;
 		const [last] = (await fill(login, stores.listingCap)).slice(-1);
@@ -1126,7 +1135,7 @@ describe("revoking a subject", () => {
 		const { stores, closer, login, handleOf, withCookie, configured } = await boot();
 		const [first, ...rest] = await fill(login, stores.listingCap);
 		const firstHandle = await handleOf(first as string);
-		const shorter = (await configured({ "lifetime-seconds": 60 })).get(sessions);
+		const shorter = (await configured({ lifetime: "1m" })).get(sessions);
 		const { session, cookies } = await shorter.complete(testRequest(), facts());
 		expect(await shorter.enter(withCookie(pair(cookies[0])))).toBeDefined();
 		expect(closer.done).toEqual(["alice"]);

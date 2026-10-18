@@ -26,29 +26,27 @@ const section = z.strictObject({
 		.describe(
 			"The longest lifetime an exchange may ask for, from 1s to 1d, even past `tokens`' lifetime.",
 		),
-	"max-lifetime-seconds": z
-		.number()
-		.int()
-		.min(1)
-		.max(86_400)
-		.optional()
-		.describe("Seconds; write `max-lifetime` instead."),
 });
 
-/** A client's metadata: whether it may present tokens that do not name it. */
-const othersTokens: Section<{ readonly "others-tokens": boolean }> = {
+/** A client's metadata: whether it may present tokens that do not name it, and exchange as a public client. */
+const clientSection: Section<{
+	readonly "others-tokens": boolean;
+	readonly "public-exchange": boolean;
+}> = {
 	name: "token-exchange",
-	schema: z.strictObject({ "others-tokens": z.boolean().prefault(false) }),
+	schema: z.strictObject({
+		"others-tokens": z.boolean().prefault(false),
+		"public-exchange": z.boolean().prefault(false),
+	}),
 };
 
 export default defineModule({ name: "token-exchange", section }, (m) => [
-	m.contribute(metadataSections).by(() => othersTokens),
+	m.contribute(metadataSections).by(() => clientSection),
 	m
 		.contribute(exchangeVerifiers)
 		.by(async (c) => selfIssued(await c.get(tokens), (await c.get(issuer)).url)),
 	m.contribute(grants).by(async (c) => {
 		const verifiers = await c.collect(exchangeVerifiers);
-		const cap = c.section["max-lifetime-seconds"] ?? c.section["max-lifetime"];
 		return exchangeGrant({
 			verifiers: new Map(verifiers.map((verifier) => [verifier.tokenType, verifier])),
 			tokens: await c.get(tokens),
@@ -57,8 +55,11 @@ export default defineModule({ name: "token-exchange", section }, (m) => [
 			sessions: await c.get(sessions),
 			issuer: (await c.get(issuer)).url,
 			maxActorDepth: c.section["max-actor-depth"],
-			...(cap === undefined ? {} : { maxLifetimeSeconds: cap }),
-			othersTokens: (client) => client.section(othersTokens)["others-tokens"],
+			...(c.section["max-lifetime"] === undefined
+				? {}
+				: { maxLifetimeSeconds: c.section["max-lifetime"] }),
+			othersTokens: (client) => client.section(clientSection)["others-tokens"],
+			publicExchange: (client) => client.section(clientSection)["public-exchange"],
 			now: c.clock.now,
 		});
 	}),

@@ -25,20 +25,25 @@ async function bytesOf(message: IncomingMessage): Promise<Buffer | undefined> {
 const isEmpty = async (message: IncomingMessage) =>
 	typeOf(message) === undefined && (await bytesOf(message))?.length === 0;
 
-/** A form body up to the limit; anything else, or too large, leaves the form empty. */
-async function formOf(message: IncomingMessage) {
+/** Throws on bytes that are not UTF-8, instead of replacing them; a BOM is kept (so a JSON body with one is refused). */
+const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+/** A form body up to the limit; anything else, or too large, leaves the form empty. `400` when it is not UTF-8. */
+async function formOf(message: IncomingMessage): Promise<Values | number> {
 	if (typeOf(message) !== "application/x-www-form-urlencoded") return valuesOf(new Map());
 	const bytes = await bytesOf(message);
-	return bytes ? paramsOf(new URLSearchParams(bytes.toString("utf8"))) : valuesOf(new Map());
+	if (!bytes) return valuesOf(new Map());
+	try {
+		return paramsOf(utf8.decode(bytes)) ?? 400;
+	} catch {
+		return 400;
+	}
 }
 
 const kinds: ReadonlyMap<string | undefined, BodyKind> = new Map([
 	["application/x-www-form-urlencoded", "form"],
 	["application/json", "json"],
 ]);
-
-/** Throws on bytes that are not UTF-8, instead of replacing them; a BOM is kept, so refused. */
-const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 /** A JSON object body, or the status that answers one that cannot be read. */
 async function jsonOf(message: IncomingMessage): Promise<Record<string, unknown> | number> {
@@ -62,6 +67,12 @@ const asForm = (form: Values, refused?: number) => ({
 	...(refused === undefined ? {} : { refused }),
 });
 
+/** A form body read as a form, or refused as one that is not UTF-8. */
+const readForm = async (message: IncomingMessage) => {
+	const form = await formOf(message);
+	return typeof form === "number" ? asForm(valuesOf(new Map()), form) : asForm(form);
+};
+
 /** A request's body as a route that takes these kinds reads it; `refused` is the status refusing it. */
 export async function bodyOf(
 	takes: readonly BodyKind[] | undefined,
@@ -69,9 +80,9 @@ export async function bodyOf(
 ): Promise<Pick<HttpRequest, "form" | "fields" | "json" | "mistyped"> & { refused?: number }> {
 	const kind = (await isEmpty(message)) ? "none" : kinds.get(typeOf(message));
 	// A route that declares no bodies reads a form when one is sent, and ignores any other.
-	if (takes === undefined) return asForm(await formOf(message));
+	if (takes === undefined) return readForm(message);
 	if (kind === undefined || !takes.includes(kind)) return asForm(valuesOf(new Map()), 415);
-	if (kind !== "json") return asForm(await formOf(message));
+	if (kind !== "json") return readForm(message);
 	const json = await jsonOf(message);
 	if (typeof json === "number") return asForm(valuesOf(new Map()), json);
 	return { form: valuesOf(new Map()), ...fieldsOf(json), json };

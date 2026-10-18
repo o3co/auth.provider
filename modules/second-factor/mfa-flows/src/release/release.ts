@@ -1,8 +1,9 @@
 import type { Audit } from "@mod/audit";
 import type { Log } from "@mod/kernel";
-import { type Factors, longestRecentMs } from "@mod/mfa";
+import type { Factors } from "@mod/mfa";
 import type { LockoutPolicy, Lockouts, Released, ReleaseTerms } from "@mod/rate-limit";
 import type { Sessions } from "@mod/session";
+import { longestRecentMs } from "@mod/session";
 import type { SubjectRevocation } from "@mod/subject-revocation";
 import type { PermitResult, Permits } from "../permits/permits.ts";
 import { auditedBy } from "../recording/recording.ts";

@@ -27,7 +27,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 
 ## Packages
 
-0.18 is published as one package per concern, `@o3co/auth-provider-<concern>`, all at the same version. Each package offers its modules as subpaths named after them: `@o3co/auth-provider-oauth/authorize` (the contract), `/authorize/module` (what an app assembles), `/authorize/testing` (test builders and contract tests; vitest is an optional peer) and, where a module records audit events, `/authorize/audit-events`. You rarely name them yourself: generate the app (`npm create @o3co/auth-provider <dir>`, or `npx @o3co/auth-provider-scaffold create-app <dir>`), and it depends on the packages it composes.
+0.18 is published as one package per concern, `@o3co/auth-provider-<concern>`, all at the same version. Each package offers its modules as subpaths named after them: `@o3co/auth-provider-oauth/authorize` (the contract), `/authorize/module` (what an app assembles), `/authorize/testing` (test builders and contract tests; vitest is an optional peer) and, where a module records audit events, `/authorize/audit-events`. You rarely name them yourself: generate the app (`npx @o3co/create-auth-provider@next <dir> …`, or `npm create @o3co/auth-provider@next -- <dir> …`), and it depends on the packages it composes.
 
 Where each 0.17 package went:
 
@@ -189,8 +189,8 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 |---|---|---|
 | `session-store.secret`, `name`, `secure`, `sameSite`, `domain` | removed | The cookie is fixed: `session`, `__Host-` and `Secure` on https, `SameSite=Lax` |
 | `session-store.maxAge` (ms) | `session-lifecycle.lifetime` | Written with its unit |
-| (none) | `session-lifecycle.credentials-within` | Default `5m`, `30s` to `1h`; used only where `mfa` is not composed |
-| `core.sessionRequirements.expected`, `secondFactorAuthority` | removed | Without `mfa`, changing credentials needs a sign-in at a known time within `session-lifecycle.credentials-within`; with `mfa`, it judges both using a session and changing credentials |
+| (none) | `session-lifecycle.recent-authentication` | Default `5m`, `30s` to `1h`; used only where `mfa` is not composed |
+| `core.sessionRequirements.expected`, `secondFactorAuthority` | removed | Without `mfa`, changing credentials needs a sign-in at a known time within `session-lifecycle.recent-authentication`; with `mfa`, it judges both using a session and changing credentials |
 | `session.loginPage.url` | `authorize.login-page` | Absolute https URL, required |
 | `session.rateLimit.login` | `login-password.attempts`, `window` | Written with its unit |
 | (none) | `login-password.account-attempts`, `account-window`, `account-max-wait` | Failed attempts at one identifier from any source make each next one wait, doubling to the longest wait (defaults 10, `1h`, `5m`); anyone who knows an identifier can keep its password login waiting that long, while passkey and federation logins are not held back |
@@ -309,7 +309,7 @@ Compose `federation-grants` and its store, `federation-grants-store`; there is n
 | `connections.<name>` | `connections.<name>` | Names are now `a-z`, `0-9` and `-`, at most 32, starting with a letter or digit; the callback path follows the name |
 | `connections.<name>.federation` | `connections.<name>.idp` | Names a `federation.idps` entry whose IdP offers delegation |
 | `connections.<name>.scopes` | `connections.<name>.scopes` | Must hold `openid`, as before |
-| `connections.<name>.maxAccessTokenLifetime` | `connections.<name>.max-access-token-seconds` | Required; now at most 86400 |
+| `connections.<name>.maxAccessTokenLifetime` | `connections.<name>.max-access-token-lifetime` | Required; written with its unit, now at most `1d` |
 | `connections.<name>.allowScopeSubsets` | `connections.<name>.scope-subsets` | Default false (was true); set `scope-subsets: true` on a connection to keep 0.17's behaviour |
 | `connections.<name>.resource` | `connections.<name>.resource` | |
 | `connections.<name>.callbackURL` | removed | Fixed at `/session/federation-grants/callback/<name>` on `http.public-origin` |
@@ -331,6 +331,8 @@ Compose `federation-grants` and its store, `federation-grants-store`; there is n
 ### Session grant
 
 Compose `session-grant`, with `session-tokens` beside it: boot is refused when nothing records its tokens to their session.
+
+A proxy in front of the session grant passes `Origin` and `Sec-Fetch-Site` through as the browser sent them, and overwrites `X-Forwarded-For` and `X-Forwarded-Proto` with its own values rather than appending to what the client sent.
 
 | 0.17 | 0.18 | Notes |
 |---|---|---|
@@ -382,6 +384,8 @@ Compose `userinfo` and `oidc` for the userinfo endpoint and ID tokens, `rp-logou
 ### Email and WebAuthn second factors
 
 Compose `mfa-email` (with `mfa-email-wording` and a mail sender such as `mail-smtp`) for codes by mail, and `mfa-webauthn` (with `webauthn`) for WebAuthn as a second factor. The relying party keys are in [MFA and passkeys](#mfa-and-passkeys).
+
+For a second factor by mail alone, with no other factor to enrol, set `mfa-email.adds-second-factor = true`: without it, a code by mail does not count as a second factor.
 
 | 0.17 | 0.18 | Notes |
 |---|---|---|
@@ -454,6 +458,7 @@ Times and sizes are written with their unit (`30s`, `5m`, `64KiB`); a number wit
 | `federation-grants.lodge-window-seconds` | `federation-grants.lodge-window` | a duration, `1s` to `1d`, default `1m` |  |
 | `federation-grants.revocation-skew-seconds` | `federation-grants.revocation-skew` | a duration, `0s` to `5m`, default `1s` |  |
 | `federation-grants.window-seconds` | `federation-grants.window` | a duration, `1s` to `1h`, default `1m` |  |
+| `federation-grants.connections.<name>.max-access-token-seconds` | `federation-grants.connections.<name>.max-access-token-lifetime` | a duration, `1s` to `1d`, required |  |
 | `federation-tokens.refresh-before-seconds` | `federation-tokens.refresh-before` | a duration, `0s` to `1h`, default `30s` |  |
 | `federation-tokens.max-lifetime-seconds` | `federation-tokens.max-lifetime` | a duration, `1m` to `365d`, default `1d` |  |
 | `federation-tokens.lock-seconds` | `federation-tokens.lock-lifetime` | a duration, `1s` to `1m`, default `5s` |  |
@@ -494,7 +499,7 @@ Times and sizes are written with their unit (`30s`, `5m`, `64KiB`); a number wit
 | `rp-logout.sweep-seconds` | `rp-logout.sweep-interval` | a duration, `1s` to `1h`, default `1m` |  |
 | `session-lifecycle.lifetime-seconds` | `session-lifecycle.lifetime` | a duration, `1m` to `30d`, default `1h` |  |
 | `session-lifecycle.sweep-seconds` | `session-lifecycle.sweep-interval` | a duration, `1s` to `1h`, default `30s` |  |
-| `session-lifecycle.credentials-seconds` | `session-lifecycle.credentials-within` | a duration, `30s` to `1h`, default `5m` |  |
+| `session-lifecycle.credentials-seconds` | `session-lifecycle.recent-authentication` | a duration, `30s` to `1h`, default `5m` |  |
 | `session-tokens.sweep-seconds` | `session-tokens.sweep-interval` | a duration, `1s` to `1h`, default `30s` |  |
 | `token-control.window-seconds` | `token-control.window` | a duration, `1s` to `1d`, default `1m` |  |
 | `token-endpoint.window-seconds` | `token-endpoint.window` | a duration, `1s` to `1d`, default `1m` |  |
@@ -568,6 +573,8 @@ These are requests 0.17 accepted, or answered differently, that 0.18 refuses or 
 
 Upstream links and MFA enrollment are no longer kept by the ledger.
 
+A ledger can also be asked for a user by subject, so a user who signs in upstream has the ledger's attributes, such as the address `mfa-email` mails: set `users-http.subject-url`. It is posted `{"subject"}` the same way; a `200` with an `id` is the user (no `username` asked), `404` and `410` are no such user, and anything else, `401` and `403` included, is unavailable. Likewise `users-http.upstream-url` is posted `{"idp", "subject"}` to look a user up by upstream identity, read the same way; with it, the ledger's answer is the last word, and links users keeps are not read. With a `credential`, every URL must be at one origin. Reading the password call's `401` and `403` as no such user is kept for 0.17's ledgers, and is to go in a later release, after which they read as a lookup's do.
+
 ### MFA and federation
 
 - With `mfa.mode = optional`, removing the last second factor also removes the recovery codes.
@@ -614,6 +621,14 @@ Upstream links and MFA enrollment are no longer kept by the ledger.
 
 - **Sealing keys**: `seal.keys` is refused at boot; write its first key as `seal.current` and the rest as `seal.previous`. Rotating a key now has a procedure, in the [runbook](runbook.md#rotating-the-sealing-key).
 - **MFA factor lists written by rc.1** hold no subject, so `reseal` cannot seal their secrets again and counts them as left (exit 2) until the user next proves or changes a factor, which writes the subject. While such lists remain, do not retire a `previous` key that sealed them.
+- **Times and sizes**: every time and size key lost its unit suffix and is written with a unit (`30m`, `64KiB`); a number without one refuses boot. The renamed keys are in [Times and sizes](#times-and-sizes), among them `federation-grants.connections.<name>.max-access-token-lifetime`, which was `max-access-token-seconds`.
+- **Linked upstream identities**: a written link no longer lets in a subject that the settings' users or the ledger answer none for; that login is refused. Where the ledger cannot look users up by subject, a link still stands for its subject, with no attributes.
+- **MFA under `required`**: boot is refused unless a composed kind both counts and adds a second factor. With `mfa-email` alone, set `mfa-email.adds-second-factor = true`.
+- **Managed Redis**: where the server refuses `CONFIG GET`, declare its settings in `redis.server-settings`; where it keeps no append-only file, set `redis.durability = "none"`. See [A managed Redis that refuses `CONFIG`](runbook.md#a-managed-redis-that-refuses-config).
+- **users-http**: `verify-url` is now optional, and `subject-url` is new. With a `credential`, every URL must share one origin, or boot is refused.
+- **idp-google**: `hosted-domains` is new and optional; nothing to change.
+- **Generated apps**: the command is `create-auth-provider`, and a generated README names the audit receivers of the adapters composed; an app already generated needs no change.
+- **Configuration files**: a file that does not parse, or a substitution that does not resolve, is refused at its `file:line:col`; nothing to change.
 
 ## Operational notes
 
@@ -643,7 +658,7 @@ A user who signs in with a passkey can satisfy the WebAuthn second factor with a
 
 ### Changing credentials without mfa
 
-Without `mfa`, registering a passkey or linking an upstream account (`?link=1`) needs a sign-in at a known time within `session-lifecycle.credentials-within`. With `mfa`, its rule decides.
+Without `mfa`, registering a passkey or linking an upstream account (`?link=1`) needs a sign-in at a known time within `session-lifecycle.recent-authentication`. With `mfa`, its rule decides.
 
 ### Outbound requests
 
@@ -681,6 +696,8 @@ The proxy resolves the names it carries and checks their addresses itself, and b
 
 Behind a TLS-terminating proxy, set `http.trusted-proxies` and `http.proxy-hops`. Only `X-Forwarded-For` and the forwarded scheme are read from a trusted proxy; `Forwarded` is ignored. With an https public origin, browser requests that change state must arrive over https, so a missing proxy setting refuses them.
 
+No setting trusts a proxy by its hop count alone: `http.proxy-hops` only bounds how many trusted proxies a request passes through. List the load balancer's subnet as CIDRs in `http.trusted-proxies`, and let only the load balancer reach the app's port.
+
 ### Redis
 
 The `redis` module checks the server at boot and refuses to start unless:
@@ -689,7 +706,7 @@ The `redis` module checks the server at boot and refuses to start unless:
 - `maxmemory-policy` is `noeviction` where the composed features need it;
 - `appendonly yes` and `appendfsync always` are set where they need durability;
 - `redis.replication` is set where they need replication, with `min-replicas-to-write` and `min-replicas-max-lag` of at least 1 for `replicas`;
-- `CONFIG GET`, `INFO` and `ROLE` are allowed. A managed Redis that blocks `CONFIG GET` cannot be used.
+- `INFO` and `ROLE` are allowed; where `CONFIG GET` is refused, the settings are declared in `redis.server-settings`, and `redis.durability = none` accepts a server that does not fsync every write. See the runbook.
 
 ### Several instances
 
