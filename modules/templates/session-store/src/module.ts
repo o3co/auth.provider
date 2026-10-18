@@ -33,11 +33,15 @@ const cookies: Space = {
 };
 const closings: Space = { name: "session-store.closings", guarantees };
 const { neverEvicted, survivesCrash, survivesFailover } = guaranteeFor;
-const listedGuaranteeFor: Record<keyof typeof subjectSessionsNeeds, Guarantee> = {
-	neverEvicted,
-	survivesCrash,
-	survivesFailover,
-};
+// Confirmed reads too, ahead of session-lifecycle stating the need: a revocation reading the list
+// must see a session opened just before.
+const listedGuaranteeFor: Record<keyof typeof subjectSessionsNeeds | "readsConfirmed", Guarantee> =
+	{
+		neverEvicted,
+		survivesCrash,
+		survivesFailover,
+		readsConfirmed: guaranteeFor.readsConfirmed,
+	};
 const subjects: Space = {
 	name: "session-store.subjects",
 	guarantees: Object.values(listedGuaranteeFor),
