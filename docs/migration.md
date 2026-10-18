@@ -14,6 +14,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 - [Configuration mapping](#configuration-mapping)
 - [Newly refused at boot](#newly-refused-at-boot)
 - [Behavior changes](#behavior-changes)
+- [From 0.18.0-rc.1](#from-0180-rc1)
 - [Operational notes](#operational-notes)
 
 ## Before you start
@@ -607,6 +608,11 @@ Every request carries `Authorization: Bearer <credential>`. Upstream links and M
 
 - `/_healthcheck` still answers `200 {"status":"ok"}`, now with `Content-Type: application/json` (no charset) and `Cache-Control: no-store`. Probes that match the exact content type need updating.
 - `/readyz` answers `{"status":"ready"}` or `{"status":"unready"}` only; the `checks` list is gone.
+
+## From 0.18.0-rc.1
+
+- **Sealing keys**: `seal.keys` is refused at boot; write its first key as `seal.current` and the rest as `seal.previous`. Rotating a key now has a procedure, in the [runbook](runbook.md#rotating-the-sealing-key).
+- **MFA factor lists written by rc.1** hold no subject, so `reseal` cannot seal their secrets again and counts them as left (exit 2) until the user next proves or changes a factor, which writes the subject. While such lists remain, do not retire a `previous` key that sealed them.
 
 ## Operational notes
 
