@@ -137,7 +137,7 @@ From `@mod/external-jwt`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `external-jwt.key-set-max-age-ms` | integer (3600000–2592000000) | `86400000` |  |  |  | How long after its fetch a key set is still used while no new one can be had, in milliseconds. |
+| `external-jwt.key-set-max-age` | string | `1d` |  |  |  | How long after its fetch a key set is still used while no new one can be had, from `1h` to `30d`. |
 
 ## federation
 
