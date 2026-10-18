@@ -11,6 +11,7 @@
 - An authenticated answer carries the challenges for a later 401 to that client: its method's, or every method's when its method has none.
 - `methods` names the usable authentication methods, built in and contributed; `signingAlgorithms` names the algorithms they take signed credentials in.
 - A client gives its metadata by section, and says whether the operator registered it or another source named it.
+- Asking a client for a section no module contributed throws; it never answers undefined.
 - Extension point `authMethods`: a method names its challenge for a refusal and its signing algorithms, and may say a request carries its credentials malformed.
 - Extension points `clientSources` and `metadataSections`; a section may give `checkAtBoot`, which takes a registered client's value of that section after the schema, and the client that holds it, and may give a reason to refuse boot.
 - Operator section `registered`: a list of `id`, `kind` (`public` or `confidential`), `method` and `sections` (values by section name); built-in section `client-secret` holds `hash`, a bcrypt or scrypt hash in the forms `secret-hash` reads.

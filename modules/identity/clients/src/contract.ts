@@ -20,6 +20,7 @@ export interface Client {
 	readonly method: string;
 	/** True when the operator registered the client in the settings, rather than a source naming it. */
 	readonly registered: boolean;
+	/** The client's value of a contributed section; throws for a section no module contributed. */
 	section<T>(section: Section<T>): T;
 }
 

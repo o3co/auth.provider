@@ -69,7 +69,11 @@ export async function readRecord(
 		kind: record.kind,
 		method: record.method,
 		registered: origin === "registered",
-		section: <T>(section: Section<T>) => values.get(section.name) as T,
+		section: <T>(section: Section<T>) => {
+			if (!values.has(section.name))
+				throw new Error(`no module contributes the section ${section.name}`);
+			return values.get(section.name) as T;
+		},
 	});
 	return { client };
 }
