@@ -251,10 +251,12 @@ describe("the client routes", () => {
 		expect((await h.grantCall(id, "status")).json).not.toHaveProperty("last_used_at");
 	});
 
-	it("answers 503 when the store cannot tell", async () => {
+	it("answers 503 when the store cannot tell, naming no cause, as for any cause", async () => {
 		const h = await harness();
 		const { id } = await h.connected();
 		h.stores.down.failNext("read");
-		expect(said(await h.grantCall(id, "token"))).toBe("503 temporarily_unavailable storage");
+		const answer = await h.grantCall(id, "token");
+		expect([answer.status, answer.json?.error]).toEqual([503, "temporarily_unavailable"]);
+		expect(answer.json).not.toHaveProperty("error_description");
 	});
 });

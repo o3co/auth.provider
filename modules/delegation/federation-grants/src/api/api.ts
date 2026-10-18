@@ -574,7 +574,7 @@ export function apiWith(p: ApiParts) {
 			if (id === "" || rest.length > 0) return error(404, "not_found");
 			return await byId(request, client, id, step);
 		} catch (thrown) {
-			if (isUnavailable(thrown)) return error(503, "temporarily_unavailable", "storage");
+			if (isUnavailable(thrown)) return error(503, "temporarily_unavailable");
 			throw thrown;
 		}
 	};
