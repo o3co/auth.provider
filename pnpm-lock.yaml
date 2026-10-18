@@ -1164,9 +1164,6 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
-      '@mod/store':
-        specifier: workspace:*
-        version: link:../../foundation/store
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -1186,6 +1183,12 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
       '@mod/tokens':
         specifier: workspace:*
         version: link:../tokens

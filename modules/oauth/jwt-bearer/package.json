@@ -5,6 +5,7 @@
 	"type": "module",
 	"kind": "feature",
 	"optIn": true,
+	"storeWiring": true,
 	"exports": {
 		".": "./src/contract.ts",
 		"./testing": "./src/testing.ts",
@@ -18,7 +19,6 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/keys": "workspace:*",
 		"@mod/outbound": "workspace:*",
-		"@mod/store": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"jose": "6.2.12",
@@ -27,6 +27,8 @@
 	"devDependencies": {
 		"@mod/clients": "workspace:*",
 		"@mod/http": "workspace:*",
+		"@mod/records": "workspace:*",
+		"@mod/store": "workspace:*",
 		"@mod/tokens": "workspace:*",
 		"vitest": "5.0.4"
 	},

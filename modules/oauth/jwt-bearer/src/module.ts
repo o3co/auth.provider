@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { clientAllowance } from "@mod/client-allowance";
 import { externalJwt } from "@mod/external-jwt";
 import { grants } from "@mod/grants";
@@ -5,12 +6,17 @@ import { issuer } from "@mod/issuer";
 import { defineModule, setting } from "@mod/kernel";
 import { publicPem } from "@mod/keys";
 import { withinHosts } from "@mod/outbound";
-import { type Space, spaces, store } from "@mod/store";
 import { revocations } from "@mod/subject-revocation";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { z } from "zod";
 import { check } from "./assertion.ts";
-import { algorithms, linkedIssuers, linkedSubjects, signerKeys } from "./contract.ts";
+import {
+	algorithms,
+	linkedIssuers,
+	linkedSubjects,
+	signerKeys,
+	spentAssertions,
+} from "./contract.ts";
 import { contributedSigners, fetchedSigners, type Signers, writtenSigners } from "./signers.ts";
 
 const grantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
@@ -108,16 +114,16 @@ const section = z.strictObject({
 const linkedOf = (s: z.output<typeof section>): ReadonlyMap<string, string> =>
 	new Map(s.issuers.flatMap((i) => (i.upstream ? [[i.issuer, i.upstream] as const] : [])));
 
-const used: Space = {
-	name: "jwt-bearer.jti",
-	guarantees: ["no-eviction", "durable", "replicated"],
-};
-
 /** Kept longer than any assertion is accepted by this much, so clock differences never let one back. */
 const usedAllowanceMs = 60_000;
 
+/** A spent assertion's name; JSON keeps the issuer and the jti apart, whatever either holds. */
+const spentName = (issuer: string, jti: string) =>
+	createHash("sha256")
+		.update(JSON.stringify([issuer, jti]))
+		.digest("base64url");
+
 export default defineModule({ name: "jwt-bearer", section }, (m) => [
-	m.contribute(spaces).by(() => used),
 	m
 		.provide(linkedIssuers)
 		.by((c) => [...linkedOf(c.section)].map(([issuer, upstream]) => ({ upstream, issuer }))),
@@ -128,7 +134,7 @@ export default defineModule({ name: "jwt-bearer", section }, (m) => [
 		if (url === undefined) {
 			return c.refuse("jwt-bearer", "the token endpoint's location needs a public origin");
 		}
-		const saved = await c.get(store);
+		const spent = await c.get(spentAssertions);
 		const boundaries = await c.get(revocations);
 		const jwt = await c.get(externalJwt);
 		const skewMs = c.section["clock-skew"] * 1000;
@@ -217,18 +223,9 @@ export default defineModule({ name: "jwt-bearer", section }, (m) => [
 				// Asked before the jti is used up, so a refusal leaves the assertion usable.
 				const admitted = await admits(access);
 				if (admitted.kind === "refused") return admitted;
-				const first = await saved.putIfAbsent(
-					{ space: used, partition: checked.issuer, name: checked.jti },
-					true,
-					// Relative, since the store judges expiry by its own clock.
-					{
-						expiry: {
-							kind: "after",
-							ms: checked.expiresAt + skewMs - c.clock.now() + usedAllowanceMs,
-						},
-					},
-				);
-				if (first.kind !== "written")
+				// Relative, since the store judges a lifetime by its own clock.
+				const lifetimeMs = checked.expiresAt + skewMs - c.clock.now() + usedAllowanceMs;
+				if ((await spent.save(spentName(checked.issuer, checked.jti), lifetimeMs)) === "exists")
 					return { kind: "error", error: "invalid_grant", description: "assertion replayed" };
 				const issued = await issue(access, { notAfter: checked.expiresAt });
 				if (issued.kind === "refused") return issued;
