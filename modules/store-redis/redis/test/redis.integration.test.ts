@@ -3,7 +3,7 @@ import { createConnection, createServer, type Socket } from "node:net";
 import { assemble, BootRefused, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { spaces, store } from "@mod/store";
-import { contractSpaces, storeContract } from "@mod/store/testing";
+import { contractSpaces, overwrite, storeContract } from "@mod/store/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import redisModule from "../src/module.ts";
 
@@ -323,7 +323,7 @@ describe("redis", () => {
 				partition: "p",
 				name: "a",
 			};
-			expect((await s.put(k, 1, { expiry: { kind: "never" } })).kind).toBe("written");
+			expect((await overwrite(s, k, 1, { expiry: { kind: "never" } })).kind).toBe("written");
 			follower = docker(
 				"run",
 				"-d",
@@ -337,7 +337,7 @@ describe("redis", () => {
 				"6379",
 			);
 			await waitFor(() => /state=online/.test(cli(lone, "info", "replication")), 30_000);
-			await expect(s.put(k, 2, { expiry: { kind: "never" } })).rejects.toMatchObject({
+			await expect(overwrite(s, k, 2, { expiry: { kind: "never" } })).rejects.toMatchObject({
 				name: "Unavailable",
 			});
 		} finally {
@@ -360,7 +360,7 @@ describe("redis", () => {
 		try {
 			cli(container, "client", "kill", "type", "replica");
 			await waitFor(() => connectedReplicas() === 0, 20_000);
-			await expect(s.put(k, 1, { expiry: { kind: "never" } })).rejects.toMatchObject({
+			await expect(overwrite(s, k, 1, { expiry: { kind: "never" } })).rejects.toMatchObject({
 				name: "Unavailable",
 			});
 		} finally {
@@ -392,11 +392,11 @@ describe("redis", () => {
 			};
 			try {
 				const wrong = redisStore(main, other, options, contractSpaces);
-				await expect(wrong.put(k, 1, { expiry: { kind: "never" } })).rejects.toMatchObject({
+				await expect(overwrite(wrong, k, 1, { expiry: { kind: "never" } })).rejects.toMatchObject({
 					name: "Unavailable",
 				});
 				const right = redisStore(main, same, options, contractSpaces);
-				expect((await right.put(k, 2, { expiry: { kind: "never" } })).kind).toBe("written");
+				expect((await overwrite(right, k, 2, { expiry: { kind: "never" } })).kind).toBe("written");
 			} finally {
 				main.disconnect();
 				other.disconnect();
@@ -437,7 +437,7 @@ describe("redis", () => {
 		};
 		const seen: string[] = [];
 		for (let i = 0; i < 3; i++) {
-			const w = await s.put(key, i, { expiry: { kind: "never" } });
+			const w = await overwrite(s, key, i, { expiry: { kind: "never" } });
 			if (w.kind === "written") seen.push(w.version);
 		}
 		const counter = `${prefix}:{contract:p}:#version`;
@@ -446,7 +446,7 @@ describe("redis", () => {
 		cli(container, "hset", counter, "n", "1");
 		let after: string | undefined;
 		for (let i = 0; i < 100 && !after; i++) {
-			after = await s.put(key, 9, { expiry: { kind: "never" } }).then(
+			after = await overwrite(s, key, 9, { expiry: { kind: "never" } }).then(
 				(w) => (w.kind === "written" ? w.version : undefined),
 				async () => {
 					await new Promise((r) => setTimeout(r, 100));
