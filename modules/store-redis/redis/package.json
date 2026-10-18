@@ -12,9 +12,9 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/store": "workspace:*",
 		"ioredis": "5.11.1",
-		"zod": "4.6.5"
+		"zod": "4.6.7"
 	},
 	"devDependencies": {
-		"vitest": "5.0.3"
+		"vitest": "5.0.4"
 	}
 }

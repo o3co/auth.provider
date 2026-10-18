@@ -20,15 +20,15 @@
 		"@mod/request-source": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/url-setting": "workspace:*",
-		"zod": "4.6.5"
+		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"@mod/cookies": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
-		"vitest": "5.0.3"
+		"vitest": "5.0.4"
 	},
 	"peerDependencies": {
-		"vitest": "5.0.3"
+		"vitest": "5.0.4"
 	}
 }

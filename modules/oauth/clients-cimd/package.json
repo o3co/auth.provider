@@ -19,9 +19,9 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/outbound": "workspace:*",
 		"@mod/refresh": "workspace:*",
-		"zod": "4.6.5"
+		"zod": "4.6.7"
 	},
 	"devDependencies": {
-		"vitest": "5.0.3"
+		"vitest": "5.0.4"
 	}
 }

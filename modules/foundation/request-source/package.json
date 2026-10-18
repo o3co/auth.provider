@@ -10,6 +10,6 @@
 	"dependencies": {
 		"@mod/client-certificate": "workspace:*",
 		"@mod/kernel": "workspace:*",
-		"zod": "4.6.5"
+		"zod": "4.6.7"
 	}
 }

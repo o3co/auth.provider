@@ -13,6 +13,6 @@
 		"@mod/http": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/url-setting": "workspace:*",
-		"zod": "4.6.5"
+		"zod": "4.6.7"
 	}
 }
