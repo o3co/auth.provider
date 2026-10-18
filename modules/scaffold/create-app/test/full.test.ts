@@ -259,6 +259,30 @@ it("gives signer-keys-http an issuer and keys-url of the trial's own, its host a
 		"keys-url": "https://ledger.example.invalid/signer-keys",
 	});
 	expect(local.get("outbound.allow")).toEqual(["ledger.example.invalid"]);
+	expect(local.get("jwt-bearer")).toBeUndefined();
+});
+
+it("names signer-keys-http's issuer among jwt-bearer's issuers where both are composed, its keys contributed", async () => {
+	const target = await mkdtemp(join(tmpdir(), "create-app-trial-"));
+	mkdirSync(join(target, "src"));
+	await writeFile(
+		join(target, "src", "main.ts"),
+		[
+			'import o from "@mod/outbound/module";',
+			'import j from "@mod/jwt-bearer/module";',
+			'import s from "@mod/signer-keys-http/module";',
+			"",
+		].join("\n"),
+	);
+	const redisUrl = "redis://127.0.0.1:1";
+	const local = parseString((await trialSettings(target, { redisUrl })).local);
+	expect(local.get("jwt-bearer.issuers")).toEqual([
+		{ issuer: "https://devices.example.invalid", subject: "as-is" },
+	]);
+	const left = parseString(
+		(await trialSettings(target, { redisUrl, leave: ["jwt-bearer"] })).local,
+	);
+	expect(left.get("jwt-bearer")).toBeUndefined();
 });
 
 it("gives exchange-id-tokens one upstream for a client of the trial's own, registered beside the clients given", async () => {
