@@ -17,7 +17,6 @@
 		"@mod/http": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
-		"@mod/refresh": "workspace:*",
 		"@mod/request-source": "workspace:*",
 		"@mod/seal": "workspace:*",
 		"@mod/sender-binding": "workspace:*",
