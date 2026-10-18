@@ -14,7 +14,7 @@
   - `verify-url`: the password call; without it, no password matches and nothing is asked.
   - `subject-url`: the lookup by subject, posting `{"subject"}`; `404` and `410` are none, `401` and `403` unavailable.
   - `upstream-url`: the lookup by upstream identity, posting `{"idp", "subject"}` apart, read as the lookup by subject. With it the ledger offers `byUpstream`, and its answer is the last word: users reads no link of its own. Without it, none is offered.
-- `credential` (optional: a bare RFC 6750 token with at least 32 bytes of key material, counted as the fewest of its bytes, hex or base64 decoding), sent on every call.
+- `credential` (optional: `keys`' `bearerToken` of at least 32 bytes of key material, never a `REPLACE-` sample), sent on every call.
 - `timeout` and `max-response-size`: each narrows outbound's cap on every call; written with its unit, a bare number refused.
 - Every call: `POST {url}` with the URL as written, nothing added; `Content-Type` and `Accept: application/json`; `Authorization: Bearer {credential}` when one is set, none otherwise.
 - The password call, with the body `{"email": identifier, "password"}`:
@@ -46,4 +46,4 @@
 - Holds no state, so it is safe on multiple instances.
 
 ## Depends on
-- `kernel`, `users`, `outbound`, `url-setting`
+- `kernel`, `users`, `outbound`, `url-setting`, `keys` (the credential's rule)

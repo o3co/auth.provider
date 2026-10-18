@@ -541,6 +541,7 @@ describe("users-http", () => {
 			settings({ credential: `${credential}\n` }),
 			settings({ credential: `${credential}é` }),
 			settings({ credential: "ab".repeat(31) }),
+			settings({ credential: `REPLACE-${"x".repeat(60)}` }),
 			settings({ credential: `${credential}@` }),
 			settings({ credential: "Z".repeat(42) }),
 			settings({ credential: "Zz0".repeat(11).slice(0, 32) }),
