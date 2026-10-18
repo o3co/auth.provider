@@ -12,7 +12,7 @@
 ## Offers
 - `cookies.write`: a name, a value, a lifetime in seconds, and whether the cookie is cross-site → a `Set-Cookie` value.
 - `cookies.read`: a request and a name → the cookie's value.
-- `cookies.lookup`: a request and a name → the cookie (`found`), none (`absent`), or `withheld` with why (`plain-http`, `duplicate`). Optional on the contract until every stand-in offers it.
+- `cookies.lookup`: a request and a name → the cookie (`found`), none (`absent`), or `withheld` with why (`plain-http`, `duplicate`).
 - `cookiesFor`: whether cookies can be made secure, and a log if any → cookies by the same rule, `lookup` included, for a stand-in that builds them without composing this module.
 
 ## Invariants

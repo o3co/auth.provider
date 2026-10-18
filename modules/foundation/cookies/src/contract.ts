@@ -14,11 +14,8 @@ export type CookieLookup =
 export interface Cookies {
 	/** The cookie the request carries once under this name; none when sent twice, or over plain http where cookies are secure. */
 	read(request: HttpRequest, name: string): string | undefined;
-	/**
-	 * The cookie the request carries under this name, none, or why it is withheld; a withheld one warns
-	 * once a request and name. Optional until every stand-in offers it; `cookiesFor` always does.
-	 */
-	lookup?(request: HttpRequest, name: string): CookieLookup;
+	/** The cookie the request carries under this name, none, or why it is withheld; a withheld one warns once a request and name. */
+	lookup(request: HttpRequest, name: string): CookieLookup;
 	/**
 	 * A `Set-Cookie` value: path `/`, HttpOnly, SameSite=Lax; zero seconds removes it. A cross-site one
 	 * is SameSite=None and only ever `__Host-` and Secure: it throws where cookies cannot be secure. A name that is not a token, or a value with anything but cookie-octets, throws.
