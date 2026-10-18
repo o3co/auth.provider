@@ -139,7 +139,6 @@ const prefaultLater = new Set([
 	"http-ops",
 	"jwt-bearer",
 	"kernel",
-	"keys",
 	"mail",
 	"mail-smtp",
 	"metrics-prometheus",
