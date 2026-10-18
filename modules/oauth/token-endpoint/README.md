@@ -30,7 +30,7 @@
 - A grant type nothing dispatches to is `unsupported_grant_type`, and is never named in the audit or the log.
 - A grant `client-allowance` does not allow the client is `unauthorized_client`.
 - The binding is read through `sender-binding`: its refusal is answered with its own code and headers, unavailable as `503`, and two bindings are `invalid_request`. A client that must bind and shows none is `invalid_request`, and one bound by a kind it does not name `unauthorized_client`.
-- A grant's `401` carries the client's method's challenge, or every method's when it names none.
+- A grant's `401` carries the challenges `clients` answers with the client: its method's, or every method's when it names none.
 - Error descriptions keep printable ASCII but `"` and `\`; any other character shows as `?`.
 - Unavailable is `503`, never audited, and logged naming only what was unavailable and a grant type dispatched to.
 - No token or secret is ever audited or logged.
