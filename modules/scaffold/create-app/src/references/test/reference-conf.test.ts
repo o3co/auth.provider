@@ -91,7 +91,6 @@ const unitsLater = new Set([
 	"token-exchange",
 	"users-http",
 	"webauthn",
-	"webauthn-login",
 ]);
 /** Sections whose schema still gives a default by `.default()`; a section leaves once its owner moves it, and never comes back. */
 const prefaultLater = new Set([
@@ -106,7 +105,6 @@ const prefaultLater = new Set([
 	"session-store",
 	"session-tokens-store",
 	"store",
-	"webauthn-login",
 ]);
 
 /** Each place a rule is broken: the key path, in its section. */

@@ -647,4 +647,4 @@ From `@mod/webauthn-login`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `webauthn-login.requests` | integer (1–100000) | `60` |  |  |  |  |
-| `webauthn-login.window-seconds` | integer (1–86400) | `60` |  |  |  |  |
+| `webauthn-login.window` | string | `1m` |  |  |  | The window `requests` is counted over, from 1s to 1d in whole seconds, written with its unit, such as `1m`. |
