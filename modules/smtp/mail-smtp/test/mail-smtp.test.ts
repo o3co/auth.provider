@@ -33,7 +33,7 @@ const section = (port: number, more: object = {}) => ({
 	port,
 	security: "none",
 	from: "Provider <noreply@example.test>",
-	"deadline-ms": 2000,
+	deadline: "2s",
 	...more,
 });
 const assembled = (settings: object, modules: readonly Module[] = [contractTemplates]) =>
@@ -138,7 +138,7 @@ describe("delivery", () => {
 	it("keeps sent when QUIT fails or goes unanswered", async () => {
 		for (const QUIT of ["drop", "none"]) {
 			const r = await started({ replies: { QUIT } });
-			const sender = await boot(section(r.port, { "deadline-ms": 400 }));
+			const sender = await boot(section(r.port, { deadline: "400ms" }));
 			await expect(sender.send(notice())).resolves.toBe("sent");
 		}
 	});
@@ -339,7 +339,7 @@ describe("deadlines", () => {
 	/** What the log names as having ended a send that failed; no wall time is read. */
 	const endedBy = async (script: Script) => {
 		const r = await started(script);
-		const sender = await boot(section(r.port, { "deadline-ms": 1000 }));
+		const sender = await boot(section(r.port, { deadline: "1s" }));
 		const from = recorded.lines().length;
 		await expect(sender.send(notice())).rejects.toBeInstanceOf(Unavailable);
 		return recorded.lines()[from]?.fields;
@@ -361,7 +361,7 @@ describe("deadlines", () => {
 describe("sends at once", () => {
 	it("answers unavailable past concurrent-sends, opening no connection, and takes another once one ends", async () => {
 		const r = await started({ replies: { greeting: "none" } });
-		const sender = await boot(section(r.port, { "deadline-ms": 400, "concurrent-sends": 1 }));
+		const sender = await boot(section(r.port, { deadline: "400ms", "concurrent-sends": 1 }));
 		const from = recorded.lines().length;
 		const first = failureOf(sender.send(notice()));
 		await expect(sender.send(notice())).rejects.toBeInstanceOf(Unavailable);
@@ -399,7 +399,10 @@ describe("settings", () => {
 			"plaintext to an address isIP does not read": [{ host: "127.0.0.08" }, "mail-smtp.security"],
 			"port 0": [{ port: 0 }, "mail-smtp.port"],
 			"a port past 65535": [{ port: 70_000 }, "mail-smtp.port"],
-			"a deadline under 100 ms": [{ "deadline-ms": 50 }, "mail-smtp.deadline-ms"],
+			"a deadline under 100 ms": [{ deadline: "99ms" }, "mail-smtp.deadline"],
+			"a deadline past 10 minutes": [{ deadline: "601s" }, "mail-smtp.deadline"],
+			"a deadline with no unit": [{ deadline: 2000 }, "mail-smtp.deadline"],
+			"the deadline by its name in milliseconds": [{ "deadline-ms": 2000 }, "mail-smtp"],
 			"a security it does not know": [{ security: "ssl" }, "mail-smtp.security"],
 			"a key it does not know": [{ retries: 3 }, "mail-smtp"],
 			"no send at once": [{ "concurrent-sends": 0 }, "mail-smtp.concurrent-sends"],

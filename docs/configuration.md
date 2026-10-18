@@ -304,7 +304,7 @@ From `@mod/mail-smtp`.
 | `mail-smtp.from` | string |  | yes | `MAIL_SMTP_FROM` | `auth@example.invalid` |  |
 | `mail-smtp.user` | string |  |  |  |  |  |
 | `mail-smtp.password` | string |  |  |  |  |  |
-| `mail-smtp.deadline-ms` | integer (100–600000) | `40000` |  |  |  |  |
+| `mail-smtp.deadline` | string | `40s` |  |  |  | How long a whole send may take, from 100ms to 10m. |
 | `mail-smtp.concurrent-sends` | integer (1–1000) | `20` |  |  |  |  |
 
 ## metrics-prometheus
