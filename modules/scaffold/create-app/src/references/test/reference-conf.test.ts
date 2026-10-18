@@ -124,7 +124,6 @@ const prefaultLater = new Set([
 	"audit",
 	"authorize",
 	"client-assertion",
-	"clients",
 	"clients-cimd",
 	"code-grant-store",
 	"consent",
