@@ -114,7 +114,7 @@ MFA factors and upstream tokens are sealed, so dumping them needs 0.17's sealing
 
 A value taken from an environment variable is read as the type its setting takes, so numbers and booleans can come from environment variables too: with `port = ${?PORT}`, `PORT=8081` listens on 8081. A value that does not convert refuses boot (`PORT=80x` gives `refused http.port: Invalid input: expected number, received string`, exit 78).
 
-Most settings are renamed. Keys are kebab-case inside a section named after its module, for example `tokens.access-token-lifetime-seconds`.
+Most settings are renamed. Keys are kebab-case inside a section named after its module, for example `tokens.access-token-lifetime`.
 
 ## Configuration mapping
 
@@ -129,7 +129,7 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 | `http.port` (default 3000) | `http.port` (default 8080) | |
 | (all interfaces) | `http.host` (default `127.0.0.1`) | Set `0.0.0.0` in a container |
 | `http.trustProxy` | `http.trusted-proxies` (IPs or CIDRs), `http.proxy-hops` | Named ranges and `true` are gone; list addresses |
-| `http.readinessTimeoutMs` | `http-ops.readiness-deadline-ms` | |
+| `http.readinessTimeoutMs` | `http-ops.readiness-deadline` | |
 | `http.cors.allowedOrigins` | `http.cors-origins` | Exact https origins, as a HOCON list |
 | (from the issuer) | `http.public-origin` | Cookies are `__Host-` and `Secure` when it is https |
 | `jwks.path`, `jwks.cacheMaxAge` | removed | Fixed at the key set's well-known path (`jwks.json` under `.well-known`), cached five minutes |
@@ -169,34 +169,34 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 
 | 0.17 | 0.18 | Notes |
 |---|---|---|
-| `oauth.accessToken.defaultExpiresIn` | `tokens.access-token-lifetime-seconds` | At most 86400 |
+| `oauth.accessToken.defaultExpiresIn` | `tokens.access-token-lifetime` | At most `1d` |
 | `oauth.revocation.accessToken` | `tokens.revocation` (`denylist` or `unsupported`) | Required |
 | `oauth.revocation.subject` | compose `subject-revocation`, or `tokens.subject-check = none` | |
-| `oauth.refreshToken.expiresIn` | `refresh.lifetime-seconds` | |
+| `oauth.refreshToken.expiresIn` | `refresh.lifetime` | |
 | `oauth.requireGrantTypeAllowlist` | removed | Always on |
 | `oauth.authorize.acrValues` | `acr.values` | Lists of non-empty amr sets |
 | `oauth.consentPage.url` | `consent.page` | Absolute https URL; without it, as in 0.17, a client that is not first-party is refused (`unauthorized_client`) |
 | `*.grants.*.enabled` | compose `authorize` + `code-grant`, `refresh`, `jwt-bearer` | `client_credentials` is part of `token-endpoint` |
-| code lifetime | `code-grant.code-seconds` | |
+| code lifetime | `code-grant.code-lifetime` | |
 | `oauth-token-exchange.maxActorChainDepth` | `token-exchange.max-actor-depth` | 1–10 |
-| `device-grant.*` | `device-grant.*` (`verification-uri`, `complete-uri`, `code-seconds`, `interval-seconds`, `attempts`) | `verification-uri` must be https |
-| rate limiter `limits.token`, `limits.authorize`, `limits.introspect`/`revoke` | `token-endpoint.requests`/`window-seconds`, `authorize.*`, `token-control.*` | Per source address |
+| `device-grant.*` | `device-grant.*` (`verification-uri`, `complete-uri`, `code-lifetime`, `interval`, `attempts`) | `verification-uri` must be https |
+| rate limiter `limits.token`, `limits.authorize`, `limits.introspect`/`revoke` | `token-endpoint.requests`/`window`, `authorize.*`, `token-control.*` | Per source address |
 
 ### Session, login and users
 
 | 0.17 | 0.18 | Notes |
 |---|---|---|
 | `session-store.secret`, `name`, `secure`, `sameSite`, `domain` | removed | The cookie is fixed: `session`, `__Host-` and `Secure` on https, `SameSite=Lax` |
-| `session-store.maxAge` (ms) | `session-lifecycle.lifetime-seconds` | Seconds |
-| (none) | `session-lifecycle.credentials-seconds` | Default 300, 30–3600; used only where `mfa` is not composed |
-| `core.sessionRequirements.expected`, `secondFactorAuthority` | removed | Without `mfa`, changing credentials needs a sign-in at a known time within `session-lifecycle.credentials-seconds`; with `mfa`, it judges both using a session and changing credentials |
+| `session-store.maxAge` (ms) | `session-lifecycle.lifetime` | Written with its unit |
+| (none) | `session-lifecycle.credentials-within` | Default `5m`, `30s` to `1h`; used only where `mfa` is not composed |
+| `core.sessionRequirements.expected`, `secondFactorAuthority` | removed | Without `mfa`, changing credentials needs a sign-in at a known time within `session-lifecycle.credentials-within`; with `mfa`, it judges both using a session and changing credentials |
 | `session.loginPage.url` | `authorize.login-page` | Absolute https URL, required |
-| `session.rateLimit.login` | `login-password.attempts`, `window-seconds` | Seconds |
-| (none) | `login-password.account-attempts`, `account-window-seconds`, `account-max-wait-seconds` | Failed attempts at one identifier from any source make each next one wait, doubling to the longest wait (defaults 10, 3600, 300); anyone who knows an identifier can keep its password login waiting that long, while passkey and federation logins are not held back |
+| `session.rateLimit.login` | `login-password.attempts`, `window` | Written with its unit |
+| (none) | `login-password.account-attempts`, `account-window`, `account-max-wait` | Failed attempts at one identifier from any source make each next one wait, doubling to the longest wait (defaults 10, `1h`, `5m`); anyone who knows an identifier can keep its password login waiting that long, while passkey and federation logins are not held back |
 | `session.redirectAllowlist`, per-IdP `redirectAllowlist` | `login-gates.return-targets` | Exact https URLs, one list |
 | `session.csrf.trustedOrigins` | removed | Same-origin evidence is checked against `http.public-origin` |
 | `users.yaml` | `users.registered` (`identifier`, `subject`, `password-hash`, `attributes`, `upstream`) | Hashes are bcrypt or scrypt; plain passwords are refused |
-| `repositories.user.http.*` | `users-http.url`, `credential`, `timeout-ms` | [Protocol changed](#user-ledger-over-http) |
+| `repositories.user.http.*` | `users-http.url`, `credential`, `timeout` | [Protocol changed](#user-ledger-over-http) |
 
 ### MFA and passkeys
 
@@ -204,11 +204,11 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 |---|---|---|
 | `mfaMode` / `mfa.mode` | `mfa.mode` (`optional` or `required`) | `required` by default, as before; for `off`, leave the MFA modules out |
 | `mfa.encryptionKeys` | `seal.keys` (`id`, `key`) | `id` is required |
-| `mfa.transactionTtlSeconds`, `maxAttemptsPerTransaction`, `lockout.*` | `mfa-flows.transaction-seconds`, `attempts-per-transaction`, `lockout.*` | |
-| `mfa.manage.maxAgeSeconds`, `maxFactorsPerSubject` | `mfa.manage-seconds`, `mfa.max-factors` | |
+| `mfa.transactionTtlSeconds`, `maxAttemptsPerTransaction`, `lockout.*` | `mfa-flows.transaction-lifetime`, `attempts-per-transaction`, `lockout.*` | |
+| `mfa.manage.maxAgeSeconds`, `maxFactorsPerSubject` | `mfa.manage-within`, `mfa.max-factors` | |
 | `mfa-totp-factor.*`, `mfa-recovery-code-factor.*` | compose `mfa-totp`, `mfa-recovery` | Parameters are fixed (SHA-1, 6 digits, 30 s; 10 codes) |
 | `webauthn.rpId`, `rpName`, `origin`, `topOrigin` | `webauthn.rp-id`, `rp-name`, `origins`, `top-origins` | `origins` is a list |
-| `webauthn.challengeTtlMs` | `webauthn.challenge-seconds` | Seconds |
+| `webauthn.challengeTtlMs` | `webauthn.challenge-lifetime` | Written with its unit |
 | `webauthn.userVerification` | `webauthn.user-verification` | |
 | `mfa.page.url` (the step-up page `/authorize` sends to) | `authorize.step-up-page` | Absolute https URL; without it, a session short of the asked acr gets `unmet_authentication_requirements`. Federation grants have their own `federation-grants.step-up-page` |
 
@@ -223,7 +223,7 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 | google `accessType`, `requireAuthorizationResponseIss` | google `access`, `require-iss` | |
 | oidc `issuer`, `discovery`, `endpoints.*` | oidc `issuer`, `discovery`, `authorization-endpoint`, `token-endpoint`, `jwks-uri`, `end-session-endpoint` | Endpoints on another host need `endpoint-hosts`: a host, or `.name` for the name and the names under it; `*.name` refuses boot |
 | oidc `scopes` | oidc `scopes` | Default is now `openid` only |
-| oidc `clockToleranceSeconds` | `clock-skew-seconds` | |
+| oidc `clockToleranceSeconds` | `clock-skew` | |
 | `callbackMeetsFreshness` (every type) | removed | A `prompt=login` or `max_age` login needs the upstream's `auth_time`, and the session takes its sign-in time from it |
 | `clientUrl` (every type) | `federation.landing` | Absolute https URL, one for every IdP; the public origin's root by default |
 | `authCallbackUrl` (every type) | removed | The callback sends the browser straight to the return target |
@@ -234,8 +234,8 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 
 | 0.17 | 0.18 | Notes |
 |---|---|---|
-| `dpop.algWhitelist`, `iatWindowSeconds` | `dpop.algorithms`, `proof-window-seconds` | Window at most 300 s |
-| `dpop.nonce.required`, `ttlSeconds`, `secret` | `dpop.nonce.required` (`never` by default, `as`, `as+rs`), `ttl-seconds` (at most 3600), `secret` | The secret is base64 of at least 32 bytes of 8 byte values or more, its decoded bytes the HMAC key; a nonce from 0.17 is refused once. The generated configuration reads `DPOP_NONCE_REQUIRED`, `DPOP_NONCE_TTL_SECONDS` and `DPOP_NONCE_SECRET`; the `OAUTH_DPOP_NONCE_*` names are gone |
+| `dpop.algWhitelist`, `iatWindowSeconds` | `dpop.algorithms`, `proof-window` | Window at most `5m` |
+| `dpop.nonce.required`, `ttlSeconds`, `secret` | `dpop.nonce.required` (`never` by default, `as`, `as+rs`), `ttl` (at most `1h`), `secret` | The secret is base64 of at least 32 bytes of 8 byte values or more, its decoded bytes the HMAC key; a nonce from 0.17 is refused once. The generated configuration reads `DPOP_NONCE_REQUIRED`, `DPOP_NONCE_TTL` and `DPOP_NONCE_SECRET`; the `OAUTH_DPOP_NONCE_*` names are gone |
 | `mtls.source = header`, `certHeader`, `certHeaderDialect`, `trustedProxies` | `http.client-certificate` (`dialect`: `xfcc`, `pem` or `rfc9440`), `http.trusted-proxies` | `envoy` is `xfcc`, `plain-pem` is `pem` |
 | `mtls.source = tls-layer` | removed | Certificates arrive only from a trusted proxy |
 | `mtls.mode = full-pki` | `mtls.mode = pki` | |
@@ -261,11 +261,11 @@ Compose `federation-tokens` beside `federation`. Its records go in the compositi
 | `redis-federation-token-store.encryptionKey` | `seal.keys` (`id`, `key`) | One shared key ring, 32-byte base64 keys; `id` is required |
 | `redis-federation-token-store.encryptionMode`, `FEDERATION_TOKENS_ALLOW_INSECURE` | removed | Always sealed; plaintext is not possible |
 | `redis-federation-token-store.ttl` (86400 s) | removed | A record lives as long as its session |
-| upstream token lifetime cap (24 h, code only; refresh only) | `federation-tokens.max-lifetime-seconds` (default 86400) | 60–31536000; caps the upstream's stated lifetime at login and refresh, and stands for a refresh answer that states none |
+| upstream token lifetime cap (24 h, code only; refresh only) | `federation-tokens.max-lifetime` (default `1d`) | `1m` to `365d`; caps the upstream's stated lifetime at login and refresh, and stands for a refresh answer that states none |
 | `redis-federation-token-store.scanFallback` | removed | No pre-index records to sweep |
-| refresh buffer (30 s, code only) | `federation-tokens.refresh-before-seconds` (default 30) | 0–3600; refresh also waits until half the life is spent |
-| refresh lock (5 s, 4 s wait; code only) | `federation-tokens.lock-seconds` (default 5) | 1–60; one value for holding and waiting |
-| (none) | `federation-tokens.requests`, `window-seconds` (60 / 60 s) | Per source address |
+| refresh buffer (30 s, code only) | `federation-tokens.refresh-before` (default `30s`) | `0s` to `1h`; refresh also waits until half the life is spent |
+| refresh lock (5 s, 4 s wait; code only) | `federation-tokens.lock-lifetime` (default `5s`) | `1s` to `1m`; one value for holding and waiting |
+| (none) | `federation-tokens.requests`, `window` (60 / `1m`) | Per source address |
 | client `allowedAzpForFederationToken` | `sections.federation-tokens.receives` | Default false; registered clients only |
 | client `postLogoutRedirectUris` (for the federation logout) | `sections.federation-tokens.post-logout-redirect-uris` | Its own list; exact match; an unlisted return is dropped and the logout still runs |
 | `POST /oauth/federation/<name>/token` | same path | Same answer shape and error codes, but `refresh_not_supported` is `410` (see [Federation tokens](#federation-tokens-and-sign-in-with-apple)) |
@@ -282,10 +282,10 @@ Settings with no counterpart: `encryptionMode`, `FEDERATION_TOKENS_ALLOW_INSECUR
 | `clientId` (Services ID) | `client-id` | |
 | `clientSecret` | `client-secret` | Give it, or the three signing keys, not both |
 | `teamId`, `keyId`, `privateKey` | `team-id`, `key-id`, `private-key` | All three together; P-256 PKCS8 PEM |
-| signed secret lifetime (180 days, code only) | `secret-seconds` (default 300) | 60–15777000; re-signed at half its life |
+| signed secret lifetime (180 days, code only) | `secret-lifetime` (default `5m`) | `1m` to `15777000s`; re-signed at half its life |
 | fixed scope `name email` | `scopes` (`name`, `email`) | Default is now `email` only |
 | Apple endpoints (fixed in code) | `authorization-endpoint`, `token-endpoint`, `jwks-uri` | Default to Apple's own |
-| (none) | `clock-skew-seconds` (default 30) | 0–300 |
+| (none) | `clock-skew` (default `30s`) | `0s` to `5m` |
 | `endSessionEndpoint` | `end-session-endpoint` | Optional; Apple has none |
 | `callbackURL` | removed | Derived from `http.public-origin`; must be https and not loopback |
 
@@ -298,13 +298,13 @@ Compose `federation-grants` and its store, `federation-grants-store`; there is n
 | `federation-grants.enabled` | compose `federation-grants` + `federation-grants-store` | |
 | `federation-grants.consent.url` | `federation-grants.page` | Absolute https URL; 0.17 also took a path. Required once a connection is configured |
 | `session.loginPage.url` (for the connect flow) | `federation-grants.login-page` | Absolute https URL; without it, a browser with no session gets a plain `401` |
-| `defaultExpiresIn`, `maxExpiresIn` | `default-seconds`, `max-seconds` | Seconds, as before; default 30 days each, at most one year |
-| `refreshBuffer` | `refresh-before-seconds` | Default 30 |
-| `rotationBudget`, `rotationWindow` | `rotations`, `rotation-window-seconds` | Defaults 24 per 3600, as before; at most 1000 per 86400 |
+| `defaultExpiresIn`, `maxExpiresIn` | `default-lifetime`, `max-lifetime` | Written with its unit; default `30d` each, at most `365d` |
+| `refreshBuffer` | `refresh-before` | Default `30s` |
+| `rotationBudget`, `rotationWindow` | `rotations`, `rotation-window` | Defaults 24 per `1h`, as before; at most 1000 per `1d` |
 | `allowKeepOnSubjectRevocation` | `keep-on-subject-revocation` | Default false |
 | `identityLookup` (`required` or `unsupported`) | `identity-check` (`required` or `none`) | `unsupported` is `none` |
 | `ineligibleRetryAfter`, `refreshFailureBackoff`, `upstreamTimeoutMs`, `upstreamHardTimeoutMs`, `refreshLockTtlMs`, `lockWaitMs`, `persistRetryBudgetMs` | removed | |
-| rate limiter `limits.federation_grants`, `limits.federation_grants_browser` | `requests`, `window-seconds` (per source, client routes and pages alike); `lodges`, `lodge-window-seconds` (per client) | 0.17's `federation_grants` budget counted both addresses and clients; lodgings per client default 60 per 60 s |
+| rate limiter `limits.federation_grants`, `limits.federation_grants_browser` | `requests`, `window` (per source, client routes and pages alike); `lodges`, `lodge-window` (per client) | 0.17's `federation_grants` budget counted both addresses and clients; lodgings per client default 60 per `1m` |
 | `connections.<name>` | `connections.<name>` | Names are now `a-z`, `0-9` and `-`, at most 32, starting with a letter or digit; the callback path follows the name |
 | `connections.<name>.federation` | `connections.<name>.idp` | Names a `federation.idps` entry whose IdP offers delegation |
 | `connections.<name>.scopes` | `connections.<name>.scopes` | Must hold `openid`, as before |
@@ -347,11 +347,11 @@ Compose `clients-cimd`. It fetches nothing unless `code-grant` is composed, and 
 | `allowedScopes` | `clients-cimd.scopes` | Default empty |
 | `allowedAudiences` | `clients-cimd.audiences` | Default empty. Empty now means the issuer as the audience; in 0.17 it was the client's own id |
 | `allowedHosts`, `deniedHosts` | `clients-cimd.allow`, `deny` | Host names; `.name` also takes the names under it. `deny` wins. A non-empty `allow` also narrows `outbound` |
-| `maxBytes` | `clients-cimd.max-bytes` | Default 5120; capped by `outbound.max-response-bytes` |
-| `timeoutMs` | `clients-cimd.timeout-ms` | Default 5000; capped by `outbound.timeout-ms` |
-| `cacheMaxAgeMs` (ms) | `clients-cimd.cache-seconds` | Seconds (default 600); the document's `max-age` still caps it |
+| `maxBytes` | `clients-cimd.max-size` | Default `5KiB`; capped by `outbound.max-response-size` |
+| `timeoutMs` | `clients-cimd.timeout` | Default `5s`; capped by `outbound.timeout` |
+| `cacheMaxAgeMs` (ms) | `clients-cimd.cache-lifetime` | Default `10m`; the document's `max-age` still caps it |
 | `maxCacheEntries` | `clients-cimd.cache-entries` | Default 256 |
-| `negativeCacheMs` (ms) | `clients-cimd.refused-seconds` | Seconds (default 60) |
+| `negativeCacheMs` (ms) | `clients-cimd.refused-lifetime` | Default `1m` |
 | `maxConcurrentFetches` | `clients-cimd.max-concurrent` | Default 8 |
 | `staleIfErrorMs` | removed | A document past its time is never used, as with 0.17's default `0` |
 
@@ -363,14 +363,14 @@ Compose `userinfo` and `oidc` for the userinfo endpoint and ID tokens, `rp-logou
 |---|---|---|
 | `/oauth/userinfo` (with the oauth endpoints) | compose `userinfo` + `oidc` | `userinfo` also needs `session-tokens` |
 | (none) | (no setting) | A token issued without the `openid` scope is refused `403 insufficient_scope`; ask `openid` for a token that reads userinfo |
-| (ID token lifetime fixed at 3600 s) | `oidc.id-token-seconds` | Default 3600; 60–86400 |
+| (ID token lifetime fixed at 3600 s) | `oidc.id-token-lifetime` | Default `1h`; `1m` to `1d` |
 | `oauth.oidcMode` | `authorize.oidc-mode` (`oidc-required` or `dual`) | Default `oidc-required`, as before |
 | `/oauth/logout` (with the oauth endpoints) | compose `rp-logout` + `rp-logout-store` | `oidc` judges the `id_token_hint` |
 | `POST /session/logout` (session module) | compose `logout` | |
 | upstream end-session from `/oauth/logout` | compose `rp-logout-federation` | Needs `federation-tokens` |
-| `core.sessionLifecycle.sweepIntervalSeconds` | `session-lifecycle.sweep-seconds` (pending closes), `rp-logout.sweep-seconds` (pending notices) | Defaults 30 and 60; `0` (no sweep) is gone |
-| (none) | `rp-logout.remember-seconds` | Default 86400; keep it at least `session-lifecycle.lifetime-seconds` |
-| (no setting; a notice was retried until the closing record lapsed, after `oauth.refreshToken.expiresIn`) | `rp-logout.notify-seconds` | Default 86400, 60–604800; how long an undelivered back-channel notice is retried, then dropped |
+| `core.sessionLifecycle.sweepIntervalSeconds` | `session-lifecycle.sweep-interval` (pending closes), `rp-logout.sweep-interval` (pending notices) | Defaults `30s` and `1m`; `0` (no sweep) is gone |
+| (none) | `rp-logout.remember-for` | Default `1d`; keep it at least `session-lifecycle.lifetime` |
+| (no setting; a notice was retried until the closing record lapsed, after `oauth.refreshToken.expiresIn`) | `rp-logout.notify-within` | Default `1d`, `1m` to `7d`; how long an undelivered back-channel notice is retried, then dropped |
 
 | `clients.yaml` field | 0.18 | Notes |
 |---|---|---|
@@ -386,7 +386,7 @@ Compose `mfa-email` (with `mfa-email-wording` and a mail sender such as `mail-sm
 |---|---|---|
 | `mfa-email-factor.enabled` | compose `mfa-email` + `mfa-email-wording` | Needs a mail sender, as before |
 | `mfa-email-factor.addsMfa` | `mfa-email.adds-second-factor` | Default false |
-| `mfa-email-factor.codeTtlSeconds` | `mfa-email.code-seconds` | Default 600; 60–1800 |
+| `mfa-email-factor.codeTtlSeconds` | `mfa-email.code-lifetime` | Default `10m`; `1m` to `30m` |
 | (none) | (no setting) | Codes go to the account's `email` that `users` holds, else to the `email` an outside HTTP ledger gave at login. An `email` from an upstream IdP is never used: a user who signs in only through an IdP cannot bind codes by mail, and the account-email proof is not offered |
 | `mfa.enrollment.requireEmailProof` (`when-mail`, `always`, `never`) | `mfa-binding-proof.mode` (`when-available`, `always`, `never`) | Compose `mfa-binding-proof`. `when-mail` is `when-available`. The account-email proof comes with `mfa-email`: without it, no proof is asked |
 | `webauthn-mfa-factor.enabled` | compose `mfa-webauthn` + `webauthn` | |
@@ -411,12 +411,98 @@ Compose `mfa-email` (with `mfa-email-wording` and a mail sender such as `mail-sm
 | `standard-smtp-mail-sender.*` | `mail-smtp.host`, `port`, `security`, `user`, `password`, `from` | `secure` is now `security` |
 | (development mail sender) | the `mail` module with `mail.accept-unsent = true` | |
 | `core.outbound.allowedHosts` | `outbound.allow`, or `outbound.allow-any-public = true` | An empty list now reaches nothing. Entries as before: a host, or `.name` for the name and the names under it |
-| `core.outbound.deniedHosts`, `timeoutMs`, `maxResponseBytes` | `outbound.deny`, `timeout-ms`, `max-response-bytes` | `deny` takes entries as `allow` does |
+| `core.outbound.deniedHosts`, `timeoutMs`, `maxResponseBytes` | `outbound.deny`, `timeout`, `max-response-size` | `deny` takes entries as `allow` does |
 | `core.outbound.internalHosts` | `outbound.internal-hosts`; `outbound.plain-loopback` (`host:port`) for plain http at loopback | `internal-hosts` reaches private addresses (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7) for the users-http ledger and the audit-http collector only; a client's URLs (key sets, back-channel logout) never reach a private, loopback or link-local address. `.name` still covers the name and the names under it |
 | `core.outbound.egress = direct` | `outbound.direct-despite-proxy = true` | Only while every request goes direct; with a proxy, write `outbound.proxy` instead |
 | `HTTPS_PROXY` with `NODE_USE_ENV_PROXY` | `outbound.proxy` (an http origin), `outbound.proxy-authorization` | Every https request goes through it by CONNECT, key sets and back-channel notices included; the variables are never read |
 | `NO_PROXY` | `outbound.direct-hosts` | The variable is never read: list each host here, as written (no `*`, `_`, spaces or short IPv4 forms); `.name` covers the name and the names under it |
 | `/metrics` | compose `metrics-prometheus`; `metrics-prometheus.path` | |
+
+### Times and sizes
+
+Times and sizes are written with their unit (`30s`, `5m`, `64KiB`); a number without one refuses boot, so a value copied from 0.17 or from 0.18.0-rc.1 as a bare number is never read in a unit you did not choose. A key read in whole seconds takes whole seconds (`90s`, not `1500ms`). Each key below lost its unit suffix in 0.18.0; the sections above map it from 0.17.
+
+| 0.18.0-rc.1 key | 0.18 key | Value | Environment variable |
+|---|---|---|---|
+| `authorize.window-seconds` | `authorize.window` | a duration, `1s` to `1d`, default `1m` |  |
+| `client-assertion.max-lifetime-seconds` | `client-assertion.max-lifetime` | a duration, `1s` to `1d`, default `1h` |  |
+| `client-assertion.clock-skew-seconds` | `client-assertion.clock-skew` | a duration, `0s` to `5m`, default `30s` |  |
+| `clients-cimd.max-bytes` | `clients-cimd.max-size` | a size, `1B` to `16MiB`, default `5KiB` |  |
+| `clients-cimd.timeout-ms` | `clients-cimd.timeout` | a duration, `1ms` to `1m`, default `5s` |  |
+| `clients-cimd.cache-seconds` | `clients-cimd.cache-lifetime` | a duration, `0s` to `1d`, default `10m` |  |
+| `clients-cimd.refused-seconds` | `clients-cimd.refused-lifetime` | a duration, `0s` to `1d`, default `1m` |  |
+| `code-grant.code-seconds` | `code-grant.code-lifetime` | a duration, `10s` to `10m`, default `10m` |  |
+| `code-grant.sweep-seconds` | `code-grant.sweep-interval` | a duration, `1s` to `1h`, default `30s` |  |
+| `consent.challenge-seconds` | `consent.challenge-lifetime` | a duration, `1m` to `1h`, default `10m` |  |
+| `device-grant.code-seconds` | `device-grant.code-lifetime` | a duration, `30s` to `1h`, default `10m` |  |
+| `device-grant.interval-seconds` | `device-grant.interval` | a duration, `1s` to `1m`, default `5s` |  |
+| `device-grant.attempts-window-seconds` | `device-grant.attempts-window` | a duration, `1m` to `1d`, default `5m` |  |
+| `device-grant.window-seconds` | `device-grant.window` | a duration, `1s` to `1d`, default `1m` |  |
+| `dpop.proof-window-seconds` | `dpop.proof-window` | a duration, `1s` to `5m`, default `1m` |  |
+| `dpop.nonce.ttl-seconds` | `dpop.nonce.ttl` | a duration, `1s` to `1h`, default `5m` | `DPOP_NONCE_TTL` |
+| `external-jwt.key-set-max-age-ms` | `external-jwt.key-set-max-age` | a duration, `1h` to `30d`, default `1d` |  |
+| `federation.transaction-seconds` | `federation.transaction-lifetime` | a duration, `1m` to `1h`, default `10m` |  |
+| `federation.window-seconds` | `federation.window` | a duration, `1s` to `1h`, default `1m` |  |
+| `federation.idps.<name>.clock-skew-seconds` | `federation.idps.<name>.clock-skew` | a duration, `0s` to `5m`, default `30s`; for the oidc, google and apple IdPs |  |
+| `federation.idps.<name>.secret-seconds` | `federation.idps.<name>.secret-lifetime` | a duration, `1m` to `15777000s`, default `5m`; for the apple IdP |  |
+| `federation-grants.default-seconds` | `federation-grants.default-lifetime` | a duration, `1m` to `365d`, default `30d` |  |
+| `federation-grants.max-seconds` | `federation-grants.max-lifetime` | a duration, `1m` to `365d`, default `30d` |  |
+| `federation-grants.connect-seconds` | `federation-grants.connect-lifetime` | a duration, `1m` to `1h`, default `10m` |  |
+| `federation-grants.refresh-before-seconds` | `federation-grants.refresh-before` | a duration, `0s` to `1h`, default `30s` |  |
+| `federation-grants.rotation-window-seconds` | `federation-grants.rotation-window` | a duration, `1s` to `1d`, default `1h` |  |
+| `federation-grants.lodge-window-seconds` | `federation-grants.lodge-window` | a duration, `1s` to `1d`, default `1m` |  |
+| `federation-grants.revocation-skew-seconds` | `federation-grants.revocation-skew` | a duration, `0s` to `5m`, default `1s` |  |
+| `federation-grants.window-seconds` | `federation-grants.window` | a duration, `1s` to `1h`, default `1m` |  |
+| `federation-tokens.refresh-before-seconds` | `federation-tokens.refresh-before` | a duration, `0s` to `1h`, default `30s` |  |
+| `federation-tokens.max-lifetime-seconds` | `federation-tokens.max-lifetime` | a duration, `1m` to `365d`, default `1d` |  |
+| `federation-tokens.lock-seconds` | `federation-tokens.lock-lifetime` | a duration, `1s` to `1m`, default `5s` |  |
+| `federation-tokens.window-seconds` | `federation-tokens.window` | a duration, `1s` to `1h`, default `1m` |  |
+| `http-ops.readiness-deadline-ms` | `http-ops.readiness-deadline` | a duration, `1ms` to `2147483647ms`, default `1s` |  |
+| `jwt-bearer.max-assertion-lifetime-seconds` | `jwt-bearer.max-assertion-lifetime` | a duration, `1s` to `1d`, default `1h` |  |
+| `jwt-bearer.clock-skew-seconds` | `jwt-bearer.clock-skew` | a duration, `0s` to `5m`, default `30s` |  |
+| `kernel.stop-seconds` | `kernel.stop-deadline` | a duration, `1s` to `1h`, default `30s` | `KERNEL_STOP_DEADLINE` |
+| `login-password.window-seconds` | `login-password.window` | a duration, `1m` to `1d`, default `15m` |  |
+| `login-password.account-window-seconds` | `login-password.account-window` | a duration, `1m` to `1d`, default `1h` |  |
+| `login-password.account-max-wait-seconds` | `login-password.account-max-wait` | a duration, `1s` to `1h`, default `5m` |  |
+| `mail-smtp.deadline-ms` | `mail-smtp.deadline` | a duration, `100ms` to `10m`, default `40s` |  |
+| `mfa.manage-seconds` | `mfa.manage-within` | a duration, `30s` to `1h`, default `5m` |  |
+| `mfa-email.code-seconds` | `mfa-email.code-lifetime` | a duration, `1m` to `30m`, default `10m` |  |
+| `mfa-flows.transaction-seconds` | `mfa-flows.transaction-lifetime` | a duration, `1m` to `30m`, default `10m` |  |
+| `mfa-flows.window-seconds` | `mfa-flows.window` | a duration, `1s` to `1d`, default `5m` |  |
+| `mfa-flows.lockout.backoff-seconds` | `mfa-flows.lockout.backoff` | a duration, default `15m` |  |
+| `mfa-flows.lockout.max-backoff-seconds` | `mfa-flows.lockout.max-backoff` | a duration, default `1d` |  |
+| `mfa-flows.lockout.budget-window-seconds` | `mfa-flows.lockout.budget-window` | a duration, default `7d` |  |
+| `mfa-flows.lockout.memory-seconds` | `mfa-flows.lockout.memory` | a duration, default `1d` |  |
+| `mtls.revocation.skew-seconds` | `mtls.revocation.skew` | a duration, `0s` to `1h`, default `5m` |  |
+| `mtls.revocation.ocsp-fresh-seconds` | `mtls.revocation.ocsp-fresh` | a duration, `1s` to `1d`, default `10m` |  |
+| `mtls.revocation.crl-ttl-seconds` | `mtls.revocation.crl-ttl` | a duration, `1s` to `1d`, default `1h` |  |
+| `mtls.revocation.failure-seconds` | `mtls.revocation.failure-lifetime` | a duration, `1s` to `1h`, default `30s` |  |
+| `mtls.revocation.timeout-ms` | `mtls.revocation.timeout` | a duration, `1ms` to `1m`, default `3s` |  |
+| `oidc.id-token-seconds` | `oidc.id-token-lifetime` | a duration, `1m` to `1d`, default `1h` |  |
+| `outbound.max-response-bytes` | `outbound.max-response-size` | a size, `1B` to `16MiB`, default `64KiB` |  |
+| `outbound.signed-max-response-bytes` | `outbound.signed-max-response-size` | a size, `1B` to `16MiB`, default `1MiB` |  |
+| `outbound.timeout-ms` | `outbound.timeout` | a duration, `1ms` to `1m`, default `5s` |  |
+| `passkey-registration.window-seconds` | `passkey-registration.window` | a duration, `1s` to `1d`, default `5m` |  |
+| `redis.connect-timeout-ms` | `redis.connect-timeout` | a duration, at least `100ms`, default `2s` |  |
+| `redis.replication-timeout-ms` | `redis.replication-timeout` | a duration, `1ms` to `1m`, default `1s` |  |
+| `redis.command-timeout-ms` | `redis.command-timeout` | a duration, `10ms` to `1m`, default `1s` |  |
+| `refresh.lifetime-seconds` | `refresh.lifetime` | a duration, `1s` to `365d`, default `1d` |  |
+| `refresh.sweep-seconds` | `refresh.sweep-interval` | a duration, `1s` to `1h`, default `30s` |  |
+| `rp-logout.remember-seconds` | `rp-logout.remember-for` | a duration, `1m` to `30d`, default `1d` |  |
+| `rp-logout.notify-seconds` | `rp-logout.notify-within` | a duration, `1m` to `7d`, default `1d` |  |
+| `rp-logout.sweep-seconds` | `rp-logout.sweep-interval` | a duration, `1s` to `1h`, default `1m` |  |
+| `session-lifecycle.lifetime-seconds` | `session-lifecycle.lifetime` | a duration, `1m` to `30d`, default `1h` |  |
+| `session-lifecycle.sweep-seconds` | `session-lifecycle.sweep-interval` | a duration, `1s` to `1h`, default `30s` |  |
+| `session-lifecycle.credentials-seconds` | `session-lifecycle.credentials-within` | a duration, `30s` to `1h`, default `5m` |  |
+| `session-tokens.sweep-seconds` | `session-tokens.sweep-interval` | a duration, `1s` to `1h`, default `30s` |  |
+| `token-control.window-seconds` | `token-control.window` | a duration, `1s` to `1d`, default `1m` |  |
+| `token-endpoint.window-seconds` | `token-endpoint.window` | a duration, `1s` to `1d`, default `1m` |  |
+| `token-exchange.max-lifetime-seconds` | `token-exchange.max-lifetime` | a duration, `1s` to `1d` |  |
+| `tokens.access-token-lifetime-seconds` | `tokens.access-token-lifetime` | a duration, `1s` to `1d`, default `1h` |  |
+| `users-http.timeout-ms` | `users-http.timeout` | a duration, `1ms` to `1m` |  |
+| `users-http.max-response-bytes` | `users-http.max-response-size` | a size, `1B` to `16MiB` |  |
+| `webauthn.challenge-seconds` | `webauthn.challenge-lifetime` | a duration, `10s` to `10m`, default `2m` |  |
+| `webauthn-login.window-seconds` | `webauthn-login.window` | a duration, `1s` to `1d`, default `1m` |  |
 
 ## Newly refused at boot
 
@@ -424,6 +510,7 @@ Compose `mfa-email` (with `mfa-email-wording` and a mail sender such as `mail-sm
 
 - **URLs in settings must be written in their canonical form**: no user information, fragment, surrounding whitespace, upper-case scheme or host, default port, or dot segments. This covers the issuer, page URLs, return targets, IdP endpoints and ledger URLs.
 - **Page URLs must be absolute https**: `authorize.login-page`, `consent.page`, `login-gates.return-targets`, `federation.landing`, `device-grant.verification-uri`. An http public origin needs `http.insecure-origin = true`.
+- **Times and sizes without their unit**: a bare number (`30`, or `"30"` from an environment variable) where a time or a size is read; write `30s` or `64KiB`. See [Times and sizes](#times-and-sizes).
 - **Settings that now have no default**: `kernel.deployment`, `keys.signing.alg` and `kid`, `tokens.revocation`, `audit.receivers`, `redis.url`, `users-http.credential`, `authorize.login-page`.
 - **Keys**: a private key where a trusted issuer's public key is expected, a client JWK whose `kid` is not a string, and a `kid` outside the allowed characters.
 - **Users**: plain-text passwords, identifiers that differ only by case or Unicode form, and an upstream identity linked to two users.
@@ -524,7 +611,7 @@ Every request carries `Authorization: Bearer <credential>`. Upstream links and M
 
 ### Clocks
 
-Every decision about time uses the host's clock, so keep hosts synchronized. Allowances for clock differences are configurable where a peer's clock matters: `client-assertion.clock-skew-seconds`, `jwt-bearer.clock-skew-seconds` and the IdPs' `clock-skew-seconds` (default 30 s), `dpop.proof-window-seconds` (default 60 s) and `mtls.revocation.skew-seconds` (default 300 s). Records kept in Redis expire by Redis's own clock, with margins for that.
+Every decision about time uses the host's clock, so keep hosts synchronized. Allowances for clock differences are configurable where a peer's clock matters: `client-assertion.clock-skew`, `jwt-bearer.clock-skew` and the IdPs' `clock-skew` (default 30 s), `dpop.proof-window` (default `1m`) and `mtls.revocation.skew` (default `5m`). Records kept in Redis expire by Redis's own clock, with margins for that.
 
 ### Upstream links in settings
 
@@ -548,7 +635,7 @@ A user who signs in with a passkey can satisfy the WebAuthn second factor with a
 
 ### Changing credentials without mfa
 
-Without `mfa`, registering a passkey or linking an upstream account (`?link=1`) needs a sign-in at a known time within `session-lifecycle.credentials-seconds`. With `mfa`, its rule decides.
+Without `mfa`, registering a passkey or linking an upstream account (`?link=1`) needs a sign-in at a known time within `session-lifecycle.credentials-within`. With `mfa`, its rule decides.
 
 ### Outbound requests
 

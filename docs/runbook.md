@@ -90,6 +90,6 @@ An HS256 secret is not published and has no `previous` or `next` form: changing 
 
 ## Stopping
 
-On SIGTERM or SIGINT the app stops taking new connections, lets requests in flight finish, and runs each module's stop hook, all within `kernel.stop-seconds` (default 30). Give your orchestrator a longer grace period than that.
+On SIGTERM or SIGINT the app stops taking new connections, lets requests in flight finish, and runs each module's stop hook, all within `kernel.stop-deadline` (default `30s`). Give your orchestrator a longer grace period than that.
 
 Audit events still being delivered at stop are awaited until the same deadline. Any still under way then are lost and counted: watch `auth_audit_events_lost_total`, by `receiver`, and the warning `audit receiver losing events` with `failure: stopped`.
