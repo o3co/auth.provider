@@ -91,7 +91,7 @@ What auth-provider 0.18 guarantees, and what it leaves to the deployment. Each g
   - Attempt limits (logins, codes) always answer 503 when they cannot count.
   - Lockouts survive a crash and a failover.
   - A request whose source cannot be determined is refused with 503 and logged as a deployment error.
-  - Failed password attempts at one identifier, from any source, make each next one wait, doubling to `login-password.account-max-wait-seconds` (default 300). In exchange, anyone who knows an identifier can keep that account's password login waiting up to that long, again and again; passkey and federation logins are not held back.
+  - Failed password attempts at one identifier, from any source, make each next one wait, doubling to `login-password.account-max-wait` (default `5m`). In exchange, anyone who knows an identifier can keep that account's password login waiting up to that long, again and again; passkey and federation logins are not held back.
 - **Left to you:** setting the trusted proxies, so that each request's source is the client's and not your proxy's.
 
 ## Upstream identity providers
@@ -126,7 +126,7 @@ What auth-provider 0.18 guarantees, and what it leaves to the deployment. Each g
 
 - **Guaranteed:**
   - Every event a receiver loses is counted per receiver, as the metric `auth_audit_events_lost_total`, and a warning names the receiver and the kind of failure, never the event.
-  - At stop, deliveries under way are awaited until `kernel.stop-seconds`.
+  - At stop, deliveries under way are awaited until `kernel.stop-deadline`.
   - The `log` receiver writes attribute names, never their values.
 - **Not guaranteed:** delivery. Audit is best effort (tier 1): a request is answered without waiting for its events to be delivered, and an event is lost past a receiver's `max-pending`, when its receiver fails, or when still under way at the stop deadline. `audit-http` never sends an event again.
 - **Left to you:** a collector that keeps up, and watching the lost-event count.
