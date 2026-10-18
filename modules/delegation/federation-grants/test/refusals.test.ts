@@ -208,7 +208,10 @@ describe("the read's judgment of a subject's revocation", () => {
 		const { id } = await h.connected();
 		h.advance(2_592_000_000);
 		const later = h.now() + 60_000;
-		h.stores.raceNext((record) => ({ ...(record as object), expiresAt: later }) as never);
+		// A renewal activating meanwhile, as it writes: a new authorization and a new end.
+		h.stores.raceNext(
+			(record) => ({ ...(record as object), authorizedAt: h.now(), expiresAt: later }) as never,
+		);
 		await h.grantCall(id, "status");
 		expect(h.stores.peek(id)).toHaveProperty("sealed");
 	});
