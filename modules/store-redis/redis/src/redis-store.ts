@@ -146,7 +146,7 @@ export function redisStore(
 	const marked = (options: { idempotency?: string } | undefined) =>
 		options?.idempotency ? "1" : "0";
 	const writeWith = async (
-		mode: "put" | "putIfAbsent" | "replaceIf",
+		mode: "putIfAbsent" | "replaceIf",
 		key: Key,
 		value: Json,
 		expected: string,
@@ -178,7 +178,6 @@ export function redisStore(
 				const read = await confirm(key, await run(scripts.read, [valueKey(key)], []));
 				return { entry: entry(list<Raw | false>(read.entries, 1)[0]), now: read.now };
 			},
-			put: (key, value, options) => writeWith("put", key, value, "", options),
 			putIfAbsent: (key, value, options) => writeWith("putIfAbsent", key, value, "", options),
 			replaceIf: (key, version, value, options) =>
 				writeWith("replaceIf", key, value, version, options),

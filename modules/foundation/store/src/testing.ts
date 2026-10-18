@@ -1,11 +1,33 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
-import { type Key, mutate, type Space, type Store, type Version } from "./contract.ts";
+import {
+	type Json,
+	type Key,
+	mutate,
+	type Space,
+	type Store,
+	type Version,
+	type WriteOptions,
+} from "./contract.ts";
 import type { section } from "./section.ts";
 
 export { type SimulatedStore, simulatedStore } from "./simulated.ts";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** For tests' set-up: writes a key whatever it holds, on the version read or if absent, again on a lost race. */
+export async function overwrite(s: Store, key: Key, value: Json, options: WriteOptions) {
+	for (let attempt = 0; attempt < 8; attempt++) {
+		const { entry } = await s.get(key);
+		const answer = entry
+			? await s.replaceIf(key, entry.version, value, options)
+			: await s.putIfAbsent(key, value, options);
+		if (answer.kind === "written" || answer.kind === "late" || answer.kind === "reused") {
+			return answer;
+		}
+	}
+	throw new Error("overwrite: the key kept moving");
+}
 
 /** The spaces the contract tests use; a harness declares them when it opens a store. */
 export const contractSpaces: readonly Space[] = Object.freeze([
@@ -94,7 +116,7 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				const s = await harness.open();
 				const k = fresh()("a");
 				expect((await s.get(k)).entry).toBeNull();
-				const version = versionOf(await s.put(k, { x: [1, "y"] }, never));
+				const version = versionOf(await overwrite(s, k, { x: [1, "y"] }, never));
 				const r = await s.get(k);
 				expect(r.entry).toEqual({ value: { x: [1, "y"] }, version, expiresAt: null });
 				expect(r.now).toBeGreaterThan(0);
@@ -124,7 +146,7 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			it("replaces and removes only on the version or value expected", async () => {
 				const s = await harness.open();
 				const k = fresh()("a");
-				const version = versionOf(await s.put(k, "one", never));
+				const version = versionOf(await overwrite(s, k, "one", never));
 				expect((await s.replaceIf(k, `${version}x`, "x", never)).kind).toBe("conflict");
 				expect((await s.replaceIf(k, version, "two", never)).kind).toBe("written");
 				expect((await s.removeIf(k, { value: "one" })).kind).toBe("conflict");
@@ -136,7 +158,7 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			it("commits a batch in one partition only when every condition holds", async () => {
 				const s = await harness.open();
 				const key = fresh();
-				const version = versionOf(await s.put(key("a"), 1, never));
+				const version = versionOf(await overwrite(s, key("a"), 1, never));
 				const lost = await s.batch(
 					[
 						{ key: key("a"), version },
@@ -176,7 +198,7 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			it("returns values in canonical form, with object keys sorted", async () => {
 				const s = await harness.open();
 				const k = fresh()("doc");
-				await s.put(k, { b: 1, a: { d: 2, c: 3 } }, never);
+				await overwrite(s, k, { b: 1, a: { d: 2, c: 3 } }, never);
 				const value = (await s.get(k)).entry?.value as Record<string, Record<string, number>>;
 				expect(Object.keys(value)).toEqual(["a", "b"]);
 				expect(Object.keys(value.a ?? {})).toEqual(["c", "d"]);
@@ -185,7 +207,7 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			it("removes the entry when a mutation decides to", async () => {
 				const s = await harness.open();
 				const k = fresh()("a");
-				await s.put(k, 1, never);
+				await overwrite(s, k, 1, never);
 				expect(await mutate(s, k, () => ({ kind: "remove" }))).toEqual({
 					kind: "done",
 					value: null,
@@ -197,17 +219,17 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			it("answers a mutation that keeps with the entry, and reads again when a removal loses a race", async () => {
 				const s = await harness.open();
 				const key = fresh();
-				const version = versionOf(await s.put(key("a"), 1, never));
+				const version = versionOf(await overwrite(s, key("a"), 1, never));
 				expect(await mutate(s, key("a"), () => ({ kind: "keep" }))).toEqual({
 					kind: "done",
 					value: 1,
 					version,
 				});
 				let runs = 0;
-				const removed = await mutate(s, key("a"), () => {
+				const removed = await mutate(s, key("a"), (entry) => {
 					runs += 1;
 					// Another client rewrites the entry after the first read.
-					if (runs === 1) void s.put(key("a"), 2, never);
+					if (runs === 1 && entry) void s.replaceIf(key("a"), entry.version, 2, never);
 					return { kind: "remove" };
 				});
 				expect([removed.kind, runs]).toEqual(["done", 2]);
@@ -220,17 +242,19 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				const s = await harness.open();
 				const key = fresh();
 				const seen = new Set<Version>();
-				const first = versionOf(await s.put(key("a"), 1, never));
+				const first = versionOf(await overwrite(s, key("a"), 1, never));
 				seen.add(first);
 				await s.removeIf(key("a"), { value: 1 });
-				seen.add(versionOf(await s.put(key("a"), 1, never)));
+				seen.add(versionOf(await overwrite(s, key("a"), 1, never)));
 				expect((await s.replaceIf(key("a"), first, 2, never)).kind).toBe("conflict");
-				const kept = versionOf(await s.put(key("long"), 1, never));
+				const kept = versionOf(await overwrite(s, key("long"), 1, never));
 				seen.add(kept);
 				for (let i = 0; i < 5; i++)
-					seen.add(versionOf(await s.put(key("short"), i, { expiry: { kind: "after", ms: 100 } })));
+					seen.add(
+						versionOf(await overwrite(s, key("short"), i, { expiry: { kind: "after", ms: 100 } })),
+					);
 				await sleep(300);
-				for (let i = 0; i < 5; i++) seen.add(versionOf(await s.put(key("short"), i, never)));
+				for (let i = 0; i < 5; i++) seen.add(versionOf(await overwrite(s, key("short"), i, never)));
 				expect(seen.size).toBe(13);
 				expect((await s.replaceIf(key("long"), kept, 2, never)).kind).toBe("written");
 			});
@@ -240,9 +264,12 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				async () => {
 					const s = await harness.open();
 					const k = fresh()("a");
-					const before = [versionOf(await s.put(k, 1, never)), versionOf(await s.put(k, 2, never))];
+					const before = [
+						versionOf(await overwrite(s, k, 1, never)),
+						versionOf(await overwrite(s, k, 2, never)),
+					];
 					await harness.restart?.();
-					const written = await eventually(() => s.put(k, 3, never), 100);
+					const written = await eventually(() => overwrite(s, k, 3, never), 100);
 					const after = written && versionOf(written);
 					expect(before).not.toContain(after);
 					expect((await s.replaceIf(k, before[1] as Version, 4, never)).kind).toBe("conflict");
@@ -255,14 +282,14 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				async () => {
 					const s = await harness.open();
 					const k = fresh()("a");
-					const seen = [versionOf(await s.put(k, 1, never))];
+					const seen = [versionOf(await overwrite(s, k, 1, never))];
 					await harness.stopReplicas?.();
-					await s.put(k, 2, never).catch(() => undefined);
+					await overwrite(s, k, 2, never).catch(() => undefined);
 					const unconfirmed = (await s.get(k)).entry?.version;
 					if (unconfirmed) seen.push(unconfirmed);
 					const undo = await harness.failover?.();
 					try {
-						const written = await eventually(() => s.put(k, 3, never), 100);
+						const written = await eventually(() => overwrite(s, k, 3, never), 100);
 						const after = written && versionOf(written);
 						expect(after).toBeDefined();
 						expect(seen).not.toContain(after);
@@ -278,11 +305,11 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				async () => {
 					const s = await harness.open();
 					const k = fresh()("a");
-					const seen = new Set<Version>([versionOf(await s.put(k, 1, never))]);
+					const seen = new Set<Version>([versionOf(await overwrite(s, k, 1, never))]);
 					const promote = async () => {
 						const undo = await harness.failover?.();
 						try {
-							const written = await eventually(() => s.put(k, 2, never), 100);
+							const written = await eventually(() => overwrite(s, k, 2, never), 100);
 							const after = written && versionOf(written);
 							if (after === undefined) throw new Error("no write after the promotion");
 							expect(seen.has(after)).toBe(false);
@@ -302,17 +329,30 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			it("expires entries on the store clock and keeps or extends expiry when asked", async () => {
 				const s = await harness.open();
 				const key = fresh();
-				await s.put(key("short"), 1, { expiry: { kind: "after", ms: 150 } });
-				await s.put(key("kept"), 1, { expiry: { kind: "after", ms: 150 } });
-				await s.put(key("kept"), 2, { expiry: { kind: "keep" } });
-				await s.put(key("long"), 1, { expiry: { kind: "after", ms: 150 } });
-				await s.put(key("long"), 2, { expiry: { kind: "extend", ms: 5000 } });
-				await s.put(key("forever"), 1, never);
-				await s.put(key("forever"), 2, { expiry: { kind: "extend", ms: 10 } });
-				await sleep(400);
+				const soon = { expiry: { kind: "after", ms: 150 } } as const;
+				await s.putIfAbsent(key("short"), 1, soon);
+				const kept = versionOf(await s.putIfAbsent(key("kept"), 1, soon));
+				const long = versionOf(await s.putIfAbsent(key("long"), 1, soon));
+				const forever = versionOf(await s.putIfAbsent(key("forever"), 1, never));
+				const ends = [
+					(await s.get(key("short"))).entry?.expiresAt ?? 0,
+					(await s.get(key("kept"))).entry?.expiresAt ?? 0,
+				];
+				// On the version written, so one landing past the expiry is refused, never a new entry.
+				const rewrite = (name: string, version: Version, expiry: WriteOptions["expiry"]) =>
+					s.replaceIf(key(name), version, 2, { expiry });
+				if ((await rewrite("kept", kept, { kind: "keep" })).kind === "written") {
+					expect((await s.get(key("kept"))).entry?.expiresAt).toBe(ends[1]);
+				}
+				const extended = await rewrite("long", long, { kind: "extend", ms: 5000 });
+				expect((await rewrite("forever", forever, { kind: "extend", ms: 10 })).kind).toBe(
+					"written",
+				);
+				// Until the store clock, not the caller's, is past both expiries.
+				while ((await s.get(key("probe"))).now <= Math.max(...ends)) await sleep(25);
 				expect((await s.get(key("short"))).entry).toBeNull();
 				expect((await s.get(key("kept"))).entry).toBeNull();
-				expect((await s.get(key("long"))).entry?.value).toBe(2);
+				if (extended.kind === "written") expect((await s.get(key("long"))).entry?.value).toBe(2);
 				expect((await s.get(key("forever"))).entry?.expiresAt).toBeNull();
 			});
 
@@ -321,13 +361,13 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				const key = fresh();
 				const { now } = await s.get(key("probe"));
 				const at = now + 30;
-				await s.put(key("a"), 1, { expiry: { kind: "at", at } });
+				await overwrite(s, key("a"), 1, { expiry: { kind: "at", at } });
 				await expectPresentUntil(at, async () => {
 					const read = await s.get(key("a"));
 					return { now: read.now, present: read.entry !== null };
 				});
 				const { now: later } = await s.get(key("probe"));
-				await s.put(key("b"), 1, { expiry: { kind: "at", at: later } });
+				await overwrite(s, key("b"), 1, { expiry: { kind: "at", at: later } });
 				expect((await s.get(key("b"))).entry).toBeNull();
 			});
 
@@ -335,12 +375,12 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				const s = await harness.open();
 				const key = fresh();
 				const { now } = await s.get(key("x"));
-				await s.put(key("at"), 1, { expiry: { kind: "at", at: now + 150 } });
+				await overwrite(s, key("at"), 1, { expiry: { kind: "at", at: now + 150 } });
 				expect((await s.get(key("at"))).entry?.value).toBe(1);
 				const version = versionOf(
-					await s.put(key("gone"), 1, { expiry: { kind: "after", ms: 150 } }),
+					await overwrite(s, key("gone"), 1, { expiry: { kind: "after", ms: 150 } }),
 				);
-				await s.put(key("w"), 1, { expiry: { kind: "after", ms: 150 } });
+				await overwrite(s, key("w"), 1, { expiry: { kind: "after", ms: 150 } });
 				await sleep(400);
 				expect((await s.get(key("at"))).entry).toBeNull();
 				expect((await s.take(key("gone"))).kind).toBe("missing");
@@ -353,23 +393,22 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				const s = await harness.open();
 				const key = fresh();
 				const { now } = await s.get(key("x"));
-				expect((await s.put(key("past"), 1, { expiry: { kind: "at", at: now } })).kind).toBe(
-					"written",
-				);
+				expect(
+					(await s.putIfAbsent(key("past"), 1, { expiry: { kind: "at", at: now } })).kind,
+				).toBe("written");
 				expect((await s.get(key("past"))).entry).toBeNull();
-				await s.put(key("doc"), { a: 1, b: 2 }, never);
+				await overwrite(s, key("doc"), { a: 1, b: 2 }, never);
 				expect((await s.removeIf(key("doc"), { value: { b: 2, a: 1 } })).kind).toBe("removed");
 			});
 		});
 
 		describe("deadlines and idempotency marks", () => {
-			it("refuses put, putIfAbsent, replaceIf, removeIf, batch and mutate past their deadline on the store clock", async () => {
+			it("refuses putIfAbsent, replaceIf, removeIf, batch and mutate past their deadline on the store clock", async () => {
 				const s = await harness.open();
 				const key = fresh();
-				const version = versionOf(await s.put(key("a"), 1, never));
+				const version = versionOf(await overwrite(s, key("a"), 1, never));
 				const { now } = await s.get(key("a"));
 				const late = { deadline: now - 1 };
-				expect((await s.put(key("b"), 1, { ...never, ...late })).kind).toBe("late");
 				expect((await s.putIfAbsent(key("b"), 1, { ...never, ...late })).kind).toBe("late");
 				expect((await s.replaceIf(key("a"), version, 2, { ...never, ...late })).kind).toBe("late");
 				expect((await s.removeIf(key("a"), { version }, late)).kind).toBe("late");
@@ -390,7 +429,7 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			it("refuses a take past its deadline and leaves the entry", async () => {
 				const s = await harness.open();
 				const k = fresh()("a");
-				await s.put(k, 1, never);
+				await overwrite(s, k, 1, never);
 				const { now } = await s.get(k);
 				expect((await s.take(k, { deadline: now - 1 })).kind).toBe("late");
 				expect((await s.get(k)).entry?.value).toBe(1);
@@ -406,8 +445,8 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				const mark = { deadline: now + 60_000, idempotency: "m" };
 				await s.count(key("hits"), { ms: 10_000, limit: 5 }, mark);
 				expect((await s.count(key("hits"), { ms: 20_000, limit: 5 }, mark)).kind).toBe("reused");
-				await s.put(key("a"), 1, never);
-				await s.put(key("b"), 1, never);
+				await overwrite(s, key("a"), 1, never);
+				await overwrite(s, key("b"), 1, never);
 				await s.take(key("a"), { ...mark, idempotency: "t" });
 				expect((await s.take(key("b"), { ...mark, idempotency: "t" })).kind).toBe("reused");
 			});
@@ -439,17 +478,19 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				const other = fresh();
 				const { now } = await s.get(key("x"));
 				const mark = (idempotency: string) => ({ deadline: now + 60_000, idempotency });
-				expect((await s.put(key("a"), { x: 1, y: 2 }, { ...never, ...mark("m1") })).kind).toBe(
+				expect(
+					(await s.putIfAbsent(key("a"), { x: 1, y: 2 }, { ...never, ...mark("m1") })).kind,
+				).toBe("written");
+				expect(
+					(await s.putIfAbsent(key("a"), { y: 2, x: 1 }, { ...never, ...mark("m1") })).kind,
+				).toBe("written");
+				expect(
+					(await s.putIfAbsent(key("a"), { x: 1, y: 3 }, { ...never, ...mark("m1") })).kind,
+				).toBe("reused");
+				expect((await s.putIfAbsent(other("a"), 1, { ...never, ...mark("m1") })).kind).toBe(
 					"written",
 				);
-				expect((await s.put(key("a"), { y: 2, x: 1 }, { ...never, ...mark("m1") })).kind).toBe(
-					"written",
-				);
-				expect((await s.put(key("a"), { x: 1, y: 3 }, { ...never, ...mark("m1") })).kind).toBe(
-					"reused",
-				);
-				expect((await s.put(other("a"), 1, { ...never, ...mark("m1") })).kind).toBe("written");
-				const version = versionOf(await s.put(key("v"), 1, never));
+				const version = versionOf(await overwrite(s, key("v"), 1, never));
 				const replaced = await s.replaceIf(key("v"), version, 2, { ...never, ...mark("m2") });
 				expect(await s.replaceIf(key("v"), version, 2, { ...never, ...mark("m2") })).toEqual(
 					replaced,
@@ -473,8 +514,8 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				const key = fresh();
 				const { now } = await s.get(key("x"));
 				const mark = { ...never, deadline: now + 60_000, idempotency: "op" };
-				expect((await s.put(key("a"), 1, mark)).kind).toBe("written");
-				expect((await s.putIfAbsent(key("a"), 1, mark)).kind).toBe("reused");
+				expect((await s.putIfAbsent(key("a"), 1, mark)).kind).toBe("written");
+				expect((await s.replaceIf(key("a"), "any", 1, mark)).kind).toBe("reused");
 			});
 
 			it("binds a batch mark to the kind of each condition, not only to its text", async () => {
@@ -504,7 +545,7 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			it("lets a taker or counter learn its first answer by resending its mark", async () => {
 				const s = await harness.open();
 				const key = fresh();
-				await s.put(key("a"), "only", never);
+				await overwrite(s, key("a"), "only", never);
 				const { now } = await s.get(key("a"));
 				const mark = { deadline: now + 60_000, idempotency: "t1" };
 				const taken = await s.take(key("a"), mark);
@@ -524,7 +565,7 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			it("remembers a refusing first answer for its mark even after the state changes", async () => {
 				const s = await harness.open();
 				const k = fresh()("a");
-				await s.put(k, 1, never);
+				await overwrite(s, k, 1, never);
 				const { now } = await s.get(k);
 				const mark = { ...never, deadline: now + 60_000, idempotency: "neg" };
 				const first = await s.putIfAbsent(k, 2, mark);
@@ -539,7 +580,7 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				async () => {
 					const s = await harness.open();
 					const key = fresh();
-					await s.put(key("a"), "only", never);
+					await overwrite(s, key("a"), "only", never);
 					const { now } = await s.get(key("a"));
 					const mark = { deadline: now + 60_000, idempotency: "lost" };
 					await harness.loseNextReply?.(s);
@@ -582,7 +623,7 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			it("takes an entry exactly once among racing takers on two connections", async () => {
 				const [s, t] = await both();
 				const k = fresh()("a");
-				await s.put(k, "only", never);
+				await overwrite(s, k, "only", never);
 				const results = await race(20, [s, t], (store) => store.take(k));
 				expect(results.filter((r) => r.kind === "taken")).toHaveLength(1);
 			});
@@ -592,7 +633,7 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				const key = fresh();
 				const absent = await race(20, [s, t], (store, i) => store.putIfAbsent(key("a"), i, never));
 				expect(absent.filter((r) => r.kind === "written")).toHaveLength(1);
-				const version = versionOf(await s.put(key("b"), 0, never));
+				const version = versionOf(await overwrite(s, key("b"), 0, never));
 				const replaced = await race(20, [s, t], (store, i) =>
 					store.replaceIf(key("b"), version, i, never),
 				);
@@ -621,14 +662,14 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			it("re-runs the decision on the newer entry instead of resending a stale write", async () => {
 				const s = await harness.open();
 				const k = fresh()("doc");
-				await s.put(k, { a: 0, b: 0 }, never);
+				await overwrite(s, k, { a: 0, b: 0 }, never);
 				let runs = 0;
 				let rival: Promise<unknown> = Promise.resolve();
 				const result = await mutate(s, k, (entry) => {
 					runs += 1;
 					const doc = entry?.value as { a: number; b: number };
 					// Another client rewrites b after the first read and before the write.
-					if (runs === 1) rival = s.put(k, { ...doc, b: 1 }, never);
+					if (runs === 1 && entry) rival = s.replaceIf(k, entry.version, { ...doc, b: 1 }, never);
 					return { kind: "write", value: { ...doc, a: 1 }, expiry: { kind: "keep" } };
 				});
 				await rival;
@@ -687,12 +728,12 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			it("lists each live value's key in the space, over pages, and no counter, set or other space", async () => {
 				const s = await harness.open();
 				const live = Array.from({ length: 250 }, (_, i) => fresh(space, `q${i % 7}`)(`k${i}`));
-				for (const k of live) await s.put(k, 1, never);
+				for (const k of live) await overwrite(s, k, 1, never);
 				const { now } = await s.get(fresh()("probe"));
 				const ends = now + 30;
-				await s.put(fresh()("gone"), 1, { expiry: { kind: "at", at: ends } });
+				await overwrite(s, fresh()("gone"), 1, { expiry: { kind: "at", at: ends } });
 				while ((await s.now()) <= ends) await sleep(5);
-				await s.put(fresh(replicated)("elsewhere"), 1, never);
+				await overwrite(s, fresh(replicated)("elsewhere"), 1, never);
 				await s.count(fresh()("counted"), { ms: 60_000, limit: 5 });
 				const seen = await walk(s, space);
 				expect([...seen.keys()].sort()).toEqual(live.map((k) => `${k.partition}/${k.name}`).sort());
@@ -704,12 +745,12 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				const s = await harness.open();
 				const kept = Array.from({ length: 120 }, (_, i) => fresh(space, "w")(`kept${i}`));
 				const dropped = Array.from({ length: 120 }, (_, i) => fresh(space, "w")(`dropped${i}`));
-				for (const k of [...kept, ...dropped]) await s.put(k, 1, never);
+				for (const k of [...kept, ...dropped]) await overwrite(s, k, 1, never);
 				let n = 0;
 				const seen = await walk(s, space, async () => {
 					const k = dropped[n];
 					if (k) await s.removeIf(k, { value: 1 });
-					await s.put(fresh(space, "w")(`added${n++}`), 1, never);
+					await overwrite(s, fresh(space, "w")(`added${n++}`), 1, never);
 				});
 				for (const k of kept) expect(seen.get(`w/${k.name}`), k.name).toBeGreaterThanOrEqual(1);
 			});
@@ -724,11 +765,13 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			it("refuses times, durations and limits that are not whole numbers in range", async () => {
 				const s = await harness.open();
 				const k = fresh()("a");
-				await expect(s.put(k, 1, { expiry: { kind: "after", ms: 1.5 } })).rejects.toThrow(
+				await expect(overwrite(s, k, 1, { expiry: { kind: "after", ms: 1.5 } })).rejects.toThrow(
 					TypeError,
 				);
-				await expect(s.put(k, 1, { expiry: { kind: "at", at: -1 } })).rejects.toThrow(TypeError);
-				await expect(s.put(k, 1, { ...never, deadline: 0.5 })).rejects.toThrow(TypeError);
+				await expect(overwrite(s, k, 1, { expiry: { kind: "at", at: -1 } })).rejects.toThrow(
+					TypeError,
+				);
+				await expect(s.putIfAbsent(k, 1, { ...never, deadline: 0.5 })).rejects.toThrow(TypeError);
 				await expect(
 					s.batch([], [{ key: k, put: 1, expiry: { kind: "after", ms: Number.NaN } }]),
 				).rejects.toThrow(TypeError);
@@ -747,7 +790,7 @@ export function storeContract(name: string, harness: StoreHarness): void {
 					new Map(),
 					() => 1,
 				]) {
-					await expect(s.put(key("a"), bad as never, never)).rejects.toThrow(TypeError);
+					await expect(overwrite(s, key("a"), bad as never, never)).rejects.toThrow(TypeError);
 				}
 				await expect(
 					s.batch(
@@ -760,7 +803,8 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				).rejects.toThrow(TypeError);
 				for (const name of ["a", "b", "c"]) expect((await s.get(key(name))).entry).toBeNull();
 				await expect(
-					s.put(
+					overwrite(
+						s,
 						{ space: { name: "undeclared", guarantees: [] }, partition: "p", name: "a" },
 						1,
 						never,
@@ -780,12 +824,14 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			it("refuses options with unknown or hidden properties", async () => {
 				const s = await harness.open();
 				const k = fresh()("a");
-				await expect(s.put(k, 1, { ...never, deadlin: 1 } as never)).rejects.toThrow(TypeError);
+				await expect(overwrite(s, k, 1, { ...never, deadlin: 1 } as never)).rejects.toThrow(
+					TypeError,
+				);
 				const hidden = Object.defineProperty({ ...never }, "deadline", {
 					value: 0,
 					enumerable: false,
 				});
-				await expect(s.put(k, 1, hidden)).rejects.toThrow(TypeError);
+				await expect(overwrite(s, k, 1, hidden)).rejects.toThrow(TypeError);
 				await expect(s.count(k, { ms: 1000, limit: 1, extra: 1 } as never)).rejects.toThrow(
 					TypeError,
 				);
@@ -795,13 +841,13 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				const s = await harness.open();
 				const key = fresh();
 				const lone = "\uD800";
-				await expect(s.put(key(lone), 1, never)).rejects.toThrow(TypeError);
-				await expect(s.put(key("a"), lone, never)).rejects.toThrow(TypeError);
-				await expect(s.put(key("a"), { [lone]: 1 }, never)).rejects.toThrow(TypeError);
-				await expect(s.put(key("a"), 1, { ...never, idempotency: lone })).rejects.toThrow(
+				await expect(overwrite(s, key(lone), 1, never)).rejects.toThrow(TypeError);
+				await expect(overwrite(s, key("a"), lone, never)).rejects.toThrow(TypeError);
+				await expect(overwrite(s, key("a"), { [lone]: 1 }, never)).rejects.toThrow(TypeError);
+				await expect(s.putIfAbsent(key("a"), 1, { ...never, idempotency: lone })).rejects.toThrow(
 					TypeError,
 				);
-				await s.put(key("é😀"), "é😀", never);
+				await overwrite(s, key("é😀"), "é😀", never);
 				expect((await s.get(key("é😀"))).entry?.value).toBe("é😀");
 				expect((await s.get(key("e😀"))).entry).toBeNull();
 			});
@@ -816,14 +862,14 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				const proto = JSON.parse('{"__proto__": 1}');
 				const getter = Object.defineProperty({}, "x", { get: () => 1, enumerable: true });
 				for (const bad of [new Point(), extra, proto, getter]) {
-					await expect(s.put(key("a"), bad as never, never)).rejects.toThrow(TypeError);
+					await expect(overwrite(s, key("a"), bad as never, never)).rejects.toThrow(TypeError);
 				}
 				const sneaky = Object.defineProperty({ space, partition: "p" }, "name", {
 					get: () => "a",
 					enumerable: true,
 				});
 				await expect(s.get(sneaky as Key)).rejects.toThrow(TypeError);
-				await s.put(key("z"), -0, never);
+				await overwrite(s, key("z"), -0, never);
 				expect(Object.is((await s.get(key("z"))).entry?.value, 0)).toBe(true);
 				await expect(
 					s.batch(
@@ -853,18 +899,20 @@ export function storeContract(name: string, harness: StoreHarness): void {
 				const refused: Record<string, () => Promise<unknown>> = {
 					"long key name": () => s.get(fresh()("x".repeat(513))),
 					"empty partition": () => s.get({ ...k, partition: "" }),
-					"time past the last date": () => s.put(k, 1, { expiry: { kind: "at", at: 8.65e15 } }),
+					"time past the last date": () =>
+						overwrite(s, k, 1, { expiry: { kind: "at", at: 8.65e15 } }),
 					"limit past its range": () => s.count(k, { ms: 1000, limit: 1_000_000_001 }),
-					"zero duration": () => s.put(k, 1, { expiry: { kind: "after", ms: 0 } }),
-					"unknown expiry": () => s.put(k, 1, { expiry: { kind: "forever" } as never }),
-					"option with a getter": () => s.put(k, 1, hiddenDeadline),
+					"zero duration": () => overwrite(s, k, 1, { expiry: { kind: "after", ms: 0 } }),
+					"unknown expiry": () => overwrite(s, k, 1, { expiry: { kind: "forever" } as never }),
+					"option with a getter": () => overwrite(s, k, 1, hiddenDeadline),
 					"batch option": () => s.batch([], [], { deadline: 0.5 }),
-					"symbol key in a value": () => s.put(k, { [Symbol("x")]: 1 } as never, never),
-					"array subclass": () => s.put(k, Items.from([1]) as never, never),
-					"array with a trailing hole": () => s.put(k, trailingHole, never),
-					"array with a hole and a property": () => s.put(k, holeAndExtra, never),
-					"array with a symbol": () => s.put(k, Object.assign([1], { [Symbol("x")]: 1 }), never),
-					"value nested too deeply": () => s.put(k, deep as never, never),
+					"symbol key in a value": () => overwrite(s, k, { [Symbol("x")]: 1 } as never, never),
+					"array subclass": () => overwrite(s, k, Items.from([1]) as never, never),
+					"array with a trailing hole": () => overwrite(s, k, trailingHole, never),
+					"array with a hole and a property": () => overwrite(s, k, holeAndExtra, never),
+					"array with a symbol": () =>
+						overwrite(s, k, Object.assign([1], { [Symbol("x")]: 1 }), never),
+					"value nested too deeply": () => overwrite(s, k, deep as never, never),
 					"value expected by a removal": () => s.removeIf(k, { value: new Date(0) as never }),
 					"empty condition version": () => s.batch([{ key: k, version: "" }], []),
 					"condition with neither": () => s.batch([{ key: k } as never], []),
@@ -884,20 +932,20 @@ export function storeContract(name: string, harness: StoreHarness): void {
 					const partition = `p${++n}`;
 					const at = fresh(replicated, partition);
 					const disguised = fresh({ ...replicated, guarantees: [] }, partition);
-					await s.put(at("a"), 1, never);
-					await s.put(at("b"), 1, never);
-					const version = versionOf(await s.put(at("r"), 1, never));
-					const vVersion = versionOf(await s.put(at("v"), 1, never));
-					await s.put(at("w"), 1, never);
+					await overwrite(s, at("a"), 1, never);
+					await overwrite(s, at("b"), 1, never);
+					const version = versionOf(await overwrite(s, at("r"), 1, never));
+					const vVersion = versionOf(await overwrite(s, at("v"), 1, never));
+					await overwrite(s, at("w"), 1, never);
 					const undo = await harness.stopReplicas?.();
 					try {
-						expect((await s.put(fresh()("plain"), 1, never)).kind).toBe("written");
+						expect((await s.putIfAbsent(fresh()("plain"), 1, never)).kind).toBe("written");
 						const unconfirmed: Record<string, () => Promise<unknown>> = {
-							put: () => s.put(at("a"), 2, never),
 							putIfAbsent: () => s.putIfAbsent(at("new"), 2, never),
 							replaceIf: () => s.replaceIf(at("v"), vVersion, 2, never),
 							"removeIf by value": () => s.removeIf(at("w"), { value: 1 }),
-							"put with a key that hides the guarantee": () => s.put(disguised("c"), 2, never),
+							"putIfAbsent with a key that hides the guarantee": () =>
+								s.putIfAbsent(disguised("c"), 2, never),
 							take: () => s.take(at("b")),
 							"removeIf by version": () => s.removeIf(at("r"), { version }),
 							batch: () => s.batch([], [{ key: at("d"), put: 1, expiry: { kind: "never" } }]),
@@ -919,7 +967,7 @@ export function storeContract(name: string, harness: StoreHarness): void {
 					const s = await harness.open();
 					const t = await harness.peer(s);
 					const k = fresh(replicated)("a");
-					await s.put(k, "code", never);
+					await overwrite(s, k, "code", never);
 					const { now } = await s.get(k);
 					const mark = { deadline: now + 60_000, idempotency: "once" };
 					const undo = await harness.stopReplicas?.();
@@ -941,8 +989,8 @@ export function storeContract(name: string, harness: StoreHarness): void {
 					const partition = `p${++n}`;
 					const at = fresh(confirmed, partition);
 					const plain = fresh(replicated, partition);
-					const version = versionOf(await s.put(at("a"), 1, never));
-					await s.put(plain("a"), 1, never);
+					const version = versionOf(await overwrite(s, at("a"), 1, never));
+					await overwrite(s, plain("a"), 1, never);
 					const { now } = await s.get(at("a"));
 					await s.count(at("hits"), { ms: 60_000, limit: 1 });
 					const undo = await harness.stopReplicas?.();
@@ -957,7 +1005,8 @@ export function storeContract(name: string, harness: StoreHarness): void {
 							"batch, conflict": () => s.batch([{ key: at("a"), absent: true }], []),
 							"removeIf, conflict": () => s.removeIf(at("a"), { value: 99 }),
 							"replaceIf, missing": () => s.replaceIf(at("none"), version, 2, never),
-							"put, late": () => s.put(at("late"), 1, { ...never, deadline: now - 1 }),
+							"putIfAbsent, late": () =>
+								s.putIfAbsent(at("late"), 1, { ...never, deadline: now - 1 }),
 						};
 						for (const [label, run] of Object.entries(unconfirmed)) {
 							await expect(run(), label).rejects.toMatchObject({ name: "Unavailable" });
@@ -981,7 +1030,7 @@ export function storeContract(name: string, harness: StoreHarness): void {
 					let early: unknown;
 					let reading: Promise<unknown> = Promise.resolve();
 					try {
-						await expect(s.put(k, 1, never)).rejects.toMatchObject({ name: "Unavailable" });
+						await expect(overwrite(s, k, 1, never)).rejects.toMatchObject({ name: "Unavailable" });
 						reading = s.get(k).then(
 							(read) => {
 								if (!resumed) early = read.entry?.value ?? null;
@@ -1015,10 +1064,10 @@ export function storeContract(name: string, harness: StoreHarness): void {
 					const s = await harness.open();
 					const k = fresh(replicated)("a");
 					const other = fresh()("b");
-					await s.put(other, 1, never);
+					await overwrite(s, other, 1, never);
 					const undo = await harness.stopReplicas?.();
 					try {
-						const waiting = s.put(k, 1, never).then(
+						const waiting = overwrite(s, k, 1, never).then(
 							() => "written",
 							() => "unavailable",
 						);
@@ -1040,8 +1089,8 @@ export function storeContract(name: string, harness: StoreHarness): void {
 					const s = await harness.open();
 					const earlier = fresh()("earlier");
 					const later = fresh(replicated)("later");
-					await s.put(earlier, "kept", never);
-					expect((await s.put(later, 1, never)).kind).toBe("written");
+					await overwrite(s, earlier, "kept", never);
+					expect((await s.putIfAbsent(later, 1, never)).kind).toBe("written");
 					await harness.stopReplicas?.();
 					const undo = await harness.failover?.();
 					try {

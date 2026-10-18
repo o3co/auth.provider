@@ -58,9 +58,8 @@ export interface WriteOptions {
 }
 
 /**
- * Opaque; versions are compared for equality only and never repeat for a key. Counters go back on
- * restart, failover or expiry, so a version names which counter of which store; giving versions
- * an order would lose that.
+ * Opaque, compared for equality only, never repeating for a key. Counters go back on restart,
+ * failover or expiry, so a version names which counter of which store, and has no order.
  */
 export type Version = string;
 
@@ -95,7 +94,6 @@ export type BatchWrite =
  */
 export interface Store {
 	get(key: Key): Promise<Read>;
-	put(key: Key, value: Json, options: WriteOptions): Promise<Written | Late | Reused>;
 	putIfAbsent(
 		key: Key,
 		value: Json,
@@ -408,7 +406,6 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 	};
 	return {
 		get: async (k) => inner.get(key(k)),
-		put: async (k, v, o) => inner.put(key(k), json(v), readWriteOptions(o)),
 		putIfAbsent: async (k, v, o) => inner.putIfAbsent(key(k), json(v), readWriteOptions(o)),
 		replaceIf: async (k, version, v, o) =>
 			inner.replaceIf(key(k), text("version", version), json(v), readWriteOptions(o)),

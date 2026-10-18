@@ -194,7 +194,10 @@ it("is unavailable when other writers keep changing a key's lockout before each 
 		if (times === 0) return;
 		simulated.beforeNext("replaceIf", lockoutSpace.name, async () => {
 			const { entry } = await store.get(held);
-			await store.put(held, entry?.value ?? {}, { expiry: { kind: "after", ms: 60_000 } });
+			const expiry = { expiry: { kind: "after", ms: 60_000 } } as const;
+			await (entry
+				? store.replaceIf(held, entry.version, entry.value, expiry)
+				: store.putIfAbsent(held, {}, expiry));
 			contend(times - 1);
 		});
 	};

@@ -9,7 +9,7 @@ import { expect, it } from "vitest";
 import { type Space, spaces, store } from "../src/contract.ts";
 import { memoryStore } from "../src/memory.ts";
 import storeModule from "../src/module.ts";
-import { contractSpaces, storeContract } from "../src/testing.ts";
+import { contractSpaces, overwrite, storeContract } from "../src/testing.ts";
 
 storeContract("memory", {
 	open: async () => memoryStore({ now: () => Date.now() }, contractSpaces),
@@ -37,31 +37,31 @@ function controlled() {
 it("answers a resend of a write refused as late with late, even after the store clock goes back", async () => {
 	const { clock, s, key } = controlled();
 	const options = { ...never, deadline: start - 10, idempotency: "m" };
-	expect((await s.put(key("a"), 1, options)).kind).toBe("late");
+	expect((await s.putIfAbsent(key("a"), 1, options)).kind).toBe("late");
 	clock.now -= 100;
-	expect((await s.put(key("a"), 1, options)).kind).toBe("late");
+	expect((await s.putIfAbsent(key("a"), 1, options)).kind).toBe("late");
 	expect((await s.get(key("a"))).entry).toBeNull();
-	expect((await s.put(key("a"), 2, options)).kind).toBe("reused");
+	expect((await s.putIfAbsent(key("a"), 2, options)).kind).toBe("reused");
 });
 
 it("takes a write at its deadline and refuses it just after", async () => {
 	const { s, key } = controlled();
-	expect((await s.put(key("a"), 1, { ...never, deadline: start })).kind).toBe("written");
-	expect((await s.put(key("a"), 1, { ...never, deadline: start - 1 })).kind).toBe("late");
+	expect((await s.putIfAbsent(key("a"), 1, { ...never, deadline: start })).kind).toBe("written");
+	expect((await s.putIfAbsent(key("a"), 1, { ...never, deadline: start - 1 })).kind).toBe("late");
 });
 
 it("forgets a mark exactly one second after its deadline, or five minutes and a second after", async () => {
 	const { clock, s, key } = controlled();
-	await s.put(key("a"), 1, { ...never, deadline: start, idempotency: "d" });
-	await s.put(key("a"), 1, { ...never, idempotency: "n" });
+	await s.putIfAbsent(key("a"), 1, { ...never, deadline: start, idempotency: "d" });
+	await s.putIfAbsent(key("a"), 1, { ...never, idempotency: "n" });
 	clock.now = start + 999;
-	expect((await s.put(key("a"), 2, { ...never, idempotency: "d" })).kind).toBe("reused");
+	expect((await s.putIfAbsent(key("a"), 2, { ...never, idempotency: "d" })).kind).toBe("reused");
 	clock.now = start + 1000;
-	expect((await s.put(key("a"), 2, { ...never, idempotency: "d" })).kind).toBe("written");
+	expect((await s.putIfAbsent(key("a"), 2, { ...never, idempotency: "d" })).kind).toBe("exists");
 	clock.now = start + 300_999;
-	expect((await s.put(key("a"), 2, { ...never, idempotency: "n" })).kind).toBe("reused");
+	expect((await s.putIfAbsent(key("a"), 2, { ...never, idempotency: "n" })).kind).toBe("reused");
 	clock.now = start + 301_000;
-	expect((await s.put(key("a"), 2, { ...never, idempotency: "n" })).kind).toBe("written");
+	expect((await s.putIfAbsent(key("a"), 2, { ...never, idempotency: "n" })).kind).toBe("exists");
 });
 
 it("keeps no mark for a batch that names no key", async () => {
@@ -72,37 +72,37 @@ it("keeps no mark for a batch that names no key", async () => {
 
 it("keeps marks and counts through the periodic sweep of what has expired", async () => {
 	const { s, key } = controlled();
-	const first = await s.put(key("a"), 1, { ...never, idempotency: "m" });
+	const first = await s.putIfAbsent(key("a"), 1, { ...never, idempotency: "m" });
 	await s.count(key("hits"), { ms: 60_000, limit: 10 });
-	for (let i = 0; i < 300; i++) await s.put(key("other"), i, never);
-	expect(await s.put(key("a"), 1, { ...never, idempotency: "m" })).toEqual(first);
+	for (let i = 0; i < 300; i++) await overwrite(s, key("other"), i, never);
+	expect(await s.putIfAbsent(key("a"), 1, { ...never, idempotency: "m" })).toEqual(first);
 	expect(await s.count(key("hits"), { ms: 60_000, limit: 10 })).toMatchObject({ count: 2 });
 });
 
 it("answers frozen, so a caller cannot change the answer a resend gets", async () => {
 	const { s, key } = controlled();
-	const first = await s.put(key("a"), 1, { ...never, idempotency: "m" });
+	const first = await s.putIfAbsent(key("a"), 1, { ...never, idempotency: "m" });
 	expect(() => Object.assign(first, { version: "changed" })).toThrow(TypeError);
-	expect((await s.put(key("a"), 1, { ...never, idempotency: "m" })).kind).toBe("written");
+	expect((await s.putIfAbsent(key("a"), 1, { ...never, idempotency: "m" })).kind).toBe("written");
 });
 
 it("never shortens an expiry when asked to extend it", async () => {
 	const { clock, s, key } = controlled();
-	await s.put(key("a"), 1, { expiry: { kind: "after", ms: 10_000 } });
-	await s.put(key("a"), 2, { expiry: { kind: "extend", ms: 100 } });
+	await overwrite(s, key("a"), 1, { expiry: { kind: "after", ms: 10_000 } });
+	await overwrite(s, key("a"), 2, { expiry: { kind: "extend", ms: 100 } });
 	clock.now = start + 5000;
 	expect((await s.get(key("a"))).entry?.value).toBe(2);
 });
 
 it("tells no remaining time for an entry that never expires", async () => {
 	const { s, key } = controlled();
-	await s.put(key("a"), 1, never);
+	await overwrite(s, key("a"), 1, never);
 	expect(await s.putIfAbsent(key("a"), 2, never)).toEqual({ kind: "exists", remainingMs: null });
 });
 
 it("removes on a version only when it is the entry's version", async () => {
 	const { s, key } = controlled();
-	const written = await s.put(key("a"), 1, never);
+	const written = await overwrite(s, key("a"), 1, never);
 	const version = written.kind === "written" ? written.version : "";
 	expect((await s.removeIf(key("a"), { version: `${version}x` })).kind).toBe("conflict");
 	expect((await s.removeIf(key("a"), { version })).kind).toBe("removed");
@@ -110,7 +110,7 @@ it("removes on a version only when it is the entry's version", async () => {
 
 it("refuses a batch whose key must be absent but is present", async () => {
 	const { s, key } = controlled();
-	await s.put(key("a"), 1, never);
+	await overwrite(s, key("a"), 1, never);
 	const absent = [{ key: key("a"), absent: true as const }];
 	expect(await s.batch(absent, [{ key: key("a"), remove: true }])).toEqual({
 		kind: "conflict",

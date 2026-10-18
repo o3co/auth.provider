@@ -10,15 +10,7 @@ import {
 } from "./contract.ts";
 import { memoryStore } from "./memory.ts";
 
-const writes = new Set<string>([
-	"put",
-	"putIfAbsent",
-	"replaceIf",
-	"removeIf",
-	"take",
-	"batch",
-	"count",
-]);
+const writes = new Set<string>(["putIfAbsent", "replaceIf", "removeIf", "take", "batch", "count"]);
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const writtenKinds = new Set(["written", "removed", "taken", "committed", "counted"]);
 
