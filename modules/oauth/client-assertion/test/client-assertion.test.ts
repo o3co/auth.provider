@@ -16,6 +16,7 @@ import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from
 import { quietRuntime, recordingLog, unavailableSwitch } from "@mod/kernel/testing";
 import outboundModule from "@mod/outbound/module";
 import { memoryRecords } from "@mod/records/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { CompactSign, FlattenedSign, type JWTPayload, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
@@ -93,6 +94,7 @@ async function boot({
 			outboundModule,
 			externalJwtModule,
 			clientsModule,
+			secretHashModule,
 			issuerModule,
 			assertionModule,
 			spent,
