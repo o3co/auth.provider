@@ -64,7 +64,7 @@ export interface Upstream {
 	/** Exchanges the code; throws UpstreamRefused for an answer that does not hold, Unavailable when unreachable. */
 	exchange(code: CodeExchange): Promise<UpstreamLogin>;
 	/** Throws as `exchange` does; an upstream that fails (5xx) is unavailable. */
-	refresh?(refreshToken: string, scope: readonly string[]): Promise<UpstreamRefresh>;
+	refresh?(refreshToken: string, scopes: readonly string[]): Promise<UpstreamRefresh>;
 	/** The upstream's end-session URL. */
 	endSession?(at: {
 		readonly idTokenHint?: string;
@@ -93,7 +93,7 @@ export interface Delegation {
 	): Promise<UpstreamLogin & { readonly issuer: string; readonly tokens: UpstreamTokens }>;
 	refresh(
 		refreshToken: string,
-		scope: readonly string[],
+		scopes: readonly string[],
 		resource?: string,
 	): Promise<UpstreamRefresh>;
 }
@@ -138,7 +138,13 @@ export interface IdpType<S extends z.ZodType = z.ZodType> {
 	/** Refuses boot (throws) when the upstream's own description does not match its settings; `UpstreamMismatch` says why. */
 	open(
 		settings: z.output<S>,
-		at: { readonly name: string; readonly redirectUri: string },
+		at: {
+			/** The IdP's name, as `upstreams.of` and the receivers take it. */
+			readonly idp: string;
+			/** The same name; read `idp`. */
+			readonly name: string;
+			readonly redirectUri: string;
+		},
 	): Promise<Upstream>;
 }
 
