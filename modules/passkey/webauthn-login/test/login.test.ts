@@ -428,15 +428,6 @@ describe("the authentication options route", () => {
 		expect((await s.ask()).status).toBe(200);
 	});
 
-	it("counts requests over window-seconds, read in place of the window while its writers move", async () => {
-		const s = await serve({ requests: 1, "window-seconds": 30 });
-		expect((await s.ask()).status).toBe(200);
-		now += 29_000;
-		expect((await s.ask()).status).toBe(429);
-		now += 1_000;
-		expect((await s.ask()).status).toBe(200);
-	});
-
 	it("answers 503 when the challenge cannot be kept", async () => {
 		const s = await serve();
 		s.state.down = true;
@@ -473,21 +464,11 @@ describe("the operator section", () => {
 		]);
 	});
 
-	it("reads window-seconds, in seconds, in place of the window, within its bounds", () => {
-		expect(loginSection.parse({ "window-seconds": 30 })).toEqual({ requests: 60, window: 30 });
-		const bounds = [0, 1, 86_400, 86_401, 1.5].map((n) => takes({ "window-seconds": n }));
-		expect(bounds).toEqual([false, true, true, false, false]);
-	});
-
-	it("refuses to start with the window under both its names, even at its default", async () => {
-		await expect(serve({ window: "1m", "window-seconds": 30 })).rejects.toMatchObject({
-			refusals: [
-				{
-					where: "webauthn-login.window-seconds",
-					reason: "window replaces window-seconds: write one",
-				},
-			],
+	it("refuses to start with window-seconds, a name it no longer reads", async () => {
+		await expect(serve({ "window-seconds": 60 })).rejects.toMatchObject({
+			refusals: [{ where: "webauthn-login" }],
 		});
+		expect(takes({ "window-seconds": 60 })).toBe(false);
 	});
 
 	it("takes whole numbers of requests within bounds, and no other key", () => {

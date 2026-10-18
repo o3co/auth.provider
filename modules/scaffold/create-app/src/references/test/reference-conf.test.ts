@@ -99,7 +99,6 @@ const unitsLater = new Set([
 	"token-exchange",
 	"users-http",
 	"webauthn",
-	"webauthn-login",
 ]);
 /** Sections whose schema still gives a default by `.default()`; a section leaves once its owner moves it, and never comes back. */
 const prefaultLater = new Set([
