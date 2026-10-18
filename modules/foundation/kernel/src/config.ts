@@ -11,9 +11,9 @@ export interface ConfigSource {
 
 /**
  * Layers the files, highest priority first, and returns a plain tree. Resolves each file on its
- * own, then layers them: deferred resolution across the layers turns objects inside arrays into
- * null in the HOCON library, so substitutions reach only env and the same file. Remove when: the
- * library's deferred resolution keeps array objects; then resolve the merged layers once so
+ * own, then layers them, so substitutions reach only env and the same file: a refusal names the
+ * file, which the HOCON library's deferred resolution does not tell. Remove when: its ResolveError
+ * carries the file (`file`) after a deferred resolve; then resolve the merged layers once, so
  * substitutions cross files again.
  */
 export async function loadConfig(source: ConfigSource): Promise<unknown> {
