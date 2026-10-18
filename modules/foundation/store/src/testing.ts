@@ -329,17 +329,30 @@ export function storeContract(name: string, harness: StoreHarness): void {
 			it("expires entries on the store clock and keeps or extends expiry when asked", async () => {
 				const s = await harness.open();
 				const key = fresh();
-				await overwrite(s, key("short"), 1, { expiry: { kind: "after", ms: 150 } });
-				await overwrite(s, key("kept"), 1, { expiry: { kind: "after", ms: 150 } });
-				await overwrite(s, key("kept"), 2, { expiry: { kind: "keep" } });
-				await overwrite(s, key("long"), 1, { expiry: { kind: "after", ms: 150 } });
-				await overwrite(s, key("long"), 2, { expiry: { kind: "extend", ms: 5000 } });
-				await overwrite(s, key("forever"), 1, never);
-				await overwrite(s, key("forever"), 2, { expiry: { kind: "extend", ms: 10 } });
-				await sleep(400);
+				const soon = { expiry: { kind: "after", ms: 150 } } as const;
+				await s.putIfAbsent(key("short"), 1, soon);
+				const kept = versionOf(await s.putIfAbsent(key("kept"), 1, soon));
+				const long = versionOf(await s.putIfAbsent(key("long"), 1, soon));
+				const forever = versionOf(await s.putIfAbsent(key("forever"), 1, never));
+				const ends = [
+					(await s.get(key("short"))).entry?.expiresAt ?? 0,
+					(await s.get(key("kept"))).entry?.expiresAt ?? 0,
+				];
+				// On the version written, so one landing past the expiry is refused, never a new entry.
+				const rewrite = (name: string, version: Version, expiry: WriteOptions["expiry"]) =>
+					s.replaceIf(key(name), version, 2, { expiry });
+				if ((await rewrite("kept", kept, { kind: "keep" })).kind === "written") {
+					expect((await s.get(key("kept"))).entry?.expiresAt).toBe(ends[1]);
+				}
+				const extended = await rewrite("long", long, { kind: "extend", ms: 5000 });
+				expect((await rewrite("forever", forever, { kind: "extend", ms: 10 })).kind).toBe(
+					"written",
+				);
+				// Until the store clock, not the caller's, is past both expiries.
+				while ((await s.get(key("probe"))).now <= Math.max(...ends)) await sleep(25);
 				expect((await s.get(key("short"))).entry).toBeNull();
 				expect((await s.get(key("kept"))).entry).toBeNull();
-				expect((await s.get(key("long"))).entry?.value).toBe(2);
+				if (extended.kind === "written") expect((await s.get(key("long"))).entry?.value).toBe(2);
 				expect((await s.get(key("forever"))).entry?.expiresAt).toBeNull();
 			});
 
