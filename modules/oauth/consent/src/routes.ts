@@ -2,7 +2,7 @@ import { audit, declaredAudit } from "@mod/audit";
 import { clients } from "@mod/clients";
 import { csrfChecked } from "@mod/csrf";
 import type { HttpRequest, HttpResponse, Route } from "@mod/http";
-import { noStore, use } from "@mod/http";
+import { jsonAnswer, noStore, use } from "@mod/http";
 import { type BuildContext, isUnavailable } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
 import { sessions } from "@mod/session";
@@ -16,18 +16,12 @@ const challengeShape = /^[A-Za-z0-9_-]{43}$/;
 /** The challenge if it has the shape consent hands out. */
 const challengeIn = (value: string | undefined) =>
 	value !== undefined && challengeShape.test(value) ? value : undefined;
-const reply = (status: number, json: unknown): HttpResponse => ({
-	status,
-	headers: noStore,
-	body: { json },
-});
-
 function guarded(handle: (request: HttpRequest) => Promise<HttpResponse>) {
 	return async (request: HttpRequest): Promise<HttpResponse> => {
 		try {
 			return await handle(request);
 		} catch (error) {
-			if (isUnavailable(error)) return reply(503, { error: "temporarily_unavailable" });
+			if (isUnavailable(error)) return jsonAnswer(503, { error: "temporarily_unavailable" });
 			throw error;
 		}
 	};
@@ -44,17 +38,17 @@ export async function showRoute(c: BuildContext<unknown>): Promise<Route> {
 		path: "/oauth/consent",
 		handle: guarded(async (request) => {
 			const session = await opened.enter(request);
-			if (!session) return reply(401, { error: "no_session" });
+			if (!session) return jsonAnswer(401, { error: "no_session" });
 			const challenge = challengeIn(request.query.single("challenge"));
-			if (!challenge) return reply(400, { error: "unknown_challenge" });
+			if (!challenge) return jsonAnswer(400, { error: "unknown_challenge" });
 			const pending = pendingOf(await asks.read(askKey(session.id, challenge)));
 			const now = c.clock.now();
 			if (!pending || pending.answer || pending.deadline <= now)
-				return reply(400, { error: "unknown_challenge" });
+				return jsonAnswer(400, { error: "unknown_challenge" });
 			const client = await listed.find(pending.clientId);
-			if (!client) return reply(400, { error: "unknown_challenge" });
+			if (!client) return jsonAnswer(400, { error: "unknown_challenge" });
 			const { name, uri, host } = shownOf(client);
-			return reply(200, {
+			return jsonAnswer(200, {
 				client_id: pending.clientId,
 				...(host === undefined ? {} : { client_id_host: host }),
 				...(name === undefined ? {} : { client_name: name }),
@@ -80,15 +74,15 @@ export async function answerRoute(c: BuildContext<unknown>): Promise<Route> {
 		takes: ["form", "json"],
 		handle: guarded(async (request) => {
 			if (request.fields.repeated().length > 0) {
-				return reply(400, { error: "repeated_parameter" });
+				return jsonAnswer(400, { error: "repeated_parameter" });
 			}
 			const decision = request.fields.single("decision");
 			if (decision !== "accept" && decision !== "deny")
-				return reply(400, { error: "invalid_decision" });
+				return jsonAnswer(400, { error: "invalid_decision" });
 			const session = await opened.enter(request);
-			if (!session) return reply(401, { error: "no_session" });
+			if (!session) return jsonAnswer(401, { error: "no_session" });
 			const challenge = challengeIn(request.fields.single("challenge"));
-			if (!challenge) return reply(400, { error: "unknown_challenge" });
+			if (!challenge) return jsonAnswer(400, { error: "unknown_challenge" });
 			// The pending consent keeps its answer: a resend of this decision gets the same back, the other none.
 			const now = c.clock.now();
 			const marked = await asks.update(askKey(session.id, challenge), (record) => {
@@ -97,7 +91,7 @@ export async function answerRoute(c: BuildContext<unknown>): Promise<Route> {
 			});
 			const pending = pendingOf(marked?.after);
 			if (!pending || pending.answer !== decision || pending.deadline <= now)
-				return reply(400, { error: "unknown_challenge" });
+				return jsonAnswer(400, { error: "unknown_challenge" });
 			if (decision === "accept")
 				await given.grant(pending.clientId, pending.subject, pending.range);
 			// A resend that completes the same decision again is recorded again.

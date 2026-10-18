@@ -1,6 +1,6 @@
 import { type Audit, audit, declaredAudit } from "@mod/audit";
 import { type Client, clients } from "@mod/clients";
-import { type HttpRequest, type HttpResponse, noStore } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer, noStore } from "@mod/http";
 import { issuer } from "@mod/issuer";
 import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
 import { type IdTokenHints, idTokenHints } from "@mod/oidc";
@@ -28,18 +28,12 @@ export interface EndingParts {
 	readonly log: Log;
 }
 
-const headers = { ...noStore, pragma: "no-cache" };
-const json = (status: number, body: unknown, cookies: readonly string[] = []): HttpResponse => ({
-	status,
-	headers,
-	body: { json: body },
-	...(cookies.length > 0 ? { cookies } : {}),
-});
-const loggedOut = (cookies: readonly string[]) => json(200, { logged_out: true }, cookies);
+const loggedOut = (cookies: readonly string[]) =>
+	jsonAnswer(200, { logged_out: true }, { cookies });
 const refused = (error: string, description: string) =>
-	json(400, { error, error_description: description });
+	jsonAnswer(400, { error, error_description: description });
 const unverified = refused("invalid_token", "id_token_hint verification failed");
-const unavailable = json(503, { error: "temporarily_unavailable" });
+const unavailable = jsonAnswer(503, { error: "temporarily_unavailable" });
 /** On a GET, a hint issued longer ago than this is refused, as a logout another site may have started. */
 const confirmAfterMs = 86_400_000;
 
@@ -133,12 +127,12 @@ export function endingOver(p: EndingParts) {
 		if (page) {
 			if (page.skipped > 0) p.log.warn("rp-logout.frames_skipped", { count: page.skipped });
 			const pageHeaders = {
-				...headers,
+				...noStore,
 				"content-type": "text/html; charset=utf-8",
 			};
 			return { status: 200, headers: pageHeaders, body: page.html, cookies, loads: page.loads };
 		}
-		if (next) return { status: 303, headers: { ...headers, location: next }, cookies };
+		if (next) return { status: 303, headers: { ...noStore, location: next }, cookies };
 		return loggedOut(cookies);
 	};
 
