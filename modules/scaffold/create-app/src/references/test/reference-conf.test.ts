@@ -108,7 +108,6 @@ const prefaultLater = new Set([
 	"redis",
 	"refresh-store",
 	"rp-logout-store",
-	"secret-hash",
 	"sender-binding",
 	"session-lifecycle",
 	"session-store",
