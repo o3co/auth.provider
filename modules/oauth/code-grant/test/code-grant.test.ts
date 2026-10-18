@@ -19,6 +19,7 @@ import {
 } from "@mod/kernel";
 import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
 import { crowdingFor, memoryRecords } from "@mod/records/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { sessionTokens } from "@mod/session-tokens";
@@ -147,6 +148,7 @@ async function serve(
 			tokensStandIn({ revocable: (options.revocation ?? "denylist") === "denylist" }),
 			issuerModule,
 			clientsModule,
+			secretHashModule,
 			grantCaller,
 			clientAllowanceModule,
 			sessionStandIn,
