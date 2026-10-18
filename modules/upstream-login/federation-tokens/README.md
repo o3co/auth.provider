@@ -20,7 +20,7 @@
   - An end of session the upstream cannot build is none, warned as `federation-tokens.end_session_failed` with the IdP and the failure's kind only.
 - Route `POST /oauth/federation/<idp>/token` (no body is read): `200 {access_token, token_type: "Bearer", expires_in?, scope?}`.
   - `expires_in` only for a finite end; `scope` only when there is one.
-  - Errors: `401 invalid_token` (or `sender-binding`'s answer), `403 forbidden`, `404 federation_not_linked`, `410 refresh_token_absent`, `re_authentication_required` or `refresh_not_supported` (no refresh at the upstream, or an IdP no longer set), `429 rate_limited` (the upstream's `retry-after` when 1 to 86400), `500 refresh_failed`, `502 upstream_token_ineligible` (`retry-after: 300`), `503 lock_timeout` or `temporarily_unavailable`.
+  - Errors: `401 invalid_token` (or `sender-binding`'s answer), `403 forbidden` or `upstream_interaction_required` (the upstream asks the user to act there first), `404 federation_not_linked`, `410 refresh_token_absent`, `re_authentication_required` or `refresh_not_supported` (no refresh at the upstream, or an IdP no longer set), `429 rate_limited` (the upstream's `retry-after` when 1 to 86400), `500 refresh_failed`, `502 upstream_token_ineligible` (`retry-after: 300`), `503 lock_timeout` or `temporarily_unavailable`.
 - Route `POST /oauth/federation/<idp>/logout` (form: `post_logout_redirect_uri?`, `state?`): `303` to the upstream's end of session, or `200 {"disconnected": true}` where it has none or fails.
   - Errors as the token route's, without `403`.
 - Both routes answer `no-store` and are limited per source by `rate-limit`'s requests policy.
@@ -41,7 +41,7 @@
 - Nothing is kept for a session that lets nobody in, even one that closes while a login's tokens are written.
 - An entry holds the access, refresh and id tokens, the end, the scope the login granted and the scope now. Nothing else of the upstream's is kept.
 - A write lands only over the version it read, so a removed or relinked entry is neither brought back nor written over.
-- Only a structured `invalid_grant` removes an entry.
+- Only a structured `invalid_grant` or `interaction_required` removes an entry.
 - A rotated refresh token is kept when the answer matches the IdP type's token answer schema, even where the rest of it is refused here.
 - An upstream logout removes the IdP's entry before it builds the upstream URL.
 - The return goes to the upstream only on an exact match of the client's list.

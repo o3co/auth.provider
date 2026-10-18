@@ -14,7 +14,14 @@ export type Current =
 			readonly scope: readonly string[];
 			readonly refreshed: boolean;
 	  }
-	| { readonly kind: "not_linked" | "ineligible" | "refresh_absent" | "reauthenticate" }
+	| {
+			readonly kind:
+				| "not_linked"
+				| "ineligible"
+				| "refresh_absent"
+				| "reauthenticate"
+				| "interaction_required";
+	  }
 	| { readonly kind: "limited"; readonly retryAfterSeconds?: number }
 	| { readonly kind: "failed"; readonly reason: string }
 	| { readonly kind: "not_supported" | "lock_timeout" | "unavailable" };
@@ -196,6 +203,11 @@ export function renewalWith(parts: Parts) {
 		if (answer.kind === "invalid_grant") {
 			await rewrite(session, idp, undefined, entry.version);
 			return { kind: "reauthenticate" } as const;
+		}
+		// Forgotten too, so no refresh is asked again until the user logs in there anew.
+		if (answer.kind === "interaction_required") {
+			await rewrite(session, idp, undefined, entry.version);
+			return { kind: "interaction_required" } as const;
 		}
 		// Only a refresh that handed tokens is read on; an answer of another kind is a failure.
 		const refreshed = answer.kind === "refreshed" ? answer : undefined;
