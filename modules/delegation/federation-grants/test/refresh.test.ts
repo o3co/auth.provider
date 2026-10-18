@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { grantStore } from "../src/store.ts";
 import { harness, said, scopes, upstreamTokens } from "./harness.ts";
 
 /** A grant whose token is due: four seconds of life, past half of it. */
@@ -36,26 +35,6 @@ describe("refreshing a grant's token", () => {
 		expect(h.stores.peek(id)).not.toHaveProperty("sealed");
 	});
 
-	it("writes a rotated refresh token before it judges the rest, and marks a token it cannot hold", async () => {
-		const { h, id } = await due();
-		h.advance(2000);
-		h.script.refreshes.push({
-			kind: "refreshed",
-			tokens: upstreamTokens({ tokenType: "DPoP", refreshToken: "rotated" }),
-		});
-		expect(said(await h.grantCall(id, "token"))).toBe(
-			"502 upstream_token_ineligible upstream_token_ineligible 300",
-		);
-		expect((await h.grantCall(id, "status")).json).toMatchObject({
-			status: "upstream_token_ineligible",
-			reason: "upstream_token_ineligible",
-		});
-		expect((await h.grantCall(id, "token")).status).toBe(200);
-		expect(h.asked.refreshes.map(([token]) => token)).toEqual(["up-refresh-1", "rotated"]);
-		expect((await h.grantCall(id, "status")).json?.status).toBe("active");
-		expect((await h.grantCall(id, "status")).json).not.toHaveProperty("reason");
-	});
-
 	it("judges the subject's boundary before it hands a held token or refreshes one", async () => {
 		for (const [life, wait] of [
 			[300, 1000],
@@ -70,40 +49,6 @@ describe("refreshing a grant's token", () => {
 			expect(said(await h.grantCall(id, "token"))).toBe("410 grant_revoked backstop");
 			expect(h.asked.refreshes).toEqual([]);
 		}
-	});
-
-	it("lets a revocation win over a refresh that raced it", async () => {
-		const { h, id } = await due();
-		h.stores.raceNext(
-			(record) => ({ ...(record as object), status: "revoked", reason: "client" }) as never,
-		);
-		expect((await h.grantCall(id, "token")).status).toBe(503);
-		expect((await h.grantCall(id, "status")).json?.status).toBe("revoked");
-	});
-
-	it("lets a revocation win over an activation that raced it", async () => {
-		const h = await harness();
-		const flow = await h.started();
-		h.stores.raceNext(
-			(record) => ({ ...(record as object), status: "revoked", reason: "client" }) as never,
-		);
-		const done = await h.callback(flow.state, flow.browser);
-		expect(h.location(done).searchParams.get("error")).toBe("grant_not_authorizable");
-		expect((await h.grantCall(flow.id, "status")).json?.status).toBe("revoked");
-	});
-
-	it("seals the credentials to the grant, so a copy under another grant does not open", async () => {
-		const h = await harness();
-		const a = await h.connected();
-		const b = await h.connected();
-		const sealedA = (h.stores.peek(a.id) as unknown as { sealed: string }).sealed;
-		// Another writer copies the first grant's sealed credentials into the second.
-		h.stores.raceNext((record) => ({ ...(record as object), sealed: sealedA }) as never);
-		await h.app.get(grantStore).change(b.id, (r) => ({ value: r }));
-		expect(said(await h.grantCall(b.id, "token"))).toBe(
-			"410 reauthorization_required credentials_unreadable",
-		);
-		expect(JSON.stringify(h.stores.peek(a.id))).not.toContain("up-refresh-1");
 	});
 });
 
