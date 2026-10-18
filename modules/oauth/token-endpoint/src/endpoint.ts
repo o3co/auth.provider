@@ -1,13 +1,13 @@
 import type { Audit } from "@mod/audit";
 import { clientAllowance } from "@mod/client-allowance";
-import type { AuthMethod, Client, Clients } from "@mod/clients";
+import type { Client, Clients } from "@mod/clients";
 import type { Grant, GrantInput, SessionIssuance, TargetRule } from "@mod/grants";
 import { type HttpRequest, type HttpResponse, noStore } from "@mod/http";
 import type { Log } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
 import type { Binding, ClientBindings, SenderBindings } from "@mod/sender-binding";
 import type { Tokens } from "@mod/tokens";
-import { challenged, challengesOf } from "./challenges.ts";
+import { challenged } from "./challenges.ts";
 import { answeringUnavailable, authenticateClient, oauthError } from "./contract.ts";
 import { issuanceFor, refusedAnswer } from "./issuance.ts";
 
@@ -73,7 +73,6 @@ export function tokenEndpoint(
 	grants: ReadonlyMap<string, Grant>,
 	targets: TargetRule,
 	audit: Audit,
-	methods: readonly AuthMethod[],
 	log: Log,
 ) {
 	const answer = async (request: HttpRequest): Promise<HttpResponse> => {
@@ -196,7 +195,7 @@ export function tokenEndpoint(
 			const named = outcome.status === 400 || outcome.status === 401 ? outcome.status : undefined;
 			const status = named ?? (outcome.error === "invalid_client" ? 401 : 400);
 			const response = oauthError(status, outcome.error, outcome.description, outcome.members);
-			return status === 401 ? challenged(response, challengesOf(methods, client)) : response;
+			return status === 401 ? challenged(response, authenticated.challenges) : response;
 		}
 		record(grantType);
 		return {

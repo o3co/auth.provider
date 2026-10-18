@@ -80,12 +80,18 @@ export async function authenticateClient(
 	clients: Clients,
 	request: HttpRequest,
 ): Promise<
-	| { readonly kind: "client"; readonly client: Client }
+	| {
+			readonly kind: "client";
+			readonly client: Client;
+			/** `clients`' challenges for a later 401 to this client. */
+			readonly challenges: readonly string[];
+	  }
 	| { readonly kind: "refused"; readonly response: HttpResponse }
 > {
 	const authenticated = await clients.authenticate(request);
-	if (authenticated.kind === "authenticated")
-		return { kind: "client", client: authenticated.client };
+	if (authenticated.kind === "authenticated") {
+		return { kind: "client", client: authenticated.client, challenges: authenticated.challenges };
+	}
 	if (authenticated.reason === "multiple_methods") {
 		return {
 			kind: "refused",
