@@ -121,7 +121,6 @@ const unitsLater = new Set([
 ]);
 /** Sections whose schema still gives a default by `.default()`; a section leaves once its owner moves it, and never comes back. */
 const prefaultLater = new Set([
-	"acr",
 	"audit",
 	"authorize",
 	"client-assertion",
