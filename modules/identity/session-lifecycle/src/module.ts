@@ -26,8 +26,9 @@ export default defineModule({ name: "session-lifecycle", section, replicaSafe: t
 			log: c.log,
 			lifetimeMs,
 			sweepMs,
-			credentialsMs: c.section["credentials-within"] * 1000,
+			credentialsMs: c.section["recent-authentication"] * 1000,
 		});
+		const recentMs = c.section["recent-authentication"] * 1000;
 		c.every(sweepMs, lifecycle.sweep);
 		const enteredAt = async (handle: string) => {
 			const entry = await lifecycle.entryAt(handle, "use");
@@ -49,6 +50,7 @@ export default defineModule({ name: "session-lifecycle", section, replicaSafe: t
 			raise: raiseOver({ lifecycle, kept, clock: c.clock, lifetimeMs }),
 			closeRequest: lifecycle.closeIn,
 			close: lifecycle.close,
+			recent: (at: number) => c.clock.now() - at <= recentMs,
 		};
 	}),
 	m.contribute(revocationFollowers).by(async (c) => {

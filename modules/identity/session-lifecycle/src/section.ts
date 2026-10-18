@@ -1,4 +1,5 @@
 import { setting } from "@mod/kernel";
+import { longestRecentMs } from "@mod/session";
 import { z } from "zod";
 import { longestLifetimeSeconds } from "./limits.ts";
 
@@ -17,11 +18,17 @@ export const section = z.strictObject({
 		.describe(
 			"How often each host goes on with pending closes, from 1s to 1h, such as 1m; a close whose participants keep failing is retried after half its age, at least this, at most an hour.",
 		),
-	"credentials-within": setting
+	"recent-authentication": setting
 		.duration("s")
-		.pipe(z.number().int().min(30).max(3600))
+		.pipe(
+			z
+				.number()
+				.int()
+				.min(30)
+				.max(longestRecentMs / 1000),
+		)
 		.prefault("5m")
 		.describe(
-			"Where no entry requirement judges changing credentials (no mfa), how recent a sign-in at a known time must be to do so, from 30s to 1h, such as 10m.",
+			"How long an authentication stays recent, from 30s to 1h, such as 10m. Where no entry requirement judges changing credentials (no mfa), a sign-in at a known time must be this recent to do so.",
 		),
 });

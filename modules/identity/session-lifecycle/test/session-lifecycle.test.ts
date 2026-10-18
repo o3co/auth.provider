@@ -404,8 +404,8 @@ describe("session entry", () => {
 		expect(await s.enter(withCookie(first))).toBeDefined();
 	});
 
-	it("lets a session change credentials, where no requirement judges that, when its sign-in is as recent as credentials-within asks", async () => {
-		const { s, withCookie, login } = await boot({ "credentials-within": "1m" });
+	it("lets a session change credentials, where no requirement judges that, when its sign-in is as recent as recent-authentication asks", async () => {
+		const { s, withCookie, login } = await boot({ "recent-authentication": "1m" });
 		const cookie = await login();
 		now += 60_000;
 		expect((await s.enterFor(withCookie(cookie), "credentials")).kind).toBe("entered");

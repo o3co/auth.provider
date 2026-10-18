@@ -189,8 +189,8 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 |---|---|---|
 | `session-store.secret`, `name`, `secure`, `sameSite`, `domain` | removed | The cookie is fixed: `session`, `__Host-` and `Secure` on https, `SameSite=Lax` |
 | `session-store.maxAge` (ms) | `session-lifecycle.lifetime` | Written with its unit |
-| (none) | `session-lifecycle.credentials-within` | Default `5m`, `30s` to `1h`; used only where `mfa` is not composed |
-| `core.sessionRequirements.expected`, `secondFactorAuthority` | removed | Without `mfa`, changing credentials needs a sign-in at a known time within `session-lifecycle.credentials-within`; with `mfa`, it judges both using a session and changing credentials |
+| (none) | `session-lifecycle.recent-authentication` | Default `5m`, `30s` to `1h`; used only where `mfa` is not composed |
+| `core.sessionRequirements.expected`, `secondFactorAuthority` | removed | Without `mfa`, changing credentials needs a sign-in at a known time within `session-lifecycle.recent-authentication`; with `mfa`, it judges both using a session and changing credentials |
 | `session.loginPage.url` | `authorize.login-page` | Absolute https URL, required |
 | `session.rateLimit.login` | `login-password.attempts`, `window` | Written with its unit |
 | (none) | `login-password.account-attempts`, `account-window`, `account-max-wait` | Failed attempts at one identifier from any source make each next one wait, doubling to the longest wait (defaults 10, `1h`, `5m`); anyone who knows an identifier can keep its password login waiting that long, while passkey and federation logins are not held back |
@@ -499,7 +499,7 @@ Times and sizes are written with their unit (`30s`, `5m`, `64KiB`); a number wit
 | `rp-logout.sweep-seconds` | `rp-logout.sweep-interval` | a duration, `1s` to `1h`, default `1m` |  |
 | `session-lifecycle.lifetime-seconds` | `session-lifecycle.lifetime` | a duration, `1m` to `30d`, default `1h` |  |
 | `session-lifecycle.sweep-seconds` | `session-lifecycle.sweep-interval` | a duration, `1s` to `1h`, default `30s` |  |
-| `session-lifecycle.credentials-seconds` | `session-lifecycle.credentials-within` | a duration, `30s` to `1h`, default `5m` |  |
+| `session-lifecycle.credentials-seconds` | `session-lifecycle.recent-authentication` | a duration, `30s` to `1h`, default `5m` |  |
 | `session-tokens.sweep-seconds` | `session-tokens.sweep-interval` | a duration, `1s` to `1h`, default `30s` |  |
 | `token-control.window-seconds` | `token-control.window` | a duration, `1s` to `1d`, default `1m` |  |
 | `token-endpoint.window-seconds` | `token-endpoint.window` | a duration, `1s` to `1d`, default `1m` |  |
@@ -658,7 +658,7 @@ A user who signs in with a passkey can satisfy the WebAuthn second factor with a
 
 ### Changing credentials without mfa
 
-Without `mfa`, registering a passkey or linking an upstream account (`?link=1`) needs a sign-in at a known time within `session-lifecycle.credentials-within`. With `mfa`, its rule decides.
+Without `mfa`, registering a passkey or linking an upstream account (`?link=1`) needs a sign-in at a known time within `session-lifecycle.recent-authentication`. With `mfa`, its rule decides.
 
 ### Outbound requests
 

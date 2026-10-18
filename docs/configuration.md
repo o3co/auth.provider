@@ -531,7 +531,7 @@ From `@mod/session-lifecycle`.
 |---|---|---|---|---|---|---|
 | `session-lifecycle.lifetime` | string | `1h` |  |  |  | How long a session lasts, counted from its opening, from 1m to 30d, such as 8h; its cookie lives as long. The lifetime in force decides on each read, so a shorter one ends sessions opened under a longer one. |
 | `session-lifecycle.sweep-interval` | string | `30s` |  |  |  | How often each host goes on with pending closes, from 1s to 1h, such as 1m; a close whose participants keep failing is retried after half its age, at least this, at most an hour. |
-| `session-lifecycle.credentials-within` | string | `5m` |  |  |  | Where no entry requirement judges changing credentials (no mfa), how recent a sign-in at a known time must be to do so, from 30s to 1h, such as 10m. |
+| `session-lifecycle.recent-authentication` | string | `5m` |  |  |  | How long an authentication stays recent, from 30s to 1h, such as 10m. Where no entry requirement judges changing credentials (no mfa), a sign-in at a known time must be this recent to do so. |
 
 ## session-store
 
