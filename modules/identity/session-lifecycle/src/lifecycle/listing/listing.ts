@@ -32,14 +32,33 @@ export function listingOver(parts: ListingParts): Listing {
 			});
 		}
 	};
-	/** Lists a pushed-out session again for what it has left; one that cannot be is ended in its record, so none stays open unlisted. */
+	/** Ends each open record there, calling no participants; how many it ended, and how many it could not. */
+	const ended = async (handles: readonly string[]) => {
+		const counts = { ended: 0, lost: 0 };
+		for (const handle of handles) {
+			try {
+				await parts.endOpen(handle);
+				counts.ended++;
+			} catch {
+				counts.lost++;
+			}
+		}
+		return counts;
+	};
+	/**
+	 * Lists a pushed-out session again for what it has left. One that cannot be listed, and any the
+	 * listing pushes out to take it back, is ended in its record, so none stays open unlisted.
+	 */
 	const putBack = async (subject: string, handle: string) => {
+		let pushedOut: readonly string[];
 		try {
 			const left = await parts.leftOf(handle);
-			if (left > 0) await listed.add(subject, handle, left);
+			if (left <= 0) return { ended: 0, lost: 0 };
+			({ pushedOut } = await listed.add(subject, handle, left));
 		} catch {
-			await parts.endOpen(handle);
+			return ended([handle]);
 		}
+		return ended(pushedOut);
 	};
 	/** Closes what a login's listing pushed out, each kept as a closing first, so the sweep finishes one that fails here; if the closings refuse, the listing is put back (each for what it has left, so it still ends first) and the login fails. */
 	const closePushedOut = async (subject: string, opening: string, handles: readonly string[]) => {
@@ -48,9 +67,15 @@ export function listingOver(parts: ListingParts): Listing {
 			for (const handle of handles) await closings.add(handle);
 		} catch (error) {
 			await listed.remove(subject, opening).catch(() => undefined);
-			let lost = 0;
-			for (const handle of handles) await putBack(subject, handle).catch(() => lost++);
-			if (lost > 0) log.warn("session-lifecycle.listing_put_back_failed", { count: lost });
+			const total = { ended: 0, lost: 0 };
+			for (const handle of handles) {
+				const counts = await putBack(subject, handle);
+				total.ended += counts.ended;
+				total.lost += counts.lost;
+			}
+			if (total.ended > 0) log.warn("session-lifecycle.listing_ended", { count: total.ended });
+			if (total.lost > 0)
+				log.warn("session-lifecycle.listing_put_back_failed", { count: total.lost });
 			throw error;
 		}
 		for (const handle of handles) {
