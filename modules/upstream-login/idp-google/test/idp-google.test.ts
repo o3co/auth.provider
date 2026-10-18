@@ -150,6 +150,10 @@ const offered = <T>(value: T | undefined, what: string): T => {
 };
 
 describe("idp-google", () => {
+	it("says its issuer is Google's", async () => {
+		expect((await open()).upstream.issuer).toBe("https://accounts.google.com");
+	});
+
 	it("asks Google for offline access, the login's nonce and the freshness the browser asked", async () => {
 		const { upstream } = await open();
 		const url = new URL(upstream.authorizationUrl({ ...start, prompt: "login", maxAgeSeconds: 0 }));

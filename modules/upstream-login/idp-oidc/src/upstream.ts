@@ -223,6 +223,7 @@ export async function opened(
 	});
 	const { endSession } = endpoints;
 	return {
+		issuer: s.issuer,
 		clockSkewMs: skewMs,
 		authorizationUrl: (start) =>
 			authorizationUrl(

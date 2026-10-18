@@ -10,7 +10,7 @@ Internal module of `federation`: opening the configured IdPs at boot.
 - What a type checks of its settings and its upstream (the type). Refusing boot (the package's module, with the reasons found here).
 
 ## Offers
-- `idpsIn`, `upstreamsIn` and `amrSourceIn`: from the build context, the opened IdPs (refusing boot with every reason), `upstreams` over them, and `login-gates`' amr source (what a federation login proves and what the IdPs' amr maps to).
+- `idpsIn`, `upstreamsIn`, `upstreamNamesIn` and `amrSourceIn`: from the build context, the opened IdPs (refusing boot with every reason), `upstreams` over them, the IdPs' names with their upstreams' issuers for `users`, and `login-gates`' amr source (what a federation login proves and what the IdPs' amr maps to).
 - `openIdps` (the offered IdP types, the section's `idps`, `http`'s public origin and whether its cookies can be secure) → the opened IdPs by name, and the reasons to refuse boot.
 
 ## Invariants

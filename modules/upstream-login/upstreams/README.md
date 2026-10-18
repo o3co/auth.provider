@@ -14,7 +14,7 @@
   - A type sees only its own settings, never `type` or the others the implementation reads.
   - `open` gets the IdP's name as `idp`, the word `upstreams.of` and the receivers use, and its redirect URI.
   - `open` throws `UpstreamMismatch(reason, at)` to say why it refuses the settings and at which of their keys; the reason names no configuration value.
-- An upstream: how it answers (in the query or a posted form), its clock allowance, authorization URL, and code exchange → upstream login, with its tokens and profile if the type gives them
+- An upstream: its issuer, how it answers (in the query or a posted form), its clock allowance, authorization URL, and code exchange → upstream login, with its tokens and profile if the type gives them
   - The code exchange gets the verifier, nonce, redirect URI and the callback's `iss`.
 - An upstream's exchanges and refreshes throw `UpstreamRefused` for an answer that does not hold, and `Unavailable` when it cannot be reached or fails (5xx); a delegation's start is refused as a value, never thrown.
 - An upstream may also offer a refresh, an end-session URL and an offline delegation

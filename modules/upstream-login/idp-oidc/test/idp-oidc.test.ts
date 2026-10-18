@@ -249,6 +249,10 @@ afterEach(() => {
 	now = start;
 });
 describe("idp-oidc", () => {
+	it("says its issuer is the one its settings name", async () => {
+		expect((await open()).upstream.issuer).toBe(issuer);
+	});
+
 	it("builds the authorization request at the described endpoint, with nonce, PKCE, prompt and max_age", async () => {
 		const { upstream } = await open();
 		const url = new URL(

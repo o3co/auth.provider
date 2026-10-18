@@ -60,6 +60,7 @@ export function opened(
 		);
 	const offline = s.access === "offline";
 	return {
+		issuer,
 		clockSkewMs: skewMs,
 		authorizationUrl: (start) => {
 			const prompt = [start.prompt, offline ? "consent" : undefined].filter(Boolean).join(" ");
