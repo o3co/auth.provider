@@ -152,12 +152,17 @@ export function usersContract(name: string, harness: UsersHarness): void {
 			}
 		});
 
-		it("finds a linked subject the settings do not hold, with no attributes", async () => {
+		it("finds a written link's subject as the users answer it: none outweighs the link", async () => {
 			const u = await harness.open();
 			expect(await u.link("s-new", { idp: "other", subject: "u-new" })).toBe("linked");
 			const found = await u.byUpstream("other", "u-new");
-			expect(found).toEqual({ kind: "user", user: { subject: "s-new", attributes: {} } });
-			expect(found.kind === "user" && Object.isFrozen(found.user.attributes)).toBe(true);
+			// Only where the users cannot answer by subject does the link stand for its subject alone.
+			const alone = { kind: "user", user: { subject: "s-new", attributes: {} } };
+			expect(found).toEqual(harness.unanswerableBySubject ? alone : { kind: "none" });
+			expect(found.kind !== "user" || Object.isFrozen(found.user.attributes)).toBe(true);
+			expect(await u.link("s-alice", { idp: "other", subject: "u-alice" })).toBe("linked");
+			const held = await u.byUpstream("other", "u-alice");
+			expect(held.kind === "user" && held.user.subject).toBe("s-alice");
 		});
 
 		it.skipIf(Boolean(harness.writtenLinksOnly))(
@@ -185,8 +190,7 @@ export function usersContract(name: string, harness: UsersHarness): void {
 			expect(await u.unlink("s-alice", upstream)).toBe("none");
 			expect(await u.byUpstream("example", "u-moved")).toEqual({ kind: "none" });
 			expect(await u.link("s-bob", upstream)).toBe("linked");
-			const moved = await u.byUpstream("example", "u-moved");
-			expect(moved.kind === "user" && moved.user.subject).toBe("s-bob");
+			expect(await u.link("s-alice", upstream)).toBe("conflict");
 		});
 
 		it("links an upstream identity to one subject when two ask at once", async () => {

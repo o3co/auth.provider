@@ -22,7 +22,7 @@
 - A ledger's answer is read once into a frozen copy of `subject` and `attributes`; its failure, an empty subject, attributes that are no object, or another subject's user is unavailable, never none.
 - Unanswerable is never read as none: a written link then finds its subject with no attributes, and claimed contacts are unanswerable.
 - An upstream identity matches exactly, by IdP name and whole upstream subject, never by email, is never created on the fly, and links to one subject at most, also when two ask at once.
-- Only an explicit link links; unlinking removes only the subject's own link, and a written link finds its subject's user, or the subject with no attributes.
+- Only an explicit link links; unlinking removes only the subject's own link, and a written link finds its subject's user, or none where the ledger answers none for the subject: the ledger's none outweighs the link.
 - A settings link wins over a written link of the same upstream identity, which stays hidden and cannot be unlinked (unlink answers fixed); taking the identity out of the settings lets the written link take effect again.
 - A contact is kept once per subject by `mail`'s canonical form, as first given, up to 20, and another past them throws RangeError; an empty subject, upstream part or contact value throws TypeError.
 - A claimed contact is the user's `email` attribute, as given, apart from verified contacts.

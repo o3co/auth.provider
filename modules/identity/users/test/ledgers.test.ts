@@ -224,6 +224,12 @@ describe("users ledgers", () => {
 		});
 	});
 
+	it("answers none for a written link to a subject the ledger answers none for: the ledger's none outweighs the link", async () => {
+		const u = await usersOf({ ...fakeLedger(), bySubject: async () => none });
+		expect(await u.link("s-gone", { idp: "example", subject: "u-gone" })).toBe("linked");
+		expect(await u.byUpstream("example", "u-gone")).toEqual(none);
+	});
+
 	it("claims only a non-empty email attribute, exactly as given", async () => {
 		const held = (attributes: Record<string, unknown>): Ledger => ({
 			...fakeLedger(),
