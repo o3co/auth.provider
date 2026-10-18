@@ -91,7 +91,7 @@ export function calls(parts: CallParts): Calls {
 	};
 	return {
 		async verify(url, identifier, password) {
-			// The identifier under the name the HTTP user repository reads.
+			// The identifier under the name the ledger's password call reads.
 			const answer = await post(url, { email: identifier, password });
 			if (answer.status === 401 || answer.status === 403) {
 				// A challenge refuses the credential; with none sent, it can only refuse the user.
