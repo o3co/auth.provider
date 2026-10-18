@@ -223,7 +223,7 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 | google `accessType`, `requireAuthorizationResponseIss` | google `access`, `require-iss` | |
 | oidc `issuer`, `discovery`, `endpoints.*` | oidc `issuer`, `discovery`, `authorization-endpoint`, `token-endpoint`, `jwks-uri`, `end-session-endpoint` | Endpoints on another host need `endpoint-hosts`: a host, or `.name` for the name and the names under it; `*.name` refuses boot |
 | oidc `scopes` | oidc `scopes` | Default is now `openid` only |
-| oidc `clockToleranceSeconds` | `clock-skew-seconds` | |
+| oidc `clockToleranceSeconds` | `clock-skew` | |
 | `callbackMeetsFreshness` (every type) | removed | A `prompt=login` or `max_age` login needs the upstream's `auth_time`, and the session takes its sign-in time from it |
 | `clientUrl` (every type) | `federation.landing` | Absolute https URL, one for every IdP; the public origin's root by default |
 | `authCallbackUrl` (every type) | removed | The callback sends the browser straight to the return target |
@@ -282,10 +282,10 @@ Settings with no counterpart: `encryptionMode`, `FEDERATION_TOKENS_ALLOW_INSECUR
 | `clientId` (Services ID) | `client-id` | |
 | `clientSecret` | `client-secret` | Give it, or the three signing keys, not both |
 | `teamId`, `keyId`, `privateKey` | `team-id`, `key-id`, `private-key` | All three together; P-256 PKCS8 PEM |
-| signed secret lifetime (180 days, code only) | `secret-seconds` (default 300) | 60–15777000; re-signed at half its life |
+| signed secret lifetime (180 days, code only) | `secret-lifetime` (default `5m`) | `1m` to `15777000s`; re-signed at half its life |
 | fixed scope `name email` | `scopes` (`name`, `email`) | Default is now `email` only |
 | Apple endpoints (fixed in code) | `authorization-endpoint`, `token-endpoint`, `jwks-uri` | Default to Apple's own |
-| (none) | `clock-skew-seconds` (default 30) | 0–300 |
+| (none) | `clock-skew` (default `30s`) | `0s` to `5m` |
 | `endSessionEndpoint` | `end-session-endpoint` | Optional; Apple has none |
 | `callbackURL` | removed | Derived from `http.public-origin`; must be https and not loopback |
 
@@ -443,6 +443,8 @@ Times and sizes are written with their unit (`30s`, `5m`, `64KiB`); a number wit
 | `external-jwt.key-set-max-age-ms` | `external-jwt.key-set-max-age` | a duration, `1h` to `30d`, default `1d` |  |
 | `federation.transaction-seconds` | `federation.transaction-lifetime` | a duration, `1m` to `1h`, default `10m` |  |
 | `federation.window-seconds` | `federation.window` | a duration, `1s` to `1h`, default `1m` |  |
+| `federation.idps.<name>.clock-skew-seconds` | `federation.idps.<name>.clock-skew` | a duration, `0s` to `5m`, default `30s`; for the oidc, google and apple IdPs |  |
+| `federation.idps.<name>.secret-seconds` | `federation.idps.<name>.secret-lifetime` | a duration, `1m` to `15777000s`, default `5m`; for the apple IdP |  |
 | `federation-grants.default-seconds` | `federation-grants.default-lifetime` | a duration, `1m` to `365d`, default `30d` |  |
 | `federation-grants.max-seconds` | `federation-grants.max-lifetime` | a duration, `1m` to `365d`, default `30d` |  |
 | `federation-grants.connect-seconds` | `federation-grants.connect-lifetime` | a duration, `1m` to `1h`, default `10m` |  |
@@ -609,7 +611,7 @@ Every request carries `Authorization: Bearer <credential>`. Upstream links and M
 
 ### Clocks
 
-Every decision about time uses the host's clock, so keep hosts synchronized. Allowances for clock differences are configurable where a peer's clock matters: `client-assertion.clock-skew`, `jwt-bearer.clock-skew` and the IdPs' `clock-skew-seconds` (default 30 s), `dpop.proof-window` (default `1m`) and `mtls.revocation.skew` (default `5m`). Records kept in Redis expire by Redis's own clock, with margins for that.
+Every decision about time uses the host's clock, so keep hosts synchronized. Allowances for clock differences are configurable where a peer's clock matters: `client-assertion.clock-skew`, `jwt-bearer.clock-skew` and the IdPs' `clock-skew` (default 30 s), `dpop.proof-window` (default `1m`) and `mtls.revocation.skew` (default `5m`). Records kept in Redis expire by Redis's own clock, with margins for that.
 
 ### Upstream links in settings
 
