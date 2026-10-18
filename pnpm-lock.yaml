@@ -2362,6 +2362,21 @@ importers:
         specifier: workspace:*
         version: link:../../foundation/store
 
+  modules/templates/exchange-id-tokens-store:
+    dependencies:
+      '@mod/exchange-id-tokens':
+        specifier: workspace:*
+        version: link:../../oauth/exchange-id-tokens
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+
   modules/templates/federation-grants-store:
     dependencies:
       '@mod/federation-grants':

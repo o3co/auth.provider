@@ -1,0 +1,17 @@
+{
+	"name": "@mod/exchange-id-tokens-store",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "wiring",
+	"wires": "@mod/exchange-id-tokens",
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/exchange-id-tokens": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/records": "workspace:*",
+		"@mod/store": "workspace:*"
+	}
+}
