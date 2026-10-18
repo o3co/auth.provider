@@ -78,6 +78,11 @@ type SettingName = keyof Declared;
 
 const minimumVersion = [7, 0];
 
+/** Whether CONFIG is refused for good, for want of permission or of the command; any other error is no answer. */
+const refusesConfig = (error: unknown) =>
+	error instanceof ReplyError &&
+	/^(NOPERM|ERR unknown (sub)?command)\b/i.test((error as Error).message);
+
 /** Reads a server setting by CONFIG GET; where the server refuses it, the operator's declaration. */
 type Settings = (name: SettingName) => Promise<string | undefined>;
 
@@ -95,7 +100,7 @@ function serverSettings(client: Redis, declared: Declared) {
 		try {
 			answered = ((await client.config("GET", name)) as string[])[1];
 		} catch (error) {
-			if (!(error instanceof ReplyError)) throw error;
+			if (!refusesConfig(error)) throw error;
 			used.add(name);
 			const value = declaredOf(name);
 			if (value === undefined) {
@@ -195,7 +200,11 @@ async function unmet(
 	client: Redis,
 	declared: readonly Space[],
 	s: z.output<typeof section>,
-): Promise<{ readonly problems: string[]; readonly declaredOnly: readonly SettingName[] }> {
+): Promise<{
+	readonly problems: string[];
+	readonly declaredOnly: readonly SettingName[];
+	readonly undurable: readonly string[];
+}> {
 	const role = await roleOf(client);
 	const settings = serverSettings(client, s["server-settings"] ?? {});
 	const problems = [
@@ -205,7 +214,15 @@ async function unmet(
 		...(await durabilityProblems(settings.read, declared, s.durability)),
 	];
 	await settings.rest();
-	return { problems: [...problems, ...settings.problems], declaredOnly: [...settings.used] };
+	const undurable =
+		s.durability === "none"
+			? declared.filter((d) => d.guarantees.includes("durable")).map((d) => d.name)
+			: [];
+	return {
+		problems: [...problems, ...settings.problems],
+		declaredOnly: [...settings.used],
+		undurable,
+	};
 }
 
 /** The two connections, open and checked, for the store and its probe alike. */
@@ -251,6 +268,10 @@ export default defineModule({ name: "redis", section }, (m) => [
 		if (checked.declaredOnly.length > 0) {
 			// On every boot: these the server would not show, so they hold as declared, unchecked.
 			c.log.warn("redis.settings_declared", { settings: checked.declaredOnly.join(", ") });
+		}
+		if (checked.undurable.length > 0) {
+			// On every boot: a crash loses these spaces' latest writes, as the operator stated.
+			c.log.warn("redis.durability_none", { spaces: checked.undurable.join(", ") });
 		}
 		c.onStop(async () => {
 			await client.quit().catch(() => client.disconnect());
