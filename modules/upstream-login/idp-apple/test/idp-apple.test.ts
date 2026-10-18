@@ -515,7 +515,8 @@ describe("idp-apple", () => {
 		const apple = app.get(types).find((type) => type.type === "apple");
 		if (!apple) throw new Error("the apple type is not contributed");
 		const read = apple.settings.parse({ "client-id": "com.example.web", "client-secret": "x" });
-		const upstream = await apple.open(read, { name: "apple", redirectUri: callback });
+		const at = { name: "apple", idp: "apple", redirectUri: callback };
+		const upstream = await apple.open(read, at);
 		const url = new URL(upstream.authorizationUrl(start));
 		expect(url.searchParams.get("redirect_uri")).toBe(callback);
 	});
