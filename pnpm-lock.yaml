@@ -1524,6 +1524,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
       '@mod/session-tokens':
         specifier: workspace:*
         version: link:../session-tokens

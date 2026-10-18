@@ -17,6 +17,7 @@ import {
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import { type Entry, type Session, sessions } from "@mod/session";
 import { stubSessions } from "@mod/session/testing";
 import { sessionTokens } from "@mod/session-tokens";
@@ -124,6 +125,7 @@ async function serve(options: Options = {}) {
 			watched,
 			issuerModule,
 			clientsModule,
+			secretHashModule,
 			grantCaller,
 			clientAllowanceModule,
 			stubs,
