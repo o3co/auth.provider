@@ -15,10 +15,7 @@ export { type SimulatedStore, simulatedStore } from "./simulated.ts";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/**
- * Writes a key whatever it holds, with the writers the contract has: on the version read, or if
- * absent, reading again on a lost race. For tests that set up state; it is not a store operation.
- */
+/** For tests' set-up: writes a key whatever it holds, on the version read or if absent, again on a lost race. */
 export async function overwrite(s: Store, key: Key, value: Json, options: WriteOptions) {
 	for (let attempt = 0; attempt < 8; attempt++) {
 		const { entry } = await s.get(key);

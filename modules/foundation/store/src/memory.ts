@@ -133,16 +133,6 @@ export function memoryStore(
 				const held = current(key, now);
 				return { entry: held ? entryOf(held) : null, now };
 			},
-			put: (key, value, options) =>
-				guarded(
-					partitionOf(key),
-					idempotencyRequest("put", [key], [value, options.expiry]),
-					options,
-					(now) => ({
-						kind: "written" as const,
-						version: write(key, value, options.expiry, now),
-					}),
-				),
 			putIfAbsent: (key, value, options) =>
 				guarded(
 					partitionOf(key),
