@@ -15,6 +15,7 @@ Internal module of `conformance`: the new system's driver, composed from a scene
 - A pattern's app boots on `create-app`'s trial settings for the keys each scene leaves unset, but none in a section a set-up marks `whole`.
 - A scene's `fallback` sections give way to the trial settings.
 - Outbound's host lists join the trial's.
+- The scene's registered clients join the trial's one clients list.
 - A scene that sets the public origin sets the issuer there too.
 - A pattern's app has its audit axis set to `audit-http`.
 - A pattern's app has the modules its pattern's `conformanceAdd` names added.
