@@ -105,6 +105,13 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | `logout.close_pending` | `sid`, `source` | the session is closed but some of its close work is left for later |
 | `logout.success` | `sid`, `source`, `userAgent` | a logout a client started closed the session it names |
 
+## @mod/subject-revocation-http
+
+| Kind | Attributes | Recorded when |
+|---|---|---|
+| `subject.revocation.denied` | `reason`, `source` | a request to revoke a subject was refused before anything was recorded |
+| `subject.revocation.requested` | `delegations`, `outcome`, `source` | the ledger's revocation of a subject was recorded, or its boundary not confirmed |
+
 ## @mod/token-control
 
 | Kind | Attributes | Recorded when |
