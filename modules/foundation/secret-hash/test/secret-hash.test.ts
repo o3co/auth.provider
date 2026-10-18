@@ -2,9 +2,10 @@ import { randomBytes, scryptSync } from "node:crypto";
 import { assemble, BootRefused, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import bcrypt from "bcryptjs";
-import { afterEach, describe, expect, it } from "vitest";
-import { checkerWith } from "../src/checker.ts";
-import { readSecretHash, type SecretHash, secretChecker, secretCheckers } from "../src/contract.ts";
+import { describe, expect, it } from "vitest";
+import { checkerWith, type Places, placesOf } from "../src/checker.ts";
+import * as offered from "../src/contract.ts";
+import { readSecretHash, type SecretHash, secretCheckers } from "../src/contract.ts";
 import { decoyOf, type Hash, matches, readHash } from "../src/hashes.ts";
 import secretHash from "../src/module.ts";
 import {
@@ -19,6 +20,8 @@ const zeros = (n: number) => unpadded(Buffer.alloc(n));
 const scryptText = (ln: number, r: number, p: number, salt = 16, key = 32) =>
 	`$scrypt$ln=${ln},r=${r},p=${p}$${zeros(salt)}$${zeros(key)}`;
 const read = (text: string) => readSecretHash(text) as SecretHash;
+/** A checker for the hashes in use, with its own limit, as an assembly's checkers have. */
+const checkerFor = (inUse: Iterable<SecretHash>) => recordingChecker(inUse, randomBytes).checker;
 /** bcrypt's 53 characters with no loose final bits: the salt's last of 22 and the hash's last of 31. */
 const bcryptTail = (c: string) => `${c.repeat(21)}e${c.repeat(30)}e`;
 
@@ -97,7 +100,7 @@ describe("reading", () => {
 describe("matching", () => {
 	it("matches a bcrypt and a scrypt hash of the secret, and nothing else", async () => {
 		for (const text of [testBcryptHash("s3cret"), testScryptHash("s3cret")]) {
-			const checker = secretChecker([read(text)], randomBytes);
+			const checker = checkerFor([read(text)]);
 			expect(await checker.check(read(text), "s3cret")).toBe(true);
 			expect(await checker.check(read(text), "s3cret ")).toBe(false);
 			expect(await checker.check(read(text), "")).toBe(false);
@@ -108,14 +111,14 @@ describe("matching", () => {
 		const text = testBcryptHash("s3cret");
 		for (const prefix of ["$2a$", "$2y$"]) {
 			const other = read(text.replace("$2b$", prefix));
-			expect(await secretChecker([other], randomBytes).check(other, "s3cret"), prefix).toBe(true);
+			expect(await checkerFor([other]).check(other, "s3cret"), prefix).toBe(true);
 		}
 	});
 
 	it("compares a secret's bytes as sent, with no Unicode normalization", async () => {
 		const composed = "caf\u00e9";
 		const text = testScryptHash(composed);
-		const checker = secretChecker([read(text)], randomBytes);
+		const checker = checkerFor([read(text)]);
 		expect(await checker.check(read(text), composed)).toBe(true);
 		expect(await checker.check(read(text), composed.normalize("NFD"))).toBe(false);
 	});
@@ -132,7 +135,7 @@ describe("matching", () => {
 
 	it("matches a bcrypt hash up to 72 bytes and never past them", async () => {
 		const hash = read(testBcryptHash(seventyTwoBytes));
-		const checker = secretChecker([hash], randomBytes);
+		const checker = checkerFor([hash]);
 		expect(await checker.check(hash, seventyTwoBytes)).toBe(true);
 		expect(await checker.check(hash, `${seventyTwoBytes}a`)).toBe(false);
 	});
@@ -142,7 +145,7 @@ describe("matching", () => {
 		// 342 characters, but 1026 bytes.
 		const long = "あ".repeat(342);
 		const over = read(testScryptHash(long));
-		expect(await secretChecker([exact], randomBytes).check(exact, "x".repeat(1024))).toBe(true);
+		expect(await checkerFor([exact]).check(exact, "x".repeat(1024))).toBe(true);
 		const { checker, works } = recordingChecker([exact, over], randomBytes);
 		expect(await checker.check(over, long)).toBe(false);
 		expect(await checker.check(undefined, long)).toBe(false);
@@ -169,7 +172,7 @@ describe("the same work for any call", () => {
 	});
 
 	it("answers a decoy's match as no match, and the hash's own match as one", async () => {
-		const alwaysMatches = checkerWith(inUse, randomBytes, async () => true);
+		const alwaysMatches = checkerWith(inUse, randomBytes, async () => true, placesOf(8));
 		expect(await alwaysMatches.check(undefined, "x")).toBe(false);
 		expect(await alwaysMatches.check(inUse[0], "x")).toBe(true);
 	});
@@ -198,19 +201,20 @@ describe("the same work for any call", () => {
 
 describe("the checks under way at once", () => {
 	const hash = read(testBcryptHash("right"));
-	const limited = (section?: Record<string, unknown>) =>
-		assemble({
-			modules: [secretHash],
-			config: { ...kernelConfig(), ...(section ? { "secret-hash": section } : {}) },
-			runtime: quietRuntime(),
-		});
-	// The limit is the process's, so each test leaves the default behind.
-	afterEach(() => limited());
+	/** A checker sharing `places`, with the work of every computation recorded in order. */
+	const recordingIn = (places: Places, inUse: SecretHash[]) => {
+		const works: string[] = [];
+		const record = (h: Hash, secret: string) => {
+			works.push(h.work);
+			return matches(h, secret);
+		};
+		return { checker: checkerWith(inUse, randomBytes, record, places), works };
+	};
 
 	it("refuses a check past `max-concurrent` as unavailable before any computation, in any checker", async () => {
-		await limited({ "max-concurrent": 1 });
-		const { checker, works } = recordingChecker([hash], randomBytes);
-		const other = recordingChecker([hash], randomBytes);
+		const places = placesOf(1);
+		const { checker, works } = recordingIn(places, [hash]);
+		const other = recordingIn(places, [hash]);
 		const first = checker.check(hash, "right");
 		await expect(checker.check(hash, "right")).rejects.toSatisfy(isUnavailable);
 		await expect(other.checker.check(undefined, "right")).rejects.toSatisfy(isUnavailable);
@@ -219,30 +223,32 @@ describe("the checks under way at once", () => {
 	});
 
 	it("gives a place back once its check ends, matched, unmatched or failed", async () => {
-		await limited({ "max-concurrent": 1 });
-		const failing = checkerWith([hash], randomBytes, async () => {
+		const places = placesOf(1);
+		const fails = async () => {
 			throw new Error("computation failed");
-		});
+		};
+		const failing = checkerWith([hash], randomBytes, fails, places);
 		await expect(failing.check(hash, "right")).rejects.toThrow("computation failed");
-		const { checker } = recordingChecker([hash], randomBytes);
+		const { checker } = recordingIn(places, [hash]);
 		expect(await checker.check(hash, "wrong")).toBe(false);
 		expect(await checker.check(hash, "right")).toBe(true);
 	});
 
 	it("keeps the place while any computation runs, even after another throws before it gives a promise", async () => {
-		await limited({ "max-concurrent": 1 });
+		const places = placesOf(1);
 		const pending = Promise.withResolvers<boolean>();
 		const two = [hash, read(scryptText(10, 8, 1))];
 		let calls = 0;
-		const throwing = checkerWith(two, randomBytes, () => {
+		const firstWaitsThenThrows = () => {
 			calls++;
 			if (calls === 1) return pending.promise;
 			throw new Error("thrown at once");
-		});
+		};
+		const throwing = checkerWith(two, randomBytes, firstWaitsThenThrows, places);
 		const failed = throwing.check(hash, "right").catch((error: unknown) => error);
 		// Let everything the throw set off run, so a place given back early would be free by now.
 		await new Promise((resolve) => setTimeout(resolve, 0));
-		const { checker } = recordingChecker([hash], randomBytes);
+		const { checker } = recordingIn(places, [hash]);
 		await expect(checker.check(hash, "right")).rejects.toSatisfy(isUnavailable);
 		pending.resolve(false);
 		expect(await failed).toMatchObject({ message: "thrown at once" });
@@ -250,20 +256,26 @@ describe("the checks under way at once", () => {
 	});
 
 	it("answers a secret over 1024 bytes as no match without a place", async () => {
-		await limited({ "max-concurrent": 1 });
-		const { checker } = recordingChecker([hash], randomBytes);
+		const places = placesOf(1);
+		const { checker } = recordingIn(places, [hash]);
 		const first = checker.check(hash, "right");
 		expect(await checker.check(hash, "x".repeat(1025))).toBe(false);
 		await first;
 	});
 
 	it("runs 8 checks at once by default, and refuses a limit outside 1 to 1024 at boot", async () => {
-		const { checker } = recordingChecker([hash], randomBytes);
+		const assembled = (section?: Record<string, unknown>) =>
+			assemble({
+				modules: [secretHash],
+				config: { ...kernelConfig(), ...(section ? { "secret-hash": section } : {}) },
+				runtime: quietRuntime(),
+			});
+		const checker = (await assembled()).get(secretCheckers).checkerOf([hash]);
 		const eight = Array.from({ length: 8 }, () => checker.check(hash, "right"));
 		await expect(checker.check(hash, "right")).rejects.toSatisfy(isUnavailable);
 		expect(await Promise.all(eight)).toEqual(Array(8).fill(true));
 		for (const max of [0, 1025]) {
-			await expect(limited({ "max-concurrent": max })).rejects.toBeInstanceOf(BootRefused);
+			await expect(assembled({ "max-concurrent": max })).rejects.toBeInstanceOf(BootRefused);
 		}
 	});
 });
@@ -288,7 +300,11 @@ describe("the checkers an assembly makes", () => {
 		expect(await first).toBe(true);
 	});
 
-	it("checks as secretChecker does: the hash's own match, and a decoy's never", async () => {
+	it("makes checkers only through the assembly's contract, never apart from one", () => {
+		expect(Object.keys(offered)).not.toContain("secretChecker");
+	});
+
+	it("checks the hash's own match, and a decoy's never", async () => {
 		const checker = (await assembled(8)).get(secretCheckers).checkerOf([hash]);
 		expect(await checker.check(hash, "right")).toBe(true);
 		expect(await checker.check(hash, "wrong")).toBe(false);

@@ -14,21 +14,13 @@ export interface Places {
 export const defaultMaxConcurrent = 8;
 /** One assembly's places, shared by every checker it makes. */
 export const placesOf = (max: number): Places => ({ max, taken: 0 });
-/** The process's places, for checkers made apart from any assembly. */
-const processPlaces = placesOf(defaultMaxConcurrent);
-
-/** Sets how many checks this process runs at once; the module sets it from its section. */
-export function limitChecks(max: number): number {
-	processPlaces.max = max;
-	return max;
-}
 
 /** A checker that computes every match with `matches`; tests record the work through it. */
 export function checkerWith(
 	inUse: Iterable<SecretHash>,
 	random: Random["bytes"],
 	matches: (hash: Hash, secret: string) => Promise<boolean>,
-	places: Places = processPlaces,
+	places: Places,
 ): SecretChecker {
 	const decoys = new Map<string, Hash>();
 	for (const hash of inUse) {

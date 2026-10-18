@@ -1,6 +1,6 @@
-import { contract, defineModule } from "@mod/kernel";
+import { defineModule } from "@mod/kernel";
 import { z } from "zod";
-import { checkerWith, defaultMaxConcurrent, limitChecks, placesOf } from "./checker.ts";
+import { checkerWith, defaultMaxConcurrent, placesOf } from "./checker.ts";
 import { secretCheckers } from "./contract.ts";
 import { matches } from "./hashes.ts";
 
@@ -12,15 +12,11 @@ const section = z.strictObject({
 		.max(1024)
 		.prefault(defaultMaxConcurrent)
 		.describe(
-			"Secret checks under way at once in this process, every caller's together; one more is unavailable at once, before any hashing.",
+			"Secret checks under way at once in this assembly, every checker it makes together; one more is unavailable at once, before any hashing.",
 		),
 });
 
-/** The process's limit on checks under way, set as the module is built. */
-const maxConcurrent = contract<number>("secret-hash.max-concurrent");
-
 export default defineModule({ name: "secret-hash", section, replicaSafe: true }, (m) => [
-	m.provide(maxConcurrent).by((c) => limitChecks(c.section["max-concurrent"])),
 	m.provide(secretCheckers).by((c) => {
 		const places = placesOf(c.section["max-concurrent"]);
 		return { checkerOf: (inUse) => checkerWith(inUse, c.random.bytes, matches, places) };
