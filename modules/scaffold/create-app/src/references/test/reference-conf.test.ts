@@ -127,7 +127,6 @@ const prefaultLater = new Set([
 	"client-assertion",
 	"clients",
 	"clients-cimd",
-	"code-grant",
 	"code-grant-store",
 	"consent",
 	"device-grant",
@@ -170,10 +169,8 @@ const prefaultLater = new Set([
 	"store",
 	"token-control",
 	"token-endpoint",
-	"token-exchange",
 	"tokens",
 	"users",
-	"webauthn",
 	"webauthn-login",
 ]);
 

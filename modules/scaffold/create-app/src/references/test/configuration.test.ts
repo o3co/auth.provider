@@ -79,7 +79,6 @@ const describedLater = new Set([
 	"authorize",
 	"clients",
 	"clients-cimd",
-	"code-grant",
 	"federation-grants",
 	"federation-tokens",
 	"mail-smtp",
@@ -90,8 +89,6 @@ const describedLater = new Set([
 	"rp-logout",
 	"session",
 	"token-endpoint",
-	"token-exchange",
-	"users-http",
 	"webauthn",
 	"webauthn-login",
 ]);

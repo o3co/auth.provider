@@ -1,3 +1,4 @@
+import { setting } from "@mod/kernel";
 import { z } from "zod";
 
 /** An origin as a browser serializes it: https, or http on localhost; a domain, never an IP literal. */
@@ -24,10 +25,21 @@ export const section = z
 			.array(z.union([z.string().regex(app, "an Android app origin of this form"), origin]))
 			.min(1),
 		/** The pages that may frame a ceremony; none by default, so any ceremony in a frame is refused. */
-		"top-origins": z.array(origin).default([]),
-		"challenge-seconds": z.number().int().min(10).max(600).default(120),
-		"user-verification": z.enum(["required", "preferred", "discouraged"]).default("preferred"),
-		"max-credentials": z.number().int().min(1).max(100).default(10),
+		"top-origins": z.array(origin).prefault([]),
+		"challenge-lifetime": setting
+			.duration("s")
+			.pipe(z.number().int().min(10).max(600))
+			.prefault("2m")
+			.describe("How long a ceremony's challenge can be answered, from 10s to 10m."),
+		"user-verification": z.enum(["required", "preferred", "discouraged"]).prefault("preferred"),
+		"max-credentials": z.number().int().min(1).max(100).prefault(10),
+		"challenge-seconds": z
+			.number()
+			.int()
+			.min(10)
+			.max(600)
+			.optional()
+			.describe("Seconds; write `challenge-lifetime` instead."),
 	})
 	.refine(
 		(s) =>
