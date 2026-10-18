@@ -17,7 +17,7 @@
 - `isLabel` (1 to 64 code points, well formed, nothing that breaks or reorders a line) `secondFactorAmr` (`mfa`), and `longestRecentMs` (the most `manage-within` allows).
 - Audit events, with the subject, once written (never for a refused or raced decision, nor a reset, never with a secret, proof or code): declared in `./audit-events`, listed in the audit event reference.
 - Contributions: `session` entry requirements, judging `use` and `credentials`; `login-gates` amr (each kind's, and `mfa` if one adds it).
-- Section: `mode` (`optional`, or `required` by default), `manage-within` (written with its unit, `30s` to `1h` in whole seconds, default `5m`; `manage-seconds`, a bare number, is read instead until 0.18.0, never beside it), `max-factors` (default 10).
+- Section: `mode` (`optional`, or `required` by default), `manage-within` (written with its unit, `30s` to `1h` in whole seconds, default `5m`), `max-factors` (default 10).
 - Store interface `factorStore`: factor lists and claims on unique values, by keys mfa makes, contents opaque; save once, read, change from what it holds, kept without end. Needs: never evicted, survives a crash and a failover, reads only what is confirmed. `./testing`: its contract test, and a config builder.
 
 ## Invariants

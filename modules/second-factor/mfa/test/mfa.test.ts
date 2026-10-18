@@ -903,11 +903,9 @@ describe("a gate contributed before a first counting factor", () => {
 	});
 });
 
-it("reads how recent a proof must be with its unit, the old bare seconds instead until 0.18.0, never both", () => {
+it("reads how recent a proof must be with its unit, in whole seconds, five minutes unless set", () => {
 	const within = (settings: object) => section.safeParse(settings).data?.["manage-within"];
-	expect([{}, { "manage-within": "10m" }, { "manage-seconds": 60 }].map(within)).toEqual([
-		300, 600, 60,
-	]);
-	const refused = [{ "manage-within": "1m", "manage-seconds": 60 }, { "manage-within": 60 }];
-	expect(refused.map(within)).toEqual([undefined, undefined]);
+	expect([{}, { "manage-within": "10m" }].map(within)).toEqual([300, 600]);
+	const refused = [{ "manage-seconds": 60 }, { "manage-within": 60 }, { "manage-within": "2h" }];
+	expect(refused.map(within)).toEqual([undefined, undefined, undefined]);
 });

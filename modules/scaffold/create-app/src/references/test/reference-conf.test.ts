@@ -87,7 +87,6 @@ const unitsLater = new Set([
 	"code-grant",
 	"federation-grants",
 	"mail-smtp",
-	"mfa",
 	"mfa-email",
 	"mfa-flows",
 	"mtls",

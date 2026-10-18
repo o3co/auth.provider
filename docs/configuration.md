@@ -322,8 +322,7 @@ From `@mod/mfa`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `mfa.mode` | optional \| required | `required` |  | `MFA_MODE` | `required` | "required" (the default) asks every login for a counting factor; "optional" only of those who hold one. |
-| `mfa.manage-within` | string |  |  |  |  | How recently a second factor must have been proved to change credentials, from `30s` to `1h` in whole seconds; `5m` unless set. |
-| `mfa.manage-seconds` | integer (30–3600) |  |  |  |  | Replaced by `manage-within`; read until 0.18.0. |
+| `mfa.manage-within` | string | `5m` |  |  |  | How recently a second factor must have been proved to change credentials, from `30s` to `1h` in whole seconds. |
 | `mfa.max-factors` | integer (2–50) | `10` |  |  |  | How many factors a subject may hold, recovery codes included. |
 
 ## mfa-binding-proof
