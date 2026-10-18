@@ -130,7 +130,6 @@ const prefaultLater = new Set([
 	"session-tokens-store",
 	"store",
 	"token-endpoint",
-	"tokens",
 	"webauthn-login",
 ]);
 
