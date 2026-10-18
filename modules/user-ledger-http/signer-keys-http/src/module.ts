@@ -1,6 +1,6 @@
 import { signerKeys } from "@mod/jwt-bearer";
 import { defineModule } from "@mod/kernel";
-import { outbound, outboundPolicy } from "@mod/outbound";
+import { credentialPolicy, outbound, outboundPolicy } from "@mod/outbound";
 import { keysAt } from "./lookup.ts";
 import { section } from "./section.ts";
 
@@ -21,11 +21,18 @@ export default defineModule({ name: "signer-keys-http", section, replicaSafe: tr
 				`outbound's destination policy refuses it: ${refusal}`,
 			);
 		}
+		const { credential } = c.section;
+		if (credential !== undefined && (await c.get(credentialPolicy)).refusalOf([url])) {
+			return c.refuse(
+				"signer-keys-http.credential",
+				"goes over https alone, or to a named plain-loopback pair",
+			);
+		}
 		return keysAt({
 			issuer: c.section.issuer,
 			url,
 			out: await c.get(outbound),
-			credential: c.section.credential,
+			credential,
 			narrower,
 			warn: (event, fields) => c.log.warn(event, fields),
 		});

@@ -41,18 +41,15 @@ export function keysAt(parts: LookupParts): SignerKeys {
 		warn("signer-keys-http.ledger_failed", why);
 		return new Unavailable("signer-keys-http");
 	};
-	const headers = deepFreeze({
-		accept: "application/json",
-		"content-type": "application/json",
-		...(credential === undefined ? {} : { authorization: `Bearer ${credential}` }),
-	});
+	const headers = deepFreeze({ accept: "application/json", "content-type": "application/json" });
+	const sent = credential === undefined ? {} : { credential: `Bearer ${credential}` };
 	return {
 		issuer,
 		async keysOf({ subject, kid }) {
 			// A kid the assertion does not name is left out, as JSON writes no undefined member.
 			const body = JSON.stringify({ issuer, subject, kid });
 			const answer = await out
-				.fetch(url, { method: "POST", headers, body }, narrower)
+				.fetch(url, { method: "POST", headers, body, ...sent }, narrower)
 				.catch((error: unknown) => {
 					throw failed({ reason: kindOf(error) });
 				});
