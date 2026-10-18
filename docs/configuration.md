@@ -456,8 +456,7 @@ From `@mod/refresh`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `refresh.lifetime` | string |  |  |  |  | How long a refresh token family lives, from `1s` to `365d` in whole seconds; `1d` unless set. Shorter is only safer, so the floor is a second, which lets tests watch a family run out. |
-| `refresh.lifetime-seconds` | integer (1–31536000) |  |  |  |  | Replaced by `lifetime`; read until 0.18.0. |
+| `refresh.lifetime` | string | `1d` |  |  |  | How long a refresh token family lives, from `1s` to `365d` in whole seconds. Shorter is only safer, so the floor is a second, which lets tests watch a family run out. |
 | `refresh.sweep-interval` | string | `30s` |  |  |  | How often the sweep finishes revocations that stopped halfway, from `1s` to `1h` in whole seconds. |
 | `refresh.bind-confidential-clients` | boolean | `false` |  |  |  | Whether a confidential client's family is bound to its sender too. As 0.17's default: a confidential client already proves itself, so only a public one's is bound. |
 

@@ -1058,15 +1058,9 @@ describe("lineage", () => {
 	});
 });
 
-it("reads a family's lifetime with its unit, the old bare seconds instead until 0.18.0, never both", () => {
+it("reads a family's lifetime with its unit, in whole seconds, a day unless set", () => {
 	const lifetimeOf = (settings: object) => section.safeParse(settings).data?.lifetime;
-	expect([{}, { lifetime: "2h" }, { "lifetime-seconds": 60 }].map(lifetimeOf)).toEqual([
-		86_400, 7200, 60,
-	]);
-	const refused = [
-		{ lifetime: "1h", "lifetime-seconds": 60 },
-		{ lifetime: 3600 },
-		{ "sweep-interval": 30 },
-	];
+	expect([{}, { lifetime: "2h" }].map(lifetimeOf)).toEqual([86_400, 7200]);
+	const refused = [{ "lifetime-seconds": 60 }, { lifetime: 3600 }, { "sweep-interval": 30 }];
 	expect(refused.map(lifetimeOf)).toEqual([undefined, undefined, undefined]);
 });

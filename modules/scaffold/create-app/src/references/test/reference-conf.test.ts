@@ -93,7 +93,6 @@ const unitsLater = new Set([
 	"outbound",
 	"passkey-registration",
 	"redis",
-	"refresh",
 	"rp-logout",
 	"session-lifecycle",
 	"token-endpoint",
