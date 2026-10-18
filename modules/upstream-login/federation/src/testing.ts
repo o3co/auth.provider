@@ -48,6 +48,7 @@ export function testIdpType(
 					}
 					return {
 						...more,
+						issuer,
 						responseMode: mode,
 						clockSkewMs: read["skew-ms"],
 						authorizationUrl: (start) => {
