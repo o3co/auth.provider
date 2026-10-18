@@ -124,7 +124,6 @@ const prefaultLater = new Set([
 	"external-jwt",
 	"federation-grants",
 	"federation-grants-store",
-	"http",
 	"http-ops",
 	"jwt-bearer",
 	"kernel",
