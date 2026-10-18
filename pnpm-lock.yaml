@@ -1382,6 +1382,9 @@ importers:
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
       '@mod/session-tokens':
         specifier: workspace:*
         version: link:../session-tokens

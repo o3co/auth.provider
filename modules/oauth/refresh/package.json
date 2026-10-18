@@ -31,6 +31,7 @@
 		"@mod/issuer": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
 		"@mod/records": "workspace:*",
+		"@mod/secret-hash": "workspace:*",
 		"@mod/session-tokens": "workspace:*",
 		"@mod/store": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
