@@ -259,7 +259,7 @@ describe("mtls", () => {
 
 	it("asks for revocation material within the section's hosts and time", async () => {
 		const { intermediate, client, section } = await pki();
-		const reach = { ...section.revocation, "timeout-ms": 1234 };
+		const reach = { ...section.revocation, timeout: "1234ms" };
 		const reaching = await boot({ ...section, revocation: reach });
 		await reaching.bindingOf(client, [intermediate]);
 		expect(reaching.sent.map(([, , narrower]) => narrower)).toContainEqual({

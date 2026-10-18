@@ -159,19 +159,19 @@ From `@mod/federation-grants`.
 | `federation-grants.login-page` | string |  |  | `FEDERATION_GRANTS_LOGIN_PAGE` | `https://login.example.invalid/login` |  |
 | `federation-grants.step-up-page` | string |  |  |  |  |  |
 | `federation-grants.connections` | map | `{}` |  |  |  |  |
-| `federation-grants.default-seconds` | integer (60–31536000) | `2592000` |  |  |  |  |
-| `federation-grants.max-seconds` | integer (60–31536000) | `2592000` |  |  |  |  |
-| `federation-grants.connect-seconds` | integer (60–3600) | `600` |  |  |  |  |
-| `federation-grants.refresh-before-seconds` | integer (0–3600) | `30` |  |  |  |  |
+| `federation-grants.default-lifetime` | string | `30d` |  |  |  | A grant's lifetime from its activation when a client asks for none: a duration with a unit, from 1m to 365d, e.g. 30d. |
+| `federation-grants.max-lifetime` | string | `30d` |  |  |  | The most a grant may live from its activation: a duration with a unit, from 1m to 365d, e.g. 90d. |
+| `federation-grants.connect-lifetime` | string | `10m` |  |  |  | How long a connection may take, from the intent to the callback: a duration with a unit, from 1m to 1h, e.g. 10m. |
+| `federation-grants.refresh-before` | string | `30s` |  |  |  | A token this close to its end is refreshed, once half its life is spent: a duration with a unit, from 0s to 1h, e.g. 30s. |
 | `federation-grants.rotations` | integer (1–1000) | `24` |  |  |  |  |
-| `federation-grants.rotation-window-seconds` | integer (1–86400) | `3600` |  |  |  |  |
+| `federation-grants.rotation-window` | string | `1h` |  |  |  | The window a grant's upstream refreshes are counted in: a duration with a unit, from 1s to 1d, e.g. 1h. |
 | `federation-grants.lodges` | integer (1–100000) | `60` |  |  |  |  |
-| `federation-grants.lodge-window-seconds` | integer (1–86400) | `60` |  |  |  |  |
-| `federation-grants.revocation-skew-seconds` | integer (0–300) | `1` |  |  |  |  |
+| `federation-grants.lodge-window` | string | `1m` |  |  |  | The window a client's lodged intents are counted in: a duration with a unit, from 1s to 1d, e.g. 1m. |
+| `federation-grants.revocation-skew` | string | `1s` |  |  |  | How far apart hosts' clocks may be: a grant made this soon after its subject's revocation counts as revoked. A duration with a unit, from 0s to 5m, e.g. 1s. |
 | `federation-grants.keep-on-subject-revocation` | boolean | `false` |  |  |  |  |
 | `federation-grants.identity-check` | required \| none | `required` |  |  |  |  |
 | `federation-grants.requests` | integer (1–1000) | `60` |  |  |  |  |
-| `federation-grants.window-seconds` | integer (1–3600) | `60` |  |  |  |  |
+| `federation-grants.window` | string | `1m` |  |  |  | The window a source's requests are counted in, on every route: a duration with a unit, from 1s to 1h, e.g. 1m. |
 
 ## federation-grants-store
 
@@ -203,10 +203,10 @@ From `@mod/http`.
 | `http.host` | string | `127.0.0.1` |  | `HTTP_HOST` | `127.0.0.1` | The address it listens on. |
 | `http.port` | integer (0–65535) | `8080` |  | `HTTP_PORT` | `8080` | The port it listens on; 0 takes a free one. |
 | `http.trusted-proxies` | list of string | `[]` |  |  |  | Proxies whose forwarded headers are believed: IPs without a zone, or CIDRs with one prefix length in decimal without a leading zero. Always set behind a proxy: otherwise every request's source is the proxy, and all look like one source. |
+| `http.proxy-hops` | integer (1–10) | `1` |  |  |  | How many trusted proxies, at most, a request passes through. |
 | `http.public-origin` | string |  |  | `HTTP_PUBLIC_ORIGIN` | `https://login.example.invalid` | The scheme, host and port users reach this deployment at: an origin only, with no path. |
 | `http.cors-origins` | list of string | `[]` |  |  |  | The https origins whose pages may read cross-origin routes: exact, without a pattern. |
 | `http.insecure-origin` | boolean | `false` |  |  |  | Accepts a plain-http `public-origin`, knowing its cookies cannot be made secure: an http `public-origin` boots only with it. |
-| `http.proxy-hops` | integer (1–10) | `1` |  |  |  | How many trusted proxies, at most, a request passes through. |
 | `http.client-certificate.dialect` | rfc9440 \| pem \| xfcc |  |  |  |  | The form a trusted proxy forwards the client's certificate in: `rfc9440` (byte sequences) with `header` and `chain-header`, `pem` (one PEM block, URL-encoded or not) with `header`, or `xfcc` (Envoy's form, the chain in the same header) with `header`. |
 | `http.client-certificate.header` | string | `client-cert` |  |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
 | `http.client-certificate.chain-header` | string | `client-cert-chain` |  |  |  | The header holding the chain behind the certificate, for `rfc9440`: lower-case letters, digits and `-`. |
@@ -302,7 +302,7 @@ From `@mod/mail-smtp`.
 | `mail-smtp.from` | string |  | yes | `MAIL_SMTP_FROM` | `auth@example.invalid` |  |
 | `mail-smtp.user` | string |  |  |  |  |  |
 | `mail-smtp.password` | string |  |  |  |  |  |
-| `mail-smtp.deadline-ms` | integer (100–600000) | `40000` |  |  |  |  |
+| `mail-smtp.deadline` | string | `40s` |  |  |  | How long a whole send may take, from 100ms to 10m. |
 | `mail-smtp.concurrent-sends` | integer (1–1000) | `20` |  |  |  |  |
 
 ## metrics-prometheus
@@ -337,8 +337,8 @@ From `@mod/mfa-email`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `mfa-email.adds-second-factor` | boolean | `false` |  |  |  |  |
-| `mfa-email.code-seconds` | integer (60–1800) | `600` |  |  |  |  |
+| `mfa-email.adds-second-factor` | boolean | `false` |  |  |  | Whether a code by mail adds `mfa`; by default it is a second factor of its own amr only. |
+| `mfa-email.code-lifetime` | string | `10m` |  |  |  | How long a code by mail lives, from 1m to 30m, for an enrolment or a sign-in; the proof before a first binding keeps its ten minutes. |
 
 ## mfa-flows
 
@@ -346,17 +346,17 @@ From `@mod/mfa-flows`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `mfa-flows.transaction-seconds` | integer (60–1800) | `600` |  |  |  |  |
+| `mfa-flows.transaction-lifetime` | string | `10m` |  |  |  | How long a transaction waits for its factor, from 1m to 30m in whole seconds, such as `10m`. |
 | `mfa-flows.attempts-per-transaction` | integer (2–10) | `5` |  |  |  |  |
 | `mfa-flows.requests` | integer (1–100000) | `60` |  |  |  |  |
-| `mfa-flows.window-seconds` | integer (1–86400) | `300` |  |  |  |  |
+| `mfa-flows.window` | string | `5m` |  |  |  | The window `requests` is counted over, from 1s to 1d in whole seconds, such as `5m`. |
 | `mfa-flows.lockout.threshold` | integer (-9007199254740991–9007199254740991) | `5` |  |  |  |  |
-| `mfa-flows.lockout.backoff-seconds` | integer (-9007199254740991–9007199254740991) | `900` |  |  |  |  |
-| `mfa-flows.lockout.max-backoff-seconds` | integer (-9007199254740991–9007199254740991) | `86400` |  |  |  |  |
+| `mfa-flows.lockout.backoff` | string | `15m` |  |  |  | The first hold after `threshold` failures, in whole seconds, such as `15m`. |
+| `mfa-flows.lockout.max-backoff` | string | `1d` |  |  |  | The longest hold, the first doubling up to it, in whole seconds, such as `1d`. |
 | `mfa-flows.lockout.budget` | integer (-9007199254740991–9007199254740991) | `10` |  |  |  |  |
-| `mfa-flows.lockout.budget-window-seconds` | integer (-9007199254740991–9007199254740991) | `604800` |  |  |  |  |
+| `mfa-flows.lockout.budget-window` | string | `7d` |  |  |  | The window `budget` is counted over, in whole seconds, such as `7d`. |
 | `mfa-flows.lockout.hard-limit` | integer (-9007199254740991–9007199254740991) | `100` |  |  |  |  |
-| `mfa-flows.lockout.memory-seconds` | integer (-9007199254740991–9007199254740991) | `86400` |  |  |  |  |
+| `mfa-flows.lockout.memory` | string | `1d` |  |  |  | How long a run of failures is remembered without one, in whole seconds, such as `1d`. |
 
 ## mfa-webauthn
 
@@ -364,8 +364,8 @@ From `@mod/mfa-webauthn`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `mfa-webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  |  |
-| `mfa-webauthn.display-name` | string | `Account` |  |  |  |  |
+| `mfa-webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  | Whether the authenticator is asked to verify its user, as WebAuthn says it. |
+| `mfa-webauthn.display-name` | string | `Account` |  |  |  | The name an authenticator shows for an account with no name to show; it names no one. |
 
 ## mtls
 
@@ -381,13 +381,13 @@ From `@mod/mtls`.
 | `mtls.revocation.on-unavailable` | reject \| allow |  |  |  |  | Required: whether an outage refuses the binding, or binds with a warning. |
 | `mtls.revocation.hosts` | list of string |  |  |  |  | Required: the only hosts revocation material is fetched from; `.name` covers the name and the names under it. |
 | `mtls.revocation.nonce` | boolean | `true` |  |  |  | Whether an OCSP request carries a nonce. |
-| `mtls.revocation.skew-seconds` | integer (0–3600) | `300` |  |  |  | How far ahead of this host's clock revocation material may say it was issued. |
-| `mtls.revocation.ocsp-fresh-seconds` | integer (1–86400) | `600` |  |  |  | How long an OCSP answer without a next update is taken. |
-| `mtls.revocation.crl-ttl-seconds` | integer (1–86400) | `3600` |  |  |  | How long a CRL is kept at most, its next update aside. |
-| `mtls.revocation.failure-seconds` | integer (1–3600) | `30` |  |  |  | How long a source that failed is not asked again. |
+| `mtls.revocation.skew` | string | `5m` |  |  |  | How far ahead of this host's clock revocation material may say it was issued, from 0s to 1h. |
+| `mtls.revocation.ocsp-fresh` | string | `10m` |  |  |  | How long an OCSP answer without a next update is taken, from 1s to 1d. |
+| `mtls.revocation.crl-ttl` | string | `1h` |  |  |  | How long a CRL is kept at most, its next update aside, from 1s to 1d. |
+| `mtls.revocation.failure-lifetime` | string | `30s` |  |  |  | How long a source that failed is not asked again, from 1s to 1h. |
 | `mtls.revocation.crl-entries` | integer (1–65536) | `256` |  |  |  | How many CRLs are kept. |
 | `mtls.revocation.ocsp-entries` | integer (1–65536) | `1024` |  |  |  | How many OCSP answers are kept. |
-| `mtls.revocation.timeout-ms` | integer (1–60000) | `3000` |  |  |  | How long one fetch may take. |
+| `mtls.revocation.timeout` | string | `3s` |  |  |  | How long one fetch may take, from 1ms to 1m. |
 | `mtls.revocation.max-fetches` | integer (1–64) | `4` |  |  |  | How many sources one check may fetch from; past them, what is left is unconfirmed. |
 
 ## oidc
@@ -408,9 +408,9 @@ From `@mod/outbound`.
 | `outbound.allow-any-public` | boolean | `false` |  |  |  | Whether requests may reach any host at a public address, instead of naming hosts in `allow`. |
 | `outbound.deny` | list of string | `[]` |  |  |  | The hosts requests never reach, checked before `allow`; `.name` covers the name and the names under it. |
 | `outbound.plain-loopback` | list of string | `[]` |  |  |  | The `host:port` pairs plain http may reach at loopback addresses. |
-| `outbound.max-response-bytes` | integer (1–16777216) | `65536` |  |  |  | The largest response body a request takes, in bytes. |
-| `outbound.signed-max-response-bytes` | integer (1–16777216) | `1048576` |  |  |  | The largest response body a request for signed material takes, in bytes. |
-| `outbound.timeout-ms` | integer (1–60000) | `5000` |  |  |  | The one deadline covering a request's resolving, connecting, headers and body, in milliseconds. |
+| `outbound.max-response-size` | string | `64KiB` |  |  |  | The largest response body a request takes, from 1B to 16MiB. |
+| `outbound.signed-max-response-size` | string | `1MiB` |  |  |  | The largest response body a request for signed material takes, from 1B to 16MiB. |
+| `outbound.timeout` | string | `5s` |  |  |  | The one deadline covering a request's resolving, connecting, headers and body, from 1ms to 1m. |
 | `outbound.max-concurrent` | integer (1–1024) | `16` |  |  |  | Requests under way at once; one more is unavailable at once. |
 | `outbound.direct-despite-proxy` | boolean | `false` |  |  |  | Whether to boot while a proxy variable is set and no proxy is configured; the variables are never read. |
 | `outbound.proxy` | string |  |  |  |  | The proxy every https request goes through by CONNECT, but to direct hosts; it resolves names and checks their addresses. |
@@ -425,7 +425,7 @@ From `@mod/passkey-registration`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `passkey-registration.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over both registration routes. |
-| `passkey-registration.window-seconds` | integer (1–86400) | `300` |  |  |  | The window, in seconds, that requests are counted over. |
+| `passkey-registration.window` | string | `5m` |  |  |  | The window requests are counted over, from 1s to 1d. |
 
 ## rate-limit
 
@@ -443,9 +443,9 @@ From `@mod/redis`.
 |---|---|---|---|---|---|---|
 | `redis.url` | string |  | yes | `REDIS_URL` | `rediss://redis.example.invalid:6379` | The Redis server to connect to. |
 | `redis.prefix` | string | `store` |  |  |  | What every key the store writes begins with. |
-| `redis.connect-timeout-ms` | integer (100–9007199254740991) | `2000` |  |  |  | How long connecting to Redis may take, in milliseconds. |
-| `redis.replication-timeout-ms` | integer (1–60000) | `1000` |  |  |  | How long a confirmation waits for every replica to have a write, in milliseconds. |
-| `redis.command-timeout-ms` | integer (10–60000) | `1000` |  |  |  | How long one Redis command may take, in milliseconds. |
+| `redis.connect-timeout` | string | `2s` |  |  |  | How long connecting to Redis may take, at least 100ms. |
+| `redis.replication-timeout` | string | `1s` |  |  |  | How long a confirmation waits for every replica to have a write, from 1ms to 1m. |
+| `redis.command-timeout` | string | `1s` |  |  |  | How long one Redis command may take, from 10ms to 1m. |
 | `redis.replication` | none \| replicas |  |  | `REDIS_REPLICATION` | `replicas` | Required when a space asks for replication or confirmed reads. "replicas": every write must reach the replicas, and Redis itself must refuse writes without them. "none": the operator states there is no failover at all, accepting that a failover would lose writes. |
 
 ## refresh
@@ -475,9 +475,9 @@ From `@mod/rp-logout`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `rp-logout.remember-seconds` | integer (60–2592000) | `86400` |  |  |  |  |
-| `rp-logout.notify-seconds` | integer (60–604800) | `86400` |  |  |  |  |
-| `rp-logout.sweep-seconds` | integer (1–3600) | `60` |  |  |  |  |
+| `rp-logout.remember-for` | string | `1d` |  |  |  | How long a session's clients are kept from a redemption, from 1m to 30d; at least as long as a session lives. |
+| `rp-logout.notify-within` | string | `1d` |  |  |  | How long an undelivered back-channel notice is tried again, from 1m to 7d. |
+| `rp-logout.sweep-interval` | string | `1m` |  |  |  | How often each host sweeps the kept notices, from 1s to 1h. |
 
 ## rp-logout-store
 
@@ -523,9 +523,9 @@ From `@mod/session-lifecycle`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `session-lifecycle.lifetime-seconds` | integer (60–2592000) | `3600` |  |  |  | How long a session lasts, counted from its opening; its cookie lives as long. The lifetime in force decides on each read, so a shorter one ends sessions opened under a longer one. |
-| `session-lifecycle.sweep-seconds` | integer (1–3600) | `30` |  |  |  | How often each host goes on with pending closes; a close whose participants keep failing is retried after half its age, at least this, at most an hour. |
-| `session-lifecycle.credentials-seconds` | integer (30–3600) | `300` |  |  |  | Where no entry requirement judges changing credentials (no mfa), how recent a sign-in at a known time must be to do so. |
+| `session-lifecycle.lifetime` | string | `1h` |  |  |  | How long a session lasts, counted from its opening, from 1m to 30d, such as 8h; its cookie lives as long. The lifetime in force decides on each read, so a shorter one ends sessions opened under a longer one. |
+| `session-lifecycle.sweep-interval` | string | `30s` |  |  |  | How often each host goes on with pending closes, from 1s to 1h, such as 1m; a close whose participants keep failing is retried after half its age, at least this, at most an hour. |
+| `session-lifecycle.credentials-within` | string | `5m` |  |  |  | Where no entry requirement judges changing credentials (no mfa), how recent a sign-in at a known time must be to do so, from 30s to 1h, such as 10m. |
 
 ## session-store
 
@@ -579,8 +579,8 @@ From `@mod/token-endpoint`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `token-endpoint.requests` | integer (1–100000) | `60` |  |  |  |  |
-| `token-endpoint.window-seconds` | integer (1–86400) | `60` |  |  |  |  |
+| `token-endpoint.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, before any client is authenticated. |
+| `token-endpoint.window` | string | `1m` |  |  |  | The window requests are counted over, from 1s to 1d. |
 
 ## token-exchange
 
@@ -641,4 +641,4 @@ From `@mod/webauthn-login`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `webauthn-login.requests` | integer (1–100000) | `60` |  |  |  |  |
-| `webauthn-login.window-seconds` | integer (1–86400) | `60` |  |  |  |  |
+| `webauthn-login.window` | string | `1m` |  |  |  | The window `requests` is counted over, from 1s to 1d in whole seconds, written with its unit, such as `1m`. |

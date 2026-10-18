@@ -8,6 +8,7 @@ import { composed, full } from "@mod/combinations";
 import { describe, expect, it, vi } from "vitest";
 import { generate, patterns } from "../src/contract.ts";
 import { generatePattern } from "../src/pattern.ts";
+import { auditReceiversOf, chosenLines } from "../src/patterns/chosen.ts";
 import { type Choice, selectionOf } from "../src/patterns/pattern.ts";
 import { patternNamed } from "../src/patterns/patterns.ts";
 import {
@@ -36,6 +37,19 @@ const named = patterns()
 const modulesOf = (name: string, choice?: Choice) =>
 	composed(selectionOf(patternNamed(name), choice));
 const cardFile = (name: string) => join(import.meta.dirname, "..", "src", "patterns", `${name}.md`);
+
+it("names in audit.receivers each composed adapter's receiver, and audit's own log only when none is", () => {
+	const of = (modules: readonly string[]) => auditReceiversOf((m) => modules.includes(m));
+	expect(of(["@mod/audit-stdout"])).toEqual(["stdout"]);
+	expect(of(["@mod/audit-http", "@mod/audit-stdout"])).toEqual(["http", "stdout"]);
+	expect(of([])).toEqual(["log"]);
+	expect(chosenLines(["@mod/audit", "@mod/audit-stdout"])).toContain(
+		"- Audit events named in `audit.receivers = [stdout]`.",
+	);
+	expect(chosenLines(["@mod/audit"])).toContain(
+		"- Audit events named in `audit.receivers = [log]`.",
+	);
+});
 
 async function freePort(): Promise<number> {
 	return new Promise((resolve) => {

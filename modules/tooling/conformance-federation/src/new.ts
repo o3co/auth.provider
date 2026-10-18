@@ -52,14 +52,12 @@ const grantsSection = (at: GrantsPart) => ({
 			{
 				idp: c.idp,
 				scopes: c.scopes,
-				"max-access-token-seconds": c.maxAccessTokenSeconds,
+				"max-access-token-lifetime": `${c.maxAccessTokenSeconds}s`,
 				"scope-subsets": c.scopeSubsets === true,
 			},
 		]),
 	),
-	...(at.lodges
-		? { lodges: at.lodges.limit, "lodge-window-seconds": at.lodges.windowSeconds }
-		: {}),
+	...(at.lodges ? { lodges: at.lodges.limit, "lodge-window": `${at.lodges.windowSeconds}s` } : {}),
 });
 
 onNew(federationArea, (part) => ({

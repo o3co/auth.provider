@@ -25,9 +25,9 @@ it("holds to the defaults", () => {
 		"allow-any-public": false,
 		deny: [],
 		"plain-loopback": [],
-		"max-response-bytes": 65_536,
-		"signed-max-response-bytes": 1_048_576,
-		"timeout-ms": 5000,
+		"max-response-size": 65_536,
+		"signed-max-response-size": 1_048_576,
+		timeout: 5000,
 		"max-concurrent": 16,
 		"direct-despite-proxy": false,
 		"direct-hosts": [],
@@ -35,29 +35,38 @@ it("holds to the defaults", () => {
 	});
 });
 
-it("takes each cap within its range, as a whole number, and refuses anything else", () => {
+it("takes each cap within its range, a size or time written with its unit, and refuses anything else", () => {
 	for (const bad of [
-		{ "max-response-bytes": 0 },
-		{ "max-response-bytes": 16_777_217 },
-		{ "max-response-bytes": 1.5 },
-		{ "signed-max-response-bytes": 0 },
-		{ "signed-max-response-bytes": 16_777_217 },
-		{ "timeout-ms": 0 },
-		{ "timeout-ms": 60_001 },
-		{ "timeout-ms": 1.5 },
+		{ "max-response-size": "0B" },
+		{ "max-response-size": "16777217B" },
+		{ "max-response-size": 1024 },
+		{ "max-response-size": "1024" },
+		{ "signed-max-response-size": "0B" },
+		{ "signed-max-response-size": "16777217B" },
+		{ timeout: "0ms" },
+		{ timeout: "60001ms" },
+		{ timeout: "1.5ms" },
+		{ timeout: 5000 },
+		{ timeout: "5000" },
 		{ "max-concurrent": 0 },
 		{ "max-concurrent": 1025 },
 		{ "max-concurrent": 1.5 },
 	]) {
 		expect(section.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
 	}
-	const caps = ["max-response-bytes", "signed-max-response-bytes", "timeout-ms", "max-concurrent"];
-	expect(section.safeParse(Object.fromEntries(caps.map((cap) => [cap, 1]))).success).toBe(true);
 	expect(
 		section.safeParse({
-			"max-response-bytes": 16_777_216,
-			"signed-max-response-bytes": 16_777_216,
-			"timeout-ms": 60_000,
+			"max-response-size": "1B",
+			"signed-max-response-size": "1B",
+			timeout: "1ms",
+			"max-concurrent": 1,
+		}).success,
+	).toBe(true);
+	expect(
+		section.safeParse({
+			"max-response-size": "16MiB",
+			"signed-max-response-size": "16MiB",
+			timeout: "1m",
 			"max-concurrent": 1024,
 		}).success,
 	).toBe(true);

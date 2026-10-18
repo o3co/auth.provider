@@ -14,7 +14,7 @@
 - The probe `redis` at `kernel`'s `probes`, which PINGs both connections.
 - Operator section:
   - `url` (`redis` or `rediss`), `prefix` (lower-case letters, digits and `-`; default `store`).
-  - `connect-timeout-ms` (default 2000), `command-timeout-ms` (default 1000), `replication-timeout-ms` (default 1000).
+  - `connect-timeout` (default `2s`), `command-timeout` (default `1s`), `replication-timeout` (default `1s`); times written with their unit, a bare number refused.
   - `replication`: `replicas` or `none`, required when a space needs replicated or confirmed reads.
 
 ## Invariants

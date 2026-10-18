@@ -19,7 +19,7 @@ describe("the operator's section and the boot", () => {
 	}
 
 	it("counts every route's requests per source in the operator's window", async () => {
-		const h = await harness({ settings: { requests: 7, "window-seconds": 9 } });
+		const h = await harness({ settings: { requests: 7, window: "9s" } });
 		const own = h.routes.filter((r) => r.path.includes("federation-grants"));
 		for (const route of own) {
 			const limited = route.uses?.find((u) => u.policy === requestsPerSource);
@@ -31,7 +31,7 @@ describe("the operator's section and the boot", () => {
 	it("holds a grant to the longest life allowed now, after a restart that shortened it", async () => {
 		const before = await harness();
 		const { id } = await before.connected();
-		const after = await harness({ stores: before.stores, settings: { "max-seconds": 60 } });
+		const after = await harness({ stores: before.stores, settings: { "max-lifetime": "1m" } });
 		after.advance(60_000);
 		expect((await after.grantCall(id, "token")).json?.error).toBe("grant_expired");
 	});

@@ -148,6 +148,6 @@ export async function noticesFrom(c: BuildContext<Settings>): Promise<Notices> {
 		clock: c.clock,
 		random: c.random,
 		log: c.log,
-		notifyMs: c.section["notify-seconds"] * 1000,
+		notifyMs: c.section["notify-within"] * 1000,
 	});
 }

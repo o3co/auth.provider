@@ -31,10 +31,10 @@ it("states the revocation policy in milliseconds, with the defaults the legacy s
 			mode: "ocsp",
 			...base,
 			nonce: false,
-			"skew-seconds": 1,
-			"ocsp-fresh-seconds": 2,
-			"crl-ttl-seconds": 3,
-			"failure-seconds": 4,
+			skew: "1s",
+			"ocsp-fresh": "2s",
+			"crl-ttl": "3s",
+			"failure-lifetime": "4s",
 			"crl-entries": 5,
 			"ocsp-entries": 6,
 			"max-fetches": 7,
@@ -75,5 +75,25 @@ it("takes revocation hosts as outbound reads a host list, and refuses anything e
 	expect(parsedWith(["ca.example", ".pki.example", "10.0.0.1"])).toBe(true);
 	for (const entry of ["*.pki.example", "ca.example.", "bad host", "ca_x.example", "10.5"]) {
 		expect(parsedWith([entry]), entry).toBe(false);
+	}
+});
+
+it("reads each revocation time written with its unit, within its bounds, and refuses a bare number", () => {
+	const takes = (more: Record<string, unknown>) =>
+		section.safeParse({
+			mode: "pki",
+			anchors: ["x"],
+			revocation: { mode: "crl", "on-unavailable": "reject", hosts: ["ca.example"], ...more },
+		}).success;
+	expect(
+		[{ skew: "0s" }, { skew: "1h" }, { timeout: "1ms" }, { timeout: "1m" }].map(takes),
+	).toEqual([true, true, true, true]);
+	expect([{ skew: "61m" }, { timeout: "0ms" }, { timeout: "61s" }].map(takes)).toEqual([
+		false,
+		false,
+		false,
+	]);
+	for (const key of ["skew", "ocsp-fresh", "crl-ttl", "failure-lifetime", "timeout"]) {
+		expect([takes({ [key]: 30 }), takes({ [key]: "30" })], key).toEqual([false, false]);
 	}
 });

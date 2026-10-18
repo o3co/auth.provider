@@ -218,7 +218,7 @@ export async function harness(
 					cal: {
 						idp: "corp",
 						scopes,
-						"max-access-token-seconds": 3600,
+						"max-access-token-lifetime": "1h",
 						resource: options.resource,
 					},
 				},

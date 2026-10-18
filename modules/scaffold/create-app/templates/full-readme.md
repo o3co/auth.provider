@@ -60,7 +60,7 @@ Write secrets in `.env` or the local layer only; neither goes into git or the im
 
 ## Adding a feature
 
-Generate again with `create-app <target> --add <feature>`, with one `--add` for each feature, and carry the configuration over.
+Generate again with `create-auth-provider <target> --add <feature>`, with one `--add` for each feature, and carry the configuration over.
 The feature comes with its wirings and bridges.
 Boot names what the added feature needs, and what cannot be composed.
 

@@ -17,7 +17,7 @@ import { grantStore } from "./store.ts";
 /** The requests a source may make in each window, on the client routes and the browser's alike. */
 const windowOf = (settings: Settings) => ({
 	limit: settings.requests,
-	ms: settings["window-seconds"] * 1000,
+	ms: settings.window * 1000,
 });
 
 export default defineModule({ name, section }, (m) => [

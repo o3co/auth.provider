@@ -230,11 +230,11 @@ describe("outbound", () => {
 	it("caps signed material by its own size, apart from every other answer's", async () => {
 		const { resolve } = svcResolver();
 		const hosts = { hosts: ["svc.test"] };
-		const small = over(resolve, { "max-response-bytes": 1000 });
+		const small = over(resolve, { "max-response-size": "1000B" });
 		expect((await small.fetchSigned(svc("/big"), {}, hosts)).body.length).toBe(2000);
 		const capped = over(resolve, {
-			"max-response-bytes": 1_000_000,
-			"signed-max-response-bytes": 1000,
+			"max-response-size": "1000000B",
+			"signed-max-response-size": "1000B",
 		});
 		expect(await failure(capped.fetchSigned(svc("/big"), {}, hosts))).toBe(
 			"unavailable: too-large",
@@ -253,7 +253,7 @@ describe("outbound", () => {
 
 	it("is unavailable past the size, the time or the header cap, or with an encoded body", async () => {
 		const { resolve } = svcResolver();
-		expect(await failure(over(resolve, { "max-response-bytes": 1000 }).fetch(svc("/big")))).toBe(
+		expect(await failure(over(resolve, { "max-response-size": "1000B" }).fetch(svc("/big")))).toBe(
 			"unavailable: too-large",
 		);
 		expect(await failure(over(resolve).fetch(svc("/big"), {}, { maxBytes: 1000 }))).toBe(
@@ -263,7 +263,7 @@ describe("outbound", () => {
 			2000,
 		);
 		// A caller narrows the operator's caps, never widens them.
-		const capped = over(resolve, { "max-response-bytes": 1000 });
+		const capped = over(resolve, { "max-response-size": "1000B" });
 		expect(await failure(capped.fetch(svc("/big"), {}, { maxBytes: 1_000_000 }))).toBe(
 			"unavailable: too-large",
 		);
@@ -273,7 +273,7 @@ describe("outbound", () => {
 			asked.push(ms);
 			return AbortSignal.abort();
 		};
-		const timed = over(resolve, { "timeout-ms": 50 }, passed);
+		const timed = over(resolve, { timeout: "50ms" }, passed);
 		expect(await failure(timed.fetch(svc("/slow"), {}, { timeoutMs: 10_000 }))).toBe(
 			"unavailable: timeout",
 		);
@@ -367,7 +367,7 @@ describe("outbound", () => {
 
 	it("refuses a switch of protocols and gives its place back, and waits past an informational answer", async () => {
 		const { resolve } = svcResolver();
-		const outbound = over(resolve, { "max-concurrent": 1, "timeout-ms": 2000 });
+		const outbound = over(resolve, { "max-concurrent": 1, timeout: "2s" });
 		for (let i = 0; i < 2; i++) {
 			const started = Date.now();
 			expect(await failure(outbound.fetch(svc("/switch")))).toBe("unavailable: unsupported-answer");

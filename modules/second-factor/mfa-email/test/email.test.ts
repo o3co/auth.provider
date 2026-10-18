@@ -105,8 +105,8 @@ async function boot(settings: Record<string, unknown> = {}) {
 const last = () => sent.at(-1) as Message;
 
 /** Ann's account states `address`, and her factor is enrolled at it. */
-async function annEnrolled(address = "ann@example.com") {
-	const { kind } = await boot();
+async function annEnrolled(address = "ann@example.com", settings: Record<string, unknown> = {}) {
+	const { kind } = await boot(settings);
 	contacts.set("ann", address);
 	const enrolled = await kind.enroll("ann", []);
 	if (!("secret" in enrolled)) throw new Error("not enrolled");
@@ -144,6 +144,14 @@ it("binds the account's address by a long code sent there, showing the address m
 	expect(await kind.verify(enrolled.secret, null, typed)).toEqual({ kind: "valid", state: {} });
 	expect(await kind.verify(enrolled.secret, null, "0".repeat(16))).toEqual({ kind: "invalid" });
 	now += 600_001;
+	expect(await kind.verify(enrolled.secret, null, code)).toEqual({ kind: "invalid" });
+});
+
+it("lets a code live as long as code-lifetime says", async () => {
+	const { kind, enrolled } = await annEnrolled("ann@example.com", { "code-lifetime": "5m" });
+	expect(enrolled.show).toMatchObject({ expires_in: 300 });
+	const code = String(last().values.code);
+	now += 300_001;
 	expect(await kind.verify(enrolled.secret, null, code)).toEqual({ kind: "invalid" });
 });
 

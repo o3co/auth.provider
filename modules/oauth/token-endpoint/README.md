@@ -20,7 +20,7 @@
 - `issuer`'s metadata items: `token_endpoint` (none without a public origin), `grant_types_supported`, `token_endpoint_auth_methods_supported` and `token_endpoint_auth_signing_alg_values_supported` (left out when `clients` names none).
 - Audit events once the client is authenticated, with `client`, `source` (when determined) and `grant_type` (when dispatched to): `token.issued`, and `token.issued.failure` with `reason` and `error` (the code answered).
 - The failure's `reason`: `repeated_parameter`, `mistyped_parameter`, `missing_grant_type`, `unsupported_grant_type`, `grant_type_not_allowed`, `unsupported_body`, `multiple_bindings`, `binding_refused`, `binding_required`, `binding_kind_not_named`, `untargeted`, `grant_refused`, or `issuance_refused` with `policy` and `refusal`.
-- Operator section: `requests` per source in each window (1–100000, default 60) and `window-seconds` (1–86400, default 60).
+- Operator section: `requests` per source in each window (1–100000, default 60) and `window` (1s–1d, default `1m`, written with its unit).
 
 ## Invariants
 - Requests are limited per source by `rate-limit`'s policy before any client is authenticated; over it, `429`.

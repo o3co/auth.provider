@@ -324,13 +324,13 @@ describe("token endpoint", () => {
 	});
 
 	it("limits requests per source before any client is authenticated", async () => {
-		const post = await serve([], { settings: { requests: 2, "window-seconds": 60 } });
+		const post = await serve([], { settings: { requests: 2, window: "2m" } });
 		const wrong = () => post({ grant_type: "client_credentials" }, "basic", { secret: "wrong" });
 		expect([(await wrong()).status, (await wrong()).status]).toEqual([401, 401]);
 		const limited = await post({ grant_type: "client_credentials" }, "basic");
 		expect([limited.status, limited.headers.get("retry-after"), limited.body]).toEqual([
 			429,
-			"60",
+			"120",
 			{ error: "rate_limited" },
 		]);
 	});

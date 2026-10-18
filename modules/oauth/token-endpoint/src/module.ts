@@ -62,7 +62,7 @@ export default defineModule({ name: "token-endpoint", section }, (m) => [
 			await c.collect(authMethods),
 			c.log,
 		);
-		const window = { limit: c.section.requests, ms: c.section["window-seconds"] * 1000 };
+		const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 		const uses = [use(requestsPerSource, { name: "token-endpoint", window })];
 		// Each grant names the bodies it takes; the endpoint refuses the others.
 		return { method: "POST", path: tokenPath, uses, takes: ["form", "json", "none"], cors, handle };

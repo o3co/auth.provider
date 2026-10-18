@@ -29,7 +29,6 @@ export type OutboundFailure =
 	/** The proxy would not open the tunnel. */
 	| "proxy-refused";
 
-/** Unavailable, with the kind of failure. */
 export class OutboundUnavailable extends Unavailable {
 	readonly failure: OutboundFailure;
 	constructor(failure: OutboundFailure) {

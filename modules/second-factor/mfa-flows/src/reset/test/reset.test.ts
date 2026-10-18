@@ -26,7 +26,7 @@ describe("a reset by an operator", () => {
 	});
 	it("ends the subject's sessions and pending logins, removes every factor and releases the lockout", async () => {
 		const s = await serve({
-			lockout: { threshold: 2, "backoff-seconds": 900, budget: 10, "hard-limit": 100 },
+			lockout: { threshold: 2, backoff: "15m", budget: 10, "hard-limit": 100 },
 		});
 		await s.enrollCode("ann");
 		const signedIn = new Map(s.jar());
@@ -221,7 +221,7 @@ describe("a reset by an operator", () => {
 
 	it("keeps the factors it could not remove and their lockout, ending the sessions twice all the same", async () => {
 		const s = await serve({
-			lockout: { threshold: 1, "backoff-seconds": 900, budget: 10, "hard-limit": 100 },
+			lockout: { threshold: 1, backoff: "15m", budget: 10, "hard-limit": 100 },
 		});
 		const { secret } = await s.enrollCode("hal");
 		const first = await s.heldLogin("hal");

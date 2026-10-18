@@ -27,7 +27,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 
 ## Packages
 
-0.18 is published as one package per concern, `@o3co/auth-provider-<concern>`, all at the same version. Each package offers its modules as subpaths named after them: `@o3co/auth-provider-oauth/authorize` (the contract), `/authorize/module` (what an app assembles), `/authorize/testing` (test builders and contract tests; vitest is an optional peer) and, where a module records audit events, `/authorize/audit-events`. You rarely name them yourself: generate the app (`npm create @o3co/auth-provider <dir>`, or `npx @o3co/auth-provider-scaffold create-app <dir>`), and it depends on the packages it composes.
+0.18 is published as one package per concern, `@o3co/auth-provider-<concern>`, all at the same version. Each package offers its modules as subpaths named after them: `@o3co/auth-provider-oauth/authorize` (the contract), `/authorize/module` (what an app assembles), `/authorize/testing` (test builders and contract tests; vitest is an optional peer) and, where a module records audit events, `/authorize/audit-events`. You rarely name them yourself: generate the app (`npx @o3co/create-auth-provider@next <dir> …`, or `npm create @o3co/auth-provider@next -- <dir> …`), and it depends on the packages it composes.
 
 Where each 0.17 package went:
 
@@ -309,7 +309,7 @@ Compose `federation-grants` and its store, `federation-grants-store`; there is n
 | `connections.<name>` | `connections.<name>` | Names are now `a-z`, `0-9` and `-`, at most 32, starting with a letter or digit; the callback path follows the name |
 | `connections.<name>.federation` | `connections.<name>.idp` | Names a `federation.idps` entry whose IdP offers delegation |
 | `connections.<name>.scopes` | `connections.<name>.scopes` | Must hold `openid`, as before |
-| `connections.<name>.maxAccessTokenLifetime` | `connections.<name>.max-access-token-seconds` | Required; now at most 86400 |
+| `connections.<name>.maxAccessTokenLifetime` | `connections.<name>.max-access-token-lifetime` | Required; written with its unit, now at most `1d` |
 | `connections.<name>.allowScopeSubsets` | `connections.<name>.scope-subsets` | Default false (was true); set `scope-subsets: true` on a connection to keep 0.17's behaviour |
 | `connections.<name>.resource` | `connections.<name>.resource` | |
 | `connections.<name>.callbackURL` | removed | Fixed at `/session/federation-grants/callback/<name>` on `http.public-origin` |
@@ -331,6 +331,8 @@ Compose `federation-grants` and its store, `federation-grants-store`; there is n
 ### Session grant
 
 Compose `session-grant`, with `session-tokens` beside it: boot is refused when nothing records its tokens to their session.
+
+A proxy in front of the session grant passes `Origin` and `Sec-Fetch-Site` through as the browser sent them, and overwrites `X-Forwarded-For` and `X-Forwarded-Proto` with its own values rather than appending to what the client sent.
 
 | 0.17 | 0.18 | Notes |
 |---|---|---|
@@ -382,6 +384,8 @@ Compose `userinfo` and `oidc` for the userinfo endpoint and ID tokens, `rp-logou
 ### Email and WebAuthn second factors
 
 Compose `mfa-email` (with `mfa-email-wording` and a mail sender such as `mail-smtp`) for codes by mail, and `mfa-webauthn` (with `webauthn`) for WebAuthn as a second factor. The relying party keys are in [MFA and passkeys](#mfa-and-passkeys).
+
+For a second factor by mail alone, with no other factor to enrol, set `mfa-email.adds-second-factor = true`: without it, a code by mail does not count as a second factor.
 
 | 0.17 | 0.18 | Notes |
 |---|---|---|
@@ -454,6 +458,7 @@ Times and sizes are written with their unit (`30s`, `5m`, `64KiB`); a number wit
 | `federation-grants.lodge-window-seconds` | `federation-grants.lodge-window` | a duration, `1s` to `1d`, default `1m` |  |
 | `federation-grants.revocation-skew-seconds` | `federation-grants.revocation-skew` | a duration, `0s` to `5m`, default `1s` |  |
 | `federation-grants.window-seconds` | `federation-grants.window` | a duration, `1s` to `1h`, default `1m` |  |
+| `federation-grants.connections.<name>.max-access-token-seconds` | `federation-grants.connections.<name>.max-access-token-lifetime` | a duration, `1s` to `1d`, required |  |
 | `federation-tokens.refresh-before-seconds` | `federation-tokens.refresh-before` | a duration, `0s` to `1h`, default `30s` |  |
 | `federation-tokens.max-lifetime-seconds` | `federation-tokens.max-lifetime` | a duration, `1m` to `365d`, default `1d` |  |
 | `federation-tokens.lock-seconds` | `federation-tokens.lock-lifetime` | a duration, `1s` to `1m`, default `5s` |  |
@@ -680,6 +685,8 @@ The proxy resolves the names it carries and checks their addresses itself, and b
 ### Reverse proxy
 
 Behind a TLS-terminating proxy, set `http.trusted-proxies` and `http.proxy-hops`. Only `X-Forwarded-For` and the forwarded scheme are read from a trusted proxy; `Forwarded` is ignored. With an https public origin, browser requests that change state must arrive over https, so a missing proxy setting refuses them.
+
+No setting trusts a proxy by its hop count alone: `http.proxy-hops` only bounds how many trusted proxies a request passes through. List the load balancer's subnet as CIDRs in `http.trusted-proxies`, and let only the load balancer reach the app's port.
 
 ### Redis
 

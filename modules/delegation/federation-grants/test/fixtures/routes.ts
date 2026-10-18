@@ -21,7 +21,7 @@ export interface RouteCase {
 }
 
 const scopes = ["openid", "offline_access", "read"];
-const conn = { idp: "corp", scopes, "max-access-token-seconds": 3600 };
+const conn = { idp: "corp", scopes, "max-access-token-lifetime": "1h" };
 const renewal = { redirect_uri: "https://worker.example/connected", state: "r" };
 
 export const routeCases: readonly RouteCase[] = [
