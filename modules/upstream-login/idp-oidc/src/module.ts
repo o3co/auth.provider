@@ -12,7 +12,7 @@ export default defineModule({ name: "idp-oidc" }, (m) => [
 		return idpType({
 			type: "oidc",
 			settings: settingsOf(jwt.algorithms, reach.policy),
-			open: (read, { name }) => opened(read, reach, jwt, { clock: c.clock, log: c.log, name }),
+			open: (read, { idp }) => opened(read, reach, jwt, { clock: c.clock, log: c.log, idp }),
 		});
 	}),
 ]);

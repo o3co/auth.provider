@@ -136,7 +136,7 @@ export async function opened(
 	s: Settings,
 	reach: Reach,
 	jwt: ExternalJwt,
-	at: { readonly clock: Clock; readonly log: Log; readonly name: string },
+	at: { readonly clock: Clock; readonly log: Log; readonly idp: string },
 ): Promise<Upstream> {
 	const { outbound } = reach;
 	const hosts = hostsOf(s);
@@ -144,7 +144,7 @@ export async function opened(
 		? await discovered(s, reach, hosts)
 		: { endpoints: given(s), offersIss: false };
 	const requireIss = s["require-iss"] || offersIss;
-	if (!requireIss) at.log.warn("idp-oidc.iss_not_required", { idp: at.name });
+	if (!requireIss) at.log.warn("idp-oidc.iss_not_required", { idp: at.idp });
 	const skewMs = s["clock-skew"] * 1000;
 	const client = s["client-id"];
 	const idTokenOf = idTokenReaderOf(
@@ -205,15 +205,15 @@ export async function opened(
 			const login = await upstreamLoginOf(idToken, code.nonce, tokens.accessToken);
 			return { ...login, tokens: { ...tokens, idToken } };
 		});
-	const refreshed = (refreshToken: string, scope: readonly string[], resource?: string) =>
+	const refreshed = (refreshToken: string, scopes: readonly string[], resource?: string) =>
 		guarded(async (): Promise<UpstreamRefresh> => {
 			const answer = await granting({
 				grant_type: "refresh_token",
 				refresh_token: refreshToken,
-				...(scope.length > 0 ? { scope: scope.join(" ") } : {}),
+				...(scopes.length > 0 ? { scope: scopes.join(" ") } : {}),
 				...(resource === undefined ? {} : { resource }),
 			});
-			return refreshAnswerOf(answer, scope, "idp-oidc");
+			return refreshAnswerOf(answer, scopes, "idp-oidc");
 		});
 	/** A start's own parameters: the nonce, and the browser's prompt and max age. */
 	const asking = (start: AuthorizationStart, prompt: string | undefined) => ({
@@ -233,7 +233,7 @@ export async function opened(
 			),
 		exchange: (code) => exchanged({ ...code, scopes: s.scopes }),
 		// The login's refresh passes no resource.
-		refresh: (refreshToken, scope) => refreshed(refreshToken, scope),
+		refresh: (refreshToken, scopes) => refreshed(refreshToken, scopes),
 		delegation: {
 			authorizationUrl: (start) => {
 				if (!start.scopes.includes("openid")) return { kind: "refused" };

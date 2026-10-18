@@ -184,7 +184,7 @@ async function open(world: World = {}) {
 	const upstream = await opened(read, { outbound: stub.outbound, policy }, jwt, {
 		clock,
 		log: recorded.log,
-		name: "corp",
+		idp: "corp",
 	});
 	/** The warn lines while it opened. */
 	const warned = recorded
