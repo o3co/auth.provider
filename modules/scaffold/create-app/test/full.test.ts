@@ -244,6 +244,23 @@ it("writes the clients given into the trial's one clients.registered, and no blo
 	}
 });
 
+it("gives signer-keys-http an issuer and keys-url of the trial's own, its host allowed", async () => {
+	const target = await mkdtemp(join(tmpdir(), "create-app-trial-"));
+	mkdirSync(join(target, "src"));
+	await writeFile(
+		join(target, "src", "main.ts"),
+		'import o from "@mod/outbound/module";\nimport s from "@mod/signer-keys-http/module";\n',
+	);
+	const local = parseString(
+		(await trialSettings(target, { redisUrl: "redis://127.0.0.1:1" })).local,
+	);
+	expect(local.get("signer-keys-http")).toEqual({
+		issuer: "https://devices.example.invalid",
+		"keys-url": "https://ledger.example.invalid/signer-keys",
+	});
+	expect(local.get("outbound.allow")).toEqual(["ledger.example.invalid"]);
+});
+
 it("gives a generated app trial settings by its own modules, with hosts under .invalid and keys made fresh", async () => {
 	const target = await generated();
 	const [one, other] = [
