@@ -564,6 +564,18 @@ From `@mod/session-tokens-store`.
 | `session-tokens-store.pending-shards` | integer (1–65536) | `64` |  |  |  | How many shards the sessions pending a push-out are spread over. |
 | `session-tokens-store.pending-per-shard` | integer (1–10000) | `1000` |  |  |  | How many pending sessions one shard holds; an add to a full shard is refused. |
 
+## signer-keys-http
+
+From `@mod/signer-keys-http`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `signer-keys-http.issuer` | string |  | yes | `SIGNER_KEYS_HTTP_ISSUER` | `https://devices.example.invalid` | The `iss` it answers for: one of jwt-bearer's `issuers` with no keys of its own. |
+| `signer-keys-http.keys-url` | string |  | yes | `SIGNER_KEYS_HTTP_KEYS_URL` | `https://ledger.example.invalid/signer-keys` | Where a signer's keys are looked up. Plain http is reached only where outbound's policy names it. |
+| `signer-keys-http.credential` | string |  |  |  |  | A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material. |
+| `signer-keys-http.timeout` | string |  |  |  |  | How long a lookup may take, from 1ms to 1m, narrowing outbound's cap. |
+| `signer-keys-http.max-response-size` | string |  |  |  |  | The largest answer read, from 1B to 16MiB, narrowing outbound's cap. |
+
 ## store
 
 From `@mod/store`.

@@ -1,0 +1,4 @@
+signer-keys-http {
+	issuer = "https://devices.example.invalid"
+	keys-url = "https://ledger.example.invalid/signer-keys"
+}
