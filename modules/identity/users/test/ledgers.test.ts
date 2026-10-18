@@ -222,10 +222,8 @@ describe("users ledgers", () => {
 		expect(await u.claimedContacts("s-alice")).toEqual({ kind: "unanswerable" });
 		expect(await u.claimedContacts("")).toEqual([]);
 		await u.link("s-alice", { idp: "example", subject: "u-alice" });
-		expect(await u.byUpstream("example", "u-alice")).toEqual({
-			kind: "user",
-			user: { subject: "s-alice", attributes: {} },
-		});
+		// The link stands for no one the ledger can name: neither none nor a user.
+		await expect(u.byUpstream("example", "u-alice")).rejects.toSatisfy(isUnavailable);
 	});
 
 	it("answers none for a written link to a subject the ledger answers none for: the ledger's none outweighs the link", async () => {
