@@ -754,6 +754,13 @@ describe("federation", () => {
 		expect(await refused({ a: { type: "test", issuer: "https://mismatch.example" } })).toEqual([
 			"federation.idps.a",
 		]);
+		// The type's own reason, under the key it names in the IdP's settings.
+		const told = await serve({
+			federation: { idps: { a: { type: "test", issuer: "https://misdescribed.example" } } },
+		}).catch((error: BootRefused) => error.refusals);
+		expect(told).toEqual([
+			{ where: "federation.idps.a.issuer", reason: "the description names another issuer" },
+		]);
 		expect(
 			await refused({ "Bad.Name": { type: "test", issuer: "https://idp.example" } }),
 		).not.toEqual([]);

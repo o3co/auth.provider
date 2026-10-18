@@ -45,7 +45,7 @@
 - A held login's tokens are kept for `transaction-lifetime` from the hold; if they cannot be kept, the callback is unavailable.
 - A held login resumes within `transaction-lifetime` of the callback.
 - An IdP's redirect URI is the public origin plus its callback path.
-- Boot is refused for an unknown type, settings the type refuses, an upstream that does not match its settings, or no public origin, one reason per issue, all at once.
+- Boot is refused for an unknown type, settings the type refuses, an upstream that does not match its settings (under the key and with the reason the type gives, where it gives them), or no public origin, one reason per issue, all at once.
 - An IdP that answers in a posted form has a cross-site cookie, so only `__Host-` and Secure; it refuses boot where cookies cannot be secure.
 
 ## Data

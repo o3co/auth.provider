@@ -6,6 +6,7 @@ import {
 	idpTypes,
 	type Upstream,
 	type UpstreamLogin,
+	UpstreamMismatch,
 	UpstreamRefused,
 } from "@mod/upstreams";
 import { describe, expect, it } from "vitest";
@@ -42,6 +43,9 @@ export function testIdpType(
 				open: async (read) => {
 					const { issuer, path, mode } = read;
 					if (issuer.includes("mismatch")) throw new Error("not this upstream");
+					if (issuer.includes("misdescribed")) {
+						throw new UpstreamMismatch("the description names another issuer", ["issuer"]);
+					}
 					return {
 						...more,
 						responseMode: mode,
