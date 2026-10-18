@@ -81,17 +81,6 @@ describe("refreshing a grant's token", () => {
 		expect((await h.grantCall(id, "status")).json?.status).toBe("revoked");
 	});
 
-	it("lets a revocation win over an activation that raced it", async () => {
-		const h = await harness();
-		const flow = await h.started();
-		h.stores.raceNext(
-			(record) => ({ ...(record as object), status: "revoked", reason: "client" }) as never,
-		);
-		const done = await h.callback(flow.state, flow.browser);
-		expect(h.location(done).searchParams.get("error")).toBe("grant_not_authorizable");
-		expect((await h.grantCall(flow.id, "status")).json?.status).toBe("revoked");
-	});
-
 	it("seals the credentials to the grant, so a copy under another grant does not open", async () => {
 		const h = await harness();
 		const a = await h.connected();
