@@ -1051,9 +1051,6 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
-      '@mod/store':
-        specifier: workspace:*
-        version: link:../../foundation/store
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -1088,6 +1085,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
       '@mod/refresh':
         specifier: workspace:*
         version: link:../refresh

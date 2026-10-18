@@ -5,6 +5,7 @@
 	"type": "module",
 	"kind": "feature",
 	"optIn": true,
+	"storeWiring": true,
 	"exports": {
 		".": "./src/contract.ts",
 		"./module": "./src/module.ts",
@@ -14,7 +15,6 @@
 		"@mod/clients": "workspace:*",
 		"@mod/external-jwt": "workspace:*",
 		"@mod/kernel": "workspace:*",
-		"@mod/store": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/token-exchange": "workspace:*",
 		"@mod/users": "workspace:*",
@@ -28,6 +28,7 @@
 		"@mod/http": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/outbound": "workspace:*",
+		"@mod/records": "workspace:*",
 		"@mod/refresh": "workspace:*",
 		"@mod/sender-binding": "workspace:*",
 		"@mod/session": "workspace:*",

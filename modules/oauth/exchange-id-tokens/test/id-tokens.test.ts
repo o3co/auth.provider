@@ -10,14 +10,7 @@ import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
-import {
-	assemble,
-	BootRefused,
-	contract,
-	defineModule,
-	kernelConfig,
-	type Module,
-} from "@mod/kernel";
+import { assemble, BootRefused, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import outboundModule from "@mod/outbound/module";
 import { lineage } from "@mod/refresh";
@@ -25,9 +18,6 @@ import { type Binding, senderBindings } from "@mod/sender-binding";
 import { sessions } from "@mod/session";
 import { stubSessions } from "@mod/session/testing";
 import { sessionTokens } from "@mod/session-tokens";
-import { type Space, spaces } from "@mod/store";
-import storeModule from "@mod/store/module";
-import { storeConfig } from "@mod/store/testing";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
@@ -38,7 +28,9 @@ import { upstreamNames } from "@mod/users";
 import usersModule from "@mod/users/module";
 import { memoryUsersStores, testUser } from "@mod/users/testing";
 import { describe, expect, it } from "vitest";
+import { usedIdTokens } from "../src/contract.ts";
 import { exchangeIdTokensOver, type Issuers } from "../src/testing.ts";
+import { memoryUsedIdTokens } from "./stores.ts";
 
 const now = 1_800_000_000_000;
 const clock = { at: now };
@@ -94,9 +86,9 @@ const dpopKind = defineModule({ name: "dpop-kind" }, (m) => [
 		.contribute(senderBindings)
 		.by(() => ({ member: "jkt", tokenType: "DPoP", read: async () => ({ kind: "absent" }) })),
 ]);
-const collectedSpaces = contract<readonly Space[]>("test.spaces");
-const spaceCollector = defineModule({ name: "space-collector" }, (m) => [
-	m.provide(collectedSpaces).by((c) => c.collect(spaces)),
+/** The id_tokens taken, in memory, fresh for each composition. */
+const usedStandIn = defineModule({ name: "used-id-tokens" }, (m) => [
+	m.provide(usedIdTokens).by(() => memoryUsedIdTokens().used),
 ]);
 
 /** Alice's links, one through each kind the section takes, under the name it gives users: a link no module names refuses boot. */
@@ -119,20 +111,18 @@ const boot = (section: unknown, extra: readonly Module[] = []) =>
 			dpopKind,
 			outboundModule,
 			externalJwtModule,
-			storeModule,
+			usedStandIn,
 			subjectRevocationStandIn,
 			usersModule,
 			memoryUsersStores().module,
 			tokenExchange,
 			exchangeIdTokensOver(issuers),
-			spaceCollector,
 			...extra,
 		],
 		config: {
 			...kernelConfig(),
 			...httpConfig(),
 			...issuerConfig(),
-			...storeConfig(),
 			...clientsConfig([
 				...["ios-app", "android-app", "web-backend"].map((id) =>
 					confidentialClient({ id, sections: allowed }),
@@ -292,13 +282,6 @@ describe("exchange-id-tokens", () => {
 		]);
 		const outcome = await s.exchange("device", await apple.sign(claims), bound);
 		expect(outcome).toMatchObject({ kind: "issued", body: { token_type: "DPoP" } });
-	});
-
-	it("contributes its space whenever it is composed", async () => {
-		const s = await serve({ google: settings.google });
-		expect(s.app.get(collectedSpaces).map((space) => space.name)).toContain(
-			"exchange-id-tokens.used",
-		);
 	});
 
 	it("refuses to start with no upstream, two clients taking one pair, an unregistered client, or a key set or issuer of its own", async () => {
