@@ -477,9 +477,9 @@ From `@mod/rp-logout`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `rp-logout.remember-seconds` | integer (60–2592000) | `86400` |  |  |  |  |
-| `rp-logout.notify-seconds` | integer (60–604800) | `86400` |  |  |  |  |
-| `rp-logout.sweep-seconds` | integer (1–3600) | `60` |  |  |  |  |
+| `rp-logout.remember-for` | string | `1d` |  |  |  | How long a session's clients are kept from a redemption, from 1m to 30d; at least as long as a session lives. |
+| `rp-logout.notify-within` | string | `1d` |  |  |  | How long an undelivered back-channel notice is tried again, from 1m to 7d. |
+| `rp-logout.sweep-interval` | string | `1m` |  |  |  | How often each host sweeps the kept notices, from 1s to 1h. |
 
 ## rp-logout-store
 

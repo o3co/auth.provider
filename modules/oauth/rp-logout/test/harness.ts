@@ -133,7 +133,7 @@ export async function harness(
 			...issuerConfig({ url: issuer }),
 			...usersConfig([]),
 			...clientsConfig(registered),
-			...rpLogoutConfig({ "sweep-seconds": 1, ...options.settings }),
+			...rpLogoutConfig({ "sweep-interval": "1s", ...options.settings }),
 		},
 		runtime,
 	});

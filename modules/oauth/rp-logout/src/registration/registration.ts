@@ -41,17 +41,17 @@ export const registration: Section<Registration> = {
 	schema: z.strictObject({
 		"post-logout-redirect-uris": z
 			.array(z.string().refine(registrable, "a URI a client may register to be sent back to"))
-			.default([]),
+			.prefault([]),
 		"frontchannel-logout-uri": z
 			.string()
 			.refine(frontChannel, "an http or https URL without iss or sid in its query")
 			.optional(),
-		"frontchannel-logout-session-required": z.boolean().default(true),
+		"frontchannel-logout-session-required": z.boolean().prefault(true),
 		"backchannel-logout-uri": z
 			.string()
 			.refine((uri) => httpUrl(uri) !== undefined, "an http or https URL")
 			.optional(),
-		"backchannel-logout-session-required": z.boolean().default(true),
+		"backchannel-logout-session-required": z.boolean().prefault(true),
 	}),
 	checkAtBoot: (value, client) =>
 		framable(value, client)

@@ -91,7 +91,7 @@ it.each([
 });
 
 it("gives up a notice past its time, without sending it again", async () => {
-	const h = await serve({ settings: { "notify-seconds": 60 } });
+	const h = await serve({ settings: { "notify-within": "1m" } });
 	h.answering.answer = async () => 503;
 	const { session } = await h.login();
 	await h.redeemed(session.id, "app");
@@ -140,14 +140,23 @@ it("sends a notice tried again with the same token id, so the client can tell a 
 	expect(ids[1]).toBe(ids[0]);
 }, 10_000);
 
-it("remembers a session's clients until the session ends, however short remember-seconds is", async () => {
-	const h = await serve({ settings: { "remember-seconds": 60 } });
+it("remembers a session's clients until the session ends, however short remember-for is", async () => {
+	const h = await serve({ settings: { "remember-for": "1m" } });
 	const { session } = await h.login();
 	await h.redeemed(session.id, "app");
 	h.advance(61_000);
 	await h.app.get(sessions).close(session.id);
 	await until(() => h.sent.length > 0);
 	expect(h.sent.map((s) => s.url)).toEqual(["https://app.example/bc"]);
+});
+
+it("remembers a client for remember-for where the session's end is unknown, and no longer", async () => {
+	const h = await serve({ settings: { "remember-for": "2h" } });
+	await h.redeemed("unknown", "app");
+	h.advance(7_199_000);
+	expect(await h.stores.clients.members("unknown")).toHaveLength(1);
+	h.advance(2000);
+	expect(await h.stores.clients.members("unknown")).toEqual([]);
 });
 
 it("logs the clients the store pushes out of a session's set", async () => {
