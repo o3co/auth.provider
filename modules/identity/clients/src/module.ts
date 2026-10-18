@@ -1,5 +1,5 @@
 import { contract, defineModule } from "@mod/kernel";
-import { type SecretChecker, secretChecker } from "@mod/secret-hash";
+import { type SecretChecker, secretCheckers } from "@mod/secret-hash";
 import { z } from "zod";
 import {
 	authMethods,
@@ -74,7 +74,10 @@ const registered = contract<ReadonlyMap<string, Client>>("clients.registered");
 const secrets = contract<SecretChecker>("clients.secrets");
 
 export default defineModule({ name: "clients", section }, (m) => [
-	m.provide(secrets).by((c) => secretChecker(hashesOf(c.section.registered), c.random.bytes)),
+	// This assembly's checkers, which share its limit on checks under way.
+	m
+		.provide(secrets)
+		.by(async (c) => (await c.get(secretCheckers)).checkerOf(hashesOf(c.section.registered))),
 	m.contribute(authMethods).by(async (c) => secretBasic(await c.get(secrets))),
 	m.contribute(authMethods).by(async (c) => secretPost(await c.get(secrets))),
 	m.contribute(authMethods).by(() => none),

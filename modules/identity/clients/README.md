@@ -28,7 +28,7 @@
 - An id that is empty, over 256 UTF-16 code units, with a lone surrogate, or with a C0, DEL, C1, U+2028, U+2029 or BOM character is unknown, and no source is asked; registered, it refuses boot.
 - `checkAtBoot` sees each registered client that carries the section, and never a source's client, which the section's owner checks at request time.
 - A `checkAtBoot` reason refuses boot at `clients.registered.<i>.sections.<name>`, naming the client id and the section; it is attached unchanged, so it never holds a configuration value.
-- A secret is checked through `secret-hash`, with decoys of the registered hashes' work; boot refuses a registered `hash` it cannot read (plain text included) or a secret method's client with none, and a source's such secret matches nothing.
+- A secret is checked through `secret-hash`, within its assembly's `max-concurrent`, with decoys of the registered hashes' work; boot refuses a registered `hash` it cannot read (plain text included) or a secret method's client with none, and a source's such secret matches nothing.
 - A client's existence is not secret, since its id shows outside: an unknown client, an invalid record and another method's client are refused at once, with no secret check.
 
 ## Depends on

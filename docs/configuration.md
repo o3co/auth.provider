@@ -538,7 +538,7 @@ From `@mod/secret-hash`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `secret-hash.max-concurrent` | integer (1–1024) | `8` |  |  |  | Secret checks under way at once in this process, every caller's together; one more is unavailable at once, before any hashing. |
+| `secret-hash.max-concurrent` | integer (1–1024) | `8` |  |  |  | Secret checks under way at once in this assembly, every checker it makes together; one more is unavailable at once, before any hashing. |
 
 ## sender-binding
 

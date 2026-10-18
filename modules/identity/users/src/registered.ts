@@ -1,10 +1,5 @@
-import { deepFreeze, type Random } from "@mod/kernel";
-import {
-	readSecretHash,
-	type SecretChecker,
-	type SecretHash,
-	secretChecker,
-} from "@mod/secret-hash";
+import { deepFreeze } from "@mod/kernel";
+import { readSecretHash, type SecretChecker, type SecretHash } from "@mod/secret-hash";
 import { z } from "zod";
 import {
 	isAttributeValue,
@@ -72,18 +67,17 @@ export const record = z
 export const none: Verified = deepFreeze({ kind: "none" });
 export const unanswerable: Unanswerable = deepFreeze({ kind: "unanswerable" });
 
-/** Makes the checker for the hashes in use; tests may record the work each check does. */
-export type CheckerOf = (inUse: Iterable<SecretHash>, random: Random["bytes"]) => SecretChecker;
+/** Makes the checker for the hashes in use, as `secret-hash`'s checkers do; tests may record the work each check does. */
+export type CheckerOf = (inUse: Iterable<SecretHash>) => SecretChecker;
 
 export interface UserSource extends Pick<Users, "verify" | "bySubject" | "byUpstream"> {
 	readonly upstreamLast?: true;
 }
 
-/** The users the settings register, checked by `secret-hash` with decoys drawn from `random`. */
+/** The users the settings register, checked by a checker `secret-hash` makes for their hashes. */
 export function registeredUsers(
 	registered: readonly z.output<typeof record>[],
-	random: Random["bytes"],
-	checkerOf: CheckerOf = secretChecker,
+	checkerOf: CheckerOf,
 ): UserSource {
 	const known = new Map<string, { user: User; hash: SecretHash }>();
 	const linked = new Map<string, User>();
@@ -96,10 +90,7 @@ export function registeredUsers(
 		for (const identity of r.upstream) linked.set(keyOf(identity), user);
 	}
 	// An unknown identifier costs the same work as a known one: the checker computes decoys for it.
-	const checker = checkerOf(
-		[...known.values()].map(({ hash }) => hash),
-		random,
-	);
+	const checker = checkerOf([...known.values()].map(({ hash }) => hash));
 	return {
 		verify: async (identifier, password) => {
 			const found = known.get(identifier);

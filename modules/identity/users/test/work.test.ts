@@ -18,8 +18,8 @@ it("computes once for each kind of work in use, whoever is asked for", async () 
 	}));
 	const kinds = new Set(entries.map((entry) => readSecretHash(entry["password-hash"])?.work));
 	let works: readonly string[] = [];
-	const u = registeredUsers(entries, randomBytes, (inUse, random) => {
-		const recording = recordingChecker(inUse, random);
+	const u = registeredUsers(entries, (inUse) => {
+		const recording = recordingChecker(inUse, randomBytes);
 		works = recording.works;
 		return recording.checker;
 	});

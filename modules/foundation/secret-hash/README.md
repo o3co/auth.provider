@@ -9,9 +9,8 @@
 
 ## Offers
 - `readSecretHash` (text → hash or none), the only maker of a hash; a hash names its `work`, alike for hashes that take equal work.
-- `secretChecker` (the hashes in use, random bytes) → `check` (hash or none, secret → matched or not).
-- `secretCheckers`: `checkerOf` (the hashes in use) → a checker as `secretChecker` makes, its decoys from the kernel's random; every checker one assembly makes shares that assembly's `max-concurrent`, apart from any other assembly's.
-- Operator section `max-concurrent`: how many checks run at once in this process, every checker's together (1–1024, default 8).
+- `secretCheckers`: `checkerOf` (the hashes in use) → a checker, `check` (hash or none, secret → matched or not), its decoys from the kernel's random; every checker one assembly makes shares that assembly's `max-concurrent`, apart from any other assembly's.
+- Operator section `max-concurrent`: how many checks run at once in the assembly, every checker it makes together (1–1024, default 8).
 - `./testing`: bcrypt and scrypt hashes at the cheapest work, a 72-byte secret, and a checker recording the work of each computation.
 
 ## Invariants
@@ -22,7 +21,6 @@
 - Each check computes once per kind of work in use: the hash for its own kind, a decoy of that work (its answer dropped) for every other, so a check without a hash takes the same work as one with it.
 - A hash whose work is not in use is computed besides the decoys; with no hash in use, a check without one computes nothing.
 - A check past `max-concurrent` is unavailable before any computation; a secret over 1024 bytes takes no place, and a check keeps its place until each of its computations ends.
-- For checkers `secretChecker` makes, the limit is one for the whole process, every assembly's together: each build of the module sets it, so the last assembly built decides; it is the default where the module is not composed.
 - Decoys are made once, when the checker is made, from the given random bytes only.
 
 ## Depends on

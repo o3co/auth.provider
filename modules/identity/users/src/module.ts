@@ -1,4 +1,5 @@
 import { defineModule } from "@mod/kernel";
+import { secretCheckers } from "@mod/secret-hash";
 import { z } from "zod";
 import { ledgers, type UpstreamNames, upstreamNames, users } from "./contract.ts";
 import { contributedSource } from "./ledger/contributed.ts";
@@ -84,9 +85,11 @@ export default defineModule({ name: "users", section }, (m) => [
 				"users are registered while a user ledger is contributed",
 			);
 		}
+		// This assembly's checkers, which share its limit on checks under way.
+		const checkers = await c.get(secretCheckers);
 		const source = ledger
 			? contributedSource(ledger, c.log)
-			: registeredUsers(c.section.registered, c.random.bytes);
+			: registeredUsers(c.section.registered, (inUse) => checkers.checkerOf(inUse));
 		return ledgerUsers(source, await c.get(linkStore), await c.get(contactStore));
 	}),
 ]);
