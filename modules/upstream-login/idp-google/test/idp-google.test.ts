@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { externalJwt } from "@mod/external-jwt";
 import externalJwtModule from "@mod/external-jwt/module";
 import { testSigner } from "@mod/external-jwt/testing";
@@ -310,6 +311,23 @@ describe("idp-google", () => {
 			).toBe(false);
 		}
 		expect(settings.safeParse({ ...both, "hosted-domains": ["corp.example"] }).success).toBe(true);
+	});
+
+	it("takes an id_token's at_hash only as the access token's", async () => {
+		const full = createHash("sha256").update("at").digest();
+		const half = full.subarray(0, 16).toString("base64url");
+		const exchanged = async (claims: Record<string, unknown>) => {
+			const { upstream } = await open({ token: async () => granted({}, claims) });
+			return outcome(upstream.exchange(exchange()));
+		};
+		expect(await exchanged({ at_hash: half })).toMatchObject({ subject: "g-alice" });
+		for (const at_hash of [
+			half.slice(1),
+			createHash("sha256").update("x").digest().subarray(0, 16).toString("base64url"),
+			7,
+		]) {
+			expect(await exchanged({ at_hash }), String(at_hash)).toBe("refused");
+		}
 	});
 
 	it("gives the profile in the checked id_token, its email verified only by a boolean true", async () => {
