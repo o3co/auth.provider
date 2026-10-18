@@ -304,7 +304,11 @@ Compose `federation-grants` and its store, `federation-grants-store`; there is n
 | `rotationBudget`, `rotationWindow` | `rotations`, `rotation-window` | Defaults 24 per `1h`, as before; at most 1000 per `1d` |
 | `allowKeepOnSubjectRevocation` | `keep-on-subject-revocation` | Default false |
 | `identityLookup` (`required` or `unsupported`) | `identity-check` (`required` or `none`) | `unsupported` is `none` |
-| `ineligibleRetryAfter`, `refreshFailureBackoff`, `upstreamTimeoutMs`, `upstreamHardTimeoutMs`, `refreshLockTtlMs`, `lockWaitMs`, `persistRetryBudgetMs` | removed | |
+| `ineligibleRetryAfter` | removed | Fixed: a `502` (`upstream_token_ineligible`, `upstream_rejected`) carries `Retry-After: 300` |
+| `refreshFailureBackoff` | removed | A failed refresh keeps the credential and is tried again on the client's next call; `rotations` per `rotation-window` bound how often the upstream is asked, and the upstream's own `Retry-After` is passed on |
+| `upstreamTimeoutMs`, `upstreamHardTimeoutMs` | `outbound.timeout` | Upstream calls go through `outbound`, whose one deadline covers resolving, connecting, the headers and the body |
+| `refreshLockTtlMs`, `lockWaitMs` | removed | Fixed: the refresh lock lives 10 seconds and a request waits up to 5, then gets `503` `lock_timeout` |
+| `persistRetryBudgetMs` | removed | Each write lands only over the grant it read; one that finds the grant changed gets `503` `grant_changed`, for the client to retry |
 | rate limiter `limits.federation_grants`, `limits.federation_grants_browser` | `requests`, `window` (per source, client routes and pages alike); `lodges`, `lodge-window` (per client) | 0.17's `federation_grants` budget counted both addresses and clients; lodgings per client default 60 per `1m` |
 | `connections.<name>` | `connections.<name>` | Names are now `a-z`, `0-9` and `-`, at most 32, starting with a letter or digit; the callback path follows the name |
 | `connections.<name>.federation` | `connections.<name>.idp` | Names a `federation.idps` entry whose IdP offers delegation |
