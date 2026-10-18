@@ -43,6 +43,8 @@ const setUp = (part: IdentityPart, _: unknown, modules: readonly string[]): NewP
 		...(part.ledger ? ["@mod/outbound", "@mod/users-http"] : []),
 	],
 	store: "volatile",
+	// A scene's own ledger is the whole users-http section: no trial value joins it.
+	...(part.ledger ? { whole: ["users-http"] } : {}),
 	// Mail, where users brings it along, sends nothing in a scene.
 	...(modules.includes("@mod/mail") ? { fallback: { mail: { "accept-unsent": true } } } : {}),
 	config: {

@@ -32,6 +32,24 @@ describe("the scene's users on an app taking users from a ledger", () => {
 		);
 	});
 
+	it("are looked up by subject at the ledger, none for a subject it does not hold", async () => {
+		const ledger = await ledgerParty([alice]);
+		const section = ledger.config["users-http"] ?? {};
+		const lookup = (subject: string) =>
+			fetch(String(section["subject-url"]), {
+				method: "POST",
+				headers: { authorization: `Bearer ${section.credential}` },
+				body: JSON.stringify({ subject }),
+			});
+		try {
+			expect(section["subject-url"]).toBe(`${ledger.base}/subject`);
+			expect(await (await lookup("u-1")).json()).toMatchObject({ id: "u-1", username: "alice" });
+			expect((await lookup("u-2")).status).toBe(404);
+		} finally {
+			await ledger.stop();
+		}
+	});
+
 	it("are answered by the ledger for the right password and its credential alone", async () => {
 		const ledger = await ledgerParty([alice]);
 		const section = ledger.config["users-http"] ?? {};
