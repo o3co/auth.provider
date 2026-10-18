@@ -102,7 +102,7 @@ describe("the client routes", () => {
 		await h.revoke("alice");
 		expect((await h.grantCall(after.id, "token")).status).toBe(410);
 
-		const none = await harness({ settings: { "revocation-skew-seconds": 0 } });
+		const none = await harness({ settings: { "revocation-skew": "0s" } });
 		await none.revoke("alice");
 		none.advance(1000);
 		const made = await none.connected();

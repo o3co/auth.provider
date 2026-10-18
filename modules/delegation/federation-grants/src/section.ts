@@ -1,3 +1,4 @@
+import { setting } from "@mod/kernel";
 import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
 
@@ -9,6 +10,10 @@ export const connectionName = z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/);
 const scope = z.string().regex(/^[\x21\x23-\x5b\x5d-\x7e]+$/);
 const page = urlSetting({ schemes: ["https"] });
 
+/** A time read in whole seconds, written with its unit, within its bounds. */
+const seconds = (min: number, max: number) =>
+	setting.duration("s").pipe(z.number().int().min(min).max(max));
+
 /** One connection: what a grant may be for. */
 const connection = z.strictObject({
 	/** The IdP, by `federation`'s name, whose delegation it uses. */
@@ -19,10 +24,11 @@ const connection = z.strictObject({
 		.min(1)
 		.refine((all) => all.includes("openid"), "scopes must hold openid"),
 	resource: z.url().optional(),
-	/** The longest an upstream access token may live to be kept. */
-	"max-access-token-seconds": z.number().int().min(1).max(86_400),
+	"max-access-token-lifetime": seconds(1, 86_400).describe(
+		"The longest an upstream access token may live to be kept: a duration with a unit, from 1s to 1d, e.g. 1h.",
+	),
 	/** A client may ask for fewer of the scopes. */
-	"scope-subsets": z.boolean().default(false),
+	"scope-subsets": z.boolean().prefault(false),
 });
 
 export const section = z.strictObject({
@@ -32,29 +38,57 @@ export const section = z.strictObject({
 	"login-page": page.optional(),
 	/** Where a session that falls short of a requirement is sent once to raise it, then back. */
 	"step-up-page": page.optional(),
-	connections: z.record(connectionName, connection).default({}),
-	/** A grant's lifetime from its activation: what a client asks for none, and the most it may. */
-	"default-seconds": z.number().int().min(60).max(31_536_000).default(2_592_000),
-	"max-seconds": z.number().int().min(60).max(31_536_000).default(2_592_000),
-	/** How long a connection may take, from the intent to the callback. */
-	"connect-seconds": z.number().int().min(60).max(3600).default(600),
-	/** A token this close to its end is refreshed, once half its life is spent. */
-	"refresh-before-seconds": z.number().int().min(0).max(3600).default(30),
+	connections: z.record(connectionName, connection).prefault({}),
+	"default-lifetime": seconds(60, 31_536_000)
+		.prefault("30d")
+		.describe(
+			"A grant's lifetime from its activation when a client asks for none: a duration with a unit, from 1m to 365d, e.g. 30d.",
+		),
+	"max-lifetime": seconds(60, 31_536_000)
+		.prefault("30d")
+		.describe(
+			"The most a grant may live from its activation: a duration with a unit, from 1m to 365d, e.g. 90d.",
+		),
+	"connect-lifetime": seconds(60, 3600)
+		.prefault("10m")
+		.describe(
+			"How long a connection may take, from the intent to the callback: a duration with a unit, from 1m to 1h, e.g. 10m.",
+		),
+	"refresh-before": seconds(0, 3600)
+		.prefault("30s")
+		.describe(
+			"A token this close to its end is refreshed, once half its life is spent: a duration with a unit, from 0s to 1h, e.g. 30s.",
+		),
 	/** Upstream refreshes a grant may take in each window. */
-	rotations: z.number().int().min(1).max(1000).default(24),
-	"rotation-window-seconds": z.number().int().min(1).max(86_400).default(3600),
+	rotations: z.number().int().min(1).max(1000).prefault(24),
+	"rotation-window": seconds(1, 86_400)
+		.prefault("1h")
+		.describe(
+			"The window a grant's upstream refreshes are counted in: a duration with a unit, from 1s to 1d, e.g. 1h.",
+		),
 	/** Intents a client may lodge in each window, whatever subject it names. */
-	lodges: z.number().int().min(1).max(100_000).default(60),
-	"lodge-window-seconds": z.number().int().min(1).max(86_400).default(60),
-	/** How far apart hosts' clocks may be: a grant made this soon after its subject's revocation counts as revoked. */
-	"revocation-skew-seconds": z.number().int().min(0).max(300).default(1),
+	lodges: z.number().int().min(1).max(100_000).prefault(60),
+	"lodge-window": seconds(1, 86_400)
+		.prefault("1m")
+		.describe(
+			"The window a client's lodged intents are counted in: a duration with a unit, from 1s to 1d, e.g. 1m.",
+		),
+	"revocation-skew": seconds(0, 300)
+		.prefault("1s")
+		.describe(
+			"How far apart hosts' clocks may be: a grant made this soon after its subject's revocation counts as revoked. A duration with a unit, from 0s to 5m, e.g. 1s.",
+		),
 	/** A subject's revocation may be asked to leave its established grants. */
-	"keep-on-subject-revocation": z.boolean().default(false),
+	"keep-on-subject-revocation": z.boolean().prefault(false),
 	/** Whether a callback refuses an upstream account another user holds. */
-	"identity-check": z.enum(["required", "none"]).default("required"),
+	"identity-check": z.enum(["required", "none"]).prefault("required"),
 	/** Requests allowed per source in each window, on every route. */
-	requests: z.number().int().min(1).max(1000).default(60),
-	"window-seconds": z.number().int().min(1).max(3600).default(60),
+	requests: z.number().int().min(1).max(1000).prefault(60),
+	window: seconds(1, 3600)
+		.prefault("1m")
+		.describe(
+			"The window a source's requests are counted in, on every route: a duration with a unit, from 1s to 1h, e.g. 1m.",
+		),
 });
 
 export type Settings = z.output<typeof section>;

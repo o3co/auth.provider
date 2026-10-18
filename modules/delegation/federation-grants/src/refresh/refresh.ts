@@ -244,7 +244,7 @@ export const refreshOver = async (c: BuildContext<Settings>, records: Records) =
 		clock: c.clock,
 		random: c.random,
 		log: c.log,
-		refreshBeforeMs: c.section["refresh-before-seconds"] * 1000,
+		refreshBeforeMs: c.section["refresh-before"] * 1000,
 		rotations: c.section.rotations,
-		rotationWindowMs: c.section["rotation-window-seconds"] * 1000,
+		rotationWindowMs: c.section["rotation-window"] * 1000,
 	});

@@ -31,7 +31,7 @@ describe("the callback of a renewal", () => {
 	});
 
 	it("renews a grant clearing its reason and rotations, audited as a renewal", async () => {
-		const h = await harness({ settings: { rotations: 1, "rotation-window-seconds": 3600 } });
+		const h = await harness({ settings: { rotations: 1, "rotation-window": "1h" } });
 		const { id } = await h.connected({ expiresInSeconds: 4 });
 		h.advance(2100);
 		h.script.refreshes.push({

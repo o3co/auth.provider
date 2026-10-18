@@ -453,7 +453,7 @@ export function connectWith(p: ConnectParts) {
 		const now = p.clock.now();
 		const read = credentialsFrom(login.tokens, {
 			now,
-			maxAccessMs: connection["max-access-token-seconds"] * 1000,
+			maxAccessMs: connection["max-access-token-lifetime"] * 1000,
 			shown: intent.scopes,
 		});
 		if (read.kind === "refused") return fail(request, grant, intent, read.why);
