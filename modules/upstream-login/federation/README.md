@@ -13,6 +13,7 @@
 ## Offers
 - Composition definition: `GET /session/oauth/federation/<idp>` (start: `redirect_to`, `prompt` (only `login` is passed on), `max_age`, `link` (`1` or `true` links; any other value is a login)) and `…/<idp>/callback` (`code`, `state`, `iss`, `error`; by POST for an IdP that answers in a posted form, else GET; the other method is 405); starts and callbacks are limited per source
 - Provides `upstreams`, as its default adapter.
+- Declares to `users` (`upstreamNames`) each IdP's name with the issuer its upstream says.
 - The operator section (its keys in the settings list).
 - Store interface for transactions, its needs (survives failover) and contract test; test configuration builders and an IdP type for tests (`./testing`)
 - Audit events for a callback that took its transaction, with `idp` and the source `request-source` determined: `federation.login.succeeded`, or `federation.login.held` when a gate held it, with the local subject; `federation.login.failed` with `reason` (`upstream_refused`, `exchange_failed`, `login_required`, `unknown_user`)
@@ -23,7 +24,6 @@
 
 ## Invariants
 - A login's state, nonce and PKCE verifier (S256) are kept server-side in its transaction for `transaction-lifetime`. Only a callback at the same IdP carrying its state takes it, once, before the code is exchanged; a callback from elsewhere spends nothing.
-- The transaction is kept under a random cookie named per IdP. The cookie, state, nonce and PKCE verifier are 256 random bits each.
 - The start refuses a return target `login-gates` does not allow (`invalid_redirect`) and a `max_age` that is not 1 to 9 digits. A repeated parameter is refused after the path and method.
 - A start finding a transaction under its cookie is unavailable.
 - The state is compared in constant time. No cookie, no state, or no transaction to take is `invalid_state`. From the take on, every answer clears the cookie, unavailable included.

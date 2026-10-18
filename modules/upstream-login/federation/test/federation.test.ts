@@ -27,6 +27,7 @@ import {
 	upstreamLoginReceivers,
 	upstreams,
 } from "@mod/upstreams";
+import { upstreamNames } from "@mod/users";
 import usersModule from "@mod/users/module";
 import { memoryUsersStores, testUser, usersConfig } from "@mod/users/testing";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it } from "vitest";
@@ -746,6 +747,24 @@ describe("federation", () => {
 		await s.begin();
 		await s.begin();
 		expect((await s.begin()).status).toBe(429);
+	});
+
+	it("names each IdP to users with its upstream's issuer, so another route naming it for another issuer refuses boot", async () => {
+		const naming = (issuer: string) =>
+			defineModule({ name: "elsewhere" }, (m) => [
+				m.contribute(upstreamNames).by(() => ({
+					declaredBy: "elsewhere",
+					names: [{ name: "corp", issuer }],
+				})),
+			]);
+		const idps = { corp: { type: "test", issuer: "https://idp.example" } };
+		const refused = await serve({ federation: { idps }, extra: [naming("https://other.example")] })
+			.then(() => [])
+			.catch((error: BootRefused) => error.refusals.map((r) => r.reason));
+		expect(refused).toEqual([expect.stringContaining("https://idp.example (by federation)")]);
+		await expect(
+			serve({ federation: { idps }, extra: [naming("https://idp.example")] }),
+		).resolves.toBeDefined();
 	});
 
 	it("refuses to boot on an unknown type, bad settings, an upstream that does not match, or no public origin", async () => {

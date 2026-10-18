@@ -38,6 +38,15 @@ const upstreamsWith = (idps: ReadonlyMap<string, Idp>) => ({
 export const upstreamsIn = async (c: BuildContext<Settings>) =>
 	upstreamsWith(await c.get(federationIdps));
 
+/** Each IdP's name to `users`, with the issuer its upstream says: the names its lookups take. */
+export const upstreamNamesIn = async (c: BuildContext<Settings>) => ({
+	declaredBy: "federation",
+	names: [...(await c.get(federationIdps))].map(([name, idp]) => ({
+		name,
+		issuer: idp.upstream.issuer,
+	})),
+});
+
 /** login-gates' amr source: what a federation login proves, and what the IdPs' amr maps to. */
 const amrSourceWith = (settings: Settings["idps"]) => ({
 	name: "federation",
