@@ -10,12 +10,13 @@ Internal module of `upstream-client`: reading an upstream's OpenID Connect id_to
 - Checking the JWT's signature and times (`external-jwt`). Which issuer, key set, algorithms and `email_verified` values a type takes (the type). What the login is used for (`federation`).
 
 ## Offers
-- `idTokenReaderOf` (`external-jwt`, the type's rules, a clock) → a reader: (id_token, the login's nonce) → the login and the checked claims. `IdTokenRules`, `IdTokenLogin`.
+- `idTokenReaderOf` (`external-jwt`, the type's rules, a clock) → a reader: (id_token, the login's nonce, the access token answered beside it if any) → the login and the checked claims. `IdTokenRules`, `IdTokenLogin`.
 
 ## Invariants
 - An id_token is checked by `external-jwt` with the type's key set, algorithms and allowance, expecting its issuer and the client among the audiences. A reason it gives refuses; no key set is unavailable.
 - It must also carry a non-empty `sub`, a numeric `iat`, and the login's nonce. With several audiences, `azp` is the client; with one, a given `azp` is the client too, unless the type takes cross-client identity.
 - Its `auth_time`, where given, is a number from 0, and is no later than the clock plus the allowance.
+- Given the access token, an `at_hash` it gives is the left half of that token's digest by the signature's algorithm (SHA-2 by size; SHA-512 for Ed25519, SHAKE256 for Ed448; `EdDSA`, whose key's curve is not known here, takes a half of either); one that is not, or not text, refuses. Without one, the id_token is read as before.
 - The profile is `email`, `name` and `picture` where they are text; the email is verified only by an `email_verified` value the type names.
 - Every refusal is `UpstreamRefused`; unavailable names the type's `what`.
 
