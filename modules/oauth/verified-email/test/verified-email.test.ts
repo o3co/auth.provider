@@ -35,7 +35,6 @@ const refused = {
 /** An answer users vouches for. */
 const known = (attributes: Record<string, unknown>): AttributesAnswer => ({
 	kind: "known",
-	source: "users",
 	vouched: true,
 	attributes,
 });
@@ -77,13 +76,14 @@ describe("what counts as verified", () => {
 		expect(await t.admits(asked("authorization_code", "h1"))).toEqual(refused);
 	});
 
-	it.each(["session:federation:acme", "users"] as const)(
-		"refuses a word users does not vouch for, under %s, that the email is verified",
-		async (source) => {
-			const t = await over(async () => ({ kind: "known", source, attributes: verified(true) }));
-			expect(await t.admits(asked("authorization_code", "h1"))).toEqual(refused);
-		},
-	);
+	it("refuses a word users does not vouch for that the email is verified", async () => {
+		const t = await over(async () => ({
+			kind: "known",
+			vouched: false,
+			attributes: verified(true),
+		}));
+		expect(await t.admits(asked("authorization_code", "h1"))).toEqual(refused);
+	});
 
 	it("refuses a subject nobody can answer for", async () => {
 		const t = await over(async () => ({ kind: "unknown" }));

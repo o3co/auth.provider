@@ -24,7 +24,7 @@ export default defineModule({ name: "verified-email" }, (m) => [
 				// Only users' word: an upstream verified an address that need not be this user's.
 				const stated =
 					found.kind === "known" &&
-					found.vouched === true &&
+					found.vouched &&
 					found.attributes[userAttribute.emailVerified] === true;
 				return stated ? allowed : unverified;
 			},
