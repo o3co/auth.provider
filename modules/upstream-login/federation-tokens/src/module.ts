@@ -37,9 +37,9 @@ export default defineModule({ name, section }, (m) => [
 			clock: c.clock,
 			random: c.random,
 			log: c.log,
-			refreshBeforeMs: c.section["refresh-before-seconds"] * 1000,
-			maxLifetimeMs: c.section["max-lifetime-seconds"] * 1000,
-			lockMs: c.section["lock-seconds"] * 1000,
+			refreshBeforeMs: c.section["refresh-before"] * 1000,
+			maxLifetimeMs: c.section["max-lifetime"] * 1000,
+			lockMs: c.section["lock-lifetime"] * 1000,
 		});
 	}),
 	m.contribute(upstreamLoginReceivers).by(async (c) => {
@@ -73,7 +73,7 @@ export default defineModule({ name, section }, (m) => [
 			audit: await c.get(audit),
 			log: c.log,
 		};
-		const window = { limit: c.section.requests, ms: c.section["window-seconds"] * 1000 };
+		const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 		return {
 			method: "POST",
 			path: `${base}/*`,

@@ -29,7 +29,7 @@ describe("the routes as composed", () => {
 	});
 
 	it("limits requests per source to the section's count in each window", async () => {
-		const s = await served({ settings: { requests: 2, "window-seconds": 60 } });
+		const s = await served({ settings: { requests: 2, window: "1m" } });
 		expect([await s.send("POST"), await s.send("POST"), await s.send("POST")]).toEqual([
 			200, 200, 429,
 		]);
