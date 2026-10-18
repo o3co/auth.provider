@@ -218,6 +218,16 @@ describe("the client routes", () => {
 		]);
 	});
 
+	it("audits a refused revoke by the client, with why, before the grant is found", async () => {
+		const h = await harness();
+		const { id } = await h.connected();
+		expect((await h.grantCall("nope", "revoke")).status).toBe(404);
+		expect((await h.grantCall(id, "revoke", { sub: "" })).status).toBe(400);
+		const denied = h.events.filter((e) => e.kind === "federation.grant.revoke.denied");
+		expect(denied.map((e) => e.attributes?.reason)).toEqual(["grant_not_found", "sub_required"]);
+		expect(denied.every((e) => e.subject === undefined)).toBe(true);
+	});
+
 	it("answers an allowed client when a grant's token was last handed out, never moving it back, nor failing for it", async () => {
 		const h = await harness();
 		const { id } = await h.connected();
@@ -241,10 +251,12 @@ describe("the client routes", () => {
 		expect((await h.grantCall(id, "status")).json).not.toHaveProperty("last_used_at");
 	});
 
-	it("answers 503 when the store cannot tell", async () => {
+	it("answers 503 when the store cannot tell, naming no cause, as for any cause", async () => {
 		const h = await harness();
 		const { id } = await h.connected();
 		h.stores.down.failNext("read");
-		expect(said(await h.grantCall(id, "token"))).toBe("503 temporarily_unavailable storage");
+		const answer = await h.grantCall(id, "token");
+		expect([answer.status, answer.json?.error]).toEqual([503, "temporarily_unavailable"]);
+		expect(answer.json).not.toHaveProperty("error_description");
 	});
 });

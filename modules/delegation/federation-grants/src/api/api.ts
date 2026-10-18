@@ -488,8 +488,8 @@ export function apiWith(p: ApiParts) {
 		readonly numbers?: readonly string[];
 		/** Whether its subject's boundary is judged first; a revocation is answered whatever the state. */
 		readonly judged: boolean;
-		/** Whether each refusal is audited, as a token refusal. */
-		readonly audited: boolean;
+		/** The event each refusal is audited as, if any. */
+		readonly denied?: "federation.grant.token.denied" | "federation.grant.revoke.denied";
 		readonly handle: (
 			request: HttpRequest,
 			client: Client,
@@ -505,7 +505,6 @@ export function apiWith(p: ApiParts) {
 				texts: ["sub", "connection", "redirect_uri", "state", "scope", "upstream_sub"],
 				numbers: ["expires_in"],
 				judged: true,
-				audited: false,
 				handle: reauthorize,
 			},
 		],
@@ -515,24 +514,24 @@ export function apiWith(p: ApiParts) {
 				texts: ["sub", "scope", "connection", "resource"],
 				numbers: ["min_ttl"],
 				judged: true,
-				audited: true,
+				denied: "federation.grant.token.denied",
 				handle: token,
 			},
 		],
+		["status", { texts: ["sub"], judged: true, handle: (_r, c, grant) => status(c, grant) }],
 		[
-			"status",
-			{ texts: ["sub"], judged: true, audited: false, handle: (_r, c, grant) => status(c, grant) },
+			"revoke",
+			{ texts: ["sub"], judged: false, denied: "federation.grant.revoke.denied", handle: revoke },
 		],
-		["revoke", { texts: ["sub"], judged: false, audited: false, handle: revoke }],
 	]);
 	const byId = async (request: HttpRequest, client: Client, id: string, step: string) => {
 		const route = byIdRoutes.get(step);
 		if (!route) return error(404, "not_found");
 		// Before the grant's owner is known, a refusal is audited by the client only.
 		const early = (why: string, refusal: HttpResponse) => {
-			if (route.audited) {
+			if (route.denied) {
 				const attributes = { client: client.id, reason: why };
-				record("federation.grant.token.denied", undefined, attributes, request);
+				record(route.denied, undefined, attributes, request);
 			}
 			return refusal;
 		};
@@ -575,7 +574,7 @@ export function apiWith(p: ApiParts) {
 			if (id === "" || rest.length > 0) return error(404, "not_found");
 			return await byId(request, client, id, step);
 		} catch (thrown) {
-			if (isUnavailable(thrown)) return error(503, "temporarily_unavailable", "storage");
+			if (isUnavailable(thrown)) return error(503, "temporarily_unavailable");
 			throw thrown;
 		}
 	};

@@ -21,6 +21,10 @@ export default auditEvents({
 		attributes: ["client", "connection", "outcome", "source"],
 		when: "a connection fails, with why (`outcome`)",
 	},
+	"federation.grant.revoke.denied": {
+		attributes: ["client", "reason", "source"],
+		when: "a client's revoke is refused before the grant is found, with why (`reason`), by the client only",
+	},
 	"federation.grant.token.success": {
 		attributes: ["client", "connection", "refreshed", "source"],
 		when: "a client is handed a grant's upstream token, refreshed first or not (`refreshed`)",
