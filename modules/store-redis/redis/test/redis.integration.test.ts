@@ -541,12 +541,64 @@ describe("settings the server will not show", () => {
 		]);
 	});
 
-	it("takes durability none in place of append-only settings", async () => {
-		const app = await boot({
-			durability: "none",
-			"server-settings": { "maxmemory-policy": "noeviction" },
-		});
+	it("takes durability none in place of append-only settings, warning on each boot of the spaces it leaves undurable", async () => {
+		const recorded = recordingLog();
+		const app = await boot(
+			{ durability: "none", "server-settings": { "maxmemory-policy": "noeviction" } },
+			blockedUrl,
+			recorded,
+		);
 		stops.push(() => app.stop(1000));
+		const warned = recorded.lines().filter((line) => line.event === "redis.durability_none");
+		expect(warned.map((line) => line.fields.spaces)).toEqual(["kept"]);
+	});
+
+	/** A relay to the primary that answers every CONFIG command with `error`, relaying the rest. */
+	const refusingConfig = async (error: string) => {
+		const port = await freePort();
+		const server = createServer((client) => {
+			const upstream = createConnection(Number(new URL(url).port), "127.0.0.1");
+			client.on("data", (chunk) => {
+				if (/\$6\r\nconfig\r\n/i.test(chunk.toString())) client.write(`-${error}\r\n`);
+				else upstream.write(chunk);
+			});
+			upstream.on("data", (chunk) => client.write(chunk));
+			const close = () => {
+				client.destroy();
+				upstream.destroy();
+			};
+			for (const end of [client, upstream]) end.on("error", close).on("close", close);
+		});
+		await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", () => resolve()));
+		stops.push(async () => {
+			server.close();
+		});
+		return `redis://127.0.0.1:${port}`;
+	};
+	const declaredAll = {
+		"server-settings": {
+			"maxmemory-policy": "noeviction",
+			appendonly: "yes",
+			appendfsync: "always",
+		},
+	};
+
+	it("takes the declaration only where the server refuses CONFIG for want of permission or the command", async () => {
+		for (const error of [
+			"NOPERM User default has no permissions to run the 'config|get' command",
+			"ERR unknown subcommand 'GET'. Try CONFIG HELP.",
+		]) {
+			const app = await boot(declaredAll, await refusingConfig(error));
+			stops.push(() => app.stop(1000));
+		}
+	});
+
+	it("refuses boot, never taking the declaration, where CONFIG fails for a passing reason", async () => {
+		const busy =
+			"BUSY Redis is busy running a script. You can only call SCRIPT KILL or SHUTDOWN NOSCRIPT.";
+		expect(await refusedFor(declaredAll, await refusingConfig(busy))).toContain(
+			"cannot check its configuration",
+		);
 	});
 
 	it("refuses a declared setting that differs from what a server answering CONFIG GET holds", async () => {
