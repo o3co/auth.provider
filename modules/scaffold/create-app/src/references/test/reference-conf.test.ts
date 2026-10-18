@@ -88,7 +88,6 @@ const unitsLater = new Set<string>();
 const prefaultLater = new Set([
 	"code-grant-store",
 	"federation-grants-store",
-	"rate-limit",
 	"refresh-store",
 	"rp-logout-store",
 	"session-store",

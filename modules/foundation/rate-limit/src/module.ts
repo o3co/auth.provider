@@ -32,7 +32,7 @@ function counter(saved: Store, space: Space, now: () => number): RateLimit {
 const section = z.strictObject({
 	"fail-mode": z
 		.enum(["open", "closed"])
-		.default("closed")
+		.prefault("closed")
 		.describe(
 			"What a route's request limit does when the store cannot count: `closed` answers 503, `open` lets the request through.",
 		),
