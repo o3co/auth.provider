@@ -19,8 +19,8 @@
 - `mfa.challenge.sent` (`kind`): a factor's or a binding proof's challenge sent; a login held or a step-up begun records nothing.
 - With the judged `factor` (a binding proof's name as `kind`): `mfa.verified` once the transaction is taken, `mfa.verify.failure` (`reason`), `mfa.locked` (`hold`), and `mfa.locked.first` (`hold`) with the wrong guess that starts a hold.
 - `mfa.email_address_mismatch` (`kind`) when a kind refuses a factor whose contact changed. `mfa.lock.recovered` when a release clears something (fields in `release`'s card).
-- Operator section: `transaction-seconds` (60–1800, default 600), `attempts-per-transaction` (2–10, default 5), `requests` (POSTs per source in each window, over every route, 1–100000, default 60), `window-seconds` (1–86400, default 300).
-- `lockout` in the section holds the lockout numbers (`budget` 10 by default, `budget-window-seconds` 7 days); `rate-limit` judges their shape, refusing boot when it does not fit.
+- Operator section: `transaction-lifetime` (1m–30m, default `10m`), `attempts-per-transaction` (2–10, default 5), `requests` (POSTs per source in each window, over every route, 1–100000, default 60), `window` (1s–1d, default `5m`).
+- `lockout` in the section holds the lockout numbers (`budget` 10 by default, `budget-window` `7d`); `rate-limit` judges their shape, refusing boot when it does not fit.
 - Store interface for transactions by their unguessable identifier, never kept in clear: save for a lifetime, read, change from what it holds (the lifetime stays). Contents are not shown to it. Its needs: never evicted, survives a crash, never back after a failover.
 - `./testing`: test configuration builders, and the store interface's contract test for every implementation (see `transactions`' card).
 
@@ -38,7 +38,7 @@
 - The management routes and enrollment from a session enter the session at the credential-changing level (`mfa` contributes the requirement).
 
 ## Data
-- Transactions: one per identifier (256 random bits), kept for `transaction-seconds`. Its needs say what the place must keep it through (a taken one coming back could finish a login twice); the wiring side meets them.
+- Transactions: one per identifier (256 random bits), kept for `transaction-lifetime`. Its needs say what the place must keep it through (a taken one coming back could finish a login twice); the wiring side meets them.
 
 ## Depends on
 - `kernel`, `http`, `cookies`, `request-source`, `csrf`, `session`, `login-gates`, `subject-revocation`, `rate-limit`, `audit`, `mfa` (the factor decision interface, the label's shape), `mfa-binding-proof` (the binding proof)

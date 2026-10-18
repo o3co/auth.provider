@@ -10,8 +10,8 @@ import { closingList, cookieIndex, sessionStore, subjectSessions } from "./store
 export default defineModule({ name: "session-lifecycle", section, replicaSafe: true }, (m) => [
 	m.provide(sessions).by(async (c) => {
 		const kept = await c.get(sessionStore);
-		const lifetimeMs = c.section["lifetime-seconds"] * 1000;
-		const sweepMs = c.section["sweep-seconds"] * 1000;
+		const lifetimeMs = c.section.lifetime * 1000;
+		const sweepMs = c.section["sweep-interval"] * 1000;
 		const lifecycle = lifecycleOver({
 			kept,
 			index: await c.get(cookieIndex),
@@ -26,7 +26,7 @@ export default defineModule({ name: "session-lifecycle", section, replicaSafe: t
 			log: c.log,
 			lifetimeMs,
 			sweepMs,
-			credentialsMs: c.section["credentials-seconds"] * 1000,
+			credentialsMs: c.section["credentials-within"] * 1000,
 		});
 		c.every(sweepMs, lifecycle.sweep);
 		const enteredAt = async (handle: string) => {

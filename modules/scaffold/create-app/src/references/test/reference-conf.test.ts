@@ -83,28 +83,17 @@ it("tells a key that reads time or size with its unit asked for from one that ta
 });
 
 /** Sections whose time and size keys still name their unit or take a bare number; a section leaves once its owner moves it, and never comes back. */
-const unitsLater = new Set([
-	"code-grant",
-	"mfa-flows",
-	"session-lifecycle",
-	"token-exchange",
-	"users-http",
-	"webauthn",
-	"webauthn-login",
-]);
+const unitsLater = new Set(["code-grant", "token-exchange", "users-http", "webauthn"]);
 /** Sections whose schema still gives a default by `.default()`; a section leaves once its owner moves it, and never comes back. */
 const prefaultLater = new Set([
 	"code-grant-store",
 	"federation-grants-store",
-	"mfa-flows",
 	"rate-limit",
 	"refresh-store",
 	"rp-logout-store",
-	"session-lifecycle",
 	"session-store",
 	"session-tokens-store",
 	"store",
-	"webauthn-login",
 ]);
 
 /** Each place a rule is broken: the key path, in its section. */

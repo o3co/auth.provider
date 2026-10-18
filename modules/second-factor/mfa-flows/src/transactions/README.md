@@ -9,7 +9,7 @@ Internal module of `mfa-flows`: transactions over the package's store interface,
 - What a request may do with a transaction, and every answer (`proof`, `enrollment`). The store's implementation (the wiring side).
 
 ## Offers
-- `transactionsIn` (the build context) → the operations below. It takes the package's store interface and `cookies`' contract from the assembly, and randomness, the clock and the package's `transaction-seconds` and `attempts-per-transaction` from the context.
+- `transactionsIn` (the build context) → the operations below. It takes the package's store interface and `cookies`' contract from the assembly, and randomness, the clock and the package's `transaction-lifetime` and `attempts-per-transaction` from the context.
 - `transactionsOver` (those parts, given directly) → the same operations.
 - `start`: a new transaction with every attempt, holding a pending binding or a binding proof's challenge when given → its identifier, deadline and cookie. `nextDeadline`: the deadline of one started now.
 - `find` (request, identifier) → the transaction and the time left, or none.

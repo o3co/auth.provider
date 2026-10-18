@@ -23,7 +23,7 @@ export default defineModule({ name: "webauthn-login", section, replicaSafe: true
 	m.contribute(routes).by(async (c) =>
 		optionsRoute(await c.get(passkeys), {
 			limit: c.section.requests,
-			ms: c.section["window-seconds"] * 1000,
+			ms: c.section.window * 1000,
 		}),
 	),
 ]);
