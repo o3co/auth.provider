@@ -133,6 +133,8 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 | `http.readinessTimeoutMs` | `http-ops.readiness-deadline` | |
 | `http.cors.allowedOrigins` | `http.cors-origins` | Exact https origins, as a HOCON list |
 | (from the issuer) | `http.public-origin` | Cookies are `__Host-` and `Secure` when it is https |
+| (Node's defaults: a minute for the headers, five for the request) | `http.headers-timeout` (default `10s`), `http.request-timeout` (default `30s`) | A request slower to arrive is answered `408` and its connection closed; raise them for clients on slow links |
+| (no cap) | `http.max-connections` (default 10000) | A connection past it is closed as it arrives |
 | `jwks.path`, `jwks.cacheMaxAge` | removed | Fixed at the key set's well-known path (`jwks.json` under `.well-known`), cached five minutes |
 
 ### Issuer and signing keys
@@ -189,7 +191,7 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 |---|---|---|
 | `session-store.secret`, `name`, `secure`, `sameSite`, `domain` | removed | The cookie is fixed: `session`, `__Host-` and `Secure` on https, `SameSite=Lax` |
 | `session-store.maxAge` (ms) | `session-lifecycle.lifetime` | Written with its unit |
-| (none) | `session-lifecycle.recent-authentication` | Default `5m`, `30s` to `1h`; used only where `mfa` is not composed |
+| (none) | `session-lifecycle.recent-authentication` | Default `5m`, `30s` to `1h`; the one window every recent-authentication check counts in, `mfa`'s included |
 | `core.sessionRequirements.expected`, `secondFactorAuthority` | removed | Without `mfa`, changing credentials needs a sign-in at a known time within `session-lifecycle.recent-authentication`; with `mfa`, it judges both using a session and changing credentials |
 | `session.loginPage.url` | `authorize.login-page` | Absolute https URL, required |
 | `session.rateLimit.login` | `login-password.attempts`, `window` | Written with its unit |
@@ -206,7 +208,7 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 | `mfaMode` / `mfa.mode` | `mfa.mode` (`optional` or `required`) | `required` by default, as before; for `off`, leave the MFA modules out |
 | `mfa.encryptionKeys` | `seal.current`, `seal.previous` (`id`, `key`) | The first key goes to `current`, the rest to `previous`; `id` is required |
 | `mfa.transactionTtlSeconds`, `maxAttemptsPerTransaction`, `lockout.*` | `mfa-flows.transaction-lifetime`, `attempts-per-transaction`, `lockout.*` | |
-| `mfa.manage.maxAgeSeconds`, `maxFactorsPerSubject` | `mfa.manage-within`, `mfa.max-factors` | |
+| `mfa.manage.maxAgeSeconds`, `maxFactorsPerSubject` | `session-lifecycle.recent-authentication`, `mfa.max-factors` | A second factor is recent by the session's one window |
 | `mfa-totp-factor.*`, `mfa-recovery-code-factor.*` | compose `mfa-totp`, `mfa-recovery` | Parameters are fixed (SHA-1, 6 digits, 30 s; 10 codes) |
 | `webauthn.rpId`, `rpName`, `origin`, `topOrigin` | `webauthn.rp-id`, `rp-name`, `origins`, `top-origins` | `origins` is a list |
 | `webauthn.challengeTtlMs` | `webauthn.challenge-lifetime` | Written with its unit |
@@ -304,7 +306,11 @@ Compose `federation-grants` and its store, `federation-grants-store`; there is n
 | `rotationBudget`, `rotationWindow` | `rotations`, `rotation-window` | Defaults 24 per `1h`, as before; at most 1000 per `1d` |
 | `allowKeepOnSubjectRevocation` | `keep-on-subject-revocation` | Default false |
 | `identityLookup` (`required` or `unsupported`) | `identity-check` (`required` or `none`) | `unsupported` is `none` |
-| `ineligibleRetryAfter`, `refreshFailureBackoff`, `upstreamTimeoutMs`, `upstreamHardTimeoutMs`, `refreshLockTtlMs`, `lockWaitMs`, `persistRetryBudgetMs` | removed | |
+| `ineligibleRetryAfter` | removed | Fixed: a `502` (`upstream_token_ineligible`, `upstream_rejected`) carries `Retry-After: 300` |
+| `refreshFailureBackoff` | removed | A failed refresh keeps the credential and is tried again on the client's next call; `rotations` per `rotation-window` bound how often the upstream is asked, and the upstream's own `Retry-After` is passed on |
+| `upstreamTimeoutMs`, `upstreamHardTimeoutMs` | `outbound.timeout` | Upstream calls go through `outbound`, whose one deadline covers resolving, connecting, the headers and the body |
+| `refreshLockTtlMs`, `lockWaitMs` | removed | Fixed: the refresh lock lives 10 seconds and a request waits up to 5, then gets `503` `lock_timeout` |
+| `persistRetryBudgetMs` | removed | Each write lands only over the grant it read; one that finds the grant changed gets `503` `grant_changed`, for the client to retry |
 | rate limiter `limits.federation_grants`, `limits.federation_grants_browser` | `requests`, `window` (per source, client routes and pages alike); `lodges`, `lodge-window` (per client) | 0.17's `federation_grants` budget counted both addresses and clients; lodgings per client default 60 per `1m` |
 | `connections.<name>` | `connections.<name>` | Names are now `a-z`, `0-9` and `-`, at most 32, starting with a letter or digit; the callback path follows the name |
 | `connections.<name>.federation` | `connections.<name>.idp` | Names a `federation.idps` entry whose IdP offers delegation |
@@ -471,7 +477,7 @@ Times and sizes are written with their unit (`30s`, `5m`, `64KiB`); a number wit
 | `login-password.account-window-seconds` | `login-password.account-window` | a duration, `1m` to `1d`, default `1h` |  |
 | `login-password.account-max-wait-seconds` | `login-password.account-max-wait` | a duration, `1s` to `1h`, default `5m` |  |
 | `mail-smtp.deadline-ms` | `mail-smtp.deadline` | a duration, `100ms` to `10m`, default `40s` |  |
-| `mfa.manage-seconds` | `mfa.manage-within` | a duration, `30s` to `1h`, default `5m` |  |
+| `mfa.manage-seconds` | `session-lifecycle.recent-authentication` | a duration, `30s` to `1h`, default `5m` |  |
 | `mfa-email.code-seconds` | `mfa-email.code-lifetime` | a duration, `1m` to `30m`, default `10m` |  |
 | `mfa-flows.transaction-seconds` | `mfa-flows.transaction-lifetime` | a duration, `1m` to `30m`, default `10m` |  |
 | `mfa-flows.window-seconds` | `mfa-flows.window` | a duration, `1s` to `1d`, default `5m` |  |
@@ -629,6 +635,7 @@ A ledger can also be asked for a user by subject, so a user who signs in upstrea
 - **idp-google**: `hosted-domains` is new and optional; nothing to change.
 - **Generated apps**: the command is `create-auth-provider`, and a generated README names the audit receivers of the adapters composed; an app already generated needs no change.
 - **Configuration files**: a file that does not parse, or a substitution that does not resolve, is refused at its `file:line:col`; nothing to change.
+- **Audit events**: `introspect.store_unavailable` is now `introspection.unavailable`, with the same `source`; a receiver that matches the old name needs it. Introspection answered unavailable also logs the warning `token-control.unavailable` with `route: "introspect"`, as revocation does.
 
 ## Operational notes
 
@@ -658,7 +665,7 @@ A user who signs in with a passkey can satisfy the WebAuthn second factor with a
 
 ### Changing credentials without mfa
 
-Without `mfa`, registering a passkey or linking an upstream account (`?link=1`) needs a sign-in at a known time within `session-lifecycle.recent-authentication`. With `mfa`, its rule decides.
+Without `mfa`, registering a passkey or linking an upstream account (`?link=1`) needs a sign-in at a known time within `session-lifecycle.recent-authentication`. With `mfa`, its rule decides, counting in the same window.
 
 ### Outbound requests
 

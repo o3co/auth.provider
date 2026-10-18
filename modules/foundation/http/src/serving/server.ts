@@ -34,6 +34,12 @@ export interface Serving {
 	readonly ends: readonly RequestEndObserver[];
 	readonly log: Log;
 	readonly clock: Clock;
+	/** How long a request's headers, and the whole request, may take to arrive; and the connections held at once. */
+	readonly limits: {
+		readonly headersMs: number;
+		readonly requestMs: number;
+		readonly connections: number;
+	};
 }
 
 /** The request's head; undefined when the request target is not a URL, or its query not UTF-8. */
@@ -172,7 +178,11 @@ export function serve(serving: Serving): Server {
 	const endIfDone = (socket: Socket) => {
 		if (!server.listening && !inFlight.has(socket)) socket.end();
 	};
-	const server = createServer((req, res) => {
+	const { headersMs, requestMs, connections } = serving.limits;
+	// Node checks the two times every 30 seconds by default; this checks often enough to keep them.
+	const checking = { connectionsCheckingInterval: Math.min(1000, headersMs) };
+	const timeouts = { headersTimeout: headersMs, requestTimeout: requestMs, ...checking };
+	const server = createServer(timeouts, (req, res) => {
 		// Outside the chain, so it must never throw: it reads the clock and adds listeners; observers
 		// are told later. Every other step runs inside, so a throw there is answered.
 		const told = ending(serving.ends, clock, req, res);
@@ -208,6 +218,7 @@ export function serve(serving: Serving): Server {
 				reply(bare(500));
 			});
 	});
+	server.maxConnections = connections;
 	server.on("connection", (socket: Socket) => {
 		open.add(socket);
 		socket.once("close", () => {

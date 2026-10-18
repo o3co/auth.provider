@@ -26,6 +26,7 @@ Internal module of `http`: the server that answers each request with the route i
 - A request target that is not a URL, or whose query is not well-formed UTF-8, gets `400` before any route.
 - An answer whose headers cannot be written gets `500`, with none of its own headers.
 - An answer's length is stated in bytes, so a HEAD answer carries the length its GET would.
+- A request's headers must arrive within `headers-timeout` and the whole request within `request-timeout`, else it is answered `408` and its connection closed; a connection past `max-connections` is closed as it arrives.
 - Stop refuses new connections and closes idle ones.
 - A connection is closed only after what it still has to send, so stop never cuts an answer already written; one sent as keep-alive before stop is closed once it is sent.
 - Requests in flight finish (`Connection: close`) until stop's deadline cuts them.

@@ -725,7 +725,7 @@ describe("mfa in a session", () => {
 	});
 
 	it("asks a recent proof to change factors, and keeps the last counting factor under required mode", async () => {
-		const s = await serve({ mode: "required", "manage-within": "1m" });
+		const s = await serve({ mode: "required" });
 		const { tx } = await s.heldLogin("dana");
 		const begun = await s.call("POST", "/session/mfa/enrollment", {
 			kind: "code",
@@ -748,7 +748,7 @@ describe("mfa in a session", () => {
 		expect((await rename("phone")).status).toBe(200);
 		const last = await s.call("POST", "/session/mfa/factors/remove", { factor_id: only });
 		expect([last.status, last.body.error]).toEqual([409, "mfa_last_factor"]);
-		clock.shift += 61_000;
+		clock.shift += 400_000;
 		for (const path of ["factors/rename", "factors/remove", "recovery-codes"]) {
 			const stale = await s.call("POST", `/session/mfa/${path}`, { factor_id: only, label: "x" });
 			expect([path, stale.status, stale.body.error]).toEqual([path, 403, "step_up_required"]);
