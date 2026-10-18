@@ -233,7 +233,7 @@ From `@mod/jwt-bearer`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `jwt-bearer.issuers` | list of map | `[]` |  |  | `[{"issuer":"https://issuer.example.invalid","jwks-uri":"https://issuer.example.invalid/jwks"}]` | The trusted issuers: each with its public keys (kid, alg, SPKI PEM), or its key set's URL at https on its host. |
+| `jwt-bearer.issuers` | list of map | `[]` |  |  | `[{"issuer":"https://issuer.example.invalid","jwks-uri":"https://issuer.example.invalid/jwks"}]` | The trusted issuers: each with its public keys (kid, alg, SPKI PEM), its key set's URL at https on its host, or neither, its keys then contributed at `signerKeys`. |
 | `jwt-bearer.max-assertion-lifetime` | string | `1h` |  |  |  | The longest lifetime an assertion may claim, from `1s` to `1d` in whole seconds. |
 | `jwt-bearer.clock-skew` | string | `30s` |  |  |  | How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds. |
 
