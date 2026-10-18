@@ -280,6 +280,11 @@ describe("keys", () => {
 		expect(keysSection.safeParse(keysConfig().keys).success).toBe(true);
 	});
 
+	it("holds no past keys and no next key when the operator writes only the signing key", () => {
+		const { signing } = keysConfig().keys;
+		expect(keysSection.parse({ signing })).toEqual({ signing, previous: [] });
+	});
+
 	it("signs with Ed25519 as asymmetric, and publishes its key set", async () => {
 		const ed = await boot({ signing: { kid: "e", alg: "EdDSA", "private-key": current.priv } });
 		expect(ed.app.get(keys).asymmetric()).toBe(true);

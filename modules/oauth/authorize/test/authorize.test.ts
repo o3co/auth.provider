@@ -48,6 +48,7 @@ import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
 import { type IssuanceRequest, issuancePolicies, type Tokens, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { afterEach, describe, expect, it } from "vitest";
+import { redirects } from "../src/contract.ts";
 import authorizeModule from "../src/module.ts";
 import { section } from "../src/section.ts";
 import { type ReauthStore, reauthStore, type StoredReauth } from "../src/store.ts";
@@ -446,7 +447,7 @@ it("counts a login reported within the second the re-authentication was asked, n
 });
 
 it("limits requests per source over both methods", async () => {
-	const { authorize, base } = await serve({ authorize: { requests: 2, "window-seconds": 60 } });
+	const { authorize, base } = await serve({ authorize: { requests: 2, window: "1m" } });
 	expect((await authorize(request())).status).toBe(302);
 	const posted = await fetch(`${base}/oauth/authorize`, {
 		method: "POST",
@@ -461,6 +462,40 @@ it("limits requests per source over both methods", async () => {
 	expect(posted.status).toBe(303);
 	const limited = await authorize(request());
 	expect([limited.status, JSON.parse(limited.text)]).toEqual([429, { error: "rate_limited" }]);
+});
+
+describe("authorize: the section", () => {
+	const login = { "login-page": "https://as.example/login" };
+
+	it("reads the rate limit's window as an operator writes it, with a unit", () => {
+		expect(section.parse({ ...login, window: "30m" }).window).toBe(1800);
+	});
+
+	it("refuses to start with a window that names no unit, a number or digits alone", async () => {
+		const unitless = [
+			[60, "written with its unit, such as 30s"],
+			["60", "duration must name its unit"],
+		] as const;
+		for (const [written, reason] of unitless) {
+			await expect(
+				serve({ authorize: { window: written } }),
+				String(written),
+			).rejects.toMatchObject({ refusals: [{ where: "authorize.window", reason }] });
+		}
+		expect(section.safeParse({ ...login, window: "60" }).error?.issues).toMatchObject([
+			{ path: ["window"], params: { problem: "missing-unit" } },
+		]);
+	});
+
+	it("reads a section that holds only the login page with the defaults it had", () => {
+		expect(section.parse(login)).toEqual({
+			...login,
+			"oidc-mode": "oidc-required",
+			requests: 60,
+			window: 60,
+		});
+		expect(redirects.schema["~standard"].validate({})).toEqual({ value: { "redirect-uris": [] } });
+	});
 });
 
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */

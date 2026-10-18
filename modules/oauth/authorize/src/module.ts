@@ -20,7 +20,7 @@ export default defineModule({ name: "authorize", section }, (m) => [
 	m.contribute(metadata).by(() => ({ name: "code_challenge_methods_supported", value: ["S256"] })),
 	...(["GET", "POST"] as const).map((method) =>
 		m.contribute(routes).by(async (c) => {
-			const window = { limit: c.section.requests, ms: c.section["window-seconds"] * 1000 };
+			const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 			return {
 				method,
 				path,

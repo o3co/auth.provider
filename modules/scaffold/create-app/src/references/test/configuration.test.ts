@@ -84,7 +84,6 @@ const describedLater = new Set([
 	"mfa-email",
 	"mfa-flows",
 	"mfa-webauthn",
-	"oidc",
 	"rp-logout",
 	"session",
 	"token-endpoint",

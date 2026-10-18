@@ -19,9 +19,9 @@ export async function sourceOver(c: BuildContext<Settings>): Promise<ClientSourc
 	const fetching = fetchingOver(
 		await readingOver(c),
 		{
-			cacheMs: s["cache-seconds"] * 1000,
+			cacheMs: s["cache-lifetime"] * 1000,
 			entries: s["cache-entries"],
-			refusedMs: s["refused-seconds"] * 1000,
+			refusedMs: s["refused-lifetime"] * 1000,
 			concurrent: s["max-concurrent"],
 		},
 		c.clock,

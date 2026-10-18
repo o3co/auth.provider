@@ -1,6 +1,6 @@
 import { idTokens } from "@mod/code-grant";
 import { issuer, metadata } from "@mod/issuer";
-import { defineModule } from "@mod/kernel";
+import { defineModule, setting } from "@mod/kernel";
 import { keys } from "@mod/keys";
 import { type SubjectAttributes, subjectAttributes } from "@mod/subject-attributes";
 import { userAttribute } from "@mod/users";
@@ -10,7 +10,11 @@ import { idTokenHints, type ReleasedClaims, releasedClaims } from "./contract.ts
 import { hintsOver } from "./hints.ts";
 
 const section = z.strictObject({
-	"id-token-seconds": z.number().int().min(60).max(86_400).default(3600),
+	"id-token-lifetime": setting
+		.duration("s")
+		.pipe(z.number().int().min(60).max(86_400))
+		.prefault("1h")
+		.describe("How long an ID token lasts: a duration with a unit, e.g. 1h."),
 });
 
 const nothing = Object.freeze({});
@@ -42,7 +46,7 @@ export default defineModule({ name: "oidc", section }, (m) => [
 			return c.refuse("oidc", "ID tokens need an asymmetric signing key");
 		}
 		const issuerUrl = (await c.get(issuer)).url;
-		const lifetime = c.section["id-token-seconds"];
+		const lifetime = c.section["id-token-lifetime"];
 		const released = releasedOver(await c.get(subjectAttributes));
 		return {
 			scope: openid,

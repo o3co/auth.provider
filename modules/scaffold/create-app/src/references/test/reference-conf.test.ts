@@ -84,9 +84,7 @@ it("tells a key that reads time or size with its unit asked for from one that ta
 
 /** Sections whose time and size keys still name their unit or take a bare number; a section leaves once its owner moves it, and never comes back. */
 const unitsLater = new Set([
-	"authorize",
 	"client-assertion",
-	"clients-cimd",
 	"code-grant",
 	"consent",
 	"device-grant",
@@ -101,7 +99,6 @@ const unitsLater = new Set([
 	"mfa-email",
 	"mfa-flows",
 	"mtls",
-	"oidc",
 	"outbound",
 	"passkey-registration",
 	"redis",
@@ -119,12 +116,8 @@ const unitsLater = new Set([
 ]);
 /** Sections whose schema still gives a default by `.default()`; a section leaves once its owner moves it, and never comes back. */
 const prefaultLater = new Set([
-	"acr",
 	"audit",
-	"authorize",
 	"client-assertion",
-	"clients",
-	"clients-cimd",
 	"code-grant-store",
 	"consent",
 	"device-grant",
@@ -136,18 +129,14 @@ const prefaultLater = new Set([
 	"http-ops",
 	"jwt-bearer",
 	"kernel",
-	"keys",
-	"login-gates",
 	"mail",
 	"mail-smtp",
 	"metrics-prometheus",
 	"mfa",
-	"mfa-binding-proof",
 	"mfa-email",
 	"mfa-flows",
 	"mfa-webauthn",
 	"mtls",
-	"oidc",
 	"outbound",
 	"passkey-registration",
 	"rate-limit",
@@ -166,7 +155,6 @@ const prefaultLater = new Set([
 	"token-control",
 	"token-endpoint",
 	"tokens",
-	"users",
 	"webauthn-login",
 ]);
 

@@ -18,7 +18,7 @@ export const redirects: Section<Redirects> = {
 						"an absolute URI without a fragment, userinfo, control characters, or a query named like a response parameter",
 					),
 			)
-			.default([]),
+			.prefault([]),
 	}),
 };
 export * from "./store.ts";

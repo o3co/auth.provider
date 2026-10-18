@@ -61,7 +61,7 @@ export const section = z
 			),
 		previous: z
 			.array(previous)
-			.default([])
+			.prefault([])
 			.describe("Past signing keys that still verify tokens until each one's `expires-at`."),
 	})
 	.refine(

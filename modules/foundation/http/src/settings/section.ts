@@ -4,13 +4,13 @@ import { z } from "zod";
 
 export const section = z
 	.strictObject({
-		host: z.string().default("127.0.0.1").describe("The address it listens on."),
+		host: z.string().prefault("127.0.0.1").describe("The address it listens on."),
 		port: z
 			.number()
 			.int()
 			.min(0)
 			.max(65535)
-			.default(8080)
+			.prefault(8080)
 			.describe("The port it listens on; 0 takes a free one."),
 		"trusted-proxies": sourceSettings.shape["trusted-proxies"],
 		"public-origin": z
@@ -26,13 +26,13 @@ export const section = z
 					.url({ protocol: /^https$/ })
 					.refine((s) => !s.includes("*") && new URL(s).origin === s, "an https origin"),
 			)
-			.default([])
+			.prefault([])
 			.describe(
 				"The https origins whose pages may read cross-origin routes: exact, without a pattern.",
 			),
 		"insecure-origin": z
 			.boolean()
-			.default(false)
+			.prefault(false)
 			.describe(
 				"Accepts a plain-http `public-origin`, knowing its cookies cannot be made secure: an http `public-origin` boots only with it.",
 			),
