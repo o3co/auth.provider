@@ -39,7 +39,7 @@ From `@mod/authorize`.
 | `authorize.step-up-page` | string |  |  |  |  |  |
 | `authorize.oidc-mode` | oidc-required \| dual | `oidc-required` |  |  |  |  |
 | `authorize.requests` | integer (1–100000) | `60` |  |  |  |  |
-| `authorize.window-seconds` | integer (1–86400) | `60` |  |  |  |  |
+| `authorize.window` | string | `1m` |  |  |  | The rate limit's window: a duration with a unit, e.g. 1m. |
 
 ## client-assertion
 
