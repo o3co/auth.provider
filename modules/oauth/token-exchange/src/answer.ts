@@ -25,6 +25,12 @@ const shape = z.object({
 	authenticatedAt: z.number().optional(),
 	acr: z.string().optional(),
 	issued: z.string().min(1).optional(),
+	clients: z.array(z.string().min(1)).min(1).optional(),
+	ceiling: z.literal("client").optional(),
+	holderDigest: z
+		.string()
+		.regex(/^[A-Za-z0-9_-]{43}$/)
+		.optional(),
 	kind: z.undefined().optional(),
 });
 /** An answer is invalid or a token's details, told apart by `kind` alone. */
