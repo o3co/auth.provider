@@ -104,6 +104,11 @@ export const section = z.strictObject({
 		.describe(
 			"How far apart hosts' clocks may be: a grant made this soon after its subject's revocation counts as revoked. A duration with a unit, from 0s to 5m, e.g. 1s.",
 		),
+	"sweep-interval": seconds(60, 86_400)
+		.prefault("1h")
+		.describe(
+			"How often each host walks every grant kept, erasing the credentials of one past its end or ended by its subject's revocation though no request reads it: a duration with a unit, from 1m to 1d, e.g. 1h.",
+		),
 	"keep-on-subject-revocation": z
 		.boolean()
 		.prefault(false)

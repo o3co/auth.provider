@@ -40,18 +40,15 @@ const sceneWith = (idps: readonly IdpScene[], at = origin) =>
 		idps,
 		landing,
 		returnTargets: [],
+		// Each user is linked only through an IdP the scene names: users refuses a link to any other.
 		users: [
-			{
-				identifier: "alice",
-				password: "correct horse battery",
-				upstream: { idp: "apple", subject: "000123.alice" },
-			},
-			{
-				identifier: "bob",
-				password: "correct horse battery",
-				upstream: { idp: "apple-signed", subject: "000456.bob" },
-			},
-		],
+			{ identifier: "alice", upstream: { idp: "apple", subject: "000123.alice" } },
+			{ identifier: "bob", upstream: { idp: "apple-signed", subject: "000456.bob" } },
+		].map(({ identifier, upstream }) => ({
+			identifier,
+			password: "correct horse battery",
+			...(idps.some((idp) => idp.name === upstream.idp) ? { upstream } : {}),
+		})),
 		clients: [probeClient],
 	});
 const fixed = (): IdpScene => ({

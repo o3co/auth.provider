@@ -181,6 +181,7 @@ From `@mod/federation-grants`.
 | `federation-grants.lodges` | integer (1–100000) | `60` |  |  |  | Intents a client may lodge in each lodge-window, whatever subject it names, from 1 to 100000. |
 | `federation-grants.lodge-window` | string | `1m` |  |  |  | The window a client's lodged intents are counted in: a duration with a unit, from 1s to 1d, e.g. 1m. |
 | `federation-grants.revocation-skew` | string | `1s` |  |  |  | How far apart hosts' clocks may be: a grant made this soon after its subject's revocation counts as revoked. A duration with a unit, from 0s to 5m, e.g. 1s. |
+| `federation-grants.sweep-interval` | string | `1h` |  |  |  | How often each host walks every grant kept, erasing the credentials of one past its end or ended by its subject's revocation though no request reads it: a duration with a unit, from 1m to 1d, e.g. 1h. |
 | `federation-grants.keep-on-subject-revocation` | boolean | `false` |  |  |  | Whether a subject's revocation may be asked to leave its established grants. |
 | `federation-grants.identity-check` | required \| none | `required` |  |  |  | required refuses a callback whose upstream account another user holds; none does not check. |
 | `federation-grants.requests` | integer (1–1000) | `60` |  |  |  | Requests allowed per source in each window, on every route, from 1 to 1000. |

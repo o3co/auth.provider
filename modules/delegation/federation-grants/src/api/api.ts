@@ -150,7 +150,10 @@ export function apiWith(p: ApiParts) {
 		if (!over(grant)) return grant;
 		const changed = await p.grants.change(grant.id, (stored) => {
 			const now = records.grantOf(stored);
-			return now && over(now) ? { value: records.stored(withoutCredentials(now)) } : undefined;
+			// A new version, so a refresh that read the grant before cannot write credentials back.
+			return now && over(now)
+				? { value: records.stored({ ...withoutCredentials(now), version: secret() }) }
+				: undefined;
 		});
 		return records.grantOf(changed?.after) ?? grant;
 	};
@@ -592,7 +595,7 @@ export async function apiOver(c: BuildContext<Settings>) {
 		steps: await c.get(stepStore),
 		pending: await c.get(pendingIntents),
 		lodges: await c.get(attemptLimit),
-		refresh: await refreshOver(c, parts.records),
+		refresh: await refreshOver(c, parts.records, parts.judge),
 		upstreams: await c.get(upstreams),
 		audit: await c.get(audit),
 		settings: c.section,
