@@ -76,7 +76,7 @@ export function checkScope(
 			: allowed;
 	}
 	// Left out with no default to take, the scope is decided for the client, and recorded.
-	return scope === undefined || scope === ""
+	return clientAllowance.parseScope(scope)?.length === 0
 		? recorded(allowed.error, "scope_omitted_without_default", allowed.description)
 		: refusal(allowed.error, allowed.description);
 }

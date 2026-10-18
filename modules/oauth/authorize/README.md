@@ -11,12 +11,17 @@
 ## Offers
 - Route `/oauth/authorize` (GET; a POST is a `303` to the GET with the same parameters, which reads the session)
 - Contribution of the return path `/oauth/authorize` to `login-gates`
-- Contribution to `issuer`'s metadata items: `authorization_endpoint` (on `http`'s public origin), `response_types_supported` (`code`), `code_challenge_methods_supported` (`S256`)
+- Contribution to `issuer`'s metadata items: `authorization_endpoint` (on `http`'s public origin), `response_types_supported` (`code`), `code_challenge_methods_supported` (`S256`), `response_modes_supported` (`query`), `request_uri_parameter_supported` (`false`)
 - Metadata section `authorize`: `redirect-uris` (default empty)
 - `registrable` (URI → whether a client may register it to be sent back to), for other returns a client registers
 - `redirectsAt` (client, origin → whether the origin is the scheme, host and port of one of its redirect URIs), for a URL another module frames for the client
-- Operator section: `login-page` (the login page. The return URL is added as `redirect_to`), `step-up-page` (the page that raises authentication. Optional); both https URLs by `url-setting`'s part for configured URLs, `oidc-mode` (`oidc-required` or `dual`), `requests` (requests per source in each window, over both methods), `window`
-- Audit events (to `audit`): `authorize.granted` when a code is given (the subject; `client`, `response_type` `code`), `authorize.rejected` on a refusal decided for the client or its consent (no subject; `client`, `reason`: `grant_type_not_allowed`, `scope_omitted_without_default`, `client_not_first_party`, `consent_required` or an issuance policy's reason, with `policy` its name). `source` only when `request-source` determined it. Never the code, `state`, the redirect URI or the scope. Nothing for a malformed request, an unknown client or redirect URI, or unavailable (logged as a warning naming only what and the route)
+- Operator section: `login-page` (the login page. The return URL is added as `redirect_to`), `step-up-page` (the page that raises authentication. Optional); both https URLs (http only on a loopback host) by `url-setting`'s part for configured URLs, `oidc-mode` (`oidc-required` or `dual`), `requests` (requests per source in each window, over both methods), `window`
+- Audit events (to `audit`):
+  - `authorize.granted` when a code is given (the subject; `client`, `response_type` `code`).
+  - `authorize.rejected` on a refusal decided for the client or its consent (no subject; `client`, `reason`: `grant_type_not_allowed`, `scope_omitted_without_default`, `client_not_first_party`, `consent_required` or an issuance policy's reason, with `policy` its name).
+  - `source` only when `request-source` determined it.
+  - Never the code, `state`, the redirect URI or the scope.
+  - Nothing for a malformed request, an unknown client or redirect URI, or unavailable (logged as a warning naming only what and the route).
 - Test configuration builders (`./testing`)
 - Store interface (the assembly wires the implementation): re-authentications (per name, an unguessable value the place never keeps in clear; put / rewrite from the current contents). Record contents are not shown to the store. Requirements: survives a crash, never rolled back by failover, names that derive from the unguessable value
 - Contract test of the store interface (`./testing`), for every implementation
@@ -31,11 +36,7 @@
 - A client that is not first-party, once logged in, is refused with `unauthorized_client` while `consent` is not `asking`. Next, before consent, `tokens`' issuance policies are asked for the code's access token (`authorization_code`, the session); a refusal is `access_denied` with the policy's description.
 - A first-party client (by `consent`) is never asked for consent. Any other is asked when `consent`'s records do not cover the scope, or with `prompt=consent`; a denial comes back as `access_denied`.
 - Until the client and redirect URI are confirmed, errors are JSON with no redirect (unavailable: `503`). After that every answer, errors and unavailable included, is a redirect to the redirect URI carrying `state` (when given once and not too long) and `iss`.
-- A fresh login that `prompt=login` or `max_age` demands counts only through a re-authentication record, never values in the URL: made for the whole request when the browser is sent to log in, taken once by that request, gone after 10 minutes. A session whose authentication time `session` answers as unknown meets neither, nor an essential `auth_time`, so a login is asked again.
 - Back from its login (its record taken) with the authentication time still unknown, a request is refused with `login_required`.
-
-## Data
-- Re-authentication record, per unguessable name, through its store interface: the time a login counts from, a hash of the request, whether it is the step-up round trip, and whether it was taken. Checked on every read; eviction only means logging in again.
 
 ## Depends on
 - `kernel`, `http`, `request-source`, `url-setting`, `clients`, `session`, `consent`, `code-grant`, `issuer`, `grants` (the audience rule), `token-endpoint` (error answers), `client-allowance`, `tokens`, `login-gates`, `acr`, `rate-limit`, `audit`
