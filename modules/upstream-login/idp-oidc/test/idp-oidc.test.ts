@@ -1014,8 +1014,10 @@ describe("idp-oidc", () => {
 		);
 		const base = { issuer, "client-id": "client", "client-secret": "s" };
 		expect(oidc.settings.safeParse({ ...base, algorithms: ["HS256"] }).success).toBe(false);
-		const at = { name: "corp", idp: "corp", redirectUri: "https://as.example/cb" };
-		await oidc.open(oidc.settings.parse(base), at);
+		await oidc.open(oidc.settings.parse(base), {
+			idp: "corp",
+			redirectUri: "https://as.example/cb",
+		});
 		expect(
 			recorded
 				.lines()
