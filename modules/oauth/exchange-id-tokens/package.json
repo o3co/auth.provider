@@ -6,6 +6,7 @@
 	"kind": "feature",
 	"optIn": true,
 	"exports": {
+		".": "./src/contract.ts",
 		"./module": "./src/module.ts",
 		"./testing": "./src/testing.ts"
 	},
@@ -18,6 +19,7 @@
 		"@mod/token-exchange": "workspace:*",
 		"@mod/users": "workspace:*",
 		"jose": "6.2.12",
+		"vitest": "5.0.4",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
