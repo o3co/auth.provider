@@ -17,25 +17,27 @@ function aLabelHolds(label: string): boolean {
 }
 
 /**
- * A domain read one way: its IDNA ASCII form is LDH with every A-label holding, and it is that form
- * or its Unicode form, case aside. IDNA drops what follows `/`, `?` or `#` and maps full-width
- * letters, so sending the ASCII form would otherwise reach a domain other than the one checked.
+ * A domain read one way: its IDNA ASCII form is LDH of at most 253 octets, 63 a label, every A-label
+ * holding, and it is that form or its Unicode form, case aside. IDNA drops what follows `/`, `?` or
+ * `#` and maps full-width letters, so sending the ASCII form would otherwise reach another domain.
  */
 function readsAsItself(domain: string): boolean {
 	const ascii = domainToASCII(domain);
 	const own = domain.toLowerCase();
-	if (!ldh.test(ascii) || !ascii.split(".").every(aLabelHolds)) return false;
+	if (ascii.length > 253 || !ldh.test(ascii)) return false;
+	if (!ascii.split(".").every((label) => label.length <= 63 && aLabelHolds(label))) return false;
 	return own === ascii || own === domainToUnicode(ascii);
 }
 
 /**
- * Whether `to` is one address mail takes: at most 254 bytes in UTF-8 (RFC 5321), letters beyond
- * ASCII allowed. A sender checks its own configured addresses by it too.
+ * Whether `to` is one address mail takes: at most 254 bytes in UTF-8 and a local part of at most 64
+ * (RFC 5321), letters beyond ASCII allowed. A sender checks its own configured addresses by it too.
  */
 export function isAddress(to: unknown): to is string {
 	if (typeof to !== "string" || !to.isWellFormed()) return false;
 	if (Buffer.byteLength(to) > 254 || !address.test(to) || encodedWord.test(to)) return false;
-	return readsAsItself(to.slice(to.indexOf("@") + 1));
+	const at = to.indexOf("@");
+	return Buffer.byteLength(to.slice(0, at)) <= 64 && readsAsItself(to.slice(at + 1));
 }
 
 /** One form for comparing addresses: the domain in IDNA's ASCII form, lowercase, the local part as given; none for a string that is no address. */

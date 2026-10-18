@@ -24,7 +24,7 @@
 
 ## Invariants
 - One address per send; anything else (a list, a line break, a display name) is a TypeError.
-- An address is at most 254 bytes in UTF-8 and holds no space, control or format character, route operator (`%`, `!`) or encoded word, else a TypeError. Letters beyond ASCII are allowed.
+- An address is at most 254 bytes in UTF-8, its local part at most 64, its domain's IDNA ASCII form at most 253 octets and 63 a label, and holds no space, control or format character, route operator (`%`, `!`) or encoded word, else a TypeError. Letters beyond ASCII are allowed.
 - Its domain reads one way, else a TypeError: IDNA's ASCII form of it is letters, digits, hyphens and dots, each `xn--` label in it decodes to other letters and encodes back to itself, and the domain is that form or its Unicode form, case aside.
 - Values that are not a plain object of strings, a locale that is not a string, and an undeclared purpose are TypeErrors.
 - A template whose subject is not one line, or whose text holds control characters other than line feed and tab, is a TypeError.
