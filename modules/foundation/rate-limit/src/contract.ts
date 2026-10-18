@@ -134,3 +134,5 @@ export function lockoutProblem(policy: LockoutPolicy): string | undefined {
 	if (memoryMs < maxBackoffMs) return "a run is forgotten before its hold ends";
 	return undefined;
 }
+
+export { sourceKey } from "./source.ts";

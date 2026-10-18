@@ -11,6 +11,7 @@
 - `Source`: the address, the scheme, whether it was determined, and the client's certificate as `client-certificate` reads it.
 - `sourceSettings`: a schema part with `trusted-proxies` and `proxy-hops`, its keys in the settings list.
 - `proxiesOf`: those settings → the trusted proxies.
+- `addressList`: a schema for a setting holding IP addresses or CIDR blocks, as `trusted-proxies` takes them; `addressesOf`: such entries → whether an address is among them (none for one that is not an address).
 - `sourceOf`: the trusted proxies, the direct peer and the headers → `Source`.
 - `determinedSource`: a request → its source address, only when it was determined.
 - `ignoredForwarding`: whether to warn now of `X-Forwarded-For` from a peer not trusted.
