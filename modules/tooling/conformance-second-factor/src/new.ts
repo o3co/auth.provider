@@ -20,8 +20,8 @@ const setUp = (part: SecondFactorPart): NewPart => ({
 					"mfa-flows": {
 						lockout: {
 							threshold: part.lockout.threshold,
-							"backoff-seconds": part.lockout.backoffSeconds,
-							"max-backoff-seconds": part.lockout.maxBackoffSeconds ?? part.lockout.backoffSeconds,
+							backoff: `${part.lockout.backoffSeconds}s`,
+							"max-backoff": `${part.lockout.maxBackoffSeconds ?? part.lockout.backoffSeconds}s`,
 							budget: part.lockout.budget,
 							"hard-limit": part.lockout.hardLimit,
 						},
