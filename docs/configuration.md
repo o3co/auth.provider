@@ -445,9 +445,9 @@ From `@mod/redis`.
 |---|---|---|---|---|---|---|
 | `redis.url` | string |  | yes | `REDIS_URL` | `rediss://redis.example.invalid:6379` | The Redis server to connect to. |
 | `redis.prefix` | string | `store` |  |  |  | What every key the store writes begins with. |
-| `redis.connect-timeout-ms` | integer (100–9007199254740991) | `2000` |  |  |  | How long connecting to Redis may take, in milliseconds. |
-| `redis.replication-timeout-ms` | integer (1–60000) | `1000` |  |  |  | How long a confirmation waits for every replica to have a write, in milliseconds. |
-| `redis.command-timeout-ms` | integer (10–60000) | `1000` |  |  |  | How long one Redis command may take, in milliseconds. |
+| `redis.connect-timeout` | string | `2s` |  |  |  | How long connecting to Redis may take, at least 100ms. |
+| `redis.replication-timeout` | string | `1s` |  |  |  | How long a confirmation waits for every replica to have a write, from 1ms to 1m. |
+| `redis.command-timeout` | string | `1s` |  |  |  | How long one Redis command may take, from 10ms to 1m. |
 | `redis.replication` | none \| replicas |  |  | `REDIS_REPLICATION` | `replicas` | Required when a space asks for replication or confirmed reads. "replicas": every write must reach the replicas, and Redis itself must refuse writes without them. "none": the operator states there is no failover at all, accepting that a failover would lose writes. |
 
 ## refresh

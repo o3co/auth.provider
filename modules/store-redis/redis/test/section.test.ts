@@ -29,7 +29,7 @@ async function refusalOf(redis: unknown) {
 	return { refused, warned: recorded.lines() };
 }
 
-it("refuses boot on a URL that is not redis or rediss, and on a prefix of other characters", async () => {
+it("refuses boot on a URL that is not redis or rediss, a prefix of other characters, or a timeout out of bounds or with no unit", async () => {
 	const refused: Record<string, unknown> = {
 		"another scheme": { url: "http://127.0.0.1:6379" },
 		"no URL": { url: "not a url" },
@@ -37,6 +37,13 @@ it("refuses boot on a URL that is not redis or rediss, and on a prefix of other 
 		"a prefix with a colon": { url: "redis://127.0.0.1:6379", prefix: "a:b" },
 		"a prefix with a brace": { url: "redis://127.0.0.1:6379", prefix: "a{b" },
 		"an empty prefix": { url: "redis://127.0.0.1:6379", prefix: "" },
+		"a connect timeout under 100ms": { url: "redis://127.0.0.1:6379", "connect-timeout": "99ms" },
+		"a command timeout past a minute": { url: "redis://127.0.0.1:6379", "command-timeout": "61s" },
+		"a timeout as a bare number": { url: "redis://127.0.0.1:6379", "replication-timeout": 1000 },
+		"a timeout as a string of a number": {
+			url: "redis://127.0.0.1:6379",
+			"command-timeout": "1000",
+		},
 	};
 	for (const [name, redis] of Object.entries(refused)) {
 		expect((await refusalOf(redis)).refused, name).toBeInstanceOf(BootRefused);
@@ -45,7 +52,7 @@ it("refuses boot on a URL that is not redis or rediss, and on a prefix of other 
 
 it("refuses boot without telling the URL's password, in the refusal or in a warning", async () => {
 	const url = `redis://user:s3cr3t-pass@127.0.0.1:${await closedPort()}`;
-	const { refused, warned } = await refusalOf({ url, "connect-timeout-ms": 100 });
+	const { refused, warned } = await refusalOf({ url, "connect-timeout": "100ms" });
 	expect(refused).toBeInstanceOf(BootRefused);
 	expect(JSON.stringify(refused.refusals)).not.toContain("s3cr3t");
 	expect(String(refused)).not.toContain("s3cr3t");
