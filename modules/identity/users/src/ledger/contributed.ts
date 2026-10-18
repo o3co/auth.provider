@@ -34,7 +34,7 @@ function acceptedOf(attributes: Record<string, unknown>, log: Log): Record<strin
 	);
 }
 
-/** Reads a ledger's copied answer into a frozen user of its declared fields; a malformed answer, or another subject's user, is unavailable. */
+/** Reads a ledger's copied answer into a frozen user of its declared fields; a malformed answer, an ill-formed subject or another subject's user is unavailable. */
 function readAnswer(answer: unknown, log: Log, askedSubject?: string): Verified {
 	if (isObject(answer) && answer.kind === "none") return none;
 	const user = isObject(answer) && answer.kind === "user" ? answer.user : undefined;
@@ -42,7 +42,7 @@ function readAnswer(answer: unknown, log: Log, askedSubject?: string): Verified 
 		throw new Unavailable("users");
 	}
 	const { subject, attributes } = user;
-	if (subject === "" || (askedSubject !== undefined && subject !== askedSubject)) {
+	if (!isWellFormedSubject(subject) || (askedSubject !== undefined && subject !== askedSubject)) {
 		throw new Unavailable("users");
 	}
 	return deepFreeze({ kind: "user", user: { subject, attributes: acceptedOf(attributes, log) } });
@@ -67,11 +67,7 @@ export function contributedSource(ledger: Ledger, log: Log): UserSource {
 					const answer = copyOf(
 						await fromLedger(() => byUpstream.call(ledger, idp, upstreamSubject)),
 					);
-					const found = readAnswer(answer, log);
-					if (found.kind === "user" && !isWellFormedSubject(found.user.subject)) {
-						throw new Unavailable("users");
-					}
-					return found;
+					return readAnswer(answer, log);
 				},
 			}
 		: { byUpstream: async () => none };
@@ -81,7 +77,7 @@ export function contributedSource(ledger: Ledger, log: Log): UserSource {
 				? none
 				: readAnswer(copyOf(await fromLedger(() => ledger.verify(identifier, password))), log),
 		bySubject: async (subject) => {
-			if (subject === "") return none;
+			if (!isWellFormedSubject(subject)) return none;
 			const answer = copyOf(await fromLedger(() => ledger.bySubject(subject)));
 			return isObject(answer) && answer.kind === "unanswerable"
 				? unanswerable

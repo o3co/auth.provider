@@ -1,6 +1,6 @@
 import { deepFreeze, Unavailable } from "@mod/kernel";
 import { canonicalAddress } from "@mod/mail";
-import { type Contact, type Users, userAttribute } from "./contract.ts";
+import { type Contact, isWellFormedSubject, type Users, userAttribute } from "./contract.ts";
 import { keyOf, none, type UserSource, unanswerable } from "./registered.ts";
 import type {
 	Changed,
@@ -69,6 +69,8 @@ export function ledgerUsers(source: UserSource, links: LinkStore, contacts: Cont
 		},
 		link: async (subject, upstream) => {
 			required(subject, upstream.idp, upstream.subject);
+			if (!isWellFormedSubject(subject))
+				throw new TypeError("users: a subject is 1 to 255 ASCII characters");
 			const fixed = await source.byUpstream(upstream.idp, upstream.subject);
 			if (fixed.kind === "user") return fixed.user.subject === subject ? "already" : "conflict";
 			if (source.upstreamLast) return "conflict";

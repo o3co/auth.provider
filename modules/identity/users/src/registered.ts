@@ -8,6 +8,7 @@ import {
 import { z } from "zod";
 import {
 	isAttributeValue,
+	isWellFormedSubject,
 	type Unanswerable,
 	type User,
 	type Users,
@@ -23,35 +24,50 @@ const upstreamIdentity = z.strictObject({
 export const keyOf = (identity: { readonly idp: string; readonly subject: string }) =>
 	JSON.stringify([identity.idp, identity.subject]);
 
-export const record = z.strictObject({
-	identifier: z.string().min(1).describe("What the user logs in with, matched exactly."),
-	subject: z.string().min(1).optional().describe("The subject; the identifier when left out."),
-	"password-hash": z
-		.string()
-		.refine(
-			(s) => readSecretHash(s) !== undefined,
-			"a bcrypt or scrypt hash (plaintext is not accepted)",
-		)
-		.describe("The user's password as a bcrypt or scrypt hash."),
-	attributes: z
-		.record(z.string(), z.json())
-		.superRefine((attributes, context) => {
-			for (const [name, value] of Object.entries(attributes)) {
-				if (isAttributeValue(name, value)) continue;
-				context.addIssue({
-					code: "custom",
-					message: "not a value this attribute takes",
-					path: [name],
-				});
-			}
-		})
-		.prefault({})
-		.describe("The user's attributes by OIDC claim name, such as `email`, `name` or `groups`."),
-	upstream: z
-		.array(upstreamIdentity)
-		.prefault([])
-		.describe("The upstream identities linked to the user."),
-});
+export const record = z
+	.strictObject({
+		identifier: z.string().min(1).describe("What the user logs in with, matched exactly."),
+		subject: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("The subject, 1 to 255 ASCII characters; the identifier when left out."),
+		"password-hash": z
+			.string()
+			.refine(
+				(s) => readSecretHash(s) !== undefined,
+				"a bcrypt or scrypt hash (plaintext is not accepted)",
+			)
+			.describe("The user's password as a bcrypt or scrypt hash."),
+		attributes: z
+			.record(z.string(), z.json())
+			.superRefine((attributes, context) => {
+				for (const [name, value] of Object.entries(attributes)) {
+					if (isAttributeValue(name, value)) continue;
+					context.addIssue({
+						code: "custom",
+						message: "not a value this attribute takes",
+						path: [name],
+					});
+				}
+			})
+			.prefault({})
+			.describe("The user's attributes by OIDC claim name, such as `email`, `name` or `groups`."),
+		upstream: z
+			.array(upstreamIdentity)
+			.prefault([])
+			.describe("The upstream identities linked to the user."),
+	})
+	.superRefine((user, context) => {
+		// An empty one is refused at its own key already.
+		const subject = user.subject ?? user.identifier;
+		if (subject === "" || isWellFormedSubject(subject)) return;
+		context.addIssue({
+			code: "custom",
+			message: "1 to 255 ASCII characters (the identifier's, where subject is left out)",
+			path: ["subject"],
+		});
+	});
 
 export const none: Verified = deepFreeze({ kind: "none" });
 export const unanswerable: Unanswerable = deepFreeze({ kind: "unanswerable" });
