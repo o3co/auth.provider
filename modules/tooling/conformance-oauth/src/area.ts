@@ -38,11 +38,17 @@ export interface ClientScene {
 	};
 }
 
-export interface TrustedIssuerScene {
-	readonly issuer: string;
-	readonly alg: "EdDSA" | "ES256" | "RS256";
-	readonly publicPem: string;
-}
+export type TrustedIssuerScene =
+	| {
+			readonly issuer: string;
+			readonly alg: "EdDSA" | "ES256" | "RS256";
+			readonly publicPem: string;
+	  }
+	/** Linked: its signers' keys asked of a ledger at `keysUrl`, the subject the user found by `upstream`. */
+	| {
+			readonly issuer: string;
+			readonly linked: { readonly upstream: string; readonly keysUrl: string };
+	  };
 
 /** Clients, the token endpoint and what is offered beside it. */
 export interface OauthPart {
