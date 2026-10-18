@@ -37,6 +37,11 @@ export default defineModule({ name: "http", section }, (m) => [
 			ends: await c.collect(requestEnds),
 			log: c.log,
 			clock: c.clock,
+			limits: {
+				headersMs: c.section["headers-timeout"] * 1000,
+				requestMs: c.section["request-timeout"] * 1000,
+				connections: c.section["max-connections"],
+			},
 		});
 		const port = () => (server.address() as AddressInfo).port;
 		c.onStart(async () => {
