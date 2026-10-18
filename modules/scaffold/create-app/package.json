@@ -17,7 +17,7 @@
 	},
 	"scripts": {
 		"create-app": "node src/main.ts",
-		"configuration": "node src/write-configuration.ts"
+		"configuration": "node src/references/write-configuration.ts"
 	},
 	"devDependencies": {
 		"vitest": "5.0.3"

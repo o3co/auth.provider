@@ -16,8 +16,7 @@
 ## Offers
 - `generate`, and the `create-app` command around it (also `run`, the command on given arguments, answering its exit status, for a package that runs it): packages listed make their app; none makes a pattern's, `--pattern` naming it (default `full`), `--add` naming features to add, `--axis <owner>=<module>` an axis's choice and `--<group>` a group's features, comma-separated (not for full).
 - `patterns()`: each pattern's name, use, conformance areas and what conformance adds for its run.
-- The workspace's configuration reference: each section's keys from its schema (type, bounds, default, whether required, description) and its fragment (example, variable), written by `pnpm --filter @mod/create-app run configuration`.
-- The configuration reference's test fails when the committed file differs, or when a key has no description outside the sections listed as described later.
+- The configuration reference and each package's `reference.conf` (its section's defaults as HOCON, for reading only), from each section's schema and fragment, written by `pnpm --filter @mod/create-app run configuration`; their tests check each key's description and default, how time and size are written, and that no `.default()` is left (internal module `references`).
 - The audit event reference beside it: each module's events as its `./audit-events` declares them through `audit`, written by the same command and held to the committed file the same way.
 - A kind two modules declare must be declared alike in the audit event reference.
 - `trialSettings(target, { redisUrl, port?, deployment?, leave?, allow?, plainLoopback? })`: for a generated app, by the modules its manifest depends on, an environment and a local layer that boot it for a test or a conformance run.
