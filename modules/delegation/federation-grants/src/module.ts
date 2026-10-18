@@ -1,3 +1,4 @@
+import { audit } from "@mod/audit";
 import { metadataSections } from "@mod/clients";
 import { csrfChecked } from "@mod/csrf";
 import { routes, use } from "@mod/http";
@@ -13,6 +14,7 @@ import { recordsOver, shared, sharedOver } from "./grant/shared.ts";
 import { resealerOver } from "./resealer.ts";
 import { name, type Settings, section } from "./section.ts";
 import { grantStore } from "./store.ts";
+import { sweepIn } from "./sweep/sweep.ts";
 
 /** The requests a source may make in each window, on the client routes and the browser's alike. */
 const windowOf = (settings: Settings) => ({
@@ -26,7 +28,12 @@ export default defineModule({ name, section }, (m) => [
 	m
 		.contribute(resealers)
 		.by(async (c) => resealerOver(await c.get(grantStore), await recordsOver(c))),
-	m.provide(shared).by(sharedOver),
+	m.provide(shared).by(async (c) => {
+		const parts = await sharedOver(c);
+		// Built once, so one sweep runs on each host.
+		await sweepIn(c, parts, await c.get(audit));
+		return parts;
+	}),
 	m.provide(browser).by(connectOver),
 	...[base, `${base}/*`].map((path) =>
 		m.contribute(routes).by(async (c) => ({
