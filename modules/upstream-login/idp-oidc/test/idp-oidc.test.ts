@@ -28,6 +28,7 @@ import {
 	type IdpType,
 	idpTypes,
 	type Upstream,
+	UpstreamMismatch,
 	UpstreamRefused,
 } from "@mod/upstreams";
 import { CompactSign, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
@@ -406,16 +407,21 @@ describe("idp-oidc", () => {
 		expect(settings.parse({ ...base, "endpoint-hosts": taken })["endpoint-hosts"]).toEqual(taken);
 	});
 
-	it("refuses at boot a description naming a token endpoint or key set outbound's policy refuses", async () => {
+	it("refuses at boot, under issuer and naming it, a description's token endpoint or key set outbound's policy refuses", async () => {
 		const cdn = "https://tokens.idp-cdn.example";
 		const named = { "endpoint-hosts": ["tokens.idp-cdn.example"] };
 		const refused = ["tokens.idp-cdn.example"];
-		for (const description of [{ token_endpoint: `${cdn}/token` }, { jwks_uri: `${cdn}/jwks` }]) {
-			const label = JSON.stringify(description);
-			await expect(open({ description, settings: named, refused }), label).rejects.toThrow(
-				/destination policy refuses/,
-			);
-			await expect(open({ description, settings: named }), label).resolves.toBeDefined();
+		for (const [name, description] of [
+			["token_endpoint", { token_endpoint: `${cdn}/token` }],
+			["jwks_uri", { jwks_uri: `${cdn}/jwks` }],
+		] as const) {
+			const thrown = await open({ description, settings: named, refused }).catch((e) => e);
+			expect(thrown, name).toBeInstanceOf(UpstreamMismatch);
+			expect([thrown.at, thrown.message], name).toEqual([
+				["issuer"],
+				`outbound's destination policy refuses the description's ${name}: not-allowed`,
+			]);
+			await expect(open({ description, settings: named }), name).resolves.toBeDefined();
 		}
 	});
 

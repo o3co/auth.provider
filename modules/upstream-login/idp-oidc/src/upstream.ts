@@ -22,6 +22,7 @@ import {
 	type AuthorizationStart,
 	type DelegatedExchange,
 	type Upstream,
+	UpstreamMismatch,
 	type UpstreamRefresh,
 	UpstreamRefused,
 } from "@mod/upstreams";
@@ -52,12 +53,15 @@ interface Reach {
 	readonly policy: OutboundPolicy;
 }
 
+/** A description that does not hold, told under `issuer`: the key it was read from. */
+const mismatch = (reason: string) => new UpstreamMismatch(reason, ["issuer"]);
+
 /** The endpoints the issuer's description names; throws, refusing boot, where they do not hold. */
 async function discovered(s: Settings, { outbound, policy }: Reach, hosts: readonly string[]) {
 	const where = descriptionUrl(s.issuer);
 	// Refused as the upstream's answer, which at boot refuses boot.
 	const described = answerOf(jsonObjectOf(await outbound.fetch(where, {}, { hosts })), description);
-	if (described.issuer !== s.issuer) throw new Error("the description names another issuer");
+	if (described.issuer !== s.issuer) throw mismatch("the description names another issuer");
 	const endSession = described.end_session_endpoint;
 	// The end of session too: the browser takes the login's id_token there.
 	const all = [
@@ -67,17 +71,20 @@ async function discovered(s: Settings, { outbound, policy }: Reach, hosts: reado
 		...(endSession ? [endSession] : []),
 	];
 	if (all.some((url) => !withinHosts(url, hosts))) {
-		throw new Error("the description names an endpoint on a host the operator did not name");
+		throw mismatch("the description names an endpoint on a host the operator did not name");
 	}
 	// The browser goes to some of them: https, or plain http where the operator named the issuer so.
 	const schemes = ["https:", new URL(s.issuer).protocol];
 	if (all.some((url) => !schemes.includes(new URL(url).protocol))) {
-		throw new Error("the description names an endpoint that is not https");
+		throw mismatch("the description names an endpoint that is not https");
 	}
 	// The two this server sends to; a refusal here would fail every login.
-	const sent = [described.token_endpoint, described.jwks_uri];
-	if (sent.some((url) => policy.refusalOf(url, { hosts }) !== undefined)) {
-		throw new Error("outbound's destination policy refuses an endpoint the description names");
+	const sent = { token_endpoint: described.token_endpoint, jwks_uri: described.jwks_uri };
+	for (const [name, url] of Object.entries(sent)) {
+		const refusal = policy.refusalOf(url, { hosts });
+		if (refusal !== undefined) {
+			throw mismatch(`outbound's destination policy refuses the description's ${name}: ${refusal}`);
+		}
 	}
 	const endpoints: Endpoints = {
 		authorization: described.authorization_endpoint,
