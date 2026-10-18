@@ -39,7 +39,7 @@ function trialBlocks(
 ) {
 	const has = (name: string) => modules.includes(name);
 	const hosts = [
-		...(has("users-http") ? ["ledger.example.invalid"] : []),
+		...(has("users-http") || has("signer-keys-http") ? ["ledger.example.invalid"] : []),
 		...(has("audit-http") ? ["audit.example.invalid"] : []),
 		...added.allow,
 	];
@@ -60,6 +60,11 @@ function trialBlocks(
 			has("users-http"),
 			"users-http",
 			`users-http { verify-url = "https://ledger.example.invalid/verify" }`,
+		],
+		[
+			has("signer-keys-http"),
+			"signer-keys-http",
+			`signer-keys-http { issuer = "https://devices.example.invalid", keys-url = "https://ledger.example.invalid/signer-keys" }`,
 		],
 		[
 			has("http"),
