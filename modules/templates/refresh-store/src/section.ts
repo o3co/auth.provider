@@ -7,7 +7,7 @@ export const section = z.strictObject({
 		.int()
 		.min(1)
 		.max(10_000)
-		.default(1000)
+		.prefault(1000)
 		.describe(
 			"How many refresh token families a session's set keeps; past it, one is pushed out and revoked.",
 		),
@@ -16,7 +16,7 @@ export const section = z.strictObject({
 		.int()
 		.min(1)
 		.max(10_000)
-		.default(1000)
+		.prefault(1000)
 		.describe(
 			"How many access tokens a family's set keeps; past it, one is pushed out and revoked.",
 		),
@@ -25,13 +25,13 @@ export const section = z.strictObject({
 		.int()
 		.min(1)
 		.max(65_536)
-		.default(1024)
+		.prefault(1024)
 		.describe("How many shards the list of families to settle is spread over."),
 	"settles-per-shard": z
 		.number()
 		.int()
 		.min(1)
 		.max(10_000)
-		.default(1000)
+		.prefault(1000)
 		.describe("How many families to settle one shard holds at most."),
 });
