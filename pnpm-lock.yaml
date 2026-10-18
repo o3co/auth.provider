@@ -232,8 +232,8 @@ importers:
   modules/foundation/kernel:
     dependencies:
       '@o3co/ts.hocon':
-        specifier: 1.14.1
-        version: 1.14.1(zod@4.6.5)
+        specifier: 1.14.3
+        version: 1.14.3(zod@4.6.5)
       zod:
         specifier: 4.6.5
         version: 4.6.5
@@ -1831,8 +1831,8 @@ importers:
         specifier: workspace:*
         version: link:../../foundation/kernel
       '@o3co/ts.hocon':
-        specifier: 1.14.1
-        version: 1.14.1(zod@4.6.5)
+        specifier: 1.14.3
+        version: 1.14.3(zod@4.6.5)
     devDependencies:
       vitest:
         specifier: 5.0.3
@@ -3193,8 +3193,8 @@ packages:
     resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
     engines: {node: ^14.21.3 || >=16}
 
-  '@o3co/ts.hocon@1.14.1':
-    resolution: {integrity: sha512-Gq7xpBnmroIUryJP9BYg6mo0Ay2OdkW1npZs/iNCQnt/IaD0BxS3ukMll4ErDEgOcbTbk5XeMXVDW/z/PVorvA==}
+  '@o3co/ts.hocon@1.14.3':
+    resolution: {integrity: sha512-eiqxkHVvfV0ZQsk0oT3V7HYP8/UGKqpL66kG2zxndHDqoNLCPMtAiKMr+5IJ+wM9y1KfZxJBX7598i28Tqc/zg==}
     engines: {node: '>=22'}
     peerDependencies:
       smol-toml: '>=1.0.0'
@@ -3806,7 +3806,7 @@ snapshots:
 
   '@noble/hashes@1.8.0': {}
 
-  '@o3co/ts.hocon@1.14.1(zod@4.6.5)':
+  '@o3co/ts.hocon@1.14.3(zod@4.6.5)':
     optionalDependencies:
       zod: 4.6.5
 

@@ -13,7 +13,7 @@
 	"dependencies": {
 		"@mod/combinations": "workspace:*",
 		"@mod/kernel": "workspace:*",
-		"@o3co/ts.hocon": "1.14.1"
+		"@o3co/ts.hocon": "1.14.3"
 	},
 	"scripts": {
 		"create-app": "node src/main.ts",
