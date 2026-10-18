@@ -474,6 +474,41 @@ describe("redis", () => {
 		}
 	}, 60_000);
 
+	it("cuts its connections at the stop's deadline, rather than waiting on a server that does not answer", async () => {
+		// A relay of its own, so only this app's connections are watched.
+		const target = Number(new URL(url).port);
+		const relayed: Socket[] = [];
+		const relay = createServer((client) => {
+			const upstream = createConnection(target, "127.0.0.1");
+			relayed.push(client);
+			client.pipe(upstream).pipe(client);
+			const close = () => {
+				client.destroy();
+				upstream.destroy();
+			};
+			client.on("error", close);
+			upstream.on("error", close);
+			client.on("close", close);
+			upstream.on("close", close);
+		});
+		const port = await freePort();
+		await new Promise<void>((resolve) => relay.listen(port, "127.0.0.1", () => resolve()));
+		try {
+			const app = await open([durable], undefined, `redis://127.0.0.1:${port}`);
+			expect(relayed.length).toBeGreaterThan(0);
+			docker("pause", container);
+			try {
+				await app.stop(300);
+				await waitFor(() => relayed.every((socket) => socket.destroyed), 2000);
+			} finally {
+				docker("unpause", container);
+				await waitFor(writable, 60_000);
+			}
+		} finally {
+			relay.close();
+		}
+	}, 90_000);
+
 	it("refuses to start when the server cannot be reached", async () => {
 		const app = assemble({
 			modules: [redisModule],
