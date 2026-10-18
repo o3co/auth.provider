@@ -45,7 +45,7 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 			gates: await c.collect(firstBindingGates),
 			random: c.random.bytes,
 			now: c.clock.now,
-			recentMs: c.section["manage-seconds"] * 1000,
+			recentMs: c.section["manage-within"] * 1000,
 			audit: await c.get(audit),
 		});
 	}),
@@ -56,7 +56,7 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 		const records = factorRecords(await c.get(factorStore));
 		const kinds = byKind(await c.collect(factorKinds));
 		const required = c.section.mode === "required";
-		const recentMs = c.section["manage-seconds"] * 1000;
+		const recentMs = c.section["manage-within"] * 1000;
 		return {
 			name: "mfa",
 			// "use" only under "required"; credentials always.
