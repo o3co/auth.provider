@@ -144,7 +144,6 @@ const prefaultLater = new Set([
 	"mail-smtp",
 	"metrics-prometheus",
 	"mfa",
-	"mfa-binding-proof",
 	"mfa-email",
 	"mfa-flows",
 	"mfa-webauthn",

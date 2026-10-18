@@ -216,3 +216,7 @@ it("passes where an ask came from to the proof unread", async () => {
 	await decided.begin("ann", "code", undefined, "t", login); // the gate's available
 	expect(contact.from).toEqual([session, login, login, login]);
 });
+
+it("asks for a proof when one is available, when the operator sets no mode", () => {
+	expect(bindingProofModule.section?.parse({})).toEqual({ mode: "when-available" });
+});
