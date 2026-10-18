@@ -29,6 +29,7 @@ import {
 	type Tokens,
 	tokens,
 } from "../src/contract.ts";
+import { defaultLifetimeSeconds } from "../src/limits.ts";
 import tokensModule from "../src/module.ts";
 import { section } from "../src/section.ts";
 import { revokedInMemory } from "./revoked.ts";
@@ -355,14 +356,17 @@ it("answers unsupported to any revocation where revocation is not configured, a 
 	expect(await t.revokeAccess("garbage")).toEqual({ kind: "unsupported" });
 });
 
-it("reads the access token's lifetime with its unit, the old bare seconds instead until 0.18.0, never both", () => {
+it("reads the access token's lifetime with its unit, in whole seconds, an hour unless set", () => {
 	const lifetimeOf = (settings: object) =>
 		section.safeParse({ revocation: "unsupported", ...settings }).data?.["access-token-lifetime"];
-	expect(
-		[{}, { "access-token-lifetime": "2h" }, { "access-token-lifetime-seconds": 60 }].map(
-			lifetimeOf,
-		),
-	).toEqual([3600, 7200, 60]);
-	const both = { "access-token-lifetime": "1h", "access-token-lifetime-seconds": 60 };
-	expect([both, { "access-token-lifetime": 3600 }].map(lifetimeOf)).toEqual([undefined, undefined]);
+	expect([{}, { "access-token-lifetime": "2h" }].map(lifetimeOf)).toEqual([
+		defaultLifetimeSeconds,
+		7200,
+	]);
+	const refused = [
+		{ "access-token-lifetime-seconds": 60 },
+		{ "access-token-lifetime": 3600 },
+		{ "access-token-lifetime": "1500ms" },
+	];
+	expect(refused.map(lifetimeOf)).toEqual([undefined, undefined, undefined]);
 });

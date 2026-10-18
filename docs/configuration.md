@@ -600,8 +600,7 @@ From `@mod/tokens`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `tokens.access-token-lifetime` | string |  |  |  |  | How long an access token lives, from `1s` to `1d` in whole seconds; `1h` unless set. |
-| `tokens.access-token-lifetime-seconds` | integer (1–86400) |  |  |  |  | Replaced by `access-token-lifetime`; read until 0.18.0. |
+| `tokens.access-token-lifetime` | string | `1h` |  |  |  | How long an access token lives, from `1s` to `1d` in whole seconds. |
 | `tokens.revocation` | denylist \| unsupported |  | yes | `TOKENS_REVOCATION` | `denylist` | Whether revoked access tokens are kept in a denylist and refused, or revocation is not supported. |
 | `tokens.subject-check` | none |  |  |  |  | Stated where no module checks subject revocation on access tokens. |
 

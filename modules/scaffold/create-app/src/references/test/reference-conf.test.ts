@@ -99,7 +99,6 @@ const unitsLater = new Set([
 	"session-lifecycle",
 	"token-endpoint",
 	"token-exchange",
-	"tokens",
 	"users-http",
 	"webauthn",
 	"webauthn-login",
