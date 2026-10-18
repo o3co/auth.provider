@@ -98,7 +98,8 @@ it("refuses to start with a plain password, work past the limits or a repeated i
 });
 
 it("matches identifiers exactly", async () => {
-	const u = (await boot([testUser("Alice", "p"), testUser("Zo\u00eb", "p")])).get(users);
+	const zoe = testUser("Zo\u00eb", "p", { subject: "s-zoe" });
+	const u = (await boot([testUser("Alice", "p"), zoe])).get(users);
 	expect((await u.verify("Alice", "p")).kind).toBe("user");
 	for (const other of ["alice", " Alice", "\uff21lice"])
 		expect((await u.verify(other, "p")).kind).toBe("none");
@@ -116,9 +117,9 @@ it("refuses to start on identifiers a person could mistake, or a shared subject"
 		["stra\u1e9ee", "strasse"],
 		["\u03bf\u03b4\u03bf\u03c3", "\u039f\u0394\u039f\u03a3"],
 	]) {
-		await expect(boot(pair.map((id) => testUser(id, "p"))), pair.join(" ")).rejects.toBeInstanceOf(
-			BootRefused,
-		);
+		// Each with a subject of its own, so only the identifiers can refuse the boot.
+		const pairOf = pair.map((id, i) => testUser(id, "p", { subject: `s-${i}` }));
+		await expect(boot(pairOf), pair.join(" ")).rejects.toBeInstanceOf(BootRefused);
 	}
 	await expect(
 		boot([testUser("bob", "p", { subject: "alice" }), testUser("alice", "q")]),
@@ -138,6 +139,20 @@ it("refuses to start on an empty identifier or subject, or a plain password, nam
 	expect(await where([{ identifier: "a", "password-hash": "plain" }])).toEqual([
 		"users.registered.0.password-hash",
 	]);
+});
+
+it("refuses to start on a subject that is not 1 to 255 ASCII characters, the identifier standing in where it is left out", async () => {
+	const where = async (registered: unknown[]) =>
+		((await boot(registered).catch((error) => error)) as BootRefused).refusals.map((r) => r.where);
+	for (const user of [
+		testUser("a", "p", { subject: "s-é" }),
+		testUser("a", "p", { subject: "s".repeat(256) }),
+		testUser("アリス", "p"),
+	]) {
+		expect(await where([user]), JSON.stringify(user)).toEqual(["users.registered.0.subject"]);
+	}
+	const named = await boot([testUser("アリス", "p", { subject: "s-alice" })]);
+	expect((await named.get(users).bySubject("s-alice")).kind).toBe("user");
 });
 
 it("refuses to start on an attribute value users does not accept, naming the attribute but never the value", async () => {

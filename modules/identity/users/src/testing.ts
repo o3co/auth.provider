@@ -200,10 +200,12 @@ export function usersContract(name: string, harness: UsersHarness): void {
 			expect(answers.toSorted()).toEqual(["conflict", "linked"]);
 		});
 
-		it("refuses an empty part or an unknown kind of contact instead of linking or keeping it", async () => {
+		it("refuses an empty part, an ill-formed subject or an unknown kind of contact instead of linking or keeping it", async () => {
 			const u = await harness.open();
 			for (const [subject, idp, upstream] of [
 				["", "example", "u"],
+				["s-é", "example", "u"],
+				["s".repeat(256), "example", "u"],
 				["s", "", "u"],
 				["s", "example", ""],
 			] as const) {
