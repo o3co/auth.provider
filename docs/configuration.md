@@ -360,6 +360,15 @@ From `@mod/mfa-flows`.
 | `mfa-flows.lockout.hard-limit` | integer (-9007199254740991–9007199254740991) | `100` |  |  |  | Failures in one run after which the hold is fixed until released; a positive integer, no less than `budget`. |
 | `mfa-flows.lockout.memory` | string | `1d` |  |  |  | How long a run of failures is remembered without one, in whole seconds, such as `1d`. |
 
+## mfa-management
+
+From `@mod/mfa-management`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `mfa-management.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over every POST the routes take. |
+| `mfa-management.window` | string | `5m` |  |  |  | The window `requests` is counted over, from 1s to 1d in whole seconds, such as `5m`. |
+
 ## mfa-webauthn
 
 From `@mod/mfa-webauthn`.
