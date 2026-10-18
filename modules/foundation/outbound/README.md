@@ -12,6 +12,7 @@
 - `outbound`: fetch a URL with a request and a narrower, answering status, headers and body, or throwing a destination refusal or unavailable with its failure.
 - `outbound.signed`: the same for signed material, with the narrower's hosts always named.
 - `outbound.policy`: at boot, why the destination policy refuses a URL, or nothing. It resolves no name and sends nothing, so a caller sending credentials can refuse boot on a destination it could never reach; a name passes on its name, an address in the URL is checked at once.
+- `outbound.credentials`: at boot, why a caller's credential must not go to its URLs (`origins`: more than one; `scheme`: one neither https nor a named `plain-loopback` pair), or nothing.
 - Composition definition; reading an answer as JSON (one frozen UTF-8 object, at the status named, `200` by default); whether a URL's host is among hosts; reading an operator's host list, as entries or as a narrower's hosts.
 - Operator section `outbound`: the policy, the caps, the proxy and `internal-hosts`; its keys are in the configuration reference.
 
@@ -23,6 +24,7 @@
 - A name is resolved once, and the request connects only to an address checked among all it resolved to.
 - One special-purpose address refuses them all: IANA's blocks not globally reachable, multicast, and IPv6 outside global unicast. Only an `internal` URL, at a host in `internal-hosts`, reaches private ones: 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7, but the cloud metadata addresses in them (100.100.100.200, fd00:ec2::254, fd20:ce::254).
 - outbound alone sets `User-Agent` (`auth-provider`), `Accept-Encoding`, `Host` and the headers that frame and carry the message.
+- A request's `credential` is sent as its `Authorization` header, never told: never for signed material (`credential`), never beside an `Authorization` header, and only as one printable line, else the caller's TypeError. A redirect never carries it, being refused.
 - A 3xx other than 304 is refused as a redirect; a 101, an encoded answer, a body past the size cap, or headers past Node's 16 KiB are unavailable, and the connection is closed; other 1xx answers are waited past.
 - A caller narrows the policy and caps, never widens them; a narrower's size or time that is not positive and finite is thrown as the caller's error. One deadline covers resolving (or the tunnel), connecting, the headers and the body.
 - A request past `max-concurrent` is unavailable at once, and each request gives its place back however it ends. Name lookups, which no deadline stops, count apart under the same limit; names resolve as the system does, hosts file included.

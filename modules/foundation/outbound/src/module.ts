@@ -2,6 +2,8 @@ import { isIP } from "node:net";
 import { contract, defineModule, setting } from "@mod/kernel";
 import { z } from "zod";
 import {
+	type CredentialPolicy,
+	credentialPolicy,
 	DestinationRefused,
 	type Narrower,
 	type Outbound,
@@ -13,7 +15,15 @@ import {
 	type SignedOutbound,
 	signedOutbound,
 } from "./contract.ts";
-import { admitAddresses, admitUrl, isHostEntry, isListEntry, isPair, listed } from "./policy.ts";
+import {
+	admitAddresses,
+	admitUrl,
+	credentialRefusal,
+	isHostEntry,
+	isListEntry,
+	isPair,
+	listed,
+} from "./policy.ts";
 import { type Resolver, type Route, send, systemResolver, type Trust } from "./transport.ts";
 
 const hostEntries = z.array(z.string().refine(isHostEntry, "not a host")).prefault([]);
@@ -146,6 +156,24 @@ interface Paths {
 	readonly fetch: Outbound["fetch"];
 	readonly fetchSigned: SignedOutbound["fetch"];
 	readonly refusalOf: OutboundPolicy["refusalOf"];
+	readonly credentialRefusalOf: CredentialPolicy["refusalOf"];
+}
+
+/** One header value: printable ASCII on one line, no space at either end. */
+const headerValue = /^[\x21-\x7e](?:[\x20-\x7e]*[\x21-\x7e])?$/;
+
+/** The request as sent: its credential as the Authorization header; none for signed material. Its value is never told. */
+function sentRequest(request: OutboundRequest, signed: boolean): OutboundRequest {
+	const { credential, ...rest } = request;
+	if (credential === undefined) return rest;
+	if (signed) throw new DestinationRefused("credential");
+	if (!headerValue.test(credential)) {
+		throw new TypeError("outbound: a credential is one header value, printable ASCII on one line");
+	}
+	if (Object.keys(rest.headers ?? {}).some((name) => name.toLowerCase() === "authorization")) {
+		throw new TypeError("outbound: a credential and an Authorization header are both given");
+	}
+	return { ...rest, headers: { ...rest.headers, authorization: credential } };
 }
 
 /** The outbound paths over a resolver; the module passes the system's, a test its own. */
@@ -187,8 +215,9 @@ export function outboundOver(
 			),
 			timeoutMs: Math.min(settings.timeout, narrowing(narrower.timeoutMs)),
 		};
+		const sent = sentRequest(request, signed);
 		const admitted = admitUrl(url, policy, narrower, signed);
-		return requestPlace(() => send(admitted, request, limits, bounded, route, trust, deadlineOf));
+		return requestPlace(() => send(admitted, sent, limits, bounded, route, trust, deadlineOf));
 	};
 	return {
 		fetch: (url, request = {}, narrower = {}) => go(url, request, narrower, false),
@@ -204,6 +233,7 @@ export function outboundOver(
 				throw error;
 			}
 		},
+		credentialRefusalOf: (urls) => credentialRefusal(urls, policy.plainLoopback),
 	};
 }
 
@@ -232,4 +262,7 @@ export default defineModule({ name: "outbound", section, replicaSafe: true }, (m
 	m.provide(outbound).by(async (c) => ({ fetch: (await c.get(paths)).fetch })),
 	m.provide(signedOutbound).by(async (c) => ({ fetch: (await c.get(paths)).fetchSigned })),
 	m.provide(outboundPolicy).by(async (c) => ({ refusalOf: (await c.get(paths)).refusalOf })),
+	m.provide(credentialPolicy).by(async (c) => ({
+		refusalOf: (await c.get(paths)).credentialRefusalOf,
+	})),
 ]);
