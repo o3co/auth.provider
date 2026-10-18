@@ -18,9 +18,11 @@
 
 ## Invariants
 - Issued tokens do not outlive the assertion's expiry.
+- A `kid` an assertion names is text of 1 to 256 well-formed characters, or the assertion is malformed, before any key is asked for.
 - The assertion is checked by `external-jwt` with the keys of the trusted issuer it names, under this section's policy: the algorithms of that issuer's keys (any the grant takes, for a key set), `clock-skew` as the allowance, `max-assertion-lifetime` as the longest lifetime. `aud` is `issuer`'s URL or the token endpoint's absolute URL as `token-endpoint` tells it; without one, the boot is refused. `sub` is a non-empty string.
 - A key set is fetched only at https from its issuer's host; a `jwks-uri` not at https or on another host, or with an issuer that is no URL, refuses the boot. While no key set can be had, the grant is unavailable.
 - Boot is refused on an issuer with keys both written and contributed, or neither; on `upstream` without `linked`, or `linked` without it; on a linked issuer with no contribution at `linkedSubjects` (users is not composed), and on two or more, naming them; on `subject-is-key-thumbprint` with a key set, which cannot tell which key signed; and on an issuer without `subject`.
+- Boot is refused on an issuer named twice in `issuers`, and on keys contributed for an issuer `issuers` does not name.
 - The signer is read before anything is verified: a `sub` that is no well-formed subject, or no thumbprint where `subject-is-key-thumbprint` asks one, is refused before its keys are asked for. With thumbprints, only the key whose thumbprint is the `sub` verifies it; a contributed key is verified with the `sub` it was asked for.
 - An unknown signer, a key that does not fit and a signature that does not match get the same answer.
 - `as-is`: the token is for the `sub`. `linked`: for the subject `linkedSubjects` resolves (`upstream`, `sub`) to, asked after the assertion is verified and before the client, the `sessions` boundary and the `jti`; none is a refusal (unknown subject) and leaves the assertion usable.

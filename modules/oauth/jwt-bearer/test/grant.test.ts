@@ -634,6 +634,38 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		expect(asked).toEqual([]);
 	});
 
+	it("asks for keys by a kid of 1 to 256 well-formed characters only, refusing any other unread", async () => {
+		const thumb = await thumbOf();
+		const asked: unknown[] = [];
+		const s = await serveWith(entry({ subject: "as-is" }), [
+			signing(async () => ({ kind: "none" }), asked),
+		]);
+		const signedWith = (kid: unknown) =>
+			assertion({ ...base, iss: fixedIss, sub: thumb }, device.privateKey, { kid: kid as string });
+		for (const kid of ["k".repeat(257), "k\uD800", 7]) {
+			expect(saidOf(await s.grant(await signedWith(kid))), String(kid)).toBe(
+				"invalid_grant: malformed assertion",
+			);
+		}
+		expect(asked).toEqual([]);
+		await s.grant(await signedWith("k1"));
+		expect(asked).toEqual([{ subject: thumb, kid: "k1" }]);
+	});
+
+	it("refuses to boot on an issuer named twice, and on keys contributed for an issuer it does not name", async () => {
+		const reasonsOf = (issuers: Record<string, unknown>[]) =>
+			serveWith(issuers, [signing(async () => ({ kind: "none" }))]).then(
+				() => [],
+				(error: BootRefused) => error.refusals.map((r) => r.reason),
+			);
+		expect(
+			await reasonsOf([...entry({ subject: "as-is" }), ...entry({ subject: "as-is" })]),
+		).toEqual([expect.stringContaining(`${fixedIss} is named more than once`)]);
+		expect(await reasonsOf([])).toEqual([
+			expect.stringContaining(`${fixedIss} has keys contributed but is not an issuer here`),
+		]);
+	});
+
 	it("tells an unknown key and a forged signature alike", async () => {
 		const thumb = await thumbOf();
 		let keys: Answer = { kind: "none" };

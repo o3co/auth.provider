@@ -33,15 +33,14 @@ const said: Readonly<Record<Reason, string>> = {
 	subject: "wrong subject",
 };
 
-const claimsShape = z.object({
-	sub: z.string().min(1),
-	// Well-formed, since it becomes a store key.
-	jti: z
-		.string()
-		.min(1)
-		.max(256)
-		.refine((s) => s.isWellFormed()),
-});
+/** Text of 1 to 256 well-formed characters: what a `jti` (a store key) and a `kid` (sent to a ledger) must be. */
+const bounded = z
+	.string()
+	.min(1)
+	.max(256)
+	.refine((s) => s.isWellFormed());
+
+const claimsShape = z.object({ sub: z.string().min(1), jti: bounded });
 
 /**
  * Checks everything but single use: the signer is read unverified, its subject's shape checked,
@@ -65,8 +64,10 @@ export async function check(
 	if (!signers) return invalid("untrusted signer");
 	const { sub, kid } = signer;
 	if (!isSignerSubject(sub)) return invalid("missing or malformed claims");
+	// Read unverified, so bounded before it reaches a key source.
+	if (kid !== undefined && !bounded.safeParse(kid).success) return invalid("malformed assertion");
 	if (signers.thumbprint && !isThumbprint(sub)) return invalid("subject is no key thumbprint");
-	const verifier = await signers.verifierFor(sub, typeof kid === "string" ? kid : undefined);
+	const verifier = await signers.verifierFor(sub, kid as string | undefined);
 	if (!verifier) return invalid("untrusted signer");
 	const verified = await verifier.verify(assertion);
 	if (verified.kind === "unavailable") throw new Unavailable("jwt-bearer");

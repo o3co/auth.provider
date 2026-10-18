@@ -148,6 +148,7 @@ export default defineModule({ name: "jwt-bearer", section }, (m) => [
 		const trusted = new Map<string, Signers>();
 		const refused: string[] = [];
 		for (const i of c.section.issuers) {
+			if (trusted.has(i.issuer)) refused.push(`${i.issuer} is named more than once`);
 			const keys = contributed.get(i.issuer);
 			const written = "keys" in i || "jwks-uri" in i;
 			if (written && keys) refused.push(`${i.issuer} has its keys written and contributed`);
@@ -170,6 +171,10 @@ export default defineModule({ name: "jwt-bearer", section }, (m) => [
 						? fetchedSigners(jwt, { url: i["jwks-uri"], hosts: hostsOf(i.issuer) }, policyOf(i))
 						: contributedSigners(jwt, keys as NonNullable<typeof keys>, policyOf(i), thumbprint),
 			);
+		}
+		for (const named of contributed.keys()) {
+			if (!trusted.has(named))
+				refused.push(`${named} has keys contributed but is not an issuer here`);
 		}
 		if (refused.length > 0) return c.refuse("jwt-bearer.issuers", refused.join("; "));
 		const linked = linkedOf(c.section);
