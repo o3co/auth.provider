@@ -18,6 +18,7 @@ import {
 } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { type FamilyHandle, type Lineage, lineage } from "@mod/refresh";
+import secretHashModule from "@mod/secret-hash/module";
 import { type Binding, senderBindings } from "@mod/sender-binding";
 import { sessions } from "@mod/session";
 import { stubSessions } from "@mod/session/testing";
@@ -163,6 +164,7 @@ async function serve(
 			watched,
 			issuerModule,
 			clientsModule,
+			secretHashModule,
 			grantCaller,
 			clientAllowanceModule,
 			tied.module,

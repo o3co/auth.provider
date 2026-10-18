@@ -1721,6 +1721,9 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
       '@mod/token-endpoint':
         specifier: workspace:*
         version: link:../token-endpoint
