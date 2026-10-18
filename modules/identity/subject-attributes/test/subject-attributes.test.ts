@@ -1,6 +1,7 @@
 import { assemble, defineModule, isUnavailable, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import { loginSource } from "@mod/login-attributes";
+import secretHashModule from "@mod/secret-hash/module";
 import { type AuthContext, type Sessions, sessions } from "@mod/session";
 import { stubSessions } from "@mod/session/testing";
 import { ledgers, type Users, userAttribute, users } from "@mod/users";
@@ -49,6 +50,7 @@ const boot = (parts: {
 		modules: [
 			memoryUsersStores().module,
 			...(parts.users ?? [usersModule]),
+			secretHashModule,
 			parts.sessions,
 			reader,
 		],
