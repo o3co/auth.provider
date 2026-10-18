@@ -9,6 +9,7 @@ import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/tes
 import { loginGates, logins, returnPaths } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
 import rateLimitModule from "@mod/rate-limit/module";
+import secretHashModule from "@mod/secret-hash/module";
 import { type Sessions, sessions } from "@mod/session";
 import { sessionStandIn, stubSessions } from "@mod/session/testing";
 import { simulatedStore } from "@mod/store/testing";
@@ -47,6 +48,7 @@ async function serve(setup: Setup = {}) {
 			csrfStandIn,
 			cookiesModule,
 			setup.users ?? usersModule,
+			secretHashModule,
 			memoryUsersStores().module,
 			setup.sessions ?? sessionStandIn,
 			subjectRevocationStandIn,
