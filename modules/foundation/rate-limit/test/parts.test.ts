@@ -1,11 +1,11 @@
 import { testRequest } from "@mod/http/testing";
 import { quietLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
+import { sourceKey } from "../src/contract.ts";
 import { retryAfterMs } from "../src/partition.ts";
 import { limitingAttempts, limitingRequests, uncountedCounter } from "../src/per-source.ts";
-import { sourceKey } from "../src/source.ts";
 
-it("keys IPv4 by address and IPv6 by its /64, however the address is written", () => {
+it("offers the source key: IPv4 by address and IPv6 by its /64, however the address is written", () => {
 	expect(sourceKey("198.51.100.4")).toBe("198.51.100.4");
 	expect(sourceKey("2001:db8:1:2:3:4:5:6")).toBe("2001:db8:1:2::/64");
 	expect(sourceKey("2001:db8:1:2::9")).toBe("2001:db8:1:2::/64");
