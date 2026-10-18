@@ -592,7 +592,7 @@ export async function apiOver(c: BuildContext<Settings>) {
 		steps: await c.get(stepStore),
 		pending: await c.get(pendingIntents),
 		lodges: await c.get(attemptLimit),
-		refresh: await refreshOver(c, parts.records),
+		refresh: await refreshOver(c, parts.records, parts.judge),
 		upstreams: await c.get(upstreams),
 		audit: await c.get(audit),
 		settings: c.section,

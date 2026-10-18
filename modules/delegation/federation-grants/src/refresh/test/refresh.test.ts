@@ -61,10 +61,13 @@ async function refresher(life: number, settings: { rotations?: number; windowMs?
 	const records = recordsWith(seal);
 	const logged = recordingLog();
 	const runtime = quietRuntime({ clock: { now: () => now }, log: logged.log });
+	/** Whether the subject's boundary ends the grant, as the grants' judge would answer. */
+	const boundary = { revoked: false };
 	const refresh = refreshWith({
 		grants: stores.grants,
 		locks: stores.lockStore,
 		records,
+		revoked: async () => boundary.revoked,
 		...runtime,
 		refreshBeforeMs: 30_000,
 		rotations: settings.rotations ?? 24,
@@ -112,6 +115,7 @@ async function refresher(life: number, settings: { rotations?: number; windowMs?
 	return {
 		stores,
 		records,
+		boundary,
 		upstream,
 		asked,
 		logs: () => logged.lines(),
@@ -560,4 +564,26 @@ describe("a grant revoked while its upstream is asked", () => {
 		});
 		expect(said(await r.call())).toBe("gone");
 	});
+});
+
+describe("a grant whose subject is revoked while its upstream is asked, the grant itself left active", () => {
+	// As one its subject's listing missed: the follower never writes it, and only the boundary ends it.
+	it.each([
+		["unavailable", () => Promise.reject(new Unavailable("test upstream"))],
+		["refreshed", () => Promise.resolve(undefined as unknown as UpstreamRefresh)],
+	] as const)(
+		"hands out nothing and writes nothing when the upstream then answers %s",
+		async (_, answers) => {
+			const r = await refresher(60);
+			r.advance(31_000);
+			const before = (await r.stored())?.sealed;
+			r.upstream.push(async () => {
+				r.boundary.revoked = true;
+				const answered = await answers();
+				return answered ?? { kind: "refreshed", tokens: upstreamTokens({ accessToken: "up-new" }) };
+			});
+			expect(said(await r.call())).toBe("gone");
+			expect((await r.stored())?.sealed).toBe(before);
+		},
+	);
 });
