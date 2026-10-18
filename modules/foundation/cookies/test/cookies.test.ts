@@ -24,14 +24,14 @@ it("names and sets cookies by one rule, and reads one only when the request carr
 	expect(secure.write("s", "v", 60)).toBe(
 		"__Host-s=v; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=60",
 	);
-	expect(secure.read(carrying("a=1; __Host-s=v"), "s")).toBe("v");
-	expect(secure.read(carrying("__Host-sx=w; __Host-s=v"), "s")).toBe("v");
-	expect(secure.read(carrying("s=v"), "s")).toBeUndefined();
-	expect(secure.read(carrying("__Host-s=v; __Host-s=w"), "s")).toBeUndefined();
-	expect(secure.read(carrying("__Host-s=v", "http"), "s")).toBeUndefined();
+	expect(secure.read?.(carrying("a=1; __Host-s=v"), "s")).toBe("v");
+	expect(secure.read?.(carrying("__Host-sx=w; __Host-s=v"), "s")).toBe("v");
+	expect(secure.read?.(carrying("s=v"), "s")).toBeUndefined();
+	expect(secure.read?.(carrying("__Host-s=v; __Host-s=w"), "s")).toBeUndefined();
+	expect(secure.read?.(carrying("__Host-s=v", "http"), "s")).toBeUndefined();
 	const plain = await at("http://as.example");
 	expect(plain.write("s", "", 0)).toBe("s=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
-	expect(plain.read(carrying("s=v", "http"), "s")).toBe("v");
+	expect(plain.read?.(carrying("s=v", "http"), "s")).toBe("v");
 });
 
 it("writes a cross-site cookie only as __Host- and Secure, and never where cookies cannot be secure", async () => {
@@ -46,7 +46,7 @@ it("writes a cross-site cookie only as __Host- and Secure, and never where cooki
 it("reads no cookie from a request that carries none", async () => {
 	for (const origin of ["https://as.example", "http://as.example"]) {
 		const scheme = origin.startsWith("https:") ? "https" : "http";
-		expect((await at(origin)).read(testRequest({ source: { scheme } }), "s")).toBeUndefined();
+		expect((await at(origin)).read?.(testRequest({ source: { scheme } }), "s")).toBeUndefined();
 	}
 });
 
@@ -110,7 +110,7 @@ describe("lookup", () => {
 		const twice = carrying("__Host-s=secret-1; __Host-s=secret-2; __Host-t=x; __Host-t=y");
 		for (let i = 0; i < 3; i++) {
 			secure.lookup(twice, "s");
-			secure.read(twice, "s");
+			secure.read?.(twice, "s");
 		}
 		secure.lookup(twice, "t");
 		secure.lookup(carrying("__Host-s=secret-1; __Host-s=secret-2"), "s");
