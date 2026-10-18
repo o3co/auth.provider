@@ -60,7 +60,7 @@ const resultOf = async (node: Node, value: unknown): Promise<Result> => {
 export const accepts = async (node: Node, value: unknown) =>
 	(await resultOf(node, value)).issues === undefined;
 
-/** Whether the node reads a time or a size written with its unit into a number, as ts.hocon's markers do. */
+/** Whether the node reads a time or a size written with its unit into a number, as kernel's `setting` does. */
 export async function readsUnits(node: Node): Promise<boolean> {
 	for (const written of ["1s", "1KiB", "1d"]) {
 		const read = await resultOf(node, written);
@@ -69,6 +69,6 @@ export async function readsUnits(node: Node): Promise<boolean> {
 	return false;
 }
 
-/** Whether the node refuses a number with no unit for naming none, as the markers do when asked to. */
+/** Whether the node refuses a value naming no unit: a bare number, or a string of one as an environment variable gives. */
 export const refusesUnitless = async (node: Node) =>
-	((await resultOf(node, 1)).issues ?? []).some((i) => i.params?.problem === "missing-unit");
+	!(await accepts(node, 1)) && !(await accepts(node, "1"));
