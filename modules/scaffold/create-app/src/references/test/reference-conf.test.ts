@@ -85,7 +85,6 @@ it("tells a key that reads time or size with its unit asked for from one that ta
 /** Sections whose time and size keys still name their unit or take a bare number; a section leaves once its owner moves it, and never comes back. */
 const unitsLater = new Set([
 	"client-assertion",
-	"clients-cimd",
 	"code-grant",
 	"consent",
 	"device-grant",
@@ -121,7 +120,6 @@ const unitsLater = new Set([
 const prefaultLater = new Set([
 	"audit",
 	"client-assertion",
-	"clients-cimd",
 	"code-grant-store",
 	"consent",
 	"device-grant",

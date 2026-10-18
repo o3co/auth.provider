@@ -86,8 +86,8 @@ export async function readingOver(c: BuildContext<Settings>) {
 		outbound: await c.get(outbound),
 		narrower: {
 			...(s.allow.length > 0 ? { hosts: s.allow } : {}),
-			maxBytes: s["max-bytes"],
-			timeoutMs: s["timeout-ms"],
+			maxBytes: s["max-size"],
+			timeoutMs: s.timeout,
 		},
 		ceiling: { scopes: s.scopes, audiences: s.audiences },
 		log: c.log,

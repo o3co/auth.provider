@@ -11,7 +11,7 @@
 
 ## Offers
 - Composition definition only: a contribution to `clientSources`, and the metadata item `client_id_metadata_document_supported` (`true`).
-- Operator section: `allow` and `deny` (host names, read as `outbound` reads a list entry; `.name` also takes the names under it), `scopes` and `audiences` (the ceiling; default empty), `max-bytes` (default 5120), `timeout-ms` (default 5000), `cache-seconds` (default 600), `cache-entries` (default 256), `refused-seconds` (default 60), `max-concurrent` (default 8).
+- Operator section: `allow` and `deny` (host names, read as `outbound` reads a list entry; `.name` also takes the names under it), `scopes` and `audiences` (the ceiling; default empty), `max-size` (default `5KiB`), `timeout` (default `5s`), `cache-lifetime` (default `10m`), `cache-entries` (default 256), `refused-lifetime` (default `1m`), `max-concurrent` (default 8). Times and sizes are written with a unit.
 
 ## Invariants
 - Whether the code grant is composed is `grants`' `composedGrants`. Without it composed, nothing is fetched and the metadata item is left out; boot is not refused.
@@ -24,7 +24,7 @@
 - `consent`'s section gets the name, the page and the id's host. The client is public, by `none`, and never registered, so it is never first-party.
 - A failed fetch or a refused document is no client (not unavailable). Other fields (keys, logo) are not read.
 - A document that an owner's schema refuses (a redirect URI `authorize` refuses, say) is kept as found; `clients` refuses it on every find, and no reason is logged.
-- A refused document, destination or outbound failure is remembered for `refused-seconds`; running out of time or of `outbound`'s places is not.
+- A refused document, destination or outbound failure is remembered for `refused-lifetime`; running out of time or of `outbound`'s places is not.
 - Fetches have no limit per time or per host beyond `max-concurrent`. Operators keep outside hosts from blocking them by narrowing the document hosts in `outbound`'s `allow`.
 - Without that, a host that does not answer can fill the `max-concurrent` places (8 by default), and an id not kept is none meanwhile.
 - A refused document's log line carries the id without control characters, cut to 200 characters, and the reason.

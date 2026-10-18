@@ -68,11 +68,11 @@ From `@mod/clients-cimd`.
 | `clients-cimd.deny` | list of string | `[]` |  |  |  |  |
 | `clients-cimd.scopes` | list of string | `[]` |  |  |  |  |
 | `clients-cimd.audiences` | list of string | `[]` |  |  |  |  |
-| `clients-cimd.max-bytes` | integer (1–16777216) | `5120` |  |  |  |  |
-| `clients-cimd.timeout-ms` | integer (1–60000) | `5000` |  |  |  |  |
-| `clients-cimd.cache-seconds` | integer (0–86400) | `600` |  |  |  |  |
+| `clients-cimd.max-size` | string | `5KiB` |  |  |  | The largest document fetched: a size with a unit, e.g. 5KiB. |
+| `clients-cimd.timeout` | string | `5s` |  |  |  | How long a fetch may take: a duration with a unit, e.g. 5s. |
+| `clients-cimd.cache-lifetime` | string | `10m` |  |  |  | How long a document is kept: a duration with a unit, e.g. 10m. |
 | `clients-cimd.cache-entries` | integer (1–100000) | `256` |  |  |  |  |
-| `clients-cimd.refused-seconds` | integer (0–86400) | `60` |  |  |  |  |
+| `clients-cimd.refused-lifetime` | string | `1m` |  |  |  | How long a refusal is remembered: a duration with a unit, e.g. 1m. |
 | `clients-cimd.max-concurrent` | integer (1–1024) | `8` |  |  |  |  |
 
 ## code-grant
