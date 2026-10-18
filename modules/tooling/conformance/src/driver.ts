@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import type { AuditTrail } from "./audit/audit.ts";
 import type { Mailbox } from "./smtp.ts";
@@ -39,6 +40,18 @@ export function freePort(): Promise<number> {
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Starts a target at a free port, choosing again (up to `attempts`) where another took it first (EADDRINUSE). */
+export async function untilPortHeld(
+	start: (port: number) => Promise<Started>,
+	attempts: number,
+): Promise<Started> {
+	for (let attempt = 1; ; attempt++) {
+		const started = await start(await freePort());
+		const taken = started.kind === "refused" && started.output.includes("EADDRINUSE");
+		if (!taken || attempt >= attempts) return started;
+	}
+}
+
 export async function launch(spec: Launch, timeoutMs = 30_000): Promise<Started> {
 	const child = spawn(spec.command, [...spec.args], { cwd: spec.cwd, env: { ...spec.env } });
 	let output = "";
@@ -74,39 +87,73 @@ export function baseEnv(): Record<string, string> {
 	return { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "" };
 }
 
+const owner = "conformance.owner";
+
+/** Whether a process of the pid runs here. */
+const running = (pid: number) => {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "EPERM";
+	}
+};
+
+/** Removes the throwaway Redis that a process no longer running left behind, such as a run killed mid-scene. */
+function sweepLeftBehind(): void {
+	const listed = execFileSync(
+		"docker",
+		["ps", "-a", "--filter", `label=${owner}`, "--format", `{{.ID}} {{.Label "${owner}"}}`],
+		{ encoding: "utf8" },
+	);
+	for (const line of listed.split("\n").filter(Boolean)) {
+		const [id, pid] = line.split(" ");
+		if (id && !running(Number(pid))) execFileSync("docker", ["rm", "-f", id], { stdio: "ignore" });
+	}
+}
+
 /** A throwaway Redis in a container, for the length of one scene. */
 export async function startRedis(
 	settings: readonly string[] = [],
 ): Promise<{ url: string; stop(): Promise<void>; pause(paused: boolean): Promise<void> }> {
-	const port = await freePort();
-	const name = `conformance-redis-${port}`;
+	sweepLeftBehind();
+	const name = `conformance-redis-${process.pid}-${randomBytes(4).toString("hex")}`;
+	// Docker picks the host port as it binds, so no other process can take it in between.
 	execFileSync("docker", [
 		"run",
 		"-d",
 		"--rm",
 		"--name",
 		name,
+		"--label",
+		`${owner}=${process.pid}`,
 		"-p",
-		`127.0.0.1:${port}:6379`,
+		"127.0.0.1::6379",
 		"redis:7-alpine",
 		"redis-server",
 		...settings,
 	]);
-	for (let i = 0; i < 100; i++) {
+	const stop = async () => {
+		execFileSync("docker", ["rm", "-f", name], { stdio: "ignore" });
+	};
+	const bound = execFileSync("docker", ["port", name, "6379/tcp"], { encoding: "utf8" });
+	const port = /:(\d+)\s*$/m.exec(bound)?.[1];
+	let ready = false;
+	for (let i = 0; port !== undefined && i < 100 && !ready; i++) {
 		try {
-			if (
+			ready =
 				execFileSync("docker", ["exec", name, "redis-cli", "ping"], { encoding: "utf8" }).trim() ===
-				"PONG"
-			)
-				break;
+				"PONG";
 		} catch {}
-		await new Promise((resolve) => setTimeout(resolve, 100));
+		if (!ready) await new Promise((resolve) => setTimeout(resolve, 100));
+	}
+	if (!ready) {
+		await stop();
+		throw new Error(`the throwaway Redis ${name} did not answer`);
 	}
 	return {
 		url: `redis://127.0.0.1:${port}`,
-		stop: async () => {
-			execFileSync("docker", ["rm", "-f", name], { stdio: "ignore" });
-		},
+		stop,
 		/** A paused server keeps its connections open and answers nothing, as a hung store does. */
 		pause: async (paused) => {
 			execFileSync("docker", [paused ? "pause" : "unpause", name], { stdio: "ignore" });

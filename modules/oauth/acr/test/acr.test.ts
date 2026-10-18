@@ -19,6 +19,7 @@ import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, expect, it } from "vitest";
 import { acr, acrEntries } from "../src/contract.ts";
 import acrModule from "../src/module.ts";
+import { section } from "../src/section.ts";
 import { acrConfig } from "../src/testing.ts";
 
 const runtime = quietRuntime();
@@ -125,4 +126,8 @@ it("refuses to start with an offered entry whose sets are not each a non-empty s
 		expect(refused, name).toBeInstanceOf(BootRefused);
 		expect(JSON.stringify(refused.refusals), name).toMatch(/urn:t:loose/);
 	}
+});
+
+it("reads an empty table when the operator sets nothing", () => {
+	expect(section.parse({})).toEqual({ values: {} });
 });

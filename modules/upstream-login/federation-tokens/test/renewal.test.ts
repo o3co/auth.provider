@@ -46,7 +46,7 @@ describe("when a token ends", () => {
 	});
 
 	it("caps an end at login, or a refresh's, at the longest lifetime", async () => {
-		const settings = { settings: { "max-lifetime-seconds": 3600 } };
+		const settings = { settings: { "max-lifetime": "1h" } };
 		const login = await linked({ expiresInSeconds: 1e12 }, undefined, settings);
 		expect((await login.get()).json).toMatchObject({ expires_in: 3600 });
 		for (const said of [1e12, undefined]) {
@@ -86,7 +86,7 @@ describe("when a token ends", () => {
 		const h = await linked(
 			{ refreshToken: "r-1", expiresInSeconds: 0 },
 			async () => answers.shift() ?? answer({}),
-			{ settings: { "max-lifetime-seconds": 60, "refresh-before-seconds": 3600 } },
+			{ settings: { "max-lifetime": "1m", "refresh-before": "1h" } },
 		);
 		expect((await h.get()).json).toMatchObject({ access_token: "up-2", expires_in: 60 });
 		h.advance(29_999);
@@ -97,7 +97,7 @@ describe("when a token ends", () => {
 
 	it("refreshes again a token whose refreshed end comes near, and hands one less than a second from its end as unavailable", async () => {
 		const h = await linked({ expiresInSeconds: 40 }, undefined, {
-			settings: { "refresh-before-seconds": 0 },
+			settings: { "refresh-before": "0s" },
 		});
 		h.advance(39_500);
 		expect((await h.get()).json).toEqual({ error: "temporarily_unavailable" });
@@ -111,7 +111,7 @@ describe("the scope", () => {
 	const narrowed = async (next: Said) => {
 		const answers = [answer({ scope: ["read"], expiresInSeconds: 1 }), answer(next)];
 		const h = await linked(granted, async () => answers.shift() ?? answer({}), {
-			settings: { "refresh-before-seconds": 0 },
+			settings: { "refresh-before": "0s" },
 		});
 		expect((await h.get()).json).toMatchObject({ scope: "read" });
 		h.advance(1000);
@@ -288,7 +288,7 @@ describe("a refresh racing other writers", () => {
 	});
 
 	it("waits no longer than its lock lasts for another's refresh", async () => {
-		const h = await linked(due, undefined, { settings: { "lock-seconds": 1 } });
+		const h = await linked(due, undefined, { settings: { "lock-lifetime": "1s" } });
 		await h.stores.locks.hold(`${h.session.id}\ncorp`, "another", 60_000);
 		const tries = vi.spyOn(h.stores.locks, "hold");
 		const got = await h.get();
@@ -337,7 +337,7 @@ describe("a refresh racing other writers", () => {
 				expect(await at.h?.stores.locks.hold(lock(), "another", 60_000)).toBe("created");
 				return answer({});
 			},
-			{ settings: { "lock-seconds": 1 } },
+			{ settings: { "lock-lifetime": "1s" } },
 		);
 		expect((await at.h.get()).json).toMatchObject({ access_token: "up-2" });
 		// Past the moment a lock let go would end: the other host's must still be held.

@@ -1,3 +1,4 @@
+import { setting } from "@mod/kernel";
 import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
 
@@ -13,10 +14,10 @@ export const section = z.strictObject({
 			name,
 			z.looseObject({
 				type: z.string().min(1),
-				"upstream-amr": z.record(z.string().min(1), amr).default({}),
+				"upstream-amr": z.record(z.string().min(1), amr).prefault({}),
 			}),
 		)
-		.default({})
+		.prefault({})
 		.describe(
 			"Each IdP by name (1 to 32 lowercase letters, digits and `-`, not starting with `-`): its `type`, `upstream-amr` (the upstream's amr values mapped to ours; none by default; mapping one to `mfa`, say, trusts the upstream's claim for that amr and any acr it satisfies, such as `urn:o3co:acr:mfa`) and the type's own settings.",
 		),
@@ -25,27 +26,23 @@ export const section = z.strictObject({
 		.describe(
 			"The https URL a login lands on when it named no return target; the public origin's root by default.",
 		),
-	"transaction-seconds": z
-		.number()
-		.int()
-		.min(60)
-		.max(3600)
-		.default(600)
-		.describe("How long a round trip, or a held login's tokens, may wait."),
+	"transaction-lifetime": setting
+		.duration("s")
+		.pipe(z.number().int().min(60).max(3600))
+		.prefault("10m")
+		.describe("How long a round trip, or a held login's tokens, may wait, from 1m to 1h."),
 	requests: z
 		.number()
 		.int()
 		.min(1)
 		.max(1000)
-		.default(60)
+		.prefault(60)
 		.describe("Starts and callbacks allowed per source in each window."),
-	"window-seconds": z
-		.number()
-		.int()
-		.min(1)
-		.max(3600)
-		.default(60)
-		.describe("The window `requests` counts in."),
+	window: setting
+		.duration("s")
+		.pipe(z.number().int().min(1).max(3600))
+		.prefault("1m")
+		.describe("The window `requests` counts in, from 1s to 1h."),
 });
 
 export type Settings = z.output<typeof section>;

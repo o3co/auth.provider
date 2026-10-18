@@ -258,7 +258,7 @@ describe("device authorization", () => {
 	});
 
 	it("answers the lifetime and the interval it is set to", async () => {
-		const s = await serve({ "code-seconds": 300, "interval-seconds": 7 });
+		const s = await serve({ "code-lifetime": "5m", interval: "7s" });
 		expect((await s.authorize()).body).toMatchObject({ expires_in: 300, interval: 7 });
 	});
 
@@ -880,21 +880,31 @@ it("takes its verification page only as an https URL kept as written: no userinf
 	}
 });
 
-it("takes each number in its bounds as a whole number, defaults each as the card says, and no other key", () => {
+it("takes each setting in its bounds, a time with its unit in whole seconds, defaults each as the card says, and no other key", () => {
 	const parsed = (settings: Record<string, unknown>) =>
 		section.safeParse({ "verification-uri": "https://as.example/device", ...settings });
-	const bounds: [string, number, number, number][] = [
-		["code-seconds", 30, 3600, 600],
-		["interval-seconds", 1, 60, 5],
+	const counts: [string, number, number, number][] = [
 		["attempts", 1, 100, 5],
-		["attempts-window-seconds", 60, 86_400, 300],
 		["requests", 1, 100_000, 60],
-		["window-seconds", 1, 86_400, 60],
 	];
-	for (const [key, min, max, byDefault] of bounds) {
+	for (const [key, min, max, byDefault] of counts) {
 		const takes = (value: number) => parsed({ [key]: value }).success;
 		expect([takes(min), takes(max), takes(min + 0.5)], key).toEqual([true, true, false]);
 		expect([takes(min - 1), takes(max + 1)], key).toEqual([false, false]);
+		expect(parsed({}).data?.[key as keyof typeof section.shape], key).toBe(byDefault);
+	}
+	const times: [string, number, number, number][] = [
+		["code-lifetime", 30, 3600, 600],
+		["interval", 1, 60, 5],
+		["attempts-window", 60, 86_400, 300],
+		["window", 1, 86_400, 60],
+	];
+	for (const [key, min, max, byDefault] of times) {
+		const takes = (value: unknown) => parsed({ [key]: value }).success;
+		const inBounds = [`${min}s`, `${max}s`, `${min * 1000 + 500}ms`].map(takes);
+		expect(inBounds, key).toEqual([true, true, false]);
+		const outside = [`${min - 1}s`, `${max + 1}s`, min, String(min)].map(takes);
+		expect(outside, key).toEqual([false, false, false, false]);
 		expect(parsed({}).data?.[key as keyof typeof section.shape], key).toBe(byDefault);
 	}
 	expect(parsed({}).data?.["complete-uri"]).toBe(false);

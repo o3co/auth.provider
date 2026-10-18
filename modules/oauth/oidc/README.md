@@ -14,7 +14,7 @@
 - `idTokenHints.check` (an ID token given back as a hint → its subject, session, client and issue time / sessionless / invalid)
 - A contribution to `code-grant`'s ID token makers
 - `issuer`'s metadata items: `scopes_supported` (`openid` and the table's scopes), `claims_supported` (`sub` and the table's claims), `subject_types_supported` (`public` only), `id_token_signing_alg_values_supported` (the algorithm `keys` signs with)
-- Operator section: `id-token-seconds` (60–86400, default 3600)
+- Operator section: `id-token-lifetime` (a duration written with a unit, `1m`–`1d` in whole seconds; default `1h`)
 
 ## Invariants
 - Only the table's claims are released; an attribute outside it, a value of another type, or a nested object never is.

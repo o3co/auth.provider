@@ -141,8 +141,8 @@ async function serve(
 				}),
 			]),
 			...(page === null
-				? { consent: { "challenge-seconds": 60 } }
-				: consentConfig({ "challenge-seconds": 60, page })),
+				? { consent: { "challenge-lifetime": "1m" } }
+				: consentConfig({ "challenge-lifetime": "1m", page })),
 		},
 		runtime,
 	});
@@ -631,13 +631,19 @@ describe("consent's sections", () => {
 		expect(await check(displayed({ name: "Acme", host: "acme.example\r\n" }))).toBe("refused");
 	});
 
-	it("takes a challenge's time as whole seconds from 60 to 3600, 600 unless set", () => {
+	it("takes a challenge's time written with its unit, in whole seconds from 1m to 1h, 10m unless set", () => {
 		const page = "https://as.example/consent";
-		const seconds = (value: number) =>
-			section.safeParse({ page, "challenge-seconds": value }).success;
-		expect([60, 3600].map(seconds)).toEqual([true, true]);
-		expect([59, 3601, 60.5].map(seconds)).toEqual([false, false, false]);
-		expect(section.parse({ page })["challenge-seconds"]).toBe(600);
+		const takes = (value: unknown) =>
+			section.safeParse({ page, "challenge-lifetime": value }).success;
+		expect(["1m", "60s", "1h"].map(takes)).toEqual([true, true, true]);
+		expect(["59s", "3601s", "60500ms", 600, "600"].map(takes)).toEqual([
+			false,
+			false,
+			false,
+			false,
+			false,
+		]);
+		expect(section.parse({ page })["challenge-lifetime"]).toBe(600);
 	});
 
 	it("takes a page only as an https URL kept as written: no userinfo, no fragment", () => {

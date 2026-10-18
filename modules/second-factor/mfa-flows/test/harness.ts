@@ -137,6 +137,7 @@ const factorStand = () => {
 				save: (key: string, record: StoredFactors) => stand.records.create(key, record, "endless"),
 				read: stand.records.read,
 				update: stand.records.change,
+				scan: stand.records.scan,
 			}),
 		),
 	]);

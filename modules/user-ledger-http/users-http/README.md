@@ -10,7 +10,7 @@
 
 ## Offers
 - Composition definition only (a contribution to `users`' `ledgers`).
-- Operator section: `verify-url` (the password call's whole URL, https or a plain-http pair outbound names, no fragment; required), `credential` (optional: a bare RFC 6750 token with at least 32 bytes of key material, counted as the fewest of its bytes, hex or base64 decoding), `timeout-ms` and `max-response-bytes` (each narrows outbound's cap).
+- Operator section: `verify-url` (the password call's whole URL, https or a plain-http pair outbound names, no fragment; required), `credential` (optional: a bare RFC 6750 token with at least 32 bytes of key material, counted as the fewest of its bytes, hex or base64 decoding), `timeout` and `max-response-size` (each narrows outbound's cap; written with its unit, a bare number refused). `timeout-ms` and `max-response-bytes` are read in their place when given.
 - The password call, as the HTTP user repository's `authenticateUrl`:
 
   | | |

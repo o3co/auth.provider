@@ -36,7 +36,10 @@ it("assembles what combinations composes in full, each axis with one adapter, an
 	expect(await imports(target)).toEqual(modules);
 	const pkg = JSON.parse(await read(target, "package.json"));
 	expect(Object.keys(pkg.dependencies)).toEqual([kernel, ...modules]);
-	expect(pkg.scripts).toEqual({ start: "node --env-file-if-exists=.env src/main.ts" });
+	expect(pkg.scripts).toEqual({
+		start: "node --env-file-if-exists=.env src/main.ts",
+		reseal: "node --env-file-if-exists=.env src/reseal.ts",
+	});
 	const composed = modules.map(manifest);
 	const owners = composed.flatMap((m) => m.replaces ?? m.adapts ?? []);
 	expect(owners.length).toBeGreaterThan(0);
@@ -97,6 +100,15 @@ it("reads each scalar of the composed modules' fragments from env, one variable 
 
 it("puts the fragments' lists, and a value spanning sections, in the local layer's example as comments only", async () => {
 	await writesListsLocally(await generated(), full());
+});
+
+it("runs the image on its own interface and port, whatever the .env of a run on the host names", async () => {
+	const target = await generated();
+	expect(await read(target, ".env.example")).toContain("# HTTP_HOST=127.0.0.1");
+	// -e after --env-file wins, so the container listens where the port mapping reaches.
+	expect(await read(target, "README.md")).toMatch(
+		/`docker run --env-file \.env -e HTTP_HOST=0\.0\.0\.0 -e HTTP_PORT=8080 [^`]* -p 8080:8080 auth-provider`/,
+	);
 });
 
 it("writes the image, and what git and the image leave out", async () => {
@@ -258,7 +270,7 @@ it("stops within the kernel's own deadline, and tells the operator to give the o
 	expect(main).toContain("await app.stop();");
 	expect(main).not.toMatch(/stop\(\d/);
 	expect(await read(target, "README.md")).toMatch(
-		/grace period longer than `kernel\.stop-seconds`/,
+		/grace period longer than `kernel\.stop-deadline`/,
 	);
 });
 

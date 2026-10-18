@@ -39,7 +39,7 @@ From `@mod/authorize`.
 | `authorize.step-up-page` | string |  |  |  |  |  |
 | `authorize.oidc-mode` | oidc-required \| dual | `oidc-required` |  |  |  |  |
 | `authorize.requests` | integer (1–100000) | `60` |  |  |  |  |
-| `authorize.window-seconds` | integer (1–86400) | `60` |  |  |  |  |
+| `authorize.window` | string | `1m` |  |  |  | The rate limit's window: a duration with a unit, e.g. 1m. |
 
 ## client-assertion
 
@@ -47,8 +47,8 @@ From `@mod/client-assertion`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `client-assertion.max-lifetime-seconds` | integer (1–86400) | `3600` |  |  |  | The longest lifetime a client assertion may have, in seconds. |
-| `client-assertion.clock-skew-seconds` | integer (0–300) | `30` |  |  |  | How far a client's clock may be off when an assertion's times are checked, in seconds. |
+| `client-assertion.max-lifetime` | string | `1h` |  |  |  | The longest lifetime a client assertion may have, from `1s` to `1d` in whole seconds. |
+| `client-assertion.clock-skew` | string | `30s` |  |  |  | How far a client's clock may be off when an assertion's times are checked, from `0s` to `5m` in whole seconds. |
 
 ## clients
 
@@ -68,11 +68,11 @@ From `@mod/clients-cimd`.
 | `clients-cimd.deny` | list of string | `[]` |  |  |  |  |
 | `clients-cimd.scopes` | list of string | `[]` |  |  |  |  |
 | `clients-cimd.audiences` | list of string | `[]` |  |  |  |  |
-| `clients-cimd.max-bytes` | integer (1–16777216) | `5120` |  |  |  |  |
-| `clients-cimd.timeout-ms` | integer (1–60000) | `5000` |  |  |  |  |
-| `clients-cimd.cache-seconds` | integer (0–86400) | `600` |  |  |  |  |
+| `clients-cimd.max-size` | string | `5KiB` |  |  |  | The largest document fetched: a size with a unit, e.g. 5KiB. |
+| `clients-cimd.timeout` | string | `5s` |  |  |  | How long a fetch may take: a duration with a unit, e.g. 5s. |
+| `clients-cimd.cache-lifetime` | string | `10m` |  |  |  | How long a document is kept: a duration with a unit, e.g. 10m. |
 | `clients-cimd.cache-entries` | integer (1–100000) | `256` |  |  |  |  |
-| `clients-cimd.refused-seconds` | integer (0–86400) | `60` |  |  |  |  |
+| `clients-cimd.refused-lifetime` | string | `1m` |  |  |  | How long a refusal is remembered: a duration with a unit, e.g. 1m. |
 | `clients-cimd.max-concurrent` | integer (1–1024) | `8` |  |  |  |  |
 
 ## code-grant
@@ -81,8 +81,10 @@ From `@mod/code-grant`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `code-grant.code-seconds` | integer (10–600) | `600` |  |  |  |  |
-| `code-grant.sweep-seconds` | integer (1–3600) | `30` |  |  |  |  |
+| `code-grant.code-lifetime` | string | `10m` |  |  |  | How long a code can be redeemed, from 10s to 10m. |
+| `code-grant.sweep-interval` | string | `30s` |  |  |  | How often each host retries the revocations a code that came again left, from 1s to 1h. |
+| `code-grant.code-seconds` | integer (10–600) |  |  |  |  | Seconds; write `code-lifetime` instead. |
+| `code-grant.sweep-seconds` | integer (1–3600) |  |  |  |  | Seconds; write `sweep-interval` instead. |
 
 ## code-grant-store
 
@@ -100,7 +102,7 @@ From `@mod/consent`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `consent.page` | string |  |  | `CONSENT_PAGE` | `https://login.example.invalid/consent` | The deployment's consent page, with the challenge as its `challenge` query parameter; without it, nobody is asked. |
-| `consent.challenge-seconds` | integer (60–3600) | `600` |  |  |  | How long a pending consent challenge stays answerable, in seconds. |
+| `consent.challenge-lifetime` | string | `10m` |  |  |  | How long a pending consent challenge stays answerable, from `1m` to `1h` in whole seconds. |
 
 ## device-grant
 
@@ -110,12 +112,12 @@ From `@mod/device-grant`.
 |---|---|---|---|---|---|---|
 | `device-grant.verification-uri` | string |  | yes | `DEVICE_GRANT_VERIFICATION_URI` | `https://login.example.invalid/device` | The deployment's page where a user enters the code. |
 | `device-grant.complete-uri` | boolean | `false` |  |  |  | Whether to answer also the page's address with the code filled in. |
-| `device-grant.code-seconds` | integer (30–3600) | `600` |  |  |  | How long a device code and its user code live, in seconds. |
-| `device-grant.interval-seconds` | integer (1–60) | `5` |  |  |  | How long a device waits between polls of the token endpoint, in seconds. |
+| `device-grant.code-lifetime` | string | `10m` |  |  |  | How long a device code and its user code live, from `30s` to `1h` in whole seconds. |
+| `device-grant.interval` | string | `5s` |  |  |  | How long a device waits between polls of the token endpoint, from `1s` to `1m` in whole seconds. |
 | `device-grant.attempts` | integer (1–100) | `5` |  |  |  | Decisions a subject may try in each window, so codes cannot be guessed. |
-| `device-grant.attempts-window-seconds` | integer (60–86400) | `300` |  |  |  | The window `attempts` is counted over, in seconds. |
+| `device-grant.attempts-window` | string | `5m` |  |  |  | The window `attempts` is counted over, from `1m` to `1d` in whole seconds. |
 | `device-grant.requests` | integer (1–100000) | `60` |  |  |  | Device authorization requests per source in each window. |
-| `device-grant.window-seconds` | integer (1–86400) | `60` |  |  |  | The window `requests` is counted over, in seconds. |
+| `device-grant.window` | string | `1m` |  |  |  | The window `requests` is counted over, from `1s` to `1d` in whole seconds. |
 
 ## dpop
 
@@ -124,9 +126,9 @@ From `@mod/dpop`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `dpop.algorithms` | list of ES256 \| ES384 \| EdDSA \| RS256 | `["ES256","ES384","EdDSA","RS256"]` |  |  |  | The signing algorithms a DPoP proof may use. |
-| `dpop.proof-window-seconds` | integer (1–300) | `60` |  |  |  | How far a proof's `iat` may lie from the clock on either side, in seconds. |
+| `dpop.proof-window` | string | `1m` |  |  |  | How far a proof's `iat` may lie from the clock on either side, from `1s` to `5m` in whole seconds. |
 | `dpop.nonce.required` | never \| as \| as+rs | `never` |  | `DPOP_NONCE_REQUIRED` | `never` | Where a server-provided nonce is asked: never, at the token endpoint, or there and at resources. |
-| `dpop.nonce.ttl-seconds` | integer (1–3600) | `300` |  | `DPOP_NONCE_TTL_SECONDS` | `300` | How often the nonce changes, in seconds; one is taken for twice this. |
+| `dpop.nonce.ttl` | string | `5m` |  | `DPOP_NONCE_TTL` | `5m` | How often the nonce changes, from `1s` to `1h` in whole seconds; one is taken for twice this. |
 | `dpop.nonce.secret` | string |  |  | `DPOP_NONCE_SECRET` | `REPLACE-NONCE-SECRET-BASE64-32-BYTES` | The nonce's key, shared by every instance: base64 of 32 bytes or more; required unless never. |
 
 ## external-jwt
@@ -135,7 +137,7 @@ From `@mod/external-jwt`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `external-jwt.key-set-max-age-ms` | integer (3600000–2592000000) | `86400000` |  |  |  | How long after its fetch a key set is still used while no new one can be had, in milliseconds. |
+| `external-jwt.key-set-max-age` | string | `1d` |  |  |  | How long after its fetch a key set is still used while no new one can be had, from `1h` to `30d`. |
 
 ## federation
 
@@ -145,9 +147,9 @@ From `@mod/federation`.
 |---|---|---|---|---|---|---|
 | `federation.idps` | map | `{}` |  |  |  | Each IdP by name (1 to 32 lowercase letters, digits and `-`, not starting with `-`): its `type`, `upstream-amr` (the upstream's amr values mapped to ours; none by default; mapping one to `mfa`, say, trusts the upstream's claim for that amr and any acr it satisfies, such as `urn:o3co:acr:mfa`) and the type's own settings. |
 | `federation.landing` | string |  |  |  |  | The https URL a login lands on when it named no return target; the public origin's root by default. |
-| `federation.transaction-seconds` | integer (60–3600) | `600` |  |  |  | How long a round trip, or a held login's tokens, may wait. |
+| `federation.transaction-lifetime` | string | `10m` |  |  |  | How long a round trip, or a held login's tokens, may wait, from 1m to 1h. |
 | `federation.requests` | integer (1–1000) | `60` |  |  |  | Starts and callbacks allowed per source in each window. |
-| `federation.window-seconds` | integer (1–3600) | `60` |  |  |  | The window `requests` counts in. |
+| `federation.window` | string | `1m` |  |  |  | The window `requests` counts in, from 1s to 1h. |
 
 ## federation-grants
 
@@ -188,11 +190,11 @@ From `@mod/federation-tokens`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `federation-tokens.refresh-before-seconds` | integer (0–3600) | `30` |  |  |  |  |
-| `federation-tokens.max-lifetime-seconds` | integer (60–31536000) | `86400` |  |  |  |  |
-| `federation-tokens.lock-seconds` | integer (1–60) | `5` |  |  |  |  |
-| `federation-tokens.requests` | integer (1–1000) | `60` |  |  |  |  |
-| `federation-tokens.window-seconds` | integer (1–3600) | `60` |  |  |  |  |
+| `federation-tokens.refresh-before` | string | `30s` |  |  |  | A token this close to its end is refreshed before it is handed over, from 0s to 1h. |
+| `federation-tokens.max-lifetime` | string | `1d` |  |  |  | The longest a token is taken to live, from 1m to 365d: caps what an upstream says, and stands for an answer that says nothing. |
+| `federation-tokens.lock-lifetime` | string | `5s` |  |  |  | How long one refresh holds its lock, and how long another request waits for it, from 1s to 1m. |
+| `federation-tokens.requests` | integer (1–1000) | `60` |  |  |  | Requests allowed per source in each window. |
+| `federation-tokens.window` | string | `1m` |  |  |  | The window `requests` counts in, from 1s to 1h. |
 
 ## http
 
@@ -207,7 +209,7 @@ From `@mod/http`.
 | `http.cors-origins` | list of string | `[]` |  |  |  | The https origins whose pages may read cross-origin routes: exact, without a pattern. |
 | `http.insecure-origin` | boolean | `false` |  |  |  | Accepts a plain-http `public-origin`, knowing its cookies cannot be made secure: an http `public-origin` boots only with it. |
 | `http.proxy-hops` | integer (1–10) | `1` |  |  |  | How many trusted proxies, at most, a request passes through. |
-| `http.client-certificate.dialect` | rfc9440 \| pem \| xfcc |  | yes |  |  | The form a trusted proxy forwards the client's certificate in: `rfc9440` (byte sequences) with `header` and `chain-header`, `pem` (one PEM block, URL-encoded or not) with `header`, or `xfcc` (Envoy's form, the chain in the same header) with `header`. |
+| `http.client-certificate.dialect` | rfc9440 \| pem \| xfcc |  |  |  |  | The form a trusted proxy forwards the client's certificate in: `rfc9440` (byte sequences) with `header` and `chain-header`, `pem` (one PEM block, URL-encoded or not) with `header`, or `xfcc` (Envoy's form, the chain in the same header) with `header`. |
 | `http.client-certificate.header` | string | `client-cert` |  |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
 | `http.client-certificate.chain-header` | string | `client-cert-chain` |  |  |  | The header holding the chain behind the certificate, for `rfc9440`: lower-case letters, digits and `-`. |
 
@@ -217,7 +219,7 @@ From `@mod/http-ops`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `http-ops.readiness-deadline-ms` | integer (1–2147483647) | `1000` |  |  |  | How long `GET /readyz` waits for the probes before it answers unready, in whole milliseconds; set it below the orchestrator's own timeout for the check. |
+| `http-ops.readiness-deadline` | string | `1s` |  |  |  | How long `GET /readyz` waits for the probes before it answers unready, in whole milliseconds (`1s`); set it below the orchestrator's own timeout for the check. |
 
 ## issuer
 
@@ -234,8 +236,8 @@ From `@mod/jwt-bearer`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `jwt-bearer.issuers` | list of map | `[]` |  |  | `[{"issuer":"https://issuer.example.invalid","jwks-uri":"https://issuer.example.invalid/jwks"}]` | The trusted issuers: each with its public keys (kid, alg, SPKI PEM), or its key set's URL at https on its host. |
-| `jwt-bearer.max-assertion-lifetime-seconds` | integer (1–86400) | `3600` |  |  |  | The longest lifetime an assertion may claim, in seconds. |
-| `jwt-bearer.clock-skew-seconds` | integer (0–300) | `30` |  |  |  | How far an assertion's times may be off this host's clock, in seconds. |
+| `jwt-bearer.max-assertion-lifetime` | string | `1h` |  |  |  | The longest lifetime an assertion may claim, from `1s` to `1d` in whole seconds. |
+| `jwt-bearer.clock-skew` | string | `30s` |  |  |  | How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds. |
 
 ## kernel
 
@@ -245,7 +247,7 @@ From `@mod/kernel`.
 |---|---|---|---|---|---|---|
 | `kernel.deployment` | single \| multi |  | yes | `KERNEL_DEPLOYMENT` | `single` | single or multi; multi refuses a module unsafe on multiple instances |
 | `kernel.logging.level` | trace \| debug \| info \| warn \| error \| fatal \| silent | `info` |  |  |  | the lowest level logged (trace to fatal), or silent for none |
-| `kernel.stop-seconds` | integer (1–3600) | `30` |  | `KERNEL_STOP_SECONDS` | `30` | whole seconds a stop given no deadline waits for its hooks; an orchestrator's grace period must be longer |
+| `kernel.stop-deadline` | string | `30s` |  | `KERNEL_STOP_DEADLINE` | `30s` | how long a stop given no deadline waits for its hooks, from `1s` to `1h` in whole seconds; an orchestrator's grace period must be longer |
 
 ## keys
 
@@ -257,9 +259,9 @@ From `@mod/keys`.
 | `keys.signing.alg` | EdDSA \| ES256 \| RS256 \| HS256 |  | yes | `KEYS_SIGNING_ALG` | `EdDSA` | The algorithm the provider signs with. |
 | `keys.signing.private-key` | string |  |  | `KEYS_SIGNING_PRIVATE_KEY` | `REPLACE-PKCS8-PEM-PRIVATE-KEY` | The signing key, as a PKCS8 PEM. |
 | `keys.signing.secret` | string |  |  |  |  | The HMAC secret for HS256: at least 32 bytes, in hex or base64, of at least 8 byte values. |
-| `keys.next.kid` | string |  | yes |  |  | The key id of the key that signs next, unique in the ring. |
-| `keys.next.alg` | EdDSA \| ES256 \| RS256 |  | yes |  |  | The algorithm the next key will sign with. |
-| `keys.next.public-key` | string |  | yes |  |  | The next key's public half, as PEM; a private PEM is taken too. |
+| `keys.next.kid` | string |  |  |  |  | The key id of the key that signs next, unique in the ring. |
+| `keys.next.alg` | EdDSA \| ES256 \| RS256 |  |  |  |  | The algorithm the next key will sign with. |
+| `keys.next.public-key` | string |  |  |  |  | The next key's public half, as PEM; a private PEM is taken too. |
 | `keys.previous` | list of map | `[]` |  |  |  | Past signing keys that still verify tokens until each one's `expires-at`. |
 
 ## login-gates
@@ -277,10 +279,10 @@ From `@mod/login-password`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `login-password.attempts` | integer (1–100) | `20` |  |  |  | Login attempts allowed per source in each window, within bounds that keep guessing slow. |
-| `login-password.window-seconds` | integer (60–86400) | `900` |  |  |  | The window `attempts` is counted over, in seconds. |
+| `login-password.window` | string | `15m` |  |  |  | The window `attempts` is counted over, from 1m to 1d. |
 | `login-password.account-attempts` | integer (1–100) | `10` |  |  |  | Failed attempts allowed at one identifier, from any source, before each next one waits. |
-| `login-password.account-window-seconds` | integer (60–86400) | `3600` |  |  |  | How long an identifier's run of failed attempts is remembered, in seconds. |
-| `login-password.account-max-wait-seconds` | integer (1–3600) | `300` |  |  |  | The longest an identifier waits between attempts, in seconds: the wait doubles to it, never locking out. |
+| `login-password.account-window` | string | `1h` |  |  |  | How long an identifier's run of failed attempts is remembered, from 1m to 1d. |
+| `login-password.account-max-wait` | string | `5m` |  |  |  | The longest an identifier waits between attempts, from 1s to 1h: the wait doubles to it, never locking out. |
 
 ## mail
 
@@ -320,7 +322,7 @@ From `@mod/mfa`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `mfa.mode` | optional \| required | `required` |  | `MFA_MODE` | `required` | "required" (the default) asks every login for a counting factor; "optional" only of those who hold one. |
-| `mfa.manage-seconds` | integer (30–3600) | `300` |  |  |  | How recently a second factor must have been proved to change credentials, in seconds. |
+| `mfa.manage-within` | string | `5m` |  |  |  | How recently a second factor must have been proved to change credentials, from `30s` to `1h` in whole seconds. |
 | `mfa.max-factors` | integer (2–50) | `10` |  |  |  | How many factors a subject may hold, recovery codes included. |
 
 ## mfa-binding-proof
@@ -377,7 +379,7 @@ From `@mod/mtls`.
 | `mtls.anchors` | list of string |  |  |  |  | The trust anchors, as PEM text holding one certificate each. |
 | `mtls.max-intermediates` | integer (0–14) | `4` |  |  |  | At most this many certificates between the leaf and an anchor. |
 | `mtls.min-rsa-bits` | integer (2048–16384) | `2048` |  |  |  | The fewest bits an RSA key in the path may have; 2048 at least. |
-| `mtls.revocation.mode` | disabled \| crl \| ocsp \| both |  | yes |  |  | Where revocation is asked: `disabled` confirms none; `crl`, `ocsp` or `both` ask what a certificate names. |
+| `mtls.revocation.mode` | disabled \| crl \| ocsp \| both |  |  |  |  | Where revocation is asked: `disabled` confirms none; `crl`, `ocsp` or `both` ask what a certificate names. |
 | `mtls.revocation.on-unavailable` | reject \| allow |  |  |  |  | Required: whether an outage refuses the binding, or binds with a warning. |
 | `mtls.revocation.hosts` | list of string |  |  |  |  | Required: the only hosts revocation material is fetched from; `.name` covers the name and the names under it. |
 | `mtls.revocation.nonce` | boolean | `true` |  |  |  | Whether an OCSP request carries a nonce. |
@@ -396,7 +398,7 @@ From `@mod/oidc`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `oidc.id-token-seconds` | integer (60–86400) | `3600` |  |  |  |  |
+| `oidc.id-token-lifetime` | string | `1h` |  |  |  | How long an ID token lasts: a duration with a unit, e.g. 1h. |
 
 ## outbound
 
@@ -454,8 +456,8 @@ From `@mod/refresh`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `refresh.lifetime-seconds` | integer (1–31536000) | `86400` |  |  |  | How long a refresh token family lives, in seconds. Shorter is only safer, so the floor is a second, which lets tests watch a family run out. |
-| `refresh.sweep-seconds` | integer (1–3600) | `30` |  |  |  | How often the sweep finishes revocations that stopped halfway, in seconds. |
+| `refresh.lifetime` | string | `1d` |  |  |  | How long a refresh token family lives, from `1s` to `365d` in whole seconds. Shorter is only safer, so the floor is a second, which lets tests watch a family run out. |
+| `refresh.sweep-interval` | string | `30s` |  |  |  | How often the sweep finishes revocations that stopped halfway, from `1s` to `1h` in whole seconds. |
 | `refresh.bind-confidential-clients` | boolean | `false` |  |  |  | Whether a confidential client's family is bound to its sender too. As 0.17's default: a confidential client already proves itself, so only a public one's is bound. |
 
 ## refresh-store
@@ -495,7 +497,11 @@ From `@mod/seal`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `seal.keys` | list of map |  | yes |  | `[{"id":"seal-1","key":"REPLACE-32-RANDOM-BYTES-BASE64"}]` | The sealing keys. The first seals; all open. |
+| `seal.current.id` | string |  | yes | `SEAL_CURRENT_ID` | `seal-1` | The key's id, which heads every value it seals. |
+| `seal.current.key` | string |  | yes | `SEAL_CURRENT_KEY` | `REPLACE-32-RANDOM-BYTES-BASE64` | 32 bytes, base64, of at least 8 byte values. |
+| `seal.next.id` | string |  |  |  |  | The key's id, which heads every value it seals. |
+| `seal.next.key` | string |  |  |  |  | 32 bytes, base64, of at least 8 byte values. |
+| `seal.previous` | list of map | `[]` |  |  |  | Keys that only open what they sealed. |
 
 ## secret-hash
 
@@ -539,7 +545,7 @@ From `@mod/session-tokens`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `session-tokens.sweep-seconds` | integer (1–3600) | `30` |  |  |  | How often each host revokes the tokens of pushed-out references left unrevoked, in seconds. |
+| `session-tokens.sweep-interval` | string | `30s` |  |  |  | How often each host revokes the tokens of pushed-out references left unrevoked, from `1s` to `1h` in whole seconds. |
 | `session-tokens.push-out-margin` | integer (0–10000) | `8` |  |  |  | How far below a session's cap an add lists the session before it may push a reference out: the adds expected to come at once. A larger margin narrows the crash window, at one more write near the cap; it must stay below the cap. |
 
 ## session-tokens-store
@@ -567,7 +573,7 @@ From `@mod/token-control`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `token-control.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, on each route, before any client is authenticated. |
-| `token-control.window-seconds` | integer (1–86400) | `60` |  |  |  | The window `requests` is counted over, in seconds. |
+| `token-control.window` | string | `1m` |  |  |  | The window `requests` is counted over, from `1s` to `1d` in whole seconds. |
 
 ## token-endpoint
 
@@ -584,8 +590,9 @@ From `@mod/token-exchange`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `token-exchange.max-actor-depth` | integer (1–10) | `3` |  |  |  |  |
-| `token-exchange.max-lifetime-seconds` | integer (1–86400) |  |  |  |  |  |
+| `token-exchange.max-actor-depth` | integer (1–10) | `3` |  |  |  | The longest chain of actors an exchanged token may carry. |
+| `token-exchange.max-lifetime` | string |  |  |  |  | The longest lifetime an exchange may ask for, from 1s to 1d, even past `tokens`' lifetime. |
+| `token-exchange.max-lifetime-seconds` | integer (1–86400) |  |  |  |  | Seconds; write `max-lifetime` instead. |
 
 ## tokens
 
@@ -593,7 +600,7 @@ From `@mod/tokens`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `tokens.access-token-lifetime-seconds` | integer (1–86400) | `3600` |  |  |  | How long an access token lives, in seconds. |
+| `tokens.access-token-lifetime` | string | `1h` |  |  |  | How long an access token lives, from `1s` to `1d` in whole seconds. |
 | `tokens.revocation` | denylist \| unsupported |  | yes | `TOKENS_REVOCATION` | `denylist` | Whether revoked access tokens are kept in a denylist and refused, or revocation is not supported. |
 | `tokens.subject-check` | none |  |  |  |  | Stated where no module checks subject revocation on access tokens. |
 
@@ -611,10 +618,12 @@ From `@mod/users-http`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `users-http.verify-url` | string |  | yes | `USERS_HTTP_VERIFY_URL` | `https://ledger.example.invalid/verify` |  |
-| `users-http.credential` | string |  |  |  |  |  |
-| `users-http.timeout-ms` | integer (1–60000) |  |  |  |  |  |
-| `users-http.max-response-bytes` | integer (1–16777216) |  |  |  |  |  |
+| `users-http.verify-url` | string |  | yes | `USERS_HTTP_VERIFY_URL` | `https://ledger.example.invalid/verify` | Where a password is verified. Plain http is reached only where outbound's policy names it. |
+| `users-http.credential` | string |  |  |  |  | A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material. |
+| `users-http.timeout` | string |  |  |  |  | How long a call may take, from 1ms to 1m, narrowing outbound's cap. |
+| `users-http.max-response-size` | string |  |  |  |  | The largest answer read, from 1B to 16MiB, narrowing outbound's cap. |
+| `users-http.timeout-ms` | integer (1–60000) |  |  |  |  | Milliseconds; write `timeout` instead. |
+| `users-http.max-response-bytes` | integer (1–16777216) |  |  |  |  | Bytes; write `max-response-size` instead. |
 
 ## webauthn
 
@@ -626,9 +635,10 @@ From `@mod/webauthn`.
 | `webauthn.rp-name` | string |  | yes | `WEBAUTHN_RP_NAME` | `Example` |  |
 | `webauthn.origins` | list of string |  | yes |  | `["https://login.example.invalid"]` |  |
 | `webauthn.top-origins` | list of string | `[]` |  |  |  |  |
-| `webauthn.challenge-seconds` | integer (10–600) | `120` |  |  |  |  |
+| `webauthn.challenge-lifetime` | string | `2m` |  |  |  | How long a ceremony's challenge can be answered, from 10s to 10m. |
 | `webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  |  |
 | `webauthn.max-credentials` | integer (1–100) | `10` |  |  |  |  |
+| `webauthn.challenge-seconds` | integer (10–600) |  |  |  |  | Seconds; write `challenge-lifetime` instead. |
 
 ## webauthn-login
 

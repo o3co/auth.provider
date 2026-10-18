@@ -15,7 +15,7 @@ const section = z
 	.strictObject({
 		registered: z
 			.array(record)
-			.default([])
+			.prefault([])
 			.describe("The users the settings register, each with its identifier and password hash."),
 	})
 	.refine((s) => distinct(s.registered.map((r) => confusable(r.identifier))), {

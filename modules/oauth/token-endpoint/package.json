@@ -21,7 +21,7 @@
 		"@mod/request-source": "workspace:*",
 		"@mod/sender-binding": "workspace:*",
 		"@mod/tokens": "workspace:*",
-		"zod": "4.6.5"
+		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"@mod/keys": "workspace:*",

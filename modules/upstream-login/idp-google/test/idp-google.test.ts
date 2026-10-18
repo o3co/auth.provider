@@ -197,13 +197,18 @@ describe("idp-google", () => {
 		]);
 	});
 
-	it("takes a clock skew of whole seconds from 0 to 300, 30 when not given", () => {
+	it("takes a clock skew of whole seconds from 0s to 5m, written with its unit, 30s when not given", () => {
 		const both = { "client-id": "client", "client-secret": "s3cr:et" };
-		expect(settings.parse(both)["clock-skew-seconds"]).toBe(30);
-		const skewOf = (seconds: number) =>
-			settings.safeParse({ ...both, "clock-skew-seconds": seconds }).success;
-		expect([0, 300].map(skewOf)).toEqual([true, true]);
-		expect([301, -1, 1.5].map(skewOf)).toEqual([false, false, false]);
+		expect(settings.parse(both)["clock-skew"]).toBe(30);
+		const skewOf = (skew: unknown) => settings.safeParse({ ...both, "clock-skew": skew }).success;
+		expect(["0s", "300s", "5m"].map(skewOf)).toEqual([true, true, true]);
+		expect(["301s", "-1s", "1.5s", 30, "30"].map(skewOf)).toEqual(Array(5).fill(false));
+	});
+
+	it("gives each default as an operator writes it, read through the key's own schema", () => {
+		const kindOf = (key: { _zod: { def: { type: string } } }) => key._zod.def.type;
+		const byDefault = Object.entries(settings.shape).filter(([, key]) => kindOf(key) === "default");
+		expect(byDefault.map(([name]) => name)).toEqual([]);
 	});
 
 	it("refuses at boot, at its key, an endpoint outbound's policy refuses, Google's own included", () => {
@@ -345,7 +350,7 @@ describe("idp-google", () => {
 	it("gives Google's clock its allowance in seconds, and no more", async () => {
 		const { upstream } = await open();
 		expect(upstream.clockSkewMs).toBe(30_000);
-		const narrow = await open({ settings: { "clock-skew-seconds": 5 } });
+		const narrow = await open({ settings: { "clock-skew": "5s" } });
 		expect(narrow.upstream.clockSkewMs).toBe(5_000);
 		for (const ahead of [{ iat: seconds + 29 }, { auth_time: seconds + 29 }]) {
 			expect(await exchangedWith(await idToken(ahead)), JSON.stringify(ahead)).toMatchObject({

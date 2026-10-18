@@ -180,6 +180,12 @@ export interface Store {
 	setRemove(key: Key, member: string): Promise<void>;
 	/** The store clock's present time, the one every expiry and deadline is judged by. */
 	now(): Promise<number>;
+	/** A page of the space's live value keys (no counter or set) and the cursor on; none when done. */
+	// Any key may come twice; one living through the walk comes unless a failover or restart falls in it.
+	scan(
+		space: Space,
+		cursor?: string,
+	): Promise<{ readonly keys: readonly Key[]; readonly cursor?: string }>;
 }
 
 export const store = contract<Store>("store");
@@ -478,6 +484,12 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 		setAdd: async (k, member, score, o) =>
 			inner.setAdd(key(k), text("member", member), whole("score", score, 0), readSetOptions(o)),
 		setMembers: async (k) => inner.setMembers(key(k)),
+		scan: async (target, cursor) => {
+			const name = text("space", fields("space", target, ["name", "guarantees"]).name);
+			const declaredSpace = known.get(name);
+			if (!declaredSpace) fail(`space ${name} is not declared`);
+			return inner.scan(declaredSpace, cursor === undefined ? undefined : text("cursor", cursor));
+		},
 		setRemove: async (k, member) => inner.setRemove(key(k), text("member", member)),
 		now: () => inner.now(),
 	};

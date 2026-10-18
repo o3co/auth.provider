@@ -17,7 +17,7 @@
   - Any other key is refused at boot.
 - Store interface for spent assertions: save a name for a lifetime, answering `created` or `exists`.
   - Requirements: no eviction, survives a crash, never rolled back by failover.
-- Operator section: `max-lifetime-seconds` (1–86400, default 3600), `clock-skew-seconds` (0–300, default 30).
+- Operator section, each written with its unit: `max-lifetime` (`1s` to `1d` in whole seconds, default `1h`), `clock-skew` (`0s` to `5m`, default `30s`).
 - Test configuration builders, the section for test clients, and the contract test of the store interface (`./testing`).
 
 ## Invariants
@@ -29,7 +29,7 @@
 - `iss` and `sub` are the client's id.
 - `aud` holds `issuer`'s URL or the token endpoint's absolute URL from `token-endpoint`. Without the latter, boot is refused.
 - The assertion is checked against the client's own keys, written or at its `jwks-uri`, in any asymmetric algorithm `external-jwt` knows. A key set is fetched from its URL's host alone; while it cannot be fetched, the answer is unavailable.
-- The longest lifetime is `max-lifetime-seconds`; the clock allowance is `clock-skew-seconds`.
+- The longest lifetime is `max-lifetime`; the clock allowance is `clock-skew`.
 - `jti` is a well-formed string of 1–256 characters.
 - The `jti` is spent last, after every other check.
 - A spent `jti` is kept per client, past the assertion's end by the allowance and a minute for the store's clock.

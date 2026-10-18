@@ -10,7 +10,7 @@
 
 ## Offers
 - `ceremonies`: creation options (a discoverable credential unless asked otherwise) and attestation, request options and assertion. The caller keeps the challenge and the credential and hands them over once.
-  - Options also answer the challenge's end, `until`: now on `kernel`'s clock plus `challenge-seconds`.
+  - Options also answer the challenge's end, `until`: now on `kernel`'s clock plus `challenge-lifetime`.
   - An answer at or past an `until` handed back is `challenge`; with none, the caller judges the lifetime.
 - `passkeys`: a challenge the same for everyone, made for a requester, and the assertion of a discoverable passkey by that requester → subject, challenge time, user verified, backup eligible; or a refusal.
 - `registrations`: options for a subject's new passkey, and keeping the one a response creates → the credential, or a refusal (the ceremony's, `unreadable`, `no-challenge`, `conflict`, `full`).
@@ -20,7 +20,7 @@
 - Store interfaces, which the assembly wires. The store never sees what a record holds.
   - Passkeys: credentials and subjects, each by a key webauthn makes, saved once, read, changed from what they hold, kept without end. Needs: no eviction, survives a crash, never rolled back by failover, confirmed reads.
   - Challenges: opened for a lifetime, taken by putting a mark in place. Needs: survives a crash, never rolled back by failover, names derived from the challenge.
-- Operator section: `rp-id`, `rp-name`, `origins` (required), `top-origins` (default none), `challenge-seconds` (default 120), `user-verification` (default `preferred`), `max-credentials` (per subject, default 10).
+- Operator section: `rp-id`, `rp-name`, `origins` (required), `top-origins` (default none), `challenge-lifetime` (10s–10m, default `2m`, written with its unit; `challenge-seconds` is read in its place when given), `user-verification` (default `preferred`), `max-credentials` (per subject, default 10).
 - Test configuration builders, the contract tests of both store interfaces, and a software authenticator behind a browser (`./testing`), which answers options as a browser does and takes twists for refusal tests.
 
 ## Invariants

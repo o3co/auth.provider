@@ -24,7 +24,7 @@ Internal module of `federation`: one round trip through an upstream IdP, a login
 - Any other path is `not_found`. The start is GET only; the callback takes only its IdP's answer method; any other method is 405 with `allow`. A repeated parameter is refused next.
 - The start refuses a return target `login-gates` does not allow, and a `max_age` that is not 1 to 9 digits. Only `prompt=login` is passed on.
 - The cookie, state, nonce and PKCE verifier are 256 random bits each. The challenge is the verifier's S256.
-- The transaction is saved under the cookie for `transaction-seconds`; finding one there already is unavailable.
+- The transaction is saved under the cookie for `transaction-lifetime`; finding one there already is unavailable.
 - The cookie is named per IdP. It is cross-site only for an IdP that answers in a posted form.
 - A callback takes the transaction in one rewrite, only at the same IdP and with its state (compared in constant time). Without the cookie or state, or with no transaction to take, it is `invalid_state` and spends nothing.
 - From the take on, every answer clears the cookie, unavailable included.

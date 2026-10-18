@@ -1,3 +1,4 @@
+import { setting } from "@mod/kernel";
 import { z } from "zod";
 
 export const section = z.strictObject({
@@ -6,15 +7,13 @@ export const section = z.strictObject({
 		.int()
 		.min(1)
 		.max(100_000)
-		.default(60)
+		.prefault(60)
 		.describe(
 			"Requests allowed per source in each window, on each route, before any client is authenticated.",
 		),
-	"window-seconds": z
-		.number()
-		.int()
-		.min(1)
-		.max(86_400)
-		.default(60)
-		.describe("The window `requests` is counted over, in seconds."),
+	window: setting
+		.duration("s")
+		.pipe(z.number().int().min(1).max(86_400))
+		.prefault("1m")
+		.describe("The window `requests` is counted over, from `1s` to `1d` in whole seconds."),
 });

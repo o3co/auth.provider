@@ -53,18 +53,18 @@ export function dependenciesOf(
 	return dependencies;
 }
 
-/** The project's manifest, starting the app with `start`. */
 /** The pnpm the workspace builds with, so the lockfile reads alike in the image. */
 const pnpm = "pnpm@11.3.0";
 
-export const manifestOf = (start: string, dependencies: Record<string, string>) =>
+/** The project's manifest, starting the app with `start`, and resealing with `reseal` when given. */
+export const manifestOf = (start: string, dependencies: Record<string, string>, reseal?: string) =>
 	`${JSON.stringify(
 		{
 			name: "auth-provider-app",
 			private: true,
 			type: "module",
 			packageManager: pnpm,
-			scripts: { start },
+			scripts: reseal === undefined ? { start } : { start, reseal },
 			dependencies,
 		},
 		null,
@@ -84,6 +84,18 @@ export const mainSource = (modules: readonly string[], importOf = (name: string)
 		imports: modules.map((name, i) => `import m${i} from "${importOf(name)}/module";`).join("\n"),
 		modules: modules.map((_, i) => `m${i}`).join(", "),
 	});
+
+/** The app's reseal entry, for an app that composes `seal`: the same modules, built and never started. */
+export const resealSource = (modules: readonly string[], importOf = (name: string) => name) =>
+	filled("reseal.ts.template", {
+		kernel: importOf(kernel),
+		seal: importOf(sealPackage),
+		imports: modules.map((name, i) => `import m${i} from "${importOf(name)}/module";`).join("\n"),
+		modules: modules.map((_, i) => `m${i}`).join(", "),
+	});
+
+/** The package whose resealers the reseal entry runs. */
+export const sealPackage = "@mod/seal";
 
 export const withKernel = (modules: readonly string[]) => [
 	kernel,

@@ -21,13 +21,13 @@
 		"@mod/refresh": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/webauthn": "workspace:*",
-		"zod": "4.6.5"
+		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"@mod/clients": "workspace:*",
 		"@mod/store": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"@mod/tokens": "workspace:*",
-		"vitest": "5.0.3"
+		"vitest": "5.0.4"
 	}
 }

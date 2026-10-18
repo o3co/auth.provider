@@ -21,8 +21,8 @@ export const clientSection: Section<{
 }> = {
 	name: "federation-tokens",
 	schema: z.strictObject({
-		receives: z.boolean().default(false),
-		"post-logout-redirect-uris": z.array(z.string().min(1)).default([]),
+		receives: z.boolean().prefault(false),
+		"post-logout-redirect-uris": z.array(z.string().min(1)).prefault([]),
 	}),
 };
 

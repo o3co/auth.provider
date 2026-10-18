@@ -13,13 +13,13 @@
 	"dependencies": {
 		"@mod/combinations": "workspace:*",
 		"@mod/kernel": "workspace:*",
-		"@o3co/ts.hocon": "1.14.1"
+		"@o3co/ts.hocon": "1.14.3"
 	},
 	"scripts": {
 		"create-app": "node src/main.ts",
-		"configuration": "node src/write-configuration.ts"
+		"configuration": "node src/references/write-configuration.ts"
 	},
 	"devDependencies": {
-		"vitest": "5.0.3"
+		"vitest": "5.0.4"
 	}
 }

@@ -6,18 +6,21 @@ import { freshHandle, keptChallenges, keptPasskeys } from "./records.ts";
 import { registrationsOver } from "./registration/registrations.ts";
 import { type Settings, section } from "./section.ts";
 
+/** The challenge's lifetime, by the name in seconds where it is still given. */
+const challengeMs = (s: Settings) => (s["challenge-seconds"] ?? s["challenge-lifetime"]) * 1000;
+
 const relyingParty = (s: Settings) => ({
 	id: s["rp-id"],
 	name: s["rp-name"],
 	origins: s.origins,
 	topOrigins: s["top-origins"],
-	timeoutMs: s["challenge-seconds"] * 1000,
+	timeoutMs: challengeMs(s),
 });
 
 type Context = BuildContext<Settings>;
 const passkeysOf = async (c: Context) => keptPasskeys(await c.get(passkeyStore));
 const challengesOf = async (c: Context) =>
-	keptChallenges(await c.get(challengeStore), c.clock.now, c.section["challenge-seconds"] * 1000);
+	keptChallenges(await c.get(challengeStore), c.clock.now, challengeMs(c.section));
 
 export default defineModule({ name: "webauthn", section, replicaSafe: true }, (m) => [
 	m

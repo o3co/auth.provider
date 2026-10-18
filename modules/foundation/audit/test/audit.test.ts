@@ -5,6 +5,7 @@ import metricsModule from "@mod/metrics/module";
 import { beforeEach, expect, it } from "vitest";
 import { type AuditEvent, type AuditReceiver, audit, auditReceivers } from "../src/contract.ts";
 import auditModule from "../src/module.ts";
+import { section } from "../src/section.ts";
 
 /** The log of the apps booted since the last reset. */
 let recorded = recordingLog();
@@ -278,4 +279,8 @@ it("counts each receiver's lost events as a metric", async () => {
 	assembly.get(audit).record({ kind: "k" });
 	await settled();
 	expect(lostSeries(assembly)).toEqual([{ labels: { receiver: "failing" }, value: 2 }]);
+});
+
+it("lets each receiver hold 1000 deliveries at once when the operator sets no limit", () => {
+	expect(section.parse({ receivers: "none" })).toEqual({ receivers: "none", "max-pending": 1000 });
 });

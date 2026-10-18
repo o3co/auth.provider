@@ -157,7 +157,7 @@ export async function roundTripIn(
 		clock: c.clock,
 		log: c.log,
 		landing: await landingIn(c),
-		transactionMs: c.section["transaction-seconds"] * 1000,
+		transactionMs: c.section["transaction-lifetime"] * 1000,
 	};
 	return (request) => federated(flow, request);
 }

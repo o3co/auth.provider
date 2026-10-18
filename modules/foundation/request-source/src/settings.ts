@@ -18,7 +18,7 @@ const block = z.string().refine((s) => blockOf(s) !== undefined, "an IP address 
 export const sourceSettings = z.strictObject({
 	"trusted-proxies": z
 		.array(block)
-		.default([])
+		.prefault([])
 		.describe(
 			"Proxies whose forwarded headers are believed: IPs without a zone, or CIDRs with one prefix length in decimal without a leading zero. Always set behind a proxy: otherwise every request's source is the proxy, and all look like one source.",
 		),
@@ -27,7 +27,7 @@ export const sourceSettings = z.strictObject({
 		.int()
 		.min(1)
 		.max(10)
-		.default(1)
+		.prefault(1)
 		.describe("How many trusted proxies, at most, a request passes through."),
 });
 

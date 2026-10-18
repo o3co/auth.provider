@@ -1,7 +1,7 @@
 import { audit } from "@mod/audit";
 import { defineModule } from "@mod/kernel";
 import { amrSources } from "@mod/login-gates";
-import { seal } from "@mod/seal";
+import { resealers, seal } from "@mod/seal";
 import { type AuthContext, entryRequirements } from "@mod/session";
 import {
 	factorKinds,
@@ -13,6 +13,7 @@ import {
 } from "./contract.ts";
 import { addsMfa, byKind, counting, factorDecisions } from "./factors.ts";
 import { factorRecords } from "./records.ts";
+import { resealerOver } from "./resealer.ts";
 import { section } from "./section.ts";
 
 const admit = { kind: "admit" } as const;
@@ -44,15 +45,18 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 			gates: await c.collect(firstBindingGates),
 			random: c.random.bytes,
 			now: c.clock.now,
-			recentMs: c.section["manage-seconds"] * 1000,
+			recentMs: c.section["manage-within"] * 1000,
 			audit: await c.get(audit),
 		});
 	}),
+	m
+		.contribute(resealers)
+		.by(async (c) => resealerOver(await c.get(factorStore), await c.get(seal))),
 	m.contribute(entryRequirements).by(async (c) => {
 		const records = factorRecords(await c.get(factorStore));
 		const kinds = byKind(await c.collect(factorKinds));
 		const required = c.section.mode === "required";
-		const recentMs = c.section["manage-seconds"] * 1000;
+		const recentMs = c.section["manage-within"] * 1000;
 		return {
 			name: "mfa",
 			// "use" only under "required"; credentials always.

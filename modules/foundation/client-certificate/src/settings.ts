@@ -11,9 +11,9 @@ const dialectText =
 export const certificateSettings = z.discriminatedUnion("dialect", [
 	z.strictObject({
 		dialect: z.literal("rfc9440").describe(dialectText),
-		header: headerName.default("client-cert").describe(headerText),
+		header: headerName.prefault("client-cert").describe(headerText),
 		"chain-header": headerName
-			.default("client-cert-chain")
+			.prefault("client-cert-chain")
 			.describe(
 				"The header holding the chain behind the certificate, for `rfc9440`: lower-case letters, digits and `-`.",
 			),
@@ -24,6 +24,6 @@ export const certificateSettings = z.discriminatedUnion("dialect", [
 	}),
 	z.strictObject({
 		dialect: z.literal("xfcc").describe(dialectText),
-		header: headerName.default("x-forwarded-client-cert").describe(headerText),
+		header: headerName.prefault("x-forwarded-client-cert").describe(headerText),
 	}),
 ]);

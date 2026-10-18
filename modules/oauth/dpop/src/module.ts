@@ -1,5 +1,5 @@
 import { metadata } from "@mod/issuer";
-import { defineModule } from "@mod/kernel";
+import { defineModule, setting } from "@mod/kernel";
 import { secretBytes } from "@mod/keys";
 import { senderBindings } from "@mod/sender-binding";
 import { z } from "zod";
@@ -11,37 +11,37 @@ const section = z.strictObject({
 	algorithms: z
 		.array(z.enum(["ES256", "ES384", "EdDSA", "RS256"]))
 		.min(1)
-		.default(["ES256", "ES384", "EdDSA", "RS256"])
+		.prefault(["ES256", "ES384", "EdDSA", "RS256"])
 		.describe("The signing algorithms a DPoP proof may use."),
-	"proof-window-seconds": z
-		.number()
-		.int()
-		.min(1)
-		.max(300)
-		.default(60)
-		.describe("How far a proof's `iat` may lie from the clock on either side, in seconds."),
+	"proof-window": setting
+		.duration("s")
+		.pipe(z.number().int().min(1).max(300))
+		.prefault("1m")
+		.describe(
+			"How far a proof's `iat` may lie from the clock on either side, from `1s` to `5m` in whole seconds.",
+		),
 	nonce: z
 		.strictObject({
 			required: z
 				.enum(["never", "as", "as+rs"])
-				.default("never")
+				.prefault("never")
 				.describe(
 					"Where a server-provided nonce is asked: never, at the token endpoint, or there and at resources.",
 				),
-			"ttl-seconds": z
-				.number()
-				.int()
-				.min(1)
-				.max(3600)
-				.default(300)
-				.describe("How often the nonce changes, in seconds; one is taken for twice this."),
+			ttl: setting
+				.duration("s")
+				.pipe(z.number().int().min(1).max(3600))
+				.prefault("5m")
+				.describe(
+					"How often the nonce changes, from `1s` to `1h` in whole seconds; one is taken for twice this.",
+				),
 			secret: secretBytes({ atLeast: 32 })
 				.optional()
 				.describe(
 					"The nonce's key, shared by every instance: base64 of 32 bytes or more; required unless never.",
 				),
 		})
-		.default({ required: "never", "ttl-seconds": 300 })
+		.prefault({})
 		.superRefine((n, ctx) => {
 			if (n.required !== "never" && n.secret === undefined) {
 				ctx.addIssue({
@@ -58,8 +58,8 @@ const clockAllowanceMs = 60_000;
 
 export default defineModule({ name: "dpop", section }, (m) => [
 	m.contribute(senderBindings).by(async (c) => {
-		const windowMs = c.section["proof-window-seconds"] * 1000;
-		const { required, "ttl-seconds": ttl, secret } = c.section.nonce;
+		const windowMs = c.section["proof-window"] * 1000;
+		const { required, ttl, secret } = c.section.nonce;
 		// The section holds a secret wherever a nonce is asked.
 		const asked =
 			required === "never" || secret === undefined

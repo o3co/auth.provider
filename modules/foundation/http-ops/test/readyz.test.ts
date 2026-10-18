@@ -78,19 +78,19 @@ describe("readyz", () => {
 		});
 	});
 
-	it("waits for the probes as long as readiness-deadline-ms says, 1000 ms unless set", async () => {
-		expect((await readyz(after(200), { "readiness-deadline-ms": 50 })).status).toBe(503);
+	it("waits for the probes as long as readiness-deadline says, 1s unless set", async () => {
+		expect((await readyz(after(200), { "readiness-deadline": "50ms" })).status).toBe(503);
 		expect((await readyz(after(200))).status).toBe(200);
 		expect((await readyz(after(1500))).status).toBe(503);
-		expect(section.parse({})["readiness-deadline-ms"]).toBe(1000);
+		expect(section.parse({})["readiness-deadline"]).toBe(1000);
 	});
 
-	it("refuses at boot a deadline that is no whole number from 1 to 2^31-1", async () => {
-		for (const bad of [0, 1.5, 2 ** 31]) {
-			const refused = await boot(after(0), { "readiness-deadline-ms": bad }).catch((e) => e);
+	it("refuses at boot a deadline without its unit, or not whole ms from 1 to 2^31-1", async () => {
+		for (const bad of ["0ms", "1.5ms", `${2 ** 31}ms`, 1000, "1000"]) {
+			const refused = await boot(after(0), { "readiness-deadline": bad }).catch((e) => e);
 			expect(refused).toBeInstanceOf(BootRefused);
 			expect((refused as BootRefused).refusals.map((r) => r.where)).toEqual([
-				"http-ops.readiness-deadline-ms",
+				"http-ops.readiness-deadline",
 			]);
 		}
 	});

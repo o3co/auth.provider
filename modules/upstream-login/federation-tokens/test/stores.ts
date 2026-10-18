@@ -35,6 +35,16 @@ export function memoryStores(now: () => number = () => 0) {
 				return changed;
 			}),
 		remove: stand.records.remove,
+		// One session a page, so a walk must go on by its cursor.
+		scan: async (cursor) => {
+			const keys = (await stand.records.scan()).keys.toSorted();
+			const at = cursor === undefined ? 0 : keys.indexOf(cursor) + 1;
+			const page = keys.slice(at, at + 1);
+			const last = page[0];
+			return at + 1 < keys.length && last !== undefined
+				? { keys: page, cursor: last }
+				: { keys: page };
+		},
 	});
 	const locks: RefreshLocks = {
 		hold: (name, mark, lifetimeMs) => lockStand.records.create(name, mark, lifetimeMs),

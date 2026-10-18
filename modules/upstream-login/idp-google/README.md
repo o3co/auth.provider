@@ -13,7 +13,7 @@
 
 ## Offers
 - Composition definition only (the IdP type `google`)
-- IdP settings (under `federation`'s `idps.<name>`): `client-id`, `client-secret` (both well-formed text), `access` (`offline` (default) or `online`), `require-iss` (default true), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (default Google's own), `clock-skew-seconds` (0–300, default 30), `end-session-endpoint` (optional)
+- IdP settings (under `federation`'s `idps.<name>`): `client-id`, `client-secret` (both well-formed text), `access` (`offline` (default) or `online`), `require-iss` (default true), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (default Google's own), `clock-skew` (0s–5m, default `30s`), `end-session-endpoint` (optional)
 
 ## Invariants
 - Every request goes through `outbound`, narrowed to the one endpoint's host.
@@ -22,7 +22,7 @@
 - Google's own default endpoints are put to that policy too.
 - A callback carrying an `iss` other than exactly `https://accounts.google.com`, an empty one included, is refused before its code is used.
 - A callback without `iss` is refused while `require-iss` holds.
-- The id_token is checked with RS256 only, Google's issuer exactly, the client among its audiences, and `clock-skew-seconds`.
+- The id_token is checked with RS256 only, Google's issuer exactly, the client among its audiences, and `clock-skew`.
 - With several audiences, the id_token's `azp` must be the client.
 - With one audience, `azp` may name another client: Google names there another client of the same project that asked for the login (cross-client identity).
 - The id_token must also carry the login's nonce, a non-empty `sub` and a numeric `iat`.

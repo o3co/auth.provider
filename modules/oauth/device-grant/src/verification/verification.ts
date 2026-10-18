@@ -37,7 +37,7 @@ const jsonResponse = (status: number, json: Record<string, unknown>): HttpRespon
 export function verificationWith(v: Verifying) {
 	const window = {
 		limit: v.settings.attempts,
-		ms: v.settings["attempts-window-seconds"] * 1000,
+		ms: v.settings["attempts-window"] * 1000,
 	};
 	/** The device a typed user code names; a code outside the alphabet asks no store. */
 	const deviceNamed = async (typed: string | undefined) => {

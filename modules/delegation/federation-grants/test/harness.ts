@@ -121,6 +121,8 @@ export async function harness(
 		readonly origin?: string | null;
 		/** Another composition's stores, as after a restart with other settings. */
 		readonly stores?: ReturnType<typeof memoryStores>;
+		/** The seal section in place of the test's one key: a ring with past keys, say. */
+		readonly seal?: Readonly<Record<string, unknown>>;
 	} = {},
 ) {
 	let now = 1_800_000_000_000;
@@ -201,7 +203,7 @@ export async function harness(
 		config: {
 			...kernelConfig(),
 			...httpConfig(options.origin === null ? {} : { "public-origin": options.origin ?? origin }),
-			...sealConfig(),
+			...(options.seal ? { seal: options.seal } : sealConfig()),
 			...clientsConfig([
 				worker("worker"),
 				worker("other"),

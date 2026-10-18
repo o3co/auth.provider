@@ -19,7 +19,7 @@
 		"@mod/sender-binding": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/tokens": "workspace:*",
-		"zod": "4.6.5"
+		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"@mod/http": "workspace:*",
@@ -29,9 +29,9 @@
 		"@mod/store": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
-		"vitest": "5.0.3"
+		"vitest": "5.0.4"
 	},
 	"peerDependencies": {
-		"vitest": "5.0.3"
+		"vitest": "5.0.4"
 	}
 }

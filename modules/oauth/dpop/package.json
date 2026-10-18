@@ -18,13 +18,13 @@
 		"@mod/keys": "workspace:*",
 		"@mod/sender-binding": "workspace:*",
 		"jose": "6.2.12",
-		"zod": "4.6.5"
+		"zod": "4.6.7"
 	},
 	"peerDependencies": {
-		"vitest": "5.0.3"
+		"vitest": "5.0.4"
 	},
 	"devDependencies": {
 		"@mod/records": "workspace:*",
-		"vitest": "5.0.3"
+		"vitest": "5.0.4"
 	}
 }

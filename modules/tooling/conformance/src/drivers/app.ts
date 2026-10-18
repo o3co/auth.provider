@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { generate, type Plan, trialSettings } from "@mod/create-app";
 import type { AreaScene, NewPart, Party } from "../areas.ts";
 import { auditSink } from "../audit/audit.ts";
-import { baseEnv, freePort, launch, type Started, startRedis } from "../driver.ts";
+import { baseEnv, launch, type Started, startRedis, untilPortHeld } from "../driver.ts";
 import { fakeSmtp } from "../smtp.ts";
 
 export const workspace = dirname(
@@ -50,6 +50,9 @@ export function sectionsOf(parts: readonly NewPart[], fallback = true): Sections
 	return config;
 }
 
+/** Tries at a new port when another process takes the one chosen before the app binds it. */
+const portAttempts = 3;
+
 /**
  * Starts the generated app at `dir` on the scene's sections, its audit sink and its store. With
  * `trial`, `create-app`'s trial settings fill the keys the scene leaves unset, except in the sections
@@ -69,7 +72,6 @@ export async function started(
 ): Promise<Started> {
 	const parties = trial?.parties ?? [];
 	const stopParties = () => Promise.all(parties.map((p) => p.stop()));
-	const port = await freePort();
 	const sink = await auditSink();
 	const smtp = trial?.smtp ? await fakeSmtp() : undefined;
 	// The settings the Redis store requires of a server before it starts.
@@ -94,45 +96,49 @@ export async function started(
 	// Lists replace each other across layers, so the trial's outbound block takes every host.
 	const trialLists = trial !== undefined && !trial.leave.includes("outbound");
 	const lists = trialLists ? {} : { allow: reach.allow, "plain-loopback": reach.plainLoopback };
-	const settings = {
-		...sections,
-		http: { ...config.http, port },
-		audit: { receivers: ["http"] },
-		"audit-http": { url: sink.url },
-		...(trialLists && Object.keys(outbound).length === 0
-			? {}
-			: { outbound: { ...outbound, ...lists } }),
-		...(store === "volatile"
-			? { store: { "accept-volatile": scene.acceptVolatileStore ?? true } }
-			: {}),
-		...(redis ? { redis: { url: redis.url, replication: "none" } } : {}),
-		...(smtp ? { "mail-smtp": { host: smtp.host, port: smtp.port, security: "none" } } : {}),
-	};
-	const scratch = await mkdtemp(join(tmpdir(), "conformance-scene-"));
-	const file = join(scratch, "scene.conf");
-	await writeFile(file, JSON.stringify(settings));
-	const layers = [file];
-	let env: Record<string, string> = {};
-	if (trial) {
-		// No Redis in the scene leaves the trial's URL unread: the app composes no Redis store.
-		const given = await trialSettings(dir, {
-			redisUrl: redis?.url ?? "redis://127.0.0.1:1",
+	/** The app, configured to listen at `port`. */
+	const startAt = async (port: number): Promise<Started> => {
+		const settings = {
+			...sections,
+			http: { ...config.http, port },
+			audit: { receivers: ["http"] },
+			"audit-http": { url: sink.url },
+			...(trialLists && Object.keys(outbound).length === 0
+				? {}
+				: { outbound: { ...outbound, ...lists } }),
+			...(store === "volatile"
+				? { store: { "accept-volatile": scene.acceptVolatileStore ?? true } }
+				: {}),
+			...(redis ? { redis: { url: redis.url, replication: "none" } } : {}),
+			...(smtp ? { "mail-smtp": { host: smtp.host, port: smtp.port, security: "none" } } : {}),
+		};
+		const scratch = await mkdtemp(join(tmpdir(), "conformance-scene-"));
+		const file = join(scratch, "scene.conf");
+		await writeFile(file, JSON.stringify(settings));
+		const layers = [file];
+		let env: Record<string, string> = {};
+		if (trial) {
+			// No Redis in the scene leaves the trial's URL unread: the app composes no Redis store.
+			const given = await trialSettings(dir, {
+				redisUrl: redis?.url ?? "redis://127.0.0.1:1",
+				port,
+				leave: trial.leave,
+				...(trialLists ? reach : {}),
+			});
+			const local = join(scratch, "local.conf");
+			await writeFile(local, given.local);
+			layers.push(local);
+			env = given.env;
+		}
+		return launch({
+			command: process.execPath,
+			args: ["src/main.ts"],
+			cwd: dir,
+			env: { ...env, ...baseEnv(), APP_CONFIG: [...layers, "config/application.conf"].join(",") },
 			port,
-			leave: trial.leave,
-			...(trialLists ? reach : {}),
 		});
-		const local = join(scratch, "local.conf");
-		await writeFile(local, given.local);
-		layers.push(local);
-		env = given.env;
-	}
-	const running = await launch({
-		command: process.execPath,
-		args: ["src/main.ts"],
-		cwd: dir,
-		env: { ...env, ...baseEnv(), APP_CONFIG: [...layers, "config/application.conf"].join(",") },
-		port,
-	});
+	};
+	const running = await untilPortHeld(startAt, portAttempts);
 	if (running.kind !== "running") {
 		await redis?.stop();
 		await sink.stop();

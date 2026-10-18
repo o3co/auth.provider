@@ -16,7 +16,7 @@
   - the token index: token id → session handle, saved once per id, for a lifetime;
   - the sessions pending a push-out: add, done, go through them; one whose handling fails stays, and is counted. It never pushes one out, and refuses when full.
 - A stand-in (`./testing`): all its store interfaces in memory, for tests that compose the real module.
-- Operator section: `sweep-seconds` (1–3600, default 30); `push-out-margin` (default 8, below the store's size, else boot is refused). How many tokens a session keeps is the store's size.
+- Operator section: `sweep-interval` (written with its unit, `1s` to `1h` in whole seconds, default `30s`); `push-out-margin` (default 8, below the store's size, else boot is refused). How many tokens a session keeps is the store's size.
 - Composition definition: the participant for closing, and the contribution to `grants`' session issuances, recording each token issued from a session; it answers after a confirmed write. It is the only way a token is recorded.
 
 ## Invariants
@@ -24,7 +24,7 @@
 - A token is indexed before its reference is kept, for the same lifetime, so every kept reference names its session in the index.
 - An add within `push-out-margin` of the store's size lists its session first.
 - What an add pushes out awaits in the set's own write; its tokens are revoked and settled, and the session leaves the list once nothing awaits.
-- A pushed-out token that cannot be revoked fails the record and is left to the sweep, which every host runs every `sweep-seconds` over the listed sessions.
+- A pushed-out token that cannot be revoked fails the record and is left to the sweep, which every host runs every `sweep-interval` over the listed sessions.
 - Closing a session revokes what awaits too.
 - A host stopped past the add leaves the session listed.
 - The window left: more adds at once than the margin push one out unlisted, and the host stops before listing it.

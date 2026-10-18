@@ -14,7 +14,7 @@
 - `issuer` metadata: `introspection_endpoint`, and `revocation_endpoint` where any token can be revoked; both absolute on `http`'s public origin, and left out without one. With each, its `*_auth_methods_supported` (`clients`' methods; at introspection, not `none`) and `*_auth_signing_alg_values_supported` where a method signs.
 - Audit events, never holding a token: declared in `./audit-events`, listed in the audit event reference.
 - Both events carry `source` when `request-source` determines it.
-- Operator section: `requests` (per source, window and route; 1–100000, default 60) and `window-seconds` (1–86400, default 60).
+- Operator section: `requests` (per source, window and route; 1–100000, default 60) and `window` (written with its unit, `1s` to `1d` in whole seconds, default `1m`).
 
 ## Invariants
 - Each route counts requests per source on its own, before any client is authenticated, and answers `429` past the limit.

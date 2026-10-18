@@ -124,6 +124,13 @@ function expiryOf(lifetimeMs: number | "endless" | undefined): Expiry {
 export function recordsIn<T extends Json>(place: Place) {
 	const keyOf = (key: string) => ({ space: place.space, partition: key, name: "record" });
 	return {
+		scan: async (
+			cursor?: string,
+		): Promise<{ readonly keys: string[]; readonly cursor?: string }> => {
+			const page = await place.store.scan(place.space, cursor);
+			const keys = page.keys.filter((k) => k.name === "record").map((k) => k.partition);
+			return page.cursor === undefined ? { keys } : { keys, cursor: page.cursor };
+		},
 		/** Places the record unless the key holds one. Throws Unavailable when the store cannot tell. */
 		create: async (
 			key: string,

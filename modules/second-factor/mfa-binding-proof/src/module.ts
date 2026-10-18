@@ -7,7 +7,7 @@ import { type BindingProof, bindingProof, bindingProofs, type PassBound } from "
 const section = z.strictObject({
 	mode: z
 		.enum(["never", "when-available", "always"])
-		.default("when-available")
+		.prefault("when-available")
 		.describe(
 			"Whether a first counting factor waits for a binding proof: never, when one is available, or always.",
 		),

@@ -59,3 +59,7 @@ it("trusts an address entry as that one address only", () => {
 it("makes trusted proxies that cannot be changed", () => {
 	expect(Object.isFrozen(proxiesOf(sourceSettings.parse({})))).toBe(true);
 });
+
+it("reads empty settings as no trusted proxy and one hop", () => {
+	expect(sourceSettings.parse({})).toEqual({ "trusted-proxies": [], "proxy-hops": 1 });
+});

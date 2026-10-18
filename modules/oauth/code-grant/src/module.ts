@@ -51,7 +51,7 @@ export default defineModule({ name: "code-grant", section }, (m) => [
 				const saved = await store.save(
 					store.nameOf(code),
 					toStored(record),
-					c.section["code-seconds"] * 1000,
+					(c.section["code-seconds"] ?? c.section["code-lifetime"]) * 1000,
 				);
 				if (saved !== "created") throw new Unavailable("code-grant");
 				return code;
@@ -82,7 +82,9 @@ export default defineModule({ name: "code-grant", section }, (m) => [
 			now: c.clock.now,
 			additions: contributed,
 		});
-		c.every(c.section["sweep-seconds"] * 1000, () => voids.sweep());
+		c.every((c.section["sweep-seconds"] ?? c.section["sweep-interval"]) * 1000, () =>
+			voids.sweep(),
+		);
 		return codeGrant({
 			store,
 			sessions: await c.get(sessions),

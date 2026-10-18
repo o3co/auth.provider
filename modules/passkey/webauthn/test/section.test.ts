@@ -54,3 +54,37 @@ it("refuses an Android app origin as a top origin, since nothing frames an app",
 	});
 	expect(parsed.success).toBe(false);
 });
+
+const parsed = (more: object) =>
+	section.safeParse({
+		"rp-id": "rp.example",
+		"rp-name": "RP",
+		origins: ["https://rp.example"],
+		...more,
+	});
+
+it("takes a challenge lifetime from 10s to 10m, written with its unit", () => {
+	const takes = (value: unknown) => parsed({ "challenge-lifetime": value }).success;
+	expect(["9s", "10s", "10m", "601s", 120, "120"].map(takes)).toEqual([
+		false,
+		true,
+		true,
+		false,
+		false,
+		false,
+	]);
+});
+
+it("frames nothing, prefers verification, keeps 10 passkeys and a challenge 2m where nothing is set", () => {
+	expect(parsed({}).data).toMatchObject({
+		"top-origins": [],
+		"challenge-lifetime": 120,
+		"user-verification": "preferred",
+		"max-credentials": 10,
+	});
+});
+
+it("still takes the challenge lifetime in seconds, in its bounds, while its writers move", () => {
+	const takes = (value: number) => parsed({ "challenge-seconds": value }).success;
+	expect([9, 10, 600, 601].map(takes)).toEqual([false, true, true, false]);
+});

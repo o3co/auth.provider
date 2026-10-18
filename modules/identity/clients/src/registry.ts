@@ -37,7 +37,7 @@ export const clientRecord = z.strictObject({
 		),
 	kind: z.enum(["public", "confidential"]),
 	method: z.string().min(1),
-	sections: z.record(z.string(), z.unknown()).default({}),
+	sections: z.record(z.string(), z.unknown()).prefault({}),
 });
 
 const pathOf = (issue: StandardSchemaV1.Issue) =>

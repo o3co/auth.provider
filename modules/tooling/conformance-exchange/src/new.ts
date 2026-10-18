@@ -7,7 +7,7 @@ const setUp = (part: ExchangePart): NewPart => ({
 	config: {
 		"token-exchange": {
 			...(part.maxActorDepth ? { "max-actor-depth": part.maxActorDepth } : {}),
-			...(part.maxLifetimeSeconds ? { "max-lifetime-seconds": part.maxLifetimeSeconds } : {}),
+			...(part.maxLifetimeSeconds ? { "max-lifetime": `${part.maxLifetimeSeconds}s` } : {}),
 		},
 	},
 });

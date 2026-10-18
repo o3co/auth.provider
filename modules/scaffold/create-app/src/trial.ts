@@ -77,7 +77,7 @@ function trialBlocks(
 		[
 			has("seal"),
 			"seal",
-			`seal { keys = [{ id = seal-1, key = "${randomBytes(32).toString("base64")}" }] }`,
+			`seal { current { id = seal-1, key = "${randomBytes(32).toString("base64")}" } }`,
 		],
 	];
 	return blocks.flatMap(([kept, section, block]) => (kept ? [{ section, block }] : []));

@@ -21,6 +21,7 @@ export default defineModule({ name: "mfa-store" }, (m) => [
 			save: (key: string, record: StoredFactors) => records.create(key, record, "endless"),
 			read: records.read,
 			update: records.change,
+			scan: records.scan,
 		};
 	}),
 ]);

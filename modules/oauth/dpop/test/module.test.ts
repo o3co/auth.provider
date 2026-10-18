@@ -129,14 +129,15 @@ describe("dpop", () => {
 		for (const refused of [
 			{ algorithms: ["HS256"] },
 			{ algorithms: [] },
-			{ "proof-window-seconds": 0 },
-			{ "proof-window-seconds": 301 },
-			{ "proof-window-seconds": 1.5 },
+			{ "proof-window": "0s" },
+			{ "proof-window": "301s" },
+			{ "proof-window": "1500ms" },
+			{ "proof-window": 60 },
 			{ other: true },
 		]) {
 			await expect(boot(refused), JSON.stringify(refused)).rejects.toThrow();
 		}
-		expect((await boot({ "proof-window-seconds": 300 })).get(senderBinding)).toBeDefined();
+		expect((await boot({ "proof-window": "5m" })).get(senderBinding)).toBeDefined();
 	});
 
 	it("reads none from a request without a proof, spending nothing", async () => {
@@ -228,7 +229,7 @@ describe("server nonces (RFC 9449 §8)", () => {
 	const bucketMs = 300_000;
 	/** A composition asking nonces where `required` says, reading at issuance or at a resource. */
 	async function asking(required: "never" | "as" | "as+rs") {
-		const app = await boot({ nonce: { required, "ttl-seconds": bucketMs / 1000, secret } });
+		const app = await boot({ nonce: { required, ttl: `${bucketMs / 1000}s`, secret } });
 		return (dpopProof: string, scene: { kind: "issue" } | { kind: "resource"; token: string }) =>
 			app.get(senderBinding).bindingOf(
 				testRequest({

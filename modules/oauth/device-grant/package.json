@@ -28,15 +28,15 @@
 		"@mod/token-endpoint": "workspace:*",
 		"@mod/tokens": "workspace:*",
 		"@mod/url-setting": "workspace:*",
-		"zod": "4.6.5"
+		"zod": "4.6.7"
 	},
 	"peerDependencies": {
-		"vitest": "5.0.3"
+		"vitest": "5.0.4"
 	},
 	"devDependencies": {
 		"@mod/cookies": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/store": "workspace:*",
-		"vitest": "5.0.3"
+		"vitest": "5.0.4"
 	}
 }

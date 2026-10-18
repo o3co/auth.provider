@@ -1,4 +1,3 @@
-/** The full template: what `combinations` composes in full, with the features added. */
 import { full, optIns } from "@mod/combinations";
 import type { FullPlan } from "./contract.ts";
 import { writeDeployment } from "./deployment.ts";

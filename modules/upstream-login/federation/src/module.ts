@@ -20,7 +20,7 @@ export default defineModule({ name: "federation", section }, (m) => [
 	m.provide(handoff).by(handoffIn),
 	m.contribute(openedAfterHold).by(openedIn),
 	m.provide(federationRoute).by(async (c) => {
-		const window = { limit: c.section.requests, ms: c.section["window-seconds"] * 1000 };
+		const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 		const login = await loginIn(c);
 		const link = await linkIn(c);
 		return {

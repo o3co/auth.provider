@@ -78,6 +78,13 @@ export function factorDecisions(p: FactorParts): Factors {
 	};
 	const secretOf = (subject: string, factor: Factor) =>
 		opened(factor.secret, sealContext(subject, factor.id));
+	/** The secret sealed again under the current key when a past key sealed it; none otherwise. */
+	const resealedSecret = (subject: string, factor: Factor) => {
+		const read = p.seal.open(factor.secret, sealContext(subject, factor.id));
+		return read.kind === "opened" && read.stale
+			? p.seal.seal(read.plain, sealContext(subject, factor.id))
+			: undefined;
+	};
 	const heldOf = (subject: string, all: readonly Factor[], kind: string): Opened[] =>
 		all
 			.filter((f) => f.kind === kind)
@@ -160,10 +167,15 @@ export function factorDecisions(p: FactorParts): Factors {
 					: opened(challenge, challengeContext(subject, factor.id));
 			const result = await kind.verify(secret, factor.state, proof, kept);
 			if (result.kind !== "valid") return result;
+			// A past key's secret is sealed again in the write the proof makes anyway.
+			const fresh = resealedSecret(subject, factor);
 			const written = await records.decide(subject, (all) => {
 				const current = all.find((f) => f.id === factor.id);
 				if (!current || !sameState(current.state, factor.state)) return { verdict: false };
-				const next = all.map((f) => (f.id === factor.id ? { ...f, state: result.state } : f));
+				const moved = fresh && current.secret === factor.secret ? { secret: fresh } : {};
+				const next = all.map((f) =>
+					f.id === factor.id ? { ...f, state: result.state, ...moved } : f,
+				);
 				return { next, verdict: true };
 			});
 			if (!written) return { kind: "raced" };

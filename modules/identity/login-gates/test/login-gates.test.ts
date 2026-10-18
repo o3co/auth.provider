@@ -289,3 +289,7 @@ it("opens the session at the authentication time the way of logging in reported,
 	const opened = await plain.login(testRequest(), { ...facts, authenticatedAt: at });
 	expect(opened.kind === "opened" && opened.session.context.authenticatedAt).toBe(at);
 });
+
+it("reads no return targets when the operator sets none", () => {
+	expect(gatesModule.section?.parse({})).toEqual({ "return-targets": [] });
+});

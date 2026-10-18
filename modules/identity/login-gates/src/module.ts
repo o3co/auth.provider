@@ -17,7 +17,7 @@ import {
 const section = z.strictObject({
 	"return-targets": z
 		.array(urlSetting({ schemes: ["https"] }))
-		.default([])
+		.prefault([])
 		.describe(
 			"The https URLs, matched as written, a login may return to besides the return paths modules contribute.",
 		),

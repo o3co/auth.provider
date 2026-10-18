@@ -21,8 +21,8 @@ Internal module of `federation`: handing the upstream tokens of a login to the r
 ## Invariants
 - Only a login whose upstream gave tokens, where some module receives them, carries a `from`; any other carries and keeps nothing.
 - Receivers are told in name order. One that throws is logged by name and error kind; the others are still told, and the login stays open.
-- A held login's tokens are sealed with its IdP and local subject, under a carry of 256 random bits, kept for `transaction-seconds` from the hold. If they cannot be kept, the callback is unavailable.
-- The `from` names a deadline `transaction-seconds` from the callback, before the kept tokens are gone, so `login-gates` refuses a resume from then on and no session opens without them.
+- A held login's tokens are sealed with its IdP and local subject, under a carry of 256 random bits, kept for `transaction-lifetime` from the hold. If they cannot be kept, the callback is unavailable.
+- The `from` names a deadline `transaction-lifetime` from the callback, before the kept tokens are gone, so `login-gates` refuses a resume from then on and no session opens without them.
 - The kept tokens are taken once, in one rewrite, then removed after telling. They go only to a session of the subject that logged in, with their lifetime counted from the hand-over.
 
 ## Data

@@ -35,10 +35,10 @@ describe("assemble", () => {
 		expect(kernelSection.parse({ deployment: "multi" })).toEqual({
 			deployment: "multi",
 			logging: { level: "info" },
-			"stop-seconds": 30,
+			"stop-deadline": 30,
 		});
-		const { deployment, logging, "stop-seconds": stopSeconds } = kernelSection.shape;
-		for (const key of [deployment, logging, logging.unwrap().shape.level, stopSeconds]) {
+		const { deployment, logging, "stop-deadline": stopDeadline } = kernelSection.shape;
+		for (const key of [deployment, logging, logging.unwrap().shape.level, stopDeadline]) {
 			expect(key.description).toMatch(/\w/);
 		}
 	});
@@ -819,7 +819,7 @@ describe("stop", () => {
 		expect(order).toEqual(["store"]);
 	});
 
-	it("stops by kernel.stop-seconds when given no deadline, 30 s unless set", async () => {
+	it("stops by kernel.stop-deadline when given no deadline, 30s unless set", async () => {
 		vi.useFakeTimers();
 		const hung = (signals: AbortSignal[]) =>
 			stopping("hung", [], (signal) => {
@@ -837,22 +837,22 @@ describe("stop", () => {
 			return [before, signals[0]?.aborted];
 		};
 		expect(await at(single, 30_000)).toEqual([false, true]);
-		expect(await at(kernelConfig({ "stop-seconds": 5 }), 5_000)).toEqual([false, true]);
-		expect(await at({ kernel: { deployment: "single", "stop-seconds": "7" } }, 7_000)).toEqual([
+		expect(await at(kernelConfig({ "stop-deadline": "5s" }), 5_000)).toEqual([false, true]);
+		expect(await at({ kernel: { deployment: "single", "stop-deadline": "7s" } }, 7_000)).toEqual([
 			false,
 			true,
 		]);
 	});
 
-	it("refuses a stop-seconds that is no whole number from 1 to 3600", async () => {
-		for (const bad of [0, 3601, 1.5, "x", true]) {
+	it("refuses a stop-deadline without its unit, or not whole seconds from 1s to 1h", async () => {
+		for (const bad of ["0s", "3601s", "1500ms", 30, "30", "x", true]) {
 			const refusals = await refusalsOf(
 				assemble({
 					modules: [],
-					config: { kernel: { deployment: "single", "stop-seconds": bad } },
+					config: { kernel: { deployment: "single", "stop-deadline": bad } },
 				}),
 			);
-			expect(refusals.map((r) => r.where)).toEqual(["kernel.stop-seconds"]);
+			expect(refusals.map((r) => r.where)).toEqual(["kernel.stop-deadline"]);
 		}
 	});
 

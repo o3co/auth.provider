@@ -1,7 +1,7 @@
 /** The audit event reference: every module's declared events, as one document. */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { workspacePackages } from "./project.ts";
+import { workspacePackages } from "../project.ts";
 
 /** One declared event, as `audit`'s `auditEvents` takes it. */
 export interface Declared {

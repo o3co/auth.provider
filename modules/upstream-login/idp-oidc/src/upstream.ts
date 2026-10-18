@@ -112,7 +112,7 @@ export async function opened(
 		: { endpoints: given(s), offersIss: false };
 	const requireIss = s["require-iss"] || offersIss;
 	if (!requireIss) at.log.warn("idp-oidc.iss_not_required", { idp: at.name });
-	const skewMs = s["clock-skew-seconds"] * 1000;
+	const skewMs = s["clock-skew"] * 1000;
 	const client = s["client-id"];
 	const idTokenOf = idTokenReaderOf(
 		jwt,

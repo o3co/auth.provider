@@ -29,7 +29,9 @@ import {
 	type Tokens,
 	tokens,
 } from "../src/contract.ts";
+import { defaultLifetimeSeconds } from "../src/limits.ts";
 import tokensModule from "../src/module.ts";
+import { section } from "../src/section.ts";
 import { revokedInMemory } from "./revoked.ts";
 
 const start = 1_800_000_000_000;
@@ -92,7 +94,7 @@ async function assembled(
 describe("tokens", () => {
 	it("issues access tokens that verify until they expire", async () => {
 		const t = await boot({
-			"access-token-lifetime-seconds": 60,
+			"access-token-lifetime": "1m",
 			revocation: "unsupported",
 		});
 		const grant = { subject: "svc", issuedTo: "svc", audience: ["api"], scope: ["read", "write"] };
@@ -111,7 +113,7 @@ describe("tokens", () => {
 
 	it("caps the expiry at the limit it is given", async () => {
 		const t = await boot({
-			"access-token-lifetime-seconds": 3600,
+			"access-token-lifetime": "1h",
 			revocation: "unsupported",
 		});
 		expect((await issueFor(t, grant, { notAfter: now + 120_000 })).expiresIn).toBe(120);
@@ -352,4 +354,19 @@ it("refuses a token another issuer stamped, and one bound by two members", async
 it("answers unsupported to any revocation where revocation is not configured, a token or not", async () => {
 	const t = await boot({ revocation: "unsupported" });
 	expect(await t.revokeAccess("garbage")).toEqual({ kind: "unsupported" });
+});
+
+it("reads the access token's lifetime with its unit, in whole seconds, an hour unless set", () => {
+	const lifetimeOf = (settings: object) =>
+		section.safeParse({ revocation: "unsupported", ...settings }).data?.["access-token-lifetime"];
+	expect([{}, { "access-token-lifetime": "2h" }].map(lifetimeOf)).toEqual([
+		defaultLifetimeSeconds,
+		7200,
+	]);
+	const refused = [
+		{ "access-token-lifetime-seconds": 60 },
+		{ "access-token-lifetime": 3600 },
+		{ "access-token-lifetime": "1500ms" },
+	];
+	expect(refused.map(lifetimeOf)).toEqual([undefined, undefined, undefined]);
 });

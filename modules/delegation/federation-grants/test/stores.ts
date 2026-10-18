@@ -31,6 +31,16 @@ export function memoryStores(now: () => number = () => 0, cap = 16) {
 		create: grants.records.create,
 		read: grants.records.read,
 		change: grants.records.change,
+		// One grant a page, so a walk must go on by its cursor.
+		scan: async (cursor) => {
+			const keys = (await grants.records.scan()).keys.toSorted();
+			const at = cursor === undefined ? 0 : keys.indexOf(cursor) + 1;
+			const page = keys.slice(at, at + 1);
+			const last = page[0];
+			return at + 1 < keys.length && last !== undefined
+				? { keys: page, cursor: last }
+				: { keys: page };
+		},
 	});
 	const stepRecords: StepStore = {
 		create: steps.records.create,

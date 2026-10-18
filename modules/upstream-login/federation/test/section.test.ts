@@ -6,18 +6,21 @@ const idp = (more: Record<string, unknown> = {}) => ({ type: "oidc", ...more });
 
 describe("federation's section", () => {
 	it.each([
-		["transaction-seconds", 60, 3600],
-		["requests", 1, 1000],
-		["window-seconds", 1, 3600],
-	])("takes %s from %i to %i, whole, and nothing outside", (key, low, high) => {
-		const takes = (value: number) => parses({ [key]: value });
-		expect([low - 1, low, low + 0.5, high, high + 1].map(takes)).toEqual([
-			false,
-			true,
-			false,
-			true,
-			false,
-		]);
+		["transaction-lifetime", 60, 3600],
+		["window", 1, 3600],
+	])(
+		"takes %s from %is to %is, whole seconds written with their unit, and nothing outside",
+		(key, low, high) => {
+			const takes = (value: unknown) => parses({ [key]: value });
+			const seconds = [low - 1, low, low + 0.5, high, high + 1].map((n) => `${n}s`);
+			expect(seconds.map(takes)).toEqual([false, true, false, true, false]);
+			expect([low, String(low)].map(takes)).toEqual([false, false]);
+		},
+	);
+
+	it("takes requests from 1 to 1000, whole, and nothing outside", () => {
+		const takes = (value: number) => parses({ requests: value });
+		expect([0, 1, 1.5, 1000, 1001].map(takes)).toEqual([false, true, false, true, false]);
 	});
 
 	it("takes an IdP name of 1 to 32 lowercase letters, digits and -, not starting with -", () => {

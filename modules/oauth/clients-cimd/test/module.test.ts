@@ -26,6 +26,7 @@ import {
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import clientsCimd from "../src/module.ts";
+import { section } from "../src/section.ts";
 
 const id = "https://app.example/client.json";
 const document = {
@@ -366,7 +367,7 @@ describe("clients-cimd: the operator's section", () => {
 			{ allow: [`${"a".repeat(64)}.example`] },
 			"clients-cimd.allow.0",
 		],
-		["a size of zero", { "max-bytes": 0 }, "clients-cimd.max-bytes"],
+		["a size of zero", { "max-size": "0B" }, "clients-cimd.max-size"],
 		["no concurrency", { "max-concurrent": 0 }, "clients-cimd.max-concurrent"],
 	])("refuses boot for %s", async (_, settings, where) => {
 		const error = await boot(settings).catch((e: unknown) => e);
@@ -402,7 +403,83 @@ describe("clients-cimd: the operator's section", () => {
 	});
 
 	it("narrows outbound by its own size and time", async () => {
-		await (await boot({ "max-bytes": 100, "timeout-ms": 50 })).find();
+		await (await boot({ "max-size": "100B", timeout: "50ms" })).find();
 		expect(sent[0]?.narrower).toEqual({ maxBytes: 100, timeoutMs: 50 });
+	});
+});
+
+describe("clients-cimd: times and sizes in the section", () => {
+	/** Each key of a time or a size, with what a bare number of it and digits alone are refused as. */
+	const unitKeys = [
+		["max-size", "written with its unit, such as 64KiB", "byte size must name its unit"],
+		["timeout", "written with its unit, such as 30s", "duration must name its unit"],
+		["cache-lifetime", "written with its unit, such as 30s", "duration must name its unit"],
+		["refused-lifetime", "written with its unit, such as 30s", "duration must name its unit"],
+	] as const;
+
+	it("reads a time or a size as an operator writes it, with a unit", () => {
+		const read = section.parse({
+			"max-size": "64KiB",
+			timeout: "2s",
+			"cache-lifetime": "5m",
+			"refused-lifetime": "30s",
+		});
+		expect(read).toMatchObject({
+			"max-size": 65_536,
+			timeout: 2000,
+			"cache-lifetime": 300,
+			"refused-lifetime": 30,
+		});
+	});
+
+	it("keeps a document for the cache lifetime and a refusal for the refused lifetime it reads", async () => {
+		const app = await boot({ "cache-lifetime": "2m", "refused-lifetime": "10s" });
+		await app.find();
+		now += 119_999;
+		await app.find();
+		expect(sent).toHaveLength(1);
+		now += 1;
+		answer = () => json(document, {}, 404);
+		await app.find();
+		now += 9_999;
+		await app.find();
+		expect(sent).toHaveLength(2);
+		now += 1;
+		await app.find();
+		expect(sent).toHaveLength(3);
+	});
+
+	it.each(unitKeys)(
+		"refuses boot for %s written as a bare number or digits alone",
+		async (key, bare, digits) => {
+			for (const [written, reason] of [
+				[5, bare],
+				["5", digits],
+			] as const) {
+				const error = await boot({ [key]: written }).catch((e: unknown) => e);
+				expect(error, String(written)).toBeInstanceOf(BootRefused);
+				expect((error as BootRefused).refusals, String(written)).toContainEqual(
+					expect.objectContaining({ where: `clients-cimd.${key}`, reason }),
+				);
+			}
+			expect(section.safeParse({ [key]: "5" }).error?.issues).toMatchObject([
+				{ path: [key], params: { problem: "missing-unit" } },
+			]);
+		},
+	);
+
+	it("reads an empty section with the defaults it had", () => {
+		expect(section.parse({})).toEqual({
+			allow: [],
+			deny: [],
+			scopes: [],
+			audiences: [],
+			"max-size": 5120,
+			timeout: 5000,
+			"cache-lifetime": 600,
+			"cache-entries": 256,
+			"refused-lifetime": 60,
+			"max-concurrent": 8,
+		});
 	});
 });

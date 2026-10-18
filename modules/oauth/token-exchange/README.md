@@ -14,7 +14,7 @@
   - A verifier answers the token's subject, issuer, issued-to, audience, scope, expiry, binding, actor chain and `may_act`, or invalid. It throws unavailable when it cannot tell.
   - `issued` names a token this provider issued, so its family and session are found. Only the built-in verifier's `issued`, amr, authentication time and acr are read.
 - Client metadata section `token-exchange`: `others-tokens` (default false), whether the client may present tokens that do not name it.
-- Operator section: `max-actor-depth` (1–10, default 3); `max-lifetime-seconds` (1–86400, optional), the longest lifetime an exchange may ask for, even past `tokens`' lifetime.
+- Operator section: `max-actor-depth` (1–10, default 3); `max-lifetime` (1s–1d, optional, written with its unit), the longest lifetime an exchange may ask for, even past `tokens`' lifetime. `max-lifetime-seconds` is read in its place when given.
 
 ## Invariants
 - Only a confidential client, explicitly allowed the grant. A public client is `401 invalid_client`.
@@ -27,7 +27,7 @@
 - A revoked or expired token, one of an ended family, or one of a closed session is refused, as subject or actor.
 - The issued token joins the subject token's family, and is issued from the subject token's session when it has one, so `token-endpoint` has it recorded there; a session closed after that revokes it, and the exchange is refused.
 - It never outlives the subject token or its family. Revoking the subject token alone does not end it.
-- Its lifetime is the `expires_in` asked, or `tokens`' lifetime when none is asked, cut to `max-lifetime-seconds`; without that cap, `tokens`' lifetime cuts an asked one too. `expires_in` in the answer is that lifetime.
+- Its lifetime is the `expires_in` asked, or `tokens`' lifetime when none is asked, cut to `max-lifetime`; without that cap, `tokens`' lifetime cuts an asked one too. `expires_in` in the answer is that lifetime.
 - `expires_in` left out or empty asks for nothing. Otherwise it is 1–10 ASCII digits above zero, or `invalid_request` before any token is checked.
 - The subject's amr, authentication time and acr are carried only from this provider's own tokens.
 - It issues through `tokens`' issuance policies, from the subject token's session when it was recorded to one; their refusal is `token-endpoint`'s answer.

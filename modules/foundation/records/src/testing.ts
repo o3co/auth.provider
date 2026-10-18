@@ -72,6 +72,9 @@ export function memoryRecords<T extends Json>(now: () => number, size: DeferredS
 		/** Keyed sets in memory, as records keeps them, at most `cap` to a key. */
 		keyedSets,
 		records: {
+			scan: async (): Promise<{ readonly keys: string[]; readonly cursor?: string }> => ({
+				keys: [...kept.keys()].filter((key) => live(key)),
+			}),
 			create: async (
 				key: string,
 				value: T,

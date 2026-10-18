@@ -17,6 +17,7 @@ import {
 	type Section,
 } from "../src/contract.ts";
 import clientsModule from "../src/module.ts";
+import { clientRecord } from "../src/registry.ts";
 import { basic, refusalsOf } from "./parts.ts";
 
 const grants: Section<{ allowed: string[] }> = {
@@ -601,4 +602,10 @@ describe("clients", () => {
 			expect(Object.isFrozen(client?.section(grants).allowed)).toBe(true);
 		}
 	});
+});
+
+it("registers no clients, and a client no sections, that the operator leaves out", () => {
+	expect(clientsModule.section?.parse({})).toEqual({ registered: [] });
+	const written = { id: "c", kind: "public", method: "none" };
+	expect(clientRecord.parse(written)).toEqual({ ...written, sections: {} });
 });

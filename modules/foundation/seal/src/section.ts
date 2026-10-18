@@ -9,10 +9,16 @@ const key = z.strictObject({
 	key: secretBytes({ exactly: 32 }).describe("32 bytes, base64, of at least 8 byte values."),
 });
 
-export const section = z.strictObject({
-	keys: z
-		.array(key)
-		.min(1)
-		.refine((keys) => new Set(keys.map((k) => k.id)).size === keys.length, "ids must differ")
-		.describe("The sealing keys. The first seals; all open."),
-});
+/** The key ring: one key seals, and every key of it opens. */
+export const section = z
+	.strictObject({
+		current: key.describe("The key that seals; any key of the ring opens."),
+		next: key
+			.optional()
+			.describe("Opens but never seals, so every host opens with it before it seals."),
+		previous: z.array(key).prefault([]).describe("Keys that only open what they sealed."),
+	})
+	.refine((s) => {
+		const ids = [s.current, ...(s.next ? [s.next] : []), ...s.previous].map((k) => k.id);
+		return new Set(ids).size === ids.length;
+	}, "ids must differ");

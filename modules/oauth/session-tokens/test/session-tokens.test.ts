@@ -93,7 +93,7 @@ async function boot(
 		config: {
 			...kernelConfig(),
 			...httpConfig({ "public-origin": "https://as.example" }),
-			"session-tokens": { "sweep-seconds": 1, "push-out-margin": options.margin ?? 0 },
+			"session-tokens": { "sweep-interval": "1s", "push-out-margin": options.margin ?? 0 },
 		},
 		runtime,
 	});
@@ -405,4 +405,17 @@ it("throws unavailable, never unbound, when the index cannot tell", async () => 
 	const a = await s.issue();
 	s.issued.down.unavailable("read");
 	await expect(s.app.get(sessionTokens).sessionOf(a.id)).rejects.toSatisfy(isUnavailable);
+});
+
+it("sweeps every 30s unless set, taking a time only with its unit and in whole seconds", () => {
+	const takes = (settings: object) => sessionTokensModule.section?.safeParse(settings).success;
+	expect(sessionTokensModule.section?.parse({})).toEqual({
+		"sweep-interval": 30,
+		"push-out-margin": 8,
+	});
+	expect(
+		[{ "sweep-interval": "1h" }, { "sweep-interval": 30 }, { "sweep-interval": "1500ms" }].map(
+			takes,
+		),
+	).toEqual([true, false, false]);
 });

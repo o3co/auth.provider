@@ -25,3 +25,14 @@ it("takes a port up to 65535, and the client's certificate by client-certificate
 	expect([named("x-client-cert"), named("X-Client-Cert")]).toEqual([true, false]);
 	expect(section.parse({})["client-certificate"]).toBeUndefined();
 });
+
+it("reads every default when the operator sets nothing", () => {
+	expect(section.parse({})).toEqual({
+		host: "127.0.0.1",
+		port: 8080,
+		"trusted-proxies": [],
+		"cors-origins": [],
+		"insecure-origin": false,
+		"proxy-hops": 1,
+	});
+});

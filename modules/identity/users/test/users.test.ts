@@ -12,7 +12,7 @@ import {
 } from "../src/contract.ts";
 import { ledgerUsers } from "../src/ledger.ts";
 import usersModule from "../src/module.ts";
-import { registeredUsers } from "../src/registered.ts";
+import { record, registeredUsers } from "../src/registered.ts";
 import {
 	ledgerContract,
 	memoryUsersStores,
@@ -263,4 +263,10 @@ describe("records", () => {
 		const u = ledgerUsers(registeredUsers([], randomBytes), vanishing, stores.contacts.store);
 		await expect(u.link("s", { idp: "i", subject: "u" })).rejects.toSatisfy(isUnavailable);
 	});
+});
+
+it("registers no users, and a user no attributes or upstream identities, that the operator leaves out", () => {
+	expect(usersModule.section?.parse({})).toEqual({ registered: [] });
+	const written = { identifier: "bob", "password-hash": aliceEntry["password-hash"] };
+	expect(record.parse(written)).toEqual({ ...written, attributes: {}, upstream: [] });
 });

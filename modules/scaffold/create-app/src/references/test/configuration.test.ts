@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, it, vi } from "vitest";
-import { referenceFile, referenceOf, rowsOf, sectionsIn } from "../src/configuration.ts";
-import { root } from "./full-app.ts";
+import { root } from "../../../test/full-app.ts";
+import { referenceFile, referenceOf, rowsOf, sectionsIn } from "../configuration.ts";
 
 // These tests read the whole workspace, which is slow when the machine is busy.
 vi.setConfig({ testTimeout: 60_000 });
@@ -39,6 +39,15 @@ it("describes each key by its schema: type and bounds, default, whether required
 	).toContain("| `s.mode` | a \\| b | `a` |  |  |  |  |");
 });
 
+it("requires a key inside an object only when the object is required too", () => {
+	const key = { type: "object", required: ["id"], properties: { id: { type: "string" } } };
+	const schema = { type: "object", required: ["current"], properties: { current: key, next: key } };
+	expect(rowsOf(schema, ["k"], () => ({}))).toEqual([
+		{ key: "k.current.id", type: "string", required: true },
+		{ key: "k.next.id", type: "string", required: false },
+	]);
+});
+
 it("merges the keys of a union of objects, required only where every variant requires them", () => {
 	const schema = {
 		oneOf: [
@@ -70,19 +79,14 @@ const describedLater = new Set([
 	"authorize",
 	"clients",
 	"clients-cimd",
-	"code-grant",
 	"federation-grants",
-	"federation-tokens",
 	"mail-smtp",
 	"mfa-email",
 	"mfa-flows",
 	"mfa-webauthn",
-	"oidc",
 	"rp-logout",
 	"session",
 	"token-endpoint",
-	"token-exchange",
-	"users-http",
 	"webauthn",
 	"webauthn-login",
 ]);
