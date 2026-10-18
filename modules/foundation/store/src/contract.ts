@@ -181,7 +181,7 @@ export interface Store {
 	/** The store clock's present time, the one every expiry and deadline is judged by. */
 	now(): Promise<number>;
 	/** A page of the space's live value keys (no counter or set) and the cursor on; none when done. */
-	// A key written or removed meanwhile may come, or twice, or not; one living through the walk comes.
+	// Any key may come twice; one living through the walk comes unless a failover or restart falls in it.
 	scan(
 		space: Space,
 		cursor?: string,
