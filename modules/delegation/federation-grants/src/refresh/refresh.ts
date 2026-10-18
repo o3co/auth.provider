@@ -193,8 +193,11 @@ export function refreshWith(parts: Parts) {
 			}));
 			return ended ? { kind: "reauthorize", reason: "upstream_invalid_grant" } : { kind: "gone" };
 		}
+		// Only a refresh that handed tokens is read on; an answer of another kind is refused.
+		const answered = refreshed.kind === "refreshed" ? refreshed : undefined;
+		if (!answered) return heldOr(grant.id, held, asked, { kind: "refused" });
 		const now = parts.clock.now();
-		const read = credentialsFrom(refreshed.tokens, {
+		const read = credentialsFrom(answered.tokens, {
 			now,
 			maxAccessMs: asked.maxAccessMs,
 			shown: counted.scopes,
