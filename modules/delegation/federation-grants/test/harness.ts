@@ -17,6 +17,7 @@ import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import { type EntryRequirement, entryRequirements, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { revocations } from "@mod/subject-revocation";
@@ -189,6 +190,7 @@ export async function harness(
 		modules: [
 			http,
 			clientsModule,
+			secretHashModule,
 			sessionStandIn,
 			csrfStandIn,
 			cookiesModule,
