@@ -65,7 +65,7 @@ Write secrets, such as the signing key, in `.env` or the local layer only; neith
 
 Generate again and carry the configuration over:
 
-- `create-app <target> --pattern {{name}} --add <feature>` adds a feature, with what it needs, its wirings and bridges.
+- `create-auth-provider <target> --pattern {{name}} --add <feature>` adds a feature, with what it needs, its wirings and bridges.
 - `--axis <owner>=<adapter>` chooses an axis's adapter, or the owner itself.
 - `--login`, `--second-factor`, `--grants`, `--client-auth` and `--binding` each replace that group of features with the comma-separated list given.
 

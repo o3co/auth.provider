@@ -242,14 +242,32 @@ it("runs the command on given arguments, answering a usage error as 64 and writi
 	const said: string[] = [];
 	const io = { out: (text: string) => said.push(text), err: (text: string) => said.push(text) };
 	expect(await run([], io)).toBe(64);
-	expect(said.join("")).toContain("usage: create-app <target>");
+	expect(said.join("")).toContain("usage: create-auth-provider <target>");
+});
+
+it("refuses an empty name in a group's list as a usage error, and answers a plan it cannot make as 1 with its reason", async () => {
+	const err: string[] = [];
+	const io = { out: () => {}, err: (text: string) => err.push(text) };
+	const target = join(await mkdtemp(join(tmpdir(), "create-app-")), "app");
+	for (const args of [
+		[target, "--pattern", "a2a", "--binding", ""],
+		[target, "--pattern", "a2a", "--login", "@mod/login-password,"],
+	]) {
+		err.length = 0;
+		expect(await run(args, io), args.join(" ")).toBe(64);
+		expect(err.join(""), args.join(" ")).toContain("usage: create-auth-provider <target>");
+	}
+	err.length = 0;
+	expect(await run([target, "--pattern", "no-such-pattern"], io)).toBe(1);
+	expect(err.join("")).toMatch(/no-such-pattern/);
+	expect(err.join("")).not.toMatch(/\n\s+at /);
 });
 
 it("answers --help with the usage on standard output, and an option it does not know as a usage error", async () => {
 	const [out, err]: [string[], string[]] = [[], []];
 	const io = { out: (text: string) => out.push(text), err: (text: string) => err.push(text) };
 	expect(await run(["--help"], io)).toBe(0);
-	expect(out.join("")).toContain("usage: create-app <target>");
+	expect(out.join("")).toContain("usage: create-auth-provider <target>");
 	for (const args of [
 		["app", "--nope"],
 		["app", "--pattern"],
@@ -257,7 +275,7 @@ it("answers --help with the usage on standard output, and an option it does not 
 		err.length = 0;
 		expect(await run(args, io), args.join(" ")).toBe(64);
 		expect(err.join(""), args.join(" ")).toMatch(
-			/^.*'--(nope|pattern).*\nusage: create-app <target>/s,
+			/^.*'--(nope|pattern).*\nusage: create-auth-provider <target>/s,
 		);
 	}
 });
