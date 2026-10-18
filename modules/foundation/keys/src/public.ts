@@ -3,22 +3,31 @@ import { canonical } from "./jws.ts";
 
 export type Jwk = Readonly<Record<string, unknown>>;
 
+const rsa = (jwk: Jwk) => jwk.kty === "RSA";
 /** The kind of key each asymmetric algorithm verifies with. */
-const fits: Readonly<Record<string, (jwk: Jwk) => boolean>> = {
-	...Object.fromEntries(
-		["RS256", "RS384", "RS512", "PS256", "PS384", "PS512"].map((alg) => [
-			alg,
-			(jwk: Jwk) => jwk.kty === "RSA",
-		]),
-	),
-	ES256: (jwk) => jwk.kty === "EC" && jwk.crv === "P-256",
-	ES384: (jwk) => jwk.kty === "EC" && jwk.crv === "P-384",
-	ES512: (jwk) => jwk.kty === "EC" && jwk.crv === "P-521",
-	EdDSA: (jwk) => jwk.kty === "OKP" && (jwk.crv === "Ed25519" || jwk.crv === "Ed448"),
-};
+const fits = {
+	RS256: rsa,
+	RS384: rsa,
+	RS512: rsa,
+	PS256: rsa,
+	PS384: rsa,
+	PS512: rsa,
+	ES256: (jwk: Jwk) => jwk.kty === "EC" && jwk.crv === "P-256",
+	ES384: (jwk: Jwk) => jwk.kty === "EC" && jwk.crv === "P-384",
+	ES512: (jwk: Jwk) => jwk.kty === "EC" && jwk.crv === "P-521",
+	EdDSA: (jwk: Jwk) => jwk.kty === "OKP" && (jwk.crv === "Ed25519" || jwk.crv === "Ed448"),
+} as const;
+
+/** An asymmetric algorithm a public key may verify under. */
+export type VerifyAlgorithm = keyof typeof fits;
 
 /** The asymmetric algorithms a public key may verify under. */
-export const verifyAlgorithms: readonly string[] = Object.freeze(Object.keys(fits));
+export const verifyAlgorithms: readonly VerifyAlgorithm[] = Object.freeze(
+	Object.keys(fits) as VerifyAlgorithm[],
+);
+
+export const isVerifyAlgorithm = (value: unknown): value is VerifyAlgorithm =>
+	typeof value === "string" && Object.hasOwn(fits, value);
 
 /** The members of each public key type. A Map, so no inherited name is a type. */
 const membersOf: ReadonlyMap<unknown, readonly string[]> = new Map([
@@ -78,7 +87,7 @@ export function verifiesUnder(jwk: Jwk, alg?: string): boolean {
 	if (jwk.key_ops !== undefined && !(Array.isArray(jwk.key_ops) && jwk.key_ops.includes("verify")))
 		return false;
 	if (alg === undefined) return Object.values(fits).some((fit) => fit(jwk));
-	const fit = Object.hasOwn(fits, alg) ? fits[alg] : undefined;
+	const fit = isVerifyAlgorithm(alg) ? fits[alg] : undefined;
 	return (fit?.(jwk) ?? false) && (jwk.alg === undefined || jwk.alg === alg);
 }
 

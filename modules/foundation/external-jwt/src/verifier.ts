@@ -38,8 +38,10 @@ export function externalJwtOver(deps: {
 	readonly keySetMaxAgeMs: number;
 }): ExternalJwt {
 	const sets = new Map<string, KeySet>();
-	const setAt = (url: string, hosts: readonly string[]) => {
-		const key = JSON.stringify([url, [...hosts].sort()]);
+	const setAt = (url: string, written: readonly string[]) => {
+		// A host is one name whatever its case or the root's trailing dot.
+		const hosts = [...new Set(written.map((h) => h.toLowerCase().replace(/\.$/, "")))].sort();
+		const key = JSON.stringify([url, hosts]);
 		const kept = sets.get(key);
 		if (kept) return kept;
 		const made = jwksAt(
