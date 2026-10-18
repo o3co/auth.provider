@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import { clientAllowance } from "@mod/client-allowance";
 import type { Client } from "@mod/clients";
 import type { Grant, GrantInput, GrantOutcome } from "@mod/grants";
+import { Unavailable } from "@mod/kernel";
 import type { FamilyHandle, Lineage } from "@mod/refresh";
-import { carried } from "@mod/sender-binding";
+import { type Binding, carried } from "@mod/sender-binding";
 import type { Sessions } from "@mod/session";
 import type { SessionTokens } from "@mod/session-tokens";
 import type { Actor, IssuedAccess, Tokens } from "@mod/tokens";
@@ -22,6 +24,8 @@ export interface Parts {
 	/** The operator's cap on an issued token's lifetime, in seconds; tokens' lifetime bounds it too. */
 	readonly maxLifetimeSeconds?: number;
 	readonly othersTokens: (client: Client) => boolean;
+	/** Whether a public client may exchange, holding by DPoP the key the subject token names. */
+	readonly publicExchange: (client: Client) => boolean;
 	readonly now: () => number;
 }
 
@@ -59,6 +63,11 @@ const askedLifetime = (value: string | undefined): number | undefined => {
 
 const depthOf = (actor: Actor | undefined): number => (actor ? 1 + depthOf(actor.actor) : 0);
 
+/** Whether the request proves by DPoP the key whose thumbprint's digest the subject token names. */
+const holds = (binding: Binding | undefined, digest: string | undefined) =>
+	binding?.tokenType === "DPoP" &&
+	createHash("sha256").update(binding.confirmation, "ascii").digest("base64url") === digest;
+
 /** Whether `may_act`, if the subject token has one, names the party acting; a client has no issuer. */
 const mayActFor = (subject: Exchanged, party: { readonly sub: string; readonly iss?: string }) =>
 	subject.mayAct === undefined ||
@@ -70,7 +79,7 @@ const mayActFor = (subject: Exchanged, party: { readonly sub: string; readonly i
 	);
 
 export function exchangeGrant(parts: Parts): Grant {
-	/** A token verified, unexpired, and naming the client unless the client may present others'. */
+	/** A token verified, unexpired, naming the client or listing it in `clients`; a once-only or client-ceiling one never acts. */
 	const presented = async (
 		client: Client,
 		role: Role,
@@ -83,10 +92,14 @@ export function exchangeGrant(parts: Parts): Grant {
 		if (!answer) return refused(`${role}_token validation failed`);
 		if (answer.expiresAt - parts.now() < expiryMarginMs)
 			return refused(`${role}_token has expired`);
-		const named = answer.issuedTo === client.id || answer.audience.includes(client.id);
-		if (!named && !parts.othersTokens(client)) {
-			return refused(`${role}_token does not name this client`);
-		}
+		if (role === "actor" && (verifier.consume || answer.ceiling))
+			return refused("actor_token cannot act");
+		const named = answer.clients
+			? answer.clients.includes(client.id)
+			: answer.issuedTo === client.id ||
+				answer.audience.includes(client.id) ||
+				parts.othersTokens(client);
+		if (!named) return refused(`${role}_token does not name this client`);
 		return answer;
 	};
 
@@ -108,8 +121,27 @@ export function exchangeGrant(parts: Parts): Grant {
 		return session === undefined ? { kind: "alone" } : { kind: "session", session };
 	};
 
+	/** The scope and the one audience asked for, within the client's allowance alone. */
+	const clientTargetOf = ({ client, param }: GrantInput) => {
+		const allowed = clientAllowance.allowedIssuance(client, param("scope"), parts.issuer);
+		if (allowed.kind === "error") {
+			return refused(allowed.description ?? "scope is not within the client's", allowed.error);
+		}
+		const audience = param("audience") || allowed.audience[0];
+		if (audience === undefined || !clientAllowance.allowsAudience(client, audience, parts.issuer)) {
+			return refused("audience is not one the client may be issued", "invalid_target");
+		}
+		const resource = param("resource");
+		if (resource && resource !== audience) {
+			return refused("resource is not the audience issued", "invalid_target");
+		}
+		return { scope: [...allowed.scope], audience: [audience] };
+	};
+
 	/** The scope and the one audience asked for, within the subject token's and the client's. */
-	const targetOf = ({ client, param }: GrantInput, subject: Exchanged) => {
+	const targetOf = (input: GrantInput, subject: Exchanged) => {
+		if (subject.ceiling === "client") return clientTargetOf(input);
+		const { client, param } = input;
 		const allows = (scope: string) => clientAllowance.allowsScope(client, scope);
 		const asked = clientAllowance.parseScope(param("scope"));
 		const ceiling = [...new Set(subject.scope.filter(allows))];
@@ -144,8 +176,12 @@ export function exchangeGrant(parts: Parts): Grant {
 		return false;
 	};
 
-	/** The binding, the actor chain, `may_act` and the target, in that order; a refusal stops them. */
+	/** The holder, the binding, the actor chain, `may_act` and the target, in that order; a refusal stops them. */
 	const policyOf = (input: GrantInput, subject: Exchanged, actor: Exchanged | undefined) => {
+		// A public client has no secret: the key it proves must be the one the token was given for.
+		if (input.client.kind !== "confidential" && !holds(input.binding, subject.holderDigest)) {
+			return refused("the request does not prove the key the subject token names");
+		}
 		// issue binds the new token to the request's proof; this checks no binding is washed off.
 		if (carried([subject.binding, actor?.binding], input.binding).kind === "refused") {
 			return refused("the request does not prove the binding of the tokens presented");
@@ -180,7 +216,7 @@ export function exchangeGrant(parts: Parts): Grant {
 		targets: true,
 		handle: async (input) => {
 			const { client, param } = input;
-			if (client.kind !== "confidential") {
+			if (client.kind !== "confidential" && !parts.publicExchange(client)) {
 				return { kind: "error", error: "invalid_client", status: 401 };
 			}
 			const asked = askedLifetime(param("expires_in"));
@@ -227,25 +263,32 @@ export function exchangeGrant(parts: Parts): Grant {
 			if (isRefusal(last)) return last;
 			const { tie } = last;
 			const { notAfter, lifetimeSeconds } = expiryOf(subject, tie, asked);
-			// Nothing is used up before issuing, so `issue` alone asks the policies.
-			const allowed = await input.issue(
-				{
-					subject: subject.subject,
-					issuedTo: client.id,
-					...target,
-					...(chain ? { actor: chain } : {}),
-					...(subject.amr ? { amr: subject.amr } : {}),
-					...(subject.authenticatedAt === undefined
-						? {}
-						: { authenticatedAt: subject.authenticatedAt }),
-					...(subject.acr === undefined ? {} : { acr: subject.acr }),
-				},
-				{
-					notAfter,
-					...(lifetimeSeconds === undefined ? {} : { lifetimeSeconds }),
-					...(tie.kind !== "alone" && tie.session ? { session: tie.session } : {}),
-				},
-			);
+			const access = {
+				subject: subject.subject,
+				issuedTo: client.id,
+				...target,
+				...(chain ? { actor: chain } : {}),
+				...(subject.amr ? { amr: subject.amr } : {}),
+				...(subject.authenticatedAt === undefined
+					? {}
+					: { authenticatedAt: subject.authenticatedAt }),
+				...(subject.acr === undefined ? {} : { acr: subject.acr }),
+			};
+			const from = tie.kind !== "alone" && tie.session ? { session: tie.session } : {};
+			// A once-only token is used up last: after the policies' leave, so a refusal leaves it usable.
+			const verifier = parts.verifiers.get(subjectType);
+			if (verifier?.consume) {
+				const admitted = await input.admits(access, from);
+				if (admitted.kind === "refused") return admitted;
+				const used = await verifier.consume(subjectToken);
+				if (used === "replayed") return refused("subject_token has been used");
+				if (used !== "consumed") throw new Unavailable("token-exchange");
+			}
+			const allowed = await input.issue(access, {
+				notAfter,
+				...(lifetimeSeconds === undefined ? {} : { lifetimeSeconds }),
+				...from,
+			});
 			if (allowed.kind === "refused") return allowed;
 			const issued = allowed.access;
 			if (!(await join(tie, issued))) return refused("subject_token has ended");
