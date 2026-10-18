@@ -23,4 +23,4 @@
 - The subject comes from the session, never from the body.
 
 ## Depends on
-- `kernel`, `http`, `csrf`, `rate-limit`, `session` (entry), `mfa` (factor decisions, the label's shape)
+- `kernel`, `http` (`jsonAnswer`), `csrf`, `rate-limit`, `session` (entry, `refusedEntry`), `mfa` (factor decisions, the label's shape)

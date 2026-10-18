@@ -1,10 +1,10 @@
 import { csrfChecked } from "@mod/csrf";
-import { type Route, routes, use } from "@mod/http";
+import { jsonAnswer, type Route, routes, use } from "@mod/http";
 import { defineModule, isUnavailable } from "@mod/kernel";
 import { factors } from "@mod/mfa";
 import { requestsPerSource } from "@mod/rate-limit";
 import { sessions } from "@mod/session";
-import { answer, handlersOver } from "./handlers.ts";
+import { handlersOver } from "./handlers.ts";
 import { section } from "./section.ts";
 
 type HandlerName = keyof ReturnType<typeof handlersOver>;
@@ -17,7 +17,7 @@ const table = [
 	["POST", "/session/mfa/recovery-codes", "regenerate"],
 ] as const satisfies readonly (readonly ["GET" | "POST", string, HandlerName])[];
 
-const unavailable = answer(503, { error: "temporarily_unavailable" });
+const unavailable = jsonAnswer(503, { error: "temporarily_unavailable" });
 
 const withUnavailable =
 	(handle: Route["handle"]): Route["handle"] =>
