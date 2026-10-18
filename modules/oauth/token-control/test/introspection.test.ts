@@ -70,7 +70,7 @@ describe("introspection", () => {
 		expect((await s.post("/oauth/introspect", undefined, wrong)).status).toBe(401);
 	});
 
-	it("answers 503 when a condition on access tokens cannot tell, never inactive", async () => {
+	it("answers 503 when a condition on access tokens cannot tell, never inactive, recording and warning so", async () => {
 		const down = unavailableSwitch<AccessCondition>();
 		const condition = defineModule({ name: "condition" }, (m) => [
 			m
@@ -85,10 +85,13 @@ describe("introspection", () => {
 		expect([answer.status, answer.error]).toEqual([503, "temporarily_unavailable"]);
 		expect(s.events).toEqual([
 			{
-				kind: "introspect.store_unavailable",
+				kind: "introspection.unavailable",
 				at: expect.any(Number),
 				attributes: { source: "127.0.0.1" },
 			},
+		]);
+		expect(s.warnings()).toEqual([
+			["token-control.unavailable", { what: "test", route: "introspect" }],
 		]);
 	});
 });
