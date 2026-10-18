@@ -29,8 +29,14 @@ import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
 import { type IssuanceRequest, issuancePolicies, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
-import { SignJWT } from "jose";
+import { calculateJwkThumbprint, exportJWK, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
+import {
+	type LinkedSubjects,
+	linkedSubjects,
+	type SignerKeys,
+	signerKeys,
+} from "../src/contract.ts";
 import jwtBearer from "../src/module.ts";
 
 const now = 1_800_000_000_000;
@@ -520,4 +526,172 @@ it("takes the lifetime cap and the clock allowance with their unit, in whole sec
 		{ "clock-skew": "1500ms" },
 	];
 	expect(refused.map(takes)).toEqual([false, false, false]);
+});
+
+describe("signers whose keys a module contributes, and subjects users links", () => {
+	const device = generateKeyPairSync("ed25519");
+	const other = generateKeyPairSync("ed25519");
+	const fixedIss = "app.devices";
+	const deviceKey = async (k = device) => ({ ...(await exportJWK(k.publicKey)), alg: "EdDSA" });
+	const thumbOf = async (k = device) =>
+		calculateJwkThumbprint(await exportJWK(k.publicKey), "sha256");
+	type Answer = Awaited<ReturnType<SignerKeys["keysOf"]>>;
+	/** A module contributing the device keys, answering as `answer` says now and recording each ask. */
+	const signing = (answer: () => Promise<Answer>, asked: unknown[] = []) =>
+		defineModule({ name: "device-keys" }, (m) => [
+			m.contribute(signerKeys).by(() => ({
+				issuer: fixedIss,
+				keysOf: async (signer) => {
+					asked.push(signer);
+					return answer();
+				},
+			})),
+		]);
+	type Linked = Awaited<ReturnType<LinkedSubjects["subjectOf"]>>;
+	/** A module resolving linked subjects as `answer` says now, recording each ask. */
+	const resolving = (
+		answer: () => Promise<Linked>,
+		asked: unknown[] = [],
+		name = "linked-subjects",
+	) =>
+		defineModule({ name }, (m) => [
+			m.contribute(linkedSubjects).by(() => ({
+				declaredBy: name,
+				subjectOf: async (upstream: string, sub: string) => {
+					asked.push([upstream, sub]);
+					return answer();
+				},
+			})),
+		]);
+
+	const entry = (more: Record<string, unknown> = {}) => [{ issuer: fixedIss, ...more }];
+	const located = `${issuer}/oauth/token`;
+	const serveWith = (issuers: Record<string, unknown>[], extra: Module[]) =>
+		serve(undefined, issuer, located, issuers, outboundModule, extra);
+	const deviceAssertion = async (sub: string, key = device.privateKey) =>
+		assertion({ ...base, iss: fixedIss, sub }, key);
+
+	it("takes a contributed signer's keys asked for each assertion, never kept, and the thumbprint's own key only", async () => {
+		const thumb = await thumbOf();
+		let keys: Answer = {
+			kind: "keys",
+			keys: [await deviceKey(other), await deviceKey()],
+			algorithms: ["EdDSA"],
+		};
+		const asked: unknown[] = [];
+		const s = await serveWith(entry({ subject: "as-is", "subject-is-key-thumbprint": true }), [
+			signing(async () => keys, asked),
+		]);
+		const issued = await s.grant(await deviceAssertion(thumb));
+		expect(errorOf(issued)).toBe("issued");
+		expect(asked).toEqual([{ subject: thumb }]);
+		keys = { kind: "none" };
+		expect(saidOf(await s.grant(await deviceAssertion(thumb)))).toBe(
+			"invalid_grant: untrusted signer",
+		);
+		// A key whose thumbprint is not the subject never verifies for it.
+		keys = { kind: "keys", keys: [await deviceKey(other)], algorithms: ["EdDSA"] };
+		expect(saidOf(await s.grant(await deviceAssertion(thumb, other.privateKey)))).toBe(
+			"invalid_grant: untrusted signer",
+		);
+	});
+
+	it("asks for no keys for a subject of the wrong shape", async () => {
+		const asked: unknown[] = [];
+		const s = await serveWith(entry({ subject: "as-is", "subject-is-key-thumbprint": true }), [
+			signing(async () => ({ kind: "none" }), asked),
+		]);
+		for (const sub of ["short", "s-\u00e9".padEnd(43, "x"), "a".repeat(300)]) {
+			expect(errorOf(await s.grant(await deviceAssertion(sub))), sub).toBe("invalid_grant");
+		}
+		expect(asked).toEqual([]);
+	});
+
+	it("tells an unknown key and a forged signature alike", async () => {
+		const thumb = await thumbOf();
+		let keys: Answer = { kind: "none" };
+		const s = await serveWith(entry({ subject: "as-is" }), [signing(async () => keys)]);
+		const unknown = await s.grant(await deviceAssertion(thumb));
+		keys = { kind: "keys", keys: [await deviceKey()], algorithms: ["EdDSA"] };
+		const forged = await s.grant(await deviceAssertion(thumb, other.privateKey));
+		expect(forged).toEqual(unknown);
+	});
+
+	it("is unavailable, using up no jti, where the keys cannot be told or answer an algorithm the grant does not take", async () => {
+		const thumb = await thumbOf();
+		const signed = await deviceAssertion(thumb);
+		let answer = async (): Promise<Answer> => {
+			throw new Unavailable("device-keys");
+		};
+		const s = await serveWith(entry({ subject: "as-is" }), [signing(() => answer())]);
+		await expect(s.grant(signed)).rejects.toBeInstanceOf(Unavailable);
+		answer = async () => ({
+			kind: "keys",
+			keys: [await deviceKey()],
+			algorithms: ["HS256" as "EdDSA"],
+		});
+		await expect(s.grant(signed)).rejects.toBeInstanceOf(Unavailable);
+		answer = async () => ({ kind: "keys", keys: [await deviceKey()], algorithms: ["EdDSA"] });
+		expect(errorOf(await s.grant(signed))).toBe("issued");
+	});
+
+	it("issues for the subject a linked signer stands for, refusing one none stands for without using up the jti", async () => {
+		const thumb = await thumbOf();
+		const keys = async (): Promise<Answer> => ({
+			kind: "keys",
+			keys: [await deviceKey()],
+			algorithms: ["EdDSA"],
+		});
+		let found: Linked = { kind: "none" };
+		let down = false;
+		const asked: unknown[] = [];
+		const s = await serveWith(entry({ subject: "linked", upstream: "device" }), [
+			signing(keys),
+			resolving(async () => {
+				if (down) throw new Unavailable("ledger");
+				return found;
+			}, asked),
+		]);
+		const signed = await deviceAssertion(thumb);
+		expect(saidOf(await s.grant(signed))).toBe("invalid_grant: unknown subject");
+		down = true;
+		await expect(s.grant(signed)).rejects.toBeInstanceOf(Unavailable);
+		down = false;
+		found = { kind: "subject", subject: "account-7" };
+		const issued = await s.grant(signed);
+		const token = issued.kind === "issued" ? String(issued.body.access_token) : "";
+		const verified = await s.verify(token);
+		expect(verified.kind === "valid" && verified.grant.subject).toBe("account-7");
+		expect(asked).toEqual([
+			["device", thumb],
+			["device", thumb],
+			["device", thumb],
+		]);
+	});
+
+	it("refuses to boot on keys both written and contributed, neither, an upstream with as-is, none with linked, linked with no resolver, or two resolvers", async () => {
+		const refused = async (issuers: Record<string, unknown>[], extra: Module[] = []) =>
+			serveWith(issuers, extra).then(
+				() => "booted",
+				(error) => (error instanceof BootRefused ? "refused" : error),
+			);
+		const contributed = signing(async () => ({ kind: "none" }));
+		expect(await refused(entry({ subject: "as-is" }), [contributed])).toBe("booted");
+		expect(await refused(entry({ subject: "as-is" }))).toBe("refused");
+		const written = [{ ...trustedUpstream[0], issuer: fixedIss, subject: "as-is" }];
+		expect(await refused(written, [contributed])).toBe("refused");
+		expect(await refused(entry({ subject: "as-is", upstream: "device" }), [contributed])).toBe(
+			"refused",
+		);
+		expect(await refused(entry({ subject: "linked" }), [contributed])).toBe("refused");
+		const linkedEntry = entry({ subject: "linked", upstream: "device" });
+		expect(await refused(linkedEntry, [contributed])).toBe("refused");
+		const resolver = resolving(async () => ({ kind: "none" }));
+		expect(await refused(linkedEntry, [contributed, resolver])).toBe("booted");
+		const second = resolving(async () => ({ kind: "none" }), [], "another");
+		expect(await refused(linkedEntry, [contributed, resolver, second])).toBe("refused");
+		// A key set fetched here cannot tell which of its keys signed.
+		const fetched = { issuer: "https://idp.example", "jwks-uri": "https://idp.example/jwks" };
+		expect(await refused([{ ...fetched, "subject-is-key-thumbprint": true }])).toBe("refused");
+	});
 });

@@ -1,7 +1,9 @@
-import type { Reason, Verifier } from "@mod/external-jwt";
+import type { Reason } from "@mod/external-jwt";
 import { Unavailable } from "@mod/kernel";
-import { decodeJwt } from "jose";
+import { decodeJwt, decodeProtectedHeader } from "jose";
 import { z } from "zod";
+import { isSignerSubject } from "./contract.ts";
+import { isThumbprint, type Signers } from "./signers.ts";
 
 export type Checked =
 	| {
@@ -41,25 +43,37 @@ const claimsShape = z.object({
 		.refine((s) => s.isWellFormed()),
 });
 
-/** Checks everything but single use, with the verifier of the issuer the assertion names. */
+/**
+ * Checks everything but single use: the signer is read unverified, its subject's shape checked,
+ * and only then are its keys looked up, among the signers of the issuer the assertion names.
+ */
 export async function check(
 	assertion: string,
-	trusted: ReadonlyMap<string, Verifier>,
+	trusted: ReadonlyMap<string, Signers>,
 ): Promise<Checked> {
 	const invalid = (reason: string) => ({ kind: "invalid", reason }) as const;
 	let issuer: string;
+	let signer: { readonly sub: unknown; readonly kid: unknown };
 	try {
-		issuer = String(decodeJwt(assertion).iss);
+		const claims = decodeJwt(assertion);
+		issuer = String(claims.iss);
+		signer = { sub: claims.sub, kid: decodeProtectedHeader(assertion).kid };
 	} catch {
 		return invalid("not a JWT");
 	}
-	const verifier = trusted.get(issuer);
+	const signers = trusted.get(issuer);
+	if (!signers) return invalid("untrusted signer");
+	const { sub, kid } = signer;
+	if (!isSignerSubject(sub)) return invalid("missing or malformed claims");
+	if (signers.thumbprint && !isThumbprint(sub)) return invalid("subject is no key thumbprint");
+	const verifier = await signers.verifierFor(sub, typeof kid === "string" ? kid : undefined);
 	if (!verifier) return invalid("untrusted signer");
 	const verified = await verifier.verify(assertion);
 	if (verified.kind === "unavailable") throw new Unavailable("jwt-bearer");
 	if (verified.kind === "invalid") return invalid(said[verified.reason]);
 	const parsed = claimsShape.safeParse(verified.claims);
 	if (!parsed.success) return invalid("missing or malformed claims");
+	if (parsed.data.sub !== sub) return invalid("wrong subject");
 	// The verifier read `iat`, where given, as a number.
 	const iat = verified.claims.iat;
 	return {
