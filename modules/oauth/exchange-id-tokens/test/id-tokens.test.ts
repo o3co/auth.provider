@@ -99,6 +99,13 @@ const spaceCollector = defineModule({ name: "space-collector" }, (m) => [
 	m.provide(collectedSpaces).by((c) => c.collect(spaces)),
 ]);
 
+/** Alice's links, one through each kind the section takes, under the name it gives users: a link no module names refuses boot. */
+const linksFor = (section: unknown) =>
+	(["apple", "google"] as const).flatMap((kind) => {
+		const taken = (section as Record<string, { upstream?: string } | undefined>)[kind];
+		return taken ? [{ idp: taken.upstream ?? kind, subject: `${kind}-sub` }] : [];
+	});
+
 const boot = (section: unknown, extra: readonly Module[] = []) =>
 	assemble({
 		modules: [
@@ -136,15 +143,7 @@ const boot = (section: unknown, extra: readonly Module[] = []) =>
 				}),
 			]),
 			users: {
-				registered: [
-					testUser("alice", "pw", {
-						subject: "acct-1",
-						upstream: [
-							{ idp: "apple", subject: "apple-sub" },
-							{ idp: "google", subject: "google-sub" },
-						],
-					}),
-				],
+				registered: [testUser("alice", "pw", { subject: "acct-1", upstream: linksFor(section) })],
 			},
 			"exchange-id-tokens": section,
 		},

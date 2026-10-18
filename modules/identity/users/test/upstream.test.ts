@@ -9,7 +9,7 @@ import {
 	type Verified,
 } from "../src/contract.ts";
 import usersModule from "../src/module.ts";
-import { memoryUsersStores } from "../src/testing.ts";
+import { memoryUsersStores, testPasswordHash } from "../src/testing.ts";
 
 const alice = { subject: "s-alice", attributes: { name: "Alice" } };
 const none: Verified = { kind: "none" };
@@ -136,6 +136,47 @@ describe("IdP names declared to users", () => {
 					expect(told).toContain(n.issuer);
 				}
 			}
+		}
+	});
+
+	it("refuses a registered user's upstream IdP no module declares, naming it at its key", async () => {
+		const linked = (idp: string) => ({
+			identifier: "alice",
+			subject: "s-alice",
+			"password-hash": testPasswordHash("p"),
+			upstream: [
+				{ idp: "google", subject: "g-1" },
+				{ idp, subject: "u-1" },
+			],
+		});
+		const registered = (idp: string, names: readonly UpstreamNames[]) =>
+			assemble({
+				modules: [
+					usersModule,
+					memoryUsersStores().module,
+					...names.map((name, i) =>
+						defineModule({ name: `names-${i}` }, (m) => [
+							m.contribute(upstreamNames).by(() => name),
+						]),
+					),
+				],
+				config: { ...kernelConfig(), users: { registered: [linked(idp)] } },
+			});
+		const both = [
+			named("google", google, "federation"),
+			named("corp", "https://corp.example", "x"),
+		];
+		await expect(registered("corp", both)).resolves.toBeDefined();
+		for (const names of [both.slice(0, 1), []]) {
+			const refused = await registered("corp", names).catch((e) => e);
+			expect(refused).toBeInstanceOf(BootRefused);
+			const said = (refused as BootRefused).refusals;
+			expect(said.map((r) => r.where)).toEqual(
+				names.length === 0
+					? ["users.registered.0.upstream.0.idp", "users.registered.0.upstream.1.idp"]
+					: ["users.registered.0.upstream.1.idp"],
+			);
+			expect(said.at(-1)?.reason).toContain("corp");
 		}
 	});
 
