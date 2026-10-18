@@ -1675,6 +1675,9 @@ importers:
       '@mod/keys':
         specifier: workspace:*
         version: link:../../foundation/keys
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store

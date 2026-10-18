@@ -18,6 +18,7 @@ import {
 } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import { senderBindings } from "@mod/sender-binding";
 import { type IssuanceRequest, issuancePolicies, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
@@ -102,6 +103,7 @@ it("hands a grant what the token endpoint hands it, for the same client, paramet
 		modules: [
 			http,
 			clientsModule,
+			secretHashModule,
 			tokensStandIn(),
 			grantCaller,
 			clientAllowanceModule,
@@ -159,6 +161,7 @@ it("hands a grant that takes JSON its members as the token endpoint does", async
 		modules: [
 			http,
 			clientsModule,
+			secretHashModule,
 			tokensStandIn(),
 			grantCaller,
 			clientAllowanceModule,
@@ -187,7 +190,15 @@ it("refuses an OAuth parameter sent in JSON as neither a string nor null before 
 		})),
 	]);
 	const harness = await assemble({
-		modules: [http, clientsModule, tokensStandIn(), grantCaller, clientAllowanceModule, grant],
+		modules: [
+			http,
+			clientsModule,
+			secretHashModule,
+			tokensStandIn(),
+			grantCaller,
+			clientAllowanceModule,
+			grant,
+		],
 		config: { ...kernelConfig(), ...httpConfig(), ...configured },
 		runtime,
 	});
@@ -220,6 +231,7 @@ it("gives a test that calls a grant itself the input the harness hands the grant
 		modules: [
 			http,
 			clientsModule,
+			secretHashModule,
 			tokensStandIn(),
 			grantCaller,
 			clientAllowanceModule,
@@ -257,6 +269,7 @@ it("answers a refusal of the issuance policies as the token endpoint does, asked
 		modules: [
 			http,
 			clientsModule,
+			secretHashModule,
 			tokensStandIn(),
 			grantCaller,
 			clientAllowanceModule,
@@ -292,6 +305,7 @@ it("tells each session issuance of a token issued from a session, and one that f
 		modules: [
 			http,
 			clientsModule,
+			secretHashModule,
 			tokensStandIn(),
 			grantCaller,
 			clientAllowanceModule,
@@ -332,6 +346,7 @@ it("refuses to boot with two rules for a request's audience, as the token endpoi
 			modules: [
 				http,
 				clientsModule,
+				secretHashModule,
 				tokensStandIn(),
 				grantCaller,
 				clientAllowanceModule,
@@ -379,6 +394,7 @@ it("refuses an audience asked of a grant that takes none before the grant runs, 
 		modules: [
 			http,
 			clientsModule,
+			secretHashModule,
 			tokensStandIn(),
 			grantCaller,
 			clientAllowanceModule,
