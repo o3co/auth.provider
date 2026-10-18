@@ -573,7 +573,7 @@ From `@mod/token-control`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `token-control.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, on each route, before any client is authenticated. |
-| `token-control.window-seconds` | integer (1–86400) | `60` |  |  |  | The window `requests` is counted over, in seconds. |
+| `token-control.window` | string | `1m` |  |  |  | The window `requests` is counted over, from `1s` to `1d` in whole seconds. |
 
 ## token-endpoint
 
