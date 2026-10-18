@@ -75,9 +75,20 @@ export function refreshWith(parts: Parts) {
 	};
 	const carries = (held: Credentials, asked: Asked) =>
 		asked.scope === undefined || within(asked.scope, held.scope);
-	/** A held token that still lives a second serves when a refresh cannot. */
-	const heldOr = (held: Credentials | undefined, asked: Asked, otherwise: Current) =>
-		held && leftOf(held) >= 1000 && carries(held, asked) ? handed(held, asked, false) : otherwise;
+	/**
+	 * A held token that still lives a second serves when a refresh cannot, but only while the grant,
+	 * read again, is still in use: one revoked or ended while the upstream was asked hands out nothing.
+	 */
+	const heldOr = async (
+		id: string,
+		held: Credentials | undefined,
+		asked: Asked,
+		otherwise: Current,
+	): Promise<Current> => {
+		if (!held || leftOf(held) < 1000 || !carries(held, asked)) return otherwise;
+		const now = records.grantOf(await grants.read(id));
+		return now && inUse(now) ? handed(held, asked, false) : { kind: "gone" };
+	};
 	/** Due near its end once half its life is spent, or when it lacks what is asked. */
 	const due = (held: Credentials, asked: Asked) => {
 		const left = leftOf(held);
@@ -137,25 +148,26 @@ export function refreshWith(parts: Parts) {
 		if (spent.kind === "gone") return { kind: "gone" };
 		if (spent.kind === "wait") {
 			const after = Math.max(1, Math.ceil(spent.ms / 1000));
-			return heldOr(held, asked, { kind: "limited", retryAfterSeconds: after });
+			return heldOr(grant.id, held, asked, { kind: "limited", retryAfterSeconds: after });
 		}
 		// The grant with this rotation counted: what every later write lands over.
 		const counted = spent.grant;
 		if (!held.refreshToken)
-			return heldOr(held, asked, { kind: "reauthorize", reason: "refresh_token_absent" });
+			return heldOr(grant.id, held, asked, { kind: "reauthorize", reason: "refresh_token_absent" });
 		let refreshed: Awaited<ReturnType<Delegation["refresh"]>>;
 		try {
 			refreshed = await asked.delegation.refresh(held.refreshToken, counted.scopes, asked.resource);
 		} catch (error) {
 			// The upstream down or refusing says nothing of the credential, which stays.
-			if (isUnavailable(error)) return heldOr(held, asked, { kind: "unavailable" });
-			if (error instanceof UpstreamRefused) return heldOr(held, asked, { kind: "refused" });
+			if (isUnavailable(error)) return heldOr(grant.id, held, asked, { kind: "unavailable" });
+			if (error instanceof UpstreamRefused)
+				return heldOr(grant.id, held, asked, { kind: "refused" });
 			throw error;
 		}
 		if (refreshed.kind === "limited") {
 			const { retryAfterSeconds } = refreshed;
 			const limited = retryAfterSeconds === undefined ? {} : { retryAfterSeconds };
-			return heldOr(held, asked, { kind: "limited", ...limited });
+			return heldOr(grant.id, held, asked, { kind: "limited", ...limited });
 		}
 		if (refreshed.kind === "invalid_grant") {
 			const ended = await rewrite(counted, (g) => ({
@@ -188,7 +200,7 @@ export function refreshWith(parts: Parts) {
 			}));
 			parts.log.warn("federation-grants.refresh_ineligible", { reason: read.why });
 			if (!marked) return { kind: "gone" };
-			return heldOr(rotated, asked, { kind: "ineligible", reason: read.why });
+			return heldOr(counted.id, rotated, asked, { kind: "ineligible", reason: read.why });
 		}
 		const kept = await rewrite(counted, (g) => {
 			const { reason: _cleared, ...rest } = g;
@@ -213,7 +225,8 @@ export function refreshWith(parts: Parts) {
 			if (!due(held, asked))
 				return carries(held, asked) ? handed(held, asked, false) : { kind: "scope" };
 			const mark = Buffer.from(parts.random.bytes(16)).toString("base64url");
-			if (!(await locked(grant.id, mark))) return heldOr(held, asked, { kind: "lock_timeout" });
+			if (!(await locked(grant.id, mark)))
+				return heldOr(grant.id, held, asked, { kind: "lock_timeout" });
 			try {
 				// Read again under the lock: another request may have refreshed, ended or revoked it.
 				const now = records.grantOf(await grants.read(grant.id));

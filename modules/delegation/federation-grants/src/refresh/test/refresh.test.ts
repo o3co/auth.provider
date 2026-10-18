@@ -4,7 +4,7 @@ import type { Seal } from "@mod/seal";
 import { type Delegation, type UpstreamRefresh, UpstreamRefused } from "@mod/upstreams";
 import { describe, expect, it, vi } from "vitest";
 import { memoryStores } from "../../../test/stores.ts";
-import { type Grant, recordsWith } from "../../grant/grant.ts";
+import { type Grant, recordsWith, withoutCredentials } from "../../grant/grant.ts";
 import type { RefreshLockStore } from "../../store.ts";
 import { type Current, refreshWith } from "../refresh.ts";
 
@@ -539,5 +539,25 @@ describe("refreshing alongside other writers", () => {
 			await letGo(r.stores.lockStore);
 			expect(said(await waiting), meanwhile).toBe(answer);
 		}
+	});
+});
+
+describe("a grant revoked while its upstream is asked", () => {
+	it.each([
+		["unavailable", () => Promise.reject(new Unavailable("test upstream"))],
+		["refused", () => Promise.reject(new UpstreamRefused())],
+		["limited", () => Promise.resolve({ kind: "limited" } as UpstreamRefresh)],
+	] as const)("hands out no held token when the upstream then answers %s", async (_, answers) => {
+		const r = await refresher(60);
+		r.advance(31_000);
+		r.upstream.push(async () => {
+			// Revoked meanwhile, as a client's revoke or a subject's revocation writes it.
+			await r.stores.grants.change("g", (record) => {
+				const grant = r.records.grantOf(record) as Grant;
+				return { value: r.records.stored({ ...withoutCredentials(grant), status: "revoked" }) };
+			});
+			return answers();
+		});
+		expect(said(await r.call())).toBe("gone");
 	});
 });
