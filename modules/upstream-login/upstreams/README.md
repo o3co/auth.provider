@@ -18,6 +18,7 @@
   - The code exchange gets the verifier, nonce, redirect URI and the callback's `iss`.
 - An upstream's exchanges and refreshes throw `UpstreamRefused` for an answer that does not hold, and `Unavailable` when it cannot be reached or fails (5xx); a delegation's start is refused as a value, never thrown.
 - An upstream may also offer a refresh, an end-session URL and an offline delegation
+- A refresh answers new tokens, `invalid_grant` (the grant is gone), `interaction_required` (the grant stands, but the user must act at the upstream first) or `limited` (with when to ask again, where said).
 - An offline delegation: its authorization URL, or a refusal of the start as a value; its code exchange given the scopes and resource its start asked for; and its refresh
 - `upstreams.of` (IdP name → its upstream's refresh, end-session URL and delegation, where the type offers them / nothing)
 - Extension point `upstreamLoginReceivers` (name → `received` (session, IdP, upstream tokens) once the session opens, or once a link joins it to the session; `withdrawn` (session, IdP) when a later step fails)
