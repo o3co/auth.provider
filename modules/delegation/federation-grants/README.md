@@ -5,7 +5,7 @@
 - Holds the upstream credentials apart from any session, and hands the client the upstream's bearer token, refreshed under a lock within a rotation budget.
 - Seals again, for `seal`'s resealers (as `federation-grants`), credentials a `previous` key sealed: walking every grant, writing only over the credentials read and keeping the grant's lifetime, counting those no key opens. A refresh seals under the current key anyway.
 - Answers a grant's status, renewal and revocation, and follows a subject's revocation.
-- Internal modules: `grant` (records, sealing, shared judgments), `api` (client routes and the follower), `connect` (browser half), `refresh` (tokens, for `api`). Each takes the contracts it uses from the build context; the package's module only declares the routes and contributions they fill.
+- Internal modules: `grant` (records, sealing, shared judgments), `api` (client routes and the follower), `sweep` (erasing credentials no request reads), `connect` (browser half), `refresh` (tokens, for `api`). Each takes the contracts it uses from the build context; the package's module only declares the routes and contributions they fill, and starts the sweep with the shared parts.
 
 ## Not here
 - The upstream's requests (`upstreams`' IdP type), who holds an upstream account (`users`), revocation boundaries (`subject-revocation`), session entry (`session`), consent to this provider's clients (`consent`).
@@ -29,6 +29,7 @@
   - `lodges` per `lodge-window` (60 per `1m`)
   - `keep-on-subject-revocation` (false)
   - `revocation-skew` (`1s`)
+  - `sweep-interval` (`1h`): how often each host walks every grant kept, erasing the credentials of one ended or revoked that no request reads
   - `identity-check` (`required`)
   - `requests` per `window`
   - Times are written with their unit; a bare number is refused.
