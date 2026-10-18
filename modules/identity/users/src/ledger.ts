@@ -63,7 +63,7 @@ export function ledgerUsers(source: UserSource, links: LinkStore, contacts: Cont
 			const subject = holderOf(await links.read(keyOf({ idp, subject: upstreamSubject })));
 			if (subject === undefined) return none;
 			const found = await source.bySubject(subject);
-			if (found.kind === "user") return found;
+			if (found.kind !== "unanswerable") return found;
 			return { kind: "user", user: deepFreeze({ subject, attributes: {} }) };
 		},
 		link: async (subject, upstream) => {
