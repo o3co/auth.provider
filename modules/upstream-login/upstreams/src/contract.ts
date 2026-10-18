@@ -57,7 +57,7 @@ export interface UpstreamTokens {
 /** One configured upstream, opened at boot by its type. */
 export interface Upstream {
 	/** The issuer the upstream's logins come from, as the type knows it: its own, or the one its settings name. */
-	readonly issuer?: string;
+	readonly issuer: string;
 	/** How the upstream sends the browser back: in the query (the default) or a posted form. */
 	readonly responseMode?: "query" | "form_post";
 	/** How far this upstream's clock may be from ours; none when not given. */
