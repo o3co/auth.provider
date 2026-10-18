@@ -3,6 +3,7 @@ import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { envName } from "./fragments.ts";
+import { auditReceiversOf } from "./patterns/chosen.ts";
 
 /** Every key an app may read from its variable, by section, with a trial value; one the app does not read is left unread. */
 function trialValues(redisUrl: string): [section: string, key: string, value: string][] {
@@ -42,9 +43,10 @@ function trialBlocks(
 		added.plainLoopback.length > 0
 			? `, plain-loopback = [${added.plainLoopback.map((h) => JSON.stringify(h)).join(", ")}]`
 			: "";
+	const receivers = auditReceiversOf((module) => has(module.slice("@mod/".length)));
 	const blocks: [boolean, string, string][] = [
 		[true, "kernel", `kernel { deployment = ${deployment} }`],
-		[true, "audit", `audit { receivers = [${has("audit-http") ? "http" : "log"}] }`],
+		[true, "audit", `audit { receivers = [${receivers.join(", ")}] }`],
 		[
 			has("authorize"),
 			"authorize",

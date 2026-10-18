@@ -9,10 +9,7 @@ const told: readonly (readonly [string, string])[] = [
 		"@mod/users-http",
 		"Users from an outside ledger (`users-http.verify-url`, `users-http.credential`).",
 	],
-	[
-		"@mod/audit-http",
-		"Audit events posted to a receiver (`audit-http.url`, `audit.receivers = [http]`).",
-	],
+	["@mod/audit-http", "Audit events posted to a receiver (`audit-http.url`)."],
 	[
 		"@mod/mail-smtp",
 		"Mail through an SMTP relay (`mail-smtp.host`, `mail-smtp.from`; `mail-smtp.user` and `mail-smtp.password` in the local layer when it asks).",
@@ -22,8 +19,19 @@ const told: readonly (readonly [string, string])[] = [
 /** Said when the owner is composed and no adapter of it is. */
 const ownerOnly: readonly (readonly [string, string, string])[] = [
 	["@mod/users", "@mod/users-http", "Users in the configuration (`users.registered`)."],
-	["@mod/audit", "@mod/audit-http", "Audit events to the log (`audit.receivers = [log]`)."],
 ];
+
+/** The receiver each audit adapter registers under. */
+const receivers: readonly (readonly [string, string])[] = [
+	["@mod/audit-http", "http"],
+	["@mod/audit-stdout", "stdout"],
+];
+
+/** The receivers to name in `audit.receivers`: each composed adapter's, or audit's own `log` when none is. */
+export function auditReceiversOf(composed: (module: string) => boolean): string[] {
+	const named = receivers.filter(([module]) => composed(module)).map(([, name]) => name);
+	return named.length > 0 ? named : ["log"];
+}
 
 /** One line for each choice the composed modules show. */
 export function chosenLines(modules: readonly string[]): string[] {
@@ -32,5 +40,10 @@ export function chosenLines(modules: readonly string[]): string[] {
 		...ownerOnly
 			.filter(([owner, adapter]) => modules.includes(owner) && !modules.includes(adapter))
 			.map(([, , line]) => `- ${line}`),
+		...(modules.includes("@mod/audit")
+			? [
+					`- Audit events named in \`audit.receivers = [${auditReceiversOf((m) => modules.includes(m)).join(", ")}]\`.`,
+				]
+			: []),
 	];
 }

@@ -2,7 +2,7 @@ import { parseArgs } from "node:util";
 import { generate, type Plan } from "./generate.ts";
 import { type Group, groups } from "./patterns/pattern.ts";
 
-/** Runs the command on its arguments, writing to `io`: 0 once the project is written or `--help` told, 64 for a usage error. */
+/** Runs the command on its arguments, writing to `io`: 0 once the project is written or `--help` told, 64 for a usage error, 1 for a plan it cannot make. */
 export async function run(
 	args: readonly string[],
 	io: { readonly out: (text: string) => void; readonly err: (text: string) => void } = {
@@ -11,10 +11,10 @@ export async function run(
 	},
 ): Promise<number> {
 	const usageText =
-		"usage: create-app <target> [--workspace <root>] [--pattern <name>] [--add <feature>]...\n" +
+		"usage: create-auth-provider <target> [--workspace <root>] [--pattern <name>] [--add <feature>]...\n" +
 		"         [--axis <owner>=<module>]... [--<group> <feature>,...]...\n" +
 		`         groups: ${groups.join(", ")}; axes and groups need a pattern other than full\n` +
-		"       create-app <target> [--workspace <root>] [--sink <package>] <package>...\n";
+		"       create-auth-provider <target> [--workspace <root>] [--sink <package>] <package>...\n";
 	const usage = (): number => {
 		io.err(usageText);
 		return 64;
@@ -57,12 +57,14 @@ export async function run(
 	const listed = modules.length > 0;
 	const patterned = values.add || values.pattern || axes.length > 0 || chosen.length > 0;
 	const malformedAxis = axes.some((pair) => pair.length !== 2 || pair.includes(""));
+	const emptyName = chosen.some(([, names]) => names.includes(""));
 	const choiceForFull = pattern === "full" && (axes.length > 0 || chosen.length > 0);
 	if (
 		!target ||
 		(listed && patterned) ||
 		(!listed && values.sink) ||
 		malformedAxis ||
+		emptyName ||
 		choiceForFull
 	) {
 		return usage();
@@ -84,7 +86,13 @@ export async function run(
 		};
 	}
 
-	await generate(planOf(target ?? ""));
+	try {
+		await generate(planOf(target ?? ""));
+	} catch (error) {
+		// A plan the workspace cannot make, told by its message alone.
+		io.err(`${(error as Error).message}\n`);
+		return 1;
+	}
 	io.out(
 		listed
 			? `created ${target}\nnext: cd ${target} && pnpm install && pnpm start\n`
