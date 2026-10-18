@@ -17,7 +17,7 @@ export default defineModule({ name: "mfa-email", section, replicaSafe: true }, (
 			// Late: session's own build asks mfa, which asks this kind.
 			attributes: c.late(subjectAttributes),
 			addsSecondFactor: c.section["adds-second-factor"],
-			codeMs: c.section["code-seconds"] * 1000,
+			codeMs: c.section["code-lifetime"] * 1000,
 			now: c.clock.now,
 			random: c.random.bytes,
 		});
