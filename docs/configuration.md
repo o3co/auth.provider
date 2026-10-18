@@ -427,7 +427,7 @@ From `@mod/passkey-registration`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `passkey-registration.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over both registration routes. |
-| `passkey-registration.window-seconds` | integer (1–86400) | `300` |  |  |  | The window, in seconds, that requests are counted over. |
+| `passkey-registration.window` | string | `5m` |  |  |  | The window requests are counted over, from 1s to 1d. |
 
 ## rate-limit
 

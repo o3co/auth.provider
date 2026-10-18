@@ -12,7 +12,7 @@ export default defineModule({ name: "passkey-registration", section, replicaSafe
 				registrationRoutes({
 					sessions: await c.get(sessions),
 					registrations: await c.get(registrations),
-					window: { limit: c.section.requests, ms: c.section["window-seconds"] * 1000 },
+					window: { limit: c.section.requests, ms: c.section.window * 1000 },
 				})[name],
 		),
 	),
