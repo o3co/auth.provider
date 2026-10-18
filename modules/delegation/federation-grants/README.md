@@ -21,16 +21,17 @@
 - Client metadata `federation-grants`: `connections`, `return-uris` (exact, holding no `grant_id`, `state` or `error`).
 - Operator section:
   - `page`, `login-page`, `step-up-page` (https)
-  - `connections.<name>` (`idp`, `scopes` with `openid`, `resource?`, `max-access-token-seconds`, `scope-subsets`)
-  - `default-seconds`, `max-seconds` (30 days)
-  - `connect-seconds` (600)
-  - `refresh-before-seconds` (30)
-  - `rotations` per `rotation-window-seconds` (24 per 3600)
-  - `lodges` per `lodge-window-seconds` (60 per 60)
+  - `connections.<name>` (`idp`, `scopes` with `openid`, `resource?`, `max-access-token-lifetime`, `scope-subsets`)
+  - `default-lifetime`, `max-lifetime` (`30d`)
+  - `connect-lifetime` (`10m`)
+  - `refresh-before` (`30s`)
+  - `rotations` per `rotation-window` (24 per `1h`)
+  - `lodges` per `lodge-window` (60 per `1m`)
   - `keep-on-subject-revocation` (false)
-  - `revocation-skew-seconds` (1)
+  - `revocation-skew` (`1s`)
   - `identity-check` (`required`)
-  - `requests` per `window-seconds`
+  - `requests` per `window`
+  - Times are written with their unit; a bare number is refused.
 - Follower of `subject-revocation`: writes at once, for each grant listed under the subject, what the boundary decides at the next read.
 - Store interfaces the assembly wires: grants by id, walked by pages (no eviction, durable, replicated, confirmed reads); steps by secret (no eviction, replicated, names from the secret); pending first-time intents per client and subject, and each subject's grants (keyed sets; the listing also durable and replicated); and the refresh lock store (no eviction), each lock held under its holder's mark and changed only over the mark read, so a holder lets go of its own lock and never another's.
 - Audit events `federation.grant.*`: `requested`, `request.denied`, `authorized`, `reauthorized`, `authorization_failed`, `token.success`, `token.denied`, `revoked`, with `client`, `connection` and an outcome or reason.
@@ -42,7 +43,7 @@
 - The upstream account matches the grant's and the client's `upstream_sub`; with `identity-check: required`, another holder or no answer refuses.
 - Only a bearer token with a refresh token, a finite life within the connection's and a scope within what was shown is held.
 - A revocation is the end: no refresh or activation writes over it, and an ordinary logout leaves grants.
-- A subject's boundary, widened by `revocation-skew-seconds`, ends a grant when read; with `keep-on-subject-revocation`, only `delegations` does.
+- A subject's boundary, widened by `revocation-skew`, ends a grant when read; with `keep-on-subject-revocation`, only `delegations` does.
 - A failed listing is logged and passed: the boundary still refuses what the follower misses.
 - Credentials are sealed to the grant's id, subject, client and connection, and erased once revoked, sent to reauthorization, or read past the end.
 - Tokens, secrets and upstream text reach neither answers, logs nor audit.

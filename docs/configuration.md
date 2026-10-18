@@ -161,19 +161,19 @@ From `@mod/federation-grants`.
 | `federation-grants.login-page` | string |  |  | `FEDERATION_GRANTS_LOGIN_PAGE` | `https://login.example.invalid/login` |  |
 | `federation-grants.step-up-page` | string |  |  |  |  |  |
 | `federation-grants.connections` | map | `{}` |  |  |  |  |
-| `federation-grants.default-seconds` | integer (60–31536000) | `2592000` |  |  |  |  |
-| `federation-grants.max-seconds` | integer (60–31536000) | `2592000` |  |  |  |  |
-| `federation-grants.connect-seconds` | integer (60–3600) | `600` |  |  |  |  |
-| `federation-grants.refresh-before-seconds` | integer (0–3600) | `30` |  |  |  |  |
+| `federation-grants.default-lifetime` | string | `30d` |  |  |  | A grant's lifetime from its activation when a client asks for none: a duration with a unit, from 1m to 365d, e.g. 30d. |
+| `federation-grants.max-lifetime` | string | `30d` |  |  |  | The most a grant may live from its activation: a duration with a unit, from 1m to 365d, e.g. 90d. |
+| `federation-grants.connect-lifetime` | string | `10m` |  |  |  | How long a connection may take, from the intent to the callback: a duration with a unit, from 1m to 1h, e.g. 10m. |
+| `federation-grants.refresh-before` | string | `30s` |  |  |  | A token this close to its end is refreshed, once half its life is spent: a duration with a unit, from 0s to 1h, e.g. 30s. |
 | `federation-grants.rotations` | integer (1–1000) | `24` |  |  |  |  |
-| `federation-grants.rotation-window-seconds` | integer (1–86400) | `3600` |  |  |  |  |
+| `federation-grants.rotation-window` | string | `1h` |  |  |  | The window a grant's upstream refreshes are counted in: a duration with a unit, from 1s to 1d, e.g. 1h. |
 | `federation-grants.lodges` | integer (1–100000) | `60` |  |  |  |  |
-| `federation-grants.lodge-window-seconds` | integer (1–86400) | `60` |  |  |  |  |
-| `federation-grants.revocation-skew-seconds` | integer (0–300) | `1` |  |  |  |  |
+| `federation-grants.lodge-window` | string | `1m` |  |  |  | The window a client's lodged intents are counted in: a duration with a unit, from 1s to 1d, e.g. 1m. |
+| `federation-grants.revocation-skew` | string | `1s` |  |  |  | How far apart hosts' clocks may be: a grant made this soon after its subject's revocation counts as revoked. A duration with a unit, from 0s to 5m, e.g. 1s. |
 | `federation-grants.keep-on-subject-revocation` | boolean | `false` |  |  |  |  |
 | `federation-grants.identity-check` | required \| none | `required` |  |  |  |  |
 | `federation-grants.requests` | integer (1–1000) | `60` |  |  |  |  |
-| `federation-grants.window-seconds` | integer (1–3600) | `60` |  |  |  |  |
+| `federation-grants.window` | string | `1m` |  |  |  | The window a source's requests are counted in, on every route: a duration with a unit, from 1s to 1h, e.g. 1m. |
 
 ## federation-grants-store
 

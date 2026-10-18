@@ -159,7 +159,7 @@ export async function connector(
 	const settings = section.parse({
 		page: `${origin}/consent-page`,
 		connections: {
-			cal: { idp: "corp", scopes, "max-access-token-seconds": 3600, resource: options.resource },
+			cal: { idp: "corp", scopes, "max-access-token-lifetime": "1h", resource: options.resource },
 		},
 		...options.settings,
 	});
@@ -175,8 +175,8 @@ export async function connector(
 		records,
 		judge: judgeWith(app.get(revocations), {
 			keep: settings["keep-on-subject-revocation"],
-			maxMs: settings["max-seconds"] * 1000,
-			allowanceMs: settings["revocation-skew-seconds"] * 1000,
+			maxMs: settings["max-lifetime"] * 1000,
+			allowanceMs: settings["revocation-skew"] * 1000,
 		}),
 		listed: listingWith(stores.subjects, logged.log),
 		audit: app.get(audit),
@@ -195,9 +195,9 @@ export async function connector(
 			returnUri: back,
 			state: "st",
 			scopes,
-			lifetimeMs: settings["default-seconds"] * 1000,
+			lifetimeMs: settings["default-lifetime"] * 1000,
 			startedAt: now,
-			endsAt: now + settings["connect-seconds"] * 1000,
+			endsAt: now + settings["connect-lifetime"] * 1000,
 			...more,
 		};
 		const grant: Grant = {
@@ -213,7 +213,7 @@ export async function connector(
 			version: `v-${n}`,
 			rotations: { from: now, count: 0 },
 		};
-		const connectMs = settings["connect-seconds"] * 1000;
+		const connectMs = settings["connect-lifetime"] * 1000;
 		await stores.grants.create(grant.id, records.stored(grant), connectMs + retentionMs);
 		const link = `link-${grant.id}`;
 		const step = { format: 1, kind: "link", grant: grant.id, intent: intent.id } as const;
