@@ -85,9 +85,7 @@ it("tells a key that reads time or size with its unit asked for from one that ta
 /** Sections whose time and size keys still name their unit or take a bare number; a section leaves once its owner moves it, and never comes back. */
 const unitsLater = new Set<string>();
 /** Sections whose schema still gives a default by `.default()`; a section leaves once its owner moves it, and never comes back. */
-const prefaultLater = new Set([
-	"federation-grants-store",
-]);
+const prefaultLater = new Set<string>([]);
 
 /** Each place a rule is broken: the key path, in its section. */
 async function broken(breaks: (placed: Placed) => Promise<boolean>) {
