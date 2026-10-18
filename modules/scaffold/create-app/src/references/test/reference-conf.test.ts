@@ -108,7 +108,6 @@ const prefaultLater = new Set([
 	"federation-grants-store",
 	"mail-smtp",
 	"mfa-email",
-	"mfa-flows",
 	"mfa-webauthn",
 	"mtls",
 	"outbound",

@@ -348,17 +348,23 @@ From `@mod/mfa-flows`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `mfa-flows.transaction-seconds` | integer (60–1800) | `600` |  |  |  |  |
+| `mfa-flows.transaction-lifetime` | string | `10m` |  |  |  | How long a transaction waits for its factor, from 1m to 30m in whole seconds, such as `10m`. |
 | `mfa-flows.attempts-per-transaction` | integer (2–10) | `5` |  |  |  |  |
 | `mfa-flows.requests` | integer (1–100000) | `60` |  |  |  |  |
-| `mfa-flows.window-seconds` | integer (1–86400) | `300` |  |  |  |  |
+| `mfa-flows.window` | string | `5m` |  |  |  | The window `requests` is counted over, from 1s to 1d in whole seconds, such as `5m`. |
 | `mfa-flows.lockout.threshold` | integer (-9007199254740991–9007199254740991) | `5` |  |  |  |  |
-| `mfa-flows.lockout.backoff-seconds` | integer (-9007199254740991–9007199254740991) | `900` |  |  |  |  |
-| `mfa-flows.lockout.max-backoff-seconds` | integer (-9007199254740991–9007199254740991) | `86400` |  |  |  |  |
+| `mfa-flows.lockout.backoff` | string | `15m` |  |  |  | The first hold after `threshold` failures, in whole seconds, such as `15m`. |
+| `mfa-flows.lockout.max-backoff` | string | `1d` |  |  |  | The longest hold, the first doubling up to it, in whole seconds, such as `1d`. |
 | `mfa-flows.lockout.budget` | integer (-9007199254740991–9007199254740991) | `10` |  |  |  |  |
-| `mfa-flows.lockout.budget-window-seconds` | integer (-9007199254740991–9007199254740991) | `604800` |  |  |  |  |
+| `mfa-flows.lockout.budget-window` | string | `7d` |  |  |  | The window `budget` is counted over, in whole seconds, such as `7d`. |
 | `mfa-flows.lockout.hard-limit` | integer (-9007199254740991–9007199254740991) | `100` |  |  |  |  |
-| `mfa-flows.lockout.memory-seconds` | integer (-9007199254740991–9007199254740991) | `86400` |  |  |  |  |
+| `mfa-flows.lockout.memory` | string | `1d` |  |  |  | How long a run of failures is remembered without one, in whole seconds, such as `1d`. |
+| `mfa-flows.lockout.backoff-seconds` | integer (-9007199254740991–9007199254740991) |  |  |  |  | Seconds, read in place of `backoff`, which replaces it; giving both refuses boot. |
+| `mfa-flows.lockout.max-backoff-seconds` | integer (-9007199254740991–9007199254740991) |  |  |  |  | Seconds, read in place of `max-backoff`, which replaces it; giving both refuses boot. |
+| `mfa-flows.lockout.budget-window-seconds` | integer (-9007199254740991–9007199254740991) |  |  |  |  | Seconds, read in place of `budget-window`, which replaces it; giving both refuses boot. |
+| `mfa-flows.lockout.memory-seconds` | integer (-9007199254740991–9007199254740991) |  |  |  |  | Seconds, read in place of `memory`, which replaces it; giving both refuses boot. |
+| `mfa-flows.transaction-seconds` | integer (60–1800) |  |  |  |  | Seconds, read in place of `transaction-lifetime`, which replaces it; giving both refuses boot. |
+| `mfa-flows.window-seconds` | integer (1–86400) |  |  |  |  | Seconds, read in place of `window`, which replaces it; giving both refuses boot. |
 
 ## mfa-webauthn
 

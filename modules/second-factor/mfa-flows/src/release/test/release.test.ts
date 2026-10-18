@@ -310,7 +310,7 @@ describe("a user's own release of the second-factor lockout", () => {
 
 	it("releases the real lockout for a session a recovery code let in, once, answering the same again", async () => {
 		const s = await serve({
-			lockout: { threshold: 2, "backoff-seconds": 900, budget: 10, "hard-limit": 100 },
+			lockout: { threshold: 2, backoff: "15m", budget: 10, "hard-limit": 100 },
 		});
 		const { done } = await s.enrollCode("bea");
 		const codes = (done.body.recovery_codes ?? []) as string[];
