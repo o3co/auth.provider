@@ -54,40 +54,14 @@ describe("session-lifecycle's section", () => {
 });
 
 describe("session-lifecycle's section, under the names in seconds", () => {
-	const renamed = [
-		["lifetime-seconds", "lifetime", 60, 30 * 86_400],
-		["sweep-seconds", "sweep-interval", 1, 3600],
-		["credentials-seconds", "credentials-within", 30, 3600],
-	] as const;
-
-	it("still reads each name in seconds, alone, as its name without a unit", () => {
-		expect(
-			section.parse({
-				"lifetime-seconds": 120,
-				"sweep-seconds": 1,
-				"credentials-seconds": 60,
-			}),
-		).toEqual({ lifetime: 120, "sweep-interval": 1, "credentials-within": 60 });
-	});
-
-	it.each(renamed)(
-		"takes %s, read as %s, from %i to %i, and nothing outside",
-		(old, _now, low, high) => {
-			const parses = (value: number) => section.safeParse({ [old]: value }).success;
-			expect([parses(low - 1), parses(low), parses(high), parses(high + 1)]).toEqual([
-				false,
-				true,
-				true,
-				false,
+	it.each(["lifetime-seconds", "sweep-seconds", "credentials-seconds"])(
+		"refuses %s as a key it does not know",
+		(old) => {
+			const read = section.safeParse({ [old]: 60 });
+			expect(read.success).toBe(false);
+			expect(read.error?.issues).toEqual([
+				expect.objectContaining({ code: "unrecognized_keys", keys: [old] }),
 			]);
 		},
 	);
-
-	it.each(renamed)("refuses %s given beside %s, naming the key to keep", (old, now) => {
-		const read = section.safeParse({ [old]: 60, [now]: "1m" });
-		expect(read.success).toBe(false);
-		expect(read.error?.issues).toEqual([
-			expect.objectContaining({ path: [old], message: expect.stringContaining(now) }),
-		]);
-	});
 });

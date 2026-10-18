@@ -120,17 +120,11 @@ describe("session cookies", () => {
 		expect(stores.kept.peek(secret)).toBeUndefined();
 	});
 
-	it("refuses to boot on a time that names no unit, or a key given under both its names", async () => {
-		const refusals = async (settings: Partial<SessionLifecycleSettings>) => {
-			const refused = await boot(settings).catch((error: unknown) => error);
-			expect(refused).toBeInstanceOf(BootRefused);
-			return (refused as BootRefused).refusals.map((r) => r.where);
-		};
-		expect(await refusals({ lifetime: 3600 as unknown as string })).toEqual([
+	it("refuses to boot on a time that names no unit", async () => {
+		const refused = await boot({ lifetime: 3600 as unknown as string }).catch((error) => error);
+		expect(refused).toBeInstanceOf(BootRefused);
+		expect((refused as BootRefused).refusals.map((r) => r.where)).toEqual([
 			"session-lifecycle.lifetime",
-		]);
-		expect(await refusals({ "lifetime-seconds": 3600, lifetime: "1h" })).toEqual([
-			"session-lifecycle.lifetime-seconds",
 		]);
 	});
 

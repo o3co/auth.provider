@@ -94,7 +94,6 @@ const unitsLater = new Set([
 	"passkey-registration",
 	"redis",
 	"rp-logout",
-	"session-lifecycle",
 	"token-endpoint",
 	"token-exchange",
 	"users-http",
