@@ -4,6 +4,8 @@ import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { metrics } from "@mod/metrics";
+import metricsModule from "@mod/metrics/module";
 import { store } from "@mod/store";
 import { simulatedStore } from "@mod/store/testing";
 import { afterEach, describe, expect, it } from "vitest";
@@ -530,7 +532,7 @@ async function serving(section?: Record<string, unknown>) {
 	const simulated = simulatedStore();
 	const audit = auditStandIn();
 	const app = await assemble({
-		modules: [http, audit.module, rateLimitModule, simulated.module, routed],
+		modules: [http, audit.module, metricsModule, rateLimitModule, simulated.module, routed],
 		config: {
 			...kernelConfig(),
 			...httpConfig({ "trusted-proxies": ["127.0.0.1"] }),
@@ -549,7 +551,13 @@ async function serving(section?: Record<string, unknown>) {
 		for (let i = 0; i < times; i++) seen.push((await from(path, address)).status);
 		return seen;
 	};
-	return { app, simulated, events: audit.events, recorded, from, statuses };
+	/** The uncounted series, by limit and outcome, as metrics reads them. */
+	const uncounted = () =>
+		app
+			.get(metrics)
+			.read()
+			.find((reading) => reading.name === "auth_rate_limit_uncounted_total")?.series ?? [];
+	return { app, simulated, events: audit.events, recorded, from, statuses, uncounted };
 }
 
 const limitedAnswer = async (res: Response) => [
@@ -617,8 +625,8 @@ describe("the policies for routes", () => {
 		expect(await statuses("/attempts", "198.51.100.1", 2)).toEqual([204, 204]);
 	});
 
-	it("refuses a request and an attempt with 503 when it cannot count, by default, recording both", async () => {
-		const { from, simulated, events } = await serving();
+	it("refuses a request and an attempt with 503 when it cannot count, by default, recording and counting both", async () => {
+		const { from, simulated, events, uncounted } = await serving();
 		expect(events).toEqual([]);
 		simulated.unreachable(true);
 		for (const path of ["/requests", "/attempts"]) {
@@ -633,16 +641,24 @@ describe("the policies for routes", () => {
 			["rate_limit.unavailable", now, { name: "test", limit: "requests", source: "198.51.100.3" }],
 			["rate_limit.unavailable", now, { name: "test", limit: "attempts", source: "198.51.100.3" }],
 		]);
+		expect(uncounted()).toEqual([
+			{ labels: { limit: "requests", outcome: "refused" }, value: 1 },
+			{ labels: { limit: "attempts", outcome: "refused" }, value: 1 },
+		]);
 	});
 
 	it("lets a request by when it cannot count where the section says open, never an attempt", async () => {
-		const { from, simulated, events } = await serving({ "fail-mode": "open" });
+		const { from, simulated, events, uncounted } = await serving({ "fail-mode": "open" });
 		simulated.unreachable(true);
 		expect((await from("/requests", "198.51.100.3")).status).toBe(204);
 		const attempt = await from("/attempts", "198.51.100.3");
 		expect([attempt.status, await attempt.json()]).toEqual([503, { error: "service_unavailable" }]);
 		simulated.unreachable(false);
 		expect(events.map((e) => e.attributes?.limit)).toEqual(["requests", "attempts"]);
+		expect(uncounted()).toEqual([
+			{ labels: { limit: "requests", outcome: "let_through" }, value: 1 },
+			{ labels: { limit: "attempts", outcome: "refused" }, value: 1 },
+		]);
 	});
 
 	it("refuses boot on a fail mode other than open or closed", async () => {

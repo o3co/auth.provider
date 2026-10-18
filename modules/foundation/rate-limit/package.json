@@ -14,6 +14,7 @@
 		"@mod/audit": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/kernel": "workspace:*",
+		"@mod/metrics": "workspace:*",
 		"@mod/request-source": "workspace:*",
 		"@mod/store": "workspace:*",
 		"zod": "4.6.7"
