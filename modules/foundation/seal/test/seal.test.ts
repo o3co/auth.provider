@@ -1,12 +1,20 @@
 import { randomBytes } from "node:crypto";
-import { assemble, BootRefused, kernelConfig, Unavailable } from "@mod/kernel";
+import {
+	assemble,
+	BootRefused,
+	defineModule,
+	kernelConfig,
+	type Module,
+	Unavailable,
+} from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
-import { seal } from "../src/contract.ts";
+import { resealers, resealing, seal } from "../src/contract.ts";
 import sealModule from "../src/module.ts";
 
 const runtime = quietRuntime({ clock: { now: () => 0 } });
 const key = () => randomBytes(32).toString("base64");
+type Entry = { id: string; key: string };
 const boot = async (keys: unknown) =>
 	(
 		await assemble({
@@ -65,7 +73,7 @@ it("seals with the first key, opens with any in the ring, and is unavailable for
 	const fresh = { id: "new", key: key() };
 	const sealedOld = (await boot([old])).seal("v", "c");
 	const rotated = await boot([fresh, old]);
-	expect(rotated.open(sealedOld, "c")).toEqual({ kind: "opened", plain: "v" });
+	expect(rotated.open(sealedOld, "c")).toEqual({ kind: "opened", plain: "v", stale: true });
 	expect(rotated.seal("v", "c").startsWith("new.")).toBe(true);
 	const withoutOld = await boot([fresh]);
 	const thrown = (() => {
@@ -120,4 +128,76 @@ it("refuses to start with a key of all one byte, or of fewer than 8 byte values,
 		await expect(boot(past), `${name}, past`).rejects.toThrow(BootRefused);
 	}
 	await expect(boot([{ id: "a", key: bytes([1, 2, 3, 4, 5, 6, 7, 8]) }])).resolves.toBeDefined();
+});
+
+const bootWith = async (section: Record<string, unknown>, modules: Module[] = []) =>
+	assemble({
+		modules: [sealModule, ...modules],
+		config: { ...kernelConfig(), seal: section },
+		runtime,
+	});
+
+it("seals with current alone, opens with next and previous too, and marks only what a previous key sealed stale", async () => {
+	const [a, b, c] = ["a", "b", "c"].map((id) => ({ id, key: key() })) as [Entry, Entry, Entry];
+	const byA = (await bootWith({ current: a })).get(seal).seal("v", "x");
+	const byC = (await bootWith({ current: c })).get(seal).seal("v", "x");
+	const ring = (await bootWith({ current: b, next: c, previous: [a] })).get(seal);
+	expect(ring.seal("v", "x").startsWith("b.")).toBe(true);
+	expect(ring.open(ring.seal("v", "x"), "x")).toEqual({ kind: "opened", plain: "v" });
+	expect(ring.open(byA, "x")).toEqual({ kind: "opened", plain: "v", stale: true });
+	// Sealed by next: newer than current, as on a host that has moved next up already.
+	expect(ring.open(byC, "x")).toEqual({ kind: "opened", plain: "v" });
+});
+
+it("reads keys, until it is gone, as current first and previous after", async () => {
+	const [a, b] = ["a", "b"].map((id) => ({ id, key: key() })) as [Entry, Entry];
+	const byB = (await bootWith({ current: b })).get(seal).seal("v", "x");
+	const listed = (await bootWith({ keys: [a, b] })).get(seal);
+	expect(listed.seal("v", "x").startsWith("a.")).toBe(true);
+	expect(listed.open(byB, "x")).toEqual({ kind: "opened", plain: "v", stale: true });
+});
+
+it("refuses to start with keys beside current, with neither, or with an id twice across the ring", async () => {
+	const [a, b] = ["a", "b"].map((id) => ({ id, key: key() })) as [Entry, Entry];
+	const refused = {
+		"keys and current": { keys: [a], current: b },
+		"keys and previous": { keys: [a], previous: [b] },
+		"no key": { previous: [a] },
+		"current again as next": { current: a, next: { ...b, id: "a" } },
+		"current again as previous": { current: a, previous: [{ ...b, id: "a" }] },
+		"a previous key twice": { current: a, previous: [b, { ...b }] },
+		"a weak next": { current: a, next: { id: "b", key: Buffer.alloc(32).toString("base64") } },
+	};
+	for (const [name, section] of Object.entries(refused)) {
+		await expect(bootWith(section), name).rejects.toThrow(BootRefused);
+	}
+});
+
+it("reseals through each holder in name order, answering counts alone, past a holder that fails", async () => {
+	const ran: string[] = [];
+	const holder = (name: string, fails = false) =>
+		defineModule({ name: `holder-${name}` }, (m) => [
+			m.contribute(resealers).by(() => ({
+				name,
+				reseal: async () => {
+					ran.push(name);
+					if (fails) throw new Unavailable("store");
+					return { resealed: 2, left: 1 };
+				},
+			})),
+		]);
+	const app = await bootWith({ current: { id: "a", key: key() } }, [
+		holder("b"),
+		holder("c", true),
+		holder("a"),
+	]);
+	expect(await app.get(resealing).reseal()).toEqual([
+		{ name: "a", resealed: 2, left: 1 },
+		{ name: "b", resealed: 2, left: 1 },
+		{ name: "c", failed: true },
+	]);
+	expect(ran).toEqual(["a", "b", "c"]);
+	expect(
+		await (await bootWith({ current: { id: "a", key: key() } })).get(resealing).reseal(),
+	).toEqual([]);
 });
