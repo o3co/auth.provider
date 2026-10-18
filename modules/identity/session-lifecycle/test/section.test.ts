@@ -4,13 +4,13 @@ import { z } from "zod";
 import { defaultLifetimeSeconds } from "../src/limits.ts";
 import { section } from "../src/section.ts";
 
-const keys = ["lifetime", "sweep-interval", "credentials-within"] as const;
+const keys = ["lifetime", "sweep-interval", "recent-authentication"] as const;
 
 describe("session-lifecycle's section", () => {
 	it("reads each key written with its unit, as seconds", () => {
 		expect(
-			section.parse({ lifetime: "8h", "sweep-interval": "1m", "credentials-within": "10m" }),
-		).toEqual({ lifetime: 28_800, "sweep-interval": 60, "credentials-within": 600 });
+			section.parse({ lifetime: "8h", "sweep-interval": "1m", "recent-authentication": "10m" }),
+		).toEqual({ lifetime: 28_800, "sweep-interval": 60, "recent-authentication": 600 });
 	});
 
 	it.each(keys)("refuses %s as a bare number, or a string of digits only", (key) => {
@@ -21,7 +21,7 @@ describe("session-lifecycle's section", () => {
 	it.each([
 		["lifetime", 60, 30 * 86_400],
 		["sweep-interval", 1, 3600],
-		["credentials-within", 30, 3600],
+		["recent-authentication", 30, 3600],
 	])("takes %s from %is to %is, and nothing outside", (key, low, high) => {
 		const parses = (seconds: number) => section.safeParse({ [key]: `${seconds}s` }).success;
 		expect([parses(low - 1), parses(low), parses(high), parses(high + 1)]).toEqual([
@@ -32,11 +32,15 @@ describe("session-lifecycle's section", () => {
 		]);
 	});
 
+	it("refuses credentials-within, the window's earlier name", () => {
+		expect(section.safeParse({ "credentials-within": "5m" }).success).toBe(false);
+	});
+
 	it("lasts a session an hour, sweeps every 30 seconds and gives a sign-in 300 seconds to change credentials, where nothing is set", () => {
 		expect(section.parse({})).toEqual({
 			lifetime: 3600,
 			"sweep-interval": 30,
-			"credentials-within": 300,
+			"recent-authentication": 300,
 		});
 	});
 
@@ -49,7 +53,7 @@ describe("session-lifecycle's section", () => {
 		expect(keys.map((key) => properties[key].default)).toEqual(["1h", "30s", "5m"]);
 		expect(readOf("lifetime")).toBe(defaultLifetimeSeconds);
 		expect(readOf("sweep-interval")).toBe(30);
-		expect(readOf("credentials-within")).toBe(sessionRules.credentialsSecondsDefault);
+		expect(readOf("recent-authentication")).toBe(sessionRules.credentialsSecondsDefault);
 	});
 });
 
