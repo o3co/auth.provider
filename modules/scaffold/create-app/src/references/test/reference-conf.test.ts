@@ -95,7 +95,6 @@ const unitsLater = new Set([
 	"rp-logout",
 	"session-lifecycle",
 	"token-endpoint",
-	"webauthn",
 	"webauthn-login",
 ]);
 /** Sections whose schema still gives a default by `.default()`; a section leaves once its owner moves it, and never comes back. */

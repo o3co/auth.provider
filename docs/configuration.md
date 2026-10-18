@@ -633,7 +633,6 @@ From `@mod/webauthn`.
 | `webauthn.challenge-lifetime` | string | `2m` |  |  |  | How long a ceremony's challenge can be answered, from 10s to 10m. |
 | `webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  |  |
 | `webauthn.max-credentials` | integer (1–100) | `10` |  |  |  |  |
-| `webauthn.challenge-seconds` | integer (10–600) |  |  |  |  | Seconds; write `challenge-lifetime` instead. |
 
 ## webauthn-login
 

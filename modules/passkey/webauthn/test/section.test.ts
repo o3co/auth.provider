@@ -84,7 +84,6 @@ it("frames nothing, prefers verification, keeps 10 passkeys and a challenge 2m w
 	});
 });
 
-it("still takes the challenge lifetime in seconds, in its bounds, while its writers move", () => {
-	const takes = (value: number) => parsed({ "challenge-seconds": value }).success;
-	expect([9, 10, 600, 601].map(takes)).toEqual([false, true, true, false]);
+it("refuses the challenge lifetime by its name in seconds", () => {
+	expect(parsed({ "challenge-seconds": 120 }).success).toBe(false);
 });

@@ -33,13 +33,6 @@ export const section = z
 			.describe("How long a ceremony's challenge can be answered, from 10s to 10m."),
 		"user-verification": z.enum(["required", "preferred", "discouraged"]).prefault("preferred"),
 		"max-credentials": z.number().int().min(1).max(100).prefault(10),
-		"challenge-seconds": z
-			.number()
-			.int()
-			.min(10)
-			.max(600)
-			.optional()
-			.describe("Seconds; write `challenge-lifetime` instead."),
 	})
 	.refine(
 		(s) =>
