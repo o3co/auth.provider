@@ -51,20 +51,6 @@ const section = z.strictObject({
 		.pipe(z.number().int().min(1).max(16_777_216))
 		.optional()
 		.describe("The largest answer read, from 1B to 16MiB, narrowing outbound's cap."),
-	"timeout-ms": z
-		.number()
-		.int()
-		.min(1)
-		.max(60_000)
-		.optional()
-		.describe("Milliseconds; write `timeout` instead."),
-	"max-response-bytes": z
-		.number()
-		.int()
-		.min(1)
-		.max(16_777_216)
-		.optional()
-		.describe("Bytes; write `max-response-size` instead."),
 });
 
 const none: Verified = deepFreeze({ kind: "none" });
@@ -114,9 +100,12 @@ function userOf(answer: Readonly<Record<string, unknown>>) {
 
 export default defineModule({ name: "users-http", section, replicaSafe: true }, (m) => [
 	m.contribute(ledgers).by(async (c): Promise<Ledger> => {
-		const { "verify-url": url, credential } = c.section;
-		const maxBytes = c.section["max-response-bytes"] ?? c.section["max-response-size"];
-		const timeoutMs = c.section["timeout-ms"] ?? c.section.timeout;
+		const {
+			"verify-url": url,
+			credential,
+			"max-response-size": maxBytes,
+			timeout: timeoutMs,
+		} = c.section;
 		// The operator's own URL: a host in `internal-hosts` is reached at a private address.
 		const narrower = {
 			hosts: [new URL(url).hostname],

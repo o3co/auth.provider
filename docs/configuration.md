@@ -83,8 +83,6 @@ From `@mod/code-grant`.
 |---|---|---|---|---|---|---|
 | `code-grant.code-lifetime` | string | `10m` |  |  |  | How long a code can be redeemed, from 10s to 10m. |
 | `code-grant.sweep-interval` | string | `30s` |  |  |  | How often each host retries the revocations a code that came again left, from 1s to 1h. |
-| `code-grant.code-seconds` | integer (10–600) |  |  |  |  | Seconds; write `code-lifetime` instead. |
-| `code-grant.sweep-seconds` | integer (1–3600) |  |  |  |  | Seconds; write `sweep-interval` instead. |
 
 ## code-grant-store
 
@@ -592,7 +590,6 @@ From `@mod/token-exchange`.
 |---|---|---|---|---|---|---|
 | `token-exchange.max-actor-depth` | integer (1–10) | `3` |  |  |  | The longest chain of actors an exchanged token may carry. |
 | `token-exchange.max-lifetime` | string |  |  |  |  | The longest lifetime an exchange may ask for, from 1s to 1d, even past `tokens`' lifetime. |
-| `token-exchange.max-lifetime-seconds` | integer (1–86400) |  |  |  |  | Seconds; write `max-lifetime` instead. |
 
 ## tokens
 
@@ -622,8 +619,6 @@ From `@mod/users-http`.
 | `users-http.credential` | string |  |  |  |  | A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material. |
 | `users-http.timeout` | string |  |  |  |  | How long a call may take, from 1ms to 1m, narrowing outbound's cap. |
 | `users-http.max-response-size` | string |  |  |  |  | The largest answer read, from 1B to 16MiB, narrowing outbound's cap. |
-| `users-http.timeout-ms` | integer (1–60000) |  |  |  |  | Milliseconds; write `timeout` instead. |
-| `users-http.max-response-bytes` | integer (1–16777216) |  |  |  |  | Bytes; write `max-response-size` instead. |
 
 ## webauthn
 
@@ -638,7 +633,6 @@ From `@mod/webauthn`.
 | `webauthn.challenge-lifetime` | string | `2m` |  |  |  | How long a ceremony's challenge can be answered, from 10s to 10m. |
 | `webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  |  |
 | `webauthn.max-credentials` | integer (1–100) | `10` |  |  |  |  |
-| `webauthn.challenge-seconds` | integer (10–600) |  |  |  |  | Seconds; write `challenge-lifetime` instead. |
 
 ## webauthn-login
 

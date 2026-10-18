@@ -26,13 +26,6 @@ const section = z.strictObject({
 		.describe(
 			"The longest lifetime an exchange may ask for, from 1s to 1d, even past `tokens`' lifetime.",
 		),
-	"max-lifetime-seconds": z
-		.number()
-		.int()
-		.min(1)
-		.max(86_400)
-		.optional()
-		.describe("Seconds; write `max-lifetime` instead."),
 });
 
 /** A client's metadata: whether it may present tokens that do not name it. */
@@ -48,7 +41,6 @@ export default defineModule({ name: "token-exchange", section }, (m) => [
 		.by(async (c) => selfIssued(await c.get(tokens), (await c.get(issuer)).url)),
 	m.contribute(grants).by(async (c) => {
 		const verifiers = await c.collect(exchangeVerifiers);
-		const cap = c.section["max-lifetime-seconds"] ?? c.section["max-lifetime"];
 		return exchangeGrant({
 			verifiers: new Map(verifiers.map((verifier) => [verifier.tokenType, verifier])),
 			tokens: await c.get(tokens),
@@ -57,7 +49,9 @@ export default defineModule({ name: "token-exchange", section }, (m) => [
 			sessions: await c.get(sessions),
 			issuer: (await c.get(issuer)).url,
 			maxActorDepth: c.section["max-actor-depth"],
-			...(cap === undefined ? {} : { maxLifetimeSeconds: cap }),
+			...(c.section["max-lifetime"] === undefined
+				? {}
+				: { maxLifetimeSeconds: c.section["max-lifetime"] }),
 			othersTokens: (client) => client.section(othersTokens)["others-tokens"],
 			now: c.clock.now,
 		});
