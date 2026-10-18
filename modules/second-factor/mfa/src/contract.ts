@@ -1,4 +1,5 @@
 import { contract, extensionPoint } from "@mod/kernel";
+import type { AuthContext } from "@mod/session";
 
 export type Verified =
 	/**
@@ -148,6 +149,8 @@ export interface Factors {
 	guessableBoundAfter(subject: string, after: number): Promise<boolean>;
 	/** Whether a proof at `at` (epoch ms, kernel's clock) is still recent, by `session`'s one window. */
 	recent(at: number): boolean;
+	/** Whether the session proved a second factor recently, by `recent`; a recent sign-in never stands for one, whatever the subject holds. */
+	provenRecently(context: AuthContext): boolean;
 	/** Sends the factor's challenge, good at most until `until` (epoch ms on kernel's clock). */
 	challenge(subject: string, factor: string, until: number, from?: AskedFrom): Promise<Challenged>;
 	/** Judges a proof, given the sealed challenge kept; the next state is kept only over the state judged. */
@@ -181,7 +184,7 @@ export interface Factors {
 		| { readonly kind: "valid"; readonly state: unknown; readonly amr: readonly string[] }
 		| { readonly kind: "invalid" | "unknown" }
 	>;
-	/** Binds a proved binding; recovery codes come with the first counting factor, once. One begun as the first counting factor, or asked from a login, binds only while no other counts by then (`first-binding-closed`). */
+	/** Binds a proved binding; recovery codes come with the first counting factor, once. One begun as the first counting factor, or asked from a login, binds only while no other counts by then (`first-binding-closed`). The caller passes `from` as it passed it to `begin`. */
 	bind(
 		subject: string,
 		pending: string,

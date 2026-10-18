@@ -2,7 +2,7 @@ import { audit } from "@mod/audit";
 import { defineModule } from "@mod/kernel";
 import { amrSources } from "@mod/login-gates";
 import { resealers, seal } from "@mod/seal";
-import { type AuthContext, entryRequirements, sessions } from "@mod/session";
+import { entryRequirements, sessions } from "@mod/session";
 import {
 	factorKinds,
 	factorStore,
@@ -11,22 +11,20 @@ import {
 	proofSteps,
 	secondFactorAmr,
 } from "./contract.ts";
-import { addsMfa, byKind, counting, factorDecisions } from "./factors.ts";
+import {
+	addsMfa,
+	byKind,
+	counting,
+	factorDecisions,
+	secondFactorAt,
+	signedInAt,
+} from "./factors.ts";
 import { factorRecords } from "./records.ts";
 import { resealerOver } from "./resealer.ts";
 import { section } from "./section.ts";
 
 const admit = { kind: "admit" } as const;
 const short = (error: string) => ({ kind: "short", answer: { error } }) as const;
-/** When the sign-in was, where it is known: a time the upstream did not give is never recent. */
-const signedInAt = (context: AuthContext) =>
-	context.authenticatedAtUnknown ? undefined : context.authenticatedAt;
-/** When a second factor was last proven: a raise that added one, else a login that did; any other raise says nothing of one. */
-const secondFactorAt = (context: AuthContext) => {
-	const raised = context.raisedAmr?.includes(secondFactorAmr) ? context.raisedAt : undefined;
-	if (raised !== undefined) return raised;
-	return context.amr.includes(secondFactorAmr) ? signedInAt(context) : undefined;
-};
 
 export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => [
 	m.contribute(amrSources).by(async (c) => {

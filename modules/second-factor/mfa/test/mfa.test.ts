@@ -17,7 +17,13 @@ import { logins } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
-import { type EntryRequirement, entryRequirements, sessionRules, sessions } from "@mod/session";
+import {
+	type AuthContext,
+	type EntryRequirement,
+	entryRequirements,
+	sessionRules,
+	sessions,
+} from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
@@ -652,6 +658,24 @@ describe("the entry requirements mfa sets", () => {
 		expect(app.get(factors).recent(now - recentMs)).toBe(true);
 		expect(app.get(factors).recent(now - recentMs - 1)).toBe(false);
 	});
+});
+
+it("takes only a second factor proven recently as proven, never a recent sign-in alone", async () => {
+	const { app } = await serve();
+	const now = runtime.clock.now();
+	const proven = (context: Partial<AuthContext>) =>
+		app
+			.get(factors)
+			.provenRecently({ subject: "x", amr: ["pwd"], authenticatedAt: now, ...context });
+	expect(proven({ amr: ["pwd", "otp", "mfa"] })).toBe(true);
+	expect(proven({})).toBe(false);
+	expect(proven({ amr: ["pwd", "mfa"], authenticatedAt: now - recentMs - 1000 })).toBe(false);
+	expect(proven({ amr: ["pwd", "mfa"], authenticatedAtUnknown: true })).toBe(false);
+	const old = now - recentMs - 1000;
+	expect(proven({ authenticatedAt: old, raisedAt: now, raisedAmr: ["otp", "mfa"] })).toBe(true);
+	expect(
+		proven({ amr: ["pwd", "mfa"], authenticatedAt: old, raisedAt: now, raisedAmr: ["pwd"] }),
+	).toBe(false);
 });
 
 it("declares mfa and the amr of every kind contributed as what it can prove", async () => {
