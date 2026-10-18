@@ -1,6 +1,12 @@
 import { deepFreeze, isUnavailable, type Log, Unavailable } from "@mod/kernel";
-import { type BySubject, isAttributeValue, type Ledger, type Verified } from "./contract.ts";
-import { none, type UserSource, unanswerable } from "./registered.ts";
+import {
+	type BySubject,
+	isAttributeValue,
+	isWellFormedSubject,
+	type Ledger,
+	type Verified,
+} from "../contract.ts";
+import { none, type UserSource, unanswerable } from "../registered.ts";
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
@@ -52,6 +58,23 @@ async function fromLedger(call: () => Promise<BySubject>): Promise<unknown> {
 }
 
 export function contributedSource(ledger: Ledger, log: Log): UserSource {
+	const { byUpstream } = ledger;
+	const upstream = byUpstream
+		? {
+				upstreamLast: true as const,
+				byUpstream: async (idp: string, upstreamSubject: string) => {
+					if (idp === "" || upstreamSubject === "") return none;
+					const answer = copyOf(
+						await fromLedger(() => byUpstream.call(ledger, idp, upstreamSubject)),
+					);
+					const found = readAnswer(answer, log);
+					if (found.kind === "user" && !isWellFormedSubject(found.user.subject)) {
+						throw new Unavailable("users");
+					}
+					return found;
+				},
+			}
+		: { byUpstream: async () => none };
 	return {
 		verify: async (identifier, password) =>
 			identifier === ""
@@ -64,6 +87,6 @@ export function contributedSource(ledger: Ledger, log: Log): UserSource {
 				? unanswerable
 				: readAnswer(answer, log, subject);
 		},
-		byUpstream: async () => none,
+		...upstream,
 	};
 }

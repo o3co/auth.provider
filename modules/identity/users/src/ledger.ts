@@ -59,6 +59,7 @@ export function ledgerUsers(source: UserSource, links: LinkStore, contacts: Cont
 		bySubject: source.bySubject,
 		byUpstream: async (idp, upstreamSubject) => {
 			const fixed = await source.byUpstream(idp, upstreamSubject);
+			if (source.upstreamLast) return fixed;
 			if (fixed.kind === "user") return fixed;
 			const subject = holderOf(await links.read(keyOf({ idp, subject: upstreamSubject })));
 			if (subject === undefined) return none;
@@ -70,6 +71,7 @@ export function ledgerUsers(source: UserSource, links: LinkStore, contacts: Cont
 			required(subject, upstream.idp, upstream.subject);
 			const fixed = await source.byUpstream(upstream.idp, upstream.subject);
 			if (fixed.kind === "user") return fixed.user.subject === subject ? "already" : "conflict";
+			if (source.upstreamLast) return "conflict";
 			const take = (record: StoredLink) =>
 				holderOf(record) === undefined ? { value: linkRecord(subject) } : undefined;
 			const { before, after } = await written(links, keyOf(upstream), linkRecord(subject), take);
@@ -79,6 +81,7 @@ export function ledgerUsers(source: UserSource, links: LinkStore, contacts: Cont
 		unlink: async (subject, upstream) => {
 			const fixed = await source.byUpstream(upstream.idp, upstream.subject);
 			if (fixed.kind === "user") return fixed.user.subject === subject ? "fixed" : "none";
+			if (source.upstreamLast) return "none";
 			const release = (record: StoredLink) =>
 				holderOf(record) === subject ? { value: linkRecord(null) } : undefined;
 			const changed = await links.update(keyOf(upstream), release);
