@@ -10,6 +10,7 @@ import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, contract, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import { grantCaller } from "@mod/token-endpoint/testing";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { expect, it } from "vitest";
@@ -35,6 +36,7 @@ async function documentOf(revocable: boolean, origin?: string, extra: Module[] =
 			tokensStandIn({ revocable }),
 			issuerModule,
 			clientsModule,
+			secretHashModule,
 			grantCaller,
 			clientAllowanceModule,
 			tokenControl,
