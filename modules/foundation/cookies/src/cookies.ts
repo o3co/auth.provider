@@ -15,7 +15,7 @@ const overHttps = (source: Source) => source.scheme === "https";
  * Cookies for this deployment: `__Host-` and Secure where they can be secure, plain names otherwise.
  * With a log, a withheld cookie warns once a request and name, since anyone can send a name twice.
  */
-export function cookiesFor(secure: boolean, log?: Pick<Log, "warn">): Required<Cookies> {
+export function cookiesFor(secure: boolean, log?: Pick<Log, "warn">): Cookies {
 	const nameOf = (base: string) => (secure ? `__Host-${base}` : base);
 	const warned = new WeakMap<HttpRequest, Set<string>>();
 	const withheld = (request: HttpRequest, base: string, reason: WithheldReason): CookieLookup => {

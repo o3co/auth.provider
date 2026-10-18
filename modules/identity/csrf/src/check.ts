@@ -10,8 +10,8 @@ const tokenShape = /^[A-Za-z0-9_-]{43}$/;
 
 /** The token the request's cookie holds, if it has the shape this module hands out. */
 export function keptToken(jar: Cookies, request: HttpRequest): string | undefined {
-	const kept = jar.read(request, carried.cookie);
-	return kept && tokenShape.test(kept) ? kept : undefined;
+	const kept = jar.lookup(request, carried.cookie);
+	return kept.kind === "found" && tokenShape.test(kept.value) ? kept.value : undefined;
 }
 
 /** A new token: 32 random bytes are 43 base64url characters. */

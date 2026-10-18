@@ -110,8 +110,8 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 	});
 	const random = () => Buffer.from(parts.random.bytes(32)).toString("base64url");
 	const secretIn = (request: HttpRequest) => {
-		const value = jar.read(request, "session");
-		return value && secretShape.test(value) ? value : undefined;
+		const carried = jar.lookup(request, "session");
+		return carried.kind === "found" && secretShape.test(carried.value) ? carried.value : undefined;
 	};
 	/** Which session a cookie's secret opens. */
 	const handleIn = async (request: HttpRequest) => {
@@ -208,8 +208,8 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 	const closeIn: Sessions["closeRequest"] = async (request) => {
 		const handle = await handleIn(request);
 		const closed = handle ? await close(handle) : { kind: "closed" as const };
-		// A cookie that opens nothing any more is destroyed all the same.
-		const carried = jar.read(request, "session") !== undefined;
+		// A cookie that opens nothing any more is destroyed all the same, as is one withheld.
+		const carried = jar.lookup(request, "session").kind !== "absent";
 		return { ...closed, cookies: carried ? [jar.write("session", "", 0)] : [] };
 	};
 	/** When a kept closing is next due: its record's retry time, or this host's for one it cannot read. */

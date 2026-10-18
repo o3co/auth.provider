@@ -86,22 +86,22 @@ describe("lookup", () => {
 
 	it("finds a cookie sent once, tells one sent none, and withholds one sent twice or over plain http, saying why", async () => {
 		const secure = await at("https://as.example");
-		expect(secure.lookup?.(carrying("a=1; __Host-s=v"), "s")).toEqual({
+		expect(secure.lookup(carrying("a=1; __Host-s=v"), "s")).toEqual({
 			kind: "found",
 			value: "v",
 		});
-		expect(secure.lookup?.(carrying("a=1"), "s")).toEqual({ kind: "absent" });
-		expect(secure.lookup?.(carrying("__Host-s=v; __Host-s=w"), "s")).toEqual({
+		expect(secure.lookup(carrying("a=1"), "s")).toEqual({ kind: "absent" });
+		expect(secure.lookup(carrying("__Host-s=v; __Host-s=w"), "s")).toEqual({
 			kind: "withheld",
 			reason: "duplicate",
 		});
-		expect(secure.lookup?.(carrying("__Host-s=v", "http"), "s")).toEqual({
+		expect(secure.lookup(carrying("__Host-s=v", "http"), "s")).toEqual({
 			kind: "withheld",
 			reason: "plain-http",
 		});
-		expect(secure.lookup?.(carrying("a=1", "http"), "s")).toEqual({ kind: "absent" });
+		expect(secure.lookup(carrying("a=1", "http"), "s")).toEqual({ kind: "absent" });
 		const plain = await at("http://as.example");
-		expect(plain.lookup?.(carrying("s=v", "http"), "s")).toEqual({ kind: "found", value: "v" });
+		expect(plain.lookup(carrying("s=v", "http"), "s")).toEqual({ kind: "found", value: "v" });
 	});
 
 	it("warns of a withheld cookie by its name and reason alone, once a request and name, however often it is read", async () => {
@@ -109,12 +109,12 @@ describe("lookup", () => {
 		const secure = await at("https://as.example", logged);
 		const twice = carrying("__Host-s=secret-1; __Host-s=secret-2; __Host-t=x; __Host-t=y");
 		for (let i = 0; i < 3; i++) {
-			secure.lookup?.(twice, "s");
+			secure.lookup(twice, "s");
 			secure.read(twice, "s");
 		}
-		secure.lookup?.(twice, "t");
-		secure.lookup?.(carrying("__Host-s=secret-1; __Host-s=secret-2"), "s");
-		secure.lookup?.(carrying("__Host-s=secret-3", "http"), "s");
+		secure.lookup(twice, "t");
+		secure.lookup(carrying("__Host-s=secret-1; __Host-s=secret-2"), "s");
+		secure.lookup(carrying("__Host-s=secret-3", "http"), "s");
 		expect(warnings(logged)).toEqual([
 			["cookies.withheld", { name: "s", reason: "duplicate" }],
 			["cookies.withheld", { name: "t", reason: "duplicate" }],
@@ -127,7 +127,7 @@ describe("lookup", () => {
 	it("answers the same without a log where a stand-in builds cookies", () => {
 		const jar = cookiesFor(true);
 		expect(
-			jar.lookup?.(
+			jar.lookup(
 				testRequest({
 					headers: new Map([["cookie", "__Host-s=v; __Host-s=w"]]),
 					source: { scheme: "https" },

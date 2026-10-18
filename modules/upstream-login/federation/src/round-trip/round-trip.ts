@@ -242,7 +242,8 @@ async function start(flow: Flow, { name, idp, request, params }: At) {
 
 async function callback(flow: Flow, at: At) {
 	const { name, idp, request, params } = at;
-	const id = flow.cookies.read(request, cookieOf(name));
+	const kept = flow.cookies.lookup(request, cookieOf(name));
+	const id = kept.kind === "found" ? kept.value : undefined;
 	const state = params.single("state");
 	if (id === undefined || state === undefined) return answer(400, { error: "invalid_state" });
 	const transaction = await tookNow(flow, at, id, state);

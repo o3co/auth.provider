@@ -416,6 +416,15 @@ describe("federation", () => {
 		expect((await s.callback(`code=good&state=${started.state}`, started.cookie)).status).toBe(302);
 	});
 
+	it("takes no transaction from its cookie sent twice, and leaves it for the browser's own callback", async () => {
+		const s = await serve();
+		const started = await s.begin();
+		const query = `code=good&state=${started.state}`;
+		const twice = await s.callback(query, `${started.cookie}; ${started.cookie}`);
+		expect([twice.status, twice.body]).toEqual([400, { error: "invalid_state" }]);
+		expect((await s.callback(query, started.cookie)).status).toBe(302);
+	});
+
 	it("ends a transaction at its lifetime", async () => {
 		const s = await serve({ federation: { "transaction-lifetime": "1m" } });
 		const started = await s.begin();
