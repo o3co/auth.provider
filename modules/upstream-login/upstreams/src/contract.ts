@@ -141,8 +141,6 @@ export interface IdpType<S extends z.ZodType = z.ZodType> {
 		at: {
 			/** The IdP's name, as `upstreams.of` and the receivers take it. */
 			readonly idp: string;
-			/** The same name; read `idp`. */
-			readonly name: string;
 			readonly redirectUri: string;
 		},
 	): Promise<Upstream>;
