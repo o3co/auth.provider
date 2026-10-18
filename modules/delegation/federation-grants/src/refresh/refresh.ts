@@ -33,6 +33,8 @@ export interface Parts {
 	readonly records: Records;
 	/** Whether a subject's revocation since its activation ends the grant (the grants' judge). */
 	readonly revoked: (grant: Grant) => Promise<boolean>;
+	/** When the grant ends, held to the longest a grant may live now (the grants' judge). */
+	readonly endOf: (grant: Grant) => number | undefined;
 	readonly clock: Clock;
 	readonly random: Random;
 	readonly log: Log;
@@ -63,6 +65,14 @@ export function refreshWith(parts: Parts) {
 	const { grants, records } = parts;
 	const versionOf = () => Buffer.from(parts.random.bytes(16)).toString("base64url");
 	const leftOf = (held: Credentials) => held.expiresAt - parts.clock.now();
+	/** Whether the grant is past its end by now: its credentials are then not to be used. */
+	const ended = (grant: Grant) => {
+		const end = parts.endOf(grant);
+		return end !== undefined && end <= parts.clock.now();
+	};
+	/** Whether the grant, as read now, may still hand out a token: in use, not ended, not revoked. */
+	const serves = async (grant: Grant) =>
+		inUse(grant) && !ended(grant) && !(await parts.revoked(grant));
 
 	const handed = (held: Credentials, asked: Asked, refreshed: boolean): Current => {
 		const ends = Math.min(held.expiresAt, asked.grantEndsAt);
@@ -89,9 +99,7 @@ export function refreshWith(parts: Parts) {
 	): Promise<Current> => {
 		if (!held || leftOf(held) < 1000 || !carries(held, asked)) return otherwise;
 		const now = records.grantOf(await grants.read(id));
-		return now && inUse(now) && !(await parts.revoked(now))
-			? handed(held, asked, false)
-			: { kind: "gone" };
+		return now && (await serves(now)) ? handed(held, asked, false) : { kind: "gone" };
 	};
 	/** Due near its end once half its life is spent, or when it lacks what is asked. */
 	const due = (held: Credentials, asked: Asked) => {
@@ -168,9 +176,9 @@ export function refreshWith(parts: Parts) {
 				return heldOr(grant.id, held, asked, { kind: "refused" });
 			throw error;
 		}
-		// A subject revoked while the upstream was asked gets nothing, written or handed: a grant its
-		// listing missed is not ended by the follower, only by the boundary.
-		if (await parts.revoked(counted)) return { kind: "gone" };
+		// A grant ended, or its subject revoked, while the upstream was asked gets nothing, written or
+		// handed: a grant its listing missed is not ended by the follower, only by the boundary.
+		if (ended(counted) || (await parts.revoked(counted))) return { kind: "gone" };
 		if (refreshed.kind === "limited") {
 			const { retryAfterSeconds } = refreshed;
 			const limited = retryAfterSeconds === undefined ? {} : { retryAfterSeconds };
@@ -259,10 +267,14 @@ export type Refresh = ReturnType<typeof refreshWith>;
 export const refreshOver = async (
 	c: BuildContext<Settings>,
 	records: Records,
-	judge: { readonly revoked: (grant: Grant) => Promise<boolean> },
+	judge: {
+		readonly revoked: (grant: Grant) => Promise<boolean>;
+		readonly endOf: (grant: Grant) => number | undefined;
+	},
 ) =>
 	refreshWith({
 		revoked: judge.revoked,
+		endOf: judge.endOf,
 		grants: await c.get(grantStore),
 		locks: await c.get(refreshLockStore),
 		records,
