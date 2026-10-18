@@ -40,3 +40,19 @@ it("refuses a JSON body that is not well-formed UTF-8", async () => {
 	const marked = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('{"a":"1"}')]);
 	expect((await read(["json"], "application/json", marked)).refused).toBe(400);
 });
+
+it("refuses a form whose percent-escapes or bytes are not UTF-8, and reads one that is", async () => {
+	const form = "application/x-www-form-urlencoded";
+	const raw = Buffer.concat([Buffer.from("a="), Buffer.from([0xff])]);
+	for (const broken of ["a=%C3%28", "a=%E9", raw]) {
+		for (const takes of [undefined, ["form"] as const]) {
+			const found = await read(takes, form, broken);
+			expect([found.refused, found.form.size, found.fields.size]).toEqual([400, 0, 0]);
+		}
+	}
+	const found = await read(undefined, form, "a=%C3%A9&b=x+y&c=");
+	expect([found.refused, Object.fromEntries(found.form)]).toEqual([
+		undefined,
+		{ a: ["é"], b: ["x y"], c: [""] },
+	]);
+});
