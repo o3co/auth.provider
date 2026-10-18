@@ -121,6 +121,20 @@ export function sessionsContract(
 			expect(place.closed).toEqual(["alice"]);
 		});
 
+		it("keeps a session's subject for as long as it lives, a raise included, and never names another session by its handle", async () => {
+			const place = await open();
+			const first = await place.sessions.complete(place.request(), facts(place));
+			const raised = await place.sessions.raise(place.request(first.cookies), ["strong"]);
+			expect(raised?.session.context.subject).toBe("alice");
+			expect((await place.sessions.openContext(first.session.id))?.subject).toBe("alice");
+			const second = await place.sessions.complete(
+				place.request(raised?.cookies),
+				facts(place, "bob"),
+			);
+			expect(await place.sessions.openContext(first.session.id)).toBeUndefined();
+			expect((await place.sessions.openContext(second.session.id))?.subject).toBe("bob");
+		});
+
 		it("ends a session at its lifetime, and when its subject is revoked", async () => {
 			const place = await open();
 			const lived = await place.sessions.complete(place.request(), facts(place));
