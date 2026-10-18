@@ -1420,6 +1420,23 @@ describe("authorize: audit events", () => {
 		]);
 	});
 
+	it("takes an empty scope as left out, and records it; a scope of whitespace alone is malformed, unrecorded", async () => {
+		const { authorize, login, events } = await serve();
+		const cookie = await login();
+		const answer = (res: { at: URL | undefined }) =>
+			["code", "error", "error_description"].map((name) =>
+				name === "code" ? res.at?.searchParams.has(name) : res.at?.searchParams.get(name),
+			);
+		const empty = await authorize(request({ client_id: "nodefault", scope: "" }), cookie);
+		expect(answer(empty)).toEqual([false, "invalid_scope", "scope is required"]);
+		expect(events).toEqual([rejected("nodefault", "scope_omitted_without_default")]);
+		for (const scope of [" ", "  ", "\t"]) {
+			const blank = await authorize(request({ client_id: "nodefault", scope }), cookie);
+			expect(answer(blank), JSON.stringify(scope)).toEqual([false, "invalid_scope", null]);
+		}
+		expect(events).toHaveLength(1);
+	});
+
 	it("records nothing for a malformed request, an unknown client or redirect URI, or while unavailable", async () => {
 		const { authorize, login, events, down } = await serve();
 		const cookie = await login();
