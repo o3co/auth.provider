@@ -33,7 +33,7 @@ function withUserCode(page: string, userCode: string): string {
 
 /** RFC 8628 §3.1–3.2: a device asks for codes, as an authenticated client allowed this grant. */
 export function authorizationWith(a: Authorizing) {
-	const lifetimeMs = a.settings["code-seconds"] * 1000;
+	const lifetimeMs = a.settings["code-lifetime"] * 1000;
 	// Kept as long again past its end, so a device still polling is told its code expired.
 	const keptMs = lifetimeMs * 2;
 	const keepUserCode = async (name: string): Promise<string> => {
@@ -65,7 +65,7 @@ export function authorizationWith(a: Authorizing) {
 			scope: allowed.scope,
 			audience: allowed.audience,
 			expiresAt: now + lifetimeMs,
-			intervalMs: a.settings["interval-seconds"] * 1000,
+			intervalMs: a.settings.interval * 1000,
 			state: "pending",
 		};
 		// A name from 32 fresh random bytes cannot exist yet; if it does, the store cannot be trusted to tell.
@@ -85,8 +85,8 @@ export function authorizationWith(a: Authorizing) {
 					...(a.settings["complete-uri"]
 						? { verification_uri_complete: withUserCode(page, userCode) }
 						: {}),
-					expires_in: a.settings["code-seconds"],
-					interval: a.settings["interval-seconds"],
+					expires_in: a.settings["code-lifetime"],
+					interval: a.settings.interval,
 				},
 			},
 		};

@@ -112,12 +112,12 @@ From `@mod/device-grant`.
 |---|---|---|---|---|---|---|
 | `device-grant.verification-uri` | string |  | yes | `DEVICE_GRANT_VERIFICATION_URI` | `https://login.example.invalid/device` | The deployment's page where a user enters the code. |
 | `device-grant.complete-uri` | boolean | `false` |  |  |  | Whether to answer also the page's address with the code filled in. |
-| `device-grant.code-seconds` | integer (30–3600) | `600` |  |  |  | How long a device code and its user code live, in seconds. |
-| `device-grant.interval-seconds` | integer (1–60) | `5` |  |  |  | How long a device waits between polls of the token endpoint, in seconds. |
+| `device-grant.code-lifetime` | string | `10m` |  |  |  | How long a device code and its user code live, from `30s` to `1h` in whole seconds. |
+| `device-grant.interval` | string | `5s` |  |  |  | How long a device waits between polls of the token endpoint, from `1s` to `1m` in whole seconds. |
 | `device-grant.attempts` | integer (1–100) | `5` |  |  |  | Decisions a subject may try in each window, so codes cannot be guessed. |
-| `device-grant.attempts-window-seconds` | integer (60–86400) | `300` |  |  |  | The window `attempts` is counted over, in seconds. |
+| `device-grant.attempts-window` | string | `5m` |  |  |  | The window `attempts` is counted over, from `1m` to `1d` in whole seconds. |
 | `device-grant.requests` | integer (1–100000) | `60` |  |  |  | Device authorization requests per source in each window. |
-| `device-grant.window-seconds` | integer (1–86400) | `60` |  |  |  | The window `requests` is counted over, in seconds. |
+| `device-grant.window` | string | `1m` |  |  |  | The window `requests` is counted over, from `1s` to `1d` in whole seconds. |
 
 ## dpop
 

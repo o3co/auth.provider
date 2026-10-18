@@ -85,7 +85,6 @@ it("tells a key that reads time or size with its unit asked for from one that ta
 /** Sections whose time and size keys still name their unit or take a bare number; a section leaves once its owner moves it, and never comes back. */
 const unitsLater = new Set([
 	"code-grant",
-	"device-grant",
 	"dpop",
 	"external-jwt",
 	"federation-grants",
@@ -115,7 +114,6 @@ const unitsLater = new Set([
 /** Sections whose schema still gives a default by `.default()`; a section leaves once its owner moves it, and never comes back. */
 const prefaultLater = new Set([
 	"code-grant-store",
-	"device-grant",
 	"dpop",
 	"external-jwt",
 	"federation-grants",

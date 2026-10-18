@@ -14,7 +14,7 @@ export const verificationPath = "/oauth/device/verification";
 
 export default defineModule({ name: "device-grant", section }, (m) => [
 	m.contribute(routes).by(async (c) => {
-		const window = { limit: c.section.requests, ms: c.section["window-seconds"] * 1000 };
+		const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 		return {
 			method: "POST",
 			path: authorizationPath,
