@@ -2,6 +2,7 @@ import { clients } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, confidentialClient } from "@mod/clients/testing";
 import { assemble, kernelConfig } from "@mod/kernel";
+import secretHashModule from "@mod/secret-hash/module";
 import { expect, it } from "vitest";
 import { clientAllowance } from "../src/contract.ts";
 import clientAllowanceModule from "../src/module.ts";
@@ -9,7 +10,7 @@ import { allowancesFor } from "../src/testing.ts";
 
 const boot = (sections: Readonly<Record<string, unknown>>) =>
 	assemble({
-		modules: [clientsModule, clientAllowanceModule],
+		modules: [clientsModule, secretHashModule, clientAllowanceModule],
 		config: { ...kernelConfig(), ...clientsConfig([confidentialClient({ id: "c", sections })]) },
 	});
 
