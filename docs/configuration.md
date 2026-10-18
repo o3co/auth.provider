@@ -210,6 +210,9 @@ From `@mod/http`.
 | `http.client-certificate.dialect` | rfc9440 \| pem \| xfcc |  |  |  |  | The form a trusted proxy forwards the client's certificate in: `rfc9440` (byte sequences) with `header` and `chain-header`, `pem` (one PEM block, URL-encoded or not) with `header`, or `xfcc` (Envoy's form, the chain in the same header) with `header`. |
 | `http.client-certificate.header` | string | `client-cert` |  |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
 | `http.client-certificate.chain-header` | string | `client-cert-chain` |  |  |  | The header holding the chain behind the certificate, for `rfc9440`: lower-case letters, digits and `-`. |
+| `http.headers-timeout` | string | `10s` |  |  |  | How long a client may take to send a request's headers, from 1s to 1m, such as 10s; past it the request is answered 408 and its connection closed. |
+| `http.request-timeout` | string | `30s` |  |  |  | How long a client may take to send a whole request, its body included, from 1s to 5m and no less than headers-timeout, such as 30s; past it the request is answered 408 and its connection closed. |
+| `http.max-connections` | integer (1–1000000) | `10000` |  |  |  | The most connections held open at once, from 1 to 1000000; one past it is closed as it arrives. |
 
 ## http-ops
 
