@@ -30,6 +30,7 @@
 		"@mod/outbound": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/refresh": "workspace:*",
+		"@mod/secret-hash": "workspace:*",
 		"@mod/sender-binding": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/session-tokens": "workspace:*",

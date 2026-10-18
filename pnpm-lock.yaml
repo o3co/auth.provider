@@ -1121,6 +1121,9 @@ importers:
       '@mod/refresh':
         specifier: workspace:*
         version: link:../refresh
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../sender-binding
