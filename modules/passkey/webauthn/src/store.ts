@@ -11,7 +11,7 @@ export type StoredChallenge = { readonly [storedChallenge]: true };
 /** Records by a key webauthn makes, each changed only from what it holds, kept without end. */
 export interface PasskeyRecords {
 	/** Keeps a key's first record, unless the key holds one. */
-	save(key: string, record: StoredPasskey): Promise<"created" | "exists">;
+	save(key: string, record: StoredPasskey, lifetimeMs: "endless"): Promise<"created" | "exists">;
 	read(key: string): Promise<StoredPasskey | undefined>;
 	/** Changes the record from what it holds; `change` runs again on a race, so it is pure; none leaves it. Nothing when gone. */
 	update(
