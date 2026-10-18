@@ -6,6 +6,7 @@ import { counter, gauge, histogram, type Instrument, instruments } from "@mod/me
 import metricsModule from "@mod/metrics/module";
 import { afterEach, describe, expect, it } from "vitest";
 import prometheus from "../src/module.ts";
+import { section } from "../src/section.ts";
 
 const quiet = quietRuntime({
 	clock: { now: () => 0 },
@@ -156,4 +157,8 @@ describe("refusals at boot", () => {
 			"metrics-prometheus:auth_provider_nodejs_gc_duration_seconds_sum: a name it takes is the process's",
 		]);
 	});
+});
+
+it("answers scrapes at /metrics when the operator names no path", () => {
+	expect(section.parse({})).toEqual({ path: "/metrics" });
 });

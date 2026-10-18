@@ -129,7 +129,6 @@ const prefaultLater = new Set([
 	"jwt-bearer",
 	"kernel",
 	"mail-smtp",
-	"metrics-prometheus",
 	"mfa",
 	"mfa-email",
 	"mfa-flows",
