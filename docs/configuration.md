@@ -410,9 +410,9 @@ From `@mod/outbound`.
 | `outbound.allow-any-public` | boolean | `false` |  |  |  | Whether requests may reach any host at a public address, instead of naming hosts in `allow`. |
 | `outbound.deny` | list of string | `[]` |  |  |  | The hosts requests never reach, checked before `allow`; `.name` covers the name and the names under it. |
 | `outbound.plain-loopback` | list of string | `[]` |  |  |  | The `host:port` pairs plain http may reach at loopback addresses. |
-| `outbound.max-response-bytes` | integer (1–16777216) | `65536` |  |  |  | The largest response body a request takes, in bytes. |
-| `outbound.signed-max-response-bytes` | integer (1–16777216) | `1048576` |  |  |  | The largest response body a request for signed material takes, in bytes. |
-| `outbound.timeout-ms` | integer (1–60000) | `5000` |  |  |  | The one deadline covering a request's resolving, connecting, headers and body, in milliseconds. |
+| `outbound.max-response-size` | string | `64KiB` |  |  |  | The largest response body a request takes, from 1B to 16MiB. |
+| `outbound.signed-max-response-size` | string | `1MiB` |  |  |  | The largest response body a request for signed material takes, from 1B to 16MiB. |
+| `outbound.timeout` | string | `5s` |  |  |  | The one deadline covering a request's resolving, connecting, headers and body, from 1ms to 1m. |
 | `outbound.max-concurrent` | integer (1–1024) | `16` |  |  |  | Requests under way at once; one more is unavailable at once. |
 | `outbound.direct-despite-proxy` | boolean | `false` |  |  |  | Whether to boot while a proxy variable is set and no proxy is configured; the variables are never read. |
 | `outbound.proxy` | string |  |  |  |  | The proxy every https request goes through by CONNECT, but to direct hosts; it resolves names and checks their addresses. |

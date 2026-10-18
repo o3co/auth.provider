@@ -1,5 +1,5 @@
 import { isIP } from "node:net";
-import { contract, defineModule } from "@mod/kernel";
+import { contract, defineModule, setting } from "@mod/kernel";
 import { z } from "zod";
 import {
 	DestinationRefused,
@@ -16,10 +16,10 @@ import {
 import { admitAddresses, admitUrl, isHostEntry, isListEntry, isPair, listed } from "./policy.ts";
 import { type Resolver, type Route, send, systemResolver, type Trust } from "./transport.ts";
 
-const hostEntries = z.array(z.string().refine(isHostEntry, "not a host")).default([]);
+const hostEntries = z.array(z.string().refine(isHostEntry, "not a host")).prefault([]);
 const listEntries = z
 	.array(z.string().refine(isListEntry, "not a host, or a name led by a dot"))
-	.default([]);
+	.prefault([]);
 
 /** An http origin, as written and as read alike: no credentials, path, query or stray character. */
 const isProxyOrigin = (value: string) => {
@@ -42,7 +42,7 @@ export const section = z
 		),
 		"allow-any-public": z
 			.boolean()
-			.default(false)
+			.prefault(false)
 			.describe(
 				"Whether requests may reach any host at a public address, instead of naming hosts in `allow`.",
 			),
@@ -51,41 +51,35 @@ export const section = z
 		),
 		"plain-loopback": z
 			.array(z.string().refine(isPair, "not a host:port pair"))
-			.default([])
+			.prefault([])
 			.describe("The `host:port` pairs plain http may reach at loopback addresses."),
-		"max-response-bytes": z
-			.number()
-			.int()
-			.min(1)
-			.max(16_777_216)
-			.default(65_536)
-			.describe("The largest response body a request takes, in bytes."),
-		"signed-max-response-bytes": z
-			.number()
-			.int()
-			.min(1)
-			.max(16_777_216)
-			.default(1_048_576)
-			.describe("The largest response body a request for signed material takes, in bytes."),
-		"timeout-ms": z
-			.number()
-			.int()
-			.min(1)
-			.max(60_000)
-			.default(5000)
+		"max-response-size": setting
+			.size()
+			.pipe(z.number().int().min(1).max(16_777_216))
+			.prefault("64KiB")
+			.describe("The largest response body a request takes, from 1B to 16MiB."),
+		"signed-max-response-size": setting
+			.size()
+			.pipe(z.number().int().min(1).max(16_777_216))
+			.prefault("1MiB")
+			.describe("The largest response body a request for signed material takes, from 1B to 16MiB."),
+		timeout: setting
+			.duration("ms")
+			.pipe(z.number().int().min(1).max(60_000))
+			.prefault("5s")
 			.describe(
-				"The one deadline covering a request's resolving, connecting, headers and body, in milliseconds.",
+				"The one deadline covering a request's resolving, connecting, headers and body, from 1ms to 1m.",
 			),
 		"max-concurrent": z
 			.number()
 			.int()
 			.min(1)
 			.max(1024)
-			.default(16)
+			.prefault(16)
 			.describe("Requests under way at once; one more is unavailable at once."),
 		"direct-despite-proxy": z
 			.boolean()
-			.default(false)
+			.prefault(false)
 			.describe(
 				"Whether to boot while a proxy variable is set and no proxy is configured; the variables are never read.",
 			),
@@ -188,10 +182,10 @@ export function outboundOver(
 	const go = async (url: string, request: OutboundRequest, narrower: Narrower, signed: boolean) => {
 		const limits = {
 			maxBytes: Math.min(
-				settings[signed ? "signed-max-response-bytes" : "max-response-bytes"],
+				settings[signed ? "signed-max-response-size" : "max-response-size"],
 				narrowing(narrower.maxBytes),
 			),
-			timeoutMs: Math.min(settings["timeout-ms"], narrowing(narrower.timeoutMs)),
+			timeoutMs: Math.min(settings.timeout, narrowing(narrower.timeoutMs)),
 		};
 		const admitted = admitUrl(url, policy, narrower, signed);
 		return requestPlace(() => send(admitted, request, limits, bounded, route, trust, deadlineOf));
