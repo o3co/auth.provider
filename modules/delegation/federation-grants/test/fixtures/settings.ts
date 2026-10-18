@@ -57,19 +57,4 @@ export const bootCases = [
 		settings: { window: "60" },
 		refused: "federation-grants.window: duration must name its unit",
 	},
-	{
-		name: "a window given under its name in seconds beside its name with a unit",
-		settings: { "window-seconds": 60, window: "1m" },
-		refused: "federation-grants.window-seconds: names window again, in seconds; write window alone",
-	},
-	{
-		name: "a connection giving its longest access token life under both its names",
-		settings: {
-			connections: {
-				cal: { ...conn, "max-access-token-seconds": 3600, "max-access-token-lifetime": "1h" },
-			},
-		},
-		refused:
-			"federation-grants.connections.cal.max-access-token-seconds: names max-access-token-lifetime again, in seconds; write max-access-token-lifetime alone",
-	},
 ] as const;

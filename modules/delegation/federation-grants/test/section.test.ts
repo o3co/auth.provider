@@ -78,44 +78,19 @@ describe("federation-grants' section: its times", () => {
 	it.each(times)("gives %s's default as an operator writes it", (key, _low, _high, written) => {
 		expect(section.parse({})[key]).toBe(section.parse({ [key]: written })[key]);
 	});
-});
 
-describe("federation-grants' section, under the names in seconds", () => {
-	/** Each name in seconds, the name it gives way to, and its bounds. */
-	const renamed = [
-		["default-seconds", "default-lifetime", 60, 31_536_000],
-		["max-seconds", "max-lifetime", 60, 31_536_000],
-		["connect-seconds", "connect-lifetime", 60, 3600],
-		["refresh-before-seconds", "refresh-before", 0, 3600],
-		["rotation-window-seconds", "rotation-window", 1, 86_400],
-		["lodge-window-seconds", "lodge-window", 1, 86_400],
-		["revocation-skew-seconds", "revocation-skew", 0, 300],
-		["window-seconds", "window", 1, 3600],
-	] as const;
-
-	it.each(renamed)("still reads %s, alone, as %s", (old, now, low) => {
-		const read = section.parse({ [old]: low });
-		expect(read[now]).toBe(low);
-		expect(read).not.toHaveProperty(old);
-	});
-
-	it.each(renamed)(
-		"takes %s, read as %s, from %i to %i, and nothing outside",
-		(old, _now, low, high) => {
-			const parses = (value: number) => section.safeParse({ [old]: value }).success;
-			expect([parses(low - 1), parses(low), parses(high), parses(high + 1)]).toEqual([
-				false,
-				true,
-				true,
-				false,
-			]);
-		},
-	);
-
-	it.each(renamed)("refuses %s given beside %s, naming the key to keep", (old, now, low) => {
-		const read = section.safeParse({ [old]: low, [now]: `${low}s` });
-		expect(read.error?.issues).toEqual([
-			expect.objectContaining({ path: [old], message: expect.stringContaining(now) }),
+	it.each([
+		"default-seconds",
+		"max-seconds",
+		"connect-seconds",
+		"refresh-before-seconds",
+		"rotation-window-seconds",
+		"lodge-window-seconds",
+		"revocation-skew-seconds",
+		"window-seconds",
+	])("refuses %s, a name in seconds it no longer reads", (old) => {
+		expect(section.safeParse({ [old]: 60 }).error?.issues).toMatchObject([
+			{ code: "unrecognized_keys", keys: [old] },
 		]);
 	});
 });
@@ -155,32 +130,15 @@ describe("federation-grants' section: a connection's longest access token life",
 		]);
 	});
 
-	it("refuses a connection that gives it under neither name", () => {
+	it("refuses a connection without it", () => {
 		expect(section.safeParse(withConnection({})).error?.issues).toMatchObject([
 			{ path: [...where, key] },
 		]);
 	});
 
-	it("still reads it in seconds, alone, under its name in seconds", () => {
-		const read = lifeOf({ [old]: 3600 });
-		expect(read?.[key]).toBe(3600);
-		expect(read).not.toHaveProperty(old);
-	});
-
-	it("takes the name in seconds from 1 to 86400, and nothing outside", () => {
-		const parses = (value: number) => section.safeParse(withConnection({ [old]: value })).success;
-		expect([parses(0), parses(1), parses(86_400), parses(86_401)]).toEqual([
-			false,
-			true,
-			true,
-			false,
-		]);
-	});
-
-	it("refuses it given under both names in one connection, naming the key to keep", () => {
-		const read = section.safeParse(withConnection({ [old]: 3600, [key]: "1h" }));
-		expect(read.error?.issues).toEqual([
-			expect.objectContaining({ path: [...where, old], message: expect.stringContaining(key) }),
-		]);
+	it("refuses max-access-token-seconds, a name in seconds it no longer reads", () => {
+		expect(
+			section.safeParse(withConnection({ [key]: "1h", [old]: 3600 })).error?.issues,
+		).toMatchObject([{ code: "unrecognized_keys", path: where, keys: [old] }]);
 	});
 });

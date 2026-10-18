@@ -174,14 +174,6 @@ From `@mod/federation-grants`.
 | `federation-grants.identity-check` | required \| none | `required` |  |  |  |  |
 | `federation-grants.requests` | integer (1–1000) | `60` |  |  |  |  |
 | `federation-grants.window` | string | `1m` |  |  |  | The window a source's requests are counted in, on every route: a duration with a unit, from 1s to 1h, e.g. 1m. |
-| `federation-grants.default-seconds` | integer (60–31536000) |  |  |  |  | Deprecated: seconds, as a bare number; write `default-lifetime` with its unit instead. |
-| `federation-grants.max-seconds` | integer (60–31536000) |  |  |  |  | Deprecated: seconds, as a bare number; write `max-lifetime` with its unit instead. |
-| `federation-grants.connect-seconds` | integer (60–3600) |  |  |  |  | Deprecated: seconds, as a bare number; write `connect-lifetime` with its unit instead. |
-| `federation-grants.refresh-before-seconds` | integer (0–3600) |  |  |  |  | Deprecated: seconds, as a bare number; write `refresh-before` with its unit instead. |
-| `federation-grants.rotation-window-seconds` | integer (1–86400) |  |  |  |  | Deprecated: seconds, as a bare number; write `rotation-window` with its unit instead. |
-| `federation-grants.lodge-window-seconds` | integer (1–86400) |  |  |  |  | Deprecated: seconds, as a bare number; write `lodge-window` with its unit instead. |
-| `federation-grants.revocation-skew-seconds` | integer (0–300) |  |  |  |  | Deprecated: seconds, as a bare number; write `revocation-skew` with its unit instead. |
-| `federation-grants.window-seconds` | integer (1–3600) |  |  |  |  | Deprecated: seconds, as a bare number; write `window` with its unit instead. |
 
 ## federation-grants-store
 

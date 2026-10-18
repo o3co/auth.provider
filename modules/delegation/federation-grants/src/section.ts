@@ -14,35 +14,8 @@ const page = urlSetting({ schemes: ["https"] });
 const seconds = (min: number, max: number) =>
 	setting.duration("s").pipe(z.number().int().min(min).max(max));
 
-/** A key named before its unit was written: read in place of its new name while its writers move. */
-const before = (min: number, max: number, instead: string) =>
-	z
-		.number()
-		.int()
-		.min(min)
-		.max(max)
-		.optional()
-		.describe(`Deprecated: seconds, as a bare number; write \`${instead}\` with its unit instead.`);
-
-/** Refuses a key given under both its names: the value in seconds would silently win or lose. */
-const oneNameEach =
-	<Raw>(renamed: Readonly<Record<string, string>>) =>
-	(raw: Raw, context: z.RefinementCtx) => {
-		if (typeof raw !== "object" || raw === null) return raw;
-		for (const [old, now] of Object.entries(renamed)) {
-			if (Object.hasOwn(raw, old) && Object.hasOwn(raw, now)) {
-				context.addIssue({
-					code: "custom",
-					path: [old],
-					message: `names ${now} again, in seconds; write ${now} alone`,
-					input: raw,
-				});
-			}
-		}
-		return raw;
-	};
-
-const connectionKeys = z.strictObject({
+/** One connection: what a grant may be for. */
+const connection = z.strictObject({
 	/** The IdP, by `federation`'s name, whose delegation it uses. */
 	idp: connectionName,
 	/** What the user may be asked for; `openid` among them. */
@@ -51,37 +24,14 @@ const connectionKeys = z.strictObject({
 		.min(1)
 		.refine((all) => all.includes("openid"), "scopes must hold openid"),
 	resource: z.url().optional(),
-	"max-access-token-lifetime": seconds(1, 86_400)
-		.optional()
-		.describe(
-			"The longest an upstream access token may live to be kept: a duration with a unit, from 1s to 1d, e.g. 1h. Required.",
-		),
+	"max-access-token-lifetime": seconds(1, 86_400).describe(
+		"The longest an upstream access token may live to be kept: a duration with a unit, from 1s to 1d, e.g. 1h.",
+	),
 	/** A client may ask for fewer of the scopes. */
 	"scope-subsets": z.boolean().prefault(false),
-	"max-access-token-seconds": before(1, 86_400, "max-access-token-lifetime"),
 });
 
-/** One connection: what a grant may be for. */
-const connection = z.preprocess(
-	oneNameEach<z.input<typeof connectionKeys>>({
-		"max-access-token-seconds": "max-access-token-lifetime",
-	}),
-	connectionKeys.transform(({ "max-access-token-seconds": inSeconds, ...read }, context) => {
-		const lifetime = inSeconds ?? read["max-access-token-lifetime"];
-		if (lifetime === undefined) {
-			context.addIssue({
-				code: "custom",
-				path: ["max-access-token-lifetime"],
-				message: "required: a duration with a unit, such as 1h",
-				input: read,
-			});
-			return z.NEVER;
-		}
-		return { ...read, "max-access-token-lifetime": lifetime };
-	}),
-);
-
-const keys = z.strictObject({
+export const section = z.strictObject({
 	/** The page that asks the user, on this deployment's origin. */
 	page: page.optional(),
 	/** Where a browser with no session is sent to log in, then back. */
@@ -139,54 +89,7 @@ const keys = z.strictObject({
 		.describe(
 			"The window a source's requests are counted in, on every route: a duration with a unit, from 1s to 1h, e.g. 1m.",
 		),
-	"default-seconds": before(60, 31_536_000, "default-lifetime"),
-	"max-seconds": before(60, 31_536_000, "max-lifetime"),
-	"connect-seconds": before(60, 3600, "connect-lifetime"),
-	"refresh-before-seconds": before(0, 3600, "refresh-before"),
-	"rotation-window-seconds": before(1, 86_400, "rotation-window"),
-	"lodge-window-seconds": before(1, 86_400, "lodge-window"),
-	"revocation-skew-seconds": before(0, 300, "revocation-skew"),
-	"window-seconds": before(1, 3600, "window"),
 });
-
-/** Each name in seconds, and the name with a unit that replaces it. */
-const renamed = {
-	"default-seconds": "default-lifetime",
-	"max-seconds": "max-lifetime",
-	"connect-seconds": "connect-lifetime",
-	"refresh-before-seconds": "refresh-before",
-	"rotation-window-seconds": "rotation-window",
-	"lodge-window-seconds": "lodge-window",
-	"revocation-skew-seconds": "revocation-skew",
-	"window-seconds": "window",
-} as const;
-
-export const section = z.preprocess(
-	oneNameEach<z.input<typeof keys>>(renamed),
-	keys.transform(
-		({
-			"default-seconds": defaultSeconds,
-			"max-seconds": maxSeconds,
-			"connect-seconds": connectSeconds,
-			"refresh-before-seconds": refreshBeforeSeconds,
-			"rotation-window-seconds": rotationWindowSeconds,
-			"lodge-window-seconds": lodgeWindowSeconds,
-			"revocation-skew-seconds": revocationSkewSeconds,
-			"window-seconds": windowSeconds,
-			...read
-		}) => ({
-			...read,
-			"default-lifetime": defaultSeconds ?? read["default-lifetime"],
-			"max-lifetime": maxSeconds ?? read["max-lifetime"],
-			"connect-lifetime": connectSeconds ?? read["connect-lifetime"],
-			"refresh-before": refreshBeforeSeconds ?? read["refresh-before"],
-			"rotation-window": rotationWindowSeconds ?? read["rotation-window"],
-			"lodge-window": lodgeWindowSeconds ?? read["lodge-window"],
-			"revocation-skew": revocationSkewSeconds ?? read["revocation-skew"],
-			window: windowSeconds ?? read.window,
-		}),
-	),
-);
 
 export type Settings = z.output<typeof section>;
 export type Connection = Settings["connections"][string];
