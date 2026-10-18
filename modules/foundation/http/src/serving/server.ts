@@ -35,10 +35,11 @@ export interface Serving {
 	readonly clock: Clock;
 }
 
-/** The request's head; undefined when the request target is not a URL. */
+/** The request's head; undefined when the request target is not a URL, or its query not UTF-8. */
 function frozenHead(message: IncomingMessage, proxies: TrustedProxies): Head | undefined {
 	const url = URL.parse(message.url ?? "/", "http://placeholder");
-	if (url === null) return undefined;
+	const query = url && paramsOf(url.search.slice(1));
+	if (!url || !query) return undefined;
 	const headers = new Map<string, string>();
 	for (const [key, value] of Object.entries(message.headers)) {
 		if (value !== undefined) headers.set(key, Array.isArray(value) ? value.join(", ") : value);
@@ -46,7 +47,7 @@ function frozenHead(message: IncomingMessage, proxies: TrustedProxies): Head | u
 	return Object.freeze({
 		method: message.method ?? "GET",
 		path: url.pathname,
-		query: paramsOf(url.searchParams),
+		query,
 		headers: readOnly(headers),
 		source: sourceOf(proxies, message.socket.remoteAddress ?? "", headers),
 	});

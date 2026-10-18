@@ -24,6 +24,7 @@ Internal module of `http`: the values a request is sent with, by name, from its 
 - A body the route does not declare is `415`, and gives no fields.
 - A route that declares no bodies reads a form when one is sent, and ignores any other body.
 - No type and nothing sent is no body.
+- A query's or a form's percent-escapes are read as UTF-8 and `+` as a space, a `%` without two hex digits kept as sent; escapes that are not well-formed UTF-8 give no values, and such a form, or one whose bytes are not UTF-8, is `400`.
 - The values of a name keep the order sent.
 - The maps, their value lists and the mistyped names cannot be written to, and a write to a map throws.
 
