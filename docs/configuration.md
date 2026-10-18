@@ -47,8 +47,8 @@ From `@mod/client-assertion`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `client-assertion.max-lifetime-seconds` | integer (1–86400) | `3600` |  |  |  | The longest lifetime a client assertion may have, in seconds. |
-| `client-assertion.clock-skew-seconds` | integer (0–300) | `30` |  |  |  | How far a client's clock may be off when an assertion's times are checked, in seconds. |
+| `client-assertion.max-lifetime` | string | `1h` |  |  |  | The longest lifetime a client assertion may have, from `1s` to `1d` in whole seconds. |
+| `client-assertion.clock-skew` | string | `30s` |  |  |  | How far a client's clock may be off when an assertion's times are checked, from `0s` to `5m` in whole seconds. |
 
 ## clients
 

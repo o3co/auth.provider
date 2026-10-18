@@ -26,7 +26,7 @@ export const clientKeys: Section<ClientKeys> = {
 						.record(z.string(), z.unknown())
 						.refine(verifiesSignatures, "a public RSA, EC or OKP key for verifying signatures"),
 				)
-				.default([]),
+				.prefault([]),
 			"jwks-uri": urlSetting({ schemes: ["https", "http"] }).optional(),
 		})
 		.refine((s) => s.keys.length === 0 || s["jwks-uri"] === undefined, {
