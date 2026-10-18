@@ -788,6 +788,37 @@ describe("values no two factors may hold", () => {
 		expect(await bindKind("bob", "card", "c1")).toMatchObject({ kind: "bound" });
 	});
 
+	it("refuses a first binding another counting factor beat to the subject, binding nothing and recording it", async () => {
+		const { decided, provedCode, bindCode, events } = await serve({ mode: "required" });
+		const beaten = await provedCode("liz");
+		await bindCode("liz");
+		events.length = 0;
+		expect(await decided.bind("liz", beaten.pending, beaten.state)).toEqual({
+			kind: "first-binding-closed",
+		});
+		expect((await decided.held("liz")).filter((f) => f.kind === "code")).toHaveLength(1);
+		expect(events).toEqual([
+			expect.objectContaining({
+				kind: "mfa.first_binding_conflict",
+				subject: "liz",
+				attributes: { kind: "code" },
+			}),
+		]);
+		// Begun once one counts, a binding is no first one, and binds beside it.
+		const later = await provedCode("liz");
+		expect((await decided.bind("liz", later.pending, later.state)).kind).toBe("bound");
+	});
+
+	it("binds one of two first bindings finished at once, refusing the other", async () => {
+		const { decided, provedCode } = await serve({ mode: "required" });
+		const [one, two] = [await provedCode("mo"), await provedCode("mo")];
+		const bound = await Promise.all([
+			decided.bind("mo", one.pending, one.state),
+			decided.bind("mo", two.pending, two.state),
+		]);
+		expect(bound.map((b) => b.kind).sort()).toEqual(["bound", "first-binding-closed"]);
+	});
+
 	it("binds only one of two factors of one value bound at once", async () => {
 		const { decided, events } = await serve({}, { kinds: [card, backup] });
 		const proved = async (subject: string) => {

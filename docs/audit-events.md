@@ -74,6 +74,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 |---|---|---|
 | `mfa.factor.enrolled` | `kind`, `factor` | a factor is bound |
 | `mfa.factor.removed` | `kind`, `factor` | a factor is removed |
+| `mfa.first_binding_conflict` | `kind` | a first binding is refused because another counting factor was bound since it began; nothing is written |
 | `mfa.recovery_code.used` | `kind`, `factor`, `remaining` | a recovery code is used; `remaining` when the kind tells how many are left |
 | `mfa.recovery_codes.generated` | `kind`, `regenerated` | recovery codes come with a first counting factor, or are reissued (`regenerated`) |
 

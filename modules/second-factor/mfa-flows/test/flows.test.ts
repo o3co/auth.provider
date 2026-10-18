@@ -980,8 +980,33 @@ describe("mfa under races and misuse", () => {
 			);
 		const done = await Promise.all([complete(first, jar), complete(second, other)]);
 		expect(done.filter((d) => d.body.recovery_codes)).toHaveLength(1);
+		// Both began as the first; the one beaten binds nothing, and the session is told of the conflict.
+		expect(done.map((d) => [d.status, d.body.error]).sort()).toEqual([
+			[200, undefined],
+			[409, "mfa_enrollment_conflict"],
+		]);
 		const held = await s.app.get(factors).held("ray");
 		expect(held.filter((f) => f.kind === "backup")).toHaveLength(1);
+	});
+
+	it("asks a login again when another factor was bound while its first binding was under way", async () => {
+		const s = await serve({ mode: "required" });
+		const { tx } = await s.heldLogin("lou");
+		const begun = await s.call("POST", "/session/mfa/enrollment", {
+			kind: "code",
+			transaction_id: tx,
+		});
+		const held = new Map(s.jar());
+		await s.enrollCode("lou");
+		const done = await s.call(
+			"POST",
+			"/session/mfa/enrollment/complete",
+			{ transaction_id: tx, proof: `${begun.body.secret}:0` },
+			{ jar: held },
+		);
+		expect([done.status, done.body.error]).toEqual([401, "login_required"]);
+		const kept = await s.app.get(factors).held("lou");
+		expect(kept.filter((f) => f.kind === "code")).toHaveLength(1);
 	});
 
 	it("takes only a raise that added a second factor as a recent second factor", async () => {
