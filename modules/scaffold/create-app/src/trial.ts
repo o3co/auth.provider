@@ -31,7 +31,11 @@ function trialBlocks(
 	modules: readonly string[],
 	deployment: string,
 	port: number | undefined,
-	added: { readonly allow: readonly string[]; readonly plainLoopback: readonly string[] },
+	added: {
+		readonly allow: readonly string[];
+		readonly plainLoopback: readonly string[];
+		readonly clients: readonly unknown[];
+	},
 ) {
 	const has = (name: string) => modules.includes(name);
 	const hosts = [
@@ -76,6 +80,12 @@ function trialBlocks(
 			"webauthn",
 			'webauthn { rp-id = login.example.invalid, rp-name = "Trial", origins = ["https://login.example.invalid"] }',
 		],
+		// Lists replace each other across layers, so the caller's clients join the trial's one list.
+		[
+			has("clients") && added.clients.length > 0,
+			"clients",
+			`clients { registered = ${JSON.stringify(added.clients)} }`,
+		],
 		[
 			has("seal"),
 			"seal",
@@ -100,6 +110,8 @@ export async function trialSettings(
 		/** Hosts the caller's own layer needs reached, merged into the trial's one outbound block. */
 		readonly allow?: readonly string[];
 		readonly plainLoopback?: readonly string[];
+		/** Clients the caller's own layer registers, merged into the trial's one `clients.registered`. */
+		readonly clients?: readonly unknown[];
 	},
 ): Promise<{ readonly env: Record<string, string>; readonly local: string }> {
 	// The modules the entry imports, by their directory's name, as the workspace or a bundle names them.
@@ -113,7 +125,11 @@ export async function trialSettings(
 			.filter(([section]) => kept(section))
 			.map(([section, key, value]) => [envName(`${section}.${key}`), value]),
 	);
-	const added = { allow: settings.allow ?? [], plainLoopback: settings.plainLoopback ?? [] };
+	const added = {
+		allow: settings.allow ?? [],
+		plainLoopback: settings.plainLoopback ?? [],
+		clients: settings.clients ?? [],
+	};
 	const blocks = trialBlocks(modules, settings.deployment ?? "single", settings.port, added).filter(
 		(b) => kept(b.section),
 	);
