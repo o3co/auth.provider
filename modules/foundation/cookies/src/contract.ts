@@ -12,8 +12,6 @@ export type CookieLookup =
 
 /** This deployment's cookies, named and set by one rule. */
 export interface Cookies {
-	/** The cookie `lookup` finds, or none; leaving in this release, so a jar need not offer it: read `lookup`. */
-	read?(request: HttpRequest, name: string): string | undefined;
 	/** The cookie the request carries under this name, none, or why it is withheld; a withheld one warns once a request and name. */
 	lookup(request: HttpRequest, name: string): CookieLookup;
 	/**
