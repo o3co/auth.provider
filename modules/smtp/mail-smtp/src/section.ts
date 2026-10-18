@@ -1,3 +1,4 @@
+import { setting } from "@mod/kernel";
 import { canonicalAddress, isAddress } from "@mod/mail";
 import { z } from "zod";
 import { isLoopbackHost, mailboxOf } from "./relay/relay.ts";
@@ -10,8 +11,8 @@ const line = z.string().refine((s) => s.isWellFormed() && s.trim() !== "" && !/\
 export const section = z
 	.strictObject({
 		host: line,
-		port: z.number().int().min(1).max(65_535).default(587),
-		security: z.enum(["starttls", "tls", "none"]).default("starttls"),
+		port: z.number().int().min(1).max(65_535).prefault(587),
+		security: z.enum(["starttls", "tls", "none"]).prefault("starttls"),
 		from: line.transform((from, ctx) => {
 			const mailbox = mailboxOf(from);
 			// Kept in mail's canonical form: a domain beyond ASCII goes out in IDNA's ASCII form.
@@ -25,8 +26,12 @@ export const section = z
 		}),
 		user: line.optional(),
 		password: line.optional(),
-		"deadline-ms": z.number().int().min(100).max(600_000).default(40_000),
-		"concurrent-sends": z.number().int().min(1).max(1000).default(20),
+		deadline: setting
+			.duration("ms")
+			.pipe(z.number().int().min(100).max(600_000))
+			.prefault("40s")
+			.describe("How long a whole send may take, from 100ms to 10m."),
+		"concurrent-sends": z.number().int().min(1).max(1000).prefault(20),
 	})
 	.superRefine((s, ctx) => {
 		if (s.user !== undefined && s.password === undefined) {

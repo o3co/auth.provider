@@ -239,7 +239,7 @@ describe("registration from a session", () => {
 	});
 
 	it("limits requests per source over both routes, then answers 429", async () => {
-		const { browser } = await serve({ requests: 2, "window-seconds": 60 });
+		const { browser } = await serve({ requests: 2, window: "1m" });
 		const post = await browser("sam");
 		expect((await post("options")).status).toBe(200);
 		expect((await post("verify", { response: {} })).status).toBe(200);

@@ -304,7 +304,7 @@ From `@mod/mail-smtp`.
 | `mail-smtp.from` | string |  | yes | `MAIL_SMTP_FROM` | `auth@example.invalid` |  |
 | `mail-smtp.user` | string |  |  |  |  |  |
 | `mail-smtp.password` | string |  |  |  |  |  |
-| `mail-smtp.deadline-ms` | integer (100–600000) | `40000` |  |  |  |  |
+| `mail-smtp.deadline` | string | `40s` |  |  |  | How long a whole send may take, from 100ms to 10m. |
 | `mail-smtp.concurrent-sends` | integer (1–1000) | `20` |  |  |  |  |
 
 ## metrics-prometheus
@@ -339,8 +339,8 @@ From `@mod/mfa-email`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `mfa-email.adds-second-factor` | boolean | `false` |  |  |  |  |
-| `mfa-email.code-seconds` | integer (60–1800) | `600` |  |  |  |  |
+| `mfa-email.adds-second-factor` | boolean | `false` |  |  |  | Whether a code by mail adds `mfa`; by default it is a second factor of its own amr only. |
+| `mfa-email.code-lifetime` | string | `10m` |  |  |  | How long a code by mail lives, from 1m to 30m, for an enrolment or a sign-in; the proof before a first binding keeps its ten minutes. |
 
 ## mfa-flows
 
@@ -366,8 +366,8 @@ From `@mod/mfa-webauthn`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `mfa-webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  |  |
-| `mfa-webauthn.display-name` | string | `Account` |  |  |  |  |
+| `mfa-webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  | Whether the authenticator is asked to verify its user, as WebAuthn says it. |
+| `mfa-webauthn.display-name` | string | `Account` |  |  |  | The name an authenticator shows for an account with no name to show; it names no one. |
 
 ## mtls
 
@@ -427,7 +427,7 @@ From `@mod/passkey-registration`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `passkey-registration.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over both registration routes. |
-| `passkey-registration.window-seconds` | integer (1–86400) | `300` |  |  |  | The window, in seconds, that requests are counted over. |
+| `passkey-registration.window` | string | `5m` |  |  |  | The window requests are counted over, from 1s to 1d. |
 
 ## rate-limit
 
@@ -477,9 +477,9 @@ From `@mod/rp-logout`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `rp-logout.remember-seconds` | integer (60–2592000) | `86400` |  |  |  |  |
-| `rp-logout.notify-seconds` | integer (60–604800) | `86400` |  |  |  |  |
-| `rp-logout.sweep-seconds` | integer (1–3600) | `60` |  |  |  |  |
+| `rp-logout.remember-for` | string | `1d` |  |  |  | How long a session's clients are kept from a redemption, from 1m to 30d; at least as long as a session lives. |
+| `rp-logout.notify-within` | string | `1d` |  |  |  | How long an undelivered back-channel notice is tried again, from 1m to 7d. |
+| `rp-logout.sweep-interval` | string | `1m` |  |  |  | How often each host sweeps the kept notices, from 1s to 1h. |
 
 ## rp-logout-store
 
@@ -581,8 +581,8 @@ From `@mod/token-endpoint`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `token-endpoint.requests` | integer (1–100000) | `60` |  |  |  |  |
-| `token-endpoint.window-seconds` | integer (1–86400) | `60` |  |  |  |  |
+| `token-endpoint.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, before any client is authenticated. |
+| `token-endpoint.window` | string | `1m` |  |  |  | The window requests are counted over, from 1s to 1d. |
 
 ## token-exchange
 

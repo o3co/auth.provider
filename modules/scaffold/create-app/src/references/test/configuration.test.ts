@@ -81,12 +81,8 @@ const describedLater = new Set([
 	"clients-cimd",
 	"federation-grants",
 	"mail-smtp",
-	"mfa-email",
 	"mfa-flows",
-	"mfa-webauthn",
-	"rp-logout",
 	"session",
-	"token-endpoint",
 	"webauthn",
 	"webauthn-login",
 ]);

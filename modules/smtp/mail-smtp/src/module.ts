@@ -21,7 +21,7 @@ export default defineModule({ name: "mail-smtp", section, replicaSafe: true }, (
 			security,
 			from,
 			account: user !== undefined && password !== undefined ? { user, pass: password } : undefined,
-			deadlineMs: c.section["deadline-ms"],
+			deadlineMs: c.section.deadline,
 		});
 		const most = c.section["concurrent-sends"];
 		// Sends on this host now; each holds a connection until its answer or its deadline.

@@ -9,7 +9,7 @@
 
 ## Interface
 - Composition definition only (provides `mail`); it cannot be composed beside mail's logging-only sender.
-- Operator section: `host` (required), `port` (default 587), `security` (`starttls` by default, `tls` or `none`), `from` (one address mail's `isAddress` takes, a display name allowed), `user` and `password` (both or neither), `deadline-ms` (the whole send, default 40000), `concurrent-sends` (sends at once on a host, 1–1000, default 20).
+- Operator section: `host` (required), `port` (default 587), `security` (`starttls` by default, `tls` or `none`), `from` (one address mail's `isAddress` takes, a display name allowed), `user` and `password` (both or neither), `deadline` (the whole send, 100ms–10m, default `40s`, written with its unit), `concurrent-sends` (sends at once on a host, 1–1000, default 20).
 
 ## Invariants
 - One connection per send, never reused. It holds no state but the count of sends at once, so it is safe on multiple instances.
