@@ -1,4 +1,5 @@
 import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
+import secretHashModule from "@mod/secret-hash/module";
 import { describe, expect, it } from "vitest";
 import {
 	type Ledger,
@@ -32,6 +33,7 @@ const boot = async (
 		await assemble({
 			modules: [
 				usersModule,
+				secretHashModule,
 				stores.module,
 				defineModule({ name: "test-ledger" }, (m) => [m.contribute(ledgers).by(() => ledger)]),
 				...names.map((name, i) =>
@@ -153,6 +155,7 @@ describe("IdP names declared to users", () => {
 			assemble({
 				modules: [
 					usersModule,
+					secretHashModule,
 					memoryUsersStores().module,
 					...names.map((name, i) =>
 						defineModule({ name: `names-${i}` }, (m) => [

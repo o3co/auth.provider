@@ -7,6 +7,7 @@ import {
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime, type RecordingLog, recordingLog } from "@mod/kernel/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import { describe, expect, it } from "vitest";
 import { type Ledger, ledgers, type Users, users, type Verified } from "../src/contract.ts";
 import usersModule from "../src/module.ts";
@@ -40,7 +41,7 @@ const boot = (
 	recorded?: RecordingLog,
 ) =>
 	assemble({
-		modules: [usersModule, memoryUsersStores().module, ...modules],
+		modules: [usersModule, secretHashModule, memoryUsersStores().module, ...modules],
 		config: { ...kernelConfig(), users: { registered } },
 		...(recorded ? { runtime: quietRuntime({ log: recorded.log }) } : {}),
 	});
