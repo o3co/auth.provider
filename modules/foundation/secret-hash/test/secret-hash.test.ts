@@ -4,7 +4,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import bcrypt from "bcryptjs";
 import { afterEach, describe, expect, it } from "vitest";
 import { checkerWith } from "../src/checker.ts";
-import { readSecretHash, type SecretHash, secretChecker } from "../src/contract.ts";
+import { readSecretHash, type SecretHash, secretChecker, secretCheckers } from "../src/contract.ts";
 import { decoyOf, type Hash, matches, readHash } from "../src/hashes.ts";
 import secretHash from "../src/module.ts";
 import {
@@ -265,5 +265,33 @@ describe("the checks under way at once", () => {
 		for (const max of [0, 1025]) {
 			await expect(limited({ "max-concurrent": max })).rejects.toBeInstanceOf(BootRefused);
 		}
+	});
+});
+
+describe("the checkers an assembly makes", () => {
+	const hash = read(testBcryptHash("right"));
+	const assembled = (max: number) =>
+		assemble({
+			modules: [secretHash],
+			config: { ...kernelConfig(), "secret-hash": { "max-concurrent": max } },
+			runtime: quietRuntime(),
+		});
+
+	it("keeps each assembly's limit apart, and shares it among the checkers one assembly makes", async () => {
+		const [one, two] = [await assembled(1), await assembled(1)];
+		const own = one.get(secretCheckers).checkerOf([hash]);
+		const sibling = one.get(secretCheckers).checkerOf([hash]);
+		const apart = two.get(secretCheckers).checkerOf([hash]);
+		const first = own.check(hash, "right");
+		await expect(sibling.check(hash, "right")).rejects.toSatisfy(isUnavailable);
+		expect(await apart.check(hash, "right")).toBe(true);
+		expect(await first).toBe(true);
+	});
+
+	it("checks as secretChecker does: the hash's own match, and a decoy's never", async () => {
+		const checker = (await assembled(8)).get(secretCheckers).checkerOf([hash]);
+		expect(await checker.check(hash, "right")).toBe(true);
+		expect(await checker.check(hash, "wrong")).toBe(false);
+		expect(await checker.check(undefined, "right")).toBe(false);
 	});
 });

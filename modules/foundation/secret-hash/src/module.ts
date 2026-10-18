@@ -1,6 +1,8 @@
 import { contract, defineModule } from "@mod/kernel";
 import { z } from "zod";
-import { defaultMaxConcurrent, limitChecks } from "./checker.ts";
+import { checkerWith, defaultMaxConcurrent, limitChecks, placesOf } from "./checker.ts";
+import { secretCheckers } from "./contract.ts";
+import { matches } from "./hashes.ts";
 
 const section = z.strictObject({
 	"max-concurrent": z
@@ -19,4 +21,8 @@ const maxConcurrent = contract<number>("secret-hash.max-concurrent");
 
 export default defineModule({ name: "secret-hash", section, replicaSafe: true }, (m) => [
 	m.provide(maxConcurrent).by((c) => limitChecks(c.section["max-concurrent"])),
+	m.provide(secretCheckers).by((c) => {
+		const places = placesOf(c.section["max-concurrent"]);
+		return { checkerOf: (inUse) => checkerWith(inUse, c.random.bytes, matches, places) };
+	}),
 ]);

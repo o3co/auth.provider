@@ -1,4 +1,4 @@
-import type { Random } from "@mod/kernel";
+import { contract, type Random } from "@mod/kernel";
 import { checkerWith } from "./checker.ts";
 import { matches, readHash } from "./hashes.ts";
 
@@ -17,6 +17,13 @@ export interface SecretChecker {
 	 */
 	check(hash: SecretHash | undefined, secret: string): Promise<boolean>;
 }
+
+/** Checkers made in one assembly, its `max-concurrent` shared by them all; decoys from the kernel's random. */
+export interface SecretCheckers {
+	checkerOf(inUse: Iterable<SecretHash>): SecretChecker;
+}
+
+export const secretCheckers = contract<SecretCheckers>("secret-hash.checkers");
 
 /** A bcrypt or scrypt hash, or undefined for anything else, plain text included. */
 export function readSecretHash(text: string): SecretHash | undefined {
