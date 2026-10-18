@@ -155,9 +155,9 @@ From `@mod/federation-grants`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `federation-grants.page` | string |  |  | `FEDERATION_GRANTS_PAGE` | `https://login.example.invalid/federation-grants` |  |
-| `federation-grants.login-page` | string |  |  | `FEDERATION_GRANTS_LOGIN_PAGE` | `https://login.example.invalid/login` |  |
-| `federation-grants.step-up-page` | string |  |  |  |  |  |
+| `federation-grants.page` | string |  |  | `FEDERATION_GRANTS_PAGE` | `https://login.example.invalid/federation-grants` | The page that asks the user, on this deployment's origin: an https URL (http only on a loopback host). |
+| `federation-grants.login-page` | string |  |  | `FEDERATION_GRANTS_LOGIN_PAGE` | `https://login.example.invalid/login` | Where a browser with no session is sent to log in, then back: an https URL (http only on a loopback host). |
+| `federation-grants.step-up-page` | string |  |  |  |  | Where a session that falls short of a requirement is sent once to raise it, then back: an https URL (http only on a loopback host). |
 | `federation-grants.connections` | map | `{}` |  |  |  |  |
 | `federation-grants.default-lifetime` | string | `30d` |  |  |  | A grant's lifetime from its activation when a client asks for none: a duration with a unit, from 1m to 365d, e.g. 30d. |
 | `federation-grants.max-lifetime` | string | `30d` |  |  |  | The most a grant may live from its activation: a duration with a unit, from 1m to 365d, e.g. 90d. |
@@ -268,7 +268,7 @@ From `@mod/login-gates`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `login-gates.return-targets` | list of string | `[]` |  |  |  | The https URLs, matched as written, a login may return to besides the return paths modules contribute. |
+| `login-gates.return-targets` | list of string | `[]` |  |  |  | The https URLs (http only on a loopback host), matched as written, a login may return to besides the return paths modules contribute. |
 
 ## login-password
 

@@ -20,7 +20,7 @@
 - Browser routes: `GET …/session/federation-grants/connect?request=`, `GET` and `POST …/consent` (`challenge`, `decision`; the POST under `csrf`), `GET …/callback/<connection>`, which returns to the intent's URI with `grant_id`, `state` and any `error`.
 - Client metadata `federation-grants`: `connections`, `return-uris` (exact, holding no `grant_id`, `state` or `error`).
 - Operator section:
-  - `page`, `login-page`, `step-up-page` (https)
+  - `page`, `login-page`, `step-up-page` (https; http only on a loopback host)
   - `connections.<name>` (`idp`, `scopes` with `openid`, `resource?`, `max-access-token-lifetime`, `scope-subsets`)
   - `default-lifetime`, `max-lifetime` (`30d`)
   - `connect-lifetime` (`10m`)
