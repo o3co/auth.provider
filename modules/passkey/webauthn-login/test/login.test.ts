@@ -413,16 +413,25 @@ describe("the authentication options route", () => {
 	});
 
 	it("limits requests per source, then answers 429", async () => {
-		const s = await serve({ requests: 2, "window-seconds": 60 });
+		const s = await serve({ requests: 2, window: "1m" });
 		expect((await s.ask()).status).toBe(200);
 		expect((await s.ask()).status).toBe(200);
 		expect((await s.ask()).status).toBe(429);
 	});
 
-	it("counts requests over window-seconds", async () => {
-		const s = await serve({ requests: 1, "window-seconds": 60 });
+	it("counts requests over the window", async () => {
+		const s = await serve({ requests: 1, window: "1m" });
 		expect((await s.ask()).status).toBe(200);
 		now += 59_000;
+		expect((await s.ask()).status).toBe(429);
+		now += 1_000;
+		expect((await s.ask()).status).toBe(200);
+	});
+
+	it("counts requests over window-seconds, read in place of the window while its writers move", async () => {
+		const s = await serve({ requests: 1, "window-seconds": 30 });
+		expect((await s.ask()).status).toBe(200);
+		now += 29_000;
 		expect((await s.ask()).status).toBe(429);
 		now += 1_000;
 		expect((await s.ask()).status).toBe(200);
@@ -436,24 +445,57 @@ describe("the authentication options route", () => {
 });
 
 describe("the operator section", () => {
-	it("defaults to 60 requests in 60 seconds", () => {
-		expect(loginSection.parse({})).toEqual({ requests: 60, "window-seconds": 60 });
+	const takes = (value: Record<string, unknown>) => loginSection.safeParse(value).success;
+
+	it("defaults to 60 requests in a window of 1m, read in seconds", () => {
+		expect(loginSection.parse({})).toEqual({ requests: 60, window: 60 });
 	});
 
-	it("takes whole numbers within bounds, and no other key", () => {
-		const takes = (value: Record<string, unknown>) => loginSection.safeParse(value).success;
-		expect([takes({ requests: 1 }), takes({ requests: 100_000 })]).toEqual([true, true]);
-		expect([takes({ "window-seconds": 1 }), takes({ "window-seconds": 86_400 })]).toEqual([
-			true,
-			true,
+	it("reads the window as an operator writes it, with a unit, from 1s to 1d", () => {
+		expect(loginSection.parse({ window: "30m" })).toEqual({ requests: 60, window: 1800 });
+		const bounds = ["0s", "1s", "1d", "86401s"].map((window) => takes({ window }));
+		expect(bounds).toEqual([false, true, true, false]);
+		expect(takes({ window: "1500ms" })).toBe(false);
+	});
+
+	it("refuses to start with a window that names no unit, a number or digits alone", async () => {
+		const unitless = [
+			[60, "written with its unit, such as 30s"],
+			["60", "duration must name its unit"],
+		] as const;
+		for (const [written, reason] of unitless) {
+			await expect(serve({ window: written }), String(written)).rejects.toMatchObject({
+				refusals: [{ where: "webauthn-login.window", reason }],
+			});
+		}
+		expect(loginSection.safeParse({ window: "60" }).error?.issues).toMatchObject([
+			{ path: ["window"], params: { problem: "missing-unit" } },
 		]);
+	});
+
+	it("reads window-seconds, in seconds, in place of the window, within its bounds", () => {
+		expect(loginSection.parse({ "window-seconds": 30 })).toEqual({ requests: 60, window: 30 });
+		const bounds = [0, 1, 86_400, 86_401, 1.5].map((n) => takes({ "window-seconds": n }));
+		expect(bounds).toEqual([false, true, true, false, false]);
+	});
+
+	it("refuses to start with the window under both its names, even at its default", async () => {
+		await expect(serve({ window: "1m", "window-seconds": 30 })).rejects.toMatchObject({
+			refusals: [
+				{
+					where: "webauthn-login.window-seconds",
+					reason: "window replaces window-seconds: write one",
+				},
+			],
+		});
+	});
+
+	it("takes whole numbers of requests within bounds, and no other key", () => {
+		expect([takes({ requests: 1 }), takes({ requests: 100_000 })]).toEqual([true, true]);
 		const refused = {
 			"no requests": { requests: 0 },
 			"too many requests": { requests: 100_001 },
 			"a fraction of requests": { requests: 1.5 },
-			"no window": { "window-seconds": 0 },
-			"too long a window": { "window-seconds": 86_401 },
-			"a fraction of a window": { "window-seconds": 1.5 },
 			"an unknown key": { limit: 1 },
 		};
 		for (const [name, value] of Object.entries(refused)) expect(takes(value), name).toBe(false);

@@ -125,7 +125,6 @@ const prefaultLater = new Set([
 	"session-tokens-store",
 	"store",
 	"token-endpoint",
-	"webauthn-login",
 ]);
 
 /** Each place a rule is broken: the key path, in its section. */

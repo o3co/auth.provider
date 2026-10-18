@@ -18,7 +18,7 @@
   - It answers `passkeys`' options with `no-store`, their challenge made for that client.
   - A missing `client_id`, or one that is not one non-empty string, is `400 invalid_request`.
 - Audit event `passkey.login.refused`, with `client` and `reason`: a kind from a fixed list, one per refusal of `passkeys`, and `authentication_revoked`.
-- Operator section: `requests` (1–100000, default 60) in `window-seconds` (1–86400, default 60), for the options route.
+- Operator section: `requests` (1–100000, default 60) in `window` (1s–1d in whole seconds, written with its unit, default `1m`), for the options route. `window-seconds` (1–86400) is read in its place while its writers move; giving both refuses boot.
 
 ## Invariants
 - Order: the assertion's shape, then `passkeys` (user handle, the challenge once and its client, signature, count), then the scope, then the subject's revocation boundary, then the access token, then the refresh token.
