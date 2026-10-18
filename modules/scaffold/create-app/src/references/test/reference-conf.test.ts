@@ -88,7 +88,6 @@ const unitsLater = new Set<string>();
 const prefaultLater = new Set([
 	"code-grant-store",
 	"federation-grants-store",
-	"session-tokens-store",
 ]);
 
 /** Each place a rule is broken: the key path, in its section. */
