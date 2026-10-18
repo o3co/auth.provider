@@ -188,9 +188,12 @@ describe("the client routes", () => {
 			h.advance(2_592_000_000 - 1);
 			await h.grantCall(id, "status");
 			expect(h.stores.peek(id)).toHaveProperty("sealed");
+			const read = (h.stores.peek(id) as { version: string }).version;
 			h.advance(1);
 			await h.grantCall(id, step, step === "reauthorize" ? { redirect_uri: back, state: "r" } : {});
 			expect(h.stores.peek(id), step).not.toHaveProperty("sealed");
+			// A new version, so a refresh that read the grant before writes nothing back.
+			expect((h.stores.peek(id) as { version: string }).version, step).not.toBe(read);
 			expect((await h.grantCall(id, "status")).json?.status).toBe("expired");
 		}
 	});

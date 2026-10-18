@@ -150,7 +150,10 @@ export function apiWith(p: ApiParts) {
 		if (!over(grant)) return grant;
 		const changed = await p.grants.change(grant.id, (stored) => {
 			const now = records.grantOf(stored);
-			return now && over(now) ? { value: records.stored(withoutCredentials(now)) } : undefined;
+			// A new version, so a refresh that read the grant before cannot write credentials back.
+			return now && over(now)
+				? { value: records.stored({ ...withoutCredentials(now), version: secret() }) }
+				: undefined;
 		});
 		return records.grantOf(changed?.after) ?? grant;
 	};

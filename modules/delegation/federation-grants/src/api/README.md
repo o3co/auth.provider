@@ -16,7 +16,7 @@ Internal module of `federation-grants`: the client routes, and the revocation fo
 
 ## Invariants
 - A route reads the body, then the owner, then the grant's state and boundary, its end, the configuration, and only then the request's assertions.
-- A grant the boundary covers is written revoked, without credentials, before anything else; a grant read past its end loses its credentials.
+- A grant the boundary covers is written revoked, without credentials, before anything else; a grant read past its end loses its credentials, under a new version, so a refresh that read it before writes nothing back.
 - Every refused token request is audited once with a reason naming the refusal; before the owner is known, by the client only.
 - A revocation is `204` in any state and audited once; a pending grant's status needs the client to still be allowed.
 - Lodgings are counted per client before they are written; pushed-out intents end.
