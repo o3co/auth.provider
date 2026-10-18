@@ -1,4 +1,4 @@
-import type { HttpRequest } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import { contract, extensionPoint } from "@mod/kernel";
 import type { SourcedAttributes } from "@mod/login-attributes";
 
@@ -47,6 +47,12 @@ export type Entry =
 	| { readonly kind: "absent" }
 	/** A requirement is not met; its `answer` is for the client and is passed on unread. */
 	| { readonly kind: "short"; readonly requirement: string; readonly answer: Answer };
+
+/** The answer to an entry that did not enter: absent is 401 `login_required`; short is 403 with the requirement's answer. */
+export const refusedEntry = (entry: Exclude<Entry, { kind: "entered" }>): HttpResponse =>
+	entry.kind === "absent"
+		? jsonAnswer(401, { error: "login_required" })
+		: jsonAnswer(403, entry.answer);
 
 export interface Sessions {
 	enter(request: HttpRequest): Promise<Session | undefined>;
