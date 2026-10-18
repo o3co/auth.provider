@@ -95,7 +95,8 @@ export type BatchWrite =
  */
 export interface Store {
 	get(key: Key): Promise<Read>;
-	put(key: Key, value: Json, options: WriteOptions): Promise<Written | Late | Reused>;
+	/** Leaving: no caller writes whatever a key holds, so a store need not offer it. */
+	put?(key: Key, value: Json, options: WriteOptions): Promise<Written | Late | Reused>;
 	putIfAbsent(
 		key: Key,
 		value: Json,
@@ -406,9 +407,9 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 		if (new Set(names).size !== names.length) fail("a batch may write each key once");
 		return checked;
 	};
+	const put = inner.put?.bind(inner);
 	return {
 		get: async (k) => inner.get(key(k)),
-		put: async (k, v, o) => inner.put(key(k), json(v), readWriteOptions(o)),
 		putIfAbsent: async (k, v, o) => inner.putIfAbsent(key(k), json(v), readWriteOptions(o)),
 		replaceIf: async (k, version, v, o) =>
 			inner.replaceIf(key(k), text("version", version), json(v), readWriteOptions(o)),
@@ -429,5 +430,8 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 			return inner.scan(declaredSpace, cursor === undefined ? undefined : text("cursor", cursor));
 		},
 		now: () => inner.now(),
+		...(put && {
+			put: async (k: Key, v: Json, o: WriteOptions) => put(key(k), json(v), readWriteOptions(o)),
+		}),
 	};
 }
