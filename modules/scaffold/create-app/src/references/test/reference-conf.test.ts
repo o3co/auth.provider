@@ -92,7 +92,6 @@ const prefaultLater = new Set([
 	"rp-logout-store",
 	"session-store",
 	"session-tokens-store",
-	"store",
 ]);
 
 /** Each place a rule is broken: the key path, in its section. */
