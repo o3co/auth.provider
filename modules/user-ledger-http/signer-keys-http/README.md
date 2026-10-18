@@ -15,7 +15,7 @@
   | Answer | Read as |
   |---|---|
   | `200`, a JSON object with `keys`, a list of JWKs, and `algorithms`, optional, among `EdDSA`, `ES256` and `RS256` | the keys with no private member, and the algorithms, or all three when none are named |
-  | `404` (not known) or `410` (known, and revoked) | none |
+  | `404` (not known) or `410` (known, and revoked), or a `200` whose `keys` is empty (no key now) | none |
   | anything else, a `200` whose keys are all private or whose algorithms the grant does not take included | unavailable |
 
 ## Invariants

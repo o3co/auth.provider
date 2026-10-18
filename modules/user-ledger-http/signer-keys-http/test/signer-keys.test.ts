@@ -152,10 +152,12 @@ describe("signer-keys-http", () => {
 		expect(received).toHaveLength(2);
 	});
 
-	it("answers none to a 404 or a 410, unlogged", async () => {
+	it("answers none to a 404, a 410, or a 200 that names no key, unlogged", async () => {
 		const { keys, logged } = await open();
 		expect(await keys.keysOf({ subject: "dev-nobody" })).toEqual({ kind: "none" });
 		expect(await keys.keysOf({ subject: "dev-gone" })).toEqual({ kind: "none" });
+		script = () => ({ status: 200, json: { keys: [] } });
+		expect(await keys.keysOf({ subject: "dev-1" })).toEqual({ kind: "none" });
 		expect(logged.lines()).toEqual([]);
 	});
 
@@ -167,7 +169,6 @@ describe("signer-keys-http", () => {
 			{ status: 500 },
 			{ status: 201, json: { keys: [deviceJwk] } },
 			{ status: 302, headers: { location: `http://${pair}/ledger/elsewhere` } },
-			{ status: 200, json: { keys: [] } },
 			{ status: 200, json: { keys: [{ ...deviceJwk, d: "secret-1" }] } },
 			{ status: 200, json: { keys: [deviceJwk], algorithms: ["HS256"] } },
 			{ status: 200, json: ["secret-2"] },
