@@ -7,6 +7,7 @@ import {
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import { type AuthContext, sessions } from "@mod/session";
 import { stubSessions } from "@mod/session/testing";
 import { type AttributesAnswer, subjectAttributes } from "@mod/subject-attributes";
@@ -148,6 +149,7 @@ describe("over users and the session's login", () => {
 				tokensStandIn(),
 				memoryUsersStores().module,
 				...parts.users,
+				secretHashModule,
 				defineModule({ name: "sessions" }, (m) => [
 					// Sessions that reach tokens as they are built, as a composition's closing tokens does.
 					m.provide(sessions).by(async (c) => {
