@@ -3,13 +3,16 @@ import { csrfChecked } from "@mod/csrf";
 import { routes, use } from "@mod/http";
 import { defineModule } from "@mod/kernel";
 import { requestsPerSource } from "@mod/rate-limit";
+import { resealers } from "@mod/seal";
 import { revocationFollowers } from "@mod/subject-revocation";
 import { apiOver, base } from "./api/api.ts";
 import { followerOver } from "./api/follow.ts";
 import { browser, browserBase, connectOver } from "./connect/connect.ts";
 import { clientSection } from "./grant/grant.ts";
-import { shared, sharedOver } from "./grant/shared.ts";
+import { recordsOver, shared, sharedOver } from "./grant/shared.ts";
+import { resealerOver } from "./resealer.ts";
 import { name, type Settings, section } from "./section.ts";
+import { grantStore } from "./store.ts";
 
 /** The requests a source may make in each window, on the client routes and the browser's alike. */
 const windowOf = (settings: Settings) => ({
@@ -20,6 +23,9 @@ const windowOf = (settings: Settings) => ({
 export default defineModule({ name, section }, (m) => [
 	m.contribute(metadataSections).by(() => clientSection),
 	m.contribute(revocationFollowers).by(followerOver),
+	m
+		.contribute(resealers)
+		.by(async (c) => resealerOver(await c.get(grantStore), await recordsOver(c))),
 	m.provide(shared).by(sharedOver),
 	m.provide(browser).by(connectOver),
 	...[base, `${base}/*`].map((path) =>

@@ -83,7 +83,12 @@ export default defineModule({ name: "federation-grants-store", section }, (m) =>
 	m.contribute(spaces).by(() => locks),
 	m.provide(grantStore).by(async (c): Promise<GrantStore> => {
 		const records = recordsIn<StoredGrant>(await placeIn(c, grants));
-		return { create: records.create, read: records.read, change: records.change };
+		return {
+			create: records.create,
+			read: records.read,
+			change: records.change,
+			scan: records.scan,
+		};
 	}),
 	m.provide(stepStore).by(async (c): Promise<StepStore> => {
 		const records = stepRecordsFor<StoredStep>(await placeIn(c, steps));

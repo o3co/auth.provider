@@ -58,6 +58,8 @@ export async function harness(
 	options: {
 		readonly settings?: Partial<FederationTokensSettings>;
 		readonly offered?: Offered;
+		/** The seal section in place of the test's one key: a ring with past keys, say. */
+		readonly seal?: Readonly<Record<string, unknown>>;
 	} = {},
 ) {
 	let now = 1_800_000_000_000;
@@ -119,7 +121,7 @@ export async function harness(
 		config: {
 			...kernelConfig(),
 			...httpConfig(),
-			...sealConfig(),
+			...(options.seal ? { seal: options.seal } : sealConfig()),
 			...clientsConfig([
 				confidentialClient({
 					id: receiver,

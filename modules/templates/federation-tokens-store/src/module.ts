@@ -40,6 +40,7 @@ export default defineModule({ name: "federation-tokens-store" }, (m) => [
 			read: records.read,
 			update: records.change,
 			remove: records.remove,
+			scan: records.scan,
 		};
 	}),
 	m.provide(refreshLocks).by(async (c): Promise<RefreshLocks> => {

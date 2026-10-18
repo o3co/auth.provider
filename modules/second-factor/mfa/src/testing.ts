@@ -63,6 +63,20 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 			expect((await place.factors.update(key, plus(1)))?.after).toEqual(asStored({ n: 21 }));
 		});
 
+		it("walks the keys it keeps, over pages", async () => {
+			const place = await open();
+			const keys = Array.from({ length: 120 }, fresh);
+			for (const key of keys) await place.factors.save(key, asStored({ n: 1 }));
+			const seen = new Set<string>();
+			let cursor: string | undefined;
+			do {
+				const page = await place.factors.scan(cursor);
+				for (const key of page.keys) seen.add(key);
+				cursor = page.cursor;
+			} while (cursor !== undefined);
+			expect(keys.filter((key) => !seen.has(key))).toEqual([]);
+		});
+
 		it("keeps a list without end, changed or not", async () => {
 			const place = await open();
 			const [kept, changed] = [fresh(), fresh()];

@@ -13,16 +13,18 @@ export interface UpstreamTokenStore {
 		lifetimeMs: number,
 	): Promise<"created" | "exists">;
 	read(session: string): Promise<StoredUpstreamTokens | undefined>;
-	/** Changes the record from what it holds, with a new lifetime; `change` reruns on a race, so it is pure. Nothing when gone. */
+	/** Changes the record from what it holds, with a new lifetime or, naming none, its own; `change` reruns on a race, so it is pure. Nothing when gone. */
 	update(
 		session: string,
 		change: (
 			record: StoredUpstreamTokens,
-		) => { readonly value: StoredUpstreamTokens; readonly lifetimeMs: number } | undefined,
+		) => { readonly value: StoredUpstreamTokens; readonly lifetimeMs?: number } | undefined,
 	): Promise<
 		{ readonly before: StoredUpstreamTokens; readonly after: StoredUpstreamTokens } | undefined
 	>;
 	remove(session: string): Promise<void>;
+	/** A page of the session handles whose records live, and the cursor on; none when done. A walk is no one instant. */
+	scan(cursor?: string): Promise<{ readonly keys: readonly string[]; readonly cursor?: string }>;
 }
 
 export const upstreamTokenStore = contract<UpstreamTokenStore>(
