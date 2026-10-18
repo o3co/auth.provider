@@ -25,6 +25,7 @@
   - The lists given (`allow`, `plainLoopback`, `clients`) join the trial's one block for each.
   - `mfa` is optional where composed.
   - `webauthn`'s relying party is the trial's public origin.
+  - Where `subject-revocation-http` is composed, `http` trusts one proxy no request comes through: the module boots, and every source stays as sent.
 - For full and a pattern: the project's manifest and app, the configuration file, the local layer's and the environment's examples, a Dockerfile, a `.dockerignore` and a README; a pattern's README opens with its use and carries its card.
 
 ## Invariants
