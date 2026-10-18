@@ -12,7 +12,7 @@ export const section = z
 			.max(65535)
 			.prefault(8080)
 			.describe("The port it listens on; 0 takes a free one."),
-		"trusted-proxies": sourceSettings.shape["trusted-proxies"],
+		...sourceSettings.shape,
 		"public-origin": z
 			.url({ protocol: /^https?$/ })
 			.refine((s) => new URL(s).origin === s, "origin only (no path)")
@@ -36,7 +36,6 @@ export const section = z
 			.describe(
 				"Accepts a plain-http `public-origin`, knowing its cookies cannot be made secure: an http `public-origin` boots only with it.",
 			),
-		"proxy-hops": sourceSettings.shape["proxy-hops"],
 		/** Where a trusted proxy forwards the client's certificate; none is read without it. */
 		"client-certificate": certificateSettings.optional(),
 	})

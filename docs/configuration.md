@@ -205,10 +205,10 @@ From `@mod/http`.
 | `http.host` | string | `127.0.0.1` |  | `HTTP_HOST` | `127.0.0.1` | The address it listens on. |
 | `http.port` | integer (0–65535) | `8080` |  | `HTTP_PORT` | `8080` | The port it listens on; 0 takes a free one. |
 | `http.trusted-proxies` | list of string | `[]` |  |  |  | Proxies whose forwarded headers are believed: IPs without a zone, or CIDRs with one prefix length in decimal without a leading zero. Always set behind a proxy: otherwise every request's source is the proxy, and all look like one source. |
+| `http.proxy-hops` | integer (1–10) | `1` |  |  |  | How many trusted proxies, at most, a request passes through. |
 | `http.public-origin` | string |  |  | `HTTP_PUBLIC_ORIGIN` | `https://login.example.invalid` | The scheme, host and port users reach this deployment at: an origin only, with no path. |
 | `http.cors-origins` | list of string | `[]` |  |  |  | The https origins whose pages may read cross-origin routes: exact, without a pattern. |
 | `http.insecure-origin` | boolean | `false` |  |  |  | Accepts a plain-http `public-origin`, knowing its cookies cannot be made secure: an http `public-origin` boots only with it. |
-| `http.proxy-hops` | integer (1–10) | `1` |  |  |  | How many trusted proxies, at most, a request passes through. |
 | `http.client-certificate.dialect` | rfc9440 \| pem \| xfcc |  |  |  |  | The form a trusted proxy forwards the client's certificate in: `rfc9440` (byte sequences) with `header` and `chain-header`, `pem` (one PEM block, URL-encoded or not) with `header`, or `xfcc` (Envoy's form, the chain in the same header) with `header`. |
 | `http.client-certificate.header` | string | `client-cert` |  |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
 | `http.client-certificate.chain-header` | string | `client-cert-chain` |  |  |  | The header holding the chain behind the certificate, for `rfc9440`: lower-case letters, digits and `-`. |
