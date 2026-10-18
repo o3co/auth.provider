@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clock, factorsDown, serve } from "./harness.ts";
+import { beforeNextChange, clock, factorsDown, serve } from "./harness.ts";
 
 const posts = [
 	"/session/mfa/factors/rename",
@@ -118,9 +118,28 @@ describe("a session's own factors", () => {
 			const stale = await s.call("POST", `/session/mfa/${path}`, { factor_id: only, label: "x" });
 			expect([path, stale.status, stale.body.error]).toEqual([path, 403, "step_up_required"]);
 		}
+	});
+
+	it("asks a recent second factor to reissue codes or remove a factor, a recent sign-in holding none not standing for one", async () => {
+		const s = await serve();
 		await s.signIn("eve");
-		const none = await s.call("POST", "/session/mfa/recovery-codes");
-		expect([none.status, none.body.error]).toEqual([409, "mfa_no_qualifying_factor"]);
+		for (const path of ["factors/remove", "recovery-codes"]) {
+			const none = await s.call("POST", `/session/mfa/${path}`, { factor_id: "x" });
+			expect([path, none.status, none.body.error]).toEqual([path, 403, "step_up_required"]);
+		}
+	});
+
+	it("hands no codes to a password-only session whose subject bound a factor while it asked", async () => {
+		const s = await serve();
+		await s.signIn("ivy");
+		// The owner binds the first factor between the session's entry and the reissue's write.
+		beforeNextChange.run = () => s.bindCode("ivy");
+		const raced = await s.call("POST", "/session/mfa/recovery-codes");
+		expect([raced.status, raced.body.error, raced.body.recovery_codes]).toEqual([
+			403,
+			"step_up_required",
+			undefined,
+		]);
 	});
 });
 

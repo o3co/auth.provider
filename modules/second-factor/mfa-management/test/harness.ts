@@ -35,9 +35,12 @@ export const clock = { shift: 0 };
 const runtime = quietRuntime({ clock: { now: () => Date.now() + clock.shift } });
 let stop = async () => {};
 export const factorsDown = unavailableSwitch<FactorStore>("factor store");
+/** Runs once before the factor store's next change, as a request racing in between would. */
+export const beforeNextChange: { run?: (() => Promise<unknown>) | undefined } = {};
 afterEach(async () => {
 	clock.shift = 0;
 	factorsDown.restore();
+	beforeNextChange.run = undefined;
 	await stop();
 });
 
@@ -91,7 +94,12 @@ const factorStand = () => {
 			factorsDown.wrap({
 				save: (key: string, record: StoredFactors) => stand.records.create(key, record, "endless"),
 				read: stand.records.read,
-				update: stand.records.change,
+				update: async (...args: Parameters<typeof stand.records.change>) => {
+					const run = beforeNextChange.run;
+					beforeNextChange.run = undefined;
+					await run?.();
+					return stand.records.change(...args);
+				},
 				scan: stand.records.scan,
 			}),
 		),

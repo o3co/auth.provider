@@ -285,6 +285,33 @@ it("names signer-keys-http's issuer among jwt-bearer's issuers where both are co
 	expect(left.get("jwt-bearer")).toBeUndefined();
 });
 
+it("gives subject-revocation-http a fresh credential, its sources and a trusted proxy no request comes through", async () => {
+	const target = await mkdtemp(join(tmpdir(), "create-app-trial-"));
+	mkdirSync(join(target, "src"));
+	await writeFile(
+		join(target, "src", "main.ts"),
+		[
+			'import h from "@mod/http/module";',
+			'import r from "@mod/subject-revocation-http/module";',
+			"",
+		].join("\n"),
+	);
+	const redisUrl = "redis://127.0.0.1:1";
+	const given = await trialSettings(target, { redisUrl });
+	const local = parseString(given.local);
+	expect(local.get("subject-revocation-http.sources")).toEqual(["192.0.2.0/24"]);
+	expect(local.get("http.trusted-proxies")).toEqual(["192.0.2.1"]);
+	const credential = given.env.SUBJECT_REVOCATION_HTTP_CREDENTIAL ?? "";
+	expect(Buffer.from(credential, "base64url").length).toBe(32);
+	const again = await trialSettings(target, { redisUrl });
+	expect(again.env.SUBJECT_REVOCATION_HTTP_CREDENTIAL).not.toBe(credential);
+	const left = parseString(
+		(await trialSettings(target, { redisUrl, leave: ["http", "subject-revocation-http"] })).local,
+	);
+	expect(left.get("http")).toBeUndefined();
+	expect(left.get("subject-revocation-http")).toBeUndefined();
+});
+
 it("gives exchange-id-tokens one upstream for a client of the trial's own, registered beside the clients given", async () => {
 	const redisUrl = "redis://127.0.0.1:1";
 	const given = [{ id: "app", kind: "public", method: "none" }];

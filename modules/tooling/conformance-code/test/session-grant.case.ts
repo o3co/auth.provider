@@ -146,6 +146,8 @@ describe("session grant", () => {
 	});
 
 	it("carries the session's login in the token: how the user authenticated, and when", async () => {
+		// A login of its own: the browser keeps an earlier test's session, signed in before this began.
+		browser.forget();
 		const before = Math.floor(Date.now() / 1000);
 		const cookie = await browser.login();
 		const after = Math.ceil(Date.now() / 1000);

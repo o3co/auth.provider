@@ -17,7 +17,13 @@ import { logins } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
-import { type EntryRequirement, entryRequirements, sessionRules, sessions } from "@mod/session";
+import {
+	type AuthContext,
+	type EntryRequirement,
+	entryRequirements,
+	sessionRules,
+	sessions,
+} from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
@@ -654,6 +660,24 @@ describe("the entry requirements mfa sets", () => {
 	});
 });
 
+it("takes only a second factor proven recently as proven, never a recent sign-in alone", async () => {
+	const { app } = await serve();
+	const now = runtime.clock.now();
+	const proven = (context: Partial<AuthContext>) =>
+		app
+			.get(factors)
+			.provenRecently({ subject: "x", amr: ["pwd"], authenticatedAt: now, ...context });
+	expect(proven({ amr: ["pwd", "otp", "mfa"] })).toBe(true);
+	expect(proven({})).toBe(false);
+	expect(proven({ amr: ["pwd", "mfa"], authenticatedAt: now - recentMs - 1000 })).toBe(false);
+	expect(proven({ amr: ["pwd", "mfa"], authenticatedAtUnknown: true })).toBe(false);
+	const old = now - recentMs - 1000;
+	expect(proven({ authenticatedAt: old, raisedAt: now, raisedAmr: ["otp", "mfa"] })).toBe(true);
+	expect(
+		proven({ amr: ["pwd", "mfa"], authenticatedAt: old, raisedAt: now, raisedAmr: ["pwd"] }),
+	).toBe(false);
+});
+
 it("declares mfa and the amr of every kind contributed as what it can prove", async () => {
 	const { app } = await serve();
 	expect(app.get(logins).achievable(["otp", "mfa"])).toBe(true);
@@ -807,6 +831,33 @@ describe("values no two factors may hold", () => {
 		// Begun once one counts, a binding is no first one, and binds beside it.
 		const later = await provedCode("liz");
 		expect((await decided.bind("liz", later.pending, later.state)).kind).toBe("bound");
+	});
+
+	it("binds a binding asked from a login only as the subject's first, whenever it began", async () => {
+		const { decided, bindCode, provedCode, events } = await serve({ mode: "required" });
+		await bindCode("ned");
+		events.length = 0;
+		const login = { kind: "login" } as const;
+		expect(await decided.begin("ned", "code", undefined, undefined, login)).toEqual({
+			kind: "first-binding-closed",
+		});
+		expect(events).toEqual([
+			expect.objectContaining({
+				kind: "mfa.first_binding_conflict",
+				subject: "ned",
+				attributes: { kind: "code" },
+			}),
+		]);
+		// A pending begun beside a counting factor, as one begun before a login could be refused.
+		const begun = await provedCode("ned");
+		expect(await decided.bind("ned", begun.pending, begun.state, undefined, login)).toEqual({
+			kind: "first-binding-closed",
+		});
+		expect((await decided.held("ned")).filter((f) => f.kind === "code")).toHaveLength(1);
+		const session = { kind: "session", handle: "h" } as const;
+		expect((await decided.bind("ned", begun.pending, begun.state, undefined, session)).kind).toBe(
+			"bound",
+		);
 	});
 
 	it("binds one of two first bindings finished at once, refusing the other", async () => {
