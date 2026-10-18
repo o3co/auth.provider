@@ -69,6 +69,7 @@ beforeAll(async () => {
 		],
 		clients: [client("fed-app", true), client("other-app", false)],
 		keepsUpstreamTokens: true,
+		userinfo: true,
 	});
 	running = await areaTarget().start(scene);
 	if (running.kind !== "running") throw new Error(`refused:\n${running.output}`);
@@ -137,6 +138,15 @@ async function clientTokens(b: Browser, as = "fed-app") {
 	});
 	expect(redeemed.status).toBe(200);
 	return redeemed.body as { access_token: string; refresh_token: string };
+}
+
+/** Userinfo's answer to `token` as a Bearer token. */
+async function userinfo(token: string) {
+	const res = await fetch(`${base}/oauth/userinfo`, {
+		headers: { ...headers, authorization: `Bearer ${token}` },
+	});
+	await res.text();
+	return { status: res.status, challenge: res.headers.get("www-authenticate") ?? "" };
 }
 
 const upstreamToken = (access: string, idp = "corp") =>
@@ -226,7 +236,7 @@ describe("federation tokens: refusals", () => {
 		expect(got).toMatchObject({ status: 404, body: { error: "federation_not_linked" } });
 	});
 
-	it("refuses a token whose refresh family ended", async () => {
+	it("refuses a token whose refresh family ended, here and at userinfo alike", async () => {
 		const b = await loggedIn();
 		const mine = await clientTokens(b);
 		const refresh = (token: string) =>
@@ -237,12 +247,19 @@ describe("federation tokens: refusals", () => {
 				client_secret: secretOf("fed-app"),
 			});
 		const next = (await refresh(mine.refresh_token)).body as { access_token: string };
+		expect((await userinfo(next.access_token)).status).toBe(200);
+		expect((await upstreamToken(next.access_token)).status).toBe(200);
 		// The spent refresh token again: the family ends, with every token it issued.
 		await refresh(mine.refresh_token);
 		expect(await upstreamToken(next.access_token)).toMatchObject({
 			status: 401,
 			body: { error: "invalid_token" },
 		});
+		const told = await userinfo(next.access_token);
+		expect([told.status, told.challenge]).toEqual([
+			401,
+			expect.stringMatching(/error="invalid_token"/),
+		]);
 	});
 
 	it("refuses a token once its session logged out", async () => {

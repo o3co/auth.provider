@@ -64,6 +64,7 @@ export interface FederationScene extends FederationPart {
 	readonly users: readonly UserScene[];
 	/** Clients that run the code flow, so a scene can ask whether a browser is logged in. */
 	readonly clients?: readonly ClientScene[];
+	readonly userinfo?: boolean;
 }
 
 export function federationScene(scene: FederationScene): AreaScene {
@@ -78,7 +79,10 @@ export function federationScene(scene: FederationScene): AreaScene {
 			? [
 					oauthArea.part({ issuer: scene.origin, clients: scene.clients }),
 					// Receiving clients refresh their own tokens.
-					codeArea.part(scene.keepsUpstreamTokens ? { refresh: {} } : {}),
+					codeArea.part({
+						...(scene.keepsUpstreamTokens ? { refresh: {} } : {}),
+						...(scene.userinfo ? { userinfo: true } : {}),
+					}),
 				]
 			: []),
 		federationArea.part({
