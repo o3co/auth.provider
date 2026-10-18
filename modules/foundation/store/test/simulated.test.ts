@@ -153,13 +153,8 @@ it("loses spaces that are not durable on a restart, and keeps the durable ones",
 	const { simulated, s, all, lacking } = await openWith();
 	await s.put(at(lacking.durable, "a"), 1, never);
 	await s.put(at(all, "b"), 1, never);
-	await s.setAdd(at(lacking.durable, "set"), "m", now + 60_000, {
-		cap: 10,
-		expiry: { kind: "never" },
-	});
 	await simulated.restart();
 	expect((await s.get(at(lacking.durable, "a"))).entry).toBeNull();
-	expect((await s.setMembers(at(lacking.durable, "set"))).members).toEqual([]);
 	expect((await s.get(at(all, "b"))).entry?.value).toBe(1);
 	await simulated.failover();
 	expect((await s.get(at(all, "b"))).entry?.value).toBe(1);
@@ -370,11 +365,6 @@ it("replays a write on the time the primary decided it, so a failover keeps what
 	expect((await s.get(key("timed"))).entry?.value ?? null).toBe(expected);
 	await simulated.restart();
 	expect((await s.get(key("timed"))).entry?.value ?? null).toBe(expected);
-});
-
-it("reads no keys as the memory store does", async () => {
-	const { s } = await open();
-	expect((await s.getMany([])).entries).toEqual([]);
 });
 
 it("applies each write once on a replica, however many later writes confirm it", async () => {

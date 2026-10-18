@@ -102,8 +102,8 @@ export interface Member {
  */
 export interface Store {
 	get(key: Key): Promise<Read>;
-	/** Entries of keys in one partition, read at one instant. */
-	getMany(
+	/** Entries of keys in one partition, read at one instant. Leaving: no caller reads it, so a store need not offer it. */
+	getMany?(
 		keys: readonly Key[],
 	): Promise<{ readonly entries: readonly (Entry | null)[]; readonly now: number }>;
 	put(key: Key, value: Json, options: WriteOptions): Promise<Written | Late | Reused>;
@@ -169,15 +169,16 @@ export interface Store {
 	 * Scores are expiry times on the store clock; a member keeps its highest score. Over the cap
 	 * the lowest scores go first, and among equal scores the member first in code point order.
 	 */
-	setAdd(
+	/** Leaving with `setMembers` and `setRemove`: no caller keeps a set, so a store need not offer them. */
+	setAdd?(
 		key: Key,
 		member: string,
 		score: number,
 		options: { readonly cap: number; readonly expiry: Expiry },
 	): Promise<{ readonly evicted: readonly string[] }>;
 	/** Live members in code point order. */
-	setMembers(key: Key): Promise<{ readonly members: readonly Member[]; readonly now: number }>;
-	setRemove(key: Key, member: string): Promise<void>;
+	setMembers?(key: Key): Promise<{ readonly members: readonly Member[]; readonly now: number }>;
+	setRemove?(key: Key, member: string): Promise<void>;
 	/** The store clock's present time, the one every expiry and deadline is judged by. */
 	now(): Promise<number>;
 	/** A page of the space's live value keys (no counter or set) and the cursor on; none when done. */
@@ -238,32 +239,6 @@ export async function mutate(
 			return { kind: "done", value: decision.value, version: written.version };
 		}
 		// exists, conflict or missing: the entry moved since the read; read again.
-	}
-	return { kind: "contended" };
-}
-
-/** Reads a key, then the keys its entry points to, and retries until the first did not move. */
-export async function getFollowing(
-	target: Store,
-	first: Key,
-	follow: (entry: Entry | null) => readonly Key[],
-	attempts = 8,
-): Promise<
-	| {
-			readonly first: Entry | null;
-			readonly followed: readonly (Entry | null)[];
-			readonly now: number;
-	  }
-	| { readonly kind: "contended" }
-> {
-	for (let attempt = 0; attempt < attempts; attempt++) {
-		const head = await target.get(first);
-		const keys = follow(head.entry);
-		const read = await target.getMany([first, ...keys]);
-		const [again, ...followed] = read.entries;
-		if ((again?.version ?? null) === (head.entry?.version ?? null)) {
-			return { first: again ?? null, followed, now: read.now };
-		}
 	}
 	return { kind: "contended" };
 }
@@ -464,9 +439,12 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 		if (new Set(names).size !== names.length) fail("a batch may write each key once");
 		return checked;
 	};
+	const getMany = inner.getMany?.bind(inner);
+	const setAdd = inner.setAdd?.bind(inner);
+	const setMembers = inner.setMembers?.bind(inner);
+	const setRemove = inner.setRemove?.bind(inner);
 	return {
 		get: async (k) => inner.get(key(k)),
-		getMany: async (keys) => inner.getMany([...keys].map(key)),
 		put: async (k, v, o) => inner.put(key(k), json(v), readWriteOptions(o)),
 		putIfAbsent: async (k, v, o) => inner.putIfAbsent(key(k), json(v), readWriteOptions(o)),
 		replaceIf: async (k, version, v, o) =>
@@ -481,16 +459,25 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 				readLimits(o),
 			),
 		count: async (k, window, o) => inner.count(key(k), readWindow(window), readLimits(o)),
-		setAdd: async (k, member, score, o) =>
-			inner.setAdd(key(k), text("member", member), whole("score", score, 0), readSetOptions(o)),
-		setMembers: async (k) => inner.setMembers(key(k)),
 		scan: async (target, cursor) => {
 			const name = text("space", fields("space", target, ["name", "guarantees"]).name);
 			const declaredSpace = known.get(name);
 			if (!declaredSpace) fail(`space ${name} is not declared`);
 			return inner.scan(declaredSpace, cursor === undefined ? undefined : text("cursor", cursor));
 		},
-		setRemove: async (k, member) => inner.setRemove(key(k), text("member", member)),
 		now: () => inner.now(),
+		...(getMany && { getMany: async (keys: readonly Key[]) => getMany([...keys].map(key)) }),
+		...(setAdd && {
+			setAdd: async (
+				k: Key,
+				member: string,
+				score: number,
+				o: { readonly cap: number; readonly expiry: Expiry },
+			) => setAdd(key(k), text("member", member), whole("score", score, 0), readSetOptions(o)),
+		}),
+		...(setMembers && { setMembers: async (k: Key) => setMembers(key(k)) }),
+		...(setRemove && {
+			setRemove: async (k: Key, member: string) => setRemove(key(k), text("member", member)),
+		}),
 	};
 }
