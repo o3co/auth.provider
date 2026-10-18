@@ -22,6 +22,7 @@ Internal module of `federation-grants`: handing a grant's upstream token, and re
 
 ## Data
 - The lock lives 10 seconds; a request waits up to 5.
+- A held token serves in place of a refresh that cannot be made only while the grant, read again then, is still in use: one revoked or ended while the upstream was asked hands out nothing (`gone`).
 
 ## Depends on
 - `federation`, `kernel`; `grant`, the package's store interfaces
