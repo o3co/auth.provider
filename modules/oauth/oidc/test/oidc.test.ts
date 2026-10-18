@@ -7,6 +7,7 @@ import { userAttribute } from "@mod/users";
 import usersModule from "@mod/users/module";
 import { testUser, usersConfig } from "@mod/users/testing";
 import { describe, expect, it } from "vitest";
+import oidc from "../src/module.ts";
 import { booted, loginOf, makers, published, sessionsOf, unanswering } from "./parts.ts";
 
 const now = 1_800_000_000_000;
@@ -40,7 +41,7 @@ const makerOf = (app: Assembly) => {
 
 describe("the ID token", () => {
 	it("is signed with the core claims and the session", async () => {
-		const app = await booted({ runtime, config: { oidc: { "id-token-seconds": 300 } } });
+		const app = await booted({ runtime, config: { oidc: { "id-token-lifetime": "5m" } } });
 		const token = await makerOf(app).make(
 			request({
 				subject: "alice",
@@ -121,15 +122,45 @@ it("refuses to start with a shared-secret signing key", async () => {
 });
 
 it("takes a lifetime of whole seconds from 60 to 86400, refusing to start with any other", async () => {
-	const lasting = (seconds: number) =>
-		booted({ runtime, config: { oidc: { "id-token-seconds": seconds } } });
-	for (const seconds of [59, 86_401, 300.5]) {
-		await expect(lasting(seconds), String(seconds)).rejects.toMatchObject({
-			refusals: [{ where: "oidc.id-token-seconds" }],
+	const lasting = (written: string) =>
+		booted({ runtime, config: { oidc: { "id-token-lifetime": written } } });
+	for (const written of ["59s", "86401s", "300500ms"]) {
+		await expect(lasting(written), written).rejects.toMatchObject({
+			refusals: [{ where: "oidc.id-token-lifetime" }],
 		});
 	}
-	await lasting(60);
-	await lasting(86_400);
+	await lasting("1m");
+	await lasting("1d");
+});
+
+describe("the section", () => {
+	it("reads the ID token's lifetime as an operator writes it, with a unit", async () => {
+		expect(oidc.section?.parse({ "id-token-lifetime": "30m" })).toEqual({
+			"id-token-lifetime": 1800,
+		});
+		const app = await booted({ runtime, config: { oidc: { "id-token-lifetime": "30m" } } });
+		const { payload } = decoded(await makerOf(app).make(request()));
+		expect(payload.exp - payload.iat).toBe(1800);
+	});
+
+	it("refuses to start with a lifetime that names no unit, a number or digits alone", async () => {
+		const unitless = [
+			[300, "written with its unit, such as 30s"],
+			["300", "duration must name its unit"],
+		] as const;
+		for (const [written, reason] of unitless) {
+			await expect(
+				booted({ runtime, config: { oidc: { "id-token-lifetime": written } } }),
+				String(written),
+			).rejects.toMatchObject({ refusals: [{ where: "oidc.id-token-lifetime", reason }] });
+		}
+		const read = oidc.section?.safeParse({ "id-token-lifetime": "300" });
+		expect(read?.error?.issues).toMatchObject([{ params: { problem: "missing-unit" } }]);
+	});
+
+	it("reads an empty section as an hour", () => {
+		expect(oidc.section?.parse({})).toEqual({ "id-token-lifetime": 3600 });
+	});
 });
 
 describe("the released claims an ID token carries", () => {

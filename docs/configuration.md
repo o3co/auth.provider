@@ -398,7 +398,7 @@ From `@mod/oidc`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `oidc.id-token-seconds` | integer (60–86400) | `3600` |  |  |  |  |
+| `oidc.id-token-lifetime` | string | `1h` |  |  |  | How long an ID token lasts: a duration with a unit, e.g. 1h. |
 
 ## outbound
 
