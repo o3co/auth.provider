@@ -10,7 +10,7 @@ export interface BindingRequirement {
 const requirementSection: Section<BindingRequirement> = {
 	name: "sender-binding",
 	schema: z.strictObject({
-		required: z.boolean().default(false),
+		required: z.boolean().prefault(false),
 		kinds: z.array(z.string()).min(1).optional(),
 	}),
 };
