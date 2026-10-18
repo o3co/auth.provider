@@ -38,11 +38,11 @@ The check reads the server's settings with `CONFIG GET`, and `ROLE` and `INFO` a
 
 ### A managed Redis that refuses `CONFIG`
 
-Where the server refuses `CONFIG GET`, declare its settings in `redis.server-settings` (`maxmemory-policy`, `appendonly`, `appendfsync`, `min-replicas-to-write`, `min-replicas-max-lag`). The check then takes them as declared and judges them as it judges the ones it reads; a setting it needs and you left out refuses boot, naming it. Every boot logs `redis.settings_declared` with the names taken from the declaration, since nothing confirmed them.
+Where the server refuses `CONFIG GET` for good (`NOPERM`, or the command renamed or missing), declare its settings in `redis.server-settings` (`maxmemory-policy`, `appendonly`, `appendfsync`, `min-replicas-to-write`, `min-replicas-max-lag`). The check then takes them as declared and judges them as it judges the ones it reads; a setting it needs and you left out refuses boot, naming it. Every boot logs `redis.settings_declared` with the names taken from the declaration, since nothing confirmed them. Any other error, such as `BUSY` while a long script runs, refuses boot rather than taking the declaration; start again once the server answers.
 
 Declare only what the server really has: a declaration is your statement, and the check cannot see past it. Where `CONFIG GET` does answer, a declared value that differs refuses boot.
 
-A server that does not fsync every write cannot give the durable guarantee. Set `redis.durability = none` to state so and accept the loss: a crash then loses the latest writes, among them spent assertion and DPoP proof ids (a replay window) and lockout records. Without it, boot is refused.
+A server that does not fsync every write cannot give the durable guarantee. Set `redis.durability = none` to state so and accept the loss: a crash then loses the latest writes, among them spent assertion and DPoP proof ids (a replay window) and lockout records. Every boot then logs `redis.durability_none` naming the durable spaces. Without it, boot is refused.
 
 - Amazon ElastiCache: append-only files are not available, so declare `appendonly no` and set `durability = none` where a durable space is composed.
 - Other managed services: check in each service's documentation which of these settings you can set and what they hold before declaring them.
