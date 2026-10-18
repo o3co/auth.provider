@@ -36,7 +36,11 @@
 - A client that is not first-party, once logged in, is refused with `unauthorized_client` while `consent` is not `asking`. Next, before consent, `tokens`' issuance policies are asked for the code's access token (`authorization_code`, the session); a refusal is `access_denied` with the policy's description.
 - A first-party client (by `consent`) is never asked for consent. Any other is asked when `consent`'s records do not cover the scope, or with `prompt=consent`; a denial comes back as `access_denied`.
 - Until the client and redirect URI are confirmed, errors are JSON with no redirect (unavailable: `503`). After that every answer, errors and unavailable included, is a redirect to the redirect URI carrying `state` (when given once and not too long) and `iss`.
+- A fresh login that `prompt=login` or `max_age` demands counts only through a re-authentication record, never values in the URL: made for the whole request when the browser is sent to log in, taken once by that request, gone after 10 minutes. A session whose authentication time `session` answers as unknown meets neither, nor an essential `auth_time`, so a login is asked again.
 - Back from its login (its record taken) with the authentication time still unknown, a request is refused with `login_required`.
+
+## Data
+- Re-authentication record, per unguessable name, through its store interface: the time a login counts from, a hash of the request, whether it is the step-up round trip, and whether it was taken. Checked on every read; eviction only means logging in again.
 
 ## Depends on
 - `kernel`, `http`, `request-source`, `url-setting`, `clients`, `session`, `consent`, `code-grant`, `issuer`, `grants` (the audience rule), `token-endpoint` (error answers), `client-allowance`, `tokens`, `login-gates`, `acr`, `rate-limit`, `audit`
