@@ -25,7 +25,7 @@
 - Client metadata section `consent`: `first-party` (default false), `name` (trimmed, cut to 200 characters), `uri` (an https URL) and `host`.
 - `displayed`: the section value a client source gives a client it found.
 - `isFirstParty`: true only for a client the operator registered with `first-party` set.
-- Operator section: `page` (an https URL without userinfo or fragment; unset by default, so nobody is asked) and `challenge-seconds` (60 to 3600, default 600).
+- Operator section: `page` (an https URL without userinfo or fragment; unset by default, so nobody is asked) and `challenge-lifetime` (written with its unit, `1m` to `1h` in whole seconds, default `10m`).
 - Store interfaces for grants and asks: save once, read, and update from what the record holds.
 - `./testing`: configuration builders, both store interfaces on `records` stand-ins, and the store contract tests.
 

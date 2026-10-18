@@ -102,7 +102,7 @@ From `@mod/consent`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `consent.page` | string |  |  | `CONSENT_PAGE` | `https://login.example.invalid/consent` | The deployment's consent page, with the challenge as its `challenge` query parameter; without it, nobody is asked. |
-| `consent.challenge-seconds` | integer (60–3600) | `600` |  |  |  | How long a pending consent challenge stays answerable, in seconds. |
+| `consent.challenge-lifetime` | string | `10m` |  |  |  | How long a pending consent challenge stays answerable, from `1m` to `1h` in whole seconds. |
 
 ## device-grant
 

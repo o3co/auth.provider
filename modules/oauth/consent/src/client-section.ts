@@ -20,7 +20,7 @@ const name = z
 export const clientSection: Section<ClientShown> = {
 	name: "consent",
 	schema: z.strictObject({
-		"first-party": z.boolean().default(false),
+		"first-party": z.boolean().prefault(false),
 		name: name.optional(),
 		uri: z
 			.string()

@@ -54,7 +54,7 @@ export default defineModule({ name: "consent", section }, (m) => [
 					throw new TypeError("consent: a range is distinct strings without spaces or controls");
 				}
 				const challenge = Buffer.from(c.random.bytes(32)).toString("base64url");
-				const lifetimeMs = c.section["challenge-seconds"] * 1000;
+				const lifetimeMs = c.section["challenge-lifetime"] * 1000;
 				const record = storedOf({
 					...asked,
 					range: [...asked.range],
