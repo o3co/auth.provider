@@ -21,7 +21,14 @@ import {
 import { clientRecord, readRecord, registry } from "./registry.ts";
 
 const section = z
-	.strictObject({ registered: z.array(clientRecord).prefault([]) })
+	.strictObject({
+		registered: z
+			.array(clientRecord)
+			.prefault([])
+			.describe(
+				"The clients the operator registers: each an id (unique), a kind (public or confidential), a method and sections (values by section name, client-secret holding its hash).",
+			),
+	})
 	.refine((s) => new Set(s.registered.map((r) => r.id)).size === s.registered.length, {
 		message: "duplicate client id",
 		path: ["registered"],

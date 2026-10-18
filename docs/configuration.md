@@ -37,8 +37,8 @@ From `@mod/authorize`.
 |---|---|---|---|---|---|---|
 | `authorize.login-page` | string |  | yes | `AUTHORIZE_LOGIN_PAGE` | `https://login.example.invalid/login` | The login page, given the return URL as `redirect_to`: an https URL (http only on a loopback host). |
 | `authorize.step-up-page` | string |  |  |  |  | Where a session that falls short of an acr is sent to raise its authentication: an https URL (http only on a loopback host). |
-| `authorize.oidc-mode` | oidc-required \| dual | `oidc-required` |  |  |  |  |
-| `authorize.requests` | integer (1–100000) | `60` |  |  |  |  |
+| `authorize.oidc-mode` | oidc-required \| dual | `oidc-required` |  |  |  | oidc-required refuses a request whose own scope does not name openid, as invalid_scope; dual lets it through with the scope it asks or the client's default. |
+| `authorize.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over both methods together; over it, 429. |
 | `authorize.window` | string | `1m` |  |  |  | The rate limit's window: a duration with a unit, e.g. 1m. |
 
 ## client-assertion
@@ -56,7 +56,7 @@ From `@mod/clients`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `clients.registered` | list of map | `[]` |  |  | `[{"id":"example-client","kind":"public","method":"none"}]` |  |
+| `clients.registered` | list of map | `[]` |  |  | `[{"id":"example-client","kind":"public","method":"none"}]` | The clients the operator registers: each an id (unique), a kind (public or confidential), a method and sections (values by section name, client-secret holding its hash). |
 
 ## clients-cimd
 
@@ -64,16 +64,16 @@ From `@mod/clients-cimd`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `clients-cimd.allow` | list of string | `[]` |  |  |  |  |
-| `clients-cimd.deny` | list of string | `[]` |  |  |  |  |
-| `clients-cimd.scopes` | list of string | `[]` |  |  |  |  |
-| `clients-cimd.audiences` | list of string | `[]` |  |  |  |  |
+| `clients-cimd.allow` | list of string | `[]` |  |  |  | The host names a client id's document may be fetched from (.name also takes the names under it); when not empty, only these, and outbound's hosts narrow to them. |
+| `clients-cimd.deny` | list of string | `[]` |  |  |  | The host names a client id's document is never fetched from (.name also takes the names under it), checked before allow. |
+| `clients-cimd.scopes` | list of string | `[]` |  |  |  | The ceiling of scopes such a client may get: a document asking none gets all of them. |
+| `clients-cimd.audiences` | list of string | `[]` |  |  |  | The audiences such a client's tokens may name, as the operator allows. |
 | `clients-cimd.max-size` | string | `5KiB` |  |  |  | The largest document fetched: a size with a unit, e.g. 5KiB. |
 | `clients-cimd.timeout` | string | `5s` |  |  |  | How long a fetch may take: a duration with a unit, e.g. 5s. |
 | `clients-cimd.cache-lifetime` | string | `10m` |  |  |  | How long a document is kept: a duration with a unit, e.g. 10m. |
-| `clients-cimd.cache-entries` | integer (1–100000) | `256` |  |  |  |  |
+| `clients-cimd.cache-entries` | integer (1–100000) | `256` |  |  |  | How many ids the kept documents, and the kept refusals, each hold at most, from 1 to 100000; past it the one kept longest goes. |
 | `clients-cimd.refused-lifetime` | string | `1m` |  |  |  | How long a refusal is remembered: a duration with a unit, e.g. 1m. |
-| `clients-cimd.max-concurrent` | integer (1–1024) | `8` |  |  |  |  |
+| `clients-cimd.max-concurrent` | integer (1–1024) | `8` |  |  |  | How many fetches may run at once, from 1 to 1024; an id past it finds no client, without waiting. |
 
 ## code-grant
 
@@ -158,19 +158,19 @@ From `@mod/federation-grants`.
 | `federation-grants.page` | string |  |  | `FEDERATION_GRANTS_PAGE` | `https://login.example.invalid/federation-grants` | The page that asks the user, on this deployment's origin: an https URL (http only on a loopback host). |
 | `federation-grants.login-page` | string |  |  | `FEDERATION_GRANTS_LOGIN_PAGE` | `https://login.example.invalid/login` | Where a browser with no session is sent to log in, then back: an https URL (http only on a loopback host). |
 | `federation-grants.step-up-page` | string |  |  |  |  | Where a session that falls short of a requirement is sent once to raise it, then back: an https URL (http only on a loopback host). |
-| `federation-grants.connections` | map | `{}` |  |  |  |  |
+| `federation-grants.connections` | map | `{}` |  |  |  | What a grant may be for, by a name (a-z, 0-9 and -, at most 32): idp (a federation IdP that offers delegation), scopes (holding openid), resource, max-access-token-lifetime and scope-subsets. |
 | `federation-grants.default-lifetime` | string | `30d` |  |  |  | A grant's lifetime from its activation when a client asks for none: a duration with a unit, from 1m to 365d, e.g. 30d. |
 | `federation-grants.max-lifetime` | string | `30d` |  |  |  | The most a grant may live from its activation: a duration with a unit, from 1m to 365d, e.g. 90d. |
 | `federation-grants.connect-lifetime` | string | `10m` |  |  |  | How long a connection may take, from the intent to the callback: a duration with a unit, from 1m to 1h, e.g. 10m. |
 | `federation-grants.refresh-before` | string | `30s` |  |  |  | A token this close to its end is refreshed, once half its life is spent: a duration with a unit, from 0s to 1h, e.g. 30s. |
-| `federation-grants.rotations` | integer (1–1000) | `24` |  |  |  |  |
+| `federation-grants.rotations` | integer (1–1000) | `24` |  |  |  | Upstream refreshes a grant may take in each rotation-window, from 1 to 1000. |
 | `federation-grants.rotation-window` | string | `1h` |  |  |  | The window a grant's upstream refreshes are counted in: a duration with a unit, from 1s to 1d, e.g. 1h. |
-| `federation-grants.lodges` | integer (1–100000) | `60` |  |  |  |  |
+| `federation-grants.lodges` | integer (1–100000) | `60` |  |  |  | Intents a client may lodge in each lodge-window, whatever subject it names, from 1 to 100000. |
 | `federation-grants.lodge-window` | string | `1m` |  |  |  | The window a client's lodged intents are counted in: a duration with a unit, from 1s to 1d, e.g. 1m. |
 | `federation-grants.revocation-skew` | string | `1s` |  |  |  | How far apart hosts' clocks may be: a grant made this soon after its subject's revocation counts as revoked. A duration with a unit, from 0s to 5m, e.g. 1s. |
-| `federation-grants.keep-on-subject-revocation` | boolean | `false` |  |  |  |  |
-| `federation-grants.identity-check` | required \| none | `required` |  |  |  |  |
-| `federation-grants.requests` | integer (1–1000) | `60` |  |  |  |  |
+| `federation-grants.keep-on-subject-revocation` | boolean | `false` |  |  |  | Whether a subject's revocation may be asked to leave its established grants. |
+| `federation-grants.identity-check` | required \| none | `required` |  |  |  | required refuses a callback whose upstream account another user holds; none does not check. |
+| `federation-grants.requests` | integer (1–1000) | `60` |  |  |  | Requests allowed per source in each window, on every route, from 1 to 1000. |
 | `federation-grants.window` | string | `1m` |  |  |  | The window a source's requests are counted in, on every route: a duration with a unit, from 1s to 1h, e.g. 1m. |
 
 ## federation-grants-store
@@ -349,15 +349,15 @@ From `@mod/mfa-flows`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `mfa-flows.transaction-lifetime` | string | `10m` |  |  |  | How long a transaction waits for its factor, from 1m to 30m in whole seconds, such as `10m`. |
-| `mfa-flows.attempts-per-transaction` | integer (2–10) | `5` |  |  |  |  |
-| `mfa-flows.requests` | integer (1–100000) | `60` |  |  |  |  |
+| `mfa-flows.attempts-per-transaction` | integer (2–10) | `5` |  |  |  | How many proofs one transaction takes, from 2 to 10; the one that uses up the last ends it. |
+| `mfa-flows.requests` | integer (1–100000) | `60` |  |  |  | POSTs allowed per source in each window, over every form this package's routes take, from 1 to 100000. |
 | `mfa-flows.window` | string | `5m` |  |  |  | The window `requests` is counted over, from 1s to 1d in whole seconds, such as `5m`. |
-| `mfa-flows.lockout.threshold` | integer (-9007199254740991–9007199254740991) | `5` |  |  |  |  |
+| `mfa-flows.lockout.threshold` | integer (-9007199254740991–9007199254740991) | `5` |  |  |  | Consecutive failures before the first hold; a positive integer, no more than `budget`. |
 | `mfa-flows.lockout.backoff` | string | `15m` |  |  |  | The first hold after `threshold` failures, in whole seconds, such as `15m`. |
 | `mfa-flows.lockout.max-backoff` | string | `1d` |  |  |  | The longest hold, the first doubling up to it, in whole seconds, such as `1d`. |
-| `mfa-flows.lockout.budget` | integer (-9007199254740991–9007199254740991) | `10` |  |  |  |  |
+| `mfa-flows.lockout.budget` | integer (-9007199254740991–9007199254740991) | `10` |  |  |  | Failures allowed in any `budget-window`; a positive integer, from `threshold` to `hard-limit`. |
 | `mfa-flows.lockout.budget-window` | string | `7d` |  |  |  | The window `budget` is counted over, in whole seconds, such as `7d`. |
-| `mfa-flows.lockout.hard-limit` | integer (-9007199254740991–9007199254740991) | `100` |  |  |  |  |
+| `mfa-flows.lockout.hard-limit` | integer (-9007199254740991–9007199254740991) | `100` |  |  |  | Failures in one run after which the hold is fixed until released; a positive integer, no less than `budget`. |
 | `mfa-flows.lockout.memory` | string | `1d` |  |  |  | How long a run of failures is remembered without one, in whole seconds, such as `1d`. |
 
 ## mfa-webauthn
