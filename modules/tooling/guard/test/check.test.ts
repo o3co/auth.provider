@@ -355,6 +355,34 @@ describe("guard", () => {
 		expect(check([over], budget).map((v) => v.detail)).toEqual(["comment lines 7 > 6.7"]);
 	});
 
+	it("leaves the doc comments of a package's public surface out of the comment share, and counts every other comment", () => {
+		const why = (n: number) => "// why\n".repeat(n);
+		const filler = (n: number) =>
+			Array.from({ length: n }, (_, i) => `const f${i} = ${i};\n`).join("");
+		const surface =
+			"/** A value. */\nexport const a = 1;\n/**\n * A shape.\n */\nexport interface Shape {\n" +
+			"\t/** Its size. */\n\treadonly size: number;\n}\n/** A name. */\n" +
+			'export type Name = { readonly first: string };\nexport { b } from "./b.ts";\n';
+		const reexported = "/** Another value. */\nexport const b = 2;\n";
+		// Seven doc comment lines on the public surface, five comments of the implementation, sixty lines.
+		const docs = pkg("@t/docs", {
+			"src/contract.ts": `${surface}${why(5)}${filler(41)}`,
+			"src/b.ts": reexported,
+		});
+		expect(check([docs], budget)).toEqual([]);
+		const implementation = pkg("@t/implementation", {
+			"src/contract.ts": `${surface}${why(7)}${filler(39)}`,
+			"src/b.ts": reexported,
+		});
+		expect(check([implementation], budget).map((v) => v.detail)).toEqual(["comment lines 7 > 6"]);
+		// A declaration exported only to another file of the package is no public surface.
+		const between = pkg("@t/between", {
+			"src/contract.ts": `import { b } from "./b.ts";\nexport const a = b;\n${why(5)}${filler(49)}`,
+			"src/b.ts": "/**\n * Shared within the package.\n */\nexport const b = 2;\n",
+		});
+		expect(check([between], budget).map((v) => v.detail)).toEqual(["comment lines 8 > 6"]);
+	});
+
 	it("G14 keeps a check package that others build on free of the product's modules", () => {
 		// Without exports, so no contract surface is built: these rules read only kinds and dependencies.
 		const deps = (...names: string[]) => ({

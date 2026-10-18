@@ -121,12 +121,15 @@ export function commentsOf(path: string): string[] {
 	return commentRanges(file).map((range) => file.text.slice(range.pos, range.end));
 }
 
-/** Non-blank lines, and lines that carry a comment, taken from the syntax tree. */
-export function countLines(path: string): LineCounts {
+/**
+ * Non-blank lines, and lines that carry a comment, taken from the syntax tree; a comment that
+ * starts at one of `leftOut` carries none.
+ */
+export function countLines(path: string, leftOut: ReadonlySet<number> = new Set()): LineCounts {
 	const file = parse(path);
 	const code = file.text.split("\n").filter((line) => line.trim() !== "").length;
 	const lines = new Set<number>();
-	for (const range of commentRanges(file)) {
+	for (const range of commentRanges(file).filter((r) => !leftOut.has(r.pos))) {
 		const first = file.getLineAndCharacterOfPosition(range.pos).line;
 		const last = file.getLineAndCharacterOfPosition(range.end).line;
 		for (let line = first; line <= last; line++) lines.add(line);
