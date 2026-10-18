@@ -207,7 +207,7 @@ async function serve(
 			// Most scenes here are not about OpenID Connect, so they leave out openid.
 			...authorizeConfig({ "oidc-mode": "dual", ...options.authorize }),
 			...acrConfig(options.acr ?? {}),
-			...codeGrantConfig({ "code-seconds": 60, ...options.codeGrant }),
+			...codeGrantConfig({ "code-lifetime": "1m", ...options.codeGrant }),
 		},
 		runtime,
 	});
@@ -875,7 +875,7 @@ describe("authorize: what the reviews asked to pin down", () => {
 	});
 
 	it("retries a revocation that failed, until the reused code's token is revoked", async () => {
-		const s = await serve({ codeGrant: { "sweep-seconds": 1 } });
+		const s = await serve({ codeGrant: { "sweep-interval": "1s" } });
 		const t = s.app.get(tokens);
 		const cookie = await s.login();
 		const code = codeFrom(await s.authorize(request(), cookie));
