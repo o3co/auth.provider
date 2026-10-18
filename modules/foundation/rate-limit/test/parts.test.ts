@@ -3,7 +3,7 @@ import { quietLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { sourceKey } from "../src/contract.ts";
 import { retryAfterMs } from "../src/partition.ts";
-import { limitingAttempts, limitingRequests, uncountedCounter } from "../src/per-source.ts";
+import { limitingAttempts, limitingRequests } from "../src/per-source.ts";
 
 it("offers the source key: IPv4 by address and IPv6 by its /64, however the address is written", () => {
 	expect(sourceKey("198.51.100.4")).toBe("198.51.100.4");
@@ -29,7 +29,6 @@ it("throws a counting failure other than unavailable, so a fault never lets a re
 	const told = {
 		log: quietLog,
 		recorded: { record: () => {} },
-		uncounted: uncountedCounter(),
 	};
 	const request = testRequest({ source: { address: "198.51.100.4", determined: true } });
 	const options = { name: "n", window: { limit: 1, ms: 1000 } };

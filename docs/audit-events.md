@@ -95,7 +95,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `rate_limit.unavailable` | `limit`, `name`, `source` | a policy cannot count |
+| `rate_limit.unavailable` | `limit`, `name`, `source`, `outcome` | a policy cannot count |
 
 ## @mod/rp-logout
 

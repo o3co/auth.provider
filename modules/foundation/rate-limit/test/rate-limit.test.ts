@@ -554,7 +554,7 @@ async function serving(section?: Record<string, unknown>) {
 		for (let i = 0; i < times; i++) seen.push((await from(path, address)).status);
 		return seen;
 	};
-	/** The uncounted series, by limit and outcome, as metrics reads them. */
+	/** The uncounted series, by limit, as metrics reads them. */
 	const uncounted = () =>
 		app
 			.get(metrics)
@@ -641,12 +641,20 @@ describe("the policies for routes", () => {
 		}
 		simulated.unreachable(false);
 		expect(events.map((e) => [e.kind, e.at, e.attributes])).toEqual([
-			["rate_limit.unavailable", now, { name: "test", limit: "requests", source: "198.51.100.3" }],
-			["rate_limit.unavailable", now, { name: "test", limit: "attempts", source: "198.51.100.3" }],
+			[
+				"rate_limit.unavailable",
+				now,
+				{ name: "test", limit: "requests", source: "198.51.100.3", outcome: "refused" },
+			],
+			[
+				"rate_limit.unavailable",
+				now,
+				{ name: "test", limit: "attempts", source: "198.51.100.3", outcome: "refused" },
+			],
 		]);
 		expect(uncounted()).toEqual([
-			{ labels: { limit: "requests", outcome: "refused" }, value: 1 },
-			{ labels: { limit: "attempts", outcome: "refused" }, value: 1 },
+			{ labels: { limit: "requests" }, value: 1 },
+			{ labels: { limit: "attempts" }, value: 1 },
 		]);
 	});
 
@@ -657,10 +665,32 @@ describe("the policies for routes", () => {
 		const attempt = await from("/attempts", "198.51.100.3");
 		expect([attempt.status, await attempt.json()]).toEqual([503, { error: "service_unavailable" }]);
 		simulated.unreachable(false);
-		expect(events.map((e) => e.attributes?.limit)).toEqual(["requests", "attempts"]);
+		expect(events.map((e) => [e.attributes?.limit, e.attributes?.outcome])).toEqual([
+			["requests", "let_through"],
+			["attempts", "refused"],
+		]);
 		expect(uncounted()).toEqual([
-			{ labels: { limit: "requests", outcome: "let_through" }, value: 1 },
-			{ labels: { limit: "attempts", outcome: "refused" }, value: 1 },
+			{ labels: { limit: "requests" }, value: 1 },
+			{ labels: { limit: "attempts" }, value: 1 },
+		]);
+	});
+
+	it("counts each use it cannot count once, by its limit, called by a handler as by a policy", async () => {
+		const { app, simulated, events, uncounted } = await serving();
+		simulated.unreachable(true);
+		await expect(app.get(rateLimit).hit("own", "k", window)).rejects.toSatisfy(isUnavailable);
+		await expect(app.get(attemptLimit).hit("own", "k", window)).rejects.toSatisfy(isUnavailable);
+		await expect(app.get(attemptLimit).hit("own", "k", window)).rejects.toSatisfy(isUnavailable);
+		simulated.unreachable(false);
+		// Another failure is thrown as it is, and counted as nothing.
+		simulated.beforeNext("count", "rate-limit.windows", () => {
+			throw new Error("broken");
+		});
+		await expect(app.get(rateLimit).hit("own", "k", window)).rejects.toThrow("broken");
+		expect(events).toEqual([]);
+		expect(uncounted()).toEqual([
+			{ labels: { limit: "requests" }, value: 1 },
+			{ labels: { limit: "attempts" }, value: 2 },
 		]);
 	});
 

@@ -15,8 +15,8 @@
 - `lockouts`: check; record a failure; reserve an attempt; end a run on success; hand back an abandoned attempt; tell a release's standing; release, whole or on terms judged as written.
 - A reservation is the check and one counted attempt in one write; a held key counts nothing; the reservation that starts a hold says so.
 - `lockoutProblem`: why a lockout policy cannot be used, for the caller to refuse boot.
-- Audit events: declared in `./audit-events`, listed in the audit event reference.
-- The counter `auth_rate_limit_uncounted_total` (to `metrics.instruments`): each request a per-source policy could not count, by `limit` (`attempts`, `requests`) and `outcome` (`refused`, or `let_through` where `fail-mode` is `open`).
+- Audit events: declared in `./audit-events`, listed in the audit event reference; a policy's uncounted request says whether it was refused or let through.
+- The counter `auth_rate_limit_uncounted_total` (to `metrics.instruments`): each use `rateLimit` (`limit` `requests`) or `attemptLimit` (`attempts`) could not count, once, whether a policy or a handler counted it.
 - A stand-in (`./testing`) counting in memory, with no store or audit, answering alike but never failing.
 
 ## Invariants
