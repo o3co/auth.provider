@@ -14,7 +14,7 @@
 - Extension point: session redemptions, told the session's handle and the client of each code redeemed in a session.
 - Extension point: additions, one per answer field (one on the answer's own fields refuses boot): redemption facts → value or none, and optionally a revocation by redemption name.
 - Store interfaces, wired by the assembly, never shown what a record holds: codes by a name made from the code (put; rewrite from the current contents, answering before and after); the void list (add, done, go through in order).
-- Operator section: `code-lifetime` (10s–10m, default `10m`), `sweep-interval` (retry of failed revocations, 1s–1h, default `30s`). Times are written with their unit; a bare number is refused. The keys in seconds (`code-seconds`, `sweep-seconds`) are read in their place when given.
+- Operator section: `code-lifetime` (10s–10m, default `10m`), `sweep-interval` (retry of failed revocations, 1s–1h, default `30s`). Times are written with their unit; a bare number is refused.
 - `./testing`: configuration builders, and the store interfaces' contract test for every implementation (records whole and once, changed only from what they hold, ended at exactly their lifetime; voids kept until done, refused when full; lost answers, failovers, restarts and memory pressure where the place has them).
 
 ## Invariants

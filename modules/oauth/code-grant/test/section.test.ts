@@ -19,12 +19,7 @@ describe("code-grant's section", () => {
 		expect(section.safeParse({ [key]: "30" }).success).toBe(false);
 	});
 
-	it("still takes the keys in seconds, in their bounds, while their writers move", () => {
-		expect(section.parse({ "code-seconds": 60, "sweep-seconds": 1 })).toMatchObject({
-			"code-seconds": 60,
-			"sweep-seconds": 1,
-		});
-		expect(section.safeParse({ "code-seconds": 601 }).success).toBe(false);
-		expect(section.safeParse({ "sweep-seconds": 0 }).success).toBe(false);
+	it.each(["code-seconds", "sweep-seconds"])("refuses %s, a name in seconds", (key) => {
+		expect(section.safeParse({ [key]: 60 }).success).toBe(false);
 	});
 });
