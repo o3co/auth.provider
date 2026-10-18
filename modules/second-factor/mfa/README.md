@@ -25,6 +25,7 @@
 - A factor list's record holds its subject, so its secrets can be sealed again; the store's key is the subject's hash.
 - A secret a `previous` key sealed is sealed again in the write a proof of its factor makes, and by the resealer `mfa` at `seal`'s `resealers`, which walks every list and writes only over the secret read; one no key opens, or a list whose subject is not its key's, is left.
 - A counting factor is one of a kind declared counting. "optional" stops only subjects holding a factor; "required" asks one with no counting factor for a first binding, and never removes the last (`last`).
+- "required" refuses to boot unless a composed kind both counts and adds `mfa`, since no session could then be used.
 - Removing the last counting factor removes the recovery codes in the same write. Recovery codes come with the first counting factor, are shown once, and count toward `max-factors`.
 - A factor's state is written only over the state judged, so one proof passes once; a factor gone meanwhile is raced. A store that cannot answer is unavailable, never a refusal.
 - A secret, and what a challenge kept, are sealed to the subject and the factor; a pending binding, to the subject. A sealed value given back comes only from mfa's records or `mfa-flows`' transactions, so one that will not open is unavailable.
