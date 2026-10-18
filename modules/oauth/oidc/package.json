@@ -19,6 +19,7 @@
 	},
 	"devDependencies": {
 		"@mod/http": "workspace:*",
+		"@mod/secret-hash": "workspace:*",
 		"@mod/session": "workspace:*"
 	}
 }
