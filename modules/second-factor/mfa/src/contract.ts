@@ -146,7 +146,7 @@ export interface Factors {
 	guessable(subject: string, factor: string): Promise<boolean | undefined>;
 	/** Whether every factor of a guessable kind the subject holds was bound after `after` (epoch ms, kernel's clock); true when it holds none. */
 	guessableBoundAfter(subject: string, after: number): Promise<boolean>;
-	/** Whether a proof at `at` (epoch ms, kernel's clock) is still recent, by `manage-within`. */
+	/** Whether a proof at `at` (epoch ms, kernel's clock) is still recent, by `session`'s one window. */
 	recent(at: number): boolean;
 	/** Sends the factor's challenge, good at most until `until` (epoch ms on kernel's clock). */
 	challenge(subject: string, factor: string, until: number, from?: AskedFrom): Promise<Challenged>;
@@ -213,8 +213,5 @@ export interface Factors {
 }
 
 export const factors = contract<Factors>("mfa.factors");
-
-/** The longest window a recent second factor is taken in (`manage-within` at most). */
-export const longestRecentMs = 3_600_000;
 
 export * from "./store.ts";

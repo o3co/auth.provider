@@ -10,28 +10,47 @@ const line = z.string().refine((s) => s.isWellFormed() && s.trim() !== "" && !/\
 
 export const section = z
 	.strictObject({
-		host: line,
-		port: z.number().int().min(1).max(65_535).prefault(587),
-		security: z.enum(["starttls", "tls", "none"]).prefault("starttls"),
-		from: line.transform((from, ctx) => {
-			const mailbox = mailboxOf(from);
-			// Kept in mail's canonical form: a domain beyond ASCII goes out in IDNA's ASCII form.
-			const address = mailbox && isAddress(mailbox.address) && canonicalAddress(mailbox.address);
-			if (mailbox && address) return Object.freeze({ name: mailbox.name, address });
-			ctx.addIssue({
-				code: "custom",
-				message: "must name one mailbox, alone or after a display name",
-			});
-			return z.NEVER;
-		}),
-		user: line.optional(),
-		password: line.optional(),
+		host: line.describe("The relay's host name or address."),
+		port: z
+			.number()
+			.int()
+			.min(1)
+			.max(65_535)
+			.prefault(587)
+			.describe("The relay's port, from 1 to 65535."),
+		security: z
+			.enum(["starttls", "tls", "none"])
+			.prefault("starttls")
+			.describe(
+				"How the connection is secured: STARTTLS after connecting, TLS from the first byte, or none, only to a loopback host.",
+			),
+		from: line
+			.transform((from, ctx) => {
+				const mailbox = mailboxOf(from);
+				// Kept in mail's canonical form: a domain beyond ASCII goes out in IDNA's ASCII form.
+				const address = mailbox && isAddress(mailbox.address) && canonicalAddress(mailbox.address);
+				if (mailbox && address) return Object.freeze({ name: mailbox.name, address });
+				ctx.addIssue({
+					code: "custom",
+					message: "must name one mailbox, alone or after a display name",
+				});
+				return z.NEVER;
+			})
+			.describe("The sender: one mailbox, alone or after a display name."),
+		user: line.optional().describe("The account the relay signs in, beside `password`."),
+		password: line.optional().describe("The account's password, beside `user`."),
 		deadline: setting
 			.duration("ms")
 			.pipe(z.number().int().min(100).max(600_000))
 			.prefault("40s")
 			.describe("How long a whole send may take, from 100ms to 10m."),
-		"concurrent-sends": z.number().int().min(1).max(1000).prefault(20),
+		"concurrent-sends": z
+			.number()
+			.int()
+			.min(1)
+			.max(1000)
+			.prefault(20)
+			.describe("Sends under way at once on a host, from 1 to 1000."),
 	})
 	.superRefine((s, ctx) => {
 		if (s.user !== undefined && s.password === undefined) {

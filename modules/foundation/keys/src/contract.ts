@@ -22,11 +22,13 @@ export const keys = contract<Keys>("keys");
 
 export { isCanonicalJws } from "./jws.ts";
 export {
+	isVerifyAlgorithm,
 	type Jwk,
 	publicJwk,
 	publicMembers,
 	publicPem,
+	type VerifyAlgorithm,
 	verifiesUnder,
 	verifyAlgorithms,
 } from "./public.ts";
-export { secretBytes } from "./secret.ts";
+export { bearerToken, secretBytes } from "./secret.ts";

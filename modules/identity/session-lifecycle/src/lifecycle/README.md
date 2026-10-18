@@ -50,7 +50,7 @@ Internal module of `session-lifecycle`: a session's record, its cookie, and its 
 - Each subject's listing: the handle, for the session's lifetime from login.
 - A session is listed after its record and before its cookie; a login that cannot list it is unavailable.
 - The listing never pushes out the session being opened.
-- The index needs confirmed reads: an entry after a raise or a close decides on what another request wrote.
+- The index needs its wiring to answer reads only from writes a failover keeps: an entry after a raise or a close decides on what another request wrote.
 
 ## Depends on
 - `kernel`, `http` (the request type), `cookies`, `subject-revocation`, `login-attributes` (the form kept attributes are read back in); `session`'s contract and rules; `session-lifecycle`'s store interfaces; `listing`.

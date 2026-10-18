@@ -2,8 +2,15 @@ import { setting } from "@mod/kernel";
 import { z } from "zod";
 
 export const section = z.strictObject({
-	/** Requests allowed per source in each window, on the options route. */
-	requests: z.number().int().min(1).max(100_000).prefault(60),
+	requests: z
+		.number()
+		.int()
+		.min(1)
+		.max(100_000)
+		.prefault(60)
+		.describe(
+			"Requests allowed per source in each window, on the options route, from 1 to 100000.",
+		),
 	window: setting
 		.duration("s")
 		.pipe(z.number().int().min(1).max(86_400))

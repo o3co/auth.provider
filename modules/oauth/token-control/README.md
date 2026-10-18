@@ -27,7 +27,7 @@
 - The hint only orders the kinds tried; a token no kind knows gets `200`.
 - A kind that cannot revoke its token gets `unsupported_token_type`, as do access tokens where `tokens` cannot revoke them.
 - A contribution for the hint `access_token` refuses boot.
-- An unavailable dependency answers `503`, never `active:false` or `200`; revocation then warns `token-control.unavailable` with what and the route.
+- An unavailable dependency answers `503`, never `active:false` or `200`; both routes then warn `token-control.unavailable` with what and the route, and introspection records `introspection.unavailable`.
 
 ## Depends on
 - `kernel`, `http`, `request-source`, `clients`, `issuer`, `tokens`, `token-endpoint`, `rate-limit`, `audit`

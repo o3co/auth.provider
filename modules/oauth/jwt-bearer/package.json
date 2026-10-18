@@ -6,6 +6,7 @@
 	"kind": "feature",
 	"optIn": true,
 	"exports": {
+		".": "./src/contract.ts",
 		"./module": "./src/module.ts"
 	},
 	"dependencies": {

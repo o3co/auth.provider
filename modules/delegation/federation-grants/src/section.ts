@@ -47,7 +47,12 @@ export const section = z.strictObject({
 		.describe(
 			"Where a session that falls short of a requirement is sent once to raise it, then back: an https URL (http only on a loopback host).",
 		),
-	connections: z.record(connectionName, connection).prefault({}),
+	connections: z
+		.record(connectionName, connection)
+		.prefault({})
+		.describe(
+			"What a grant may be for, by a name (a-z, 0-9 and -, at most 32): idp (a federation IdP that offers delegation), scopes (holding openid), resource, max-access-token-lifetime and scope-subsets.",
+		),
 	"default-lifetime": seconds(60, 31_536_000)
 		.prefault("30d")
 		.describe(
@@ -68,15 +73,27 @@ export const section = z.strictObject({
 		.describe(
 			"A token this close to its end is refreshed, once half its life is spent: a duration with a unit, from 0s to 1h, e.g. 30s.",
 		),
-	/** Upstream refreshes a grant may take in each window. */
-	rotations: z.number().int().min(1).max(1000).prefault(24),
+	rotations: z
+		.number()
+		.int()
+		.min(1)
+		.max(1000)
+		.prefault(24)
+		.describe("Upstream refreshes a grant may take in each rotation-window, from 1 to 1000."),
 	"rotation-window": seconds(1, 86_400)
 		.prefault("1h")
 		.describe(
 			"The window a grant's upstream refreshes are counted in: a duration with a unit, from 1s to 1d, e.g. 1h.",
 		),
-	/** Intents a client may lodge in each window, whatever subject it names. */
-	lodges: z.number().int().min(1).max(100_000).prefault(60),
+	lodges: z
+		.number()
+		.int()
+		.min(1)
+		.max(100_000)
+		.prefault(60)
+		.describe(
+			"Intents a client may lodge in each lodge-window, whatever subject it names, from 1 to 100000.",
+		),
 	"lodge-window": seconds(1, 86_400)
 		.prefault("1m")
 		.describe(
@@ -87,12 +104,23 @@ export const section = z.strictObject({
 		.describe(
 			"How far apart hosts' clocks may be: a grant made this soon after its subject's revocation counts as revoked. A duration with a unit, from 0s to 5m, e.g. 1s.",
 		),
-	/** A subject's revocation may be asked to leave its established grants. */
-	"keep-on-subject-revocation": z.boolean().prefault(false),
-	/** Whether a callback refuses an upstream account another user holds. */
-	"identity-check": z.enum(["required", "none"]).prefault("required"),
-	/** Requests allowed per source in each window, on every route. */
-	requests: z.number().int().min(1).max(1000).prefault(60),
+	"keep-on-subject-revocation": z
+		.boolean()
+		.prefault(false)
+		.describe("Whether a subject's revocation may be asked to leave its established grants."),
+	"identity-check": z
+		.enum(["required", "none"])
+		.prefault("required")
+		.describe(
+			"required refuses a callback whose upstream account another user holds; none does not check.",
+		),
+	requests: z
+		.number()
+		.int()
+		.min(1)
+		.max(1000)
+		.prefault(60)
+		.describe("Requests allowed per source in each window, on every route, from 1 to 1000."),
 	window: seconds(1, 3600)
 		.prefault("1m")
 		.describe(

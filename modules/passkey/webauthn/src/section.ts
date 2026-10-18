@@ -18,21 +18,42 @@ const servesHost = (rpId: string, host: string) =>
 
 export const section = z
 	.strictObject({
-		"rp-id": z.string().min(1),
-		"rp-name": z.string().min(1),
-		/** The origins ceremonies may come from, matched exactly. */
+		"rp-id": z
+			.string()
+			.min(1)
+			.describe("The relying party ID: each web origin's host, or a domain each one lies under."),
+		"rp-name": z
+			.string()
+			.min(1)
+			.describe("The relying party's name, as an authenticator shows it."),
 		origins: z
 			.array(z.union([z.string().regex(app, "an Android app origin of this form"), origin]))
-			.min(1),
-		/** The pages that may frame a ceremony; none by default, so any ceremony in a frame is refused. */
-		"top-origins": z.array(origin).prefault([]),
+			.min(1)
+			.describe(
+				"The origins ceremonies may come from, matched exactly: https web origins (http only on localhost), or Android app origins.",
+			),
+		"top-origins": z
+			.array(origin)
+			.prefault([])
+			.describe(
+				"The pages that may frame a ceremony; none by default, so any ceremony in a frame is refused.",
+			),
 		"challenge-lifetime": setting
 			.duration("s")
 			.pipe(z.number().int().min(10).max(600))
 			.prefault("2m")
 			.describe("How long a ceremony's challenge can be answered, from 10s to 10m."),
-		"user-verification": z.enum(["required", "preferred", "discouraged"]).prefault("preferred"),
-		"max-credentials": z.number().int().min(1).max(100).prefault(10),
+		"user-verification": z
+			.enum(["required", "preferred", "discouraged"])
+			.prefault("preferred")
+			.describe("Whether the authenticator is asked to verify its user, as WebAuthn says it."),
+		"max-credentials": z
+			.number()
+			.int()
+			.min(1)
+			.max(100)
+			.prefault(10)
+			.describe("The most passkeys a subject may hold, from 1 to 100."),
 	})
 	.refine(
 		(s) =>

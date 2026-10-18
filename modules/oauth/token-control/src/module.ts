@@ -41,6 +41,7 @@ export default defineModule({ name: "token-control", section }, (m) => [
 			await c.get(tokens),
 			(await c.get(issuer)).url,
 			await c.get(audit),
+			c.log,
 		),
 	})),
 	m.contribute(routes).by(async (c) => {

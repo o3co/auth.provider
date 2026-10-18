@@ -1130,6 +1130,51 @@ describe("cross-origin routes", () => {
 	});
 });
 
+describe("limits", () => {
+	/** Opens a connection, sends `sent`, and resolves with all it reads once the server closes it. */
+	function stalled(port: number, sent: string): Promise<string> {
+		const socket = connect(port, "127.0.0.1", () => socket.write(sent));
+		let text = "";
+		socket.on("data", (chunk) => {
+			text += chunk.toString();
+		});
+		socket.on("error", () => {});
+		return new Promise((resolve) => socket.on("close", () => resolve(text)));
+	}
+	const routes = handlers([
+		{ method: "POST", path: "/p", takes: ["form"], handle: () => ({ status: 204 }) },
+	]);
+
+	it("answers 408 and closes a connection whose headers are not all sent within headers-timeout", async () => {
+		const base = await serveWith(routes, { "headers-timeout": "1s", "request-timeout": "5s" });
+		const started = Date.now();
+		const text = await stalled(Number(new URL(base).port), "GET /p HTTP/1.1\r\nHost: x\r\n");
+		expect(text).toMatch(/^HTTP\/1\.1 408 /);
+		expect(Date.now() - started).toBeLessThan(4000);
+	});
+
+	it("answers 408 and closes a connection whose body is not all sent within request-timeout", async () => {
+		const base = await serveWith(routes, { "headers-timeout": "1s", "request-timeout": "2s" });
+		const started = Date.now();
+		const head =
+			"POST /p HTTP/1.1\r\nHost: x\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 10\r\n\r\na=";
+		const text = await stalled(Number(new URL(base).port), head);
+		expect(text).toMatch(/^HTTP\/1\.1 408 /);
+		expect(Date.now() - started).toBeGreaterThanOrEqual(1500);
+	});
+
+	it("closes a connection past max-connections as it arrives, and serves the one it holds", async () => {
+		const base = await serveWith(routes, { "max-connections": 1 });
+		const port = Number(new URL(base).port);
+		const held = connect(port, "127.0.0.1");
+		held.on("error", () => {});
+		await new Promise((resolve) => held.once("connect", resolve));
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(await stalled(port, "GET /p HTTP/1.1\r\nHost: x\r\n\r\n")).toBe("");
+		held.destroy();
+	});
+});
+
 describe("test requests", () => {
 	it("give fields from their JSON or form, as the server does", () => {
 		const form = new Map([["a", ["1", "2"]]]);

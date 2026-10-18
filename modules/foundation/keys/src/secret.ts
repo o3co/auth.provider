@@ -36,3 +36,29 @@ export function secretBytes(
 		}
 	});
 }
+
+/** The fewest bytes of key material a token can be read as: its own, or as hex or base64 decodes them. */
+function keyBytes(token: string): number {
+	const hex = /^(?:[0-9a-fA-F]{2})+$/.test(token) ? token.length / 2 : undefined;
+	const body = token.replace(/=+$/, "");
+	const padding = token.length - body.length;
+	// Base64 as written: one alphabet, no lone sixth bit, and padding that completes the last four.
+	const alphabet = /^[A-Za-z0-9+/]+$/.test(body) || /^[A-Za-z0-9_-]+$/.test(body);
+	const rest = body.length % 4;
+	const base64 =
+		alphabet && padding <= 2 && rest !== 1 && (padding === 0 || rest + padding === 4)
+			? Math.floor((body.length * 3) / 4)
+			: undefined;
+	return Math.min(...[Buffer.byteLength(token), hex, base64].filter((n) => n !== undefined));
+}
+
+/** A bearer token's setting: a b64token of at least `atLeast` bytes of key material however read, never a sample. */
+export function bearerToken({ atLeast }: { readonly atLeast: number }) {
+	return z.string().superRefine((value, ctx) => {
+		const refuse = (message: string) => ctx.addIssue({ code: "custom", message });
+		if (value.startsWith("REPLACE-"))
+			return refuse("a sample left in place: REPLACE- is never a secret");
+		if (!/^[A-Za-z0-9\-._~+/]+=*$/.test(value)) return refuse("not an RFC 6750 b64token");
+		if (keyBytes(value) < atLeast) refuse(`at least ${atLeast} bytes of key material`);
+	});
+}

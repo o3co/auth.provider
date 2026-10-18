@@ -17,7 +17,7 @@ import { logins } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
-import { type EntryRequirement, entryRequirements, sessions } from "@mod/session";
+import { type EntryRequirement, entryRequirements, sessionRules, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
@@ -37,6 +37,8 @@ import { type MfaSettings, mfaConfig } from "../src/testing.ts";
 import { memoryFactors } from "./stores.ts";
 
 let shift = 0;
+/** `session`'s recent-authentication window, as its stand-in counts it. */
+const recentMs = sessionRules.credentialsSecondsDefault * 1000;
 const runtime = quietRuntime({ clock: { now: () => Date.now() + shift } });
 let stop = async () => {};
 afterEach(async () => {
@@ -389,22 +391,12 @@ describe("decisions on the subject's factors", () => {
 					}) as never,
 			),
 		]);
-		const { decided, bindKind, idOf } = await serve(
-			{ "manage-within": "1m" },
-			{ kinds: [code, backup, silent] },
-		);
+		const { decided, bindKind, idOf } = await serve({}, { kinds: [code, backup, silent] });
 		const before = runtime.clock.now();
 		await bindKind("ola", "silent", "x");
 		expect(await decided.guessable("ola", await idOf("ola", "silent"))).toBe(true);
 		shift += 1000;
 		expect(await decided.guessableBoundAfter("ola", before + 500)).toBe(false);
-	});
-
-	it("tells whether a proof at a time is still recent, by manage-within on the kernel's clock", async () => {
-		const { decided } = await serve({ "manage-within": "1m" });
-		const now = runtime.clock.now();
-		expect(decided.recent(now - 60_000 + 1000)).toBe(true);
-		expect(decided.recent(now - 61_000)).toBe(false);
 	});
 
 	it("requires a second factor where the section leaves the mode unset, as 0.17 did", async () => {
@@ -598,7 +590,7 @@ describe("the entry requirements mfa sets", () => {
 	});
 
 	it("asks a recent second factor to change credentials, and a second factor to use the session under required mode", async () => {
-		const { app, bindCode, signedIn } = await serve({ mode: "required", "manage-within": "1m" });
+		const { app, bindCode, signedIn } = await serve({ mode: "required" });
 		const opened = app.get(sessions);
 		const bare = await signedIn("bea", ["pwd"]);
 		expect((await opened.enterFor(bare, "credentials")).kind).toBe("entered");
@@ -608,7 +600,7 @@ describe("the entry requirements mfa sets", () => {
 		const proved = await signedIn("bea", ["pwd", "otp", "mfa"]);
 		expect((await opened.enterFor(proved, "use")).kind).toBe("entered");
 		expect((await opened.enterFor(proved, "credentials")).kind).toBe("entered");
-		shift += 61_000;
+		shift += recentMs + 1000;
 		expect((await opened.enterFor(proved, "credentials")).kind).toBe("short");
 		const raised = await opened.raise(proved, ["otp", "mfa"]);
 		const after = withCookie(raised?.cookies[0] ?? "");
@@ -616,7 +608,7 @@ describe("the entry requirements mfa sets", () => {
 	});
 
 	it("never takes a sign-in at an unknown time as recent, a second factor it says it proved included", async () => {
-		const { app, signedIn } = await serve({ "manage-within": "1m" });
+		const { app, signedIn } = await serve();
 		const opened = app.get(sessions);
 		// No counting factor: only a sign-in known to be recent opens credentials.
 		const unknown = await signedIn("dee", ["fed"], "unknown");
@@ -631,14 +623,28 @@ describe("the entry requirements mfa sets", () => {
 	});
 
 	it("takes only a raise that added a second factor as a recent second factor", async () => {
-		const { app, bindCode, signedIn } = await serve({ "manage-within": "1m" });
+		const { app, bindCode, signedIn } = await serve();
 		const opened = app.get(sessions);
 		await bindCode("cid");
 		const request = await signedIn("cid", ["pwd"]);
-		shift += 61_000;
+		shift += recentMs + 1000;
 		const raised = await opened.raise(request, ["pwd"]);
 		const after = withCookie(raised?.cookies[0] ?? "");
 		expect((await opened.enterFor(after, "credentials")).kind).toBe("short");
+	});
+
+	it("counts a second factor recent by session's one window: a fresh sign-in over an older proof is short", async () => {
+		const { app, bindCode, signedIn } = await serve();
+		const opened = app.get(sessions);
+		await bindCode("eve");
+		const proved = await signedIn("eve", ["pwd", "otp", "mfa"]);
+		shift += recentMs + 1000;
+		// A raise without a second factor: the session's latest authentication is now, its proof is not.
+		const raised = await opened.raise(proved, ["pwd"]);
+		const fresh = withCookie(raised?.cookies[0] ?? "");
+		expect((await opened.enterFor(fresh, "credentials")).kind).toBe("short");
+		expect(app.get(factors).recent(runtime.clock.now() - recentMs)).toBe(true);
+		expect(app.get(factors).recent(runtime.clock.now() - recentMs - 1)).toBe(false);
 	});
 });
 
@@ -921,9 +927,6 @@ describe("a gate contributed before a first counting factor", () => {
 	});
 });
 
-it("reads how recent a proof must be with its unit, in whole seconds, five minutes unless set", () => {
-	const within = (settings: object) => section.safeParse(settings).data?.["manage-within"];
-	expect([{}, { "manage-within": "10m" }].map(within)).toEqual([300, 600]);
-	const refused = [{ "manage-seconds": 60 }, { "manage-within": 60 }, { "manage-within": "2h" }];
-	expect(refused.map(within)).toEqual([undefined, undefined, undefined]);
+it("refuses manage-within, now session's one recent-authentication window", () => {
+	expect(section.safeParse({ "manage-within": "5m" }).success).toBe(false);
 });

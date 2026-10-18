@@ -2,7 +2,7 @@ import cookiesModule from "@mod/cookies/module";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { participants, type Session, sessions } from "@mod/session";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
@@ -15,7 +15,7 @@ import { sessionLifecycleConfig } from "../../../testing.ts";
 let now = 1_800_000_000_000;
 const facts = () => ({ subject: "alice", amr: ["pwd"], authenticatedAt: now });
 
-async function boot() {
+async function boot(log = recordingLog()) {
 	const stores = memoryStores();
 	const closed: string[] = [];
 	const closer = defineModule({ name: "closer" }, (m) => [
@@ -40,7 +40,7 @@ async function boot() {
 			...httpConfig({ "public-origin": "https://as.example" }),
 			...sessionLifecycleConfig(),
 		},
-		runtime: quietRuntime({ clock: { now: () => now } }),
+		runtime: quietRuntime({ clock: { now: () => now }, log: log.log }),
 	});
 	await app.start();
 	const s = app.get(sessions);
@@ -48,7 +48,8 @@ async function boot() {
 		testRequest({ headers: new Map([["cookie", cookie]]), source: { scheme: "https" } });
 	const login = async (given = facts()) =>
 		(await s.complete(testRequest(), given)).cookies[0]?.split(";")[0] ?? "";
-	return { app, s, stores, closed, login, withCookie };
+	const logged = (event: string) => log.lines().filter((line) => line.event === event);
+	return { app, s, stores, closed, login, withCookie, logged };
 }
 
 it("puts a pushed-out session back for what it has left, so the next login pushes out that one again", async () => {
@@ -154,4 +155,26 @@ it("puts a pushed-out session back though the opened one cannot be taken off", a
 	const first = ((await s.enter(withCookie(await login()))) as Session).id;
 	stores.down.listed.failNext("remove");
 	expect(await pushOutRefused(booted, first)).toBeDefined();
+});
+
+it("ends a session the put-back pushes out, so none is left open off the listing, and logs how many it ended", async () => {
+	const { s, stores, login, withCookie, logged } = await boot();
+	const first = ((await s.enter(withCookie(await login()))) as Session).id;
+	const cookies: string[] = [];
+	for (let n = 0; n < stores.listingCap - 1; n++) {
+		now += 1000;
+		cookies.push(await login());
+	}
+	// The opened session stays listed, so the listing is full again when the first is put back.
+	stores.down.closing.failNext("add");
+	stores.down.listed.failNext("remove");
+	await expect(s.complete(testRequest(), facts())).rejects.toSatisfy(isUnavailable);
+	const listed = (await stores.listed.members("alice")).map(({ member }) => member);
+	expect(listed).toContain(first);
+	// The second login's session, the one ending first after the first's, was pushed out and ended.
+	expect(await s.enter(withCookie(cookies[0] as string))).toBeUndefined();
+	expect(await s.enter(withCookie(cookies[1] as string))).toBeDefined();
+	expect(logged("session-lifecycle.listing_ended")).toEqual([
+		expect.objectContaining({ fields: { count: 1 } }),
+	]);
 });

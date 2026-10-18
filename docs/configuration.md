@@ -37,8 +37,8 @@ From `@mod/authorize`.
 |---|---|---|---|---|---|---|
 | `authorize.login-page` | string |  | yes | `AUTHORIZE_LOGIN_PAGE` | `https://login.example.invalid/login` | The login page, given the return URL as `redirect_to`: an https URL (http only on a loopback host). |
 | `authorize.step-up-page` | string |  |  |  |  | Where a session that falls short of an acr is sent to raise its authentication: an https URL (http only on a loopback host). |
-| `authorize.oidc-mode` | oidc-required \| dual | `oidc-required` |  |  |  |  |
-| `authorize.requests` | integer (1–100000) | `60` |  |  |  |  |
+| `authorize.oidc-mode` | oidc-required \| dual | `oidc-required` |  |  |  | oidc-required refuses a request whose own scope does not name openid, as invalid_scope; dual lets it through with the scope it asks or the client's default. |
+| `authorize.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over both methods together; over it, 429. |
 | `authorize.window` | string | `1m` |  |  |  | The rate limit's window: a duration with a unit, e.g. 1m. |
 
 ## client-assertion
@@ -56,7 +56,7 @@ From `@mod/clients`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `clients.registered` | list of map | `[]` |  |  | `[{"id":"example-client","kind":"public","method":"none"}]` |  |
+| `clients.registered` | list of map | `[]` |  |  | `[{"id":"example-client","kind":"public","method":"none"}]` | The clients the operator registers: each an id (unique), a kind (public or confidential), a method and sections (values by section name, client-secret holding its hash). |
 
 ## clients-cimd
 
@@ -64,16 +64,16 @@ From `@mod/clients-cimd`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `clients-cimd.allow` | list of string | `[]` |  |  |  |  |
-| `clients-cimd.deny` | list of string | `[]` |  |  |  |  |
-| `clients-cimd.scopes` | list of string | `[]` |  |  |  |  |
-| `clients-cimd.audiences` | list of string | `[]` |  |  |  |  |
+| `clients-cimd.allow` | list of string | `[]` |  |  |  | The host names a client id's document may be fetched from (.name also takes the names under it); when not empty, only these, and outbound's hosts narrow to them. |
+| `clients-cimd.deny` | list of string | `[]` |  |  |  | The host names a client id's document is never fetched from (.name also takes the names under it), checked before allow. |
+| `clients-cimd.scopes` | list of string | `[]` |  |  |  | The ceiling of scopes such a client may get: a document asking none gets all of them. |
+| `clients-cimd.audiences` | list of string | `[]` |  |  |  | The audiences such a client's tokens may name, as the operator allows. |
 | `clients-cimd.max-size` | string | `5KiB` |  |  |  | The largest document fetched: a size with a unit, e.g. 5KiB. |
 | `clients-cimd.timeout` | string | `5s` |  |  |  | How long a fetch may take: a duration with a unit, e.g. 5s. |
 | `clients-cimd.cache-lifetime` | string | `10m` |  |  |  | How long a document is kept: a duration with a unit, e.g. 10m. |
-| `clients-cimd.cache-entries` | integer (1–100000) | `256` |  |  |  |  |
+| `clients-cimd.cache-entries` | integer (1–100000) | `256` |  |  |  | How many ids the kept documents, and the kept refusals, each hold at most, from 1 to 100000; past it the one kept longest goes. |
 | `clients-cimd.refused-lifetime` | string | `1m` |  |  |  | How long a refusal is remembered: a duration with a unit, e.g. 1m. |
-| `clients-cimd.max-concurrent` | integer (1–1024) | `8` |  |  |  |  |
+| `clients-cimd.max-concurrent` | integer (1–1024) | `8` |  |  |  | How many fetches may run at once, from 1 to 1024; an id past it finds no client, without waiting. |
 
 ## code-grant
 
@@ -158,19 +158,19 @@ From `@mod/federation-grants`.
 | `federation-grants.page` | string |  |  | `FEDERATION_GRANTS_PAGE` | `https://login.example.invalid/federation-grants` | The page that asks the user, on this deployment's origin: an https URL (http only on a loopback host). |
 | `federation-grants.login-page` | string |  |  | `FEDERATION_GRANTS_LOGIN_PAGE` | `https://login.example.invalid/login` | Where a browser with no session is sent to log in, then back: an https URL (http only on a loopback host). |
 | `federation-grants.step-up-page` | string |  |  |  |  | Where a session that falls short of a requirement is sent once to raise it, then back: an https URL (http only on a loopback host). |
-| `federation-grants.connections` | map | `{}` |  |  |  |  |
+| `federation-grants.connections` | map | `{}` |  |  |  | What a grant may be for, by a name (a-z, 0-9 and -, at most 32): idp (a federation IdP that offers delegation), scopes (holding openid), resource, max-access-token-lifetime and scope-subsets. |
 | `federation-grants.default-lifetime` | string | `30d` |  |  |  | A grant's lifetime from its activation when a client asks for none: a duration with a unit, from 1m to 365d, e.g. 30d. |
 | `federation-grants.max-lifetime` | string | `30d` |  |  |  | The most a grant may live from its activation: a duration with a unit, from 1m to 365d, e.g. 90d. |
 | `federation-grants.connect-lifetime` | string | `10m` |  |  |  | How long a connection may take, from the intent to the callback: a duration with a unit, from 1m to 1h, e.g. 10m. |
 | `federation-grants.refresh-before` | string | `30s` |  |  |  | A token this close to its end is refreshed, once half its life is spent: a duration with a unit, from 0s to 1h, e.g. 30s. |
-| `federation-grants.rotations` | integer (1–1000) | `24` |  |  |  |  |
+| `federation-grants.rotations` | integer (1–1000) | `24` |  |  |  | Upstream refreshes a grant may take in each rotation-window, from 1 to 1000. |
 | `federation-grants.rotation-window` | string | `1h` |  |  |  | The window a grant's upstream refreshes are counted in: a duration with a unit, from 1s to 1d, e.g. 1h. |
-| `federation-grants.lodges` | integer (1–100000) | `60` |  |  |  |  |
+| `federation-grants.lodges` | integer (1–100000) | `60` |  |  |  | Intents a client may lodge in each lodge-window, whatever subject it names, from 1 to 100000. |
 | `federation-grants.lodge-window` | string | `1m` |  |  |  | The window a client's lodged intents are counted in: a duration with a unit, from 1s to 1d, e.g. 1m. |
 | `federation-grants.revocation-skew` | string | `1s` |  |  |  | How far apart hosts' clocks may be: a grant made this soon after its subject's revocation counts as revoked. A duration with a unit, from 0s to 5m, e.g. 1s. |
-| `federation-grants.keep-on-subject-revocation` | boolean | `false` |  |  |  |  |
-| `federation-grants.identity-check` | required \| none | `required` |  |  |  |  |
-| `federation-grants.requests` | integer (1–1000) | `60` |  |  |  |  |
+| `federation-grants.keep-on-subject-revocation` | boolean | `false` |  |  |  | Whether a subject's revocation may be asked to leave its established grants. |
+| `federation-grants.identity-check` | required \| none | `required` |  |  |  | required refuses a callback whose upstream account another user holds; none does not check. |
+| `federation-grants.requests` | integer (1–1000) | `60` |  |  |  | Requests allowed per source in each window, on every route, from 1 to 1000. |
 | `federation-grants.window` | string | `1m` |  |  |  | The window a source's requests are counted in, on every route: a duration with a unit, from 1s to 1h, e.g. 1m. |
 
 ## federation-grants-store
@@ -210,6 +210,9 @@ From `@mod/http`.
 | `http.client-certificate.dialect` | rfc9440 \| pem \| xfcc |  |  |  |  | The form a trusted proxy forwards the client's certificate in: `rfc9440` (byte sequences) with `header` and `chain-header`, `pem` (one PEM block, URL-encoded or not) with `header`, or `xfcc` (Envoy's form, the chain in the same header) with `header`. |
 | `http.client-certificate.header` | string | `client-cert` |  |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
 | `http.client-certificate.chain-header` | string | `client-cert-chain` |  |  |  | The header holding the chain behind the certificate, for `rfc9440`: lower-case letters, digits and `-`. |
+| `http.headers-timeout` | string | `10s` |  |  |  | How long a client may take to send a request's headers, from 1s to 1m, such as 10s; past it the request is answered 408 and its connection closed. |
+| `http.request-timeout` | string | `30s` |  |  |  | How long a client may take to send a whole request, its body included, from 1s to 5m and no less than headers-timeout, such as 30s; past it the request is answered 408 and its connection closed. |
+| `http.max-connections` | integer (1–1000000) | `10000` |  |  |  | The most connections held open at once, from 1 to 1000000; one past it is closed as it arrives. |
 
 ## http-ops
 
@@ -233,7 +236,7 @@ From `@mod/jwt-bearer`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `jwt-bearer.issuers` | list of map | `[]` |  |  | `[{"issuer":"https://issuer.example.invalid","jwks-uri":"https://issuer.example.invalid/jwks"}]` | The trusted issuers: each with its public keys (kid, alg, SPKI PEM), or its key set's URL at https on its host. |
+| `jwt-bearer.issuers` | list of map | `[]` |  |  | `[{"issuer":"https://issuer.example.invalid","jwks-uri":"https://issuer.example.invalid/jwks"}]` | The trusted issuers: each with its public keys (kid, alg, SPKI PEM), its key set's URL at https on its host, or neither, its keys then contributed at `signerKeys`. |
 | `jwt-bearer.max-assertion-lifetime` | string | `1h` |  |  |  | The longest lifetime an assertion may claim, from `1s` to `1d` in whole seconds. |
 | `jwt-bearer.clock-skew` | string | `30s` |  |  |  | How far an assertion's times may be off this host's clock, from `0s` to `5m` in whole seconds. |
 
@@ -296,14 +299,14 @@ From `@mod/mail-smtp`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `mail-smtp.host` | string |  | yes | `MAIL_SMTP_HOST` | `smtp.example.invalid` |  |
-| `mail-smtp.port` | integer (1–65535) | `587` |  |  |  |  |
-| `mail-smtp.security` | starttls \| tls \| none | `starttls` |  |  |  |  |
-| `mail-smtp.from` | string |  | yes | `MAIL_SMTP_FROM` | `auth@example.invalid` |  |
-| `mail-smtp.user` | string |  |  |  |  |  |
-| `mail-smtp.password` | string |  |  |  |  |  |
+| `mail-smtp.host` | string |  | yes | `MAIL_SMTP_HOST` | `smtp.example.invalid` | The relay's host name or address. |
+| `mail-smtp.port` | integer (1–65535) | `587` |  |  |  | The relay's port, from 1 to 65535. |
+| `mail-smtp.security` | starttls \| tls \| none | `starttls` |  |  |  | How the connection is secured: STARTTLS after connecting, TLS from the first byte, or none, only to a loopback host. |
+| `mail-smtp.from` | string |  | yes | `MAIL_SMTP_FROM` | `auth@example.invalid` | The sender: one mailbox, alone or after a display name. |
+| `mail-smtp.user` | string |  |  |  |  | The account the relay signs in, beside `password`. |
+| `mail-smtp.password` | string |  |  |  |  | The account's password, beside `user`. |
 | `mail-smtp.deadline` | string | `40s` |  |  |  | How long a whole send may take, from 100ms to 10m. |
-| `mail-smtp.concurrent-sends` | integer (1–1000) | `20` |  |  |  |  |
+| `mail-smtp.concurrent-sends` | integer (1–1000) | `20` |  |  |  | Sends under way at once on a host, from 1 to 1000. |
 
 ## metrics-prometheus
 
@@ -320,7 +323,6 @@ From `@mod/mfa`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `mfa.mode` | optional \| required | `required` |  | `MFA_MODE` | `required` | "required" (the default) asks every login for a counting factor; "optional" only of those who hold one. |
-| `mfa.manage-within` | string | `5m` |  |  |  | How recently a second factor must have been proved to change credentials, from `30s` to `1h` in whole seconds. |
 | `mfa.max-factors` | integer (2–50) | `10` |  |  |  | How many factors a subject may hold, recovery codes included. |
 
 ## mfa-binding-proof
@@ -347,15 +349,15 @@ From `@mod/mfa-flows`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `mfa-flows.transaction-lifetime` | string | `10m` |  |  |  | How long a transaction waits for its factor, from 1m to 30m in whole seconds, such as `10m`. |
-| `mfa-flows.attempts-per-transaction` | integer (2–10) | `5` |  |  |  |  |
-| `mfa-flows.requests` | integer (1–100000) | `60` |  |  |  |  |
+| `mfa-flows.attempts-per-transaction` | integer (2–10) | `5` |  |  |  | How many proofs one transaction takes, from 2 to 10; the one that uses up the last ends it. |
+| `mfa-flows.requests` | integer (1–100000) | `60` |  |  |  | POSTs allowed per source in each window, over every form this package's routes take, from 1 to 100000. |
 | `mfa-flows.window` | string | `5m` |  |  |  | The window `requests` is counted over, from 1s to 1d in whole seconds, such as `5m`. |
-| `mfa-flows.lockout.threshold` | integer (-9007199254740991–9007199254740991) | `5` |  |  |  |  |
+| `mfa-flows.lockout.threshold` | integer (-9007199254740991–9007199254740991) | `5` |  |  |  | Consecutive failures before the first hold; a positive integer, no more than `budget`. |
 | `mfa-flows.lockout.backoff` | string | `15m` |  |  |  | The first hold after `threshold` failures, in whole seconds, such as `15m`. |
 | `mfa-flows.lockout.max-backoff` | string | `1d` |  |  |  | The longest hold, the first doubling up to it, in whole seconds, such as `1d`. |
-| `mfa-flows.lockout.budget` | integer (-9007199254740991–9007199254740991) | `10` |  |  |  |  |
+| `mfa-flows.lockout.budget` | integer (-9007199254740991–9007199254740991) | `10` |  |  |  | Failures allowed in any `budget-window`; a positive integer, from `threshold` to `hard-limit`. |
 | `mfa-flows.lockout.budget-window` | string | `7d` |  |  |  | The window `budget` is counted over, in whole seconds, such as `7d`. |
-| `mfa-flows.lockout.hard-limit` | integer (-9007199254740991–9007199254740991) | `100` |  |  |  |  |
+| `mfa-flows.lockout.hard-limit` | integer (-9007199254740991–9007199254740991) | `100` |  |  |  | Failures in one run after which the hold is fixed until released; a positive integer, no less than `budget`. |
 | `mfa-flows.lockout.memory` | string | `1d` |  |  |  | How long a run of failures is remembered without one, in whole seconds, such as `1d`. |
 
 ## mfa-webauthn
@@ -634,13 +636,13 @@ From `@mod/webauthn`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `webauthn.rp-id` | string |  | yes | `WEBAUTHN_RP_ID` | `login.example.invalid` |  |
-| `webauthn.rp-name` | string |  | yes | `WEBAUTHN_RP_NAME` | `Example` |  |
-| `webauthn.origins` | list of string |  | yes |  | `["https://login.example.invalid"]` |  |
-| `webauthn.top-origins` | list of string | `[]` |  |  |  |  |
+| `webauthn.rp-id` | string |  | yes | `WEBAUTHN_RP_ID` | `login.example.invalid` | The relying party ID: each web origin's host, or a domain each one lies under. |
+| `webauthn.rp-name` | string |  | yes | `WEBAUTHN_RP_NAME` | `Example` | The relying party's name, as an authenticator shows it. |
+| `webauthn.origins` | list of string |  | yes |  | `["https://login.example.invalid"]` | The origins ceremonies may come from, matched exactly: https web origins (http only on localhost), or Android app origins. |
+| `webauthn.top-origins` | list of string | `[]` |  |  |  | The pages that may frame a ceremony; none by default, so any ceremony in a frame is refused. |
 | `webauthn.challenge-lifetime` | string | `2m` |  |  |  | How long a ceremony's challenge can be answered, from 10s to 10m. |
-| `webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  |  |
-| `webauthn.max-credentials` | integer (1–100) | `10` |  |  |  |  |
+| `webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  | Whether the authenticator is asked to verify its user, as WebAuthn says it. |
+| `webauthn.max-credentials` | integer (1–100) | `10` |  |  |  | The most passkeys a subject may hold, from 1 to 100. |
 
 ## webauthn-login
 
@@ -648,5 +650,5 @@ From `@mod/webauthn-login`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `webauthn-login.requests` | integer (1–100000) | `60` |  |  |  |  |
+| `webauthn-login.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, on the options route, from 1 to 100000. |
 | `webauthn-login.window` | string | `1m` |  |  |  | The window `requests` is counted over, from 1s to 1d in whole seconds, written with its unit, such as `1m`. |

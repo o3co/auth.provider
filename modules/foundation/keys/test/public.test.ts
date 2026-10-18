@@ -2,6 +2,7 @@ import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
 	isCanonicalJws,
+	isVerifyAlgorithm,
 	type Jwk,
 	publicJwk,
 	publicMembers,
@@ -158,4 +159,11 @@ describe("a JWS in its one form", () => {
 		for (const [name, jws] of Object.entries(refused))
 			expect(isCanonicalJws(jws), name).toBe(false);
 	});
+});
+
+it("tells an algorithm it verifies under from any other name, an inherited one too", () => {
+	for (const alg of verifyAlgorithms) expect(isVerifyAlgorithm(alg), alg).toBe(true);
+	for (const other of ["HS256", "none", "toString", "constructor", 256]) {
+		expect(isVerifyAlgorithm(other), String(other)).toBe(false);
+	}
 });

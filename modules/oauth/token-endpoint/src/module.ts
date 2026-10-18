@@ -1,5 +1,5 @@
 import { audit } from "@mod/audit";
-import { authMethods, clients } from "@mod/clients";
+import { clients } from "@mod/clients";
 import { composedGrants, grants, sessionIssuances, targets } from "@mod/grants";
 import { routes, site, use } from "@mod/http";
 import { issuer, metadata } from "@mod/issuer";
@@ -59,7 +59,6 @@ export default defineModule({ name: "token-endpoint", section }, (m) => [
 			new Map((await c.collect(grants)).map((g) => [g.grantType, g])),
 			await c.get(targets),
 			await c.get(audit),
-			await c.collect(authMethods),
 			c.log,
 		);
 		const window = { limit: c.section.requests, ms: c.section.window * 1000 };

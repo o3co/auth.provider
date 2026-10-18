@@ -11,11 +11,15 @@ const runtime = quietRuntime({
 	random: { bytes: (n) => new Uint8Array(n) },
 });
 
+/** /hang answers only once released, and says when it is reached; fresh for each test. */
+let hang = { reached: Promise.withResolvers<void>(), released: Promise.withResolvers<void>() };
+
 let stop: () => Promise<void> = async () => {};
 afterEach(async () => {
 	await stop();
 	stop = async () => {};
 	now = 0;
+	hang = { reached: Promise.withResolvers<void>(), released: Promise.withResolvers<void>() };
 });
 
 const handlers = defineModule({ name: "handlers" }, (m) => [
@@ -43,7 +47,11 @@ const handlers = defineModule({ name: "handlers" }, (m) => [
 	m.contribute(routes).by(() => ({
 		method: "GET",
 		path: "/hang",
-		handle: () => new Promise((resolve) => setTimeout(() => resolve({ status: 200 }), 200)),
+		handle: async () => {
+			hang.reached.resolve();
+			await hang.released.promise;
+			return { status: 200 };
+		},
 	})),
 ]);
 
@@ -90,17 +98,16 @@ it("tells each request's end once: the method sent, the declared route reached, 
 it("tells a connection closed before any answer as closed, once", async () => {
 	const ends: RequestEnd[] = [];
 	const base = await serveWith(observing(ends));
-	await new Promise<void>((resolve, reject) => {
-		const socket = connect(Number(new URL(base).port), "127.0.0.1", () => {
-			socket.write("GET /hang HTTP/1.1\r\nHost: x\r\n\r\n");
-			setTimeout(() => socket.destroy(), 50);
-		});
-		socket.on("close", () => resolve());
-		socket.on("error", reject);
-	});
+	const socket = connect(Number(new URL(base).port), "127.0.0.1", () =>
+		socket.write("GET /hang HTTP/1.1\r\nHost: x\r\n\r\n"),
+	);
+	socket.on("error", () => {});
+	await hang.reached.promise;
+	socket.destroy();
 	await until(() => ends.length > 0);
-	// Past /hang's 200 ms, so its late answer would have been told by now.
-	await new Promise((r) => setTimeout(r, 300));
+	// The late answer is written now, and a second end would be told within these turns.
+	hang.released.resolve();
+	for (let turn = 0; turn < 3; turn++) await new Promise((r) => setImmediate(r));
 	expect(ends).toEqual([{ method: "GET", route: "/hang", status: "closed", ms: 0 }]);
 });
 

@@ -557,5 +557,9 @@ describe("a key set at a URL", () => {
 		const reordered = { jwks: { ...source.jwks, hosts: ["other.example", "issuer.example"] } };
 		expect((await jwt.verifierOf(reordered, policy).verify(token)).kind).toBe("valid");
 		expect(s.asked).toHaveLength(2);
+		// So are they written in another case or with the root's trailing dot.
+		const respelled = { jwks: { ...source.jwks, hosts: ["Other.Example.", "ISSUER.example"] } };
+		expect((await jwt.verifierOf(respelled, policy).verify(token)).kind).toBe("valid");
+		expect(s.asked).toHaveLength(2);
 	});
 });

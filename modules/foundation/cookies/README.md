@@ -12,7 +12,8 @@
 ## Offers
 - `cookies.write`: a name, a value, a lifetime in seconds, and whether the cookie is cross-site → a `Set-Cookie` value.
 - `cookies.read`: a request and a name → the cookie's value.
-- `cookiesFor`: whether cookies can be made secure → cookies by the same rule, for a stand-in that builds them without composing this module.
+- `cookies.lookup`: a request and a name → the cookie (`found`), none (`absent`), or `withheld` with why (`plain-http`, `duplicate`). Optional on the contract until every stand-in offers it.
+- `cookiesFor`: whether cookies can be made secure, and a log if any → cookies by the same rule, `lookup` included, for a stand-in that builds them without composing this module.
 
 ## Invariants
 - Where cookies can be made secure, a cookie's name gets the `__Host-` prefix.
@@ -28,6 +29,7 @@
 - Each write takes its attributes from the rule of the deployment writing it; nothing of a cookie is kept between writes.
 - A request's cookie is read only when exactly one cookie has that name.
 - Where cookies can be made secure, the cookies of a request not over HTTPS are not read.
+- A withheld cookie warns `cookies.withheld` with its name and reason alone, never its value, once a request and name however often it is read, since anyone can send a name twice.
 - The cookies offered are frozen.
 
 ## Depends on
