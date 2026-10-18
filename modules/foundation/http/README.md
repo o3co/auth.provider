@@ -26,6 +26,7 @@
 - `listening` (the port) and `site` (the public origin; cookies can be made secure unless it is http); an answer's `cookies` are sent one `Set-Cookie` each; `client-certificate`'s `certificateForwarding` is provided from this section.
 - `requestEnds`: each request's end, once, answered or closed: the method sent, the declared path of the route reached (none when none), the status written or `closed` when the client closed first, and the milliseconds taken (never negative); an observer's throw is dropped.
 - Observers are told after the request, asynchronously, and what they throw or reject is dropped.
+- `jsonAnswer`: status, a JSON value, and any cookies and headers → an answer kept out of caches (`noStore`).
 - `./testing`: test configuration and request builders with working defaults.
 
 ## Invariants
