@@ -10,6 +10,7 @@
 - Composition definition (grant, taking its audience from the request), and its contract (`.`).
 - Extension point `signerKeys`, one per issuer: the keys of the signer an assertion names (its `sub` and `kid`) with the algorithms they take, or none; it throws Unavailable when it cannot tell, and is asked anew for each assertion.
 - Extension point `linkedSubjects`: the subject a linked issuer's verified signer stands for, by the IdP name and the `sub`, or none; it throws Unavailable when it cannot tell. Contract `linkedIssuers`: each linked issuer with its IdP name (`upstream`), for the module declaring the names.
+- Store interface for spent assertions: save a name for a lifetime, answering `created` or `exists`. Needs: never evicted, survives a crash and a failover. Its contract test (`./testing`).
 - Operator section:
   - `issuers`, a list of `issuer` with `keys` (`kid`, `alg`, `public-key` (SPKI PEM; a private key refuses boot)), `jwks-uri` (where its key set is, at https on the issuer's host), or neither, its keys then contributed.
   - Each issuer's `subject` (`as-is` or `linked`, required), `upstream` (the IdP name its signers are known by, with `linked` only) and `subject-is-key-thumbprint` (default false).
