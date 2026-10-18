@@ -634,13 +634,13 @@ From `@mod/webauthn`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `webauthn.rp-id` | string |  | yes | `WEBAUTHN_RP_ID` | `login.example.invalid` |  |
-| `webauthn.rp-name` | string |  | yes | `WEBAUTHN_RP_NAME` | `Example` |  |
-| `webauthn.origins` | list of string |  | yes |  | `["https://login.example.invalid"]` |  |
-| `webauthn.top-origins` | list of string | `[]` |  |  |  |  |
+| `webauthn.rp-id` | string |  | yes | `WEBAUTHN_RP_ID` | `login.example.invalid` | The relying party ID: each web origin's host, or a domain each one lies under. |
+| `webauthn.rp-name` | string |  | yes | `WEBAUTHN_RP_NAME` | `Example` | The relying party's name, as an authenticator shows it. |
+| `webauthn.origins` | list of string |  | yes |  | `["https://login.example.invalid"]` | The origins ceremonies may come from, matched exactly: https web origins (http only on localhost), or Android app origins. |
+| `webauthn.top-origins` | list of string | `[]` |  |  |  | The pages that may frame a ceremony; none by default, so any ceremony in a frame is refused. |
 | `webauthn.challenge-lifetime` | string | `2m` |  |  |  | How long a ceremony's challenge can be answered, from 10s to 10m. |
-| `webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  |  |
-| `webauthn.max-credentials` | integer (1–100) | `10` |  |  |  |  |
+| `webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  | Whether the authenticator is asked to verify its user, as WebAuthn says it. |
+| `webauthn.max-credentials` | integer (1–100) | `10` |  |  |  | The most passkeys a subject may hold, from 1 to 100. |
 
 ## webauthn-login
 
