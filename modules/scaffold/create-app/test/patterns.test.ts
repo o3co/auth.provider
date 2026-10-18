@@ -51,6 +51,13 @@ it("names in audit.receivers each composed adapter's receiver, and audit's own l
 	);
 });
 
+it("tells a federation app taking users from a ledger to give it the lookup by subject", () => {
+	const ledger =
+		"- A federation login finds its user through the ledger's lookup by subject (`users-http.subject-url`), or by upstream identity (`users-http.upstream-url`).";
+	expect(chosenLines(["@mod/federation", "@mod/users-http"])).toContain(ledger);
+	expect(chosenLines(["@mod/users-http"])).not.toContain(ledger);
+});
+
 async function freePort(): Promise<number> {
 	return new Promise((resolve) => {
 		const server = createServer().listen(0, "127.0.0.1", () => {
