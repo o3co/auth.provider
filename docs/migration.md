@@ -530,7 +530,7 @@ Times and sizes are written with their unit (`30s`, `5m`, `64KiB`); a number wit
 - **Users**: plain-text passwords, identifiers that differ only by case or Unicode form, and an upstream identity linked to two users.
 - **acr**: an acr value that no composed way of logging in can meet.
 - **Outbound**: `ALL_PROXY`, and the lower-case proxy variables, now refuse boot as `HTTP_PROXY` and `HTTPS_PROXY` already did, unless `outbound.proxy` or `outbound.direct-despite-proxy` is written; the variables are never read.
-- **audit-http**: an `authorization` value with a URL that is not https, or a URL that outbound's policy refuses.
+- **audit-http**: an `authorization` value with a URL that is neither https nor a `plain-loopback` pair outbound names, or a URL that outbound's policy refuses.
 - **users-http**: a `verify-url` that outbound's policy refuses.
 - **mail**: the logging-only sender without `mail.accept-unsent = true`.
 - **Revocation**: a composition that issues refresh tokens or codes while access tokens cannot be revoked.
@@ -638,6 +638,7 @@ A ledger can also be asked for a user by subject, so a user who signs in upstrea
 - **JWT bearer issuers**: each of `jwt-bearer.issuers` needs `subject`: `"as-is"` (the assertion's `sub` is the subject, as rc.1 read it) or `"linked"` (the user `users` links to the signer, with `upstream` naming its IdP). An issuer without it refuses boot at `jwt-bearer.issuers.<i>.subject`; write `subject = "as-is"` to keep rc.1's reading.
 - **Upstream links in settings**: each `idp` in `users.registered[].upstream` must be a name a composed module declares: a `federation` IdP, a linked `jwt-bearer` issuer's `upstream`, or one `exchange-id-tokens` takes. A link through any other name refuses boot at its `idp`; nothing would ever look it up.
 - **JWT bearer assertions spent under rc.1**: they were kept in the `jwt-bearer.jti` space, and this version keeps them through `jwt-bearer-store`, so it does not see them. An assertion spent just before the upgrade could be exchanged again until it ends, at most `jwt-bearer.max-assertion-lifetime` plus `jwt-bearer.clock-skew` (about 1 hour 30 seconds by default). Stop taking the JWT bearer grant for that long before you upgrade, or accept a reuse within that window.
+- **audit-http**: with `authorization`, a collector at a `plain-loopback` pair outbound names is now reached over plain http too; rc.1 took https alone, and any other plain http URL is still refused. The value may no longer end in a space.
 - **MFA under `required`**: boot is refused unless a composed kind both counts and adds a second factor. With `mfa-email` alone, set `mfa-email.adds-second-factor = true`.
 - **Managed Redis**: where the server refuses `CONFIG GET`, declare its settings in `redis.server-settings`; where it keeps no append-only file, set `redis.durability = "none"`. See [A managed Redis that refuses `CONFIG`](runbook.md#a-managed-redis-that-refuses-config).
 - **users-http**: `verify-url` is now optional, and `subject-url` is new. With a `credential`, every URL must share one origin, or boot is refused.
