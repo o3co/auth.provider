@@ -18,6 +18,9 @@ export default defineModule({ name: "authorize", section }, (m) => [
 	// Only the code flow, and PKCE only by S256 (the endpoint refuses anything else).
 	m.contribute(metadata).by(() => ({ name: "response_types_supported", value: ["code"] })),
 	m.contribute(metadata).by(() => ({ name: "code_challenge_methods_supported", value: ["S256"] })),
+	// Answers only in the query, and takes no request object by reference (discovery's default is true).
+	m.contribute(metadata).by(() => ({ name: "response_modes_supported", value: ["query"] })),
+	m.contribute(metadata).by(() => ({ name: "request_uri_parameter_supported", value: false })),
 	...(["GET", "POST"] as const).map((method) =>
 		m.contribute(routes).by(async (c) => {
 			const window = { limit: c.section.requests, ms: c.section.window * 1000 };

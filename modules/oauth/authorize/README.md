@@ -11,7 +11,7 @@
 ## Offers
 - Route `/oauth/authorize` (GET; a POST is a `303` to the GET with the same parameters, which reads the session)
 - Contribution of the return path `/oauth/authorize` to `login-gates`
-- Contribution to `issuer`'s metadata items: `authorization_endpoint` (on `http`'s public origin), `response_types_supported` (`code`), `code_challenge_methods_supported` (`S256`)
+- Contribution to `issuer`'s metadata items: `authorization_endpoint` (on `http`'s public origin), `response_types_supported` (`code`), `code_challenge_methods_supported` (`S256`), `response_modes_supported` (`query`), `request_uri_parameter_supported` (`false`)
 - Metadata section `authorize`: `redirect-uris` (default empty)
 - `registrable` (URI → whether a client may register it to be sent back to), for other returns a client registers
 - `redirectsAt` (client, origin → whether the origin is the scheme, host and port of one of its redirect URIs), for a URL another module frames for the client
