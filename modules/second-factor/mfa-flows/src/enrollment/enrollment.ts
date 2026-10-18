@@ -37,6 +37,7 @@ const refusals: Readonly<Partial<Record<Refusal, HttpResponse>>> = {
 	refused: jsonAnswer(403, { error: "mfa_factor_refused" }),
 	"binding-proof-required": jsonAnswer(403, { error: "mfa_binding_proof_required" }),
 };
+const enrollmentConflict = jsonAnswer(409, { error: "mfa_enrollment_conflict" });
 
 export interface EnrollmentParts {
 	readonly factors: Factors;
@@ -270,6 +271,10 @@ export function enrollmentOver(p: EnrollmentParts) {
 		}
 		if (!(await p.transactions.take(txId))) return unknownTransaction;
 		const bound = await p.factors.bind(t.subject, pending, proved.state, label);
+		// A first binding another factor beat: a login asks again, a session is told of the conflict.
+		if (bound.kind === "first-binding-closed") {
+			return t.purpose === "enroll-login" ? loginRequired : enrollmentConflict;
+		}
 		if (bound.kind !== "bound") return refusals[bound.kind] ?? unknownTransaction;
 		const codes = bound.recoveryCodes === undefined ? {} : { recovery_codes: bound.recoveryCodes };
 		const body = { factor: bound.factor, ...codes };
