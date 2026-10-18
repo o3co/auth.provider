@@ -15,6 +15,7 @@
 - `verifiesUnder`: whether a JWK may verify, under an algorithm or any of `verifyAlgorithms`.
 - `publicMembers`: a JWK rebuilt from its type's public members alone, without reading it.
 - `isCanonicalJws`: whether a compact JWS is written in its one form; `verify` answers any other as `malformed`. `secretBytes` (exactly or at least n): the setting of a secret's bytes every module takes, strict base64 of at least 8 byte values, never a `REPLACE-` sample; a refusal never names the value.
+- `bearerToken` (at least n): the setting of a bearer token sent to an outside party, an RFC 6750 b64token of at least n bytes of key material however read (as written, hex or base64), never a `REPLACE-` sample; a refusal never names the value.
 - Operator section: `signing` (`kid`, `alg`, and a PKCS8 PEM `private-key`, or for HS256 a hex or base64 `secret`), `next` (`kid`, `alg`, `public-key`), `previous` (`kid`, `alg`, `public-key`, `expires-at`).
 - Test configuration builders (`./testing`), with a new Ed25519 signing key unless a test sets one.
 

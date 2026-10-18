@@ -29,4 +29,4 @@ export {
 	verifiesUnder,
 	verifyAlgorithms,
 } from "./public.ts";
-export { secretBytes } from "./secret.ts";
+export { bearerToken, secretBytes } from "./secret.ts";
