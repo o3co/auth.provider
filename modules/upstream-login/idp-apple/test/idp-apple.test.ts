@@ -170,6 +170,10 @@ afterEach(() => {
 });
 
 describe("idp-apple", () => {
+	it("says its issuer is Apple's", async () => {
+		expect((await open()).upstream.issuer).toBe("https://appleid.apple.com");
+	});
+
 	it("asks for an answer in a posted form, at the callback checked at boot, without freshness", async () => {
 		const { upstream } = await open();
 		expect(upstream.responseMode).toBe("form_post");

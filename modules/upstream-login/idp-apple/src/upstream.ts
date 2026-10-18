@@ -93,6 +93,7 @@ export function opened(
 		);
 	const end = s["end-session-endpoint"];
 	return {
+		issuer,
 		responseMode: "form_post",
 		clockSkewMs: skewMs,
 		// Apple takes no freshness, so a browser's prompt and max age are not sent.
