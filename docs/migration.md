@@ -565,6 +565,7 @@ These are requests 0.17 accepted, or answered differently, that 0.18 refuses or 
 
 - A login that repeats a field gets `400` with `repeated_parameter`.
 - A bcrypt password that is longer than 72 bytes no longer matches on its first 72 bytes alone; a password over 1024 bytes is refused.
+- The audit event `session.admission.subject_mismatch` is gone. 0.17 recorded it when the user a cookie or a token named was not the user of the session record behind it. A 0.18 session is named only by its handle, a new random value each login, and keeps the subject its login gave until it closes, a raise included, so the two can never differ; a receiver that matches the event receives nothing.
 
 #### User ledger over HTTP
 
