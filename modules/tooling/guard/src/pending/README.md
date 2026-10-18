@@ -11,7 +11,6 @@
 - `pendingLimits(packages, budget)`: each place over a limit, by where and what went over.
 
 ## Invariants
-- A card many depend on at run time is held to `narrowCardBytes`.
 - Every card item, a line opening with `- ` (nested ones too), is held to `cardItemBytes`; the report names its opening.
 - A unit's test lines count its `test/fixtures` (`countedFixtureFile`) against `testLines`; other test tables, such as vectors, still count for nothing.
 

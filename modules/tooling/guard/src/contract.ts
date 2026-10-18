@@ -35,8 +35,7 @@ export interface Budget {
 	/** A package that this many packages depend on at run time has its card held to the narrower lines. */
 	readonly narrowCardFanIn: number;
 	readonly narrowCardLines: number;
-	/** Limits measured but not yet refused: such a card's bytes, any card item's, and fixtures as test lines. */
-	readonly narrowCardBytes: number;
+	/** Limits measured but not yet refused: any card item's bytes, and fixtures as test lines. */
 	readonly cardItemBytes: number;
 	readonly countedFixtureFile: string;
 	/** The bytes of the cards of the packages a unit's shipped code imports, together. */

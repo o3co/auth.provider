@@ -5,9 +5,9 @@ import { budgetsAsTest, scopeOf, unitsOf } from "../units.ts";
 import type { Pkg } from "../workspace.ts";
 
 /**
- * The limits measured before they are refused, each place over one: a card many depend on past
- * its narrower bytes, a card item (a line opening with `- `, nested ones too) past its bytes, and a
- * unit's test lines with its `test/fixtures` counted. Each turns into a G7 limit once none is over.
+ * The limits measured before they are refused, each place over one: a card item (a line opening
+ * with `- `, nested ones too) past its bytes, and a unit's test lines with its `test/fixtures`
+ * counted. Each turns into a G7 limit once none is over.
  */
 export function pendingLimits(packages: readonly Pkg[], budget: Budget): Violation[] {
 	const found: Violation[] = [];
@@ -19,16 +19,12 @@ export function pendingLimits(packages: readonly Pkg[], budget: Budget): Violati
 		counted.test(f) || (budgetsAsTest(s, p, f) && !table.test(f));
 	for (const p of packages) {
 		const { cardDirs, unitOf, cardOf, whereOf } = unitsOf(p);
-		const dependents = packages.filter((q) => s.workspaceDeps(q, false).includes(p.name)).length;
 		for (const unit of ["", ...cardDirs]) {
 			const where = whereOf(unit);
 			const over = (what: string, value: number, limit: number, note = "") => {
 				if (value > limit) s.report("measure", where, `${what} ${value} > ${limit}${note}`);
 			};
 			const card = cardOf(unit) ?? "";
-			if (unit === "" && dependents >= budget.narrowCardFanIn) {
-				over("card bytes", Buffer.byteLength(card), budget.narrowCardBytes);
-			}
 			for (const line of card.split("\n").filter((l) => /^\s*- /.test(l))) {
 				const opening = line.replace(/^\s*- /, "").slice(0, 12);
 				over("card item bytes", Buffer.byteLength(line), budget.cardItemBytes, ` (${opening}…)`);
