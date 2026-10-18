@@ -61,13 +61,14 @@ async function refresher(life: number, settings: { rotations?: number; windowMs?
 	const records = recordsWith(seal);
 	const logged = recordingLog();
 	const runtime = quietRuntime({ clock: { now: () => now }, log: logged.log });
-	/** Whether the subject's boundary ends the grant, as the grants' judge would answer. */
-	const boundary = { revoked: false };
+	/** Whether the subject's boundary ends the grant, and when the grant ends, as the grants' judge would answer. */
+	const boundary: { revoked: boolean; endsAt?: number } = { revoked: false };
 	const refresh = refreshWith({
 		grants: stores.grants,
 		locks: stores.lockStore,
 		records,
 		revoked: async () => boundary.revoked,
+		endOf: () => boundary.endsAt,
 		...runtime,
 		refreshBeforeMs: 30_000,
 		rotations: settings.rotations ?? 24,
@@ -579,6 +580,28 @@ describe("a grant whose subject is revoked while its upstream is asked, the gran
 			const before = (await r.stored())?.sealed;
 			r.upstream.push(async () => {
 				r.boundary.revoked = true;
+				const answered = await answers();
+				return answered ?? { kind: "refreshed", tokens: upstreamTokens({ accessToken: "up-new" }) };
+			});
+			expect(said(await r.call())).toBe("gone");
+			expect((await r.stored())?.sealed).toBe(before);
+		},
+	);
+});
+
+describe("a grant that ends while its upstream is asked, its status left as it was", () => {
+	// lapse keeps the status to answer it, so only the end tells the grant is over.
+	it.each([
+		["unavailable", () => Promise.reject(new Unavailable("test upstream"))],
+		["refreshed", () => Promise.resolve(undefined as unknown as UpstreamRefresh)],
+	] as const)(
+		"hands out nothing and writes nothing when the upstream then answers %s",
+		async (_, answers) => {
+			const r = await refresher(60);
+			r.advance(31_000);
+			const before = (await r.stored())?.sealed;
+			r.upstream.push(async () => {
+				r.boundary.endsAt = 0;
 				const answered = await answers();
 				return answered ?? { kind: "refreshed", tokens: upstreamTokens({ accessToken: "up-new" }) };
 			});
