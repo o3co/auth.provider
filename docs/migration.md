@@ -582,6 +582,8 @@ These are requests 0.17 accepted, or answered differently, that 0.18 refuses or 
 
 Upstream links and MFA enrollment are no longer kept by the ledger. An upstream login through a link users keeps needs `subject-url` or `upstream-url`: without either, nothing can say who the link stands for, and that login answers `503`.
 
+A ledger that suspends a user stops new logins and grants by its answers. To end the user's open sessions and issued tokens as well, compose `subject-revocation-http` and have the ledger post the subject to `/ledger/subject-revocations`; see [Revoking a user from the ledger](runbook.md#revoking-a-user-from-the-ledger).
+
 A ledger can also be asked for a user by subject, so a user who signs in upstream has the ledger's attributes, such as the address `mfa-email` mails: set `users-http.subject-url`. It is posted `{"subject"}` the same way; a `200` with an `id` is the user (no `username` asked), `404` and `410` are no such user, and anything else, `401` and `403` included, is unavailable. Likewise `users-http.upstream-url` is posted `{"idp", "subject"}` to look a user up by upstream identity, read the same way; with it, the ledger's answer is the last word, and links users keeps are not read. With a `credential`, every URL must be at one origin. Reading the password call's `401` and `403` as no such user is kept for 0.17's ledgers, and is to go in a later release, after which they read as a lookup's do.
 
 ### MFA and federation
@@ -648,6 +650,7 @@ A ledger can also be asked for a user by subject, so a user who signs in upstrea
 - **Federation grants**: `federation-grants.sweep-interval` is new (default `1h`, `1m` to `1d`): each instance erases, that often, the credentials of grants past their end or ended by their subject's revocation, though no request reads them. rc.1 erased them only when a grant was next read.
 - **A store adapter of your own**: `put`, `getMany`, `setAdd`, `setMembers` and `setRemove` are gone from the `store` contract, with the helper `getFollowing`; nothing called them, so an adapter no longer offers them. To write whatever a key holds, read it and write on its version with `replaceIf`, or with `putIfAbsent` where it holds none, as `mutate` does.
 - **A module of your own that reads cookies**: `Cookies.read` is gone; call `lookup`, which answers the cookie (`found`), none (`absent`), or `withheld` with why (`plain-http` or `duplicate`). A hand-made `Cookies`, as in a test, offers `lookup` and no `read`.
+- **Revoking a user from the ledger**: `subject-revocation-http` is new: an outside ledger posts a subject, with a credential from a listed source over https, to end the user's open sessions and tokens here too. Nothing changes until you compose it; see the [runbook](runbook.md#revoking-a-user-from-the-ledger).
 
 ## Operational notes
 
