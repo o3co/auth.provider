@@ -13,7 +13,7 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/url-setting": "workspace:*",
-		"zod": "4.6.5"
+		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"@mod/subject-revocation": "workspace:*"

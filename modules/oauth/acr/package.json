@@ -13,7 +13,7 @@
 		"@mod/issuer": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/login-gates": "workspace:*",
-		"zod": "4.6.5"
+		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"@mod/http": "workspace:*",
