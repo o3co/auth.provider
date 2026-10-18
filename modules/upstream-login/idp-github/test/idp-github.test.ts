@@ -271,3 +271,11 @@ describe("idp-github", () => {
 		expect(await open({}).upstream.exchange(exchange())).not.toHaveProperty("authenticatedAt");
 	});
 });
+
+describe("github's settings", () => {
+	it("gives each default as an operator writes it, read through the key's own schema", () => {
+		const kindOf = (key: { _zod: { def: { type: string } } }) => key._zod.def.type;
+		const byDefault = Object.entries(settings.shape).filter(([, key]) => kindOf(key) === "default");
+		expect(byDefault.map(([name]) => name)).toEqual([]);
+	});
+});
