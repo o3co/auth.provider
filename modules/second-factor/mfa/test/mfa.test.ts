@@ -809,6 +809,33 @@ describe("values no two factors may hold", () => {
 		expect((await decided.bind("liz", later.pending, later.state)).kind).toBe("bound");
 	});
 
+	it("binds a binding asked from a login only as the subject's first, whenever it began", async () => {
+		const { decided, bindCode, provedCode, events } = await serve({ mode: "required" });
+		await bindCode("ned");
+		events.length = 0;
+		const login = { kind: "login" } as const;
+		expect(await decided.begin("ned", "code", undefined, undefined, login)).toEqual({
+			kind: "first-binding-closed",
+		});
+		expect(events).toEqual([
+			expect.objectContaining({
+				kind: "mfa.first_binding_conflict",
+				subject: "ned",
+				attributes: { kind: "code" },
+			}),
+		]);
+		// A pending begun beside a counting factor, as one begun before a login could be refused.
+		const begun = await provedCode("ned");
+		expect(await decided.bind("ned", begun.pending, begun.state, undefined, login)).toEqual({
+			kind: "first-binding-closed",
+		});
+		expect((await decided.held("ned")).filter((f) => f.kind === "code")).toHaveLength(1);
+		const session = { kind: "session", handle: "h" } as const;
+		expect((await decided.bind("ned", begun.pending, begun.state, undefined, session)).kind).toBe(
+			"bound",
+		);
+	});
+
 	it("binds one of two first bindings finished at once, refusing the other", async () => {
 		const { decided, provedCode } = await serve({ mode: "required" });
 		const [one, two] = [await provedCode("mo"), await provedCode("mo")];

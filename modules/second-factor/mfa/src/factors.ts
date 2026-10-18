@@ -199,6 +199,11 @@ export function factorDecisions(p: FactorParts): Factors {
 			const all = await records.list(subject);
 			if (all.length >= p.maxFactors) return { kind: "full" };
 			const first = counting(all, p.kinds).length === 0;
+			// A login's ask holds the password alone, which lets it bind a first factor and never add one.
+			if (!first && from?.kind === "login") {
+				audited.record("mfa.first_binding_conflict", { subject, attributes: { kind: name } });
+				return { kind: "first-binding-closed" };
+			}
 			if (p.gates.length > 0 && first) {
 				const ask = { subject, kind: name, transaction, passed, from };
 				for (const gate of p.gates) {
@@ -226,10 +231,12 @@ export function factorDecisions(p: FactorParts): Factors {
 			if (result.kind !== "valid") return { kind: "invalid" };
 			return { kind: "valid", state: result.state, amr: amrOf(found.kind, result.amr) };
 		},
-		bind: async (subject, pending, state, label) => {
+		bind: async (subject, pending, state, label, from) => {
 			if (label !== undefined && !isLabel(label)) return { kind: "malformed-label" };
 			const found = pendingOf(subject, pending);
 			if (!found) return { kind: "unknown" };
+			// Asked from a login, it binds only as the first, whenever and however it began.
+			const asFirst = found.first || from?.kind === "login";
 			const fid = id();
 			const factor: Factor = {
 				id: fid,
@@ -246,7 +253,7 @@ export function factorDecisions(p: FactorParts): Factors {
 				subject,
 				(all) => {
 					// A first binding another counting factor beat to the subject binds nothing: it was let begin as the first.
-					if (found.first && counting(all, p.kinds).length > 0) return { verdict: "closed" };
+					if (asFirst && counting(all, p.kinds).length > 0) return { verdict: "closed" };
 					const brought =
 						codes && !all.some((f) => f.kind === codes.factor.kind) ? codes : undefined;
 					const added = [factor, ...(brought ? [brought.factor] : [])];
