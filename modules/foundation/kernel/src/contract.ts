@@ -38,4 +38,5 @@ export type {
 	Runtime,
 } from "./runtime.ts";
 export { sameSecret } from "./secret.ts";
+export { type DurationUnit, type SizeUnit, setting } from "./setting/setting.ts";
 export { type KernelSettings, kernelSection } from "./settings.ts";

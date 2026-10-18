@@ -2,7 +2,7 @@ import { parseArgs } from "node:util";
 import { generate, type Plan } from "./generate.ts";
 import { type Group, groups } from "./patterns/pattern.ts";
 
-/** Runs the command on its arguments, writing to `io`: 0 once the project is written, 64 for a usage error. */
+/** Runs the command on its arguments, writing to `io`: 0 once the project is written or `--help` told, 64 for a usage error. */
 export async function run(
 	args: readonly string[],
 	io: { readonly out: (text: string) => void; readonly err: (text: string) => void } = {
@@ -10,31 +10,42 @@ export async function run(
 		err: (text) => process.stderr.write(text),
 	},
 ): Promise<number> {
+	const usageText =
+		"usage: create-app <target> [--workspace <root>] [--pattern <name>] [--add <feature>]...\n" +
+		"         [--axis <owner>=<module>]... [--<group> <feature>,...]...\n" +
+		`         groups: ${groups.join(", ")}; axes and groups need a pattern other than full\n` +
+		"       create-app <target> [--workspace <root>] [--sink <package>] <package>...\n";
 	const usage = (): number => {
-		io.err(
-			"usage: create-app <target> [--workspace <root>] [--pattern <name>] [--add <feature>]...\n" +
-				"         [--axis <owner>=<module>]... [--<group> <feature>,...]...\n" +
-				`         groups: ${groups.join(", ")}; axes and groups need a pattern other than full\n` +
-				"       create-app <target> [--workspace <root>] [--sink <package>] <package>...\n",
-		);
+		io.err(usageText);
 		return 64;
 	};
 
 	const groupOptions = Object.fromEntries(
 		groups.map((group) => [group, { type: "string" }]),
 	) as Record<Group, { type: "string" }>;
-	const { values, positionals } = parseArgs({
-		args: [...args],
-		allowPositionals: true,
-		options: {
-			workspace: { type: "string" },
-			sink: { type: "string" },
-			pattern: { type: "string" },
-			add: { type: "string", multiple: true },
-			axis: { type: "string", multiple: true },
-			...groupOptions,
-		},
-	});
+	const options = {
+		help: { type: "boolean", short: "h" },
+		workspace: { type: "string" },
+		sink: { type: "string" },
+		pattern: { type: "string" },
+		add: { type: "string", multiple: true },
+		axis: { type: "string", multiple: true },
+		...groupOptions,
+	} as const;
+	const parse = () => parseArgs({ args: [...args], allowPositionals: true, options });
+	let parsed: ReturnType<typeof parse>;
+	try {
+		parsed = parse();
+	} catch (error) {
+		// An option not known, or one missing its value: told, then the usage.
+		io.err(`${(error as Error).message}\n`);
+		return usage();
+	}
+	const { values, positionals } = parsed;
+	if (values.help) {
+		io.out(usageText);
+		return 0;
+	}
 	const [target, ...modules] = positionals;
 	const pattern = values.pattern ?? "full";
 	const axes = (values.axis ?? []).map((given) => given.split("="));
