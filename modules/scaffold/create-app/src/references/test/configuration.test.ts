@@ -79,7 +79,6 @@ const describedLater = new Set([
 	"authorize",
 	"clients",
 	"clients-cimd",
-	"code-grant",
 	"federation-grants",
 	"federation-tokens",
 	"mail-smtp",

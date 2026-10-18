@@ -81,8 +81,10 @@ From `@mod/code-grant`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `code-grant.code-seconds` | integer (10–600) | `600` |  |  |  |  |
-| `code-grant.sweep-seconds` | integer (1–3600) | `30` |  |  |  |  |
+| `code-grant.code-lifetime` | string | `10m` |  |  |  | How long a code can be redeemed, from 10s to 10m. |
+| `code-grant.sweep-interval` | string | `30s` |  |  |  | How often each host retries the revocations a code that came again left, from 1s to 1h. |
+| `code-grant.code-seconds` | integer (10–600) |  |  |  |  | Seconds; write `code-lifetime` instead. |
+| `code-grant.sweep-seconds` | integer (1–3600) |  |  |  |  | Seconds; write `sweep-interval` instead. |
 
 ## code-grant-store
 
