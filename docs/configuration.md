@@ -281,9 +281,6 @@ From `@mod/login-password`.
 | `login-password.account-attempts` | integer (1–100) | `10` |  |  |  | Failed attempts allowed at one identifier, from any source, before each next one waits. |
 | `login-password.account-window` | string | `1h` |  |  |  | How long an identifier's run of failed attempts is remembered, from 1m to 1d. |
 | `login-password.account-max-wait` | string | `5m` |  |  |  | The longest an identifier waits between attempts, from 1s to 1h: the wait doubles to it, never locking out. |
-| `login-password.window-seconds` | integer (60–86400) |  |  |  |  | Seconds; write `window` instead. |
-| `login-password.account-window-seconds` | integer (60–86400) |  |  |  |  | Seconds; write `account-window` instead. |
-| `login-password.account-max-wait-seconds` | integer (1–3600) |  |  |  |  | Seconds; write `account-max-wait` instead. |
 
 ## mail
 

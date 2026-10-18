@@ -11,10 +11,6 @@ import { acceptedAttributes, type User, users } from "@mod/users";
 import { z } from "zod";
 import events from "./audit-events.ts";
 
-/** A key named before its unit was written: read in place of its new name while its writers move. */
-const before = (min: number, max: number, instead: string) =>
-	z.number().int().min(min).max(max).optional().describe(`Seconds; write \`${instead}\` instead.`);
-
 const section = z.strictObject({
 	attempts: z
 		.number()
@@ -51,9 +47,6 @@ const section = z.strictObject({
 		.describe(
 			"The longest an identifier waits between attempts, from 1s to 1h: the wait doubles to it, never locking out.",
 		),
-	"window-seconds": before(60, 86_400, "window"),
-	"account-window-seconds": before(60, 86_400, "account-window"),
-	"account-max-wait-seconds": before(1, 3600, "account-max-wait"),
 });
 
 /** The name an identifier's attempts are kept under. */
@@ -100,18 +93,14 @@ export default defineModule({ name: "login-password", section }, (m) => [
 				attributes: { method: "password", ...(source === undefined ? {} : { source }) },
 			});
 		};
-		const read = c.section;
-		const window = {
-			limit: read.attempts,
-			ms: (read["window-seconds"] ?? read.window) * 1000,
-		};
+		const window = { limit: c.section.attempts, ms: c.section.window * 1000 };
 		const budgets = await c.get(lockouts);
-		const windowMs = (read["account-window-seconds"] ?? read["account-window"]) * 1000;
+		const windowMs = c.section["account-window"] * 1000;
 		// Waits double from a second to the longest; no budget or hard limit ever holds one for good.
 		const policy: LockoutPolicy = {
 			threshold: c.section["account-attempts"],
 			backoffMs: 1000,
-			maxBackoffMs: (read["account-max-wait-seconds"] ?? read["account-max-wait"]) * 1000,
+			maxBackoffMs: c.section["account-max-wait"] * 1000,
 			budget: Number.MAX_SAFE_INTEGER,
 			budgetWindowMs: windowMs,
 			hardLimit: Number.MAX_SAFE_INTEGER,

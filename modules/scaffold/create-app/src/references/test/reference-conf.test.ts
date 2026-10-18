@@ -98,7 +98,6 @@ const unitsLater = new Set([
 	"http-ops",
 	"jwt-bearer",
 	"kernel",
-	"login-password",
 	"mail-smtp",
 	"mfa",
 	"mfa-email",
