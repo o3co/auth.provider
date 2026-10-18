@@ -24,6 +24,7 @@
 		"@mod/issuer": "workspace:*",
 		"@mod/keys": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
+		"@mod/secret-hash": "workspace:*",
 		"@mod/sender-binding": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/session-lifecycle": "workspace:*",
