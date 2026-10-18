@@ -25,9 +25,10 @@ const readable = (pem: string) => publicPem(pem) !== undefined;
 const subjectOf = {
 	subject: z
 		.enum(["as-is", "linked"])
+		// Required, but checked past the union of key sources, so a refusal names this key.
 		.optional()
 		.describe(
-			'"as-is": the assertion\'s `sub` is the subject. "linked": the user `users` finds by the upstream identity (`upstream`, `sub`) is. Read as "as-is" where unset, with a warning on boot.',
+			'Required. "as-is": the assertion\'s `sub` is the subject. "linked": the user `users` finds by the upstream identity (`upstream`, `sub`) is.',
 		),
 	upstream: z
 		.string()
@@ -73,6 +74,10 @@ const issuerEntry = z
 			),
 		z.strictObject({ issuer: z.string().min(1), ...subjectOf }),
 	])
+	.refine((i) => i.subject !== undefined, {
+		message: 'required: "as-is" or "linked"',
+		path: ["subject"],
+	})
 	.refine((i) => (i.subject === "linked") === (i.upstream !== undefined), {
 		message: 'upstream is written with subject = "linked", and only then',
 		path: ["upstream"],
@@ -141,9 +146,6 @@ export default defineModule({ name: "jwt-bearer", section }, (m) => [
 			const written = "keys" in i || "jwks-uri" in i;
 			if (written && keys) refused.push(`${i.issuer} has its keys written and contributed`);
 			if (!written && !keys) refused.push(`${i.issuer} has no keys written or contributed`);
-			if (i.subject === undefined) {
-				c.log.warn("jwt-bearer.subject_unset", { issuer: i.issuer, read: "as-is" });
-			}
 			const thumbprint = i["subject-is-key-thumbprint"];
 			trusted.set(
 				i.issuer,
