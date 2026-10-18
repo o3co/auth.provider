@@ -573,6 +573,8 @@ These are requests 0.17 accepted, or answered differently, that 0.18 refuses or 
 
 Upstream links and MFA enrollment are no longer kept by the ledger.
 
+A ledger can also be asked for a user by subject, so a user who signs in upstream has the ledger's attributes, such as the address `mfa-email` mails: set `users-http.subject-url`. It is posted `{"subject"}` the same way; a `200` with an `id` is the user (no `username` asked), `404` and `410` are no such user, and anything else, `401` and `403` included, is unavailable. With a `credential`, every URL must be at one origin. Reading the password call's `401` and `403` as no such user is kept for 0.17's ledgers, and is to go in a later release, after which they read as a lookup's do.
+
 ### MFA and federation
 
 - With `mfa.mode = optional`, removing the last second factor also removes the recovery codes.
