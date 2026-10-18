@@ -91,7 +91,6 @@ const unitsLater = new Set([
 	"outbound",
 	"redis",
 	"session-lifecycle",
-	"token-endpoint",
 	"token-exchange",
 	"users-http",
 	"webauthn",
@@ -116,7 +115,6 @@ const prefaultLater = new Set([
 	"session-store",
 	"session-tokens-store",
 	"store",
-	"token-endpoint",
 	"webauthn-login",
 ]);
 

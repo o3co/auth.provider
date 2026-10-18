@@ -84,7 +84,6 @@ const describedLater = new Set([
 	"mfa-flows",
 	"mfa-webauthn",
 	"session",
-	"token-endpoint",
 	"webauthn",
 	"webauthn-login",
 ]);

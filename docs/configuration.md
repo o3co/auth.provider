@@ -581,8 +581,8 @@ From `@mod/token-endpoint`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `token-endpoint.requests` | integer (1–100000) | `60` |  |  |  |  |
-| `token-endpoint.window-seconds` | integer (1–86400) | `60` |  |  |  |  |
+| `token-endpoint.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, before any client is authenticated. |
+| `token-endpoint.window` | string | `1m` |  |  |  | The window requests are counted over, from 1s to 1d. |
 
 ## token-exchange
 
