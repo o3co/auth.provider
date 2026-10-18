@@ -247,7 +247,7 @@ From `@mod/kernel`.
 |---|---|---|---|---|---|---|
 | `kernel.deployment` | single \| multi |  | yes | `KERNEL_DEPLOYMENT` | `single` | single or multi; multi refuses a module unsafe on multiple instances |
 | `kernel.logging.level` | trace \| debug \| info \| warn \| error \| fatal \| silent | `info` |  |  |  | the lowest level logged (trace to fatal), or silent for none |
-| `kernel.stop-seconds` | integer (1–3600) | `30` |  | `KERNEL_STOP_SECONDS` | `30` | whole seconds a stop given no deadline waits for its hooks; an orchestrator's grace period must be longer |
+| `kernel.stop-deadline` | string | `30s` |  | `KERNEL_STOP_DEADLINE` | `30s` | how long a stop given no deadline waits for its hooks, from `1s` to `1h` in whole seconds; an orchestrator's grace period must be longer |
 
 ## keys
 

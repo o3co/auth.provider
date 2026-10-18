@@ -1,4 +1,4 @@
 kernel {
 	deployment = single
-	stop-seconds = 30
+	stop-deadline = 30s
 }
