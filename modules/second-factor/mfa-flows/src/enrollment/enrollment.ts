@@ -233,6 +233,8 @@ export function enrollmentOver(p: EnrollmentParts) {
 			if ("status" in proved) return proved;
 			begun = await begin(proved.passed);
 		}
+		// Only a login's ask is closed so: a factor counts by now, and the password alone adds none.
+		if (begun.kind === "first-binding-closed") return loginRequired;
 		if (begun.kind !== "begun") return refusals[begun.kind] ?? unknownKind;
 		const kept = await keep(e, { pending: begun.pending });
 		if (!kept) return unknownTransaction;
@@ -270,7 +272,7 @@ export function enrollmentOver(p: EnrollmentParts) {
 			return jsonAnswer(401, { error: "mfa_invalid", attempts_remaining: left });
 		}
 		if (!(await p.transactions.take(txId))) return unknownTransaction;
-		const bound = await p.factors.bind(t.subject, pending, proved.state, label);
+		const bound = await p.factors.bind(t.subject, pending, proved.state, label, askedFrom(t));
 		// A first binding another factor beat: a login asks again, a session is told of the conflict.
 		if (bound.kind === "first-binding-closed") {
 			return t.purpose === "enroll-login" ? loginRequired : enrollmentConflict;

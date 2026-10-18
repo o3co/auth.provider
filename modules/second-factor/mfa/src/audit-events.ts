@@ -10,7 +10,7 @@ export default auditEvents({
 	},
 	"mfa.first_binding_conflict": {
 		attributes: ["kind"],
-		when: "a first binding is refused because another counting factor was bound since it began; nothing is written",
+		when: "a first binding is refused, at its start or as it is written, because another counting factor counts: bound since it began, or held already for a binding asked from a login; nothing is written",
 	},
 	"mfa.recovery_codes.generated": {
 		attributes: ["kind", "regenerated"],

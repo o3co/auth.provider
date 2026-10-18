@@ -37,6 +37,7 @@
 - A step-up raises only the session that started it, under a new cookie.
 - A first factor bound after a binding proof passed counts at once: its login goes on, or its session is raised. Bound without one, it counts from the next sign-in.
 - A first binding another factor beat while it was under way binds nothing (`mfa` decides): a login gets `401 login_required`, a session `409 mfa_enrollment_conflict`.
+- A login's transaction binds only the subject's first factor (`mfa` decides, told the login it came from): begun or completed once a factor counts, it gets `401 login_required` and binds nothing.
 - Enrollment from a session enters the session at the credential-changing level (`mfa` contributes the requirement).
 
 ## Data
