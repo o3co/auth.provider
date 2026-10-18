@@ -1164,9 +1164,6 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
-      '@mod/store':
-        specifier: workspace:*
-        version: link:../../foundation/store
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -1186,9 +1183,18 @@ importers:
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
       '@mod/tokens':
         specifier: workspace:*
         version: link:../tokens
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
 
   modules/oauth/jwt-bearer-users:
     dependencies:
@@ -2409,6 +2415,21 @@ importers:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
 
+  modules/templates/jwt-bearer-store:
+    dependencies:
+      '@mod/jwt-bearer':
+        specifier: workspace:*
+        version: link:../../oauth/jwt-bearer
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+
   modules/templates/mfa-flows-store:
     dependencies:
       '@mod/kernel':
@@ -3251,6 +3272,9 @@ importers:
       '@mod/issuer':
         specifier: workspace:*
         version: link:../../oauth/issuer
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store

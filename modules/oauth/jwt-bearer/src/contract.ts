@@ -55,3 +55,5 @@ export const linkedSubjects = extensionPoint<LinkedSubjects>("jwt-bearer.subject
 export type LinkedIssuers = readonly { readonly upstream: string; readonly issuer: string }[];
 
 export const linkedIssuers = contract<LinkedIssuers>("jwt-bearer.linked-issuers");
+
+export * from "./store.ts";

@@ -21,8 +21,9 @@ import {
 import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import { type Narrower, type Outbound, outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
+import { memoryRecords } from "@mod/records/testing";
 import storeModule from "@mod/store/module";
-import { type SimulatedStore, simulatedStore, storeConfig } from "@mod/store/testing";
+import { storeConfig } from "@mod/store/testing";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
@@ -36,6 +37,7 @@ import {
 	linkedSubjects,
 	type SignerKeys,
 	signerKeys,
+	spentAssertions,
 } from "../src/contract.ts";
 import jwtBearer from "../src/module.ts";
 
@@ -59,9 +61,20 @@ const trustedUpstream = [
 	},
 ];
 
+/** Spent assertions on records' stand-in, whose own clock runs `aheadMs` past the kernel's. */
+const spentOn = (aheadMs = 0) =>
+	defineModule({ name: "spent-assertions" }, (m) => [
+		m.provide(spentAssertions).by(() => {
+			const stand = memoryRecords<true>(() => clock.at + aheadMs, { shards: 1, perShard: 1 });
+			return {
+				save: (name: string, lifetimeMs: number) => stand.records.create(name, true, lifetimeMs),
+			};
+		}),
+	]);
+
 /** Where the token endpoint answers; null for a deployment without a public origin. */
 async function serve(
-	simulated?: SimulatedStore,
+	storeAheadMs = 0,
 	named = issuer,
 	located: string | null = `${issuer}/oauth/token`,
 	issuers: readonly Record<string, unknown>[] = trustedUpstream,
@@ -82,16 +95,17 @@ async function serve(
 			clientAllowanceModule,
 			out,
 			externalJwtModule,
-			simulated ? simulated.module : storeModule,
+			storeModule,
 			subjectRevocationStandIn,
 			jwtBearer,
+			spentOn(storeAheadMs),
 			...extra,
 		],
 		config: {
 			...kernelConfig(),
 			...httpConfig(),
 			...issuerConfig({ url: named }),
-			...(simulated ? {} : storeConfig()),
+			...storeConfig(),
 			...clientsConfig([
 				confidentialClient({
 					id: "app",
@@ -192,9 +206,7 @@ describe("jwt-bearer", () => {
 	});
 
 	it("still refuses a replay while the store clock runs ahead", async () => {
-		const simulated = simulatedStore();
-		const s = await serve(simulated);
-		simulated.shiftClock(200_000);
+		const s = await serve(200_000);
 		const signed = await assertion(base);
 		expect(errorOf(await s.grant(signed))).toBe("issued");
 		expect(errorOf(await s.grant(signed))).toBe("invalid_grant");
