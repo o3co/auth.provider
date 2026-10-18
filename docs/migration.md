@@ -696,7 +696,7 @@ The `redis` module checks the server at boot and refuses to start unless:
 - `maxmemory-policy` is `noeviction` where the composed features need it;
 - `appendonly yes` and `appendfsync always` are set where they need durability;
 - `redis.replication` is set where they need replication, with `min-replicas-to-write` and `min-replicas-max-lag` of at least 1 for `replicas`;
-- `CONFIG GET`, `INFO` and `ROLE` are allowed. A managed Redis that blocks `CONFIG GET` cannot be used.
+- `INFO` and `ROLE` are allowed; where `CONFIG GET` is refused, the settings are declared in `redis.server-settings`, and `redis.durability = none` accepts a server that does not fsync every write. See the runbook.
 
 ### Several instances
 

@@ -16,10 +16,14 @@
   - `url` (`redis` or `rediss`), `prefix` (lower-case letters, digits and `-`; default `store`).
   - `connect-timeout` (default `2s`), `command-timeout` (default `1s`), `replication-timeout` (default `1s`); times written with their unit, a bare number refused.
   - `replication`: `replicas` or `none`, required when a space needs replicated or confirmed reads.
+  - `durability`: `none`, or unset.
+  - `server-settings`: the server's `maxmemory-policy`, `appendonly`, `appendfsync`, `min-replicas-to-write` and `min-replicas-max-lag`, as the operator declares them.
 
 ## Invariants
 - Boot is refused on Redis below 7.0, a server that is no primary, or a cluster, proxies splitting keys across nodes included.
-- Boot is refused on a no eviction space without `noeviction`, and on a durable space without `appendonly yes` and `appendfsync always`.
+- Boot is refused on a no eviction space without `noeviction`, and on a durable space without `appendonly yes` and `appendfsync always` unless `durability` is `none`.
+- A setting is read by `CONFIG GET`. Where the server refuses it, the declared value is taken, a needed one left undeclared refusing boot, and every boot warns `redis.settings_declared` with the names taken so; where it answers, a declared value that differs refuses boot.
+- `durability` `none`: the operator states the server does not fsync every write, so a crash loses the latest writes, spent assertion and proof ids and lockout records among them.
 - Boot is refused on a space needing replicated or confirmed reads without `replication`.
 - A refusal or a warning never tells the URL, which may hold a password; an error event is logged by its name alone.
 - `replicas`: at boot, `min-replicas-to-write` and `min-replicas-max-lag` are 1 or more; at runtime, no replica seen is unavailable.

@@ -29,7 +29,7 @@ async function refusalOf(redis: unknown) {
 	return { refused, warned: recorded.lines() };
 }
 
-it("refuses boot on a URL that is not redis or rediss, a prefix of other characters, or a timeout out of bounds or with no unit", async () => {
+it("refuses boot on a URL that is not redis or rediss, a prefix of other characters, a timeout out of bounds or with no unit, or a declaration of another shape", async () => {
 	const refused: Record<string, unknown> = {
 		"another scheme": { url: "http://127.0.0.1:6379" },
 		"no URL": { url: "not a url" },
@@ -43,6 +43,15 @@ it("refuses boot on a URL that is not redis or rediss, a prefix of other charact
 		"a timeout as a string of a number": {
 			url: "redis://127.0.0.1:6379",
 			"command-timeout": "1000",
+		},
+		"a durability other than none": { url: "redis://127.0.0.1:6379", durability: "fsync" },
+		"a declared setting it does not read": {
+			url: "redis://127.0.0.1:6379",
+			"server-settings": { "maxmemory-samples": 5 },
+		},
+		"a declared appendfsync Redis has no such value of": {
+			url: "redis://127.0.0.1:6379",
+			"server-settings": { appendfsync: "sometimes" },
 		},
 	};
 	for (const [name, redis] of Object.entries(refused)) {

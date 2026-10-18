@@ -447,6 +447,12 @@ From `@mod/redis`.
 | `redis.replication-timeout` | string | `1s` |  |  |  | How long a confirmation waits for every replica to have a write, from 1ms to 1m. |
 | `redis.command-timeout` | string | `1s` |  |  |  | How long one Redis command may take, from 10ms to 1m. |
 | `redis.replication` | none \| replicas |  |  | `REDIS_REPLICATION` | `replicas` | Required when a space asks for replication or confirmed reads. "replicas": every write must reach the replicas, and Redis itself must refuse writes without them. "none": the operator states there is no failover at all, accepting that a failover would lose writes. |
+| `redis.durability` | none |  |  |  |  | "none": the operator states the server does not fsync every write, accepting that a crash loses the latest writes, among them spent assertion and proof ids and lockout records. Without it, a durable space needs appendonly yes and appendfsync always. |
+| `redis.server-settings.maxmemory-policy` | string |  |  |  |  | The server's maxmemory-policy, as it is set there. |
+| `redis.server-settings.appendonly` | yes \| no |  |  |  |  | Whether the server keeps an append-only file. |
+| `redis.server-settings.appendfsync` | always \| everysec \| no |  |  |  |  | How often the server fsyncs its append-only file. |
+| `redis.server-settings.min-replicas-to-write` | integer (0–9007199254740991) |  |  |  |  | The replicas the server needs before it takes a write. |
+| `redis.server-settings.min-replicas-max-lag` | integer (0–9007199254740991) |  |  |  |  | How many seconds behind a replica may be and still count for writes. |
 
 ## refresh
 
