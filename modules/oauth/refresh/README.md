@@ -14,7 +14,7 @@
 - A `token-control` revocable kind `refresh_token`: only its client revokes it, with its whole family, answered as written so it is audited; another client is answered the same.
 - A participant for closing a session.
 - Contract `lineage`: `of(token id)` → family (handle, end) / none / ended; `adopt(handle, issued)` → adopted / ended; `start(...)` → a family's first refresh token, or nothing for a client not allowed to refresh.
-- Operator section `refresh`, with `lifetime-seconds` and `bind-confidential-clients` (false, as 0.17); its keys are in the configuration reference.
+- Operator section `refresh`, with `lifetime` and `sweep-interval` (each written with its unit, in whole seconds; `lifetime-seconds`, a bare number, is read instead of `lifetime` until 0.18.0, never beside it) and `bind-confidential-clients` (false, as 0.17); its keys are in the configuration reference.
 - Store interfaces: families, redemptions, token links, each session's families, each family's access tokens, the families to revoke; their needs (never evicted, survives a crash, never rolled back by failover), contract test and configuration builders (`./testing`).
 
 ## Invariants

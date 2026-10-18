@@ -54,6 +54,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { lineage } from "../src/contract.ts";
 import refreshModule from "../src/module.ts";
 import { toStored, toStoredRedemption } from "../src/record.ts";
+import { section } from "../src/section.ts";
 import { refreshConfig } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
 
@@ -152,8 +153,8 @@ async function serve(
 			]),
 			...codeGrantConfig(),
 			...refreshConfig({
-				"lifetime-seconds": options.lifetime ?? 3600,
-				"sweep-seconds": 1,
+				lifetime: `${options.lifetime ?? 3600}s`,
+				"sweep-interval": "1s",
 				...(options.bindConfidential ? { "bind-confidential-clients": true } : {}),
 			}),
 		},
@@ -1055,4 +1056,17 @@ describe("lineage", () => {
 		const app = await s.app.get(lineage).start({ ...(await beginning(s, "app")), binding });
 		expect((await s.refresh(app)).status).toBe(200);
 	});
+});
+
+it("reads a family's lifetime with its unit, the old bare seconds instead until 0.18.0, never both", () => {
+	const lifetimeOf = (settings: object) => section.safeParse(settings).data?.lifetime;
+	expect([{}, { lifetime: "2h" }, { "lifetime-seconds": 60 }].map(lifetimeOf)).toEqual([
+		86_400, 7200, 60,
+	]);
+	const refused = [
+		{ lifetime: "1h", "lifetime-seconds": 60 },
+		{ lifetime: 3600 },
+		{ "sweep-interval": 30 },
+	];
+	expect(refused.map(lifetimeOf)).toEqual([undefined, undefined, undefined]);
 });

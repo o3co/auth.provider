@@ -116,7 +116,6 @@ const prefaultLater = new Set([
 	"passkey-registration",
 	"rate-limit",
 	"redis",
-	"refresh",
 	"refresh-store",
 	"rp-logout",
 	"rp-logout-store",
