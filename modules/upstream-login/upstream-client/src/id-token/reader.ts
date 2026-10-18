@@ -1,4 +1,4 @@
-import type { ExternalJwt, JwksSource } from "@mod/external-jwt";
+import type { Algorithm, ExternalJwt, JwksSource } from "@mod/external-jwt";
 import { type Clock, Unavailable } from "@mod/kernel";
 import { type UpstreamLogin, type UpstreamProfile, UpstreamRefused } from "@mod/upstreams";
 import { z } from "zod";
@@ -8,7 +8,7 @@ export interface IdTokenRules {
 	readonly issuer: string;
 	readonly client: string;
 	readonly jwks: JwksSource;
-	readonly algorithms: readonly string[];
+	readonly algorithms: readonly Algorithm[];
 	readonly skewMs: number;
 	/** Takes one audience whose `azp` names another client; otherwise a given `azp` is the client. */
 	readonly crossClient?: boolean;

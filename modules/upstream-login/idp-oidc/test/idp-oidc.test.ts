@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { externalJwt } from "@mod/external-jwt";
+import { type Algorithm, externalJwt } from "@mod/external-jwt";
 import externalJwtModule from "@mod/external-jwt/module";
 import {
 	assemble,
@@ -38,7 +38,7 @@ import { settingsOf } from "../src/settings.ts";
 import { atHashHolds, opened } from "../src/upstream.ts";
 
 /** The asymmetric algorithms external-jwt knows, the defaults among them. */
-const asymmetric = ["RS256", "PS256", "ES256", "EdDSA"];
+const asymmetric: readonly Algorithm[] = ["RS256", "PS256", "ES256", "EdDSA"];
 const issuer = "https://idp.example";
 const start = 1_800_000_000_000;
 let now = start;
