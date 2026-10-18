@@ -1,8 +1,8 @@
 import { Unavailable } from "@mod/kernel";
 import { seal } from "@mod/seal";
 import { describe, expect, it } from "vitest";
-import { grantStore } from "../src/store.ts";
-import { harness } from "./harness.ts";
+import { harness, said } from "../../../test/harness.ts";
+import { grantStore } from "../../store.ts";
 
 describe("a grant's records", () => {
 	it("opens no credentials sealed for another subject or of another shape", async () => {
@@ -48,5 +48,18 @@ describe("a grant's records", () => {
 			event: "federation-grants.listing_failed",
 			fields: { kind: "Unavailable" },
 		});
+	});
+	it("seals the credentials to the grant, so a copy under another grant does not open", async () => {
+		const h = await harness();
+		const a = await h.connected();
+		const b = await h.connected();
+		const sealedA = (h.stores.peek(a.id) as unknown as { sealed: string }).sealed;
+		// Another writer copies the first grant's sealed credentials into the second.
+		h.stores.raceNext((record) => ({ ...(record as object), sealed: sealedA }) as never);
+		await h.app.get(grantStore).change(b.id, (r) => ({ value: r }));
+		expect(said(await h.grantCall(b.id, "token"))).toBe(
+			"410 reauthorization_required credentials_unreadable",
+		);
+		expect(JSON.stringify(h.stores.peek(a.id))).not.toContain("up-refresh-1");
 	});
 });

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { grantStore } from "../src/store.ts";
 import { harness, said, scopes, upstreamTokens } from "./harness.ts";
 
 /** A grant whose token is due: four seconds of life, past half of it. */
@@ -79,20 +78,6 @@ describe("refreshing a grant's token", () => {
 		);
 		expect((await h.grantCall(id, "token")).status).toBe(503);
 		expect((await h.grantCall(id, "status")).json?.status).toBe("revoked");
-	});
-
-	it("seals the credentials to the grant, so a copy under another grant does not open", async () => {
-		const h = await harness();
-		const a = await h.connected();
-		const b = await h.connected();
-		const sealedA = (h.stores.peek(a.id) as unknown as { sealed: string }).sealed;
-		// Another writer copies the first grant's sealed credentials into the second.
-		h.stores.raceNext((record) => ({ ...(record as object), sealed: sealedA }) as never);
-		await h.app.get(grantStore).change(b.id, (r) => ({ value: r }));
-		expect(said(await h.grantCall(b.id, "token"))).toBe(
-			"410 reauthorization_required credentials_unreadable",
-		);
-		expect(JSON.stringify(h.stores.peek(a.id))).not.toContain("up-refresh-1");
 	});
 });
 
