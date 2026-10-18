@@ -72,6 +72,13 @@ const outcome = (run: Promise<unknown>) =>
 	);
 
 describe("idp-github", () => {
+	it("says its issuer is the one its settings name, GitHub's unless told another", () => {
+		expect(open({}).upstream.issuer).toBe("https://github.com/login/oauth");
+		expect(open({}, { issuer: "https://ghe.example/login/oauth" }).upstream.issuer).toBe(
+			"https://ghe.example/login/oauth",
+		);
+	});
+
 	it("asks GitHub to authorize with PKCE, and its own endpoints unless told others", () => {
 		const { upstream } = open({});
 		const url = new URL(upstream.authorizationUrl(start));
