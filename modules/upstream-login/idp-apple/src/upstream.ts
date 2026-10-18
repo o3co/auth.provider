@@ -93,6 +93,7 @@ export function opened(
 		);
 	const end = s["end-session-endpoint"];
 	return {
+		issuer,
 		responseMode: "form_post",
 		clockSkewMs: skewMs,
 		// Apple takes no freshness, so a browser's prompt and max age are not sent.
@@ -115,7 +116,7 @@ export function opened(
 				});
 				const { tokens, idToken } = tokenAnswerOf(jsonObjectOf(answer), s.scopes);
 				if (!idToken) throw new UpstreamRefused();
-				const { login } = await idTokenOf(idToken, exchange.nonce);
+				const { login } = await idTokenOf(idToken, exchange.nonce, tokens.accessToken);
 				return { ...login, amr: [], tokens: { ...tokens, idToken } };
 			}),
 		refresh: (refreshToken, scopes) =>

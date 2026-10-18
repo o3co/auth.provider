@@ -40,6 +40,11 @@ export function chosenLines(modules: readonly string[]): string[] {
 		...ownerOnly
 			.filter(([owner, adapter]) => modules.includes(owner) && !modules.includes(adapter))
 			.map(([, , line]) => `- ${line}`),
+		...(modules.includes("@mod/federation") && modules.includes("@mod/users-http")
+			? [
+					"- A federation login finds its user through the ledger's lookup by subject (`users-http.subject-url`), or by upstream identity (`users-http.upstream-url`).",
+				]
+			: []),
 		...(modules.includes("@mod/audit")
 			? [
 					`- Audit events named in \`audit.receivers = [${auditReceiversOf((m) => modules.includes(m)).join(", ")}]\`.`,

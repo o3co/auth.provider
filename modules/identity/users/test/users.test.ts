@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { assemble, BootRefused, isUnavailable, kernelConfig } from "@mod/kernel";
+import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import { recordingChecker, testBcryptHash } from "@mod/secret-hash/testing";
 import { describe, expect, it } from "vitest";
@@ -8,6 +8,7 @@ import {
 	type LinkStore,
 	linkStore,
 	type StoredContacts,
+	upstreamNames,
 	users,
 } from "../src/contract.ts";
 import { ledgerUsers } from "../src/ledger.ts";
@@ -22,9 +23,20 @@ import {
 	usersContract,
 } from "../src/testing.ts";
 
+/** The IdP names the registered users below link through, as a federation would declare them. */
+const named = defineModule({ name: "test-idps" }, (m) => [
+	m.contribute(upstreamNames).by(() => ({
+		declaredBy: "test-idps",
+		names: ["example", "corp:eu", "idp", "i"].map((name) => ({
+			name,
+			issuer: `https://${name.replace(":", "-")}.example`,
+		})),
+	})),
+]);
+
 const boot = (registered: unknown[]) =>
 	assemble({
-		modules: [usersModule, memoryUsersStores().module],
+		modules: [usersModule, memoryUsersStores().module, named],
 		config: { ...kernelConfig(), users: { registered } },
 	});
 
@@ -253,9 +265,9 @@ describe("records", () => {
 			null,
 			"b@example.com",
 		];
-		await stores.contacts.store.save("s", held as unknown as StoredContacts);
+		await stores.contacts.store.save("s", held as unknown as StoredContacts, "endless");
 		const one = { kind: "email", value: "c@example.com" };
-		await stores.contacts.store.save("t", one as unknown as StoredContacts);
+		await stores.contacts.store.save("t", one as unknown as StoredContacts, "endless");
 		expect(await u.contactsOf("s")).toEqual([{ kind: "email", value: "a@example.com" }]);
 		expect(await u.contactsOf("t")).toEqual([]);
 	});

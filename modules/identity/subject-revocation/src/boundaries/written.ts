@@ -29,7 +29,7 @@ export function writtenTo(boundaries: BoundaryStore, now: () => number): Write {
 		// Update first: a subject revoked before then costs one call.
 		if (await boundaries.update(subject, moved)) return;
 		const first = stored(recorded(undefined, at, keep));
-		if ((await boundaries.save(subject, first)) === "created") return;
+		if ((await boundaries.save(subject, first, "endless")) === "created") return;
 		// Another request saved the first boundary meanwhile: move it from what it holds.
 		if (!(await boundaries.update(subject, moved))) throw new Unavailable("subject-revocation");
 	};

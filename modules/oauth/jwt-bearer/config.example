@@ -3,6 +3,7 @@ jwt-bearer {
 		{
 			issuer = "https://issuer.example.invalid"
 			jwks-uri = "https://issuer.example.invalid/jwks"
+			subject = "as-is"
 		}
 	]
 }

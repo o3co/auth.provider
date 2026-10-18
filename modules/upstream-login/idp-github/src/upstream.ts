@@ -37,6 +37,7 @@ function profileOf(said: Readonly<Record<string, unknown>>) {
 export function opened(s: Settings, outbound: Outbound): Upstream {
 	const hosts = hostsOf(s);
 	return {
+		issuer: s.issuer,
 		authorizationUrl: (start) =>
 			authorizationUrl(s["authorization-endpoint"], start, {
 				clientId: s["client-id"],

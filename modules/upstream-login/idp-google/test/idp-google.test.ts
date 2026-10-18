@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { externalJwt } from "@mod/external-jwt";
 import externalJwtModule from "@mod/external-jwt/module";
 import { testSigner } from "@mod/external-jwt/testing";
@@ -150,6 +151,10 @@ const offered = <T>(value: T | undefined, what: string): T => {
 };
 
 describe("idp-google", () => {
+	it("says its issuer is Google's", async () => {
+		expect((await open()).upstream.issuer).toBe("https://accounts.google.com");
+	});
+
 	it("asks Google for offline access, the login's nonce and the freshness the browser asked", async () => {
 		const { upstream } = await open();
 		const url = new URL(upstream.authorizationUrl({ ...start, prompt: "login", maxAgeSeconds: 0 }));
@@ -306,6 +311,23 @@ describe("idp-google", () => {
 			).toBe(false);
 		}
 		expect(settings.safeParse({ ...both, "hosted-domains": ["corp.example"] }).success).toBe(true);
+	});
+
+	it("takes an id_token's at_hash only as the access token's", async () => {
+		const full = createHash("sha256").update("at").digest();
+		const half = full.subarray(0, 16).toString("base64url");
+		const exchanged = async (claims: Record<string, unknown>) => {
+			const { upstream } = await open({ token: async () => granted({}, claims) });
+			return outcome(upstream.exchange(exchange()));
+		};
+		expect(await exchanged({ at_hash: half })).toMatchObject({ subject: "g-alice" });
+		for (const at_hash of [
+			half.slice(1),
+			createHash("sha256").update("x").digest().subarray(0, 16).toString("base64url"),
+			7,
+		]) {
+			expect(await exchanged({ at_hash }), String(at_hash)).toBe("refused");
+		}
 	});
 
 	it("gives the profile in the checked id_token, its email verified only by a boolean true", async () => {

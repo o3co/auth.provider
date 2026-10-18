@@ -565,6 +565,7 @@ These are requests 0.17 accepted, or answered differently, that 0.18 refuses or 
 
 - A login that repeats a field gets `400` with `repeated_parameter`.
 - A bcrypt password that is longer than 72 bytes no longer matches on its first 72 bytes alone; a password over 1024 bytes is refused.
+- The audit event `session.admission.subject_mismatch` is gone. 0.17 recorded it when the user a cookie or a token named was not the user of the session record behind it. A 0.18 session is named only by its handle, a new random value each login, and keeps the subject its login gave until it closes, a raise included, so the two can never differ; a receiver that matches the event receives nothing.
 
 #### User ledger over HTTP
 
@@ -632,6 +633,8 @@ A ledger can also be asked for a user by subject, so a user who signs in upstrea
 - **Times and sizes**: every time and size key lost its unit suffix and is written with a unit (`30m`, `64KiB`); a number without one refuses boot. The renamed keys are in [Times and sizes](#times-and-sizes), among them `federation-grants.connections.<name>.max-access-token-lifetime`, which was `max-access-token-seconds`.
 - **Linked upstream identities**: a written link no longer lets in a subject that the settings' users or the ledger answer none for; that login is refused. Where the ledger cannot look users up by subject, a link still stands for its subject, with no attributes.
 - **Subjects**: a subject is 1 to 255 ASCII characters, as OpenID Connect bounds `sub`. A user in `users.registered` with no `subject` takes its identifier as the subject, so one whose identifier is outside ASCII (`Zoë`) now refuses boot at `users.registered.<i>.subject`; write a `subject` for it. A user ledger that answers a subject outside that bound is now unavailable.
+- **JWT bearer issuers**: each of `jwt-bearer.issuers` needs `subject`: `"as-is"` (the assertion's `sub` is the subject, as rc.1 read it) or `"linked"` (the user `users` links to the signer, with `upstream` naming its IdP). An issuer without it refuses boot at `jwt-bearer.issuers.<i>.subject`; write `subject = "as-is"` to keep rc.1's reading.
+- **Upstream links in settings**: each `idp` in `users.registered[].upstream` must be a name a composed module declares: a `federation` IdP, a linked `jwt-bearer` issuer's `upstream`, or one `exchange-id-tokens` takes. A link through any other name refuses boot at its `idp`; nothing would ever look it up.
 - **MFA under `required`**: boot is refused unless a composed kind both counts and adds a second factor. With `mfa-email` alone, set `mfa-email.adds-second-factor = true`.
 - **Managed Redis**: where the server refuses `CONFIG GET`, declare its settings in `redis.server-settings`; where it keeps no append-only file, set `redis.durability = "none"`. See [A managed Redis that refuses `CONFIG`](runbook.md#a-managed-redis-that-refuses-config).
 - **users-http**: `verify-url` is now optional, and `subject-url` is new. With a `credential`, every URL must share one origin, or boot is refused.
@@ -640,6 +643,7 @@ A ledger can also be asked for a user by subject, so a user who signs in upstrea
 - **Configuration files**: a file that does not parse, or a substitution that does not resolve, is refused at its `file:line:col`; nothing to change.
 - **Audit events**: `introspect.store_unavailable` is now `introspection.unavailable`, with the same `source`; a receiver that matches the old name needs it. Introspection answered unavailable also logs the warning `token-control.unavailable` with `route: "introspect"`, as revocation does.
 - **Managing factors**: the routes `GET /session/mfa/factors`, `POST /session/mfa/factors/rename`, `POST /session/mfa/factors/remove` and `POST /session/mfa/recovery-codes` now come from the `mfa-management` module. An app generated with rc.1 that composes `mfa-flows` must also compose `mfa-management` to keep them; its POSTs are counted per source under `mfa-management.requests` and `window`, apart from `mfa-flows`' routes.
+- **A first factor bound meanwhile**: a first binding begun while the subject held no counting factor no longer binds when another counting factor was bound before it finished. It writes nothing and records `mfa.first_binding_conflict` (`kind`); a login held for it gets `401 login_required`, a session `409 mfa_enrollment_conflict`. rc.1 bound it beside the other.
 
 ## Operational notes
 

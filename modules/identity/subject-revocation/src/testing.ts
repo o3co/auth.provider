@@ -172,8 +172,8 @@ export function boundaryStoreContract(name: string, open: () => Promise<Boundary
 			const { boundaries } = await open();
 			const subject = fresh();
 			const odd = stored({ state: "unheard-of", nested: { list: [1, "two"] } });
-			expect(await boundaries.save(subject, odd)).toBe("created");
-			expect(await boundaries.save(subject, stored({ n: 1 }))).toBe("exists");
+			expect(await boundaries.save(subject, odd, "endless")).toBe("created");
+			expect(await boundaries.save(subject, stored({ n: 1 }), "endless")).toBe("exists");
 			expect(await boundaries.read(subject)).toEqual(odd);
 			expect(await boundaries.read(fresh())).toBeUndefined();
 			expect(await boundaries.update(fresh(), plus(1))).toBeUndefined();
@@ -182,7 +182,7 @@ export function boundaryStoreContract(name: string, open: () => Promise<Boundary
 		it("changes a boundary only from what it holds, again after a racing writer", async () => {
 			const place = await open();
 			const subject = fresh();
-			await place.boundaries.save(subject, stored({ n: 1 }));
+			await place.boundaries.save(subject, stored({ n: 1 }), "endless");
 			expect(await place.boundaries.update(subject, plus(1))).toEqual({
 				before: stored({ n: 1 }),
 				after: stored({ n: 2 }),
@@ -195,8 +195,8 @@ export function boundaryStoreContract(name: string, open: () => Promise<Boundary
 		it("never ends a boundary, saved or changed", async () => {
 			const place = await open();
 			const [saved, changed] = [fresh(), fresh()];
-			await place.boundaries.save(saved, stored({ n: 1 }));
-			await place.boundaries.save(changed, stored({ n: 1 }));
+			await place.boundaries.save(saved, stored({ n: 1 }), "endless");
+			await place.boundaries.save(changed, stored({ n: 1 }), "endless");
 			await place.boundaries.update(changed, plus(1));
 			place.advance(10 * 365 * 86_400_000);
 			expect(await place.boundaries.read(saved)).toEqual(stored({ n: 1 }));
@@ -209,8 +209,8 @@ export function boundaryStoreContract(name: string, open: () => Promise<Boundary
 			if (!lose || !failover || !restart || !pressMemory) return context.skip();
 			const [saved, changed] = [fresh(), fresh()];
 			lose();
-			expect(await place.boundaries.save(saved, stored({ n: 1 }))).toBe("created");
-			await place.boundaries.save(changed, stored({ n: 1 }));
+			expect(await place.boundaries.save(saved, stored({ n: 1 }), "endless")).toBe("created");
+			await place.boundaries.save(changed, stored({ n: 1 }), "endless");
 			lose();
 			expect((await place.boundaries.update(changed, plus(1)))?.after).toEqual(stored({ n: 2 }));
 			await failover();

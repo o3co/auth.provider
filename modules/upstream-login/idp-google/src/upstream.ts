@@ -60,6 +60,7 @@ export function opened(
 		);
 	const offline = s.access === "offline";
 	return {
+		issuer,
 		clockSkewMs: skewMs,
 		authorizationUrl: (start) => {
 			const prompt = [start.prompt, offline ? "consent" : undefined].filter(Boolean).join(" ");
@@ -91,7 +92,7 @@ export function opened(
 				);
 				const { tokens, idToken } = tokenAnswerOf(jsonObjectOf(answer), scopes);
 				if (!idToken) throw new UpstreamRefused();
-				const { login, claims } = await idTokenOf(idToken, exchange.nonce);
+				const { login, claims } = await idTokenOf(idToken, exchange.nonce, tokens.accessToken);
 				// The domain is the checked id_token's own claim: never the authorize hint, nor the email's.
 				const domains = s["hosted-domains"];
 				if (domains && !(typeof claims.hd === "string" && domains.includes(claims.hd))) {

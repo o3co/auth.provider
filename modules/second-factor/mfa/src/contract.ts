@@ -180,7 +180,7 @@ export interface Factors {
 		| { readonly kind: "valid"; readonly state: unknown; readonly amr: readonly string[] }
 		| { readonly kind: "invalid" | "unknown" }
 	>;
-	/** Binds a proved binding; recovery codes come with the first counting factor, once. */
+	/** Binds a proved binding; recovery codes come with the first counting factor, once. One begun as the first counting factor binds only while no other counts by then (`first-binding-closed`). */
 	bind(
 		subject: string,
 		pending: string,
@@ -192,7 +192,14 @@ export interface Factors {
 				readonly factor: Shown;
 				readonly recoveryCodes?: unknown;
 		  }
-		| { readonly kind: "full" | "unknown" | "malformed-label" | "duplicate" }
+		| {
+				readonly kind:
+					| "full"
+					| "unknown"
+					| "malformed-label"
+					| "duplicate"
+					| "first-binding-closed";
+		  }
 	>;
 	rename(
 		subject: string,

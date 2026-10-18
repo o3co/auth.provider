@@ -35,7 +35,7 @@ import { CompactSign, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import idpOidc from "../src/module.ts";
 import { settingsOf } from "../src/settings.ts";
-import { atHashHolds, opened } from "../src/upstream.ts";
+import { opened } from "../src/upstream.ts";
 
 /** The asymmetric algorithms external-jwt knows, the defaults among them. */
 const asymmetric: readonly Algorithm[] = ["RS256", "PS256", "ES256", "EdDSA"];
@@ -249,6 +249,10 @@ afterEach(() => {
 	now = start;
 });
 describe("idp-oidc", () => {
+	it("says its issuer is the one its settings name", async () => {
+		expect((await open()).upstream.issuer).toBe(issuer);
+	});
+
 	it("builds the authorization request at the described endpoint, with nonce, PKCE, prompt and max_age", async () => {
 		const { upstream } = await open();
 		const url = new URL(
@@ -499,20 +503,6 @@ describe("idp-oidc", () => {
 		]) {
 			expect(await exchangedAt(claims), JSON.stringify(claims)).toBe("refused");
 		}
-	});
-
-	it("takes the digest of the signature's algorithm for at_hash, SHA-512 for EdDSA, and holds none under one it does not know", () => {
-		const headed = (alg: string) =>
-			`${Buffer.from(JSON.stringify({ alg })).toString("base64url")}.payload.signature`;
-		const full = createHash("sha512").update("at").digest();
-		const atHash = full.subarray(0, 32).toString("base64url");
-		expect(atHashHolds(headed("EdDSA"), atHash, "at")).toBe(true);
-		expect(atHashHolds(headed("ES512"), atHash, "at")).toBe(true);
-		expect(atHashHolds(headed("HS1"), atHash, "at")).toBe(false);
-		const sha384 = createHash("sha384").update("at").digest().subarray(0, 24).toString("base64url");
-		expect(atHashHolds(headed("PS384"), sha384, "at")).toBe(true);
-		expect(atHashHolds(headed("RS256"), sha384, "at")).toBe(false);
-		expect(atHashHolds(headed("EdDSA"), undefined, "at")).toBe(true);
 	});
 
 	it("exchanges the code with its verifier and the client's secret, and answers the id_token's subject", async () => {

@@ -307,10 +307,10 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 			const { passkeys } = await open();
 			const key = fresh();
 			const odd = held({ state: "unheard-of", nested: { list: [1, "two"] } });
-			expect(await passkeys.credentials.save(key, odd)).toBe("created");
-			expect(await passkeys.credentials.save(key, held({ n: 1 }))).toBe("exists");
+			expect(await passkeys.credentials.save(key, odd, "endless")).toBe("created");
+			expect(await passkeys.credentials.save(key, held({ n: 1 }), "endless")).toBe("exists");
 			expect(await passkeys.subjects.read(key)).toBeUndefined();
-			expect(await passkeys.subjects.save(key, held({ n: 1 }))).toBe("created");
+			expect(await passkeys.subjects.save(key, held({ n: 1 }), "endless")).toBe("created");
 			expect(await passkeys.credentials.read(key)).toEqual(odd);
 			expect(await passkeys.subjects.update(key, plus(1))).toEqual({
 				before: held({ n: 1 }),
@@ -322,7 +322,7 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 		it("changes a record only from what it holds, again after a racing writer", async () => {
 			const place = await open();
 			const key = fresh();
-			await place.passkeys.subjects.save(key, held({ n: 1 }));
+			await place.passkeys.subjects.save(key, held({ n: 1 }), "endless");
 			place.raceNextUpdate(key, (record) => held({ n: counted(record) * 10 }));
 			expect((await place.passkeys.subjects.update(key, plus(1)))?.after).toEqual(held({ n: 11 }));
 		});
@@ -330,7 +330,7 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 		it("keeps records without end, through a restart and through memory pressure", async () => {
 			const place = await open();
 			const key = fresh();
-			await place.passkeys.credentials.save(key, held({ n: 1 }));
+			await place.passkeys.credentials.save(key, held({ n: 1 }), "endless");
 			place.advance(10 * 365 * 86_400_000);
 			await place.restart?.();
 			await place.pressMemory?.();
@@ -343,7 +343,7 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 			if (!lose || !failover) return context.skip();
 			const key = fresh();
 			lose();
-			expect(await place.passkeys.subjects.save(key, held({ n: 1 }))).toBe("created");
+			expect(await place.passkeys.subjects.save(key, held({ n: 1 }), "endless")).toBe("created");
 			lose();
 			expect((await place.passkeys.subjects.update(key, plus(1)))?.after).toEqual(held({ n: 2 }));
 			await failover();
@@ -362,7 +362,7 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 				await failover();
 				place.advance(60_000);
 			});
-			await place.passkeys.credentials.save(key, held({ n: 1 })).catch(() => undefined);
+			await place.passkeys.credentials.save(key, held({ n: 1 }), "endless").catch(() => undefined);
 			expect(await place.passkeys.credentials.read(key)).toEqual(seen);
 		});
 
@@ -402,9 +402,9 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 			const keys: string[] = [];
 			const spied = (records: PasskeyRecords): PasskeyRecords => ({
 				...records,
-				save: (key, record) => {
+				save: (key, record, lifetimeMs) => {
 					keys.push(key);
-					return records.save(key, record);
+					return records.save(key, record, lifetimeMs);
 				},
 			});
 			const [subject, id] = [fresh(), randomBytes(16).toString("base64url")];

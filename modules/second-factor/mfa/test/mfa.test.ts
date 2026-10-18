@@ -37,12 +37,15 @@ import { type MfaSettings, mfaConfig } from "../src/testing.ts";
 import { memoryFactors } from "./stores.ts";
 
 let shift = 0;
+/** Where set, the clock stands at this time (before the shift), so a test can judge a window's very edge. */
+let stopped: number | undefined;
 /** `session`'s recent-authentication window, as its stand-in counts it. */
 const recentMs = sessionRules.credentialsSecondsDefault * 1000;
-const runtime = quietRuntime({ clock: { now: () => Date.now() + shift } });
+const runtime = quietRuntime({ clock: { now: () => (stopped ?? Date.now()) + shift } });
 let stop = async () => {};
 afterEach(async () => {
 	shift = 0;
+	stopped = undefined;
 	await stop();
 });
 
@@ -643,8 +646,11 @@ describe("the entry requirements mfa sets", () => {
 		const raised = await opened.raise(proved, ["pwd"]);
 		const fresh = withCookie(raised?.cookies[0] ?? "");
 		expect((await opened.enterFor(fresh, "credentials")).kind).toBe("short");
-		expect(app.get(factors).recent(runtime.clock.now() - recentMs)).toBe(true);
-		expect(app.get(factors).recent(runtime.clock.now() - recentMs - 1)).toBe(false);
+		// The window's edge, judged on a clock that stands still between reading it and asking.
+		stopped = Date.now();
+		const now = runtime.clock.now();
+		expect(app.get(factors).recent(now - recentMs)).toBe(true);
+		expect(app.get(factors).recent(now - recentMs - 1)).toBe(false);
 	});
 });
 
@@ -780,6 +786,37 @@ describe("values no two factors may hold", () => {
 		expect(await bindKind("bob", "card", "c2")).toMatchObject({ kind: "bound" });
 		expect(await decided.remove("ann", await idOf("ann", "card"))).toBe("removed");
 		expect(await bindKind("bob", "card", "c1")).toMatchObject({ kind: "bound" });
+	});
+
+	it("refuses a first binding another counting factor beat to the subject, binding nothing and recording it", async () => {
+		const { decided, provedCode, bindCode, events } = await serve({ mode: "required" });
+		const beaten = await provedCode("liz");
+		await bindCode("liz");
+		events.length = 0;
+		expect(await decided.bind("liz", beaten.pending, beaten.state)).toEqual({
+			kind: "first-binding-closed",
+		});
+		expect((await decided.held("liz")).filter((f) => f.kind === "code")).toHaveLength(1);
+		expect(events).toEqual([
+			expect.objectContaining({
+				kind: "mfa.first_binding_conflict",
+				subject: "liz",
+				attributes: { kind: "code" },
+			}),
+		]);
+		// Begun once one counts, a binding is no first one, and binds beside it.
+		const later = await provedCode("liz");
+		expect((await decided.bind("liz", later.pending, later.state)).kind).toBe("bound");
+	});
+
+	it("binds one of two first bindings finished at once, refusing the other", async () => {
+		const { decided, provedCode } = await serve({ mode: "required" });
+		const [one, two] = [await provedCode("mo"), await provedCode("mo")];
+		const bound = await Promise.all([
+			decided.bind("mo", one.pending, one.state),
+			decided.bind("mo", two.pending, two.state),
+		]);
+		expect(bound.map((b) => b.kind).sort()).toEqual(["bound", "first-binding-closed"]);
 	});
 
 	it("binds only one of two factors of one value bound at once", async () => {

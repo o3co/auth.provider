@@ -140,11 +140,13 @@ export function apiWith(p: ApiParts) {
 		const ended = records.grantOf(changed?.before)?.status !== "revoked" && after !== undefined;
 		return { grant: after ?? revoked(grant), ended };
 	};
-	/** Erases the credentials of a grant past its own end; its status stays to be answered. */
+	/** Erases the credentials of a grant past its end (its own, or the longest life allowed now); its status stays to be answered. */
 	const lapse = async (grant: Grant): Promise<Grant> => {
 		const at = p.clock.now();
-		const over = (g: Grant) =>
-			g.sealed !== undefined && g.expiresAt !== undefined && g.expiresAt <= at;
+		const over = (g: Grant) => {
+			const end = p.judge.endOf(g);
+			return g.sealed !== undefined && end !== undefined && end <= at;
+		};
 		if (!over(grant)) return grant;
 		const changed = await p.grants.change(grant.id, (stored) => {
 			const now = records.grantOf(stored);

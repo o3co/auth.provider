@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
-import { areaTarget, type Started } from "@mod/conformance";
+import { areaTarget, faultyTarget, type Started } from "@mod/conformance";
 import type { ClientScene } from "@mod/conformance-oauth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type CodeScene, codeScene } from "../src/main.ts";
@@ -145,6 +145,19 @@ describe("session grant", () => {
 		});
 	});
 
+	it("carries the session's login in the token: how the user authenticated, and when", async () => {
+		const before = Math.floor(Date.now() / 1000);
+		const cookie = await browser.login();
+		const after = Math.ceil(Date.now() / 1000);
+		const res = await sessionGrant({ ...asBff, cookie });
+		expect(res.status).toBe(200);
+		const [, payload = ""] = (res.body.access_token ?? "").split(".");
+		const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+		expect(claims.amr).toEqual(["pwd"]);
+		expect(claims.auth_time).toBeGreaterThanOrEqual(before);
+		expect(claims.auth_time).toBeLessThanOrEqual(after);
+	});
+
 	it("ends the token at logout, and issues nothing more on the same cookie", async () => {
 		const cookie = await browser.login();
 		const issued = await sessionGrant({ ...asBff, cookie });
@@ -204,3 +217,26 @@ describe("session grant: whose allowance", () => {
 		expect([res.status, res.body.error]).toEqual([401, "invalid_client"]);
 	});
 });
+
+describe.runIf(areaTarget().can("store-fault:session-grant"))(
+	"session grant: the store failing",
+	() => {
+		const faulty = faultyTarget(scene);
+		let at = "";
+		beforeAll(() => {
+			at = base;
+			base = faulty.base();
+			browser.forget();
+		});
+		afterAll(() => {
+			base = at;
+			browser.forget();
+		});
+
+		it("answers 503 while the store is unreachable, never an unauthorized session", async () => {
+			const cookie = await browser.login();
+			const answer = await faulty.whileDown(() => sessionGrant({ ...asBff, cookie }));
+			expect([answer.status, answer.body.error]).toEqual([503, "temporarily_unavailable"]);
+		});
+	},
+);

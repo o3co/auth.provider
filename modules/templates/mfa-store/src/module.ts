@@ -18,7 +18,7 @@ export default defineModule({ name: "mfa-store" }, (m) => [
 		const place = { store: await c.get(store), space: factors, log: c.log, random: c.random };
 		const records = recordsIn<StoredFactors>(place);
 		return {
-			save: (key: string, record: StoredFactors) => records.create(key, record, "endless"),
+			save: records.create,
 			read: records.read,
 			update: records.change,
 			scan: records.scan,

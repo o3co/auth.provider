@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import type { ExternalJwt, Policy, Verified } from "@mod/external-jwt";
 import { isUnavailable } from "@mod/kernel";
 import { UpstreamRefused } from "@mod/upstreams";
 import { describe, expect, it } from "vitest";
 import { type IdTokenRules, idTokenReaderOf } from "../src/contract.ts";
+import { atHashHolds } from "../src/id-token/reader.ts";
 
 describe("upstream-client's id_token reader", () => {
 	const now = 1_800_000_000_000;
@@ -67,6 +69,43 @@ describe("upstream-client's id_token reader", () => {
 		expect((await atAllowance.read("t", "n")).login.authenticatedAt).toBe(now + 30_000);
 		const shared = readerOf(valid({ aud: ["cid", "other"], azp: "cid" }));
 		expect((await shared.read("t", "n")).login.subject).toBe("alice");
+	});
+
+	/** An id_token's text with the header naming `alg`; the stand-in external-jwt reads no more of it. */
+	const signedWith = (alg: string) =>
+		`${Buffer.from(JSON.stringify({ alg })).toString("base64url")}.payload.signature`;
+	/** The left half of the access token's digest, base64url. */
+	const halfOf = (digest: Buffer) => digest.subarray(0, digest.length / 2).toString("base64url");
+	const sha = (name: string) => createHash(name).update("at").digest();
+	const shake = createHash("shake256", { outputLength: 114 }).update("at").digest();
+
+	it("checks an id_token's at_hash against the access token given beside it, and reads one without", async () => {
+		const read = (atHash: unknown, accessToken?: string) =>
+			outcome(readerOf(valid({ at_hash: atHash })).read(signedWith("RS256"), "n", accessToken));
+		expect(await read(halfOf(sha("sha256")), "at")).toMatchObject({ login: { subject: "alice" } });
+		expect(await read(undefined, "at")).toMatchObject({ login: { subject: "alice" } });
+		expect(await read(halfOf(sha("sha256")))).toMatchObject({ login: { subject: "alice" } });
+		for (const atHash of [halfOf(sha("sha384")), halfOf(sha("sha256")).slice(1), 7, ""]) {
+			expect(await read(atHash, "at"), String(atHash)).toBe("refused");
+		}
+	});
+
+	it("takes at_hash by the signature's algorithm, either Ed25519's or Ed448's half for EdDSA", () => {
+		const holds = (alg: string, digest: Buffer) =>
+			atHashHolds(signedWith(alg), halfOf(digest), "at");
+		expect([
+			holds("RS256", sha("sha256")),
+			holds("ES384", sha("sha384")),
+			holds("PS512", sha("sha512")),
+		]).toEqual([true, true, true]);
+		expect([holds("Ed25519", sha("sha512")), holds("Ed448", shake)]).toEqual([true, true]);
+		expect([holds("EdDSA", sha("sha512")), holds("EdDSA", shake)]).toEqual([true, true]);
+		expect([
+			holds("Ed25519", shake),
+			holds("RS256", sha("sha512")),
+			holds("HS256", sha("sha256")),
+		]).toEqual([false, false, false]);
+		expect(atHashHolds(signedWith("EdDSA"), undefined, "at")).toBe(true);
 	});
 
 	it("is unavailable without a key set, naming the type", async () => {

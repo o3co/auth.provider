@@ -93,9 +93,9 @@ it("saves a first boundary, and moves one the subject holds, with one write each
 	const calls: string[] = [];
 	const { revocation } = await boot((b) => ({
 		...b,
-		save: (subject, record) => {
+		save: (subject, record, lifetimeMs) => {
 			calls.push("save");
-			return b.save(subject, record);
+			return b.save(subject, record, lifetimeMs);
 		},
 		update: (subject, change) => {
 			calls.push("update");
@@ -111,14 +111,18 @@ it("saves a first boundary, and moves one the subject holds, with one write each
 
 it("is unavailable when a boundary holds no time, and a revocation moves both kinds over it", async () => {
 	const { boundaries, revocation, revocations } = await boot();
-	await boundaries.save("alice", { at: now } as unknown as StoredBoundary);
-	await boundaries.save("bob", { sessions: now, delegations: "soon" } as unknown as StoredBoundary);
+	await boundaries.save("alice", { at: now } as unknown as StoredBoundary, "endless");
+	await boundaries.save(
+		"bob",
+		{ sessions: now, delegations: "soon" } as unknown as StoredBoundary,
+		"endless",
+	);
 	await expect(revocation.check("alice", now - 1000)).rejects.toSatisfy(isUnavailable);
 	await expect(revocations.compare("alice", now - 1000, "delegations")).rejects.toSatisfy(
 		isUnavailable,
 	);
 	await expect(revocations.compare("bob", now - 1000, "sessions")).rejects.toSatisfy(isUnavailable);
-	await boundaries.save("carol", null as unknown as StoredBoundary);
+	await boundaries.save("carol", null as unknown as StoredBoundary, "endless");
 	await expect(revocations.compare("carol", now - 1000, "sessions")).rejects.toSatisfy(
 		isUnavailable,
 	);
@@ -130,7 +134,7 @@ it("is unavailable when a boundary holds no time, and a revocation moves both ki
 
 it("reads a boundary of one time as both kinds", async () => {
 	const { boundaries, revocations } = await boot();
-	await boundaries.save("alice", stored(now));
+	await boundaries.save("alice", stored(now), "endless");
 	expect(await revocations.compare("alice", now - 1000, "sessions")).toBe("revoked");
 	expect(await revocations.compare("alice", now - 1000, "delegations")).toBe("revoked");
 	expect(await revocations.compare("alice", now + 1000, "delegations")).toBe("valid");
@@ -141,9 +145,9 @@ it("reads a boundary of one time as both kinds", async () => {
 it("moves a first boundary another writer saved first", async () => {
 	const { revocation } = await boot((b) => ({
 		...b,
-		save: async (subject, record) => {
-			await b.save(subject, stored(now - 60_000));
-			return b.save(subject, record);
+		save: async (subject, record, lifetimeMs) => {
+			await b.save(subject, stored(now - 60_000), lifetimeMs);
+			return b.save(subject, record, lifetimeMs);
 		},
 	}));
 	await revocation.revoke("alice");

@@ -25,7 +25,7 @@ export default defineModule({ name: "subject-revocation-store" }, (m) => [
 		const place = { store: await c.get(store), space: boundaries, log: c.log, random: c.random };
 		const records = recordsIn<StoredBoundary>(place);
 		return {
-			save: (subject, record) => records.create(subject, record, "endless"),
+			save: records.create,
 			read: records.read,
 			update: (subject, change) => records.change(subject, (record) => ({ value: change(record) })),
 		};

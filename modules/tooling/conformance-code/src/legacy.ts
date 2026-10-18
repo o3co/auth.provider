@@ -39,8 +39,9 @@ onLegacy(codeArea, {
 		...(part.dpopAtResources ? { extra: ["dpop"] } : {}),
 	}),
 	cannot: [
-		// The legacy build cannot be set up so codes fail with its store.
+		// The legacy build cannot be set up so codes, or a session grant, fail with its store.
 		"store-fault:codes",
+		"store-fault:session-grant",
 	],
 	differs: [
 		// An acr no way of logging in can meet is dropped at boot, and answered as one not known.

@@ -300,6 +300,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../kernel
+      '@mod/metrics':
+        specifier: workspace:*
+        version: link:../metrics
       '@mod/request-source':
         specifier: workspace:*
         version: link:../request-source
