@@ -26,7 +26,7 @@
 - A token answer has a non-empty access token and type; a refresh token and id_token are non-empty text, a scope is text, and a lifetime is whole seconds from 0.
 - A scope left out is the one asked; where the caller gives none to stand for it, the answer refuses.
 - The id_token is never put among the tokens: the type checks it first.
-- A refresh's answer is a limit for a 429, with `retry-after` only where it is digits; unavailable for a 5xx; `invalid_grant` for a 400 saying so; else its tokens, never its id_token.
+- A refresh's answer is a limit for a 429, with `retry-after` only where it is digits; unavailable for a 5xx; `invalid_grant` for a 400 saying so; `interaction_required` for a 400 saying `interaction_required`, `login_required`, `consent_required` or `account_selection_required` (the user must act at the upstream first); else its tokens, never its id_token.
 - An id_token holds only as `src/id-token/`'s card says.
 - An end-session URL keeps the endpoint's query, then sets the parameters RP-Initiated Logout fixes (`id_token_hint`, `post_logout_redirect_uri`, `state`, `client_id`), each where given and non-empty, then the type's own.
 - A type's own parameter with the name of a fixed one is dropped, given or not; it never replaces or places it.

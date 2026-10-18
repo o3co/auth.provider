@@ -204,6 +204,20 @@ describe("the token route", () => {
 		expect((await h.ask(h.token)).status).toBe(404);
 	});
 
+	it("removes the tokens when the upstream asks the user to act there first, and says so once", async () => {
+		const up = refreshing({ kind: "interaction_required" });
+		const h = await linked({ offered: up.offered }, { refreshToken: "r-1", expiresInSeconds: 0 });
+		expect(await h.ask(h.token)).toMatchObject({
+			status: 403,
+			json: { error: "upstream_interaction_required" },
+		});
+		expect(h.events.map((e) => [e.kind, e.attributes?.reason])).toContainEqual([
+			"federation.token.failed",
+			"interaction_required",
+		]);
+		expect((await h.ask(h.token)).status).toBe(404);
+	});
+
 	it("keeps the tokens while the upstream is down or limits, and hands them once it answers", async () => {
 		const up = refreshing(new Unavailable("upstream"), {
 			kind: "limited",
