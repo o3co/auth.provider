@@ -39,7 +39,8 @@ describe("loadConfig", () => {
 		// biome-ignore lint/suspicious/noTemplateCurlyInString: a HOCON substitution, not a template
 		const paths = await files("a = ${b}", "b = 1");
 		const refusals = await refusalsOf(loadConfig({ files: paths, env: {} }));
-		expect(refusals.map((r) => r.where)).toEqual([paths[0]]);
+		expect(refusals.map((r) => r.where.startsWith(`${paths[0]}:1:`))).toEqual([true]);
+		expect(refusals.map((r) => r.reason)).toEqual(["cannot resolve b"]);
 	});
 
 	it("reads no environment but the one it is given", async () => {
@@ -81,11 +82,17 @@ describe("loadConfig", () => {
 	it("refuses unreadable and malformed files without quoting them", async () => {
 		const unreadable = await refusalsOf(loadConfig({ files: ["/nonexistent.conf"], env: {} }));
 		expect(unreadable.map((r) => r.where)).toEqual(["/nonexistent.conf"]);
-		const malformed = await refusalsOf(
-			loadConfig({ files: await files("a = { secret-value"), env: {} }),
-		);
-		expect(malformed).toHaveLength(1);
-		expect(JSON.stringify(malformed)).not.toContain("secret-value");
+		const [file] = await files("a = 1\nb = { secret-value");
+		const located = await refusalsOf(loadConfig({ files: [file as string], env: {} }));
+		expect(located).toEqual([
+			{ where: expect.stringMatching(/:2:\d+$/), reason: "not readable as HOCON" },
+		]);
+		expect(located[0]?.where.startsWith(`${file}:`)).toBe(true);
+		expect(JSON.stringify(located)).not.toContain("secret-value");
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: a HOCON substitution, not a template
+		const substituting = "a = 1\nb = ${missing}";
+		const unresolved = await refusalsOf(loadConfig({ files: await files(substituting), env: {} }));
+		expect(unresolved.map((r) => r.reason)).toEqual(["cannot resolve missing"]);
 	});
 });
 

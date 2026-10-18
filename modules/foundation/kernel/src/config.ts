@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { type Config, parse } from "@o3co/ts.hocon";
+import { type Config, ParseError, parse, ResolveError } from "@o3co/ts.hocon";
 import { BootRefused } from "./refusal.ts";
 
 export interface ConfigSource {
@@ -27,13 +27,22 @@ export async function loadConfig(source: ConfigSource): Promise<unknown> {
 		});
 		try {
 			layers.push(parse(text, { env, baseDir: dirname(file) }));
-		} catch {
-			throw new BootRefused([
-				{ where: file, reason: "not readable as HOCON, or a substitution cannot be resolved" },
-			]);
+		} catch (error) {
+			throw new BootRefused([refusalOf(file, error)]);
 		}
 	}
 	const [first, ...rest] = layers;
 	if (first === undefined) return {};
 	return rest.reduce((acc, layer) => acc.withFallback(layer), first).toObject();
+}
+
+/** Where a file fails, at its line and column, and why by the kind of failure; never its text. */
+function refusalOf(file: string, error: unknown) {
+	if (error instanceof ParseError) {
+		return { where: `${file}:${error.line}:${error.col}`, reason: "not readable as HOCON" };
+	}
+	if (error instanceof ResolveError) {
+		return { where: `${file}:${error.line}:${error.col}`, reason: `cannot resolve ${error.path}` };
+	}
+	return { where: file, reason: "not readable as HOCON, or a substitution cannot be resolved" };
 }
