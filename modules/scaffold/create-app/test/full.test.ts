@@ -4,6 +4,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { full, optIns } from "@mod/combinations";
+import { parseString } from "@o3co/ts.hocon";
 import { expect, it, vi } from "vitest";
 import { generate, trialSettings } from "../src/contract.ts";
 import {
@@ -221,6 +222,25 @@ it("makes the full template from the command with features added, and the listed
 		[],
 	]) {
 		expect(cli(...args).status, args.join(" ")).toBe(64);
+	}
+});
+
+it("writes the clients given into the trial's one clients.registered, and no block for none or for clients left", async () => {
+	const target = await generated();
+	const redisUrl = "redis://127.0.0.1:1";
+	const clients = [
+		{ id: "app", kind: "public", method: "none" },
+		{
+			id: "svc",
+			kind: "confidential",
+			method: "client_secret_basic",
+			sections: { x: { "a.b": "${c}" } },
+		},
+	];
+	const given = await trialSettings(target, { redisUrl, clients });
+	expect(parseString(given.local).get("clients.registered")).toEqual(clients);
+	for (const settings of [{ redisUrl }, { redisUrl, clients, leave: ["clients"] }]) {
+		expect((await trialSettings(target, settings)).local).not.toMatch(/^clients /m);
 	}
 });
 
