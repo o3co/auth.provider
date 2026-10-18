@@ -15,7 +15,7 @@
 - Each host goes on with pending closes every `sweep-interval`, past a failing one; on stop, the host waits for the sweep under way.
 - Logs as `session-lifecycle.*`, never a value: the names a login's attributes dropped (names outside the set as a count), a capped authentication time, a failed participant by name and kind, a closing put off with its age, a sweep's failures and the listing's (a failed removal by kind, sessions pushed out by count, and pushed-out sessions neither put back nor ended, by count).
 - Store interfaces of its own, named `session-lifecycle.*`, which a wiring must provide for it: records by handle (create, read, change from the current contents, with a lifetime or none), the cookie index by secret (create, read, remove), the closings (add, done, each) and each subject's listed sessions (add for a lifetime, members, remove). The stores never see record contents and need no eviction, crash survival and no rollback on failover.
-- The records and the cookie index read only what a failover keeps, since an entry decides on what other requests wrote; the cookie index names its entries from the secret and never keeps it in clear.
+- The records, the cookie index and the listing read only what a failover keeps, since an entry or a revocation decides on what other requests wrote; the cookie index names its entries from the secret and never keeps it in clear.
 - `./testing`: the configuration builder, and contract tests of its store interfaces.
 
 ## Invariants
