@@ -3269,6 +3269,9 @@ importers:
       '@mod/issuer':
         specifier: workspace:*
         version: link:../../oauth/issuer
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store

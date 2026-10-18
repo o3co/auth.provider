@@ -10,7 +10,7 @@ import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
-import { type SignerKeys, signerKeys } from "@mod/jwt-bearer";
+import { type SignerKeys, signerKeys, spentAssertions } from "@mod/jwt-bearer";
 import jwtBearer from "@mod/jwt-bearer/module";
 import {
 	assemble,
@@ -22,6 +22,7 @@ import {
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import outboundModule from "@mod/outbound/module";
+import { memoryRecords } from "@mod/records/testing";
 import storeModule from "@mod/store/module";
 import { storeConfig } from "@mod/store/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
@@ -111,6 +112,16 @@ async function open(section: unknown = settings(), allow = ["127.0.0.1"]) {
 	if (!keys) throw new Error("no signer keys contributed");
 	return { keys, logged };
 }
+
+/** jwt-bearer's spent assertions on records' stand-in, as a wiring would keep them. */
+const spent = defineModule({ name: "spent-assertions" }, (m) => [
+	m.provide(spentAssertions).by((c) => {
+		const stand = memoryRecords<true>(c.clock.now, { shards: 1, perShard: 1 });
+		return {
+			save: (name: string, lifetimeMs: number) => stand.records.create(name, true, lifetimeMs),
+		};
+	}),
+]);
 
 describe("signer-keys-http", () => {
 	it("posts the issuer, the subject and the kid to keys-url as written, with the credential", async () => {
@@ -227,6 +238,7 @@ describe("signer-keys-http under jwt-bearer", () => {
 				storeModule,
 				subjectRevocationStandIn,
 				jwtBearer,
+				spent,
 				signerKeysHttp,
 			],
 			config: {
