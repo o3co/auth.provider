@@ -23,6 +23,7 @@ import {
 	OutboundUnavailable,
 	outbound,
 } from "@mod/outbound";
+import secretHashModule from "@mod/secret-hash/module";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import clientsCimd from "../src/module.ts";
@@ -94,6 +95,7 @@ async function boot(
 		modules: [
 			outboundStandIn,
 			clientsModule,
+			secretHashModule,
 			owners,
 			tokenEndpointStandIn(options.code === false ? [] : ["authorization_code"]),
 			clientsCimd,
