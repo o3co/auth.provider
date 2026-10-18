@@ -350,6 +350,19 @@ describe("refreshing a grant's token", () => {
 		expect(r.asked.length).toBe(1);
 	});
 
+	it("ends the credential when the upstream asks the user to act there first, under its own reason", async () => {
+		const r = await refresher(4);
+		r.advance(2100);
+		r.upstream.push({ kind: "interaction_required" });
+		expect(said(await r.call())).toBe("reauthorize upstream_interaction_required");
+		const ended = await r.stored();
+		expect(ended).toMatchObject({
+			status: "reauthorization_required",
+			reason: "upstream_interaction_required",
+		});
+		expect(ended).not.toHaveProperty("sealed");
+	});
+
 	it("ends the credential only on a structured invalid_grant", async () => {
 		const r = await refresher(4);
 		r.advance(2100);

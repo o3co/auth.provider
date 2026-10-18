@@ -193,6 +193,18 @@ export function refreshWith(parts: Parts) {
 			}));
 			return ended ? { kind: "reauthorize", reason: "upstream_invalid_grant" } : { kind: "gone" };
 		}
+		// The grant stands upstream, but the user must act there: the client asks for it anew.
+		if (refreshed.kind === "interaction_required") {
+			const ended = await rewrite(counted, (g) => ({
+				...withoutCredentials(g),
+				version: versionOf(),
+				status: "reauthorization_required",
+				reason: "upstream_interaction_required",
+			}));
+			return ended
+				? { kind: "reauthorize", reason: "upstream_interaction_required" }
+				: { kind: "gone" };
+		}
 		// Only a refresh that handed tokens is read on; an answer of another kind is refused.
 		const answered = refreshed.kind === "refreshed" ? refreshed : undefined;
 		if (!answered) return heldOr(grant.id, held, asked, { kind: "refused" });

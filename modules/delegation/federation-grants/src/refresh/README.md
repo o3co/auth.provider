@@ -17,7 +17,7 @@ Internal module of `federation-grants`: handing a grant's upstream token, and re
 - The lock is let go (ending a millisecond later) only while it holds that mark, never one another took after it ran out.
 - A write lands only as its own write over the version read, and never on a grant no longer in use.
 - A rotation is written before the upstream is asked; with the window spent, the held token serves, else `limited`.
-- The upstream down, limiting or refusing leaves the credential, and a live held token serves; only `invalid_grant` removes it.
+- The upstream down, limiting or refusing leaves the credential, and a live held token serves; only `invalid_grant`, or `interaction_required` (the user must act at the upstream), removes it, each under its own reason (`upstream_invalid_grant`, `upstream_interaction_required`).
 - A rotated refresh token is written before the rest is judged; an answer that cannot be held marks the grant ineligible.
 
 ## Data
