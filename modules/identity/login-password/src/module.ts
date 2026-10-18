@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { audit, declaredAudit } from "@mod/audit";
 import { csrfChecked } from "@mod/csrf";
 import { type HttpRequest, type HttpResponse, noStore, routes, use } from "@mod/http";
-import { defineModule, isUnavailable } from "@mod/kernel";
+import { defineModule, isUnavailable, setting } from "@mod/kernel";
 import { loginSource } from "@mod/login-attributes";
 import { amrSources, logins } from "@mod/login-gates";
 import { attemptsPerSource, type LockoutPolicy, lockoutProblem, lockouts } from "@mod/rate-limit";
@@ -11,48 +11,49 @@ import { acceptedAttributes, type User, users } from "@mod/users";
 import { z } from "zod";
 import events from "./audit-events.ts";
 
+/** A key named before its unit was written: read in place of its new name while its writers move. */
+const before = (min: number, max: number, instead: string) =>
+	z.number().int().min(min).max(max).optional().describe(`Seconds; write \`${instead}\` instead.`);
+
 const section = z.strictObject({
 	attempts: z
 		.number()
 		.int()
 		.min(1)
 		.max(100)
-		.default(20)
+		.prefault(20)
 		.describe(
 			"Login attempts allowed per source in each window, within bounds that keep guessing slow.",
 		),
-	"window-seconds": z
-		.number()
-		.int()
-		.min(60)
-		.max(86_400)
-		.default(900)
-		.describe("The window `attempts` is counted over, in seconds."),
+	window: setting
+		.duration("s")
+		.pipe(z.number().int().min(60).max(86_400))
+		.prefault("15m")
+		.describe("The window `attempts` is counted over, from 1m to 1d."),
 	"account-attempts": z
 		.number()
 		.int()
 		.min(1)
 		.max(100)
-		.default(10)
+		.prefault(10)
 		.describe(
 			"Failed attempts allowed at one identifier, from any source, before each next one waits.",
 		),
-	"account-window-seconds": z
-		.number()
-		.int()
-		.min(60)
-		.max(86_400)
-		.default(3600)
-		.describe("How long an identifier's run of failed attempts is remembered, in seconds."),
-	"account-max-wait-seconds": z
-		.number()
-		.int()
-		.min(1)
-		.max(3600)
-		.default(300)
+	"account-window": setting
+		.duration("s")
+		.pipe(z.number().int().min(60).max(86_400))
+		.prefault("1h")
+		.describe("How long an identifier's run of failed attempts is remembered, from 1m to 1d."),
+	"account-max-wait": setting
+		.duration("s")
+		.pipe(z.number().int().min(1).max(3600))
+		.prefault("5m")
 		.describe(
-			"The longest an identifier waits between attempts, in seconds: the wait doubles to it, never locking out.",
+			"The longest an identifier waits between attempts, from 1s to 1h: the wait doubles to it, never locking out.",
 		),
+	"window-seconds": before(60, 86_400, "window"),
+	"account-window-seconds": before(60, 86_400, "account-window"),
+	"account-max-wait-seconds": before(1, 3600, "account-max-wait"),
 });
 
 /** The name an identifier's attempts are kept under. */
@@ -99,14 +100,18 @@ export default defineModule({ name: "login-password", section }, (m) => [
 				attributes: { method: "password", ...(source === undefined ? {} : { source }) },
 			});
 		};
-		const window = { limit: c.section.attempts, ms: c.section["window-seconds"] * 1000 };
+		const read = c.section;
+		const window = {
+			limit: read.attempts,
+			ms: (read["window-seconds"] ?? read.window) * 1000,
+		};
 		const budgets = await c.get(lockouts);
-		const windowMs = c.section["account-window-seconds"] * 1000;
+		const windowMs = (read["account-window-seconds"] ?? read["account-window"]) * 1000;
 		// Waits double from a second to the longest; no budget or hard limit ever holds one for good.
 		const policy: LockoutPolicy = {
 			threshold: c.section["account-attempts"],
 			backoffMs: 1000,
-			maxBackoffMs: c.section["account-max-wait-seconds"] * 1000,
+			maxBackoffMs: (read["account-max-wait-seconds"] ?? read["account-max-wait"]) * 1000,
 			budget: Number.MAX_SAFE_INTEGER,
 			budgetWindowMs: windowMs,
 			hardLimit: Number.MAX_SAFE_INTEGER,

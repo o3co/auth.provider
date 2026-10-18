@@ -14,8 +14,9 @@
 - Success is `200` with `{}` or `{redirect_to}`; a gate holding the login is `403` with the gate's answer and cookies, unread.
 - Errors: `csrf` (403), `repeated_parameter`, `invalid_redirect`, `invalid_request` (400), `too_many_attempts` (429), `service_unavailable` (503, attempts uncounted), `invalid_credentials` (401), `temporarily_unavailable` (503).
 - Audit events to `audit`, with `method` `password` and the `source` where `request-source` determined it: declared in `./audit-events`, listed in the audit event reference.
-- Operator section: `attempts` per source (1–100, default 20) in `window-seconds` (60–86400, default 900).
-- Operator section, per identifier: `account-attempts` (1–100, default 10), `account-window-seconds` (60–86400, default 3600, no shorter than the longest wait), `account-max-wait-seconds` (1–3600, default 300).
+- Operator section: `attempts` per source (1–100, default 20) in `window` (1m–1d, default `15m`). Times are written with their unit; a bare number is refused.
+- Before `window`, `account-window` and `account-max-wait`, the same keys in seconds (`window-seconds`, `account-window-seconds`, `account-max-wait-seconds`) are read in their place when given.
+- Operator section, per identifier: `account-attempts` (1–100, default 10), `account-window` (1m–1d, default `1h`, no shorter than the longest wait), `account-max-wait` (1s–1h, default `5m`).
 
 ## Invariants
 - Checks run in this order: `csrf`, attempts per source, the body's type, repeated parameters, destination, credentials present, attempts per identifier, credentials matching.
@@ -26,7 +27,7 @@
 - An identifier's wait doubles from a second to `account-max-wait-seconds`, and never locks it out.
 - Anyone who knows an identifier can keep its password login waiting, up to `account-max-wait-seconds` at a time, for as long as they keep trying; passkey and federation logins are not held back.
 - The right password ends the identifier's run; a guess `users` could not judge is handed back.
-- An identifier's run is forgotten after `account-window-seconds` without a failure.
+- An identifier's run is forgotten after `account-window` without a failure.
 - Where the attempt per identifier cannot be counted, the login is `503` `service_unavailable`.
 - The password is handed to `users` as typed, with no Unicode normalization.
 - A JSON `redirect_to` that is neither a string nor null is `invalid_redirect`; any other member that is no string counts as absent.

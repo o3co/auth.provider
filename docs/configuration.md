@@ -277,10 +277,13 @@ From `@mod/login-password`.
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
 | `login-password.attempts` | integer (1–100) | `20` |  |  |  | Login attempts allowed per source in each window, within bounds that keep guessing slow. |
-| `login-password.window-seconds` | integer (60–86400) | `900` |  |  |  | The window `attempts` is counted over, in seconds. |
+| `login-password.window` | string | `15m` |  |  |  | The window `attempts` is counted over, from 1m to 1d. |
 | `login-password.account-attempts` | integer (1–100) | `10` |  |  |  | Failed attempts allowed at one identifier, from any source, before each next one waits. |
-| `login-password.account-window-seconds` | integer (60–86400) | `3600` |  |  |  | How long an identifier's run of failed attempts is remembered, in seconds. |
-| `login-password.account-max-wait-seconds` | integer (1–3600) | `300` |  |  |  | The longest an identifier waits between attempts, in seconds: the wait doubles to it, never locking out. |
+| `login-password.account-window` | string | `1h` |  |  |  | How long an identifier's run of failed attempts is remembered, from 1m to 1d. |
+| `login-password.account-max-wait` | string | `5m` |  |  |  | The longest an identifier waits between attempts, from 1s to 1h: the wait doubles to it, never locking out. |
+| `login-password.window-seconds` | integer (60–86400) |  |  |  |  | Seconds; write `window` instead. |
+| `login-password.account-window-seconds` | integer (60–86400) |  |  |  |  | Seconds; write `account-window` instead. |
+| `login-password.account-max-wait-seconds` | integer (1–3600) |  |  |  |  | Seconds; write `account-max-wait` instead. |
 
 ## mail
 

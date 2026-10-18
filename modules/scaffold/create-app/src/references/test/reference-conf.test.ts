@@ -144,7 +144,6 @@ const prefaultLater = new Set([
 	"kernel",
 	"keys",
 	"login-gates",
-	"login-password",
 	"mail",
 	"mail-smtp",
 	"metrics-prometheus",
