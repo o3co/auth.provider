@@ -75,8 +75,7 @@ const outside = defineModule({ name: "outside" }, (m) => [
 			if (!told) return { kind: "unknown" as const };
 			return {
 				kind: "known" as const,
-				source: told.vouched ? ("session:users" as const) : ("session:upstream:idp" as const),
-				...(told.vouched ? { vouched: true as const } : {}),
+				vouched: told.vouched,
 				attributes: { email: told.email },
 			};
 		},
