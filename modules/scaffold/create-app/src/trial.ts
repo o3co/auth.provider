@@ -63,7 +63,7 @@ function trialBlocks(
 		[
 			has("users-http"),
 			"users-http",
-			`users-http { verify-url = "https://ledger.example.invalid/verify" }`,
+			`users-http { verify-url = "https://ledger.example.invalid/verify", subject-url = "https://ledger.example.invalid/subject" }`,
 		],
 		[
 			has("signer-keys-http"),
