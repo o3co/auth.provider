@@ -389,22 +389,16 @@ describe("users-http", () => {
 		}
 	});
 
-	it.each([
-		[{ timeout: "50ms" }, { "max-response-size": "100B" }, { "max-response-size": "1000B" }],
-		[{ "timeout-ms": 50 }, { "max-response-bytes": 100 }, { "max-response-bytes": 1000 }],
-	])(
-		"answers unavailable past its own time or size, never none, as %o and the rest say",
-		async (short, small, roomier) => {
-			script = (asked) => ({ ...aliceLedger(asked), delayMs: 300 });
-			const slow = await open(short);
-			await expect(slow.ledger.verify("alice", "correct horse")).rejects.toSatisfy(isUnavailable);
-			script = () => ({ status: 200, json: { ...alice, name: "x".repeat(200) } });
-			const large = await open(small);
-			await expect(large.ledger.verify("alice", "correct horse")).rejects.toSatisfy(isUnavailable);
-			const roomy = await open(roomier);
-			expect((await roomy.ledger.verify("alice", "correct horse")).kind).toBe("user");
-		},
-	);
+	it("answers unavailable past its own time or size, never none", async () => {
+		script = (asked) => ({ ...aliceLedger(asked), delayMs: 300 });
+		const slow = await open({ timeout: "50ms" });
+		await expect(slow.ledger.verify("alice", "correct horse")).rejects.toSatisfy(isUnavailable);
+		script = () => ({ status: 200, json: { ...alice, name: "x".repeat(200) } });
+		const large = await open({ "max-response-size": "100B" });
+		await expect(large.ledger.verify("alice", "correct horse")).rejects.toSatisfy(isUnavailable);
+		const roomy = await open({ "max-response-size": "1000B" });
+		expect((await roomy.ledger.verify("alice", "correct horse")).kind).toBe("user");
+	});
 
 	it("refuses a malformed user as unavailable", async () => {
 		const malformed: Record<string, unknown> = {
@@ -517,10 +511,8 @@ describe("users-http", () => {
 			settings({ "max-response-size": "0B" }),
 			settings({ "max-response-size": "16777217B" }),
 			settings({ "max-response-size": 100 }),
-			settings({ "timeout-ms": 0 }),
-			settings({ "timeout-ms": 60_001 }),
-			settings({ "max-response-bytes": 0 }),
-			settings({ "max-response-bytes": 16_777_217 }),
+			settings({ "timeout-ms": 50 }),
+			settings({ "max-response-bytes": 100 }),
 			settings({ extra: true }),
 		];
 		for (const section of refusals) {

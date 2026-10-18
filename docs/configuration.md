@@ -619,8 +619,6 @@ From `@mod/users-http`.
 | `users-http.credential` | string |  |  |  |  | A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material. |
 | `users-http.timeout` | string |  |  |  |  | How long a call may take, from 1ms to 1m, narrowing outbound's cap. |
 | `users-http.max-response-size` | string |  |  |  |  | The largest answer read, from 1B to 16MiB, narrowing outbound's cap. |
-| `users-http.timeout-ms` | integer (1–60000) |  |  |  |  | Milliseconds; write `timeout` instead. |
-| `users-http.max-response-bytes` | integer (1–16777216) |  |  |  |  | Bytes; write `max-response-size` instead. |
 
 ## webauthn
 
