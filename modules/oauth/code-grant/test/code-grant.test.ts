@@ -22,6 +22,7 @@ import { crowdingFor, memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import sessionParticipants from "@mod/session-participants/module";
 import { entryRequirements } from "@mod/session-requirements";
 import sessionRequirements from "@mod/session-requirements/module";
 import { sessionTokens } from "@mod/session-tokens";
@@ -154,6 +155,7 @@ async function serve(
 			grantCaller,
 			clientAllowanceModule,
 			sessionStandIn,
+			sessionParticipants,
 			sessionRequirements,
 			subjectRevocationStandIn,
 			simulated.module,
@@ -324,6 +326,14 @@ it("has the access token recorded to the code's session", async () => {
 		kind: "bound",
 		handle: s.session.id,
 	});
+});
+
+it("revokes the code's access token when its session closes, through session-tokens' participant", async () => {
+	const s = await serve();
+	const token = String((await s.redeem(await s.issue())).body.access_token);
+	expect(await revoked(s, token)).toBe(false);
+	await s.app.get(sessions).close(s.session.id, carrying(s.cookies));
+	expect(await revoked(s, token)).toBe(true);
 });
 
 it("ends the access token no later than its session, when the session ends first", async () => {
