@@ -107,6 +107,7 @@ export function refreshGrant(
 ): Grant {
 	return {
 		grantType: refreshGrantType,
+		readsAmbient: "none",
 		targets: true,
 		handle: async ({ client, param, binding, issue, target }) => {
 			const token = param("refresh_token");
