@@ -1,21 +1,8 @@
 import { contract, deepFreeze, Unavailable } from "@mod/kernel";
 import type { Narrower } from "@mod/outbound-policy";
 
-// The destination policy's own, offered here too while callers still import them from outbound.
-export {
-	type CredentialPolicy,
-	type CredentialRefusal,
-	credentialPolicy,
-	DestinationRefused,
-	destinationRefusal,
-	type HostEntry,
-	hostEntryOf,
-	type Narrower,
-	type OutboundRefusals,
-	outboundRefusals,
-	type RefusalReason,
-	withinHosts,
-} from "@mod/outbound-policy";
+// The destination policy's own, as `fetch` takes and throws them.
+export { DestinationRefused, type Narrower, type RefusalReason } from "@mod/outbound-policy";
 
 /** Why no usable answer came, for a caller to log by; it carries no value and no body. */
 export type OutboundFailure =

@@ -1,13 +1,8 @@
 import { assemble, BootRefused, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { type OutboundRefusals, outboundRefusals } from "@mod/outbound-policy";
 import { afterEach, expect, it, vi } from "vitest";
-import {
-	type Narrower,
-	type OutboundRefusals,
-	outbound,
-	outboundRefusals,
-	signedOutbound,
-} from "../src/contract.ts";
+import { type Narrower, outbound, signedOutbound } from "../src/contract.ts";
 import outboundModule, { section } from "../src/module.ts";
 
 afterEach(() => vi.unstubAllEnvs());
