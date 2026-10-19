@@ -38,6 +38,8 @@ What each module contains is described by that module's contract card (each modu
 | Public origin | setting | http |
 | Building and reading cookies | contract | cookies |
 | What a configured URL may hold (the schema part modules take theirs by) | contract | url-setting |
+| When a section's own check of the URLs it holds may read them (once every one parses), and putting what the check answers at its key | contract | url-setting |
+| What a module's check of a URL says, such as an outbound refusal | vocabulary | the module that checks |
 | Received values: a name's single value, and the names repeated | vocabulary | http |
 | Signing, verification, publishing public keys | contract | keys |
 | Outbound HTTP requests and the destination policy | contract / setting | outbound |
