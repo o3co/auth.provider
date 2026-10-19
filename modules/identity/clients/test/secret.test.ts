@@ -90,18 +90,17 @@ it("checks secrets within its own assembly's secret-hash limit, whatever another
 	expect(await first).toMatchObject(as("b"));
 });
 
-it("refuses boot on a secret that is no bcrypt or scrypt hash, naming the client and never the value", async () => {
+it("refuses boot on a secret that is no bcrypt or scrypt hash, at its place and never by the client's id or the value", async () => {
 	const list = [
 		confidential("fine", "client_secret_basic", testScryptHash("x")),
 		confidential("plain", "client_secret_post", "plain-text-secret-value"),
 	];
 	const refusals = await refusalsOf(boot(list));
 	expect(refusals.map((r) => r.where)).toEqual(["clients.registered.1.sections.client-secret"]);
-	expect(refusals[0]?.reason).toMatch(/^client "plain" section "client-secret": /);
-	expect(JSON.stringify(refusals)).not.toContain("plain-text-secret-value");
+	expect(JSON.stringify(refusals)).not.toMatch(/plain-text-secret-value|"plain"/);
 });
 
-it("refuses boot on a registered client whose method needs a secret and that holds no hash, naming the client", async () => {
+it("refuses boot on a registered client whose method needs a secret and that holds no hash, at its place and never by its id", async () => {
 	const list = [
 		{ id: "pub", kind: "public", method: "none" },
 		{ id: "bare", kind: "confidential", method: "client_secret_basic" },
@@ -120,8 +119,9 @@ it("refuses boot on a registered client whose method needs a secret and that hol
 		"clients.registered.2.sections.client-secret",
 		"clients.registered.3.sections.client-secret",
 	]);
-	expect(refusals[0]?.reason).toMatch(/^client "bare" section "client-secret": /);
-	expect(refusals[1]?.reason).toMatch(/^client "empty" section "client-secret": /);
+	expect(refusals[0]?.reason).toBe("its method needs a secret, and it holds no hash");
+	expect(refusals[1]?.reason).toBe("its method needs a secret, and it holds no hash");
+	expect(JSON.stringify(refusals)).not.toMatch(/bare|empty|blank/);
 });
 
 it("refuses a source's client whose secret is no hash, or that holds none, matching it by no form", async () => {

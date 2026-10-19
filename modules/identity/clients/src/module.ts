@@ -34,10 +34,10 @@ const section = z
 		path: ["registered"],
 	});
 
-/** A refusal at a registered client's section, naming the client and the section and never a value. */
-const sectionRefusal = (where: string, id: string, name: string, reason: string) => ({
+/** A refusal at a registered client's section, by its place alone: never the client's id or a value. */
+const sectionRefusal = (where: string, name: string, reason: string) => ({
 	where: `${where}.sections.${name}`,
-	reason: `client ${JSON.stringify(id)} section ${JSON.stringify(name)}: ${reason}`,
+	reason,
 });
 
 /** The boot checks of a registered client that reads well: its secret, and each section check it carries. */
@@ -53,7 +53,6 @@ function refusedAtBoot(
 			? [
 					sectionRefusal(
 						where,
-						entry.id,
 						secretSection.name,
 						"its method needs a secret, and it holds no hash",
 					),
@@ -63,7 +62,7 @@ function refusedAtBoot(
 		[...known.values()].flatMap((s) => {
 			if (!s.checkAtBoot || !Object.hasOwn(entry.sections, s.name)) return [];
 			const reason = s.checkAtBoot(client.section(s), client);
-			return reason === undefined ? [] : [sectionRefusal(where, entry.id, s.name, reason)];
+			return reason === undefined ? [] : [sectionRefusal(where, s.name, reason)];
 		}),
 	);
 }
