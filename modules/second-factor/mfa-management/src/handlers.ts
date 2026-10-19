@@ -1,9 +1,11 @@
 import { type HttpRequest, jsonAnswer, type Route } from "@mod/http";
 import type { Factors } from "@mod/mfa";
+import type { SecondFactors } from "@mod/mfa-entry";
 import { refusedEntry, type Sessions } from "@mod/session";
 
 export interface HandlerParts {
 	readonly factors: Factors;
+	readonly secondFactors: SecondFactors;
 	readonly sessions: Sessions;
 }
 
@@ -47,7 +49,7 @@ export function handlersOver(p: HandlerParts) {
 	const proving = async (request: HttpRequest) => {
 		const session = await managing(p.sessions, request);
 		if ("status" in session) return session;
-		return p.factors.provenRecently(session.context) ? session : stepUpRequired;
+		return p.secondFactors.provenRecently(session.context) ? session : stepUpRequired;
 	};
 
 	const remove: Handler = async (request) => {

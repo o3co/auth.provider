@@ -11,6 +11,7 @@ import gatesModule from "@mod/login-gates/module";
 import { type FactorStore, factorStore, factors, proofSteps, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
 import { type MfaSettings, mfaConfig } from "@mod/mfa/testing";
+import mfaEntry from "@mod/mfa-entry/module";
 import { factorKinds } from "@mod/mfa-extensions";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { memoryRecords } from "@mod/records/testing";
@@ -126,6 +127,7 @@ export async function serve(settings: Settings = {}) {
 			sealModule,
 			gatesModule,
 			mfaModule,
+			mfaEntry,
 			code,
 			backup,
 			step,

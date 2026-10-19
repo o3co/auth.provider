@@ -18,10 +18,10 @@
 
 ## Invariants
 - The list needs a live session; the others enter it at the credential-changing level (`mfa` contributes the requirement).
-- Removing a factor and reissuing codes also ask a second factor proven recently (`mfa`'s `provenRecently`), else `403 step_up_required`: a recent sign-in holding no counting factor, judged before a factor is bound, never stands for one.
+- Removing a factor and reissuing codes also ask a second factor proven recently (`mfa-entry`'s `provenRecently`), else `403 step_up_required`: a recent sign-in holding no counting factor, judged before a factor is bound, never stands for one.
 - Renaming takes `mfa`'s refusal of a label, after the session enters and before the factor; a missing label is refused too.
 - Every POST declares `csrf`'s policy, then `rate-limit`'s requests per source, and takes a form or JSON body read by name, a JSON member that is not a string being absent.
 - The subject comes from the session, never from the body.
 
 ## Depends on
-- `kernel`, `http` (`jsonAnswer`), `csrf`, `rate-limit`, `session` (entry, `refusedEntry`), `mfa` (factor decisions, the label's shape)
+- `kernel`, `http` (`jsonAnswer`), `csrf`, `rate-limit`, `session` (entry, `refusedEntry`), `mfa` (factor decisions, the label's shape), `mfa-entry` (`provenRecently`)
