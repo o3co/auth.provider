@@ -5,6 +5,7 @@ import { clientCredentialsGrantType } from "./contract.ts";
 export function clientCredentials(issuer: string): Grant {
 	return {
 		grantType: clientCredentialsGrantType,
+		readsAmbient: "none",
 		targets: true,
 		handle: async ({ client, param, issue, target }) => {
 			if (client.kind !== "confidential") return { kind: "error", error: "unauthorized_client" };
