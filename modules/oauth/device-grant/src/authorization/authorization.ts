@@ -1,10 +1,10 @@
 import { clientAllowance } from "@mod/client-allowance";
 import { type Clients, clients } from "@mod/clients";
 import { type TargetRule, targets } from "@mod/grants";
-import { type HttpRequest, type HttpResponse, noStore } from "@mod/http";
+import { type HttpRequest, type HttpResponse, noStore, type Route } from "@mod/http";
 import { issuer } from "@mod/issuer";
 import { type BuildContext, type Runtime, Unavailable } from "@mod/kernel";
-import { answeringUnavailable, authenticateClient, oauthError } from "@mod/token-endpoint";
+import { authenticateClient, oauthError } from "@mod/token-endpoint";
 import { userCodeFrom } from "../codes.ts";
 import { deviceGrantType } from "../contract.ts";
 import { type Device, toStored } from "../record.ts";
@@ -32,7 +32,7 @@ function withUserCode(page: string, userCode: string): string {
 }
 
 /** RFC 8628 §3.1–3.2: a device asks for codes, as an authenticated client allowed this grant. */
-export function authorizationWith(a: Authorizing) {
+export function authorizationWith(a: Authorizing): Pick<Route, "handle" | "unavailable"> {
 	const lifetimeMs = a.settings["code-lifetime"] * 1000;
 	// Kept as long again past its end, so a device still polling is told its code expired.
 	const keptMs = lifetimeMs * 2;
@@ -91,9 +91,7 @@ export function authorizationWith(a: Authorizing) {
 			},
 		};
 	};
-	return answeringUnavailable(answer, (_request, { what }) => {
-		a.runtime.log.warn("device-grant.unavailable", { what, route: "authorization" });
-	});
+	return { handle: answer, unavailable: { response: oauthError(503, "temporarily_unavailable") } };
 }
 
 /** The handler over the contracts the assembly gives. */

@@ -13,7 +13,7 @@
 - Route `POST /oauth/device/verification`, for the deployment's page. It takes a JSON body as `http` reads it, and answers JSON.
   - Fields: `action` (`lookup`, `approve` or `deny`) and `user_code`. A member that is not a string counts as absent.
   - `lookup` answers `client_id`, `scope` and `expires_at`. `approve` and `deny` answer `status` and `client_id`.
-  - Errors: `invalid_request` (400), `login_required` (401), `step_up_required` (403), `access_denied` (403, a policy refusing the approval), `invalid_user_code` (404), `already_decided` (409), `expired_token` (410), `slow_down` (429, with `retry-after`), `temporarily_unavailable` (503, warned with what).
+  - Errors: `invalid_request` (400), `login_required` (401), `step_up_required` (403), `access_denied` (403, a policy refusing the approval), `invalid_user_code` (404), `already_decided` (409), `expired_token` (410), `slow_down` (429, with `retry-after`), `temporarily_unavailable` (503, the route's declared answer, warned by `http` as `http.unavailable` with what and the route).
   - `step_up_required` passes the requirement's name and answer on unread.
 - The `urn:ietf:params:oauth:grant-type:device_code` grant to `grants`: `authorization_pending`, `slow_down`, `access_denied`, `expired_token`, `invalid_grant`, or an access token.
 - Audit events to `audit`, from the verification interface, with the subject and the request's `source` when `request-source` determined it, never a user or device code: declared in `./audit-events`, listed in the audit event reference.
