@@ -14,8 +14,8 @@ Internal module of `federation`: handing the upstream tokens of a login to the r
 - `handoffWith` (receivers, `seal`, transaction store, `kernel`'s runtime, lifetime):
   - for one login: the `from` that `login-gates` carries and what follows the login's outcome
   - `opened` (session, carry), for `login-gates`
-  - `joined` (session, IdP, tokens), for a link, handed at once: a receiver failing undoes those given (`withdrawn`) and is unavailable, logged as `federation.link_join_failed`
-  - `withdrawn` (session, IdP) takes a link's tokens back from every receiver; an undo that fails is logged as `federation.link_join_undo_failed`, and the rest still go
+  - `joined` (session, IdP, tokens), for a link, handed at once, answering what it gave each receiver with its receipt: a receiver failing undoes those given (`withdrawn`) and is unavailable, logged as `federation.link_join_failed`
+  - `withdrawn` (session, IdP, what the join answered) takes a link's tokens back from each receiver given them, with its receipt, and nothing written since; an undo that fails is logged as `federation.link_join_undo_failed`, and the rest still go
 - `noHandoff`, where no module receives upstream tokens
 
 ## Invariants

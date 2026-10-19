@@ -182,10 +182,14 @@ export async function harness(
 		families.set(issued.id, more.family ?? "family");
 		return { token: issued.token, id: issued.id };
 	};
-	/** A login's upstream tokens, handed to the receivers as federation hands them. */
+	/** A login's upstream tokens, handed to the receivers as federation hands them; the last receipt answered. */
 	const receive = async (session: Session, given: Partial<UpstreamTokens> = {}, idp = "corp") => {
 		const tokensGiven = { accessToken: "up-1", tokenType: "Bearer", scope: ["read"], ...given };
-		for (const one of receivers) await one.received({ session, idp, tokens: tokensGiven });
+		let receipt: string | undefined;
+		for (const one of receivers) {
+			receipt = (await one.received({ session, idp, tokens: tokensGiven })) ?? undefined;
+		}
+		return receipt;
 	};
 	const call = async (
 		step: string,

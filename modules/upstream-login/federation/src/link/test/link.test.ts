@@ -6,6 +6,7 @@ import { recordingLog } from "@mod/kernel/testing";
 import type { AuthContext, Entry, Session } from "@mod/session";
 import type { UpstreamLogin } from "@mod/upstreams";
 import { expect, it } from "vitest";
+import type { Joined } from "../../handoff/handoff.ts";
 import type { Completing, Idp } from "../../round-trip/round-trip.ts";
 import type { Transaction } from "../../round-trip/transaction.ts";
 import { linkWith } from "../link.ts";
@@ -71,8 +72,9 @@ function standIn() {
 				if (set.down === "handoff") throw new Unavailable("federation");
 				joined.push([session.id, idp, tokens.accessToken]);
 				set.onJoin?.();
+				return `joined ${session.id} ${idp}` as unknown as Joined;
 			},
-			withdrawn: async (session, idp) => void withdrawn.push([session, idp]),
+			withdrawn: async (session, idp, given) => void withdrawn.push([session, idp, given]),
 		},
 		log: logged.log,
 		landing,
@@ -301,7 +303,7 @@ it("answers a session closed, short of a requirement or logged in as someone els
 		expect([s.links.length, s.joined, s.withdrawn], change).toEqual([
 			1,
 			[["s1", "corp", "up-1"]],
-			[["s1", "corp"]],
+			[["s1", "corp", "joined s1 corp"]],
 		]);
 		expect(
 			s.events.map((e) => e.kind),
@@ -319,7 +321,7 @@ it("takes the tokens back before failing as unavailable when the session cannot 
 	expect([s.links.length, s.joined, s.withdrawn]).toEqual([
 		1,
 		[["s1", "corp", "up-1"]],
-		[["s1", "corp"]],
+		[["s1", "corp", "joined s1 corp"]],
 	]);
 	expect(s.events.map((e) => e.kind)).toEqual(["federation.identity.linked"]);
 });
