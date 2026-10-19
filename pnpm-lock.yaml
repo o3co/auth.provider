@@ -820,9 +820,6 @@ importers:
 
   modules/oauth/clients-cimd:
     dependencies:
-      '@mod/authorize':
-        specifier: workspace:*
-        version: link:../authorize
       '@mod/client-allowance':
         specifier: workspace:*
         version: link:../client-allowance
@@ -847,6 +844,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/redirect-uris':
+        specifier: workspace:*
+        version: link:../redirect-uris
       '@mod/refresh':
         specifier: workspace:*
         version: link:../refresh

@@ -1,9 +1,9 @@
 import { isIP } from "node:net";
-import { redirects } from "@mod/authorize";
 import { type AllowanceLists, clientAllowance } from "@mod/client-allowance";
 import type { ClientRecord } from "@mod/clients";
 import { codeGrantType } from "@mod/code-grant";
 import { clientSection, displayed } from "@mod/consent";
+import { redirects } from "@mod/redirect-uris";
 import { refreshGrantType } from "@mod/refresh";
 
 /** The grants a document client may hold: the code, and refresh when its document names it. */
