@@ -26,8 +26,8 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | POST | `/oauth/federation-grants/*` | `@mod/federation-grants` | json, form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/federation/*` | `@mod/federation-tokens` | form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/introspect` | `@mod/token-control` | form | `rate-limit.requests-per-source` | yes | A resource server's call, authenticated as a client; it reads no cookie. | `rate-limit.requests-per-source` |  |
-| GET | `/oauth/logout` | `@mod/rp-logout` | form, none | `rate-limit.requests-per-source` |  |  | `rate-limit.requests-per-source` |  |
-| POST | `/oauth/logout` | `@mod/rp-logout` | form, none | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
+| GET | `/oauth/logout` | `@mod/rp-logout` | form, none | `rate-limit.requests-per-source` | yes | RP-initiated logout is a navigation from the RP's site by design; it closes only the session that a hint the provider signed names. | `rate-limit.requests-per-source` |  |
+| POST | `/oauth/logout` | `@mod/rp-logout` | form, none | `rate-limit.requests-per-source` | yes | RP-initiated logout is a navigation from the RP's site by design; it closes only the session that a hint the provider signed names. | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/revoke` | `@mod/token-control` | form | `rate-limit.requests-per-source` | yes | It reads no cookie: revoking needs the token itself, which a public client may revoke for itself (RFC 7009). | `rate-limit.requests-per-source` | yes |
 | POST | `/oauth/token` | `@mod/token-endpoint` | form, json, none | `rate-limit.requests-per-source` | yes | Authorization is per grant; a grant that reads a cookie declares it and checks the origin itself. | `rate-limit.requests-per-source` | yes |
 | GET | `/oauth/userinfo` | `@mod/userinfo` | form, json, none |  |  |  |  | yes |
