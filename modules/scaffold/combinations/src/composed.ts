@@ -28,6 +28,12 @@ function axesIn(declared: Declared) {
 	return { adapters, defaultOf, replacingOf };
 }
 
+export const addableOf = (declared: Declared) =>
+	[...declared.packages.values()]
+		.filter((p) => p.module && (p.kind === kinds.feature || p.kind === kinds.adapter))
+		.map((p) => p.name)
+		.sort();
+
 /** Each name the workspace lacks, once, first named first. */
 const absentFrom = (declared: Declared, names: readonly string[]) =>
 	names
@@ -47,10 +53,7 @@ function refusals(declared: Declared, selection: Selection): string[] {
 			.filter((n) => known(n) && known(n)?.kind !== kinds.feature)
 			.map((n) => `${n}: not a feature`),
 		...added
-			.filter((n) => {
-				const p = known(n);
-				return p && !(p.module && (p.kind === kinds.feature || p.kind === kinds.adapter));
-			})
+			.filter((n) => known(n) && !addableOf(declared).includes(n))
 			.map((n) => `${n}: not a feature or an adapter with a module`),
 		...axes
 			.filter(([owner]) => known(owner) && !adapters.has(owner))

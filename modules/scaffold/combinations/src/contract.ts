@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
+	addableOf,
 	completedOf,
 	composedWith,
 	fullWith,
@@ -40,6 +41,9 @@ export const full = (add?: readonly string[]): string[] => fullWith(declared(), 
 
 /** The features that opt in, which the full template leaves out until added. */
 export const optIns = (): string[] => optInsOf(declared());
+
+/** The names a selection or the full template may add, in code point order. */
+export const addable = (): string[] => addableOf(declared());
 
 /** The modules given, what they need to run, then `completed`, as `composed` reaches them but with no axis default. */
 export const needed = (modules: readonly string[]): string[] => neededWith(declared(), modules);
