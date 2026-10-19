@@ -139,7 +139,8 @@ When the outside user ledger suspends a user, its answers stop new logins and gr
 
 - Stopped: the subject's open sessions (and with them the session's refresh tokens, its access tokens, and the local copy of its upstream tokens; relying parties are sent logout notices), and from then on every refresh, device poll, JWT bearer grant, exchange, passkey login and second-factor step; access tokens too where `subject-tokens` is composed. With `delegations: "end"`, federation grants end.
 - Left until they expire: access tokens not bound to a session where `tokens.subject-check = none`, JWTs a resource server checks itself, and tokens already handed to an upstream. A request already past its checks when the revocation is recorded may finish.
-- Every subject revoked keeps its record with no end, so the records grow with the subjects you revoke.
+- Every subject revoked keeps its record with no end, so the records grow with the subjects you revoke. With `mfa-revocation`, each revocation also writes the subject's factor list in `mfa`'s store, empty for a subject who never enrolled, so that store grows with them too.
+- With second factors composed, `mfa-revocation` makes a revocation complete only once no enrollment begun before it can bind; an app composed by hand must compose it, as `combinations` does.
 
 ## Keeping the second-factor witness at the ledger
 
@@ -162,6 +163,8 @@ Compose `mfa-witness-http` to have the outside user ledger remember which subjec
 **The deadline.** It is the time a write is sent plus `mfa-witness-http.timeout` (default `5s`, as `outbound.timeout`'s). Keep `outbound.timeout` no shorter: the provider gives up at the shorter of the two, and a deadline past that leaves the ledger time to carry out a write the provider no longer waits for.
 
 **Composing it where subjects already hold a factor.** The provider marks a subject only when it binds that subject's first counting factor with the witness composed. A subject who enrolled before carries no mark, and the provider never adds one later: if its factor records are then lost, the subject reads as one who never enrolled, and under `mfa.mode = optional` logs in without a second factor. Before composing the witness, mark at the ledger every subject that already holds a counting factor (any token will do; the provider only reads whether a mark is there), and keep marking newly enrolled subjects that way until the witness is composed on every instance.
+
+**A mark left with no factor.** A binding stopped by a reset or a revocation after it marked the subject leaves the mark with no factor: that subject is refused as inconsistent until an operator resets its second factors, which clears the mark.
 
 **While the ledger cannot answer.** Subjects holding no counting factor get `503` at login, when they start their first enrollment and when they change their credentials, until it answers; subjects holding one are let through without asking it.
 

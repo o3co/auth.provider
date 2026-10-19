@@ -73,8 +73,8 @@ interface Pending {
 	readonly first?: true;
 	/** The first binding's own mark at the witness, never shown or logged. */
 	readonly token?: string;
-	/** The subject's clears when it began: a clear since leaves it nothing to bind. None reads as 0. */
-	readonly clears?: number;
+	/** The subject's fence when it began: a reset or a fence since leaves it nothing to bind. None reads as 0. */
+	readonly fences?: number;
 }
 
 const isWayBack = (kind: FactorKind) => !kind.counts && !guessing(kind);
@@ -115,9 +115,9 @@ export function factorDecisions(p: FactorParts): Factors {
 	const pendingOf = (subject: string, pending: string) => {
 		const value = JSON.parse(opened(pending, sealContext(subject, "pending"))) as Pending;
 		const kind = p.kinds.get(value.kind);
-		const clears = typeof value.clears === "number" ? value.clears : 0;
+		const fences = typeof value.fences === "number" ? value.fences : 0;
 		return kind
-			? { kind, secret: value.secret, first: value.first === true, token: value.token, clears }
+			? { kind, secret: value.secret, first: value.first === true, token: value.token, fences }
 			: undefined;
 	};
 	const recovery = async (subject: string) => {
@@ -159,10 +159,10 @@ export function factorDecisions(p: FactorParts): Factors {
 	};
 	// Factors first, then the mark: a failure between leaves a mark and no factor, which stops logins.
 	const clear = async (subject: string) => {
-		// Written even when nothing is held: the clear is counted, so no binding begun before it binds.
+		// Written even when nothing is held: the fence moves, so no binding begun before it binds.
 		const cleared = await records.decide(subject, (all) => ({
 			next: [],
-			clear: true,
+			fence: true,
 			verdict: { count: all.length, kinds: [...new Set(all.map((f) => f.kind))].sort() },
 		}));
 		await p.witness?.clear(subject);
@@ -248,7 +248,7 @@ export function factorDecisions(p: FactorParts): Factors {
 			const kind = p.kinds.get(name);
 			if (!kind?.counts) return { kind: "unknown-kind" };
 			const all = await records.list(subject);
-			const clears = await records.clears(subject);
+			const fences = await records.fences(subject);
 			if (all.length >= p.maxFactors) return { kind: "full" };
 			const counts = counting(all, p.kinds).length > 0;
 			const first = (await standing(subject, counts, "binding")) === "none";
@@ -270,7 +270,7 @@ export function factorDecisions(p: FactorParts): Factors {
 				kind: kind.kind,
 				secret: enrolled.secret,
 				...(first ? { first, token: id() } : {}),
-				...(clears > 0 ? { clears } : {}),
+				...(fences > 0 ? { fences } : {}),
 			};
 			const pending = p.seal.seal(JSON.stringify(value), sealContext(subject, "pending"));
 			return { kind: "begun", pending, show: enrolled.show };
@@ -286,8 +286,8 @@ export function factorDecisions(p: FactorParts): Factors {
 			if (label !== undefined && !isLabel(label)) return { kind: "malformed-label" };
 			const found = pendingOf(subject, pending);
 			if (!found) return { kind: "unknown" };
-			// A clear since it began (a reset) leaves it nothing to bind; checked again in the write below.
-			if ((await records.clears(subject)) !== found.clears) return { kind: "cleared" };
+			// A reset or a fence since it began leaves it nothing to bind; checked again in the write below.
+			if ((await records.fences(subject)) !== found.fences) return { kind: "fenced" };
 			// Asked from a login, it binds only as the first, whenever and however it began.
 			const asFirst = found.first || from?.kind === "login";
 			// The mark goes first: a first factor never stands unwitnessed, and another binding's mark closes this one.
@@ -309,9 +309,9 @@ export function factorDecisions(p: FactorParts): Factors {
 			const codes = await recovery(subject);
 			// Decided on the factors as written: of two first bindings at once, one brings the codes.
 			const written = await records.decide<
-				"full" | "closed" | "cleared" | { brought: typeof codes }
-			>(subject, (all, clears) => {
-				if (clears !== found.clears) return { verdict: "cleared" };
+				"full" | "closed" | "fenced" | { brought: typeof codes }
+			>(subject, (all, fences) => {
+				if (fences !== found.fences) return { verdict: "fenced" };
 				// A first binding another counting factor beat to the subject binds nothing: it was let begin as the first.
 				if (asFirst && counting(all, p.kinds).length > 0) return { verdict: "closed" };
 				const brought = codes && !all.some((f) => f.kind === codes.factor.kind) ? codes : undefined;
@@ -320,7 +320,7 @@ export function factorDecisions(p: FactorParts): Factors {
 				return { next: [...all, ...added], verdict: { brought } };
 			});
 			// Any mark is left: only a reset clears one, as the mark may be a newer binding's by now.
-			if (written === "cleared") return { kind: "cleared" };
+			if (written === "fenced") return { kind: "fenced" };
 			if (written === "full") return { kind: "full" };
 			if (written === "closed") return closed(subject, factor.kind, "competing");
 			const { brought } = written;
@@ -352,6 +352,7 @@ export function factorDecisions(p: FactorParts): Factors {
 				...(brought ? { recoveryCodes: brought.show, recoveryCodesFactor: brought.factor.id } : {}),
 			};
 		},
+		fence: (subject) => records.fence(subject),
 		rename: async (subject, target, label) => {
 			if (!isLabel(label)) return "malformed-label";
 			return records.decide(subject, (all) =>
