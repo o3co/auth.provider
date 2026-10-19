@@ -667,18 +667,35 @@ describe("signers whose keys a module contributes, and subjects users links", ()
 		expect(asked).toEqual([{ subject: thumb, kid: "k1" }]);
 	});
 
-	it("refuses to boot on an issuer named twice, and on keys contributed for an issuer it does not name", async () => {
-		const reasonsOf = (issuers: Record<string, unknown>[]) =>
+	it("refuses to boot on an issuer named twice, and on keys contributed for an issuer it does not name, by path and never by value", async () => {
+		const refusalsOf = (issuers: Record<string, unknown>[]) =>
 			serveWith(issuers, [signing(async () => ({ kind: "none" }))]).then(
 				() => [],
-				(error: BootRefused) => error.refusals.map((r) => r.reason),
+				(error: BootRefused) => error.refusals,
 			);
-		expect(
-			await reasonsOf([...entry({ subject: "as-is" }), ...entry({ subject: "as-is" })]),
-		).toEqual([expect.stringContaining(`${fixedIss} is named more than once`)]);
-		expect(await reasonsOf([])).toEqual([
-			expect.stringContaining(`${fixedIss} has keys contributed but is not an issuer here`),
+		const twice = await refusalsOf([
+			...entry({ subject: "as-is" }),
+			...entry({ subject: "as-is" }),
 		]);
+		expect(twice).toEqual([
+			{ where: "jwt-bearer.issuers.1", reason: "names the same issuer as jwt-bearer.issuers.0" },
+		]);
+		const unnamed = await refusalsOf([]);
+		expect(unnamed).toEqual([
+			{
+				where: "jwt-bearer.issuers",
+				reason:
+					"keys are contributed for 1 issuer none of these names: name it here, or leave out the module that contributes them",
+			},
+		]);
+		const keyless = await serveWith(entry({ subject: "as-is" }), []).then(
+			() => [],
+			(error: BootRefused) => error.refusals,
+		);
+		expect(keyless).toEqual([
+			{ where: "jwt-bearer.issuers.0", reason: "has no keys written or contributed" },
+		]);
+		expect(JSON.stringify([twice, unnamed, keyless])).not.toContain(fixedIss);
 	});
 
 	it("tells an unknown key and a forged signature alike", async () => {
