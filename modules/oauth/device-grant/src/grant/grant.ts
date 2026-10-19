@@ -64,13 +64,13 @@ const sessionOf = (approval: Approval) => (approval.session ? { session: approva
 export function grantWith(
 	devices: DeviceStore,
 	revocation: SubjectRevocation,
-	open: Pick<Sessions, "stillOpen">,
+	open: Pick<Sessions, "entryOf">,
 	runtime: Runtime,
 ): Grant {
 	const refused = (error: OAuthError | PollError): GrantOutcome => ({ kind: "error", error });
-	/** A token is answered only while the approving session is open, as a code redemption is. */
+	/** A token is answered only while the approving session enters at use, as a code redemption is. */
 	const stillOpen = async (approval: Approval) =>
-		approval.session === undefined || (await open.stillOpen(approval.session));
+		approval.session === undefined || (await open.entryOf(approval.session)).kind === "entered";
 	return {
 		grantType: deviceGrantType,
 		handle: async ({ client, param, admits, issue }) => {

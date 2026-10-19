@@ -36,7 +36,7 @@
   - Another client's poll writes nothing and is `invalid_grant`.
   - A poll before the interval is over is `slow_down`, and widens the interval by 5 seconds.
   - An approval or a denial is answered once, and the record is taken.
-- A subject revoked since the approving session's authentication is `invalid_grant`, and so is an approving session closed, checked before the poll takes the code and again once the token is made, which is then never answered.
+- A subject revoked since the approving session's authentication is `invalid_grant`, and so is an approving session that does not enter at use (closed, or short of a requirement), checked before the poll takes the code and again once the token is made, which is then never answered.
 - The token is an access token to the approving subject, with the scope and audience decided at device authorization.
 - A kept record is read only in the shape written here or the format before, with times a date can hold; any other, or one that throws, is no record.
 - Times are on `kernel`'s clock. A decision or a poll reads it in the rewrite of the record, so a code that ends meanwhile is `expired_token`.
