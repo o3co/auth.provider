@@ -19,7 +19,7 @@ import rateLimitModule from "@mod/rate-limit/module";
 import { memoryRecords } from "@mod/records/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
-import { sessions } from "@mod/session";
+import { type Sessions, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { simulatedStore } from "@mod/store/testing";
 import { type Revocations, revocations } from "@mod/subject-revocation";
@@ -40,6 +40,7 @@ export const runtime = quietRuntime({
 let stop = async () => {};
 export const revocationsDown = unavailableSwitch<Revocations>("subject-revocation");
 export const factorsDown = unavailableSwitch<FactorStore>("factor store");
+export const sessionsDown = unavailableSwitch<Sessions>("sessions");
 export const during = {
 	/** Runs once as the next lockout is released, before the release, as another request or a failure would. */
 	release: undefined as (() => Promise<void>) | undefined,
@@ -77,6 +78,7 @@ afterEach(async () => {
 	clock.shift = 0;
 	revocationsDown.restore();
 	factorsDown.restore();
+	sessionsDown.restore();
 	during.release = undefined;
 	during.backup = undefined;
 	during.unfinishedRecords = 0;
@@ -175,7 +177,7 @@ export async function serve(settings: Settings = {}, extra: Module[] = []) {
 			audit.module,
 			csrfStandIn,
 			cookiesModule,
-			sessionStandIn,
+			switchedModule(sessionStandIn, sessions, sessionsDown),
 			switchedModule(subjectRevocationStandIn, revocations, recording),
 			simulated.module,
 			factorStand(),
