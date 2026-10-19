@@ -25,7 +25,7 @@ Each promise below holds across every module composed. Each names what keeps it 
 1. **Closing a session closes every path for the tokens issued from it.**
    - Kept by: `session`'s participants, which `session-lifecycle` calls on every close; `session-tokens` and `refresh` take part, and `code-grant` voids a code whose session ended.
    - Scenes: code ("tokens and logout", "refresh: what a token may do", "session grant", "OpenID Connect userinfo"), exchange ("token exchange of a session's token"), federation ("federation tokens: refusals").
-   - A close left pending is not done: the session stays closing until every participant has finished, each host going on with it every `session-lifecycle.sweep-interval`, and `logout` and RP-initiated logout answer it `503`, never as logged out.
+   - A close left pending is not done: the session stays closing until every participant has finished. Each host sweeps every `session-lifecycle.sweep-interval`, and takes a pending close up again once its retry time comes: after half its age so far, from the sweep interval up to an hour, and `logout` and RP-initiated logout answer it `503`, never as logged out.
    - No scene yet for a device approval. A session that ends by expiry alone calls no participant.
    - Bridges such as `session-tokens` come in every app composed through `combinations`; an app composed by hand must compose them itself, or the promise does not hold for what they join.
 2. **`prompt=login` and `max_age` are met only by a fresh authentication.**
@@ -33,9 +33,11 @@ Each promise below holds across every module composed. Each names what keeps it 
    - Scenes: federation ("federation logins meeting a client's demand for a fresh login", and the freshness scenes through Google and Apple).
    - No scene yet for a password login.
 3. **A dependency that cannot answer never grants anything.**
+   - It covers what an authorization decision waits on; a notice sent best effort, such as an audit event or a logout notice to a client, decides nothing.
    - Kept by: `kernel`'s `Unavailable`, which `http` answers `503`, or as the route declares.
    - Scenes: each area's "the store failing" scenes (code, exchange, oauth, federation, second factor, passkey), identity ("password login: a user ledger over HTTP"), mtls (the CRL and OCSP outage scenes).
    - Declared exceptions, each the operator's choice: `rate-limit.fail-mode = open` and `mtls.revocation.on-unavailable = allow`.
+   - While an issuer's key set cannot be fetched, the last one fetched is still used, up to `external-jwt.key-set-max-age` (`1d` by default) after its fetch.
 4. **A subject's revocation boundary refuses everything made before it.**
    - Kept by: `subject-revocation`'s boundaries, which every holder of a subject's state compares against, and its followers. Among them, `mfa-revocation` moves `mfa`'s fence, so no second factor's enrollment begun before a revocation binds once the revocation is complete.
    - Does not hold for access tokens where `tokens.subject-check = none` is chosen: they live until they expire.
@@ -47,6 +49,7 @@ Each promise below holds across every module composed. Each names what keeps it 
 5. **What is used once is used once, on any number of instances.**
    - Kept by: `store`'s take-once writes and each store interface's declared needs; `kernel.deployment = multi` refuses a module that declares itself unsafe on several instances (a module that declares nothing is taken as safe).
    - Does not hold with a store that does not persist (`store.accept-volatile`): a restart forgets what was used.
+   - Upgrading from rc.1 leaves a window in which JWT bearer assertions spent and id_tokens exchanged under rc.1 are not seen, as [From 0.18.0-rc.1](migration.md#from-0180-rc1) says.
    - Scenes: code (a code redeemed once, a refresh token rotated once, two concurrent uses), oauth ("refuses a replayed assertion"), device ("decides a code once").
    - No scene yet for an exchanged id_token or a recovery code used twice, and no scene runs several instances.
 6. **A token bound to a key or a certificate is never used as a bearer token.**
@@ -54,7 +57,7 @@ Each promise below holds across every module composed. Each names what keeps it 
    - Scenes: code (userinfo with a DPoP-bound token and with an mTLS-bound one, "refresh: binding a public client's family"), exchange ("token exchange: a binding washed off").
 7. **Every request to another server goes through `outbound`.**
    - Kept by: guard G26, which lets product code reach the network only through `outbound` or as its manifest's `network` declares. It reads how the code is written: network modules, clients and DNS resolvers imported, or loaded with `import()` or `require`; any use of `node:child_process`; a module loaded by a name known only at run time; and `fetch`, `WebSocket` and `EventSource` used directly or as a property of the global object, named by a dot or a string literal. What the code's form cannot show (`eval`, a worker, a native add-on, a function passed in from outside, the global object under another name, a property named at run time) is left to review.
-   - Declared exceptions: `http` serves, `mail-smtp` speaks SMTP and `redis` speaks to Redis, each by its manifest's `network`.
+   - `outbound` is the gate itself, and declares `network` as `outbound`. Besides it, three packages declare their own reach: `http` serves, `mail-smtp` speaks SMTP and `redis` speaks to Redis, each by its manifest's `network`.
    - No scene: the guard checks it.
 8. **Secrets appear neither in logs nor in answers, but for what the provider hands out on purpose.**
    - What it hands out on purpose: tokens and codes to the one they are issued to, and a secret a registration shows once to its owner (a one-time password app's secret, recovery codes).
