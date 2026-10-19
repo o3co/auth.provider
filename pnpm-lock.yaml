@@ -73,6 +73,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../../oauth/sender-binding
