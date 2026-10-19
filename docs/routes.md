@@ -15,7 +15,7 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | GET | `/.well-known/openid-configuration/` | `@mod/discovery` | form |  | no |  |  | yes |
 | GET | `/_healthcheck` | `@mod/http-ops` | none |  | no |  |  |  |
 | POST | `/ledger/subject-revocations` | `@mod/subject-revocation-http` | json |  | yes | A server's call proved by its own credential; it reads no cookie. | It checks the source and the credential first, then counts failures and authenticated requests apart, per source, in the handler. |  |
-| GET | `/metrics` | `@mod/metrics-prometheus` | none |  |  |  |  |  |
+| GET | `/metrics` | `@mod/metrics-prometheus` | none |  | no |  |  |  |
 | GET | `/oauth/authorize` | `@mod/authorize` | form | `rate-limit.requests-per-source` | yes | An authorization request arrives as a navigation from the client's site by design; it only starts what the user's own login and consent complete. | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/authorize` | `@mod/authorize` | form | `rate-limit.requests-per-source` | yes | An authorization request arrives as a navigation from the client's site by design; it only starts what the user's own login and consent complete. | `rate-limit.requests-per-source` |  |
 | GET | `/oauth/consent` | `@mod/consent` | form |  | no |  |  |  |
