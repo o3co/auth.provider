@@ -701,3 +701,179 @@ From `@mod/webauthn-login`.
 |---|---|---|---|---|---|---|
 | `webauthn-login.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, on the options route, from 1 to 100000. |
 | `webauthn-login.window` | string | `1m` |  |  |  | The window `requests` is counted over, from 1s to 1d in whole seconds, written with its unit, such as `1m`. |
+
+## Client metadata sections
+
+What a client record holds under `sections`, each added by the module named, which reads it.
+Shown as the full template with every opt-in composes them on the trial's settings: a section whose shape follows the composition (`client-assertion` by the outbound policy, `sender-binding` by the bindings composed) can differ in another app.
+
+### sections.authorize
+
+From `@mod/authorize`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `sections.authorize.redirect-uris` | list of string | `[]` |  |  |
+
+### sections.client-allowance
+
+From `@mod/client-allowance`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `sections.client-allowance.grants` | list of string | `[]` |  |  |
+| `sections.client-allowance.scopes` | list of string | `[]` |  |  |
+| `sections.client-allowance.default-scopes` | list of string |  |  |  |
+| `sections.client-allowance.audiences` | list of string | `[]` |  |  |
+
+### sections.client-assertion
+
+From `@mod/client-assertion`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `sections.client-assertion.keys` | list of map | `[]` |  |  |
+| `sections.client-assertion.jwks-uri` | string |  |  |  |
+
+### sections.client-secret
+
+From `@mod/clients`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `sections.client-secret.hash` | string |  |  |  |
+
+### sections.consent
+
+From `@mod/consent`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `sections.consent.first-party` | boolean | `false` |  |  |
+| `sections.consent.name` | string |  |  |  |
+| `sections.consent.uri` | string |  |  |  |
+| `sections.consent.host` | string |  |  |  |
+
+### sections.federation-grants
+
+From `@mod/federation-grants`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `sections.federation-grants.connections` | list of string | `[]` |  |  |
+| `sections.federation-grants.return-uris` | list of string | `[]` |  |  |
+
+### sections.federation-tokens
+
+From `@mod/federation-tokens`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `sections.federation-tokens.receives` | boolean | `false` |  |  |
+| `sections.federation-tokens.post-logout-redirect-uris` | list of string | `[]` |  |  |
+
+### sections.rp-logout
+
+From `@mod/rp-logout`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `sections.rp-logout.post-logout-redirect-uris` | list of string | `[]` |  |  |
+| `sections.rp-logout.frontchannel-logout-uri` | string |  |  |  |
+| `sections.rp-logout.frontchannel-logout-session-required` | boolean | `true` |  |  |
+| `sections.rp-logout.backchannel-logout-uri` | string |  |  |  |
+| `sections.rp-logout.backchannel-logout-session-required` | boolean | `true` |  |  |
+
+### sections.sender-binding
+
+From `@mod/sender-binding`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `sections.sender-binding.required` | boolean | `false` |  |  |
+| `sections.sender-binding.kinds` | list of string |  |  |  |
+
+### sections.token-exchange
+
+From `@mod/token-exchange`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `sections.token-exchange.others-tokens` | boolean | `false` |  |  |
+| `sections.token-exchange.public-exchange` | boolean | `false` |  |  |
+
+## IdP type settings
+
+What one IdP under `federation`'s `idps.<name>` holds beside its `type`, by the module that adds the type, which reads them.
+Shown as the full template with every opt-in composes them on the trial's settings: the URLs each type takes follow the outbound policy, which can differ in another app.
+
+### federation.idps.<name> (type = apple)
+
+From `@mod/idp-apple`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `federation.idps.<name>.client-id` | string |  | yes |  |
+| `federation.idps.<name>.client-secret` | string |  |  |  |
+| `federation.idps.<name>.team-id` | string |  |  |  |
+| `federation.idps.<name>.key-id` | string |  |  |  |
+| `federation.idps.<name>.private-key` | string |  |  |  |
+| `federation.idps.<name>.secret-lifetime` | string | `5m` |  |  |
+| `federation.idps.<name>.scopes` | list of name \| email | `["email"]` |  |  |
+| `federation.idps.<name>.authorization-endpoint` | string | `https://appleid.apple.com/auth/authorize` |  |  |
+| `federation.idps.<name>.token-endpoint` | string | `https://appleid.apple.com/auth/token` |  |  |
+| `federation.idps.<name>.jwks-uri` | string | `https://appleid.apple.com/auth/keys` |  |  |
+| `federation.idps.<name>.clock-skew` | string | `30s` |  |  |
+| `federation.idps.<name>.end-session-endpoint` | string |  |  |  |
+
+### federation.idps.<name> (type = github)
+
+From `@mod/idp-github`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `federation.idps.<name>.client-id` | string |  | yes |  |
+| `federation.idps.<name>.client-secret` | string |  | yes |  |
+| `federation.idps.<name>.scopes` | list of string | `["read:user"]` |  |  |
+| `federation.idps.<name>.authorization-endpoint` | string | `https://github.com/login/oauth/authorize` |  |  |
+| `federation.idps.<name>.token-endpoint` | string | `https://github.com/login/oauth/access_token` |  |  |
+| `federation.idps.<name>.api` | string | `https://api.github.com` |  |  |
+| `federation.idps.<name>.issuer` | string | `https://github.com/login/oauth` |  |  |
+
+### federation.idps.<name> (type = google)
+
+From `@mod/idp-google`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `federation.idps.<name>.client-id` | string |  | yes |  |
+| `federation.idps.<name>.client-secret` | string |  | yes |  |
+| `federation.idps.<name>.access` | offline \| online | `offline` |  |  |
+| `federation.idps.<name>.require-iss` | boolean | `true` |  |  |
+| `federation.idps.<name>.authorization-endpoint` | string | `https://accounts.google.com/o/oauth2/v2/auth` |  |  |
+| `federation.idps.<name>.token-endpoint` | string | `https://oauth2.googleapis.com/token` |  |  |
+| `federation.idps.<name>.jwks-uri` | string | `https://www.googleapis.com/oauth2/v3/certs` |  |  |
+| `federation.idps.<name>.clock-skew` | string | `30s` |  |  |
+| `federation.idps.<name>.end-session-endpoint` | string |  |  |  |
+| `federation.idps.<name>.hosted-domains` | list of string |  |  |  |
+
+### federation.idps.<name> (type = oidc)
+
+From `@mod/idp-oidc`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `federation.idps.<name>.client-id` | string |  | yes |  |
+| `federation.idps.<name>.client-secret` | string |  | yes |  |
+| `federation.idps.<name>.issuer` | string |  | yes |  |
+| `federation.idps.<name>.token-auth` | client_secret_basic \| client_secret_post | `client_secret_basic` |  |  |
+| `federation.idps.<name>.discovery` | boolean | `true` |  |  |
+| `federation.idps.<name>.authorization-endpoint` | string |  |  |  |
+| `federation.idps.<name>.token-endpoint` | string |  |  |  |
+| `federation.idps.<name>.jwks-uri` | string |  |  |  |
+| `federation.idps.<name>.end-session-endpoint` | string |  |  |  |
+| `federation.idps.<name>.scopes` | list of string | `["openid"]` |  |  |
+| `federation.idps.<name>.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256","PS256","ES256","EdDSA"]` |  |  |
+| `federation.idps.<name>.endpoint-hosts` | list of string | `[]` |  |  |
+| `federation.idps.<name>.require-iss` | boolean | `false` |  |  |
+| `federation.idps.<name>.clock-skew` | string | `30s` |  |  |
