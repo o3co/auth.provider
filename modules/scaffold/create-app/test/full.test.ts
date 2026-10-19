@@ -5,9 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { full, optIns } from "@mod/combinations";
 import { trialLayer } from "@mod/trial";
-import { parseString } from "@o3co/ts.hocon";
 import { expect, it, vi } from "vitest";
-import { generate, trialSettings } from "../src/contract.ts";
+import { generate } from "../src/contract.ts";
 import {
 	boot,
 	kernel,
@@ -196,8 +195,8 @@ it("refuses the generated configuration alone only for keys the guide names", as
 it("boots on the generated configuration with the environment and local layer filled, refused only for an unreachable Redis", async () => {
 	const target = await installed();
 	// Nothing listens on port 1.
-	const env = await configured(target, { deployment: "single", redisUrl: "redis://127.0.0.1:1" });
-	const run = boot(target, "config/local.conf,config/application.conf", env);
+	await configured(target, { deployment: "single", redisUrl: "redis://127.0.0.1:1" });
+	const run = boot(target, "config/local.conf,config/application.conf");
 	expect(run.status, run.stderr).toBe(78);
 	expect(run.refused, run.stderr).toEqual(["redis.url"]);
 });
@@ -224,38 +223,6 @@ it("makes the full template from the command with features added, and the listed
 	]) {
 		expect(cli(...args).status, args.join(" ")).toBe(64);
 	}
-});
-
-it("writes the hosts and clients a caller gives into the trial's one list for each, until its callers take the trial layer", async () => {
-	const target = await generated();
-	const clients = [
-		{ id: "app", kind: "public", method: "none" },
-		{
-			id: "svc",
-			kind: "confidential",
-			method: "client_secret_basic",
-			sections: { x: { "a.b": "${c}" } },
-		},
-	];
-	const given = await trialSettings(target, {
-		redisUrl: "redis://127.0.0.1:1",
-		port: 1234,
-		deployment: "multi",
-		allow: ["sink.example.invalid"],
-		plainLoopback: ["127.0.0.1:4318"],
-		clients,
-	});
-	expect(given.env).toEqual({});
-	const local = parseString(given.local);
-	expect((local.get("outbound.allow") as string[]).sort()).toEqual([
-		"audit.example.invalid",
-		"ledger.example.invalid",
-		"sink.example.invalid",
-	]);
-	expect(local.get("outbound.plain-loopback")).toEqual(["127.0.0.1:4318"]);
-	expect(local.get("clients.registered")).toEqual(clients);
-	expect(local.get("http.port")).toBe(1234);
-	expect(local.get("kernel.deployment")).toBe("multi");
 });
 
 it("gives a generated app a trial layer by its own modules, with hosts under .invalid, leaving the sections the caller names", async () => {
