@@ -465,8 +465,10 @@ it("refuses to start with a client whose front channel is at none of its redirec
 		expect(refused?.refusals, uri).toEqual([
 			{
 				where: "clients.registered.0.sections.rp-logout",
-				reason:
-					'client "app" section "rp-logout": frontchannel-logout-uri is at none of its redirect URIs\' origins',
+				// rp-logout's own words, however clients words the refusal around them.
+				reason: expect.stringMatching(
+					/frontchannel-logout-uri is at none of its redirect URIs' origins$/,
+				),
 			},
 		]);
 	}
