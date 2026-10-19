@@ -129,7 +129,7 @@ it("describes every key of every client metadata section", async () => {
 });
 
 /** IdP types whose settings their owners describe later: one leaves once described, and the list only shrinks. */
-const typesDescribedLater = ["apple", "github", "oidc"];
+const typesDescribedLater = ["apple", "oidc"];
 
 it("describes every key of every IdP type's settings, outside the types listed as described later", async () => {
 	const types = await idpTypesOf(root);

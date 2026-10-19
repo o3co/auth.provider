@@ -15,13 +15,25 @@ export const hostsOf = (s: { readonly "token-endpoint": string; readonly api: st
 ];
 
 const section = clientSetting.extend({
-	scopes: z.array(scope).prefault(["read:user"]),
-	/** GitHub's own unless the operator names another (GitHub Enterprise). */
-	"authorization-endpoint": endpoint.prefault("https://github.com/login/oauth/authorize"),
-	"token-endpoint": endpoint.prefault("https://github.com/login/oauth/access_token"),
-	api: endpoint.prefault("https://api.github.com"),
-	/** The `iss` a callback carries, where it carries one (RFC 9207). */
-	issuer: z.string().min(1).prefault("https://github.com/login/oauth"),
+	scopes: z.array(scope).prefault(["read:user"]).describe("The scopes asked of GitHub at a login."),
+	"authorization-endpoint": endpoint
+		.prefault("https://github.com/login/oauth/authorize")
+		.describe(
+			"Where the browser is sent to log in at GitHub; GitHub's own unless named (GitHub Enterprise).",
+		),
+	"token-endpoint": endpoint
+		.prefault("https://github.com/login/oauth/access_token")
+		.describe(
+			"Where a code is exchanged for a token; GitHub's own unless named (GitHub Enterprise).",
+		),
+	api: endpoint
+		.prefault("https://api.github.com")
+		.describe("Where the user is read; GitHub's own unless named (GitHub Enterprise)."),
+	issuer: z
+		.string()
+		.min(1)
+		.prefault("https://github.com/login/oauth")
+		.describe("The `iss` a callback carries, where it carries one (RFC 9207)."),
 });
 
 /** The section; boot is refused on a URL it sends to that outbound's destination policy refuses. */

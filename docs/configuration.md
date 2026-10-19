@@ -849,11 +849,11 @@ From `@mod/idp-github`.
 |---|---|---|---|---|
 | `federation.idps.<name>.client-id` | string |  | yes | The client ID this provider is registered under at the IdP. |
 | `federation.idps.<name>.client-secret` | string |  | yes | The client secret the IdP gave this provider, sent to its token endpoint. |
-| `federation.idps.<name>.scopes` | list of string | `["read:user"]` |  |  |
-| `federation.idps.<name>.authorization-endpoint` | string | `https://github.com/login/oauth/authorize` |  |  |
-| `federation.idps.<name>.token-endpoint` | string | `https://github.com/login/oauth/access_token` |  |  |
-| `federation.idps.<name>.api` | string | `https://api.github.com` |  |  |
-| `federation.idps.<name>.issuer` | string | `https://github.com/login/oauth` |  |  |
+| `federation.idps.<name>.scopes` | list of string | `["read:user"]` |  | The scopes asked of GitHub at a login. |
+| `federation.idps.<name>.authorization-endpoint` | string | `https://github.com/login/oauth/authorize` |  | Where the browser is sent to log in at GitHub; GitHub's own unless named (GitHub Enterprise). |
+| `federation.idps.<name>.token-endpoint` | string | `https://github.com/login/oauth/access_token` |  | Where a code is exchanged for a token; GitHub's own unless named (GitHub Enterprise). |
+| `federation.idps.<name>.api` | string | `https://api.github.com` |  | Where the user is read; GitHub's own unless named (GitHub Enterprise). |
+| `federation.idps.<name>.issuer` | string | `https://github.com/login/oauth` |  | The `iss` a callback carries, where it carries one (RFC 9207). |
 
 ### federation.idps.<name> (type = google)
 
