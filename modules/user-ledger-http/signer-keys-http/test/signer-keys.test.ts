@@ -219,6 +219,19 @@ describe("signer-keys-http", () => {
 	});
 });
 
+it("says which of outbound's keys lets a keys-url it refuses through, naming no value", async () => {
+	const error = await open(settings({ "keys-url": "https://ledger.example/keys" })).catch(
+		(e: unknown) => e,
+	);
+	expect((error as BootRefused).refusals).toEqual([
+		{
+			where: "signer-keys-http.keys-url",
+			reason:
+				"outbound's destination policy refuses it: not-allowed: name the host in outbound.allow, or set outbound.allow-any-public",
+		},
+	]);
+});
+
 describe("signer-keys-http under jwt-bearer", () => {
 	const issuer = "https://as.example";
 	const grantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
