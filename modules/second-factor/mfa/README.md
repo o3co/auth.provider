@@ -37,7 +37,7 @@
 - Changing credentials needs `mfa` added recently (as `session`'s `recent` tells), or a recent login while no counting factor is held; else `step_up_required`. A login at a time the upstream did not give is never recent, nor is the `mfa` it says it proved. Under "required", using a session needs `mfa`.
 - A first counting factor begins only where every gate contributed admits it, given what the caller holds (`mfa-binding-proof`'s asks its proof); `begin` asks the kind for nothing before. With no gate, the first factor trusts whoever binds it.
 - With a witness (`mfa-witness`, at most one, two refusing boot), a subject it marks while holding no counting factor is unavailable to login, a first binding and credentials, recorded as `mfa.enrollment_inconsistent`; a witness that cannot be read is unavailable alike.
-- A first binding marks the witness with its own token before it writes, and binds nothing (`first-binding-closed`) where another binding's mark stands or a reset cleared its own as it wrote; one that marked before a reset's clear reached its write takes its mark back.
+- A first binding marks the witness with its own token before it writes, and binds nothing (`first-binding-closed`) where another binding's mark stands or a reset cleared its own as it wrote; one a reset's clear reached as it wrote leaves the mark, which only a reset clears.
 - With a witness, the last counting factor is never removed; `clear` removes the factors, then the mark. Without one, a lost store reads as never enrolled.
 
 ## Depends on

@@ -1169,15 +1169,18 @@ describe("an enrollment witness", () => {
 		]);
 	});
 
-	it("takes its own mark back when a reset's clear lands while it binds a first factor", async () => {
+	it("leaves the witness's mark when a reset's clear lands while it binds a first factor: only a reset clears one", async () => {
 		const { decided, provedCode, witness, counted, place } = await witnessed();
 		await place.factors.save(listKeyOf("gil"), storedList("gil", []), "endless");
 		const begun = await provedCode("gil");
-		// The reset clears the factors and the mark; this binding marks again before it writes.
-		place.raceNextChange((record) => ({ ...record, factors: [], clears: 1 }));
+		// While this binding writes, a reset clears the factors and the mark, and a newer binding marks.
+		place.raceNextChange((record) => {
+			witness.marks.set("gil", "newer");
+			return { ...record, factors: [], clears: 1 };
+		});
 		expect(await decided.bind("gil", begun.pending, begun.state)).toEqual({ kind: "cleared" });
 		expect(await counted("gil")).toBe(0);
-		expect(witness.marks.has("gil")).toBe(false);
+		expect(witness.marks.get("gil")).toBe("newer");
 	});
 
 	it("takes back its own factor once more when the store cannot answer the first time", async () => {
