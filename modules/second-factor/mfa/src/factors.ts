@@ -319,11 +319,8 @@ export function factorDecisions(p: FactorParts): Factors {
 				if (all.length + added.length > p.maxFactors) return { verdict: "full" };
 				return { next: [...all, ...added], verdict: { brought } };
 			});
-			if (written === "cleared") {
-				// The mark this binding set is its own: it goes, or stays and closes the subject.
-				if (witness) await witness.clear(subject).catch(() => undefined);
-				return { kind: "cleared" };
-			}
+			// Any mark is left: only a reset clears one, as the mark may be a newer binding's by now.
+			if (written === "cleared") return { kind: "cleared" };
 			if (written === "full") return { kind: "full" };
 			if (written === "closed") return closed(subject, factor.kind, "competing");
 			const { brought } = written;
