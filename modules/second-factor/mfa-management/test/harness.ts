@@ -33,10 +33,13 @@ let stop = async () => {};
 export const factorsDown = unavailableSwitch<FactorStore>("factor store");
 /** Runs once before the factor store's next change, as a request racing in between would. */
 export const beforeNextChange: { run?: (() => Promise<unknown>) | undefined } = {};
+/** Runs once after the factor store's next change is written, before it answers, as a slow store would. */
+export const afterNextChange: { run?: (() => Promise<unknown>) | undefined } = {};
 afterEach(async () => {
 	clock.shift = 0;
 	factorsDown.restore();
 	beforeNextChange.run = undefined;
+	afterNextChange.run = undefined;
 	await stop();
 });
 
@@ -94,7 +97,11 @@ const factorStand = () => {
 					const run = beforeNextChange.run;
 					beforeNextChange.run = undefined;
 					await run?.();
-					return stand.records.change(...args);
+					const changed = await stand.records.change(...args);
+					const after = afterNextChange.run;
+					afterNextChange.run = undefined;
+					await after?.();
+					return changed;
 				},
 				scan: stand.records.scan,
 			}),

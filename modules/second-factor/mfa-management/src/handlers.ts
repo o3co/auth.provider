@@ -81,7 +81,13 @@ export function handlersOver(p: HandlerParts) {
 		if ("status" in allowed) return allowed;
 		const reissued = await p.factors.reissue(allowed.session.context.subject, allowed.fence);
 		if (reissued.kind === "fenced") return loginRequired;
-		if (reissued.kind === "reissued") return jsonAnswer(200, { recovery_codes: reissued.codes });
+		if (reissued.kind === "reissued") {
+			// The fence guards the write, not the handing: a revocation complete by the time the codes
+			// came back leaves them unseen, though they replaced the old ones.
+			const still = await proving(request);
+			if ("status" in still) return still;
+			return jsonAnswer(200, { recovery_codes: reissued.codes });
+		}
 		return reissued.kind === "no-qualifying-factor"
 			? jsonAnswer(409, { error: "mfa_no_qualifying_factor" })
 			: jsonAnswer(404, { error: "unknown_kind" });

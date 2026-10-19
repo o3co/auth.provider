@@ -1,7 +1,7 @@
 import { factors } from "@mod/mfa";
 import { revocations } from "@mod/subject-revocation";
 import { describe, expect, it } from "vitest";
-import { beforeNextChange, clock, factorsDown, serve } from "./harness.ts";
+import { afterNextChange, beforeNextChange, clock, factorsDown, serve } from "./harness.ts";
 
 const posts = [
 	"/session/mfa/factors/rename",
@@ -163,6 +163,23 @@ describe("a revocation while factors are managed", () => {
 	it("reissues no codes once the subject was revoked while they were written", async () => {
 		const { answer } = await revokedMeanwhile("kit", "recovery-codes");
 		expect([answer.status, answer.body.error, answer.body.recovery_codes]).toEqual([
+			401,
+			"login_required",
+			undefined,
+		]);
+	});
+
+	it("hands no codes once a revocation completed after they were written, before the store answered", async () => {
+		const s = await serve();
+		await s.bindCode("mo");
+		await s.signIn("mo", { proved: true });
+		clock.shift += 1000;
+		afterNextChange.run = async () => {
+			await s.app.get(revocations).record("mo");
+			clock.shift += 1000;
+		};
+		const slow = await s.call("POST", "/session/mfa/recovery-codes");
+		expect([slow.status, slow.body.error, slow.body.recovery_codes]).toEqual([
 			401,
 			"login_required",
 			undefined,
