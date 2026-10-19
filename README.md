@@ -1,223 +1,104 @@
-# Owner map
+# auth-provider
 
-Look things up in this table instead of searching for where they go. The owner decides where anything not in the table goes.
-What each module contains is described by that module's contract card (each module's README).
+[![CI](https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/o3co/auth.provider/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@o3co/create-auth-provider/next)](https://www.npmjs.com/package/@o3co/create-auth-provider)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-| Concern | Kind of ownership | Owner |
-|---|---|---|
-| Generic rules for module definitions, contracts, extension points, and contributions | contract | kernel |
-| Loading configuration sections and boot refusal | contract | kernel |
-| Lifecycle (start, drain, stop) | contract | kernel |
-| Declaration of multi-instance safety, and the deployment shape | contract / setting | kernel |
-| "Unavailable" | vocabulary | kernel |
-| Clock, randomness, logging | contract | kernel |
-| Log levels and the operator's level, and the sinks log lines go to | contract / extension point / setting | kernel |
-| The stdout log sink (each log line as one JSON line) | contract implementation | log-stdout |
-| Readiness: running the probes under a deadline and answering ready or unready | contract / extension point | kernel |
-| What a readiness probe checks (one per connection) | contribution | the module holding the connection |
-| Recording audit events, and the receivers they go to | contract / extension point kind / setting | audit |
-| The HTTP audit receiver (each event posted to the operator's URL) | contract implementation / setting | audit-http |
-| The stdout audit receiver (each event as one JSON line) | contract implementation | audit-stdout |
-| Each audit event kind and its attributes | vocabulary | the module that emits it |
-| Counters, histograms and gauges (instruments), their counts within the declared label values, and reading them, gauges when sampled | contract / extension point | metrics |
-| Each instrument's name, labels and what it counts | vocabulary | the module that emits it |
-| Publishing the counts and the process defaults as Prometheus text, and the scrape route's path | contract implementation / setting | metrics-prometheus |
-| Each module's settings | setting | that module |
-| Explicit acknowledgment of using something despite the risk | setting | the module that requires it |
-| HTTP routes | plug-in point | http |
-| The readiness route (`GET /readyz`) and how long it waits | contract / setting | http-ops |
-| The liveness route (`GET /_healthcheck`), and timing each request | contract | http-ops |
-| Each request's end (`requestEnds`) | extension point | http |
-| Route policies (making one, a route's use of one, applying them before the handler) | extension point kind | http |
-| A route taking cross-origin requests (its declaration), and the origins allowed | contract / setting | http |
-| The security headers on every answer, and what a page declares it loads (the frames and scripts its policy allows) | contract | http |
-| Trusted proxies | setting | http |
-| Request source | vocabulary | request-source |
-| The client's certificate a trusted proxy forwards, the forms it is read in, and whether the operator named where it is forwarded | vocabulary / contract | client-certificate |
-| Where a trusted proxy forwards the client's certificate | setting | http |
-| Public origin | setting | http |
-| Building and reading cookies | contract | cookies |
-| What a configured URL may hold (the schema part modules take theirs by) | contract | url-setting |
-| Received values: a name's single value, and the names repeated | vocabulary | http |
-| Signing, verification, publishing public keys | contract | keys |
-| Outbound HTTP requests and the destination policy | contract / setting | outbound |
-| Fetching signed material (plain http from named hosts, its size cap) | contract / setting | outbound |
-| Which destinations a feature reaches | setting | the module that sends the request |
-| Rate limiting, lockout | contract | rate-limit |
-| Limiting attempts per source on a route | policy | rate-limit |
-| Limiting requests per source on a route | policy | rate-limit |
-| Limit budgets and key names | setting / vocabulary | the module that calls the limit |
-| Sealing at rest (keyring) | contract / setting | seal |
-| Checking a secret against a stored hash (bcrypt, scrypt), with the same work when there is none to check | contract | secret-hash |
-| Sending mail (one address per send), preparing a message for a sender | contract | mail |
-| Mail purposes and mail templates | extension point kind | mail |
-| The logging-only mail sender | contract implementation / setting | mail |
-| The SMTP mail sender (one connection per send to the operator's relay, securing it, reading its answers) | contract implementation / setting | mail-smtp |
-| Each mail purpose | vocabulary | the module that sends that mail |
-| The wording of each purpose's mail | contribution | the module that contributes the template |
-| Basic storage operations | contract | store |
-| Space declarations | extension point kind | store |
-| Version, store clock, partition, guarantee, deadline, idempotency marker | vocabulary | store |
-| Keyed records (also under a secret), deferred work and keyed sets | implementation | records |
-| Place (where records are kept: the store and space a wiring gives) | vocabulary | records |
-| Checking JWTs signed by outside keys (header, key choice, signature, times, expected issuer, audience and subject), and fetching key sets | contract | external-jwt |
-| How large a feature's deferred work may grow | setting | the per-owner modules in templates |
-| Wiring a feature's store interface to a capability's implementation | wiring | the per-owner modules in templates |
-| Wiring code-grant's store interface to records | wiring | code-grant-store |
-| Wiring session-lifecycle's store interfaces to records | wiring | session-store |
-| Wiring refresh's store interfaces to records | wiring | refresh-store |
-| Wiring authorize's store interface to records | wiring | authorize-store |
-| Wiring client-assertion's store interface to records | wiring | client-assertion-store |
-| Wiring device-grant's store interfaces to records | wiring | device-grant-store |
-| Wiring dpop's store interface to records | wiring | dpop-store |
-| Wiring tokens' store interface to records | wiring | tokens-store |
-| Wiring federation's store interface to records | wiring | federation-store |
-| Wiring subject-revocation's store interface to records | wiring | subject-revocation-store |
-| Wiring consent's store interfaces to records | wiring | consent-store |
-| Wiring session-tokens' store interfaces to records' keyed sets, records and deferred work | wiring | session-tokens-store |
-| Wiring mfa's store interface to records | wiring | mfa-store |
-| Wiring mfa-flows' store interface to records | wiring | mfa-flows-store |
-| Wiring users' store interfaces to records | wiring | users-store |
-| Wiring webauthn's store interfaces to records | wiring | webauthn-store |
-| Wiring federation-tokens' store interfaces to records | wiring | federation-tokens-store |
-| Wiring federation-grants' store interfaces to records' records, records under a secret and keyed sets | wiring | federation-grants-store |
-| Wiring rp-logout's store interfaces to records | wiring | rp-logout-store |
-| What a feature needs from the store, and its records' contents | contract / vocabulary | the feature that defines the store interface |
-| Space names, and the guarantees a space declares for those needs | vocabulary / setting | the wiring that declares the space |
-| Redis implementation of store | contract implementation / setting | redis |
-| Verifying and looking up users, from the settings or one contributed user ledger | contract | users |
-| Linking with upstream identities (written links, the settings' fixed ones), looking up a subject from an upstream identity | contract | users |
-| A user's verified contacts, and the claimed ones the settings or the ledger state | contract / data | users |
-| User ledger, upstream identity, link, verified contact, claimed contact | vocabulary | users |
-| The names and value types of user attributes (the OIDC claim names), and a subject's shape | contract / vocabulary | users |
-| The HTTP user ledger (verifying passwords at the operator's URL), its request shape and credential | contribution / setting | users-http |
-| Logging in through an upstream IdP (start, callback, transaction) | contract | federation |
-| Linking an upstream identity to the account a browser is logged in as (start and callback) | contract | federation |
-| What an opened upstream is to the provider: its authorization URL, code exchange and what its login says | contract | upstreams |
-| Opening the configured IdPs through their types and handing their logins' tokens to the receivers, as `upstreams`' default | contract implementation | federation |
-| Upstream IdP types | extension point kind | upstreams |
-| Receiving the upstream tokens of a login once its session opens, or once a link joins it | extension point kind | upstreams |
-| An upstream's refresh, end of session and offline delegation, by IdP name | contract | upstreams |
-| What IdP types share as OAuth clients of an upstream: the client's credentials, endpoint and scope settings, the authorization request, its Basic authentication, reading its answers and refreshes, checking an OpenID Connect id_token and its profile, the end-session URL | contract | upstream-client |
-| Generic OpenID Connect upstreams | contribution / setting | idp-oidc |
-| GitHub upstreams | contribution / setting | idp-github |
-| Google upstreams | contribution / setting | idp-google |
-| Apple upstreams | contribution / setting | idp-apple |
-| Keeping a federation login's upstream tokens, handing them to receiving clients, logging a session out of one upstream, and the end of session of a session's first upstream | contract / setting | federation-tokens |
-| Receiving upstream tokens, returns after an upstream logout (client metadata fields) | vocabulary / setting | federation-tokens |
-| Holding upstream credentials for clients apart from sessions: intents, the user's connection, the upstream token, status, renewal, revocation | contract / setting | federation-grants |
-| The connections a client may ask for, where its browser is sent back (client metadata fields) | vocabulary / setting | federation-grants |
-| The IdPs, their types and settings, and how each one's amr maps to ours | setting | federation |
-| Looking up and authenticating clients | contract | clients |
-| Client authentication methods | extension point kind | clients |
-| `private_key_jwt` (client assertions), the client's keys (client metadata field) | contribution / vocabulary | client-assertion |
-| Client sources | extension point kind | clients |
-| Clients whose id is a URL: fetching and judging the metadata document there, keeping it, the ceiling they are allowed within | contribution / setting | clients-cimd |
-| Client metadata sections | extension point kind | clients |
-| Each client metadata field | vocabulary | the module that reads that field |
-| Allowed grants, allowed scopes and audiences (client metadata fields), and what a client may be issued and may see | vocabulary / setting / contract | client-allowance |
-| The audience a request asks for: the one rule (none reads nothing), asked with each issuance's default and ceiling | extension point kind / contract | grants |
-| Resource indicators (RFC 8707): reading `resource` and narrowing the audience issued to it | contribution | resource-indicators |
-| Redirect URIs (a client metadata field), PKCE required of every client by S256, and the rule for URIs a client may register to be sent back to | vocabulary / setting / contract | authorize |
-| Paths to return to after login | extension point kind | login-gates |
-| Where a login may return (listed targets, the check) | contract / setting | login-gates |
-| first-party, and the name, page and verified host the consent page shows (client metadata fields) | vocabulary / setting | consent |
-| Subject revocation boundaries (`sessions`, `delegations`) | contract / vocabulary | subject-revocation |
-| Comparison against a revocation boundary | contract | subject-revocation |
-| Work that follows a recorded revocation (followers) | extension point kind | subject-revocation |
-| Sessions' contract, entry | contract | session |
-| Session records, lifecycle | contract implementation / setting | session-lifecycle |
-| Session handle, and looking up a request's session | contract / vocabulary | session |
-| Entry requirements | extension point kind | session |
-| Raising authentication (step-up) and rotating the cookie secret | contract | session |
-| Login completion gates, and resuming a held login | extension point kind / contract | login-gates |
-| Telling the caller that a held login it asked for has opened | extension point kind | login-gates |
-| Declarations of the amr values this deployment can produce, and judging whether they can be produced | extension point kind / contract | login-gates |
-| Participants when a session closes | extension point kind | session |
-| Each subject's live sessions, and closing them when the subject is revoked | contract | session |
-| Closing a revoked subject's live sessions (a follower of subject-revocation) | contribution | session-lifecycle |
-| Authentication context | vocabulary | session |
-| The attributes a login gives (the named set, their caps), and the names of their sources | contract / vocabulary | login-attributes |
-| Keeping a login's attributes with the session under their source | contract | session |
-| Mapping a login's values to the named set (its source is named by login-attributes) | vocabulary | the login that passes them |
-| A subject's attributes from one source (users when it answers for the subject, else the session's login), the name of that source, and whether users vouches for them | contract / vocabulary | subject-attributes |
-| Each amr value, and the declaration that it can be produced | vocabulary | the module that supplies that value |
-| CSRF checks on a route | policy | csrf |
-| Issuing, verifying, revoking access tokens | contract | tokens |
-| issuer | contract / setting | issuer |
-| scope, audience, actor | vocabulary | tokens |
-| Records of access tokens issued per session, cleaning them up when the session closes, the link between an access token and its session | contract | session-tokens |
-| Recording each access token issued from a session, as `grants`' session issuances tell of it | contribution | session-tokens |
-| A logout a client starts, its returns, the front-channel page and back-channel notices, the clients of each session (client metadata fields, routes, data) | contract / setting / data | rp-logout |
-| Ending the upstream session before a logout a client starts returns | extension point kind | rp-logout |
-| Sending a client's logout on to the session's upstream | contribution | rp-logout-federation |
-| Refresh tokens and families (rotation, reuse detection, revocation), the link between a family and its session, the family an access token belongs to | contract | refresh |
-| The refresh grant | grant contribution | refresh |
-| The JWT bearer grant (RFC 7523) and its trusted issuers, their keys or key sets | grant contribution / setting | jwt-bearer |
-| Resolving a linked JWT bearer signer's subject through users, and declaring the linked issuers' IdP names | contribution | jwt-bearer-users |
-| One issuer's JWT bearer signer keys, asked of the operator's HTTP ledger on every assertion, its request shape and credential | contribution / setting | signer-keys-http |
-| The token exchange grant (RFC 8693), the verifiers of the token types it exchanges, the actor chain | grant contribution / extension point kind / setting | token-exchange |
-| Verifying one token type for exchange | contribution | the module that verifies that type |
-| Verifying Apple's and Google's id_tokens for exchange, which client of this provider may exchange each app's id_token, and taking each once | contribution / setting / data | exchange-id-tokens |
-| The session grant: an access token for the user of the browser's session, recorded to that session | grant contribution | session-grant |
-| Sender binding (binding kinds, reading a request's binding, the shape of a binding), admitting a request presenting a token at a resource | extension point kind / contract | sender-binding |
-| Certificate-bound tokens: the `x5t#S256` binding kind, certificate path validation and revocation checking, trust anchors | contribution / setting | mtls |
-| Extra checks added to access token verification | extension point kind | tokens |
-| The check of subject revocation on access tokens, and stating there is none | extension point kind / setting | tokens |
-| Checking access tokens against the subject revocation boundary | contribution | subject-tokens |
-| Issuance policy | plug-in point | tokens |
-| Refusing an access token to a subject whose email users has not stated verified | issuance policy contribution | verified-email |
-| grant | extension point kind | grants |
-| Telling of each access token issued from a session (session issuances) | extension point kind | grants |
-| Shape of OAuth error responses | contract | token-endpoint |
-| grant type names | vocabulary | the module that supplies that grant |
-| Kinds of revocable tokens | extension point kind | token-control |
-| Device Authorization Grant (device authorization, the verification interface, the device code grant) | contract / setting | device-grant |
-| Authorization endpoint, re-authentication requests, steering to the raise (step-up) screen | contract / setting | authorize |
-| The acr table, and judging which acr values are known and which are satisfied | contract / setting | acr |
-| acr table entries | extension point kind | acr |
-| Contributed acr names and the amr values that satisfy them | vocabulary | the module that contributes that entry |
-| Recording and redeeming authorization codes, code revocation | contract / setting | code-grant |
-| ID token producers | extension point kind | code-grant |
-| Additions issued with the redemption response | extension point kind | code-grant |
-| Clients told of each code redeemed in a session | extension point kind | code-grant |
-| Consent records | contract | consent |
-| ID token contents (a contribution to code-grant's extension point), claim scope | vocabulary | oidc |
-| The claim table (the claims each scope releases), and the claims released for a subject and scope | contract | oidc |
-| Judging an ID token given back as a hint | contract | oidc |
-| OpenID Connect's userinfo: an access token's subject, and its session's claims while that session is open | route | userinfo |
-| Authorization server metadata items (what this server names itself by) | extension point kind | issuer |
-| Each metadata item | vocabulary | the module that contributes that item |
-| Building and publishing the discovery document | contract | discovery |
-| Second factor kinds | extension point kind | mfa |
-| Steps that prove a factor at login | extension point kind | mfa |
-| A user's factor records, and judgments about them | contract / data | mfa |
-| Second factor transactions, contributions to the login completion gate and to step-up, enrollment routes, lockout numbers | contract / setting / data | mfa-flows |
-| An operator's reset of a subject's second factors | contract | mfa-flows |
-| A subject's own release of their second-factor lockout, after a proof guessing cannot beat | route | mfa-flows |
-| A session's management of its own factors (listing, naming and removing them, reissuing recovery codes), and its request budget | route / setting | mfa-management |
-| Each second factor kind | contribution | the module that contributes that kind |
-| Proofs asked before a first second factor, and when they are asked | extension point kind / contract / setting | mfa-binding-proof |
-| What `begin` asks before a subject's first counting factor | extension point kind | mfa |
-| WebAuthn ceremonies (options and when their challenge ends, verifying responses, the signature count, the user handle) | contract | webauthn |
-| Passkeys (each subject's user handle and credentials), assertions by them, registering them for a subject, reading a credential and making a user handle | contract / setting / data | webauthn |
-| Registering passkeys from a session (the registration routes), and their request budget | route / setting | passkey-registration |
-| Logging in with a passkey (the grant `urn:o3co:oauth:grant-type:webauthn`, its request options), and the amr it gives | grant contribution / contract / setting | webauthn-login |
-| WebAuthn as a second factor (the subject's user handle for it, its amr, the name an authenticator shows) | contribution / setting | mfa-webauthn |
-| A code by mail as a second factor, the proof of the account's address before a first binding, and their mail purposes | contribution / setting | mfa-email |
-| The wording of mfa-email's mails, which a deployment replaces | contribution | mfa-email-wording |
-| Budget numbers and invariant checks | setting | guard |
-| Kind names | vocabulary | combinations |
-| Kind order and the checks each kind gets | setting | guard |
-| Conformance test base | contract | conformance |
-| Running each pattern's conformance areas on its app, and leaving out as `not-in-pattern` the scenes it cannot hold | contract | conformance |
-| Starting the legacy build, and registering legacy set-ups | contract | conformance-legacy |
-| Each area's scene terms, scenes, set-ups for legacy and new | vocabulary / contribution | each area's conformance module |
-| Repo layout (where packages go) | setting | the workspace definition |
-| A generated deployment (full or a pattern: the module list, configuration gathered from the modules' fragments, env and local examples, Dockerfile, README) | template | create-app |
-| The patterns: each one's use, selection, conformance areas and card, and the operator's choice over them | template | create-app (`patterns`) |
-| What is composed together by default (a feature's wiring, the bridges between features), a selection's composition (what it needs to run, each axis's adapter), the full template, and the features that opt in | contract | combinations |
-| Declaring that a feature's store interfaces must be wired (`storeWiring` in the feature's package.json, checked by guard) | setting | the feature whose store interfaces must be wired |
-| How distribution is bundled | setting | distribution |
+An OAuth 2.0 and OpenID Connect provider, built from small modules that a generated app assembles. You choose the modules a deployment needs; each one brings its routes, its settings and its stores, and refuses to boot when what it needs is missing.
+
+0.18 is a rewrite of 0.17 under new package names. To move a 0.17 deployment, read the [migration guide](docs/migration.md) first.
+
+## What it does, and what it leaves to others
+
+The provider holds the signing keys and the session state, so relying parties never hold a key that can mint tokens, and the layers that decide and enforce access can change on their own.
+
+It does:
+
+- **Sign users in and keep their sessions**: by password checked against your user ledger, through upstream identity providers (OpenID Connect, Google, GitHub, Apple), or by passkey; with a second factor (an authenticator app, a code by email, recovery codes, a security key) when you compose one. It ends sessions by logout, including logout started by a relying party.
+- **Authenticate clients**: by secret, by signed assertion, as public clients with PKCE, and by client ID metadata documents.
+- **Issue and manage tokens**: authorization code, refresh, client credentials, JWT bearer, device authorization and token exchange grants; ID tokens and userinfo; consent; introspection and revocation; tokens bound to a key (DPoP) or a certificate (mTLS).
+- **Publish** its signing keys and its discovery document.
+- **Hold** the tokens upstream providers issue, and the grants users give to use them.
+- **Send mail** for the email second factor and for proving an account's address.
+
+It leaves to others:
+
+- **Deciding** what a token allows: the policy verifier.
+- **Enforcing** that decision inside services: the service interceptors, or a token-validating proxy in front.
+- **The user ledger**: who the users are and their passwords. The provider asks your ledger (over HTTP, or a list in its settings) and keeps only what it needs beside it, such as links to upstream identities and proven contacts.
+- **Pages**: the login and consent pages are the deployment's.
+- **Sign-up and account recovery.**
+
+## Quick start
+
+Generate a deployment from one of the patterns:
+
+```sh
+npx @o3co/create-auth-provider@next my-provider --pattern simple-web
+cd my-provider
+```
+
+Then follow the generated `README.md`. It names the settings the pattern needs, and the project comes with a Dockerfile.
+
+- **Patterns.** Each pattern is one kind of deployment; `simple-web`, a password login, needs no outside system. The [patterns card](modules/scaffold/create-app/src/patterns/README.md) and each pattern's own card say what they are for, and a name not known is refused with the names that are. `--add` adds a feature to a pattern, and `--help` tells the other options.
+- **Your own selection.** Name the modules instead of a pattern, and the app assembles those, with the wirings and bridges they need added for you.
+
+The [create-app card](modules/scaffold/create-app/README.md) describes what is generated.
+
+## How it is built
+
+- **Modules.** Each concern is one module under `modules/<group>/<name>`. Its README, the module's card, is its contract: what it does, what it offers, what it promises, and what it depends on.
+- **The owner map.** [modules/README.md](modules/README.md) says which module owns each contract, setting, extension point and word. Look things up there before searching.
+- **The kernel.** Modules declare contracts and extension points and contribute to others' through the [kernel](modules/foundation/kernel/README.md), which boots them, reads their configuration sections and refuses boot with every problem at once.
+- **Composition.** [combinations](modules/scaffold/combinations/README.md) decides which wirings, adapters and bridges come with a selection.
+- **The guard.** `pnpm check` runs the [guard](modules/tooling/guard/README.md), which holds the workspace to its rules: dependency direction, the public surface of each package, and the size of each module and its card.
+
+## Extending
+
+A module of your own is assembled the same way as the provided ones:
+
+- **Contracts and extension points** are described in the [kernel card](modules/foundation/kernel/README.md); each feature's card lists the extension points it offers.
+- **Adapters and bridges** declare what they stand in for or join in their manifest, as [combinations](modules/scaffold/combinations/README.md) describes.
+- **Contract tests.** Each module publishes its contract tests at `./testing`, for an implementation of your own to run against.
+
+## Packages
+
+0.18 is published as one package per concern, `@o3co/auth-provider-<concern>`, all at the same version, with each module as a subpath. You rarely name them yourself: the generated app depends on what it composes. The [migration guide](docs/migration.md#packages) maps the 0.17 packages to these.
+
+## Configuration
+
+Each module reads its own section of HOCON configuration, and refuses boot on an unknown key, a section for a module that is not loaded, or a value it cannot use. A project generated from a pattern reads its scalar settings from the environment; the [configuration reference](docs/configuration.md) lists every key, its default and what it means.
+
+## Operating
+
+- [Operations runbook](docs/runbook.md): what the deployment must provide, Redis, rotating keys, upgrading, revoking a user, stopping.
+- [Security model](docs/security-model.md): what the provider guarantees, and what it leaves to the deployment.
+- [Audit events](docs/audit-events.md): every event and its attributes.
+- [Configuration reference](docs/configuration.md).
+- [Migrating from 0.17](docs/migration.md).
+
+## Versions
+
+Releases before 1.0 may break in a minor version; each breaking release has a migration guide. Release candidates are published under the npm `next` tag.
+
+## Development
+
+```sh
+pnpm install
+pnpm check
+```
+
+`pnpm check` runs the type check, lint, tests, the guard and the distribution check. Tests that need Docker run with `pnpm test:integration`.
+
+## Related projects
+
+- [auth](https://github.com/o3co/auth): the umbrella repository, with the architecture and end-to-end tests across components.
+- [auth.policy-verifier](https://github.com/o3co/auth.policy-verifier): the policy engine that makes authorization decisions.
+- [auth.proxy](https://github.com/o3co/auth.proxy): an optional reverse proxy that validates tokens in front of services.
+- [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors): authorization inside gRPC and ConnectRPC services, asking this provider to introspect and the policy verifier to decide.
+
+## License
+
+[Apache License 2.0](LICENSE).
 
 Copyright 2026 1o1 Co. Ltd. Licensed under the Apache License, Version 2.0.
