@@ -84,9 +84,14 @@ export function idTokens(parts: VerifierParts): ExchangeVerifier {
 			const found = await parts.users.byUpstream(taken.upstream, sub);
 			if (found.kind !== "user") return invalid;
 			const subject = found.user.subject;
-			if ((await parts.revocations.compare(subject, iat * 1000, "sessions")) === "revoked") {
-				return invalid;
-			}
+			// Widened by the skew: an issuer's clock running ahead could put a token issued before the revocation after it.
+			const revoked = await parts.revocations.compare(
+				subject,
+				iat * 1000,
+				"sessions",
+				parts.skewMs,
+			);
+			if (revoked === "revoked") return invalid;
 			return {
 				subject,
 				issuer: taken.iss[0],
