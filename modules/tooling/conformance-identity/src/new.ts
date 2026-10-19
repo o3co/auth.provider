@@ -109,11 +109,16 @@ export function onPattern(
 ): PatternPart {
 	const part = { ...given, users: statedWhereJudged(given.users, modules) };
 	const set = setUp(part, scene, modules);
-	if (!modules.includes("@mod/users-http") || part.ledger || part.users.length === 0) return set;
+	// An app keeping mfa's witness at a ledger asks it at a login: the ledger keeps it, whoever holds the users.
+	const witness = modules.includes("@mod/mfa-witness-http");
+	const witnessed = witness ? { whole: [...(set.whole ?? []), "mfa-witness-http"] } : {};
+	if (!modules.includes("@mod/users-http") || part.ledger || part.users.length === 0) {
+		return witness ? { ...set, ...witnessed, party: () => ledgerParty({ witness }) } : set;
+	}
 	const reason = unledgered(part.users);
 	if (reason) return { leaveOut: reason };
 	const { users: _users, ...config } = set.config ?? {};
-	return { ...set, config, party: () => ledgerParty(part.users) };
+	return { ...set, ...witnessed, config, party: () => ledgerParty({ users: part.users, witness }) };
 }
 
 onNew(identityArea, setUp, onPattern);

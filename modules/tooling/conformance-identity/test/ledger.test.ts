@@ -33,7 +33,7 @@ describe("the scene's users on an app taking users from a ledger", () => {
 	});
 
 	it("are looked up by subject at the ledger, none for a subject it does not hold", async () => {
-		const ledger = await ledgerParty([alice]);
+		const ledger = await ledgerParty({ users: [alice] });
 		const section = ledger.config["users-http"] ?? {};
 		const lookup = (subject: string) =>
 			fetch(String(section["subject-url"]), {
@@ -51,7 +51,7 @@ describe("the scene's users on an app taking users from a ledger", () => {
 	});
 
 	it("are answered by the ledger for the right password and its credential alone", async () => {
-		const ledger = await ledgerParty([alice]);
+		const ledger = await ledgerParty({ users: [alice] });
 		const section = ledger.config["users-http"] ?? {};
 		const verify = (email: string, password: string, credential = section.credential) =>
 			fetch(String(section["verify-url"]), {
@@ -78,7 +78,7 @@ describe("the scene's users on an app taking users from a ledger", () => {
 	it("give an address with a stated verification, as users keeps one only beside an address", async () => {
 		const bob = { identifier: "bob", password: "right", subject: "u-2", emailVerified: false };
 		const carol = { identifier: "carol", password: "right", subject: "u-3" };
-		const ledger = await ledgerParty([bob, carol]);
+		const ledger = await ledgerParty({ users: [bob, carol] });
 		const section = ledger.config["users-http"] ?? {};
 		const verify = async (email: string) =>
 			(
@@ -96,6 +96,53 @@ describe("the scene's users on an app taking users from a ledger", () => {
 				emailVerified: false,
 			});
 			expect(await verify("carol")).toEqual({ id: "u-3", username: "carol" });
+		} finally {
+			await ledger.stop();
+		}
+	});
+});
+
+describe("mfa's witness on an app keeping it at a ledger", () => {
+	it("is kept by the ledger, whoever holds the users: a scene with its own ledger too", () => {
+		const origin = "https://as.example";
+		const witnessed = ["@mod/users-http", "@mod/mfa-witness-http"];
+		const own = { verifyUrl: "https://own.example/verify", credential: "c" };
+		for (const part of [
+			{ origin, users: [alice] },
+			{ origin, users: [], ledger: own },
+		]) {
+			const set = onPattern(part, {}, witnessed);
+			expect(set).toHaveProperty("party");
+			expect(set).toMatchObject({ whole: expect.arrayContaining(["mfa-witness-http"]) });
+		}
+		expect(onPattern({ origin, users: [] }, {}, [])).not.toHaveProperty("party");
+	});
+
+	it("answers whether a subject is enrolled, takes the first mark, and clears it, with its credential alone", async () => {
+		const ledger = await ledgerParty({ witness: true });
+		const section = ledger.config["mfa-witness-http"] ?? {};
+		const ask = (key: string, body: unknown, credential = section.credential) =>
+			fetch(String(section[key]), {
+				method: "POST",
+				headers: { authorization: `Bearer ${credential}` },
+				body: JSON.stringify(body),
+			});
+		try {
+			expect(ledger.config).not.toHaveProperty("users-http");
+			for (const key of ["read-url", "enroll-url", "clear-url"]) {
+				expect(new URL(String(section[key])).origin, key).toBe(ledger.base);
+			}
+			expect(await (await ask("read-url", { subject: "u-1" })).json()).toEqual({ enrolled: false });
+			expect(await (await ask("enroll-url", { subject: "u-1", token: "a" })).json()).toEqual({
+				owner: true,
+			});
+			expect(await (await ask("enroll-url", { subject: "u-1", token: "b" })).json()).toEqual({
+				owner: false,
+			});
+			expect(await (await ask("read-url", { subject: "u-1" })).json()).toEqual({ enrolled: true });
+			expect((await ask("clear-url", { subject: "u-1" })).status).toBe(204);
+			expect(await (await ask("read-url", { subject: "u-1" })).json()).toEqual({ enrolled: false });
+			expect((await ask("read-url", { subject: "u-1" }, "wrong")).status).toBe(404);
 		} finally {
 			await ledger.stop();
 		}
