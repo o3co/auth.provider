@@ -811,4 +811,15 @@ describe("guard", () => {
 			"G12 some/dir/missing.md",
 		]);
 	});
+
+	it("G12 tells a refused path whole, its extension too, and reads no file whose extension it does not know", () => {
+		const p = pkg("@t/whole", { "README.md": "x\n" });
+		const doc = (text: string) => check([], budget, [{ path: join(p.dir, "README.md"), text }]);
+		const found = (text: string) => doc(text).map((v) => `${v.rule.split(" ")[0]} ${v.detail}`);
+		expect(found("`some/dir/package.json` and `other/dir/notes.yaml`")).toEqual([
+			"G12 some/dir/package.json",
+			"G12 other/dir/notes.yaml",
+		]);
+		expect(found("`some/dir/view.tsx` and `some/dir/data.jsonl`")).toEqual([]);
+	});
 });
