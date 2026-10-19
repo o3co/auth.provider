@@ -8,7 +8,7 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 
 | Method | Path | From | Body | Policies | Changes state | Other sites | Per source | CORS |
 |---|---|---|---|---|---|---|---|---|
-| GET | `/.well-known/jwks.json` | `@mod/keys` | form |  |  |  |  | yes |
+| GET | `/.well-known/jwks.json` | `@mod/keys` | form |  | no |  |  | yes |
 | GET | `/.well-known/oauth-authorization-server` | `@mod/discovery` | form |  |  |  |  | yes |
 | GET | `/.well-known/oauth-authorization-server/` | `@mod/discovery` | form |  |  |  |  | yes |
 | GET | `/.well-known/openid-configuration` | `@mod/discovery` | form |  |  |  |  | yes |
