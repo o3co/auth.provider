@@ -392,6 +392,19 @@ From `@mod/mfa-webauthn`.
 | `mfa-webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  | Whether the authenticator is asked to verify its user, as WebAuthn says it. |
 | `mfa-webauthn.display-name` | string | `Account` |  |  |  | The name an authenticator shows for an account with no name to show; it names no one. |
 
+## mfa-witness-http
+
+From `@mod/mfa-witness-http`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `mfa-witness-http.read-url` | string |  | yes | `MFA_WITNESS_HTTP_READ_URL` | `https://ledger.example.invalid/mfa-witness/read` | Where whether a subject carries the mark is read. At the same origin as the other two URLs. Plain http is reached only where outbound's policy names it. |
+| `mfa-witness-http.enroll-url` | string |  | yes | `MFA_WITNESS_HTTP_ENROLL_URL` | `https://ledger.example.invalid/mfa-witness/enroll` | Where the mark is set to a token unless one is set. At the same origin as the other two URLs. Plain http is reached only where outbound's policy names it. |
+| `mfa-witness-http.clear-url` | string |  | yes | `MFA_WITNESS_HTTP_CLEAR_URL` | `https://ledger.example.invalid/mfa-witness/clear` | Where the mark is removed. At the same origin as the other two URLs. Plain http is reached only where outbound's policy names it. |
+| `mfa-witness-http.credential` | string |  | yes | `MFA_WITNESS_HTTP_CREDENTIAL` | `REPLACE-RANDOM-BEARER-TOKEN-32-BYTES` | A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material, sent on every call. |
+| `mfa-witness-http.timeout` | string | `5s` |  |  |  | How long a call may take, from 1ms to 1m, narrowing outbound's cap; a write's deadline is its sending time plus this. |
+| `mfa-witness-http.max-response-size` | string |  |  |  |  | The largest answer read, from 1B to 16MiB, narrowing outbound's cap. |
+
 ## mtls
 
 From `@mod/mtls`.

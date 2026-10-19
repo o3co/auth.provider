@@ -1,0 +1,23 @@
+{
+	"name": "@mod/mfa-witness-http",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"optIn": true,
+	"exports": {
+		"./module": "./src/module.ts",
+		"./testing": "./src/testing.ts"
+	},
+	"dependencies": {
+		"@mod/kernel": "workspace:*",
+		"@mod/keys": "workspace:*",
+		"@mod/mfa-witness": "workspace:*",
+		"@mod/outbound": "workspace:*",
+		"@mod/url-setting": "workspace:*",
+		"zod": "4.6.7"
+	},
+	"devDependencies": {
+		"vitest": "5.0.4"
+	}
+}
