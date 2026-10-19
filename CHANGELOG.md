@@ -11,7 +11,7 @@ What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc
 ### Security
 
 - `mfa`: an enrollment begun at login could add a further factor after the account's first factor was registered; removing a factor or reissuing recovery codes could pass on what is allowed to an account with no factor while another request bound one; and two first enrollments at once could both bind.
-- `mfa-flows`: recovery codes that were never shown could stay usable; an enrollment could complete after a reset or a revocation that came while it was under way.
+- `mfa-flows`: recovery codes that were never shown could stay usable; an enrollment could complete after a reset or a revocation that came while it was under way; an enrollment begun before a subject revocation could still bind after the revocation completed.
 - `federation-grants`: a refresh could hand out a token after the grant had ended or its subject had been revoked, a request that waited for the refresh lock included; a grant past its end is treated as ended everywhere.
 - `session-lifecycle`: an explicit close of a session past its lifetime did not revoke the session's tokens.
 - `refresh`: an access token from a refresh could outlive the session of its family.
@@ -48,7 +48,7 @@ What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc
 
 ### Added
 
-- Modules: `subject-revocation-http` (an outside ledger ends a user's sessions and tokens here), `signer-keys-http` (an outside ledger supplies JWT bearer signers' keys), `jwt-bearer-users` (a JWT bearer subject linked to a user), `exchange-id-tokens` (an upstream id_token exchanged for this provider's tokens), `mfa-management` (managing factors), `mfa-witness` (the contract of an enrollment witness kept apart from the factors' store), `mfa-witness-http` (that witness kept at the operator's ledger over HTTP; what the ledger must keep is in the [runbook](docs/runbook.md#keeping-the-second-factor-witness-at-the-ledger)), and the store wirings `jwt-bearer-store` and `exchange-id-tokens-store`.
+- Modules: `subject-revocation-http` (an outside ledger ends a user's sessions and tokens here), `signer-keys-http` (an outside ledger supplies JWT bearer signers' keys), `jwt-bearer-users` (a JWT bearer subject linked to a user), `exchange-id-tokens` (an upstream id_token exchanged for this provider's tokens), `mfa-management` (managing factors), `mfa-witness` (the contract of an enrollment witness kept apart from the factors' store), `mfa-witness-http` (that witness kept at the operator's ledger over HTTP; what the ledger must keep is in the [runbook](docs/runbook.md#keeping-the-second-factor-witness-at-the-ledger)), `mfa-revocation` (moves a revoked subject's second-factor fence before the revocation completes; composed through `combinations`), and the store wirings `jwt-bearer-store` and `exchange-id-tokens-store`.
 - `federation-grants.sweep-interval`: each instance erases the credentials of ended grants, though no request reads them.
 - `users-http.subject-url` and `upstream-url`, for a ledger that looks users up by subject or by upstream identity; `verify-url` is now optional.
 - `idp-google.hosted-domains`.
