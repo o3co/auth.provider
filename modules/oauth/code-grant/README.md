@@ -8,7 +8,7 @@
 - The decisions up to issuing a code (`authorize`). The token format and how tokens are revoked (`tokens`). What the ID token holds (the maker).
 
 ## Offers
-- Code issuance, for `authorize` only: client, redirect URI, PKCE challenge, nonce, scope, audience, session handle, subject, optional acr met → code. It checks again the session enters at use with that subject, the client may use the grant with that scope and audience, and the challenge's shape; the authentication context comes from the session.
+- Code issuance, for `authorize` only: client, redirect URI, PKCE challenge, nonce, scope, audience, session handle, subject, optional acr met → code. It checks again the session enters at use with that subject, the client may use the grant with that scope and audience, and the challenge's shape (`challengeShape`, offered for a request to be checked by); the authentication context comes from the session.
 - The `authorization_code` grant (`codeGrantType`, taking its audience from the request) to `grants`' grant extension point, and the scope that asks for an ID token (the maker's, or none).
 - Extension point: the ID token maker, declaring its scope (two or more refuse boot). It is told the subject, client, nonce, authentication time (and whether the session knew it), amr, the code's acr if any, its scope and the session's handle.
 - Extension point: session redemptions, told the session's handle and the client of each code redeemed in a session.

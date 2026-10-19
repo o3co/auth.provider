@@ -5,9 +5,10 @@ import { issuer } from "@mod/issuer";
 import { defineModule, Unavailable } from "@mod/kernel";
 import { sessions } from "@mod/session";
 import { tokens } from "@mod/tokens";
-import { type CodeRecord, challengeShape, toStored } from "./codes.ts";
+import { type CodeRecord, toStored } from "./codes.ts";
 import {
 	additions,
+	challengeShape,
 	codeGrantType,
 	codeStore,
 	codes,
