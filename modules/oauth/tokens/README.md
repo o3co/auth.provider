@@ -11,7 +11,7 @@
 ## Offers
 - Issuance only through `issue`, policies first: `issue(request: grant, grant type, session, `continuing` (set by an issuing side whose grant the policies already let through); limits)` → issued, or refused by the first policy to refuse.
 - The order policies are asked in: tokens' own rule first (an authentication time over 300 s ahead of the clock), then the issuance policies in name order, each asked the grant as its caller verified it; any answer but allowed refuses.
-- `admits` makes the same judgment without issuing; a policy that cannot tell is unavailable.
+- `admits` makes the same judgment without issuing; a policy that cannot tell is unavailable. Every policy reads one frozen copy of the request, so none changes what another or the issuing sees.
 - What it issues for: a grant (subject, issued-to, audience, scope; optionally an actor chain, `amr`, an authentication time and `acr`), an expiry cap, a binding, and a lifetime other than the section's (1–86400 s) → the token, its id, expiry and token type.
 - Verification → the id, the grant, the token type (Bearer, or the bound kind's) and the binding; the validity check `sender-binding` admits a request at a resource by.
 - Issued-to, for the revoking side to check the owner: answered for revoked tokens and within the allowance past expiry too; never for authorization.
