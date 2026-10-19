@@ -4,8 +4,12 @@ import { z } from "zod";
 import type { AuthMethod, Client, ClientRecord, Section } from "./contract.ts";
 
 const secretFields = z.strictObject({
-	/** A bcrypt or scrypt hash of the secret. */
-	hash: z.string().optional(),
+	hash: z
+		.string()
+		.optional()
+		.describe(
+			"A bcrypt or scrypt hash of the client's secret, as `secret-hash` reads it; a plain-text secret, or a hash it cannot read, is refused at boot.",
+		),
 });
 
 /** The section's hash as secret-hash reads it; undefined when it holds none or one that does not read. */

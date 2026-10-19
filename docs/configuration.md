@@ -743,7 +743,7 @@ From `@mod/clients`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.client-secret.hash` | string |  |  |  |
+| `sections.client-secret.hash` | string |  |  | A bcrypt or scrypt hash of the client's secret, as `secret-hash` reads it; a plain-text secret, or a hash it cannot read, is refused at boot. |
 
 ### sections.consent
 
