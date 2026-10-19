@@ -2088,6 +2088,9 @@ importers:
       '@mod/mfa-binding-proof':
         specifier: workspace:*
         version: link:../mfa-binding-proof
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
       '@mod/subject-attributes':
         specifier: workspace:*
         version: link:../../identity/subject-attributes
