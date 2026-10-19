@@ -158,16 +158,23 @@ export const idpTypes = extensionPoint<IdpType>("upstreams.idp-types", {
 	keyOf: (type) => type.type,
 });
 
+/** What a receiver kept at `received`, read by that receiver alone; its caller only holds it and hands it back. */
+export type Receipt = string;
+
 /** Takes the upstream tokens of a login once its session opens. */
 export interface UpstreamLoginReceiver {
 	readonly name: string;
+	/** Answers a receipt of what it kept, or none. */
 	received(at: {
 		readonly session: Session;
 		readonly idp: string;
 		readonly tokens: UpstreamTokens;
-	}): Promise<void>;
-	/** When a later step fails, deletes what `received` kept, whatever the session's state; idempotent. */
-	withdrawn(sessionId: string, idp: string): Promise<void>;
+	}): Promise<Receipt | undefined | void>;
+	/**
+	 * When a later step fails, deletes what `received` kept, whatever the session's state; idempotent.
+	 * Given its receipt, only what that `received` kept, and nothing written since.
+	 */
+	withdrawn(sessionId: string, idp: string, receipt?: Receipt): Promise<void>;
 }
 
 export const upstreamLoginReceivers = extensionPoint<UpstreamLoginReceiver>(
