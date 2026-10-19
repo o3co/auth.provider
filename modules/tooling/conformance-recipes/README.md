@@ -22,6 +22,7 @@
 - A recipe's outside package is a fixture compiled against the published packages' declarations; its source is kept out of the workspace's own type check, and shown in the recipe as its author writes it.
 - An exchange is shown as a reader repeats it: the request's method, path, the headers needed to repeat it and its body, then the answer's status, the headers acted on and its body. Cookies are the browser's and left out.
 - Values that differ between runs are shown under fixed names, and no secret is shown.
+- A recipe's file boots below the keys the driver sets for every scene (the port, the audit receivers and sink, outbound's loopback hosts): such a key in the file is shown as its reader writes it, and its run takes the driver's (`audit.receivers` in recipe-first-login).
 - Touches only the HTTP interface and boot refusals.
 
 ## Depends on
