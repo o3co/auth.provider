@@ -297,7 +297,10 @@ export function enrollmentOver(p: EnrollmentParts) {
 			} catch (error) {
 				const codes = bound.recoveryCodesFactor;
 				// One that cannot go stays unseen, as before; the failure answered is the first.
-				if (codes) await p.factors.remove(t.subject, codes).catch(() => undefined);
+				// Read just before: a reset or a revocation in between leaves them, unseen all the same.
+				const take = async (id: string) =>
+					p.factors.remove(t.subject, id, await p.factors.fenceOf(t.subject));
+				if (codes) await take(codes).catch(() => undefined);
 				throw error;
 			}
 		};
