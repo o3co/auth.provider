@@ -118,7 +118,7 @@ It rejects dependency cycles and dependencies that point against the declared or
 It checks declared runtime imports and limits public interfaces.
 It also enforces budgets for module size and the cards a contributor must read.
 
-Individual card-item size is measured and reported, but not yet refused.
+A card item over its size limit is refused too.
 
 Outbound HTTP goes through `outbound`, and other network use must match the package's declaration.
 The guard checks this rather than relying on reviewers to spot every call.
@@ -155,7 +155,7 @@ Conformance scenes describe behavior through HTTP and boot refusals.
 They do not depend on module internals, so boundaries can move while behavior stays tested.
 
 The scenes run nightly on develop and on every release pull request, against 0.18 and the 0.17.0 baseline.
-It also runs applicable scenes against each pattern's generated application.
+Applicable scenes also run against each pattern's generated application.
 Legacy setup limitations and agreed behavior differences are declared explicitly.
 
 Release checks generate each pattern from packed packages, then type-check and boot it.
