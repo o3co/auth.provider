@@ -109,7 +109,7 @@ Only a value a `previous` key sealed is sealed again; one `next` sealed is newer
 
 - Stored records keep their names within a version. A new version that changes a record's shape reads the old one for the record's lifetime.
 - Changing `redis.prefix` starts from empty state: every key, sessions, refresh tokens, the denylist, lockouts and MFA factors included, lives under the prefix.
-- `create-app` never writes into a non-empty directory. To add a feature to an existing app, generate again (`create-app <target> --add <feature>`) and carry your configuration over.
+- `create-auth-provider` never writes into a non-empty directory. To add a feature to an existing app, generate again (`create-auth-provider <target> --add <feature>`) and carry your configuration over.
 - A boot that refuses exits with status 78 and prints each refusal on stderr, by setting path and never by value. Fix every refusal it lists; they are reported together.
 
 ## Revoking a user from the ledger
