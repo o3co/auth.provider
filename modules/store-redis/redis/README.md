@@ -20,6 +20,7 @@
   - `server-settings`: the server's `maxmemory-policy`, `appendonly`, `appendfsync`, `min-replicas-to-write` and `min-replicas-max-lag`, as the operator declares them.
 
 ## Invariants
+- Connects to Redis itself, through its client, apart from `outbound`, which carries HTTP alone (`network`: `redis`).
 - Boot is refused on Redis below 7.0, a server that is no primary, or a cluster, proxies splitting keys across nodes included.
 - Boot is refused on a no eviction space without `noeviction`, and on a durable space without `appendonly yes` and `appendfsync always` unless `durability` is `none`.
 - A setting is read by `CONFIG GET`. Where the server refuses it for good (`NOPERM`, or an unknown command or subcommand), the declared value is taken, a needed one left undeclared refusing boot, and every boot warns `redis.settings_declared` with the names taken so; where it answers, a declared value that differs refuses boot; any other error (`BUSY`, say) refuses boot.
