@@ -101,7 +101,7 @@ An outside grant uses that same extension point.
 
 The [kernel](modules/foundation/kernel/README.md) assembles modules without knowing the names of their features.
 Adding a grant type does not require teaching the kernel about it.
-Additions to the kernel itself go through a human gate.
+By convention, a person reviews every change to the kernel itself.
 
 State is separated the same way: a feature declares the storage guarantees it needs.
 A wiring module connects its interface to a storage implementation.
@@ -154,7 +154,7 @@ Replacement implementations can run the contract tests published by the owner.
 Conformance scenes describe behavior through HTTP and boot refusals.
 They do not depend on module internals, so boundaries can move while behavior stays tested.
 
-CI runs the scenes against 0.18 and the 0.17.0 baseline.
+The scenes run nightly on develop and on every release pull request, against 0.18 and the 0.17.0 baseline.
 It also runs applicable scenes against each pattern's generated application.
 Legacy setup limitations and agreed behavior differences are declared explicitly.
 
