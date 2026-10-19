@@ -24,7 +24,7 @@
 - An event is lost past a receiver's pending limit (never queued), when its receiver fails, or when still under way at the stop deadline: at stop, deliveries under way are awaited until `kernel.stop-deadline`.
 - The built-in receiver `log` writes at `info`, so `kernel` drops its lines when the operator's log level is higher; the other receivers are not subject to that level.
 - Every loss is counted, and a warning names the receiver once when it starts losing, with the failure's kind alone (`backlog`, `stopped`, or the error's name, never its message), and once when it next takes an event.
-- Boot is refused without the section, for a name that is no receiver, for a composed receiver left unnamed or named `log`, and for `none` while a receiver is composed.
+- Boot is refused without the section or with no receiver named, saying to name `log`, one a composed module contributes, or `none`; for a name that is no receiver, for a composed receiver left unnamed or named `log`, and for `none` while a receiver is composed.
 
 ## Data
 - Each instance's own delivery counts; nothing is shared, so it is safe on many instances.
