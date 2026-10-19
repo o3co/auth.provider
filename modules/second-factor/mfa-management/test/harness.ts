@@ -13,6 +13,7 @@ import mfaModule from "@mod/mfa/module";
 import { type MfaSettings, mfaConfig } from "@mod/mfa/testing";
 import mfaEntry from "@mod/mfa-entry/module";
 import { factorKinds } from "@mod/mfa-extensions";
+import mfaRevocation from "@mod/mfa-revocation/module";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { memoryRecords } from "@mod/records/testing";
 import sealModule from "@mod/seal/module";
@@ -128,6 +129,7 @@ export async function serve(settings: Settings = {}) {
 			gatesModule,
 			mfaModule,
 			mfaEntry,
+			mfaRevocation,
 			code,
 			backup,
 			step,

@@ -22,6 +22,7 @@
 		"@mod/cookies": "workspace:*",
 		"@mod/login-gates": "workspace:*",
 		"@mod/mfa-extensions": "workspace:*",
+		"@mod/mfa-revocation": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/seal": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
