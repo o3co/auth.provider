@@ -24,8 +24,13 @@ const intentShape = z
 		ended: z.string().min(1).optional(),
 		/** The session that took its question: the browser it is bound to. */
 		session: z.string().min(1).optional(),
-		/** A step-up was asked once already. */
-		stepped: z.boolean().optional(),
+		/** The last step-up trip: the requirement it was for and when it was asked; `true`, as an earlier version wrote it, is a trip for no requirement at no time. */
+		stepped: z
+			.union([
+				z.literal(true),
+				z.strictObject({ requirement: z.string().min(1), at: z.number().int() }).readonly(),
+			])
+			.optional(),
 	})
 	.readonly();
 
