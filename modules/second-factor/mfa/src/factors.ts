@@ -9,7 +9,7 @@ import {
 import type { EnrollmentWitness } from "@mod/mfa-witness";
 import type { Seal } from "@mod/seal";
 import events from "./audit-events.ts";
-import { type Factors, isLabel, type Shown } from "./contract.ts";
+import { type Factors, type Fence, isLabel, type Shown } from "./contract.ts";
 import { type Factor, factorRecords, sealContext } from "./records/records.ts";
 import type { FactorStore } from "./store.ts";
 import { markedBy, standingOf } from "./witness/witness.ts";
@@ -339,6 +339,7 @@ export function factorDecisions(p: FactorParts): Factors {
 			};
 		},
 		fence: (subject) => records.fence(subject),
+		fenceOf: async (subject) => (await records.fences(subject)) as Fence,
 		rename: async (subject, target, label) => {
 			if (!isLabel(label)) return "malformed-label";
 			return records.decide(subject, (all) =>
@@ -350,10 +351,11 @@ export function factorDecisions(p: FactorParts): Factors {
 					: { verdict: "unknown" as const },
 			);
 		},
-		remove: async (subject, target) => {
-			const removed = await records.decide<"unknown" | "last" | { kind: string }>(
+		remove: async (subject, target, fence) => {
+			const removed = await records.decide<"unknown" | "last" | "fenced" | { kind: string }>(
 				subject,
-				(all) => {
+				(all, fences) => {
+					if (fence !== undefined && fences !== fence) return { verdict: "fenced" };
 					const kind = all.find((f) => f.id === target)?.kind;
 					if (kind === undefined) return { verdict: "unknown" };
 					const rest = all.filter((f) => f.id !== target);
@@ -369,10 +371,11 @@ export function factorDecisions(p: FactorParts): Factors {
 			return "removed";
 		},
 		clear,
-		reissue: async (subject) => {
+		reissue: async (subject, fence) => {
 			const codes = await recovery(subject);
 			// Decided on the factors as written: no codes land beside no counting factor, and the old set goes in the same write.
-			const counted = await records.decide(subject, (all) => {
+			const counted = await records.decide<boolean | "fenced">(subject, (all, fences) => {
+				if (fence !== undefined && fences !== fence) return { verdict: "fenced" };
 				const holds = counting(all, p.kinds).length > 0;
 				const next =
 					holds && codes
@@ -380,6 +383,7 @@ export function factorDecisions(p: FactorParts): Factors {
 						: undefined;
 				return { next, verdict: holds };
 			});
+			if (counted === "fenced") return { kind: "fenced" };
 			if (!counted) return { kind: "no-qualifying-factor" };
 			if (!codes) return { kind: "unknown-kind" };
 			recorded("recovery_codes.generated", subject, {

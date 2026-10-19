@@ -382,6 +382,21 @@ describe("decisions on the subject's factors", () => {
 		expect(await decided.held("ned")).toEqual([]);
 	});
 
+	it("removes or reissues nothing for a fence read before it moved", async () => {
+		const { decided, bindCode, idOf } = await serve();
+		await bindCode("rio");
+		const read = await decided.fenceOf("rio");
+		await decided.fence("rio");
+		const code = await idOf("rio", "code");
+		expect(await decided.remove("rio", code, read)).toBe("fenced");
+		expect(await decided.reissue("rio", read)).toEqual({ kind: "fenced" });
+		expect((await decided.held("rio")).map((f) => f.kind).sort()).toEqual(["backup", "code"]);
+		const now = await decided.fenceOf("rio");
+		expect((await decided.reissue("rio", now)).kind).toBe("reissued");
+		await bindCode("rio");
+		expect(await decided.remove("rio", code, now)).toBe("removed");
+	});
+
 	it("answers unavailable when it cannot move the fence", async () => {
 		const { decided, place } = await serve();
 		place.down.unavailable("update", "save");

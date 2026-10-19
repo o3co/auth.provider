@@ -9,6 +9,9 @@ export interface ProofStep {
 /** The steps that prove factors. mfa refuses to start without at least one. */
 export const proofSteps = extensionPoint<ProofStep>("mfa.proof-steps", { multiplicity: "some" });
 
+/** Where a subject's fence stood when read: compared, never computed with. */
+export type Fence = number & { readonly __fence: never };
+
 /** Where a subject's standing is asked, as an inconsistency with the witness is recorded. */
 export type Asked = "login" | "binding" | "credentials";
 
@@ -127,21 +130,28 @@ export interface Factors {
 	>;
 	/** Moves the subject's fence, when asked: no binding begun before binds (`fenced`). */
 	fence(subject: string): Promise<void>;
+	/** Where the subject's fence stands, read before a change is allowed: given back, the change is `fenced` once it moved. */
+	fenceOf(subject: string): Promise<Fence>;
 	rename(
 		subject: string,
 		factor: string,
 		label: string,
 	): Promise<"renamed" | "unknown" | "malformed-label">;
-	/** Under required mode, the last counting factor is not removed. */
-	remove(subject: string, factor: string): Promise<"removed" | "unknown" | "last">;
+	/** Under required mode, the last counting factor is not removed; nothing is removed once the fence moved past `fence`. */
+	remove(
+		subject: string,
+		factor: string,
+		fence?: Fence,
+	): Promise<"removed" | "unknown" | "last" | "fenced">;
 	/** Removes every factor of the subject, of any kind, and answers how many and of which kinds; nothing is recorded. */
 	clear(subject: string): Promise<{ readonly count: number; readonly kinds: readonly string[] }>;
-	/** Replaces the recovery codes, for a subject holding a counting factor. */
+	/** Replaces the recovery codes, for a subject holding a counting factor; nothing once the fence moved past `fence`. */
 	reissue(
 		subject: string,
+		fence?: Fence,
 	): Promise<
 		| { readonly kind: "reissued"; readonly codes: unknown }
-		| { readonly kind: "no-qualifying-factor" | "unknown-kind" }
+		| { readonly kind: "no-qualifying-factor" | "unknown-kind" | "fenced" }
 	>;
 }
 
