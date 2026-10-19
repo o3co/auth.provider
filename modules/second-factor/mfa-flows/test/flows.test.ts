@@ -9,6 +9,7 @@ import { seal } from "@mod/seal";
 import { sessions } from "@mod/session";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { afterEach, describe, expect, it } from "vitest";
+import { holding } from "../src/enrollment/held.ts";
 import { transactionListings, transactionStore } from "../src/store.ts";
 import {
 	type HeldFacts,
@@ -1073,7 +1074,7 @@ describe("mfa under races and misuse", () => {
 					attempts: 5,
 				});
 				return (tx, subject, secret) =>
-					held.hold(
+					holding(held).hold(
 						tx,
 						sealed.seal(JSON.stringify({ kind: "code", secret }), `${subject}\npending`),
 					);

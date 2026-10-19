@@ -8,12 +8,6 @@ export interface Challenge {
 	readonly sealed: string;
 }
 
-/** A binding proof's challenge: the proof's name, and what mfa-binding-proof sealed. */
-export interface BindingChallenge {
-	readonly proof: string;
-	readonly sealed: string;
-}
-
 /** A login's facts as held: one held before the authentication time was reported has none. */
 export type HeldFacts = Omit<LoginFacts, "authenticatedAt"> &
 	Partial<Pick<LoginFacts, "authenticatedAt">>;
@@ -40,30 +34,36 @@ interface Common {
 	readonly startedAt: number;
 	readonly deadline: number;
 	readonly attemptsLeft: number;
-	/** A binding waiting for its first proof, sealed by mfa. */
-	readonly pending?: string;
 	/** The challenge last sent for a factor, sealed by mfa; the next proof takes it. */
 	readonly challenge?: Challenge;
-	/** The binding proof's challenge last sent; it stands until replaced or proved. */
-	readonly bindingChallenge?: BindingChallenge;
-	/** The pass `mfa-binding-proof` gave for the binding proof passed in this transaction, so a binding may begin in it. */
-	readonly bindingPassed?: { readonly kind: string; readonly pass: string };
-	/** A binding proof passed in it: a first factor bound in it counts at once. */
-	readonly proved?: true;
+	/** What the work a transaction is for keeps in it, as JSON; never read here. */
+	readonly held?: unknown;
+	/** The record's format: 2; a record without one is format 1. */
+	readonly format?: 2;
 	/** Taken once: kept to its lifetime so it stays taken, and read as gone. */
 	readonly taken?: true;
 }
 
 export type Transaction = Common & ByPurpose;
 /** What a start gives; the rest the transaction takes from its start. */
-export type Started = Pick<Common, "subject" | "pending" | "bindingChallenge"> & ByPurpose;
+export type Started = Pick<Common, "subject" | "held"> & ByPurpose;
 
 export const hashOf = (value: string) => createHash("sha256").update(value).digest("base64url");
 /** Whose live transactions a transaction counts among: the session it is tied to, or the held login's subject. */
 export const holderOf = (t: Pick<Common, "subject"> & ByPurpose) =>
 	"handle" in t ? `session:${t.handle}` : `login:${t.subject}`;
-export const transactionOf = (record: StoredTransaction | undefined) =>
-	record as unknown as Transaction | undefined;
+/** Format 1 kept a binding's own fields at the top; read, they become what it holds. */
+const formerlyTop = ["pending", "bindingChallenge", "bindingPassed", "proved"];
+export const transactionOf = (record: StoredTransaction | undefined) => {
+	const t = record as unknown as (Transaction & Record<string, unknown>) | undefined;
+	if (!t || t.format === 2) return t;
+	const top = Object.entries(t).filter(([name]) => formerlyTop.includes(name));
+	const rest = Object.fromEntries(
+		Object.entries(t).filter(([name]) => !formerlyTop.includes(name)),
+	);
+	const held = top.length > 0 ? { held: Object.fromEntries(top) } : {};
+	return { ...rest, ...held, format: 2 } as Transaction;
+};
 export const stored = (transaction: Transaction) => transaction as unknown as StoredTransaction;
 /** Whether the transaction can still be used at `now`, on the kernel's clock. */
 export const live = (transaction: Transaction, now: number) =>

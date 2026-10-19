@@ -227,12 +227,17 @@ describe("a binding proof before a first factor", () => {
 		const challenged = await s.call("POST", "/session/mfa/challenge", { transaction_id: first });
 		expect([challenged.status, challenged.body]).toEqual([200, {}]);
 		expect(await enroll(first, "code")).toMatchObject(refused);
-		const kept = (await s.kept.transactions.read(first)) as unknown as { bindingPassed: unknown };
+		const kept = (await s.kept.transactions.read(first)) as unknown as {
+			held: { bindingPassed: unknown };
+		};
 		// Carried into another transaction, it begins nothing there.
 		const second = await start();
-		await s.kept.transactions.update(second, (record) => ({
-			value: { ...record, bindingPassed: kept.bindingPassed } as never,
-		}));
+		await s.kept.transactions.update(second, (record) => {
+			const { held } = record as unknown as { held: object };
+			return {
+				value: { ...record, held: { ...held, bindingPassed: kept.held.bindingPassed } } as never,
+			};
+		});
 		expect(await enroll(second, "told")).toEqual(refused);
 		// Proved there, it begins once: the binding begun takes it.
 		expect((await enroll(second, "code", `c-${contact.sent}`)).status).toBe(200);

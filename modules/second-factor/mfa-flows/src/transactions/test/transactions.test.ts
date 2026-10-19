@@ -47,25 +47,44 @@ it("finds no transaction for a request without the browser's cookie", async () =
 	expect(await transactions.find(testRequest(), (await start()).id)).toBeUndefined();
 });
 
-it("holds a binding only in a transaction still in use", async () => {
+it("keeps what a transaction holds only while it is in use, changed from what it holds", async () => {
 	const { clock, transactions, start } = opened();
 	const [used, late, open] = [await start(), await start(), await start()];
 	await transactions.take(used.id);
-	expect(await transactions.hold(used.id, "p")).toBe(false);
-	expect(await transactions.hold(open.id, "p")).toBe(true);
+	expect(await transactions.keep(used.id, () => ({ n: 1 }))).toBeUndefined();
+	expect(await transactions.keep(open.id, () => ({ n: 1 }))).toEqual({ held: { n: 1 } });
+	const plus = (held: unknown) => ({ n: (held as { n: number }).n + 1 });
+	expect(await transactions.keep(open.id, plus)).toEqual({ held: { n: 2 } });
+	expect(await transactions.keep(open.id, () => undefined)).toBeUndefined();
 	clock.now = 60_000;
-	expect(await transactions.hold(late.id, "p")).toBe(false);
+	expect(await transactions.keep(late.id, () => ({ n: 1 }))).toBeUndefined();
 });
 
-it("keeps a binding proof's pass only over the challenge it answered, which it ends", async () => {
-	const { kept, transactions, start } = opened();
+it("starts a transaction holding what it is given, in format 2", async () => {
+	const { kept, transactions } = opened();
+	const { id } = await transactions.start({
+		subject: "sue",
+		purpose: "enroll-login",
+		held: { pending: "p" },
+	});
+	const record = (await kept.transactions.read(id)) as unknown as Transaction;
+	expect([record.format, record.held]).toEqual([2, { pending: "p" }]);
+});
+
+it("reads a format 1 record's binding fields as what it holds", async () => {
+	const { clock, kept, transactions, start } = opened();
 	const { id } = await start();
-	await transactions.bindingSent(id, { proof: "contact", sealed: "s2" });
-	const passed = { kind: "code", pass: "pass" };
-	expect(await transactions.bindingPassed(id, "s1", passed)).toBe(false);
-	expect(await transactions.bindingPassed(id, "s2", passed)).toBe(true);
-	const held = (await kept.transactions.read(id)) as unknown as Transaction;
-	expect([held.bindingPassed, held.bindingChallenge]).toEqual([passed, undefined]);
+	await kept.transactions.update(id, (record) => {
+		const { format: _, held: __, ...rest } = record as unknown as Transaction;
+		const old = { ...rest, pending: "p", bindingPassed: { kind: "code", pass: "x" }, proved: true };
+		return { value: old as never };
+	});
+	clock.now = 1;
+	expect(await transactions.keep(id, (held) => held)).toEqual({
+		held: { pending: "p", bindingPassed: { kind: "code", pass: "x" }, proved: true },
+	});
+	const record = (await kept.transactions.read(id)) as unknown as Record<string, unknown>;
+	expect([record.format, record.pending, record.proved]).toEqual([2, undefined, undefined]);
 });
 
 it("holds or clears a challenge only in a transaction still in use", async () => {

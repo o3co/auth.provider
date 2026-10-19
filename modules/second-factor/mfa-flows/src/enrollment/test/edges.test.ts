@@ -175,7 +175,7 @@ it("answers 503 to a completion whose binding mfa cannot open", async () => {
 	const begun = await s.call("POST", "/session/mfa/enrollment", { kind: "code" });
 	const tx = String(begun.body.transaction);
 	await s.kept.transactions.update(tx, (record) => ({
-		value: { ...record, pending: "not-sealed" } as never,
+		value: { ...record, held: { pending: "not-sealed" } } as never,
 	}));
 	expect(
 		await s.call("POST", "/session/mfa/enrollment/complete", { transaction_id: tx, proof: "x:0" }),

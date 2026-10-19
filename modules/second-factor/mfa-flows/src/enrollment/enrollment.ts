@@ -17,8 +17,9 @@ import {
 	revokedSince,
 	unknownTransaction,
 } from "../routing.ts";
-import type { BindingChallenge, Transaction } from "../transactions/records.ts";
+import type { Transaction } from "../transactions/records.ts";
 import { askedFrom, type Transactions } from "../transactions/transactions.ts";
+import { type Binding, type BindingChallenge, heldOf, holding } from "./held.ts";
 
 const unknownKind = jsonAnswer(400, {
 	error: "invalid_request",
@@ -58,7 +59,8 @@ export interface EnrollmentParts {
 
 /** The transaction an enrollment goes on in, and how far its binding proof went. */
 interface Open
-	extends Pick<Transaction, "purpose" | "deadline" | "bindingChallenge" | "bindingPassed"> {
+	extends Pick<Transaction, "purpose" | "deadline">,
+		Pick<Binding, "bindingChallenge" | "bindingPassed"> {
 	readonly id: string;
 	readonly expiresIn: number;
 }
@@ -73,6 +75,7 @@ interface Enrolling {
 
 export function enrollmentOver(p: EnrollmentParts) {
 	const audited = auditedBy(p.audit);
+	const binding = holding(p.transactions);
 	/** A session's enrollment goes on only in that session, entered as it began; the answer refusing it, or nothing. */
 	const outsideSession = async (request: HttpRequest, t: Transaction) => {
 		if (t.purpose !== "enroll") return undefined;
@@ -103,7 +106,11 @@ export function enrollmentOver(p: EnrollmentParts) {
 		const elsewhere = await outsideSession(request, t);
 		if (elsewhere) return elsewhere;
 		const expiresIn = Math.floor(found.leftMs / 1000);
-		return { subject: t.subject, where: { ...t, id: txId, expiresIn }, from: askedFrom(t) };
+		return {
+			subject: t.subject,
+			where: { ...t, ...heldOf(t), id: txId, expiresIn },
+			from: askedFrom(t),
+		};
 	};
 
 	/** Holds what the enrollment keeps, in its transaction or one started in the session: where, or none when no longer in use. */
@@ -114,12 +121,12 @@ export function enrollmentOver(p: EnrollmentParts) {
 		const { where } = e;
 		if ("session" in where) {
 			const subject = e.subject;
-			return p.transactions.start({ subject, purpose: "enroll", handle: where.session, ...held });
+			return p.transactions.start({ subject, purpose: "enroll", handle: where.session, held });
 		}
 		const kept =
 			"pending" in held
-				? await p.transactions.hold(where.id, held.pending)
-				: await p.transactions.bindingSent(where.id, held.bindingChallenge);
+				? await binding.hold(where.id, held.pending)
+				: await binding.bindingSent(where.id, held.bindingChallenge);
 		return kept ? { id: where.id, expiresIn: where.expiresIn, cookies: [] } : undefined;
 	};
 
@@ -156,7 +163,7 @@ export function enrollmentOver(p: EnrollmentParts) {
 		if (passed) audited("verified", subject, request, judged);
 		else audited("verify.failure", subject, request, { ...judged, reason: "invalid" });
 		if (passed && left > 0) {
-			const kept = await p.transactions.bindingPassed(id, challenge.sealed, { kind, pass: passed });
+			const kept = await binding.bindingPassed(id, challenge.sealed, { kind, pass: passed });
 			return kept ? { passed } : unknownTransaction;
 		}
 		// The last attempt ends the transaction even when it passes: none would be left to complete a binding.
@@ -204,12 +211,12 @@ export function enrollmentOver(p: EnrollmentParts) {
 	): Promise<HttpResponse> => {
 		const elsewhere = await outsideSession(request, t);
 		if (elsewhere) return elsewhere;
-		const sent = t.bindingPassed
+		const sent = heldOf(t).bindingPassed
 			? undefined
 			: await sendBinding(t.subject, t.deadline, askedFrom(t));
 		if (sent === undefined) return jsonAnswer(200, {});
 		if ("status" in sent) return sent;
-		if (!(await p.transactions.bindingSent(id, sent.challenge))) return unknownTransaction;
+		if (!(await binding.bindingSent(id, sent.challenge))) return unknownTransaction;
 		audited("challenge.sent", t.subject, request, {
 			kind: sent.challenge.proof,
 			purpose: t.purpose,
@@ -247,7 +254,7 @@ export function enrollmentOver(p: EnrollmentParts) {
 		const txId = postedTransaction(request);
 		if (!txId) return unknownTransaction;
 		const t = (await p.transactions.find(request, txId))?.transaction;
-		if (!t?.pending || (t.purpose !== "enroll" && t.purpose !== "enroll-login"))
+		if (!heldOf(t).pending || !t || (t.purpose !== "enroll" && t.purpose !== "enroll-login"))
 			return unknownTransaction;
 		if (await revokedSince(p.revocation, t)) {
 			await p.transactions.take(txId);
@@ -263,7 +270,7 @@ export function enrollmentOver(p: EnrollmentParts) {
 		if (left === undefined) return unknownTransaction;
 		const proof = proofOf(request) ?? "";
 		// Kept: inside the callback below, the check above no longer narrows it.
-		const pending = t.pending;
+		const pending = heldOf(t).pending ?? "";
 		const proved = await p.transactions.judged(txId, () =>
 			p.factors.provePending(t.subject, pending, proof),
 		);
@@ -298,7 +305,7 @@ export function enrollmentOver(p: EnrollmentParts) {
 		const body = { factor: bound.factor, ...codes };
 		// A first factor bound on the password alone counts from the next sign-in: binding it during a
 		// login never finishes that login.
-		if (!t.proved) return jsonAnswer(200, body, { cookies: [p.transactions.cleared()] });
+		if (!heldOf(t).proved) return jsonAnswer(200, body, { cookies: [p.transactions.cleared()] });
 		// Bound on a binding proof, it counts at once by its first proof: the login goes on, or the session is raised.
 		// Either can fail after the codes were made: then they go, as no one would ever see them.
 		const shown = async (answer: () => Promise<HttpResponse>) => {
