@@ -1,3 +1,4 @@
+import { type Audit, audit, declaredAudit } from "@mod/audit";
 import { clientAllowance } from "@mod/client-allowance";
 import type { Redeemed } from "@mod/code-grant";
 import type { Grant, GrantOutcome } from "@mod/grants";
@@ -6,6 +7,7 @@ import { type BuildContext, type Log, Unavailable } from "@mod/kernel";
 import { sameBinding } from "@mod/sender-binding";
 import { type Sessions, sessions } from "@mod/session";
 import { type SubjectRevocation, subjectRevocation } from "@mod/subject-revocation";
+import events from "../audit-events.ts";
 import { refreshGrantType } from "../contract.ts";
 import {
 	allowanceMs,
@@ -106,7 +108,17 @@ export function refreshGrant(
 	random: Random,
 	issuer: string,
 	now: () => number,
+	recorder: Pick<Audit, "record">,
 ): Grant {
+	const recorded = declaredAudit(recorder, events);
+	/** Ends the family a reuse showed, and records it. */
+	const reused = async (id: string, family: Family) => {
+		await revoker.revokeFamily(id);
+		recorded.record("refresh.family_revoked", {
+			subject: family.subject,
+			attributes: { client: family.clientId },
+		});
+	};
 	return {
 		grantType: refreshGrantType,
 		readsAmbient: "none",
@@ -128,7 +140,7 @@ export function refreshGrant(
 			// Knowing a family's name means having held one of its tokens, so any other secret is a
 			// reuse, whatever binding comes with it.
 			if (hashOf(parsed.secret) !== family.current) {
-				await revoker.revokeFamily(parsed.id);
+				await reused(parsed.id, family);
 				return refused;
 			}
 			if (family.binding && !sameBinding(family.binding, binding)) return refused;
@@ -175,8 +187,10 @@ export function refreshGrant(
 				liveFamily(stored)?.current === family.current ? { value: toStored(rotated) } : undefined,
 			);
 			// Another use, a revocation or a logout came first: a reuse, or a family already ended.
-			if (liveFamily(written?.after)?.current !== rotated.current) {
-				await revoker.revokeFamily(parsed.id);
+			const after = liveFamily(written?.after);
+			if (after?.current !== rotated.current) {
+				if (after) await reused(parsed.id, family);
+				else await revoker.revokeFamily(parsed.id);
 				return refused;
 			}
 			return {
@@ -228,7 +242,15 @@ export async function grantOver(c: BuildContext<Settings>) {
 	c.every(c.section["sweep-interval"] * 1000, () => revoker.sweep());
 	const checks = { sessions: await c.get(sessions), revocation: await c.get(subjectRevocation) };
 	const issuerUrl = (await c.get(issuer)).url;
-	return refreshGrant(stores, revoker, checks, c.random.bytes, issuerUrl, c.clock.now);
+	return refreshGrant(
+		stores,
+		revoker,
+		checks,
+		c.random.bytes,
+		issuerUrl,
+		c.clock.now,
+		await c.get(audit),
+	);
 }
 
 /** code-grant's addition of a refresh token to an exchanged code. */
