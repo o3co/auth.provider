@@ -160,7 +160,6 @@ describe("over users and the session's login", () => {
 								handle === "h1" && login !== undefined
 									? { kind: "entered", session: { id: handle, context: login }, endsAt: 1 }
 									: { kind: "absent" },
-							openContext: async (handle) => (handle === "h1" ? login : undefined),
 						});
 					}),
 				]),
