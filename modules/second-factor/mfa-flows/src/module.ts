@@ -6,13 +6,13 @@ import { loginGates } from "@mod/login-gates";
 import { factors, proofSteps } from "@mod/mfa";
 import { lockoutProblem, lockouts, requestsPerSource } from "@mod/rate-limit";
 import { revocations } from "@mod/subject-revocation";
-import { mfaReset } from "./contract.ts";
+import { flowParts, mfaReset } from "./contract.ts";
 import { gateOver } from "./proof/proof.ts";
 import { resetOver } from "./reset/reset.ts";
 import { type Handler, unavailable } from "./routing.ts";
 import { section } from "./section.ts";
 import { transactionsIn } from "./transactions/transactions.ts";
-import { handlersOver, policyOf } from "./wiring/wiring.ts";
+import { handlersOver, partsIn, policyOf } from "./wiring/wiring.ts";
 
 type HandlerName = keyof Awaited<ReturnType<typeof handlersOver>>;
 
@@ -40,6 +40,7 @@ const withUnavailable =
 
 export default defineModule({ name: "mfa-flows", section, replicaSafe: true }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "mfa-flows" })),
+	m.provide(flowParts).by(partsIn),
 	m.provide(mfaReset).by(async (c) =>
 		resetOver({
 			factors: await c.get(factors),
