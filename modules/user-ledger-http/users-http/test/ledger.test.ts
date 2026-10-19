@@ -7,6 +7,7 @@ const alice = {
 	subject: "u-1",
 	email: "a@x.example",
 	emailVerified: true,
+	upstream: { idp: "corp", subject: "up-1" },
 };
 
 describe("a fake ledger speaking users-http's calls", () => {
@@ -23,6 +24,7 @@ describe("a fake ledger speaking users-http's calls", () => {
 		expect(section).toEqual({
 			"verify-url": "http://127.0.0.1:1/verify",
 			"subject-url": "http://127.0.0.1:1/subject",
+			"upstream-url": "http://127.0.0.1:1/upstream",
 			credential: expect.stringMatching(/^[0-9a-f]{64}$/),
 		});
 	});
@@ -37,6 +39,19 @@ describe("a fake ledger speaking users-http's calls", () => {
 		});
 		expect(ledger.answer(call("/subject", { subject: "u-1" }))).toEqual({ json: user });
 		expect(ledger.answer(call("/subject", { subject: "u-2" }))).toEqual({ status: 404 });
+	});
+
+	it("looks a user up by upstream identity, the IdP and its subject both matching", () => {
+		const user = { id: "u-1", username: "alice", email: "a@x.example", emailVerified: true };
+		expect(ledger.answer(call("/upstream", { idp: "corp", subject: "up-1" }))).toEqual({
+			json: user,
+		});
+		expect(ledger.answer(call("/upstream", { idp: "other", subject: "up-1" }))).toEqual({
+			status: 404,
+		});
+		expect(ledger.answer(call("/upstream", { idp: "corp", subject: "u-1" }))).toEqual({
+			status: 404,
+		});
 	});
 
 	it("answers 404 to its calls without its credential, and nothing to a call not its own", () => {

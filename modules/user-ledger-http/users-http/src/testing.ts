@@ -23,14 +23,16 @@ export interface LedgerUser {
 	readonly subject?: string;
 	readonly email?: string;
 	readonly emailVerified?: boolean;
+	/** The upstream identity the ledger links to this user. */
+	readonly upstream?: { readonly idp: string; readonly subject: string };
 }
 
-const calls = ["/verify", "/subject"];
+const calls = ["/verify", "/subject", "/upstream"];
 
 /**
  * A fake ledger holding these users behind a credential of its own: its answer to users-http's
- * password call and lookup by subject (none for a call not its own), and the section pointing
- * users-http at it once it listens at `base`.
+ * password call and lookups by subject and by upstream identity (none for a call not its own), and
+ * the section pointing users-http at it once it listens at `base`.
  */
 export function usersLedger(users: readonly LedgerUser[]) {
 	const credential = randomBytes(32).toString("hex");
@@ -45,8 +47,12 @@ export function usersLedger(users: readonly LedgerUser[]) {
 			const user =
 				call.path === "/subject"
 					? users.find((u) => (u.subject ?? u.identifier) === given.subject)
-					: users.find((u) => u.identifier === given.email && u.password === given.password);
-			if (!user) return { status: call.path === "/subject" ? 404 : 401 };
+					: call.path === "/upstream"
+						? users.find(
+								(u) => u.upstream?.idp === given.idp && u.upstream?.subject === given.subject,
+							)
+						: users.find((u) => u.identifier === given.email && u.password === given.password);
+			if (!user) return { status: call.path === "/verify" ? 401 : 404 };
 			return {
 				json: {
 					id: user.subject ?? user.identifier,
@@ -60,6 +66,7 @@ export function usersLedger(users: readonly LedgerUser[]) {
 			"users-http": {
 				"verify-url": `${base}/verify`,
 				"subject-url": `${base}/subject`,
+				"upstream-url": `${base}/upstream`,
 				credential,
 			},
 		}),

@@ -54,6 +54,8 @@ export interface FederationPart {
 	readonly keepsUpstreamTokens?: boolean;
 	/** The deployment holds upstream credentials for clients, as federation grants. */
 	readonly grants?: GrantsPart;
+	/** The scene links an upstream identity to the account logged in, from the deployment's own page. */
+	readonly links?: boolean;
 }
 
 export const federationArea = area<FederationPart>("federation");
@@ -94,6 +96,7 @@ export function federationScene(scene: FederationScene): AreaScene {
 			returnTargets: scene.returnTargets,
 			...(scene.keepsUpstreamTokens ? { keepsUpstreamTokens: true } : {}),
 			...(scene.grants ? { grants: scene.grants } : {}),
+			...(scene.links ? { links: true } : {}),
 		}),
 	);
 }

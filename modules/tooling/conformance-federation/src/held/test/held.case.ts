@@ -1,7 +1,11 @@
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { type AreaScene, areaTarget, type Started } from "@mod/conformance";
 import { secondFactorArea } from "@mod/conformance-second-factor";
-import { browser as passwordBrowser, totp } from "@mod/conformance-second-factor/testing";
+import {
+	beginBinding,
+	browser as passwordBrowser,
+	totp,
+} from "@mod/conformance-second-factor/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { browser as openBrowser, probeClient } from "../../../test/browser.ts";
 import { fakeUpstream } from "../../../test/upstream.ts";
@@ -76,11 +80,15 @@ describe.runIf(!areaTarget().differs("federation-login-held-at-gates"))(
 			await corp?.stop();
 		});
 
-		/** Binds TOTP to the user from a password session; answers its secret and the factor's id. */
+		/**
+		 * Binds TOTP to the user from a password session, sending the mailed binding proof where the
+		 * target asks one first; answers its secret and the factor's id.
+		 */
 		async function enrolled() {
 			const b = passwordBrowser(() => base);
 			expect((await b.login("alice")).status).toBe(200);
-			const begun = await b.send("POST", "/session/mfa/enrollment", { kind: "totp" });
+			const mail = running.kind === "running" ? running.mail : undefined;
+			const begun = await beginBinding(b, { kind: "totp" }, mail);
 			const secret = String(begun.body.secret);
 			const done = await b.send("POST", "/session/mfa/enrollment/complete", {
 				transaction_id: String(begun.body.transaction),

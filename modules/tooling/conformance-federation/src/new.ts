@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { onNew } from "@mod/conformance";
-import { federationArea, type GrantsPart, type IdpScene } from "./area.ts";
+import { type NewPart, onNew, type PatternPart } from "@mod/conformance";
+import { type FederationPart, federationArea, type GrantsPart, type IdpScene } from "./area.ts";
 
 /**
  * An IdP's own settings, by the type that serves it on the new target: its type's endpoints at the
@@ -60,7 +60,7 @@ const grantsSection = (at: GrantsPart) => ({
 	...(at.lodges ? { lodges: at.lodges.limit, "lodge-window": `${at.lodges.windowSeconds}s` } : {}),
 });
 
-onNew(federationArea, (part, _, modules) => ({
+const setUp = (part: FederationPart, _: unknown, modules: readonly string[]): NewPart => ({
 	modules: [
 		"@mod/outbound",
 		"@mod/external-jwt",
@@ -92,4 +92,21 @@ onNew(federationArea, (part, _, modules) => ({
 				.map((url) => url.host),
 		},
 	},
-}));
+});
+
+/** Where a ledger looks users up by upstream identity, it holds the links: users' `link` then answers already or conflict. */
+export function onPattern(
+	part: FederationPart,
+	scene: unknown,
+	modules: readonly string[],
+): PatternPart {
+	if (part.links && modules.includes("@mod/users-http")) {
+		return {
+			leaveOut:
+				"links from the deployment: a ledger looking users up by upstream identity holds the links, so a link answers already or conflict",
+		};
+	}
+	return setUp(part, scene, modules);
+}
+
+onNew(federationArea, setUp, onPattern);

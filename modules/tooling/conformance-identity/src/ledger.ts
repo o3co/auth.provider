@@ -5,10 +5,9 @@ import { addressOf } from "./pattern.ts";
 
 /** Why a ledger cannot hold these users, or nothing where it can. */
 export function unledgered(users: readonly UserScene[]): string | undefined {
-	const lacks = [
-		users.some((u) => u.upstream) && "upstream links",
-		users.some((u) => u.bcrypt) && "a password hash other than scrypt",
-	].filter((why) => why !== false);
+	const lacks = [users.some((u) => u.bcrypt) && "a password hash other than scrypt"].filter(
+		(why) => why !== false,
+	);
 	return lacks.length > 0 ? `gives users a ledger cannot hold: ${lacks.join(", ")}` : undefined;
 }
 
@@ -28,8 +27,9 @@ function witnessKeeper() {
 }
 
 /**
- * A ledger answering users-http's password call and lookup by subject for the users given, and
- * mfa-witness-http's calls where `witness`; and the sections that point an app at it.
+ * A ledger answering users-http's password call and lookups by subject and by upstream identity
+ * for the users given, and mfa-witness-http's calls where `witness`; and the sections that point an
+ * app at it. A copy of users-http's own fake ledger, kept here until this area may take that one.
  */
 export async function ledgerParty(held: {
 	readonly users?: readonly UserScene[];
@@ -38,7 +38,7 @@ export async function ledgerParty(held: {
 	const credential = randomBytes(32).toString("hex");
 	const users = held.users;
 	const witness = held.witness ? witnessKeeper() : undefined;
-	const userCalls = users ? ["/verify", "/subject"] : [];
+	const userCalls = users ? ["/verify", "/subject", "/upstream"] : [];
 	const witnessCalls = witness
 		? ["/mfa-witness/read", "/mfa-witness/enroll", "/mfa-witness/clear"]
 		: [];
@@ -48,11 +48,16 @@ export async function ledgerParty(held: {
 		if (!call || asked.headers.authorization !== `Bearer ${credential}`) return { status: 404 };
 		const given = JSON.parse(asked.body);
 		if (witness && witnessCalls.includes(asked.path)) return witness(asked.path, given);
+		// The lookup by upstream identity, as users-http's own fake answers it; this copy goes once the area takes that one.
 		const user =
 			asked.path === "/subject"
 				? users?.find((u) => (u.subject ?? u.identifier) === given.subject)
-				: users?.find((u) => u.identifier === given.email && u.password === given.password);
-		if (!user) return { status: asked.path === "/subject" ? 404 : 401 };
+				: asked.path === "/upstream"
+					? users?.find(
+							(u) => u.upstream?.idp === given.idp && u.upstream?.subject === given.subject,
+						)
+					: users?.find((u) => u.identifier === given.email && u.password === given.password);
+		if (!user) return { status: asked.path === "/verify" ? 401 : 404 };
 		const { emailVerified } = user;
 		const email = emailVerified === undefined ? user.email : addressOf(user);
 		return {
@@ -73,6 +78,7 @@ export async function ledgerParty(held: {
 						"users-http": {
 							"verify-url": at("/verify"),
 							"subject-url": at("/subject"),
+							"upstream-url": at("/upstream"),
 							credential,
 						},
 					}

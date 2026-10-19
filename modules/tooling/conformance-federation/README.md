@@ -28,6 +28,7 @@
 - The scenes touch only the HTTP interface.
 - Whether a browser is logged in is asked with a silent authorization request.
 - The new target reaches the fake upstream only because the scene names its host in outbound's `allow` and the upstream as a plain-http loopback destination.
+- On a pattern's app taking users from a ledger (`users-http`), a scene linking an identity from the deployment's own page is left out: the ledger, looking users up by upstream identity, holds the links.
 
 ## Depends on
 - `conformance`, `conformance-legacy`, `conformance-keys`, `conformance-identity`, `conformance-oauth`, `conformance-code`, `conformance-second-factor` (a second factor that holds a login, in the scenes only)
