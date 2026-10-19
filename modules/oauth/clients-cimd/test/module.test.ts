@@ -22,6 +22,7 @@ import {
 	OutboundUnavailable,
 	outbound,
 } from "@mod/outbound";
+import { type Limits, outboundLimits } from "@mod/outbound-policy";
 import { redirects } from "@mod/redirect-uris";
 import secretHashModule from "@mod/secret-hash/module";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -55,15 +56,20 @@ function json(body: unknown, headers: Record<string, string> = {}, status = 200)
 	};
 }
 
-/** Outbound as a test stand-in: it records each request and answers from the script. */
-const outboundStandIn = defineModule({ name: "outbound" }, (m) => [
-	m.provide(outbound).by(() => ({
-		fetch: async (url, request, narrower) => {
-			sent.push({ url, request, narrower });
-			return answer(url);
-		},
-	})),
-]);
+/** The operator's caps outbound answers: wide enough for the defaults, unless a test narrows them. */
+const wideCaps: Limits = { maxBytes: 65_536, timeoutMs: 5_000 };
+
+/** Outbound as a test stand-in: it records each request and answers from the script, under the caps given. */
+const outboundStandIn = (caps: Limits = wideCaps) =>
+	defineModule({ name: "outbound" }, (m) => [
+		m.provide(outbound).by(() => ({
+			fetch: async (url, request, narrower) => {
+				sent.push({ url, request, narrower });
+				return answer(url);
+			},
+		})),
+		m.provide(outboundLimits).by(() => ({ of: () => caps })),
+	]);
 
 /** The sections a document record carries, as their owners contribute them; client-allowance's taken as written. */
 const owners = defineModule({ name: "owners" }, (m) => [
@@ -88,12 +94,12 @@ const collector = defineModule({ name: "test-collector" }, (m) => [
 
 async function boot(
 	settings: Record<string, unknown> = {},
-	options: { code?: boolean; registered?: unknown[] } = {},
+	options: { code?: boolean; registered?: unknown[]; caps?: Limits } = {},
 ) {
 	const recording = recordingLog();
 	const app = await assemble({
 		modules: [
-			outboundStandIn,
+			outboundStandIn(options.caps),
 			clientsModule,
 			secretHashModule,
 			owners,
@@ -375,6 +381,27 @@ describe("clients-cimd: the operator's section", () => {
 		const error = await boot(settings).catch((e: unknown) => e);
 		expect(error).toBeInstanceOf(BootRefused);
 		expect((error as BootRefused).refusals.map((r) => r.where)).toContain(where);
+	});
+
+	it("refuses boot where the size or the timeout is above outbound's cap, naming the key and no value", async () => {
+		const caps = { maxBytes: 4096, timeoutMs: 1000 };
+		const error = await boot({ "max-size": "5KiB", timeout: "2s" }, { caps }).catch(
+			(e: unknown) => e,
+		);
+		expect(error).toBeInstanceOf(BootRefused);
+		const refusals = (error as BootRefused).refusals;
+		expect(refusals.map((r) => r.where)).toEqual(["clients-cimd.max-size", "clients-cimd.timeout"]);
+		expect(refusals.map((r) => r.reason)).toEqual([
+			"is above outbound's cap: lower it, or raise outbound.max-response-size",
+			"is above outbound's cap: lower it, or raise outbound.timeout",
+		]);
+		expect(JSON.stringify(refusals)).not.toMatch(/4096|5120|1000|2000/);
+	});
+
+	it("boots with the size and the timeout at outbound's cap or below it", async () => {
+		const caps = { maxBytes: 5120, timeoutMs: 5000 };
+		await expect(boot({}, { caps })).resolves.toBeDefined();
+		await expect(boot({ "max-size": "1KiB", timeout: "1s" }, { caps })).resolves.toBeDefined();
 	});
 
 	it("takes host names, one beyond ASCII by its punycode, as outbound's hosts", async () => {

@@ -18,6 +18,7 @@
 - An id is fetched only when it is https, has a path other than `/`, has no query, fragment, user information, IP literal or localhost, and is written exactly as the URL parser writes it.
 - Its host is checked before the fetch, spelled as `outbound` spells hosts: `deny` first, then a non-empty `allow`. An `allow` list also narrows `outbound`'s hosts.
 - The fetch goes only through `outbound`, asks for JSON, and narrows its size and time. Only a `200` with a JSON media type and one object is a document.
+- Boot is refused where `max-size` or `timeout` is above `outbound`'s cap, as its `outboundLimits` answers it, naming the key and no value.
 - The document's `client_id` equals the id. It has no `client_secret` or `client_secret_expires_at`, and its `token_endpoint_auth_method` is `none` or absent.
 - `redirect_uris` is a non-empty list of strings, put in `redirect-uris`' section (`authorize`) as it is. `grant_types` (default the code) holds the code; `response_types`, if present, holds `code`; `client_name` is not blank; `client_uri`, if present, is https without whitespace or control characters.
 - Its allowances come from `client-allowance` within the ceiling: the code, refresh only when the document names it, the scopes it asks (all the ceiling's when it asks none), the operator's audiences. An empty answer refuses the record.
