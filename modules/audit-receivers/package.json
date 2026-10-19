@@ -1,3 +1,7 @@
 {
-	"private": false
+	"private": false,
+	"description": "Audit event receivers (JSON lines on stdout, or posted to an HTTP endpoint) for auth-provider, a self-hosted OAuth 2.0 authorization server and OpenID Connect provider for Node.js.",
+	"keywords": [
+		"audit"
+	]
 }

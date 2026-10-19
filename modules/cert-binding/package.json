@@ -1,3 +1,8 @@
 {
-	"private": false
+	"private": false,
+	"description": "Mutual-TLS client certificate-bound tokens (RFC 8705) for auth-provider, a self-hosted OAuth 2.0 authorization server and OpenID Connect provider for Node.js.",
+	"keywords": [
+		"mtls",
+		"rfc8705"
+	]
 }

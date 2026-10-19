@@ -1,3 +1,4 @@
 {
-	"private": false
+	"private": false,
+	"description": "HTTP user ledger for auth-provider, a self-hosted OAuth 2.0 authorization server and OpenID Connect provider for Node.js: users, signer keys and subject revocation answered by your own HTTP service."
 }

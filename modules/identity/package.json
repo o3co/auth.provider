@@ -1,3 +1,9 @@
 {
-	"private": false
+	"private": false,
+	"description": "Clients, users, password login, CSRF protection and sessions for auth-provider, a self-hosted OAuth 2.0 authorization server and OpenID Connect provider for Node.js.",
+	"keywords": [
+		"login",
+		"session",
+		"csrf"
+	]
 }

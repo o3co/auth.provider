@@ -1,3 +1,4 @@
 {
-	"private": false
+	"private": false,
+	"description": "Store wirings for auth-provider, a self-hosted OAuth 2.0 authorization server and OpenID Connect provider for Node.js: each feature's records mapped to the storage it runs on."
 }

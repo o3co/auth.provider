@@ -21,7 +21,46 @@ export interface Release {
 	readonly repository?: string;
 	/** The workspace's copyright and license line, closing each package's README. */
 	readonly notice?: string;
+	/** The words every package of the release is found by on the registry. */
+	readonly keywords?: readonly string[];
 }
+
+/** What a package says of itself on the registry: its description, and the words it is found by. */
+export interface About {
+	readonly description: string;
+	readonly keywords: readonly string[];
+}
+
+/**
+ * What a package says of itself, as its declaration states it: its own description, and the
+ * release's keywords followed by its own, each once. Refuses a package without a description, or
+ * whose keywords are not a list of words.
+ */
+export function aboutOf(
+	name: string,
+	declared: { readonly description?: unknown; readonly keywords?: unknown },
+	release: Release,
+): { readonly about: About } | { readonly problem: string } {
+	const { description, keywords = [] } = declared;
+	if (typeof description !== "string" || description.trim() === "") {
+		return { problem: `${name}: states no description` };
+	}
+	if (!Array.isArray(keywords) || !keywords.every((word) => typeof word === "string")) {
+		return { problem: `${name}: its keywords are not a list of words` };
+	}
+	return {
+		about: { description, keywords: [...new Set([...(release.keywords ?? []), ...keywords])] },
+	};
+}
+
+/** The manifest fields a package's description and keywords become; none for keywords without one. */
+export const aboutFields = (about: About | undefined): Record<string, unknown> =>
+	about
+		? {
+				description: about.description,
+				...(about.keywords.length > 0 ? { keywords: about.keywords } : {}),
+			}
+		: {};
 
 /** A bundle's public name: the scope's prefix and its concern directory's name. */
 export const publicNameOf = (bundleDir: string) => `@o3co/auth-provider-${basename(bundleDir)}`;
@@ -33,13 +72,17 @@ const built = (memberDir: string, source: string) => {
 };
 
 /**
- * A bundle's package.json: each member's entries under its directory's name, built; other bundles
- * at the release's version; outside packages at the one version the members state; the members'
- * peers as optional, as only their test builders read them. Refuses an outside package stated at
- * two versions, naming both.
+ * A bundle's package.json: what it says of itself; each member's entries under its directory's
+ * name, built; other bundles at the release's version; outside packages at the one version the
+ * members state; the members' peers as optional, as only their test builders read them. Refuses
+ * an outside package stated at two versions, naming both.
  */
 export function bundleManifest(
-	bundle: { readonly dir: string; readonly members: readonly MemberManifest[] },
+	bundle: {
+		readonly dir: string;
+		readonly members: readonly MemberManifest[];
+		readonly about?: About;
+	},
 	release: Release,
 	bundleOf: (name: string) => string | undefined,
 ): { readonly manifest: Record<string, unknown> } | { readonly problems: readonly string[] } {
@@ -82,6 +125,7 @@ export function bundleManifest(
 		manifest: {
 			name: publicNameOf(bundle.dir),
 			version: release.version,
+			...aboutFields(bundle.about),
 			type: "module",
 			...(release.license ? { license: release.license } : {}),
 			...(release.repository
