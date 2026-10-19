@@ -328,7 +328,7 @@ describe("guard", () => {
 		).toEqual(["@t/split/src/inner dependencies 2 > 1"]);
 	});
 
-	it("counts no test table as test lines: fixtures and vectors", () => {
+	it("counts fixtures as test lines, but no other test table such as vectors", () => {
 		const line = "export const n = 1;\n";
 		const p = pkg("@t/tables", {
 			"src/contract.ts": line,
@@ -336,10 +336,23 @@ describe("guard", () => {
 			"test/fixtures/big.ts": line.repeat(10),
 			"test/cases.vectors.ts": line.repeat(10),
 		});
-		expect(check([p], { ...budget, testLines: 2 })).toEqual([]);
-		expect(check([p], { ...budget, testLines: 1 }).map((v) => v.detail)).toEqual([
-			"test lines 2 > 1",
+		expect(check([p], { ...budget, testLines: 12 })).toEqual([]);
+		expect(check([p], { ...budget, testLines: 11 }).map((v) => v.detail)).toEqual([
+			"test lines 12 > 11",
 		]);
+	});
+
+	it("holds every card item, nested ones too, to its bytes, naming its opening", () => {
+		const line = "export const n = 1;\n";
+		const p = pkg("@t/items", {
+			"src/contract.ts": line,
+			"src/inner/README.md": `# inner\n  - ${"y".repeat(40)}\n`,
+			"src/inner/x.ts": line,
+		});
+		expect(check([p], { ...budget, cardItemBytes: 44 })).toEqual([]);
+		expect(
+			check([p], { ...budget, cardItemBytes: 40 }).map((v) => `${v.where} ${v.detail}`),
+		).toEqual(["@t/items/src/inner card item bytes 44 > 40 (yyyyyyyyyyyy…)"]);
 	});
 
 	it("counts comment lines from the syntax tree, ignoring // inside strings, against a share or a floor", () => {
