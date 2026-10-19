@@ -734,8 +734,8 @@ From `@mod/client-assertion`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.client-assertion.keys` | list of map | `[]` |  |  |
-| `sections.client-assertion.jwks-uri` | string |  |  |  |
+| `sections.client-assertion.keys` | list of map | `[]` |  | The client's public keys for its assertions, as JWKs: RSA, EC or OKP, with no private member; never beside `jwks-uri`. |
+| `sections.client-assertion.jwks-uri` | string |  |  | Where the client publishes its key set, an https URL (http only where `outbound` allows plain http); never beside written `keys`. A registered client's one that `outbound` refuses refuses boot. |
 
 ### sections.client-secret
 
