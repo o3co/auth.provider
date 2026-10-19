@@ -13,6 +13,8 @@ import {
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { entryRequirements, participants, type Session, sessions } from "@mod/session";
+import sessionParticipants from "@mod/session-participants/module";
+import sessionRequirements from "@mod/session-requirements/module";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -77,6 +79,8 @@ async function boot(
 				http,
 				cookiesModule,
 				sessionLifecycle,
+				sessionRequirements,
+				sessionParticipants,
 				subjectRevocationStandIn,
 				stores.module,
 				participant,
@@ -126,6 +130,22 @@ describe("session cookies", () => {
 		expect((refused as BootRefused).refusals.map((r) => r.where)).toEqual([
 			"session-lifecycle.lifetime",
 		]);
+	});
+
+	it("refuses to boot where nothing keeps the entry requirements or the participants", async () => {
+		const refused = await assemble({
+			modules: [
+				http,
+				cookiesModule,
+				sessionLifecycle,
+				subjectRevocationStandIn,
+				memoryStores().module,
+			],
+			config: configWith(),
+			runtime,
+		}).catch((error) => error);
+		expect(refused).toBeInstanceOf(BootRefused);
+		expect((refused as BootRefused).refusals.map((r) => r.where)).toEqual(["session.entry-judge"]);
 	});
 
 	it("uses the lifetime it is given, to the millisecond", async () => {
@@ -415,7 +435,15 @@ describe("session entry", () => {
 			})),
 		]);
 		const other = await assemble({
-			modules: [http, cookiesModule, sessionLifecycle, failing, memoryStores().module],
+			modules: [
+				http,
+				cookiesModule,
+				sessionLifecycle,
+				sessionRequirements,
+				sessionParticipants,
+				failing,
+				memoryStores().module,
+			],
 			config: configWith(),
 			runtime,
 		});
@@ -947,7 +975,15 @@ describe("session raise", () => {
 		const random = { bytes: (n: number) => new Uint8Array(n).fill(++draws) };
 		const stores = memoryStores();
 		const other = await assemble({
-			modules: [http, cookiesModule, sessionLifecycle, moving, stores.module],
+			modules: [
+				http,
+				cookiesModule,
+				sessionLifecycle,
+				sessionRequirements,
+				sessionParticipants,
+				moving,
+				stores.module,
+			],
 			config: configWith({ lifetime: "1m" }),
 			runtime: quietRuntime({ clock: { now: () => now }, random }),
 		});

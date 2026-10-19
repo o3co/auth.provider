@@ -5,6 +5,8 @@ import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { entryRequirements, participants, sessions } from "@mod/session";
 import { type PlaceOptions, type SessionsPlace, sessionsContract } from "@mod/session/testing";
+import sessionParticipants from "@mod/session-participants/module";
+import sessionRequirements from "@mod/session-requirements/module";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { describe, expect, it } from "vitest";
@@ -49,6 +51,8 @@ async function placeOver(
 			http,
 			cookiesModule,
 			sessionLifecycle,
+			sessionRequirements,
+			sessionParticipants,
 			stores.module,
 			subjectRevocationStandIn,
 			...modules,

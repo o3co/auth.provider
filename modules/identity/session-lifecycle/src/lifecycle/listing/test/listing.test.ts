@@ -4,6 +4,8 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { participants, type Session, sessions } from "@mod/session";
+import sessionParticipants from "@mod/session-participants/module";
+import sessionRequirements from "@mod/session-requirements/module";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { expect, it } from "vitest";
@@ -31,6 +33,8 @@ async function boot(log = recordingLog()) {
 			http,
 			cookiesModule,
 			sessionLifecycle,
+			sessionRequirements,
+			sessionParticipants,
 			subjectRevocationStandIn,
 			stores.module,
 			closer,
