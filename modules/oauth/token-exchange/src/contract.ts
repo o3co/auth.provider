@@ -48,32 +48,10 @@ export interface ForeignToken extends ExchangedToken {
 /** What a verifier answers for a token it accepts, told apart by `kind`. */
 export type Exchanged = OwnToken | ForeignToken;
 
-/**
- * An answer before `kind`, still read until every verifier gives one: `clients` makes it foreign,
- * and `ceiling` says nothing more.
- * @deprecated answer `OwnToken` or `ForeignToken`.
- */
-export interface UnkindedExchanged extends ExchangedToken {
-	readonly kind?: undefined;
-	readonly issuedTo?: string;
-	readonly audience: readonly string[];
-	readonly scope: readonly string[];
-	readonly binding?: Binding;
-	readonly actor?: Actor;
-	readonly mayAct?: readonly { readonly sub?: string; readonly iss?: string }[];
-	readonly amr?: readonly string[];
-	readonly authenticatedAt?: number;
-	readonly acr?: string;
-	readonly issued?: string;
-	readonly clients?: readonly string[];
-	readonly ceiling?: "client";
-	readonly holderDigest?: string;
-}
-
 /** Verifies one token type; throws Unavailable when it cannot tell. */
 export interface ExchangeVerifier {
 	readonly tokenType: string;
-	verify(token: string): Promise<Exchanged | UnkindedExchanged | { readonly kind: "invalid" }>;
+	verify(token: string): Promise<Exchanged | { readonly kind: "invalid" }>;
 	/** Records a once-only token, once, after the second check and the policies' leave; throws Unavailable when it cannot tell. */
 	consume?(token: string): Promise<"consumed" | "replayed">;
 }

@@ -13,7 +13,6 @@
 - Extension point `token-exchange.verifiers`, one verifier per token type; a second for one type refuses the boot.
   - A verifier answers invalid, or a token by its `kind`, with its subject, issuer and expiry: `own`, naming the client by issued-to or audience, with its scope, audience, binding, actor chain and `may_act`; or `foreign`, another issuer's for an app, with `clients` (at least one) and `holderDigest`, `BASE64URL(SHA-256(jkt))` of the key a public client must hold. It throws unavailable when it cannot tell.
   - `issued` names a token this provider issued, so its family and session are found. Only the built-in verifier's `issued`, amr, authentication time and acr are read.
-  - An answer without `kind` is still read, foreign where it lists `clients` and own otherwise, until every verifier gives one.
   - `consume(token)`, optional: records a once-only token, answering `consumed` or `replayed`.
 - Client metadata section `token-exchange`: `others-tokens` (default false), whether the client may present tokens that do not name it; `public-exchange` (default false), whether a public client may exchange.
 - Operator section: `max-actor-depth` (1–10, default 3); `max-lifetime` (1s–1d, optional, written with its unit), the longest lifetime an exchange may ask for, even past `tokens`' lifetime.

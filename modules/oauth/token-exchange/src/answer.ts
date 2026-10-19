@@ -37,24 +37,14 @@ const holderDigest = z
 	.optional();
 const own = z.object({ kind: z.literal("own"), ...common, ...ownFields });
 const foreign = z.object({ kind: z.literal("foreign"), ...common, clients, holderDigest });
-/** An answer before `kind`, read until every verifier gives one. */
-const unkinded = z.object({
-	kind: z.undefined().optional(),
-	...common,
-	...ownFields,
-	clients: clients.optional(),
-	ceiling: z.literal("client").optional(),
-	holderDigest,
-});
 /** An answer is invalid or a token's details, told apart by `kind` alone. */
 const answer = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("invalid") }),
 	own,
 	foreign,
-	unkinded,
 ]);
 
-/** A foreign token from what an answer says of it, its scope and audience, if any, left out. */
+/** A foreign token as its answer says it, a holder digest only where one is given. */
 const foreignOf = (read: {
 	subject: string;
 	issuer: string;
@@ -69,13 +59,6 @@ const foreignOf = (read: {
 	clients: read.clients as [string, ...string[]],
 	...(read.holderDigest === undefined ? {} : { holderDigest: read.holderDigest }),
 });
-
-/** An answer before `kind` as one: one that lists clients is foreign, any other own. */
-function kinded(read: z.output<typeof unkinded>): Exchanged {
-	const { kind: _, clients, ceiling: __, holderDigest, ...rest } = read;
-	if (clients !== undefined) return foreignOf({ ...rest, clients, holderDigest });
-	return { kind: "own", ...rest } as OwnToken;
-}
 
 /** The verifiers built here, the only ones whose amr, authentication time, acr and `issued` are read. */
 const built = new WeakSet<ExchangeVerifier>();
@@ -117,11 +100,7 @@ export async function verified(
 	const parsed = answer.safeParse(await verifier.verify(token));
 	if (!parsed.success || parsed.data.kind === "invalid") return undefined;
 	const read: Exchanged =
-		parsed.data.kind === "foreign"
-			? foreignOf(parsed.data)
-			: parsed.data.kind === "own"
-				? (parsed.data as OwnToken)
-				: kinded(parsed.data);
+		parsed.data.kind === "foreign" ? foreignOf(parsed.data) : (parsed.data as OwnToken);
 	if (read.kind === "foreign") return deepFreeze(read);
 	const { amr, authenticatedAt, acr, issued, ...rest } = read;
 	// Only this provider's own tokens have a family or a session to look up.
