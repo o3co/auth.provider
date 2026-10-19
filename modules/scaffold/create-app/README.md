@@ -20,7 +20,9 @@
 - The configuration reference and each package's `reference.conf` (its section's defaults as HOCON, for reading only), from each section's schema and fragment, written by `pnpm --filter @mod/create-app run configuration`; their tests check each key's description and default, how time and size are written, and that no `.default()` is left (internal module `references`).
 - The audit event reference beside it: each module's events as its `./audit-events` declares them through `audit`, written by the same command and held to the committed file the same way.
 - A kind two modules declare must be declared alike in the audit event reference.
-- For full and a pattern: the project's manifest and app, the configuration file, the local layer's and the environment's examples, a Dockerfile, a `.dockerignore` and a README; a pattern's README opens with its use and carries its card.
+- For full and a pattern: the project's manifest and app, the configuration file, the local layer's and the environment's examples, a Dockerfile, a `.dockerignore`, a README and `AGENTS.md`; a pattern's README opens with its use and carries its card.
+  - The README lists each composed module's card as installed, and points at the `## Deployment` section of each card that has one (the index marks those when published).
+  - `AGENTS.md` indexes where each composed module's card and section defaults lie as installed, and where the release's configuration and route references lie; it states nothing of its own.
 
 ## Invariants
 - A target that holds anything is refused, never overwritten; a missing or empty one is taken.

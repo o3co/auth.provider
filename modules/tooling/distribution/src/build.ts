@@ -66,11 +66,18 @@ type Manifests = ReadonlyMap<
 	{ readonly bundle: string; readonly path: string; readonly written: MemberManifest }
 >;
 
+/** Whether a card has a section of what its module asks of the deployment. */
+const asksOfDeployment = (card: string) =>
+	existsSync(card) && /^## Deployment$/m.test(readFileSync(card, "utf8"));
+
 /**
  * The index a bundle may ask for: each shipped member's manifest as written, its public package
  * and entry, and its section's example, for a module that composes them from a bundle.
  */
-function indexOf(manifests: Manifests, version: string): string {
+function indexOf(
+	manifests: Manifests,
+	release: { readonly version: string; readonly repository?: string },
+): string {
 	const packages = [...manifests.entries()]
 		.sort(([a], [b]) => (a < b ? -1 : 1))
 		.map(([name, { bundle, path, written }]) => {
@@ -86,9 +93,14 @@ function indexOf(manifests: Manifests, version: string): string {
 				entry: `${publicNameOf(bundle)}/${written.dir}`,
 				manifest,
 				...(existsSync(fragment) ? { fragment: readFileSync(fragment, "utf8") } : {}),
+				// The section's defaults ship beside the member, for an app to point at.
+				...(existsSync(join(path, "reference.conf")) ? { references: true } : {}),
+				// Its card asks something of the deployment, for an app to point at that section.
+				...(asksOfDeployment(join(path, "README.md")) ? { deployment: true } : {}),
 			};
 		});
-	return `${JSON.stringify({ version, packages }, null, "\t")}\n`;
+	const { version, repository } = release;
+	return `${JSON.stringify({ version, ...(repository ? { repository } : {}), packages }, null, "\t")}\n`;
 }
 
 /**
@@ -240,7 +252,7 @@ export function buildBundles(input: {
 		}
 		built.push(publicNameOf(bundle.dir));
 		if (typeof declared.index === "string") {
-			writeFileSync(join(dest, declared.index), indexOf(manifests, input.release.version));
+			writeFileSync(join(dest, declared.index), indexOf(manifests, input.release));
 		}
 		for (const [name, entrance] of Object.entries(declared.entrances ?? {})) {
 			const made = entranceOf(name, entrance as Entrance, placed, input.release);

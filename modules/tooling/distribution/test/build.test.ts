@@ -40,6 +40,8 @@ beforeAll(() => {
 	);
 	write("modules/base/kernel/config.example", "kernel {}\n");
 	write("modules/base/kernel/trial.conf", "kernel {}\n");
+	write("modules/base/kernel/README.md", "# kernel\n\n## Deployment\n- A server it reaches.\n");
+	write("modules/base/kernel/reference.conf", "kernel {\n}\n");
 	write(
 		"modules/feature/package.json",
 		JSON.stringify({
@@ -126,9 +128,12 @@ it("builds each shipped bundle: its members' files built and named publicly, the
 
 it("writes the index a bundle asks for: each shipped member's manifest, public names and section example", () => {
 	const out = join(root, "dist-index");
-	buildBundles({ bundles: bundles(), release: { version: "0.18.0" }, out });
+	const repository = "https://github.com/o3co/auth.provider";
+	buildBundles({ bundles: bundles(), release: { version: "0.18.0", repository }, out });
 	const index = JSON.parse(readFileSync(join(out, "feature/index.json"), "utf8"));
 	expect(index.version).toBe("0.18.0");
+	// Where the release's documents are, which members ship their section's defaults, and whose card asks of the deployment.
+	expect(index.repository).toBe(repository);
 	expect(index.packages).toEqual([
 		{
 			name: "@mod/app",
@@ -142,6 +147,8 @@ it("writes the index a bundle asks for: each shipped member's manifest, public n
 			entry: "@o3co/auth-provider-base/kernel",
 			manifest: expect.objectContaining({ name: "@mod/kernel" }),
 			fragment: "kernel {}\n",
+			references: true,
+			deployment: true,
 		},
 	]);
 	expect(existsSync(join(out, "base/index.json"))).toBe(false);

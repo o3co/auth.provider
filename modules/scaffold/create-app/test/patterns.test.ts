@@ -21,6 +21,7 @@ import {
 } from "./checks.ts";
 import {
 	configured,
+	packageDirs as dirs,
 	generatedPattern,
 	importedModules as imports,
 	linked,
@@ -110,6 +111,20 @@ describe.each(named)("the pattern %s", (name) => {
 		expect(readme).toContain(patternNamed(name).use);
 		for (const line of card.split("\n").slice(1)) expect(readme).toContain(line);
 		expect(readme).toContain("`docker run --env-file .env -e HTTP_HOST=0.0.0.0 -e HTTP_PORT=8080 ");
+	});
+
+	it("points its README at the Deployment section of each composed module whose card has one", async () => {
+		const readme = await read(await generatedPattern(name), "README.md");
+		const asking = [kernel, ...modulesOf(name)].filter((module) =>
+			/^## Deployment$/m.test(readFileSync(join(dirs.get(module) as string, "README.md"), "utf8")),
+		);
+		const listed = [
+			...readme.matchAll(/^- `(@[^`]+)`: `node_modules\/\1\/README\.md#deployment`$/gm),
+		];
+		expect(listed.map((found) => found[1])).toEqual(asking);
+		expect(readme.includes("## What the composed modules ask of the deployment")).toBe(
+			asking.length > 0,
+		);
 	});
 
 	it("reads its fragments' scalars from env and writes their lists locally, holding no value", async () => {
