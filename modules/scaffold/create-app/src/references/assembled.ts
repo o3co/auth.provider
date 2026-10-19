@@ -21,6 +21,15 @@ export interface Contributed {
 	readonly schema: Schema;
 }
 
+/** A route as `http` holds it, as far as the reference reads it. */
+interface Route {
+	readonly method: string;
+	readonly path: string;
+	readonly takes?: readonly string[];
+	readonly uses?: readonly { readonly policy: { readonly label: string } }[];
+	readonly cors?: object;
+}
+
 /** A module as its definition holds it: its name, and the points it contributes to. */
 interface Definition {
 	readonly name: string;
@@ -31,24 +40,35 @@ interface Definition {
 const redis = "@mod/redis";
 const memory = "@mod/store";
 
-/** What the assembly collected: the client metadata sections, and the IdP types' settings. */
+/** A route as the reference reads it: the package whose module contributed it, and what it takes and passes through. */
+export interface RouteSeen {
+	readonly owner: string;
+	readonly method: string;
+	readonly path: string;
+	readonly takes?: readonly string[];
+	readonly policies: readonly string[];
+	readonly cors: boolean;
+}
+
+/** What the assembly collected: the client metadata sections, the IdP types' settings, and the routes. */
 export interface Assembled {
 	readonly clientSections: readonly Contributed[];
 	readonly idpTypes: readonly Contributed[];
+	readonly routes: readonly RouteSeen[];
 }
 
 let assembled: Promise<Assembled> | undefined;
 
-/** What full with every opt-in composes at two points, each in module order, by contributor; assembled once. */
+/** What full with every opt-in composes at three points, each in module order, by contributor; assembled once. */
 export function assembledIn(root: string): Promise<Assembled> {
 	assembled ??= collectedIn(root);
 	return assembled;
 }
 
-/** A point's contributions as the reference reads them: a name and a schema. */
-interface Point<T> {
+/** A point's contributions, and how the reference reads each. */
+interface Point<T, R> {
 	readonly point: ExtensionPoint<T>;
-	readonly read: (contribution: T) => { readonly name: string; readonly schema: Schema };
+	readonly read: (contribution: T) => R;
 }
 
 async function collectedIn(root: string): Promise<Assembled> {
@@ -63,26 +83,37 @@ async function collectedIn(root: string): Promise<Assembled> {
 	const modules = await Promise.all(
 		names.map(async (name) => ({ owner: name, module: (await entryOf(name, "./module")).default })),
 	);
-	const clients: Point<{ name: string; schema: Schema }> = {
+	const clients: Point<{ name: string; schema: Schema }, Omit<Contributed, "owner">> = {
 		point: (await entryOf("@mod/clients", ".")).metadataSections,
 		read: ({ name, schema }) => ({ name, schema }),
 	};
-	const types: Point<{ type: string; settings: Schema }> = {
+	const types: Point<{ type: string; settings: Schema }, Omit<Contributed, "owner">> = {
 		point: (await entryOf("@mod/upstreams", ".")).idpTypes,
 		read: ({ type, settings }) => ({ name: type, schema: settings }),
 	};
-	const probed =
-		contract<readonly [readonly unknown[], readonly unknown[]]>("references.collected");
+	const routes: Point<Route, Omit<RouteSeen, "owner">> = {
+		point: (await entryOf("@mod/http", ".")).routes,
+		read: ({ method, path, takes, uses, cors }) => ({
+			method,
+			path,
+			...(takes ? { takes } : {}),
+			policies: (uses ?? []).map((u) => u.policy.label),
+			cors: cors !== undefined,
+		}),
+	};
+	const probed = contract<readonly (readonly unknown[])[]>("references.collected");
 	const probe = defineModule({ name: "references-probe" }, (m) => [
 		m
 			.provide(probed)
-			.by(async (c) => [await c.collect(clients.point), await c.collect(types.point)] as const),
+			.by(async (c) =>
+				Promise.all([c.collect(clients.point), c.collect(types.point), c.collect(routes.point)]),
+			),
 	]);
 	const config = await trialConfig(root);
 	const app = await assemble({ modules: [...modules.map((m) => m.module), probe], config });
-	const [sections, idps] = app.get(probed);
+	const [sections = [], idps = [], served = []] = app.get(probed);
 	/** Each contribution read, by the package whose module contributed it, in module order. */
-	const byOwner = <T>({ point, read }: Point<T>, collected: readonly unknown[]) => {
+	const byOwner = <T, R>({ point, read }: Point<T, R>, collected: readonly unknown[]) => {
 		const owners = modules.flatMap(({ owner, module }) =>
 			(module as Definition).contributes.filter((c) => c.point === point).map(() => owner),
 		);
@@ -91,7 +122,11 @@ async function collectedIn(root: string): Promise<Assembled> {
 		}
 		return collected.map((c, i) => ({ owner: owners[i] as string, ...read(c as T) }));
 	};
-	return { clientSections: byOwner(clients, sections), idpTypes: byOwner(types, idps) };
+	return {
+		clientSections: byOwner(clients, sections),
+		idpTypes: byOwner(types, idps),
+		routes: byOwner(routes, served),
+	};
 }
 
 /** The full template's configuration with every opt-in, on the trial's settings, its store kept in memory. */
