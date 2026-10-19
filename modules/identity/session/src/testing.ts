@@ -27,6 +27,7 @@ export function stubSessions(parts: Partial<Sessions> = {}): Sessions {
 		},
 		close: async () => ({ kind: "closed", cookies: [] }),
 		closeRequest: async () => ({ kind: "closed", cookies: [] }),
+		entryOf: async () => ({ kind: "absent" }),
 		stillOpen: async () => false,
 		openContext: async () => undefined,
 		endsAt: async () => undefined,
@@ -148,6 +149,27 @@ export function sessionsContract(
 			place.advance(1);
 			expect(await place.sessions.enter(place.request(lived.cookies))).toBeUndefined();
 			expect(await place.sessions.openContext(lived.session.id)).toBeUndefined();
+		});
+
+		it("answers by handle the entry its cookie would get: entered with its end, short at a level it falls short of, absent once closed or revoked", async () => {
+			const place = await open();
+			const done = await place.sessions.complete(place.request(), facts(place));
+			const endsAt = done.session.context.authenticatedAt + place.lifetimeMs;
+			expect(await place.sessions.entryOf(done.session.id)).toMatchObject({
+				kind: "entered",
+				session: { id: done.session.id, context: { subject: "alice" } },
+				endsAt,
+			});
+			expect(await place.sessions.entryOf(done.session.id, "credentials")).toMatchObject({
+				kind: "short",
+			});
+			expect((await place.sessions.entryOf(done.session.id, "none")).kind).toBe("entered");
+			const revoked = await place.sessions.complete(place.request(), facts(place, "bob"));
+			await place.revokeSubject("bob");
+			expect(await place.sessions.entryOf(revoked.session.id)).toEqual({ kind: "absent" });
+			await place.sessions.close(done.session.id);
+			expect(await place.sessions.entryOf(done.session.id)).toEqual({ kind: "absent" });
+			expect(await place.sessions.entryOf("x".repeat(43))).toEqual({ kind: "absent" });
 		});
 
 		it("tells an entered session when it ends: its opening and the lifetime in force", async () => {
@@ -648,6 +670,7 @@ export const sessionStandIn = defineModule({ name: "session" }, (m) => [
 			recent: (at) => c.clock.now() - at <= sessionRules.credentialsSecondsDefault * 1000,
 			enter: async (request) => (await enteredAt(handleIn(request)))?.session,
 			enterFor: (request, level) => enterAt(handleIn(request), level),
+			entryOf: (handle, level = "use") => enterAt(handle, level),
 			stillOpen: async (handle) => (await enteredAt(handle)) !== undefined,
 			openContext: async (handle) => (await enteredAt(handle))?.session.context,
 			endsAt: async (handle) => (await enteredAt(handle))?.endsAt,
