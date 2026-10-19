@@ -26,7 +26,7 @@ export function clientCredentials(issuer: string): Grant {
 					access_token: token,
 					token_type: tokenType,
 					expires_in: expiresIn,
-					...(scope.length > 0 ? { scope: scope.join(" ") } : {}),
+					scope: scope.join(" "),
 				},
 			};
 		},
