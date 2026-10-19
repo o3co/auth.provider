@@ -10,13 +10,13 @@
 
 ## Offers
 - Area `recipes`: its part names the modules a recipe's command composes, set up on Redis where the command composes it and with a second factor required where it composes `mfa`, and `localConf`, the `config/local.conf` its reader writes, which the app boots as written, below the set-up's sections. It has no legacy set-up: recipes run on the new system only.
-- `commands`: each recipe's generate command after the target, and `shownCommand`, the command as a reader types it.
+- `commands`: each recipe's generate command after the target, and `shownCommand`, the command as a reader types it. `scripts`: the scripts a reader runs with `node -e`, and `shownScript`, a script as typed.
 - `composedBy` (command, workspace → the modules the app it generates depends on), `transcript` (a recorder of a scene's exchanges, by block), `withBlocks` (a document and its blocks' text → the document rewritten).
 - `pnpm --filter @mod/conformance-recipes run examples`: rewrites each recipe's generated blocks from a run.
 - `pnpm --filter @mod/conformance-recipes run external`, with `RECIPES_TARBALLS` naming the packed release (`pnpm bundles`, then `.github/scripts/pack-published.sh <dir>`): the recipes written against the published packages, built and run from the tarballs alone; with `RECIPES_WRITE=1` it rewrites their blocks.
 
 ## Invariants
-- A recipe's generate command is one constant, shown in its document and run by its scene.
+- A recipe's generate command, and each script it has its reader run, is one constant, shown in its document and run by its scene.
 - A generated block sits between `<!-- generated:<name> -->` and `<!-- end generated -->`. Only the text between marks is rewritten; a block with no marks, marks with no block, a name marked twice and an unclosed mark are each refused.
 - A recipe on the workspace's modules runs on every pull request, as an integration test; one written against the published packages runs in the release check, against the packed release. Each fails when a committed block differs from what its run records, naming the command that rewrites it.
 - A recipe's outside package is a fixture compiled against the published packages' declarations; its source is kept out of the workspace's own type check, and shown in the recipe as its author writes it.
