@@ -1,7 +1,8 @@
 import { defineModule } from "@mod/kernel";
 import { enforcers, factors } from "@mod/mfa";
 import { factorKinds, secondFactorAmr } from "@mod/mfa-extensions";
-import { type AuthContext, entryRequirements, sessions } from "@mod/session";
+import { type AuthContext, sessions } from "@mod/session";
+import { entryRequirements } from "@mod/session-requirements";
 import { secondFactors } from "./contract.ts";
 
 const admit = { kind: "admit" } as const;

@@ -13,8 +13,10 @@ import {
 import { quietRuntime } from "@mod/kernel/testing";
 import { type Enforcer, enforcers, type Factors, factors } from "@mod/mfa";
 import { type FactorKind, factorKinds, secondFactorAmr } from "@mod/mfa-extensions";
-import { type EntryRequirement, entryRequirements, sessionRules, sessions } from "@mod/session";
+import { sessionRules, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import { type EntryRequirement, entryRequirements } from "@mod/session-requirements";
+import sessionRequirements from "@mod/session-requirements/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { secondFactors } from "../src/contract.ts";
@@ -66,6 +68,7 @@ async function serve(
 		modules: [
 			http,
 			sessionStandIn,
+			sessionRequirements,
 			subjectRevocationStandIn,
 			stand.module,
 			kindsModule,

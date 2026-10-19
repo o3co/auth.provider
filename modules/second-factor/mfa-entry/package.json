@@ -16,7 +16,8 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/mfa": "workspace:*",
 		"@mod/mfa-extensions": "workspace:*",
-		"@mod/session": "workspace:*"
+		"@mod/session": "workspace:*",
+		"@mod/session-requirements": "workspace:*"
 	},
 	"devDependencies": {
 		"@mod/http": "workspace:*",
