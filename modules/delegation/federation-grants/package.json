@@ -35,6 +35,7 @@
 		"@mod/cookies": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
+		"@mod/session-requirements": "workspace:*",
 		"@mod/store": "workspace:*",
 		"vitest": "5.0.4"
 	}

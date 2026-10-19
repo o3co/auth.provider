@@ -7,8 +7,10 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import type { Seal } from "@mod/seal";
-import { type EntryRequirement, entryRequirements, sessions } from "@mod/session";
+import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import { type EntryRequirement, entryRequirements } from "@mod/session-requirements";
+import sessionRequirements from "@mod/session-requirements/module";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import type {
@@ -152,7 +154,14 @@ export async function connector(
 		(options.requirements ?? []).map((r) => m.contribute(entryRequirements).by(() => r)),
 	);
 	const app = await assemble({
-		modules: [http, sessionStandIn, subjectRevocationStandIn, recorded.module, requirements],
+		modules: [
+			http,
+			sessionStandIn,
+			sessionRequirements,
+			subjectRevocationStandIn,
+			recorded.module,
+			requirements,
+		],
 		config: { ...kernelConfig(), ...httpConfig({ "public-origin": origin }) },
 		runtime,
 	});
