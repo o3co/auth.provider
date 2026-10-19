@@ -256,6 +256,7 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		if (!found) return { kind: "absent" };
 		const session = sessionOf(handle, found);
 		const short = await shortOf(session.context, level);
+		if (!(await liveAt(handle))) return { kind: "absent" };
 		if (short) return { kind: "short", ...short };
 		return { kind: "entered", session, endsAt: found.openedAt + lifetimeMs };
 	};

@@ -289,6 +289,36 @@ describe("session entry", () => {
 		expect((await s.entryOf("unknown")).kind).toBe("absent");
 	});
 
+	it("lets nobody in whose subject is revoked while the entry requirements are asked", async () => {
+		const asked: { gate?: Promise<void>; reached?: () => void } = {};
+		const waiting = defineModule({ name: "waiting" }, (m) => [
+			m.contribute(entryRequirements).by(() => ({
+				name: "waiting",
+				judges: ["use"],
+				admits: async () => {
+					asked.reached?.();
+					await asked.gate;
+					return { kind: "admit" };
+				},
+			})),
+		]);
+		const { s, withCookie, login, app } = await boot({}, [waiting]);
+		const a = await login("alice");
+		now += 60_000;
+		let open = () => {};
+		asked.gate = new Promise((resolve) => {
+			open = resolve;
+		});
+		const reached = new Promise<void>((resolve) => {
+			asked.reached = resolve;
+		});
+		const entering = s.enterFor(withCookie(a), "use");
+		await reached;
+		await app.get(subjectRevocation).revoke("alice");
+		open();
+		expect(await entering).toEqual({ kind: "absent" });
+	});
+
 	it("lets nobody in past the subject's revocation", async () => {
 		const { s, withCookie, login, app } = await boot();
 		const a = await login("alice");
