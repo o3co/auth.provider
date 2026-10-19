@@ -24,7 +24,7 @@
 - An acr is known only by its exact name as an own entry of the table.
 - The operator's table wins over an entry offered for the same acr.
 - An offered entry's sets follow the operator's rule, non-empty sets in a non-empty list; boot is refused for any other.
-- Boot is refused when an acr in the table has no set a declared way of logging in can meet.
+- Boot is refused when an acr in the table has no set a declared way of logging in can meet: a configured one at `acr.values.<acr>`, never in the text; an offered one, a module's own name, by that name.
 
 ## Data
 - The table, read once at boot; nothing is stored.
