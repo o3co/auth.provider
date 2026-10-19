@@ -30,8 +30,8 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | POST | `/oauth/logout` | `@mod/rp-logout` | form, none | `rate-limit.requests-per-source` | yes | RP-initiated logout is a navigation from the RP's site by design; it closes only the session that a hint the provider signed names. | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/revoke` | `@mod/token-control` | form | `rate-limit.requests-per-source` | yes | It reads no cookie: revoking needs the token itself, which a public client may revoke for itself (RFC 7009). | `rate-limit.requests-per-source` | yes |
 | POST | `/oauth/token` | `@mod/token-endpoint` | form, json, none | `rate-limit.requests-per-source` | yes | Authorization is per grant; a grant that reads a cookie declares it and checks the origin itself. | `rate-limit.requests-per-source` | yes |
-| GET | `/oauth/userinfo` | `@mod/userinfo` | form, json, none |  |  |  |  | yes |
-| POST | `/oauth/userinfo` | `@mod/userinfo` | form, json, none |  | yes |  |  | yes |
+| GET | `/oauth/userinfo` | `@mod/userinfo` | form, json, none |  | no |  |  | yes |
+| POST | `/oauth/userinfo` | `@mod/userinfo` | form, json, none |  | yes | The access token comes in the Authorization header, never a cookie, and it only reads. | It is authenticated by a bearer access token and only reads. | yes |
 | POST | `/oauth/webauthn/authentication/options` | `@mod/webauthn-login` | json, form, none | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/webauthn/registration/options` | `@mod/passkey-registration` | json, none | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/webauthn/registration/verify` | `@mod/passkey-registration` | json, none | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |

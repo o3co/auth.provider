@@ -45,6 +45,13 @@ export default defineModule({ name: "userinfo", replicaSafe: true }, (m) => [
 			cors,
 			// A POST may carry a body, but the token is read from the header only.
 			takes: ["form", "json", "none"],
+			...(method === "GET"
+				? { changesState: false }
+				: {
+						crossSite:
+							"The access token comes in the Authorization header, never a cookie, and it only reads.",
+						unlimited: "It is authenticated by a bearer access token and only reads.",
+					}),
 			handle: await handlerOf(c),
 		})),
 	),

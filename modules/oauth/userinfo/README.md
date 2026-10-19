@@ -7,7 +7,7 @@
 - The claim table and mapping attributes to claims (`oidc`). A token's validity (`tokens`) and its holder's proof (`sender-binding`). Whether a session is open (`session`). Which session a token was issued in (`session-tokens`). How cross-origin requests are answered (`http`).
 
 ## Offers
-- Routes `GET` and `POST /oauth/userinfo`, taking cross-origin requests from the operator's origins: a page may send `authorization`, `dpop` and `content-type`, and read `www-authenticate`, `dpop-nonce` and `retry-after`.
+- Routes `GET` and `POST /oauth/userinfo`, the GET declared not to change state and the POST to take requests from other sites without a per-source limit, taking cross-origin requests from the operator's origins: a page may send `authorization`, `dpop` and `content-type`, and read `www-authenticate`, `dpop-nonce` and `retry-after`.
 - The issuer's metadata `userinfo_endpoint`.
 
 ## Invariants
