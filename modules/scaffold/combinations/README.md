@@ -18,6 +18,7 @@
 - `composed` refuses, naming each: a name the workspace lacks, a group value that is not a feature, an addition that is not a feature or adapter with a module, an axis key that owns no axis, an axis value that is neither its adapter nor its owner, and an owner chosen for its own axis that has no module.
 - `needed` (modules): the modules given, what they need to run, then `completed`, as `composed` reaches them but with no axis default other than one declared to replace its owner; owners a reached adapter replaces are left out. It refuses, naming each, a name the workspace lacks, as `composed` does.
 - `full` (modules added): every foundation and feature with a module that does not opt in, composed alike. `optIns`: the features that opt in.
+- `addable`: the names a selection or the full template may add (a feature or an adapter, with a module), in code point order; `composed` and `full` refuse any other.
 - `published` (modules): built into a bundle, each name given as published, in the order given: `{ name, package, entry }`, the bundle to depend on and the path its entries import under (a module at `<entry>/module`), read from the index's entries. It refuses, naming each, a name no bundle publishes; in the workspace, where nothing is published, it refuses every name.
 - `kinds`: the kinds a package's manifest may name, the one place their words are written.
 

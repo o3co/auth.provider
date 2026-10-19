@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { completed } from "@mod/combinations";
+import { addable, completed } from "@mod/combinations";
 import { kernelConfig } from "@mod/kernel";
 import { expect, it, vi } from "vitest";
 import { generate, run } from "../src/contract.ts";
@@ -278,4 +278,18 @@ it("answers --help with the usage on standard output, and an option it does not 
 			/^.*'--(nope|pattern).*\nusage: create-auth-provider <target>/s,
 		);
 	}
+});
+
+it("answers --list with what --add takes, one name a line, writing nothing", async () => {
+	const [out, err]: [string[], string[]] = [[], []];
+	const io = { out: (text: string) => out.push(text), err: (text: string) => err.push(text) };
+	expect(await run(["--list"], io)).toBe(0);
+	expect(out.join("")).toBe(`${addable().join("\n")}\n`);
+	expect(addable()).toContain("@mod/dpop");
+	expect(err).toEqual([]);
+	expect(await run(["--list", "app"], io)).toBe(64);
+	expect(out.join("")).not.toContain("created");
+	const [help] = [[] as string[]];
+	await run(["--help"], { out: (text) => help.push(text), err: () => {} });
+	expect(help.join("")).toContain("create-auth-provider --list");
 });

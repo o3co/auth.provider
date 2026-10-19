@@ -1,6 +1,13 @@
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { completedOf, composedWith, fullWith, neededWith, optInsOf } from "../src/composed.ts";
+import {
+	addableOf,
+	completedOf,
+	composedWith,
+	fullWith,
+	neededWith,
+	optInsOf,
+} from "../src/composed.ts";
 import { declaredIn } from "../src/declared.ts";
 
 // Generating and reading a workspace spawn pnpm, slow on a loaded machine.
@@ -70,6 +77,16 @@ it("adds any feature asked for, with its axis's default only once it is composed
 	const wired = fullWith(declared, ["@c/wired"]);
 	expect(wired).toContain("@c/wired");
 	expect(wired.at(-1)).toBe("@c/wired-store");
+});
+
+it("names what can be added, in code point order, each taken and nothing else", () => {
+	const addable = addableOf(declared);
+	expect(addable).toEqual([...addable].sort());
+	expect(addable).toEqual(expect.arrayContaining(["@c/mailer", "@c/own-wording", "@c/wired"]));
+	for (const name of addable) expect(() => fullWith(declared, [name]), name).not.toThrow();
+	for (const name of declared.packages.keys()) {
+		if (!addable.includes(name)) expect(() => fullWith(declared, [name]), name).toThrow();
+	}
 });
 
 it("names the features that opt in", () => {
