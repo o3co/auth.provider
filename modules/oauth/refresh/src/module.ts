@@ -1,7 +1,7 @@
 import { additions } from "@mod/code-grant";
 import { grants } from "@mod/grants";
 import { defineModule } from "@mod/kernel";
-import { participants } from "@mod/session";
+import { participants } from "@mod/session-participants";
 import { revocableKinds } from "@mod/token-control";
 import { accessConditions } from "@mod/tokens";
 import { lineage } from "./contract.ts";
