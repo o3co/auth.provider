@@ -4,6 +4,8 @@
 [![npm](https://img.shields.io/npm/v/@o3co/create-auth-provider/next)](https://www.npmjs.com/package/@o3co/create-auth-provider)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
+English | [日本語](README.ja.md)
+
 An OAuth 2.0 and OpenID Connect provider, built from small modules that a generated app assembles. You choose the modules a deployment needs; each one brings its routes, its settings and its stores, and refuses to boot when what it needs is missing.
 
 0.18 is a rewrite of 0.17 under new package names. To move a 0.17 deployment, read the [migration guide](docs/migration.md) first.
@@ -82,6 +84,8 @@ Each module reads its own section of HOCON configuration, and refuses boot on an
 
 Releases before 1.0 may break in a minor version; each breaking release has a migration guide. Release candidates are published under the npm `next` tag.
 
+Security fixes are released for the latest 0.18.x. To report a vulnerability, follow the [security policy](SECURITY.md).
+
 ## Development
 
 ```sh
@@ -90,6 +94,8 @@ pnpm check
 ```
 
 `pnpm check` runs the type check, lint, tests, the guard and the distribution check. Tests that need Docker run with `pnpm test:integration`.
+
+How changes are made, checked and committed is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Related projects
 
