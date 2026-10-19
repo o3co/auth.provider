@@ -51,6 +51,26 @@ const contextOf = (session: string, idp: string) => `federation-tokens\n${sessio
 
 /** Seals and opens a session's upstream tokens, and reads and writes the record they are kept in. */
 export function vaultWith(seal: Seal) {
+	const read = (
+		session: string,
+		idp: string,
+		entry: Entry,
+	): { readonly kept: Kept; readonly resealed?: Entry } | undefined => {
+		const opened = seal.open(entry.sealed, contextOf(session, idp));
+		if (opened.kind !== "opened") return undefined;
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(opened.plain);
+		} catch {
+			return undefined;
+		}
+		const shaped = keptShape.safeParse(parsed);
+		if (!shaped.success) return undefined;
+		const kept = shaped.data as Kept;
+		if (!opened.stale) return { kept };
+		const sealed = seal.seal(opened.plain, contextOf(session, idp));
+		return { kept, resealed: { version: entry.version, sealed } };
+	};
 	return {
 		/** The record's entries; a record of another shape holds none. */
 		entriesOf: (stored: StoredUpstreamTokens | undefined): Entries => {
@@ -61,16 +81,10 @@ export function vaultWith(seal: Seal) {
 		recordOf: (entries: Entries) =>
 			({ format: 1, idps: entries }) as unknown as StoredUpstreamTokens,
 		/** Opened tokens, or none when they do not open or hold another shape. */
-		open: (session: string, idp: string, entry: Entry): Kept | undefined => {
-			const opened = seal.open(entry.sealed, contextOf(session, idp));
-			if (opened.kind !== "opened") return undefined;
-			try {
-				const read = keptShape.safeParse(JSON.parse(opened.plain));
-				return read.success ? (read.data as Kept) : undefined;
-			} catch {
-				return undefined;
-			}
-		},
+		open: (session: string, idp: string, entry: Entry): Kept | undefined =>
+			read(session, idp, entry)?.kept,
+		/** Opened tokens with one opening, and the entry sealed again where a past key sealed it; none as `open`. */
+		read,
 		/** The entry sealed again under the current key when a past key sealed it, else as it is; none when it does not open. */
 		resealed: (session: string, idp: string, entry: Entry): Entry | undefined => {
 			const opened = seal.open(entry.sealed, contextOf(session, idp));

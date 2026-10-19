@@ -61,6 +61,29 @@ describe("the vault", () => {
 		}
 	});
 
+	it("reads an entry with one opening: its tokens, and it sealed again where a past key sealed it", () => {
+		const kept = { accessToken: "a", tokenType: "Bearer", granted: [], scope: [] };
+		let opened = 0;
+		const counting = (stale: boolean): Seal => ({
+			seal: (plain) => `again:${plain}`,
+			open: (sealed) => {
+				opened++;
+				if (!sealed.startsWith("{")) return { kind: "refused" };
+				return { kind: "opened", plain: sealed, ...(stale ? { stale: true } : {}) };
+			},
+		});
+		expect(vaultWith(counting(false)).read("s", "corp", entry(kept))).toEqual({ kept });
+		expect(vaultWith(counting(true)).read("s", "corp", entry(kept))).toEqual({
+			kept,
+			resealed: { version: "v", sealed: `again:${JSON.stringify(kept)}` },
+		});
+		expect(opened).toBe(2);
+		expect(
+			vaultWith(counting(true)).read("s", "corp", { version: "v", sealed: "x" }),
+		).toBeUndefined();
+		expect(vaultWith(counting(true)).read("s", "corp", entry(["a"]))).toBeUndefined();
+	});
+
 	it("reads no entries from a record of another format or shape", () => {
 		const idps = { corp: { version: "v", sealed: "x" } };
 		expect(vault.entriesOf(stored({ format: 1, idps }))).toEqual(idps);
