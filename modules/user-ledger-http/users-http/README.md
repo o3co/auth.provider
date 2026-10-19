@@ -47,4 +47,4 @@
 - Holds no state, so it is safe on multiple instances.
 
 ## Depends on
-- `kernel`, `users`, `outbound`, `url-setting`, `keys` (the credential's rule)
+- `kernel`, `users`, `outbound`, `outbound-policy`, `url-setting`, `keys` (the credential's rule)

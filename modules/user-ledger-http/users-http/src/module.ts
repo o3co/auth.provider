@@ -1,6 +1,7 @@
 import { deepFreeze, defineModule, setting } from "@mod/kernel";
 import { bearerToken } from "@mod/keys";
-import { credentialPolicy, destinationRefusal, outbound, outboundRefusals } from "@mod/outbound";
+import { outbound } from "@mod/outbound";
+import { credentialPolicy, destinationRefusal, outboundRefusals } from "@mod/outbound-policy";
 import { urlSetting } from "@mod/url-setting";
 import { type Ledger, ledgers } from "@mod/users";
 import { z } from "zod";
