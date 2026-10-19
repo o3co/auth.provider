@@ -21,6 +21,6 @@ export const ssoFederated: Pattern = {
 		],
 		grants: simpleWeb.features.grants ?? [],
 	},
-	areas: ["keys", "identity", "code", "oauth", "ops"],
+	areas: ["keys", "identity", "code", "oauth", "federation", "ops"],
 	conformanceAdd: ["@mod/login-password"],
 };

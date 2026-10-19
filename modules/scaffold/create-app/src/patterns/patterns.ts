@@ -37,6 +37,7 @@ const fullSummary: PatternSummary = {
 		"mtls",
 		"passkey",
 		"exchange",
+		"federation",
 		"ops",
 	],
 	conformanceAdd: [],

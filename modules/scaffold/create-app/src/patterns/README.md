@@ -20,6 +20,7 @@
 - A pattern writes no configuration value: its card names the keys the deployment provides for its use; what the store, users, audit and mail chosen ask is told from the modules composed (`chosen`), whatever the pattern's default.
 - A group the operator names that is not one of the groups is refused, naming it.
 - The memory store (`store` chosen as its own axis) means one instance.
+- A pattern, and the full template, runs every conformance area whose module it composes.
 - Module names are written here and in the operator's flags only.
 
 ## Depends on
