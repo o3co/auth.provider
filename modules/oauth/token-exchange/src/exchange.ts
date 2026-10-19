@@ -9,7 +9,12 @@ import type { Sessions } from "@mod/session";
 import type { SessionTokens } from "@mod/session-tokens";
 import type { Actor, IssuedAccess, Tokens } from "@mod/tokens";
 import { verified } from "./answer.ts";
-import { accessTokenType, type Exchanged, type ExchangeVerifier } from "./contract.ts";
+import {
+	accessTokenType,
+	type Exchanged,
+	type ExchangeVerifier,
+	type OwnToken,
+} from "./contract.ts";
 
 export const grantType = "urn:ietf:params:oauth:grant-type:token-exchange";
 
@@ -69,7 +74,12 @@ const holds = (binding: Binding | undefined, digest: string | undefined) =>
 	createHash("sha256").update(binding.confirmation, "ascii").digest("base64url") === digest;
 
 /** Whether `may_act`, if the subject token has one, names the party acting; a client has no issuer. */
+/** The token's own details where it has them: a foreign token holds none. */
+const ownOf = (token: Exchanged | undefined): OwnToken | undefined =>
+	token?.kind === "own" ? token : undefined;
+
 const mayActFor = (subject: Exchanged, party: { readonly sub: string; readonly iss?: string }) =>
+	subject.kind === "foreign" ||
 	subject.mayAct === undefined ||
 	subject.mayAct.some(
 		({ sub, iss }) =>
@@ -79,7 +89,7 @@ const mayActFor = (subject: Exchanged, party: { readonly sub: string; readonly i
 	);
 
 export function exchangeGrant(parts: Parts): Grant {
-	/** A token verified, unexpired, naming the client or listing it in `clients`; a once-only or client-ceiling one never acts. */
+	/** A token verified, unexpired, naming the client, or foreign and listing it; a once-only or foreign one never acts. */
 	const presented = async (
 		client: Client,
 		role: Role,
@@ -92,20 +102,21 @@ export function exchangeGrant(parts: Parts): Grant {
 		if (!answer) return refused(`${role}_token validation failed`);
 		if (answer.expiresAt - parts.now() < expiryMarginMs)
 			return refused(`${role}_token has expired`);
-		if (role === "actor" && (verifier.consume || answer.ceiling))
+		if (role === "actor" && (verifier.consume || answer.kind === "foreign"))
 			return refused("actor_token cannot act");
-		const named = answer.clients
-			? answer.clients.includes(client.id)
-			: answer.issuedTo === client.id ||
-				answer.audience.includes(client.id) ||
-				parts.othersTokens(client);
+		const named =
+			answer.kind === "foreign"
+				? answer.clients.includes(client.id)
+				: answer.issuedTo === client.id ||
+					answer.audience.includes(client.id) ||
+					parts.othersTokens(client);
 		if (!named) return refused(`${role}_token does not name this client`);
 		return answer;
 	};
 
 	/** The family and session a token of this provider ends with, refused once either has ended. */
 	const tieOf = async (role: Role, token: Exchanged): Promise<Tie | Refusal> => {
-		if (token.issued === undefined) return { kind: "alone" };
+		if (token.kind === "foreign" || token.issued === undefined) return { kind: "alone" };
 		const family = await parts.lineage.of(token.issued);
 		if (family.kind === "ended") return refused(`${role}_token family has ended`);
 		// A family's token is recorded to its session too: the policies hear of it on either path.
@@ -142,7 +153,7 @@ export function exchangeGrant(parts: Parts): Grant {
 
 	/** The scope and the one audience asked for, within the subject token's and the client's. */
 	const targetOf = (input: GrantInput, subject: Exchanged) => {
-		if (subject.ceiling === "client") return clientTargetOf(input);
+		if (subject.kind === "foreign") return clientTargetOf(input);
 		const { client, param } = input;
 		const allows = (scope: string) => clientAllowance.allowsScope(client, scope);
 		const asked = clientAllowance.parseScope(param("scope"));
@@ -182,16 +193,20 @@ export function exchangeGrant(parts: Parts): Grant {
 	/** The holder, the binding, the actor chain, `may_act` and the target, in that order; a refusal stops them. */
 	const policyOf = (input: GrantInput, subject: Exchanged, actor: Exchanged | undefined) => {
 		// A public client has no secret: the key it proves must be the one the token was given for.
-		if (input.client.kind !== "confidential" && !holds(input.binding, subject.holderDigest)) {
+		const digest = subject.kind === "foreign" ? subject.holderDigest : undefined;
+		if (input.client.kind !== "confidential" && !holds(input.binding, digest)) {
 			return refused("the request does not prove the key the subject token names");
 		}
 		// issue binds the new token to the request's proof; this checks no binding is washed off.
-		if (carried([subject.binding, actor?.binding], input.binding).kind === "refused") {
+		if (
+			carried([ownOf(subject)?.binding, ownOf(actor)?.binding], input.binding).kind === "refused"
+		) {
 			return refused("the request does not prove the binding of the tokens presented");
 		}
+		const held = ownOf(subject)?.actor;
 		const chain: Actor | undefined = actor && {
 			subject: actor.subject,
-			...(subject.actor ? { actor: subject.actor } : {}),
+			...(held ? { actor: held } : {}),
 		};
 		if (depthOf(chain) > parts.maxActorDepth) return refused("actor chain too deep");
 		const party = actor ? { sub: actor.subject, iss: actor.issuer } : { sub: input.client.id };
@@ -267,16 +282,15 @@ export function exchangeGrant(parts: Parts): Grant {
 			if (isRefusal(last)) return last;
 			const { tie } = last;
 			const { notAfter, lifetimeSeconds } = expiryOf(subject, tie, asked);
+			const own = ownOf(subject);
 			const access = {
 				subject: subject.subject,
 				issuedTo: client.id,
 				...target,
 				...(chain ? { actor: chain } : {}),
-				...(subject.amr ? { amr: subject.amr } : {}),
-				...(subject.authenticatedAt === undefined
-					? {}
-					: { authenticatedAt: subject.authenticatedAt }),
-				...(subject.acr === undefined ? {} : { acr: subject.acr }),
+				...(own?.amr ? { amr: own.amr } : {}),
+				...(own?.authenticatedAt === undefined ? {} : { authenticatedAt: own.authenticatedAt }),
+				...(own?.acr === undefined ? {} : { acr: own.acr }),
 			};
 			const from = tie.kind !== "alone" && tie.session ? { session: tie.session } : {};
 			// A once-only token is used up last: after the policies' leave, so a refusal leaves it usable.

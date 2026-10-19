@@ -11,20 +11,20 @@
 ## Offers
 - Composition definition. The grant, and the verifier of the type `urn:ietf:params:oauth:token-type:access_token` (through `tokens`).
 - Extension point `token-exchange.verifiers`, one verifier per token type; a second for one type refuses the boot.
-  - A verifier answers the token's subject, issuer, issued-to, audience, scope, expiry, binding, actor chain and `may_act`, or invalid. It throws unavailable when it cannot tell.
+  - A verifier answers invalid, or a token by its `kind`, with its subject, issuer and expiry: `own`, naming the client by issued-to or audience, with its scope, audience, binding, actor chain and `may_act`; or `foreign`, another issuer's for an app, with `clients` (at least one) and `holderDigest`, `BASE64URL(SHA-256(jkt))` of the key a public client must hold. It throws unavailable when it cannot tell.
   - `issued` names a token this provider issued, so its family and session are found. Only the built-in verifier's `issued`, amr, authentication time and acr are read.
-  - Optional, for any verifier: `clients`, the clients that may exchange it, in place of naming the caller; `ceiling: "client"`, the scope and audience from the client's allowance alone; `holderDigest`, `BASE64URL(SHA-256(jkt))` of the key a public client must hold.
+  - An answer without `kind` is still read, foreign where it lists `clients` and own otherwise, until every verifier gives one.
   - `consume(token)`, optional: records a once-only token, answering `consumed` or `replayed`.
 - Client metadata section `token-exchange`: `others-tokens` (default false), whether the client may present tokens that do not name it; `public-exchange` (default false), whether a public client may exchange.
 - Operator section: `max-actor-depth` (1–10, default 3); `max-lifetime` (1s–1d, optional, written with its unit), the longest lifetime an exchange may ask for, even past `tokens`' lifetime.
 
 ## Invariants
 - Only a client explicitly allowed the grant: a confidential one, or a public one with `public-exchange`. Any other public client is `401 invalid_client`.
-- A public client exchanges only a subject token with a `holderDigest`, proving by DPoP the key it names; it is then issued a DPoP-bound token. A confidential client's `holderDigest` is unread.
+- A public client exchanges only a foreign subject token with a `holderDigest`, proving by DPoP the key it names; it is then issued a DPoP-bound token. A confidential client's `holderDigest` is unread.
 - Refusals take the form and status of every grant's: `400`, or `401` for the client. A refused token or request is `invalid_request`.
-- The subject token and the actor token must name the calling client, by issued-to or audience, unless its `others-tokens` is true. A token whose verifier answers `clients` must list the caller instead, whatever `others-tokens` says.
-- A once-only token (its verifier has `consume`), or one under the client's ceiling, is refused as the actor.
-- The scope lies within the subject token's scope and the client's allowance; left out, it is the subject token's, cut to the client's. Wider is `invalid_scope`. Under the client's ceiling, the subject token's scope and audience are unread: the client's allowance decides them, by the same rules for `audience` and `resource`.
+- The subject token and the actor token must name the calling client, by issued-to or audience, unless its `others-tokens` is true. A foreign token must list the caller in `clients` instead, whatever `others-tokens` says.
+- A once-only token (its verifier has `consume`), or a foreign one, is refused as the actor.
+- The scope lies within the subject token's scope and the client's allowance; left out, it is the subject token's, cut to the client's. Wider is `invalid_scope`. For a foreign token, there is no scope or audience of its own: the client's allowance decides them, by the same rules for `audience` and `resource`.
 - The audience is one the subject token holds and the client is allowed; left out, the only such one. A `resource` must be that audience. Otherwise `invalid_target`. It declares it takes its audience from the request, so no rule refuses its `resource` before it runs.
 - Bindings follow `sender-binding`'s answer. A token bound to a key is never exchanged for one without it, for the subject and the actor alike.
 - `act` is the actor's subject over the subject token's chain. Without an actor there is no `act`. A chain past `max-actor-depth` is refused. A `may_act` must name the actor, or the client when there is none; a client never matches an entry with an issuer.

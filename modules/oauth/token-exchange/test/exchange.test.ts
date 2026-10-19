@@ -900,7 +900,7 @@ describe("token-exchange: what any verifier may answer", () => {
 	it("refuses a once-only token, or one under the client's ceiling, as the actor", async () => {
 		for (const [more, consume] of [
 			[{}, async () => "consumed" as const],
-			[{ ceiling: "client" }, undefined],
+			[{ clients: ["app"], ceiling: "client" }, undefined],
 		] as const) {
 			const { verifier } = answering({ issuedTo: "app", ...more }, consume);
 			const s = await serve({ verifier });
@@ -955,6 +955,50 @@ describe("token-exchange: what any verifier may answer", () => {
 		]) {
 			const s = await serve({ verifier: answering({ issuedTo: "app", ...more }).verifier });
 			expect(said(await s.exchange("app", outsider)), JSON.stringify(more)).toEqual([
+				"invalid_request",
+				"subject_token validation failed",
+			]);
+		}
+	});
+});
+
+describe("token-exchange: an answer told by its kind", () => {
+	/** An outside verifier answering exactly `answer`. */
+	const exactly = (answer: object): ExchangeVerifier => ({
+		tokenType: outsideType,
+		verify: async () => answer as never,
+	});
+	const outsider = { ...subjectOf("outside", outsideType), scope: "read" };
+	const base = { subject: "erin", issuer: "https://idp.example", expiresAt: now + 60_000 };
+
+	it("lets only the clients a foreign token lists exchange it, within their allowance alone", async () => {
+		const s = await serve({ verifier: exactly({ ...base, kind: "foreign", clients: ["gate"] }) });
+		expect(said(await s.exchange("app", outsider))).toEqual([
+			"invalid_request",
+			"subject_token does not name this client",
+		]);
+		const grant = (await s.issued(await s.exchange("gate", { ...outsider, scope: "write" }))).grant;
+		expect([grant.subject, grant.scope, grant.audience]).toEqual(["erin", ["write"], [api]]);
+	});
+
+	it("never lets a foreign token act", async () => {
+		const s = await serve({ verifier: exactly({ ...base, kind: "foreign", clients: ["app"] }) });
+		const actor = { actor_token: "outside", actor_token_type: outsideType };
+		expect(
+			said(await s.exchange("app", { ...subjectOf((await s.issue()).token), ...actor })),
+		).toEqual(["invalid_request", "actor_token cannot act"]);
+	});
+
+	it("names the client of an own token by issued-to or audience, within the token's scope", async () => {
+		const s = await serve({ verifier: exactly({ ...outsideAnswer, kind: "own" }) });
+		expect(said(await s.exchange("app", outsider))).toEqual(["issued"]);
+		expect(said(await s.exchange("app", { ...outsider, scope: "write" }))[0]).toBe("invalid_scope");
+	});
+
+	it("takes a foreign answer listing no client as no answer", async () => {
+		for (const clients of [[], undefined]) {
+			const s = await serve({ verifier: exactly({ ...base, kind: "foreign", clients }) });
+			expect(said(await s.exchange("app", outsider))).toEqual([
 				"invalid_request",
 				"subject_token validation failed",
 			]);

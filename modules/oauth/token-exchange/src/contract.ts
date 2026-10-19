@@ -4,16 +4,21 @@ import type { Actor } from "@mod/tokens";
 
 export const accessTokenType = "urn:ietf:params:oauth:token-type:access_token";
 
-/** What a verifier answers for a token it accepts. */
-export interface Exchanged {
+/** What every token a verifier accepts answers. */
+export interface ExchangedToken {
 	readonly subject: string;
 	readonly issuer: string;
+	/** Epoch ms. */
+	readonly expiresAt: number;
+}
+
+/** A token naming the client by issued-to or audience, holding its own scope and audience. */
+export interface OwnToken extends ExchangedToken {
+	readonly kind: "own";
 	/** The client the token was issued to (`azp`). */
 	readonly issuedTo?: string;
 	readonly audience: readonly string[];
 	readonly scope: readonly string[];
-	/** Epoch ms. */
-	readonly expiresAt: number;
 	readonly binding?: Binding;
 	/** The actor chain the token already holds. */
 	readonly actor?: Actor;
@@ -26,18 +31,49 @@ export interface Exchanged {
 	readonly acr?: string;
 	/** The id of a token this provider issued, by which its family and session are found. */
 	readonly issued?: string;
-	/** The clients that may exchange it; when given, in place of the token naming the calling client. */
-	readonly clients?: readonly string[];
-	/** "client": the scope and audience are the client's allowance alone, the token's own unread. */
-	readonly ceiling?: "client";
+}
+
+/**
+ * A token another issuer gave an app, for the clients listed alone: what it may give is the
+ * client's allowance, its own scope and audience unread; it never acts.
+ */
+export interface ForeignToken extends ExchangedToken {
+	readonly kind: "foreign";
+	/** The clients that may exchange it, at least one. */
+	readonly clients: readonly [string, ...string[]];
 	/** BASE64URL(SHA-256(the holder's key thumbprint)); read only for a public client. */
+	readonly holderDigest?: string;
+}
+
+/** What a verifier answers for a token it accepts, told apart by `kind`. */
+export type Exchanged = OwnToken | ForeignToken;
+
+/**
+ * An answer before `kind`, still read until every verifier gives one: `clients` makes it foreign,
+ * and `ceiling` says nothing more.
+ * @deprecated answer `OwnToken` or `ForeignToken`.
+ */
+export interface UnkindedExchanged extends ExchangedToken {
+	readonly kind?: undefined;
+	readonly issuedTo?: string;
+	readonly audience: readonly string[];
+	readonly scope: readonly string[];
+	readonly binding?: Binding;
+	readonly actor?: Actor;
+	readonly mayAct?: readonly { readonly sub?: string; readonly iss?: string }[];
+	readonly amr?: readonly string[];
+	readonly authenticatedAt?: number;
+	readonly acr?: string;
+	readonly issued?: string;
+	readonly clients?: readonly string[];
+	readonly ceiling?: "client";
 	readonly holderDigest?: string;
 }
 
 /** Verifies one token type; throws Unavailable when it cannot tell. */
 export interface ExchangeVerifier {
 	readonly tokenType: string;
-	verify(token: string): Promise<Exchanged | { readonly kind: "invalid" }>;
+	verify(token: string): Promise<Exchanged | UnkindedExchanged | { readonly kind: "invalid" }>;
 	/** Records a once-only token, once, after the second check and the policies' leave; throws Unavailable when it cannot tell. */
 	consume?(token: string): Promise<"consumed" | "replayed">;
 }
