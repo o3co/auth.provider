@@ -30,13 +30,21 @@ export default defineModule({ name: "federation", section }, (m) => [
 			handle: await roundTripIn(c, { login, link }),
 		};
 	}),
+	m.contribute(routes).by(async (c) => ({
+		method: "GET",
+		path: `${base}/*`,
+		changesState: true,
+		crossSite:
+			"A start is the user's own navigation. A link's start checks its origin before any transaction is made; a login's start takes a navigation from another site, its state bound to its cookie and taken once.",
+		...(await c.get(federationRoute)),
+	})),
 	...(["GET", "POST"] as const).map((method) =>
 		m.contribute(routes).by(async (c) => ({
 			method,
-			path: `${base}/*`,
+			path: `${base}/*/callback`,
 			...(method === "GET" ? { changesState: true } : {}),
 			crossSite:
-				"Its start is the user's own navigation and its callback the IdP's redirect or form_post. A link's start checks its origin before any transaction is made; a login's start takes a navigation from another site, its state bound to its cookie and taken once.",
+				"A callback is the IdP's redirect or form_post, from the IdP's own site. It takes a transaction only at that IdP, with the transaction's state, and only once.",
 			...(await c.get(federationRoute)),
 		})),
 	),
