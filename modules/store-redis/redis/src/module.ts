@@ -304,7 +304,8 @@ export default defineModule({ name: "redis", section }, (m) => [
 		);
 	}),
 	m.contribute(probes).by(async (c) => {
-		const { client, confirmer } = await c.get(connections);
-		return redisProbe([client, confirmer]);
+		const { client, confirmer, declared } = await c.get(connections);
+		const recheck = async () => (await unmet(client, declared, c.section)).problems;
+		return redisProbe([client, confirmer], recheck, c.log);
 	}),
 ]);
