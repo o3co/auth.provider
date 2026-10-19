@@ -790,7 +790,8 @@ describe("federation", () => {
 		const refused = await serve({ federation: { idps }, extra: [naming("https://other.example")] })
 			.then(() => [])
 			.catch((error: BootRefused) => error.refusals.map((r) => r.reason));
-		expect(refused).toEqual([expect.stringContaining("https://idp.example (by federation)")]);
+		// users names the modules that declare the name, never the name or an issuer.
+		expect(refused).toEqual([expect.stringContaining("federation")]);
 		await expect(
 			serve({ federation: { idps }, extra: [naming("https://idp.example")] }),
 		).resolves.toBeDefined();
