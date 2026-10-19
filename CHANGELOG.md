@@ -22,7 +22,7 @@ What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc
 - `outbound`: an `Authorization` header a caller wrote could be sent without the credential rules.
 - `users`: a link the ledger could not answer for could be read as absent.
 - `authorize`: re-authentication was compared in whole seconds, so an authentication less than a second before the request counted as fresh.
-- `signer-keys-http`: an answer with no keys was read as unusable; it is read as no keys (the old reading refused, so it was on the safe side).
+- `signer-keys-http`: a key carrying a member that is not public, other than `d`, could be passed on; and an answer with no keys was read as unusable, where it is read as no keys (the old reading refused, so it was on the safe side).
 
 ### Changed
 
