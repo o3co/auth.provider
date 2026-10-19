@@ -13,6 +13,7 @@
 - `outbound.signed`: the same for signed material, with the narrower's hosts always named.
 - `outbound.refusals`: at boot, why the destination policy refuses a URL and what to set, `<reason>: <what to set>` (`outbound.allow`, `outbound.plain-loopback`, `outbound.internal-hosts`, `outbound.deny`, or the URL to write otherwise), naming keys alone and never the URL's host, port or other value; nothing when the policy lets it through.
   - It resolves no name and sends nothing, so a caller sending credentials can refuse boot on a destination it could never reach; a name passes on its name, an address in the URL is checked at once. A host the caller's own narrowing leaves out is told as no key to set.
+- `destinationRefusal` (the refusals, a URL, a narrowing, what is refused, `it` unless given) → the boot refusal every module gives for it, `outbound's destination policy refuses <what>: <reason>: <what to set>`, or nothing; the words are outbound's alone.
 - `outbound.credentials`: at boot, why a caller's credential must not go to its URLs (`origins`: more than one; `scheme`: one neither https nor a named `plain-loopback` pair), or nothing.
 - Composition definition; reading an answer as JSON (one frozen UTF-8 object, at the status named, `200` by default); whether a URL's host is among hosts; reading an operator's host list, as entries or as a narrower's hosts.
 - Operator section `outbound`: the policy, the caps, the proxy and `internal-hosts`; its keys are in the configuration reference.

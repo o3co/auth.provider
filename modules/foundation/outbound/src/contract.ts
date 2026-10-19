@@ -88,6 +88,21 @@ export interface OutboundRefusals {
 
 export const outboundRefusals = contract<OutboundRefusals>("outbound.refusals");
 
+/**
+ * A boot refusal of a URL the destination policy refuses, as every module says it:
+ * `outbound's destination policy refuses <what>: <reason>: <what to set>`, `what` being `it` unless
+ * given; undefined when the policy lets the URL through. The words are outbound's, never a caller's.
+ */
+export function destinationRefusal(
+	refusals: OutboundRefusals,
+	url: string,
+	narrower?: Narrower,
+	what = "it",
+): string | undefined {
+	const explained = refusals.explained(url, narrower);
+	return explained && `outbound's destination policy refuses ${what}: ${explained}`;
+}
+
 /** Why a credential must not go to a set of URLs: more than one origin, or a URL neither https nor a named plain-loopback pair. */
 export type CredentialRefusal = "origins" | "scheme";
 
