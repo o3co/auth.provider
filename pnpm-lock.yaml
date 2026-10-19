@@ -2029,6 +2029,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/labels':
+        specifier: workspace:*
+        version: link:../../foundation/labels
       '@mod/login-gates':
         specifier: workspace:*
         version: link:../../identity/login-gates
