@@ -25,6 +25,7 @@ Each promise below holds across every module composed. Each names what keeps it 
 1. **Closing a session closes every path for the tokens issued from it.**
    - Kept by: `session`'s participants, which `session-lifecycle` calls on every close; `session-tokens` and `refresh` take part, and `code-grant` voids a code whose session ended.
    - Scenes: code ("tokens and logout", "refresh: what a token may do", "session grant", "OpenID Connect userinfo"), exchange ("token exchange of a session's token"), federation ("federation tokens: refusals").
+   - A close left pending is not done: the session stays closing until every participant has finished, each host going on with it every `session-lifecycle.sweep-interval`, and `logout` and RP-initiated logout answer it `503`, never as logged out.
    - No scene yet for a device approval. A session that ends by expiry alone calls no participant.
 2. **`prompt=login` and `max_age` are met only by a fresh authentication.**
    - Kept by: `authorize`'s re-authentication record, taken once; `session` never counts an authentication time it does not know as fresh.
@@ -37,6 +38,7 @@ Each promise below holds across every module composed. Each names what keeps it 
 4. **A subject's revocation boundary refuses everything made before it.**
    - Kept by: `subject-revocation`'s boundaries, which every holder of a subject's state compares against, and its followers.
    - Does not hold for access tokens where `tokens.subject-check = none` is chosen: they live until they expire.
+   - Does not hold for federation grants where `federation-grants.keep-on-subject-revocation` is set and a revocation asks to keep delegations: an established grant then answers only to the `delegations` boundary, which such a revocation leaves where it was.
    - A revocation alone does not stop a second factor's enrollment already past its last check. After an account is taken over, reset the subject's second factors (`mfa-flows`' `mfaReset`) rather than only revoking: a reset also stops an enrollment under way.
    - Scenes: code ("a subject the ledger revokes over HTTP"), federation ("federation grants: a subject the ledger revokes"), second factor ("a subject the ledger revokes").
    - No scene yet for a code not yet redeemed, a device code or a token exchange.
@@ -64,7 +66,7 @@ Each promise below holds across every module composed. Each names what keeps it 
 10. **A `POST` taken before authentication is limited per source.**
     - Kept by: `rate-limit`'s policies, marked `per-source`; a route without one declares why it counts no source.
     - Scenes: oauth ("limits requests to the token endpoint per source"), identity (login attempts per sender), passkey ("passkey login: the options' limit"), ops (the operations routes and request counting).
-    - Declared exceptions: the route reference's "Per source" reasons.
+    - Declared exceptions: the route reference's "Per source" reasons; and, as promise 3 declares, `rate-limit.fail-mode = open`, which lets a request limit pass requests uncounted while the store cannot count (an attempt limit still refuses).
 
 ## Boot
 
