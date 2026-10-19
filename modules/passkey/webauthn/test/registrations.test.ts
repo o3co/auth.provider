@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
-import { assemble, isUnavailable, kernelConfig } from "@mod/kernel";
+import { assemble, BootRefused, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { ceremoniesFor } from "../src/ceremony/ceremony.ts";
@@ -16,6 +16,7 @@ import {
 	softwareAuthenticator,
 	type Twist,
 	testOrigin,
+	type WebauthnSettings,
 	webauthnConfig,
 } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
@@ -176,6 +177,28 @@ it("offers registrations in a composition without a session, and serves no route
 		expect(res.status).toBe(404);
 	} finally {
 		await app.stop(1000);
+	}
+});
+
+it("refuses to boot, never throwing, on an origin that is empty or no URL, wherever it is listed", async () => {
+	const cases: [Partial<WebauthnSettings>, string][] = [
+		[{ origins: [""] }, "webauthn.origins.0"],
+		[{ origins: ["not a url"] }, "webauthn.origins.0"],
+		[{ origins: [testOrigin, ""] }, "webauthn.origins.1"],
+		[{ "top-origins": [""] }, "webauthn.top-origins.0"],
+		[{ "top-origins": ["not a url"] }, "webauthn.top-origins.0"],
+	];
+	for (const [settings, where] of cases) {
+		const error = await assemble({
+			modules: [http, memoryStores().module, webauthn],
+			config: { ...kernelConfig(), ...httpConfig(), ...webauthnConfig(settings) },
+			runtime: quietRuntime(),
+		}).then(
+			() => undefined,
+			(e: unknown) => e,
+		);
+		expect(error, JSON.stringify(settings)).toBeInstanceOf(BootRefused);
+		expect((error as BootRefused).refusals.map((r) => r.where)).toEqual([where]);
 	}
 });
 

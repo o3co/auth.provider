@@ -55,10 +55,15 @@ export const section = z
 			.prefault(10)
 			.describe("The most passkeys a subject may hold, from 1 to 100."),
 	})
+	// An entry that is no URL is the origins' own refusal: this never reads one, whether or not zod
+	// runs it past a field that failed.
 	.refine(
 		(s) =>
 			s.origins.every(
-				(entry) => app.test(entry) || servesHost(s["rp-id"], new URL(entry).hostname),
+				(entry) =>
+					app.test(entry) ||
+					!URL.canParse(entry) ||
+					servesHost(s["rp-id"], new URL(entry).hostname),
 			),
 		{
 			path: ["rp-id"],
