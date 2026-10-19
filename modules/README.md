@@ -51,6 +51,7 @@ What each module contains is described by that module's contract card (each modu
 | Limit budgets and key names | setting / vocabulary | the module that calls the limit |
 | Sealing at rest (keyring) | contract / setting | seal |
 | Checking a secret against a stored hash (bcrypt, scrypt), with the same work when there is none to check | contract | secret-hash |
+| The rule for a name a user gives something that a page shows back as it is (a label) | contract | labels |
 | Sending mail (one address per send), preparing a message for a sender | contract | mail |
 | Mail purposes and mail templates | extension point kind | mail |
 | The logging-only mail sender | contract implementation / setting | mail |
