@@ -1,20 +1,24 @@
 import { defineModule } from "@mod/kernel";
-import { type AuthContext, sessions } from "@mod/session";
+import { type Entry, sessions } from "@mod/session";
 import { users } from "@mod/users";
 import { type AttributesAnswer, subjectAttributes, vouches } from "./contract.ts";
 
 const neither: AttributesAnswer = Object.freeze({ kind: "unknown" });
 const noAttributes = Object.freeze({});
 
-/** The login attributes a session kept, under its source, when it is the subject's open session. */
-const fromLogin = (subject: string, context: AuthContext | undefined): AttributesAnswer =>
-	context?.subject !== subject || context.attributes === undefined
+/** The login attributes a session kept, under its source, when the subject's session enters at use. */
+const fromLogin = (subject: string, entry: Entry): AttributesAnswer => {
+	// Absent or short of a requirement: no session to read the login from.
+	if (entry.kind !== "entered") return neither;
+	const { context } = entry.session;
+	return context.subject !== subject || context.attributes === undefined
 		? neither
 		: {
 				kind: "known",
 				vouched: vouches(context.attributes),
 				attributes: Object.freeze({ ...context.attributes.values }),
 			};
+};
 
 export default defineModule({ name: "subject-attributes" }, (m) => [
 	m.provide(subjectAttributes).by(async (c) => {
@@ -38,9 +42,7 @@ export default defineModule({ name: "subject-attributes" }, (m) => [
 						};
 					case "unanswerable":
 						// Only when users cannot say: the login the session kept, if it is the subject's.
-						return handle === undefined
-							? neither
-							: fromLogin(subject, await open.openContext(handle));
+						return handle === undefined ? neither : fromLogin(subject, await open.entryOf(handle));
 				}
 			},
 		};
