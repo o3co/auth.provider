@@ -177,6 +177,7 @@ const guarded = defineModule({ name: "guarded" }, (m) =>
 			method,
 			path: "/guarded",
 			uses: [use(csrfChecked)],
+			...(method === "GET" ? { changesState: false } : { unlimited: "a test route" }),
 			handle: () => ({ status: 204 }),
 		})),
 	),
