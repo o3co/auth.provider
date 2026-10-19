@@ -43,7 +43,7 @@
 - An internal module whose shipped code imports nothing another unit of its package imports is reported as a branch, not refused.
 - A document copies a configuration list when one line lays out more consecutive values of a list (nested lists flattened) than the configuration allows, in order, with no word between them but `and`, `or` or `then`.
 - Documents are all Markdown in the repository. A target resolves from the document's directory, and is refused if it leaves it or names a missing file with an extension.
-- The map is the shallowest README that is no package's card. An owner cell made only of lowercase names and separators (`,`, `/`, `and`) lists packages; any other cell is a general phrase.
+- The map is the README of the deepest folder that holds every package. An owner cell made only of lowercase names and separators (`,`, `/`, `and`) lists packages; any other cell is a general phrase.
 - A dependency item names modules with the lowercase names it opens with, before any note in brackets or sentence after a full stop.
 
 ## Data
