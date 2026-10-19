@@ -129,9 +129,9 @@ export function renewalWith(parts: Parts) {
 		return next ? after?.version === next.version : changed !== undefined && !after;
 	};
 
-	/** Removes one IdP's entry whatever the session's state; a session that lets nobody in keeps no record. */
-	const forget = async (session: string, idp: string) => {
-		if (await rewrite(session, idp, undefined)) return;
+	/** Removes one IdP's entry whatever the session's state, only at `version` when given; a session that lets nobody in keeps no record. */
+	const forget = async (session: string, idp: string, version?: string) => {
+		if (await rewrite(session, idp, undefined, version)) return;
 		if ((await lifetimeOf(session)) === undefined) await store.remove(session);
 	};
 
@@ -301,8 +301,12 @@ export function renewalWith(parts: Parts) {
 				);
 			}
 		},
-		/** Keeps a login's tokens for the session; tokens without an access token are not kept. */
-		receive: async (session: string, idp: string, tokens: UpstreamTokens) => {
+		/** Keeps a login's tokens for the session, answering the entry's version; tokens without an access token are not kept. */
+		receive: async (
+			session: string,
+			idp: string,
+			tokens: UpstreamTokens,
+		): Promise<string | undefined> => {
 			const said = tokens as unknown as Partial<Record<keyof UpstreamTokens, unknown>>;
 			const accessToken = text(said.accessToken);
 			const granted = scopeOf(said.scope);
@@ -311,7 +315,7 @@ export function renewalWith(parts: Parts) {
 			if (!accessToken || !granted || unreadable("refreshToken") || unreadable("idToken")) {
 				parts.log.warn("federation-tokens.login_tokens_refused", { idp });
 				await rewrite(session, idp, undefined);
-				return;
+				return undefined;
 			}
 			const refreshToken = text(said.refreshToken);
 			const idToken = text(said.idToken);
@@ -332,9 +336,10 @@ export function renewalWith(parts: Parts) {
 			const entry = vault.seal(session, idp, kept, versionOf());
 			const written = await keep(session, idp, entry);
 			// A session that closed, or fell short of a requirement, while they were written: they go here.
-			if (written && (await lifetimeOf(session)) !== undefined) return;
-			if (written) await forget(session, idp);
+			if (written && (await lifetimeOf(session)) !== undefined) return entry.version;
+			if (written) await forget(session, idp, entry.version);
 			parts.log.warn("federation-tokens.login_tokens_not_kept", { idp });
+			return undefined;
 		},
 		/** Removes one IdP's entry; answers its id_token, or not linked when it held none. */
 		disconnect: async (session: string, idp: string) => {

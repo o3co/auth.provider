@@ -355,6 +355,31 @@ describe("as a receiver and a participant", () => {
 		expect((await h.ask(h.token, "other")).json).toMatchObject({ access_token: "up-o" });
 	});
 
+	it("withdraws, given its receipt, only what that login kept, and nothing written since", async () => {
+		const h = await harness();
+		const session = await h.login();
+		const [keeper] = h.receivers;
+		const tokens = (accessToken: string) => ({ accessToken, tokenType: "Bearer", scope: ["read"] });
+		const first = await keeper?.received({ session, idp: "corp", tokens: tokens("up-1") });
+		// Another login of the same IdP writes its own tokens in the meantime.
+		const second = await keeper?.received({ session, idp: "corp", tokens: tokens("up-2") });
+		expect(typeof first).toBe("string");
+		expect(second).not.toBe(first);
+		const { token } = await h.issue(session);
+		await keeper?.withdrawn(session.id, "corp", first as string);
+		expect((await h.ask(token)).json).toMatchObject({ access_token: "up-2" });
+		await keeper?.withdrawn(session.id, "corp", second as string);
+		expect((await h.ask(token)).status).toBe(404);
+	});
+
+	it("keeps nothing it answers a receipt of, where the login's tokens were not kept", async () => {
+		const h = await harness();
+		const session = await h.login();
+		const [keeper] = h.receivers;
+		const refused = { accessToken: "", tokenType: "Bearer", scope: ["read"] };
+		expect(await keeper?.received({ session, idp: "corp", tokens: refused })).toBeUndefined();
+	});
+
 	it("withdraws a closed session's tokens, whatever is left of it, and again harmlessly", async () => {
 		const h = await linked({});
 		h.stores.down.failNext("remove");
