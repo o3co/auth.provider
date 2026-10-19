@@ -663,7 +663,12 @@ A ledger can also be asked for a user by subject, so a user who signs in upstrea
 - **Unavailable warnings**: `token-endpoint.unavailable`, `token-control.unavailable`, `device-grant.unavailable`, and `authorize.unavailable` before the redirect URI is confirmed, are now one warning, `http.unavailable`, with `what`, the route's path as `route` (`/oauth/revoke`, not `revoke`) and, from the token endpoint, the `grant_type` it dispatches to. A log alert that matches the old names needs the new one; `authorize.unavailable` stays only for an unavailable answered by redirect to the client.
 - **A 503 a route does not declare**: it now carries the JSON body `{"error":"service_unavailable"}`, kept out of caches as before; rc.1 answered it with no body.
 - **A route of your own that answers unavailable**: `answeringUnavailable` is gone from `@mod/token-endpoint`; declare `unavailable` on the route you contribute to `http`, with its answer and, in `noted`, the fields only the route knows.
+- **A route of your own**: every route contributed to `http` declares what it guarantees, or boot is refused naming it. A `GET` says `changesState`. A route that changes state uses, for its method, a policy marked `own-site` (`csrfChecked`) or gives `crossSite`, the reason it takes other sites' requests, and a policy marked `per-source` (`attemptsPerSource`, `requestsPerSource`) or gives `unlimited`, the reason it counts no source. The [route reference](routes.md) shows each route's.
+- **A grant of your own**: it declares `readsAmbient`: `cookie` when it reads the session's cookie, and then checks the request's origin itself, or `none`. A grant without it refuses boot.
+- **HEAD on a GET that changes state** (`/oauth/authorize`, `/oauth/logout`, and the browser routes of `federation` and `federation-grants`) is answered `405` with the path's methods in `Allow`; rc.1 ran the GET.
+- **Federation grants' consent**: a `POST /session/federation-grants/consent` from another site is refused before it is counted against the source's requests, so it no longer uses up the window.
 
+## Operational notes
 ## Operational notes
 
 ### Clocks
