@@ -36,6 +36,7 @@
 
 - A user: `id` is the subject; `email`, `name`, `picture`, `groups` and a boolean `emailVerified` (only beside `email`) are the attributes `users` names for them; other fields are dropped.
 
+- `./testing`: `usersLedger` (users), a fake ledger speaking these calls for the users given, behind a credential of its own: its answer to a call (none for a call not its own) and the section pointing users-http at it, for a scene or an operator's trial.
 ## Invariants
 - The ledger is reached only through `outbound`, at each URL's host alone; a redirect is not followed. Each URL is an internal destination: a private address is reached only when its host is in `outbound.internal-hosts`.
 - Boot is refused with no URL, on a URL outbound's destination policy refuses (at that URL's key), and with a `credential` where `outbound.credentials` refuses its URLs (more than one origin, or one neither https nor a named plain-loopback pair; at `credential`): the credential goes to one party alone, sent by `outbound` as its `credential`.
