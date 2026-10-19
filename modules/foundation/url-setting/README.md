@@ -1,14 +1,15 @@
 # url-setting
 
 ## Responsibilities
-- Decides which configured URLs boot, for every module that takes one by `urlSetting`.
+- Decides which configured URLs boot, for every module that takes one by `urlSetting`, and when a section's own check of the URLs it holds may read them.
 
 ## Not here
 - What a module's URL means, and how it is compared (the module's).
 
 ## Offers
 - `urlSetting`: a module's `UrlRules` → a schema part for a configured URL.
-- `UrlRules`: the schemes, whether plain `http` is also taken, on a loopback host only (`loopbackHttp`, default no), whether a query may be part (default yes), and whether a trailing `/` is kept (default) or refused.
+- `UrlRules`: the schemes, whether plain `http` is also taken, on a loopback host only (`loopbackHttp`, default no), whether a query may be part (default yes), whether a trailing `/` is kept (default) or refused, and whether only an origin is taken (`origin`: no path, not even `/`, and no query).
+- `urlsChecked` (a check of a URL and its hosts → its refusal, the URLs that must parse first, the URL and hosts sent at each key) → a section's refinement: once every URL parses, each one sent is checked and what the check answers is put at its key; while one is no URL, nothing is asked. The check's words are its own.
 
 ## Invariants
 - A configured URL is written `<scheme>://` in lower case.

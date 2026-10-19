@@ -1,6 +1,7 @@
 import { certificateSettings } from "@mod/client-certificate";
 import { setting } from "@mod/kernel";
 import { sourceSettings } from "@mod/request-source";
+import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
 
 export const section = z
@@ -14,21 +15,18 @@ export const section = z
 			.prefault(8080)
 			.describe("The port it listens on; 0 takes a free one."),
 		...sourceSettings.shape,
-		"public-origin": z
-			.url({ protocol: /^https?$/ })
-			.refine((s) => URL.canParse(s) && new URL(s).origin === s, "origin only (no path)")
+		"public-origin": urlSetting({ schemes: ["https", "http"], origin: true })
 			.optional()
 			.describe(
 				"The scheme, host and port users reach this deployment at: an origin only, with no path.",
 			),
 		"cors-origins": z
 			.array(
-				z
-					.url({ protocol: /^https$/ })
-					.refine(
-						(s) => !s.includes("*") && URL.canParse(s) && new URL(s).origin === s,
-						"an https origin",
-					),
+				// The parser takes `*` in a host, so a pattern is refused here: an origin matches exactly.
+				urlSetting({ schemes: ["https"], origin: true }).refine(
+					(s) => !s.includes("*"),
+					"an exact origin, without a pattern",
+				),
 			)
 			.prefault([])
 			.describe(
