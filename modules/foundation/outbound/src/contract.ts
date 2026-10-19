@@ -77,15 +77,7 @@ export interface Outbound {
 
 export const outbound = contract<Outbound>("outbound");
 
-/** The destination policy answered at boot, apart from sending: no name is resolved. */
-export interface OutboundPolicy {
-	/** Why the policy refuses the URL, or undefined when it lets it through. */
-	refusalOf(url: string, narrower?: Narrower): RefusalReason | undefined;
-}
-
-export const outboundPolicy = contract<OutboundPolicy>("outbound.policy");
-
-/** The destination policy's refusals, as an operator reads them at boot, apart from sending. */
+/** The destination policy's refusals, as an operator reads them at boot, apart from sending: no name is resolved. */
 export interface OutboundRefusals {
 	/**
 	 * Why the policy refuses the URL and what to set, `<reason>: <what to set>`, naming keys alone and
