@@ -6,8 +6,10 @@ import {
 	contract,
 	defineModule,
 	kernelConfig,
+	type Module,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { spaces } from "@mod/store";
 import { afterEach, describe, expect, it } from "vitest";
 import redisModule from "../src/module.ts";
 
@@ -36,10 +38,11 @@ function commandOf(buffer: Buffer): { args: string[]; used: number } | undefined
 
 const bulk = (text: string) => `$${text.length}\r\n${text}\r\n`;
 
-/** Just enough of a Redis 7 primary to boot the module with no spaces, counting PINGs per socket. */
+/** Just enough of a Redis 7 primary to boot the module, counting PINGs per socket; its role and eviction policy may change. */
 function fakeRedis() {
 	const sockets = new Set<Socket>();
 	const pinged = new Set<Socket>();
+	const settings = { role: "master", "maxmemory-policy": "noeviction" };
 	const server: Server = createServer((socket) => {
 		sockets.add(socket);
 		socket.on("close", () => sockets.delete(socket));
@@ -57,14 +60,17 @@ function fakeRedis() {
 						: name === "INFO"
 							? bulk("redis_version:7.4.0\r\ncluster_enabled:0\r\nloading:0\r\n")
 							: name === "ROLE"
-								? `*3\r\n${bulk("master")}:0\r\n*0\r\n`
-								: "+OK\r\n",
+								? `*3\r\n${bulk(settings.role)}:0\r\n*0\r\n`
+								: name === "CONFIG" && command.args[2] === "maxmemory-policy"
+									? `*2\r\n${bulk("maxmemory-policy")}${bulk(settings["maxmemory-policy"])}`
+									: "+OK\r\n",
 				);
 			}
 		});
 	});
 	return {
 		pinged,
+		settings,
 		listen: () =>
 			new Promise<number>((resolve) =>
 				server.listen(0, "127.0.0.1", () => {
@@ -99,7 +105,12 @@ afterEach(async () => {
 	app = undefined;
 });
 
-async function boot(port: number) {
+/** A space that must never be evicted, so boot checks the eviction policy. */
+const kept = defineModule({ name: "kept-owner" }, (m) => [
+	m.contribute(spaces).by(() => ({ name: "kept", guarantees: ["no-eviction"] })),
+]);
+
+async function boot(port: number, extra: readonly Module[] = []) {
 	const recorded = recordingLog();
 	let context: BuildContext<unknown> | undefined;
 	const asker = defineModule({ name: "asker" }, (m) => [
@@ -109,7 +120,7 @@ async function boot(port: number) {
 		}),
 	]);
 	app = await assemble({
-		modules: [redisModule, asker],
+		modules: [redisModule, asker, ...extra],
 		config: { ...kernelConfig(), redis: { url: `redis://127.0.0.1:${port}` } },
 		runtime: quietRuntime({
 			clock: { now: () => 0 },
@@ -133,6 +144,22 @@ describe("the redis probe", () => {
 		redis.pinged.clear();
 		expect(await ready()).toBe("ready");
 		expect(redis.pinged.size).toBe(2);
+		redis.down();
+	});
+
+	it("answers unready once the server no longer gives what boot checked, and ready again when it does", async () => {
+		const redis = fakeRedis();
+		const { warned, ready } = await boot(await redis.listen(), [kept]);
+		expect(await ready()).toBe("ready");
+		redis.settings.role = "slave";
+		expect(await ready()).toBe("unready");
+		redis.settings.role = "master";
+		expect(await ready()).toBe("ready");
+		redis.settings["maxmemory-policy"] = "allkeys-lru";
+		expect(await ready()).toBe("unready");
+		expect(warned()).toContain("redis.settings_unmet");
+		redis.settings["maxmemory-policy"] = "noeviction";
+		expect(await ready()).toBe("ready");
 		redis.down();
 	});
 

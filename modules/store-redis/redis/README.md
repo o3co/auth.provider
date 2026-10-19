@@ -11,7 +11,7 @@
 
 ## Offers
 - Composition definition only: the `store` contract's implementation.
-- The probe `redis` at `kernel`'s `probes`, which PINGs both connections.
+- The probe `redis` at `kernel`'s `probes`, which PINGs both connections and checks again what boot checked of the server, logging `redis.settings_unmet` with what no longer holds when that changes.
 - Operator section:
   - `url` (`redis` or `rediss`), `prefix` (lower-case letters, digits and `-`; default `store`).
   - `connect-timeout` (default `2s`), `command-timeout` (default `1s`), `replication-timeout` (default `1s`); times written with their unit, a bare number refused.
@@ -36,7 +36,7 @@
 - A command whose reply was lost is never sent again; a dropped connection fails at once, and nothing ends the process.
 - The store clock is Redis's time; values and counts are kept in separate keys, values untouched.
 - A scan walks Redis's SCAN over the space's value keys alone, which one server holds (clusters are refused); a value at its very expiry may still be listed, and a read then finds none. A failover or restart during a walk loses its cursor's place, so a key may not come; a later walk lists it.
-- Outside the guarantees, the operator's: keeping a detached or lagging replica from promotion, replicas' disk writes, `CONFIG SET` after boot.
+- Outside the guarantees, the operator's: keeping a detached or lagging replica from promotion, replicas' disk writes, and what a `CONFIG SET` or a failover after boot lets through until the next probe answers unready.
 
 ## Data
 - Keys under the prefix, one hash tag per space and partition, holding values, counts, versions and marks.
