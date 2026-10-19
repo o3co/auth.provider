@@ -1,0 +1,20 @@
+{
+	"name": "example-grant",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		"./module": {
+			"types": "./module.d.ts",
+			"default": "./module.js"
+		}
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.json"
+	},
+	"peerDependencies": {
+		"@o3co/auth-provider-foundation": "<version>",
+		"@o3co/auth-provider-identity": "<version>",
+		"@o3co/auth-provider-oauth": "<version>"
+	}
+}
