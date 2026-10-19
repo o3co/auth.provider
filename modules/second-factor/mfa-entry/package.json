@@ -4,6 +4,10 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "feature",
+	"joins": [
+		"@mod/mfa",
+		"@mod/session"
+	],
 	"exports": {
 		".": "./src/contract.ts",
 		"./module": "./src/module.ts"
