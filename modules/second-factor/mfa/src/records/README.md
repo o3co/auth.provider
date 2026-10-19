@@ -18,6 +18,7 @@ Internal module of `mfa`: how the factor lists and the claims on unique values a
 - A factor list's record holds its subject, so its secrets can be sealed again; the store's key is the subject's hash.
 - A secret, and what a challenge kept, are sealed to the subject and the factor; a pending binding, to the subject.
 - A factor is written before its claim, so a claim whose list lacks its factor is stale.
+- A secret a `previous` key sealed is sealed again in the write a proof of its factor makes, and by the resealer, which walks every list and writes only over the secret read; one no key opens, or a list whose subject is not its key's, is left.
 
 ## Depends on
 - `kernel`, `seal`; `mfa` (its store interface).
