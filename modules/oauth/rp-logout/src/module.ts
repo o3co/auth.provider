@@ -76,6 +76,10 @@ export default defineModule({ name, section, replicaSafe: true }, (m) => [
 			path,
 			// OpenID Connect RP-Initiated Logout 1.0 §2: a POST is a form.
 			takes: ["form", "none"],
+			// It closes the session even on a GET, so a HEAD is not answered as one.
+			...(method === "GET" ? { changesState: true } : {}),
+			crossSite:
+				"RP-initiated logout is a navigation from the RP's site by design; it closes only the session that a hint the provider signed names.",
 			// Counted before any hint is checked, which reads keys and the store.
 			uses: [
 				use(requestsPerSource, {

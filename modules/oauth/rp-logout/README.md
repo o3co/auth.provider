@@ -9,7 +9,7 @@
 - Closing the session and its cookie (`session`, which the browser's `logout` uses too). Judging an ID token hint (`oidc`). The upstream's end of session (contributed at `upstreamEnds`).
 
 ## Offers
-- Routes `GET` and `POST /oauth/logout` (`ending`).
+- Routes `GET` and `POST /oauth/logout` (`ending`), both declared to take requests from other sites, and the GET to change state (no HEAD).
 - Extension point `upstreamEnds`: at most one; two or more refuse boot.
 - Client metadata section `rp-logout` (`registration`).
 - Contribution to `code-grant`'s session redemptions: keeps the client until the session ends, and at least `remember-for`.
