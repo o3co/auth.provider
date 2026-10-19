@@ -49,7 +49,7 @@ Each promise below holds across every module composed. Each names what keeps it 
    - Kept by: `sender-binding`, which refuses a bound token presented in another scheme.
    - Scenes: code (userinfo with a DPoP-bound token and with an mTLS-bound one, "refresh: binding a public client's family"), exchange ("token exchange: a binding washed off").
 7. **Every request to another server goes through `outbound`.**
-   - Kept by: guard G26, which lets product code reach the network only through `outbound` or as its manifest's `network` declares. It reads how the code is written: static imports of network modules and clients, and calls of `fetch`, `WebSocket` and `EventSource`; a dynamic import or a reach it cannot read from the code is not seen.
+   - Kept by: guard G26, which lets product code reach the network only through `outbound` or as its manifest's `network` declares. It reads how the code is written: network modules, clients and DNS resolvers imported, or loaded with `import()` or `require`; any use of `node:child_process`; a module loaded by a name known only at run time; and `fetch`, `WebSocket` and `EventSource` used directly or as a property of the global object. What the code's form cannot show (`eval`, a worker, a native add-on, a function passed in from outside) is left to review.
    - Declared exceptions: `http` serves, `mail-smtp` speaks SMTP and `redis` speaks to Redis, each by its manifest's `network`.
    - No scene: the guard checks it.
 8. **Secrets appear neither in logs nor in answers, but for what the provider hands out on purpose.**
