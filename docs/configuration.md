@@ -828,7 +828,7 @@ From `@mod/idp-apple`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `federation.idps.<name>.client-id` | string |  | yes |  |
+| `federation.idps.<name>.client-id` | string |  | yes | The client ID this provider is registered under at the IdP. |
 | `federation.idps.<name>.client-secret` | string |  |  |  |
 | `federation.idps.<name>.team-id` | string |  |  |  |
 | `federation.idps.<name>.key-id` | string |  |  |  |
@@ -847,8 +847,8 @@ From `@mod/idp-github`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `federation.idps.<name>.client-id` | string |  | yes |  |
-| `federation.idps.<name>.client-secret` | string |  | yes |  |
+| `federation.idps.<name>.client-id` | string |  | yes | The client ID this provider is registered under at the IdP. |
+| `federation.idps.<name>.client-secret` | string |  | yes | The client secret the IdP gave this provider, sent to its token endpoint. |
 | `federation.idps.<name>.scopes` | list of string | `["read:user"]` |  |  |
 | `federation.idps.<name>.authorization-endpoint` | string | `https://github.com/login/oauth/authorize` |  |  |
 | `federation.idps.<name>.token-endpoint` | string | `https://github.com/login/oauth/access_token` |  |  |
@@ -861,8 +861,8 @@ From `@mod/idp-google`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `federation.idps.<name>.client-id` | string |  | yes |  |
-| `federation.idps.<name>.client-secret` | string |  | yes |  |
+| `federation.idps.<name>.client-id` | string |  | yes | The client ID this provider is registered under at the IdP. |
+| `federation.idps.<name>.client-secret` | string |  | yes | The client secret the IdP gave this provider, sent to its token endpoint. |
 | `federation.idps.<name>.access` | offline \| online | `offline` |  |  |
 | `federation.idps.<name>.require-iss` | boolean | `true` |  |  |
 | `federation.idps.<name>.authorization-endpoint` | string | `https://accounts.google.com/o/oauth2/v2/auth` |  |  |
@@ -878,8 +878,8 @@ From `@mod/idp-oidc`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `federation.idps.<name>.client-id` | string |  | yes |  |
-| `federation.idps.<name>.client-secret` | string |  | yes |  |
+| `federation.idps.<name>.client-id` | string |  | yes | The client ID this provider is registered under at the IdP. |
+| `federation.idps.<name>.client-secret` | string |  | yes | The client secret the IdP gave this provider, sent to its token endpoint. |
 | `federation.idps.<name>.issuer` | string |  | yes |  |
 | `federation.idps.<name>.token-auth` | client_secret_basic \| client_secret_post | `client_secret_basic` |  |  |
 | `federation.idps.<name>.discovery` | boolean | `true` |  |  |
