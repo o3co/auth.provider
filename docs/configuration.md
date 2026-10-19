@@ -801,8 +801,8 @@ From `@mod/token-exchange`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.token-exchange.others-tokens` | boolean | `false` |  |  |
-| `sections.token-exchange.public-exchange` | boolean | `false` |  |  |
+| `sections.token-exchange.others-tokens` | boolean | `false` |  | Whether the client may present subject and actor tokens that do not name it, by issued-to or audience. |
+| `sections.token-exchange.public-exchange` | boolean | `false` |  | Whether the client, when public, may exchange; a confidential client allowed the grant always may. |
 
 ## IdP type settings
 
