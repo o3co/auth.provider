@@ -3173,6 +3173,9 @@ importers:
       '@mod/conformance-second-factor':
         specifier: workspace:*
         version: link:../conformance-second-factor
+      '@mod/trial':
+        specifier: workspace:*
+        version: link:../../scaffold/trial
       '@mod/users-http':
         specifier: workspace:*
         version: link:../../user-ledger-http/users-http

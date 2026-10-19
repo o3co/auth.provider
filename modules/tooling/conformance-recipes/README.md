@@ -25,7 +25,7 @@
 - Touches only the HTTP interface and boot refusals.
 
 ## Depends on
-- `conformance`, `create-app`; in tests, the areas whose parts a recipe's scene composes, and `users-http`'s fake ledger.
+- `conformance`, `create-app`; in tests, the areas whose parts a recipe's scene composes, `users-http`'s fake ledger, and `trial`'s layer.
 
 ## Vocabulary
 - recipe: a document a user follows to build something with the provider, written by hand around generated blocks.
