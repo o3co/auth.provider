@@ -199,6 +199,7 @@ export default defineModule({ name: "jwt-bearer", section }, (m) => [
 		};
 		return {
 			grantType,
+			readsAmbient: "none",
 			targets: true,
 			handle: async ({ client, param, admits, issue, target }) => {
 				const assertion = param("assertion");
