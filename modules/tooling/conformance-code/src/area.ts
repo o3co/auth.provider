@@ -1,5 +1,10 @@
 import { type AreaScene, area, sceneOf } from "@mod/conformance";
-import { identityArea, type LedgerScene, type UserScene } from "@mod/conformance-identity";
+import {
+	identityArea,
+	type LedgerScene,
+	type RevocationScene,
+	type UserScene,
+} from "@mod/conformance-identity";
 import { type KeysPart, keysArea } from "@mod/conformance-keys";
 import { type MtlsPart, mtlsArea } from "@mod/conformance-mtls";
 import { type ClientScene, oauthArea } from "@mod/conformance-oauth";
@@ -43,6 +48,8 @@ export interface CodeScene extends CodePart {
 	readonly ledger?: LedgerScene;
 	readonly login?: { readonly returnTargets?: readonly string[] };
 	readonly corsOrigins?: readonly string[];
+	/** Subjects the ledger revokes over HTTP, as the identity area sets it up. */
+	readonly revocations?: RevocationScene;
 	readonly introspection?: boolean;
 	readonly revocation?: boolean;
 	readonly dpop?: boolean;
@@ -67,6 +74,7 @@ export function codeScene(scene: CodeScene): AreaScene {
 			...(scene.ledger ? { ledger: scene.ledger } : {}),
 			...(scene.login ? { login: scene.login } : {}),
 			...(scene.corsOrigins ? { corsOrigins: scene.corsOrigins } : {}),
+			...(scene.revocations ? { revocations: scene.revocations } : {}),
 		}),
 		oauthArea.part({
 			issuer: scene.issuer,
