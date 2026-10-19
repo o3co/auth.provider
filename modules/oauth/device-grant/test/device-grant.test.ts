@@ -29,8 +29,10 @@ import {
 import { quietRuntime, recordingLog, unavailableSwitch } from "@mod/kernel/testing";
 import rateLimitModule from "@mod/rate-limit/module";
 import secretHashModule from "@mod/secret-hash/module";
-import { entryRequirements, sessions } from "@mod/session";
+import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import { entryRequirements } from "@mod/session-requirements";
+import sessionRequirements from "@mod/session-requirements/module";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
@@ -123,6 +125,7 @@ async function serve(
 			grantCaller,
 			clientAllowanceModule,
 			sessionStandIn,
+			sessionRequirements,
 			subjectRevocationStandIn,
 			csrfStandIn,
 			cookiesModule,
