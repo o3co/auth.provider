@@ -217,9 +217,10 @@ export default defineModule({ name: "jwt-bearer", section }, (m) => [
 					clientAllowance.allowsAudience(client, a, named),
 				);
 				if (asked.kind === "error") return asked;
-				// Made at its `iat`, never later than now; one that does not say is as old as can be.
+				// Made at its `iat`, never later than now; one that does not say is as old as can be. The
+				// boundary is widened by the skew allowed, as an issuer's clock may run that far ahead.
 				const madeAt = Math.min(checked.issuedAt ?? 0, c.clock.now());
-				if ((await boundaries.compare(checked.subject, madeAt, "sessions")) === "revoked") {
+				if ((await boundaries.compare(checked.subject, madeAt, "sessions", skewMs)) === "revoked") {
 					return { kind: "error", error: "invalid_grant", description: "assertion revoked" };
 				}
 				const { scope } = allowed;

@@ -279,12 +279,25 @@ describe("jwt-bearer", () => {
 			await s.revoke("alice", true);
 			const ahead = await assertion({ ...base, iat: now / 1000 + 22 });
 			expect(saidOf(await s.grant(ahead))).toBe("invalid_grant: assertion revoked");
-			clock.at = now + 3000;
-			expect(errorOf(await s.grant(await assertion({ ...base, iat: now / 1000 + 3 })))).toBe(
-				"issued",
-			);
+			// Made past the boundary by more than the clock skew allowed (30s): issued.
+			clock.at = now + 33_000;
+			const past = { ...base, iat: now / 1000 + 33, exp: now / 1000 + 150 };
+			expect(errorOf(await s.grant(await assertion(past)))).toBe("issued");
 			expect(errorOf(await s.grant(await assertion({ ...base, sub: "bob" })))).toBe("issued");
 			expect(errorOf(await s.grant(made))).toBe("invalid_grant");
+		} finally {
+			clock.at = now;
+		}
+	});
+
+	it("refuses an assertion an issuer whose clock runs ahead signed just before its subject's revocation", async () => {
+		const s = await serve();
+		await s.revoke("alice");
+		// Signed a moment before the boundary on a clock 20s ahead, which the skew allowed takes in.
+		clock.at = now + 1000;
+		try {
+			const ahead = await assertion({ ...base, iat: now / 1000 + 20 });
+			expect(saidOf(await s.grant(ahead))).toBe("invalid_grant: assertion revoked");
 		} finally {
 			clock.at = now;
 		}
