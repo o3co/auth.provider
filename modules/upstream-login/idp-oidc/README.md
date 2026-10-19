@@ -21,7 +21,7 @@
 - Every request to the upstream goes through `outbound`, narrowed to the issuer's host, the `endpoint-hosts` and the hosts of endpoints the operator gives; the client's secret goes to no other host.
 - An issuer's description that names an endpoint (its end of session included) on another host, as `outbound` matches hosts, refuses boot.
 - An issuer's description that names an endpoint not on https (or on http where the issuer is) refuses boot.
-- Boot is refused, at its key, on a URL this server sends to that `outbound`'s destination policy refuses with those hosts: the description's own URL (at `issuer`), or `token-endpoint` and `jwks-uri` without discovery.
+- Boot is refused, at its key, on a URL this server sends to that `outbound`'s destination policy refuses with those hosts: the description's own URL (at `issuer`), or `token-endpoint` and `jwks-uri` without discovery; it says which of `outbound`'s keys to set (`outbound.refusals`).
 - A description whose token endpoint or key set that policy refuses also refuses boot.
 - A description's refusal is told at `issuer`, with its reason; one the policy gives names the endpoint and the policy's reason.
 - An answer naming another issuer in `iss` is refused before its code is used.

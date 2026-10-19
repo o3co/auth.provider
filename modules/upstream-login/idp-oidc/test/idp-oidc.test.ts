@@ -13,11 +13,11 @@ import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import {
 	type Narrower,
 	type Outbound,
-	type OutboundPolicy,
+	type OutboundRefusals,
 	type OutboundRequest,
 	type OutboundResponse,
 	outbound,
-	outboundPolicy,
+	outboundRefusals,
 	withinHosts,
 } from "@mod/outbound";
 import {
@@ -88,11 +88,13 @@ function stubOutbound(handlers: Record<string, Handler>) {
 
 /** What the destination policy was asked at boot. */
 const policyAsked: { url: string; narrower: Narrower | undefined }[] = [];
+/** How outbound explains a host its allow list leaves out. */
+const notAllowed = "not-allowed: name the host in outbound.allow, or set outbound.allow-any-public";
 /** A destination policy refusing the `refused` hosts as not allowed. */
-const policyRefusing = (refused: readonly string[] = []): OutboundPolicy => ({
-	refusalOf: (url, narrower) => {
+const policyRefusing = (refused: readonly string[] = []): OutboundRefusals => ({
+	explained: (url, narrower) => {
 		policyAsked.push({ url, narrower });
-		return refused.includes(new URL(url).hostname) ? "not-allowed" : undefined;
+		return refused.includes(new URL(url).hostname) ? notAllowed : undefined;
 	},
 });
 
@@ -172,8 +174,8 @@ async function open(world: World = {}) {
 		runtime,
 	});
 	const jwt = app.get(externalJwt);
-	const policy = policyRefusing(world.refused);
-	const settings = settingsOf(jwt.algorithms, policy);
+	const refusals = policyRefusing(world.refused);
+	const settings = settingsOf(jwt.algorithms, refusals);
 	const read = settings.parse({
 		issuer,
 		"client-id": "client",
@@ -181,7 +183,7 @@ async function open(world: World = {}) {
 		...world.settings,
 	});
 	const recorded = recordingLog();
-	const upstream = await opened(read, { outbound: stub.outbound, policy }, jwt, {
+	const upstream = await opened(read, { outbound: stub.outbound, refusals }, jwt, {
 		clock,
 		log: recorded.log,
 		idp: "corp",
@@ -374,7 +376,7 @@ describe("idp-oidc", () => {
 			settings.safeParse({ ...base, ...more }).error?.issues.map((i) => [i.path, i.message]);
 		const refused = (key: string) => [
 			[key],
-			"outbound's destination policy refuses it: not-allowed",
+			`outbound's destination policy refuses it: ${notAllowed}`,
 		];
 		policyAsked.length = 0;
 		expect(refusalsOf({ "endpoint-hosts": ["x.example"] })).toEqual([refused("issuer")]);
@@ -423,7 +425,7 @@ describe("idp-oidc", () => {
 			expect(thrown, name).toBeInstanceOf(UpstreamMismatch);
 			expect([thrown.at, thrown.message], name).toEqual([
 				["issuer"],
-				`outbound's destination policy refuses the description's ${name}: not-allowed`,
+				`outbound's destination policy refuses the description's ${name}: ${notAllowed}`,
 			]);
 			await expect(open({ description, settings: named }), name).resolves.toBeDefined();
 		}
@@ -1030,7 +1032,7 @@ describe("idp-oidc", () => {
 			modules: [
 				defineModule({ name: "outbound" }, (m) => [
 					m.provide(outbound).by(() => stub.outbound),
-					m.provide(outboundPolicy).by(() => policyRefusing()),
+					m.provide(outboundRefusals).by(() => policyRefusing()),
 				]),
 				externalJwtModule,
 				idpOidc,
