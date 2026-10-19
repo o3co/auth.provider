@@ -41,17 +41,32 @@ export const registration: Section<Registration> = {
 	schema: z.strictObject({
 		"post-logout-redirect-uris": z
 			.array(z.string().refine(registrable, "a URI a client may register to be sent back to"))
-			.prefault([]),
+			.prefault([])
+			.describe(
+				"Where a logout may send the browser back to, each a URI `authorize` lets a client register; a return asked for is used only when it matches one exactly.",
+			),
 		"frontchannel-logout-uri": z
 			.string()
 			.refine(frontChannel, "an http or https URL without iss or sid in its query")
-			.optional(),
-		"frontchannel-logout-session-required": z.boolean().prefault(true),
+			.optional()
+			.describe(
+				"The page framed after a logout (OpenID Connect Front-Channel Logout 1.0): an http or https URL without userinfo, a fragment, or iss or sid in its query, at one of the client's redirect URIs' origins.",
+			),
+		"frontchannel-logout-session-required": z
+			.boolean()
+			.prefault(true)
+			.describe("Whether the framed page's URL gets the session's sid beside iss."),
 		"backchannel-logout-uri": z
 			.string()
 			.refine((uri) => httpUrl(uri) !== undefined, "an http or https URL")
-			.optional(),
-		"backchannel-logout-session-required": z.boolean().prefault(true),
+			.optional()
+			.describe(
+				"Where the logout token is posted after a logout (OpenID Connect Back-Channel Logout 1.0): an http or https URL without userinfo or a fragment.",
+			),
+		"backchannel-logout-session-required": z
+			.boolean()
+			.prefault(true)
+			.describe("Whether the logout token carries the session's sid."),
 	}),
 	checkAtBoot: (value, client) =>
 		framable(value, client)

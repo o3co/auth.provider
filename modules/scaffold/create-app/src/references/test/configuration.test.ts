@@ -130,7 +130,6 @@ const clientsDescribedLater = [
 	"consent",
 	"federation-grants",
 	"federation-tokens",
-	"rp-logout",
 	"sender-binding",
 	"token-exchange",
 ];
