@@ -128,6 +128,7 @@ export function codeGrant(parts: {
 	const enters = async (session: string) => (await sessions.entryOf(session)).kind === "entered";
 	return {
 		grantType: codeGrantType,
+		readsAmbient: "none",
 		targets: true,
 		handle: async ({ client, param, admits, issue, binding, target }) => {
 			const code = param("code");
