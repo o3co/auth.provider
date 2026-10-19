@@ -52,7 +52,7 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | POST | `/session/mfa/lock/release` | `@mod/mfa-flows` | form, json | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | POST | `/session/mfa/recovery-codes` | `@mod/mfa-management` | form, json | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | POST | `/session/mfa/step-up` | `@mod/mfa-flows` | form, json | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
-| GET | `/session/mfa/transaction` | `@mod/mfa-flows` | form |  |  |  |  |  |
+| GET | `/session/mfa/transaction` | `@mod/mfa-flows` | form |  | no |  |  |  |
 | POST | `/session/mfa/verify` | `@mod/mfa-flows` | form, json | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | GET | `/session/oauth/federation/*` | `@mod/federation` | form | `rate-limit.requests-per-source` |  |  | `rate-limit.requests-per-source` |  |
 | POST | `/session/oauth/federation/*` | `@mod/federation` | form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
