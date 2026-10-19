@@ -67,6 +67,8 @@ export default defineModule({ name: "token-endpoint", section }, (m) => [
 			method: "POST",
 			path: tokenPath,
 			uses,
+			crossSite:
+				"Authorization is per grant; a grant that reads a cookie declares it and checks the origin itself.",
 			takes: ["form", "json", "none"],
 			cors,
 			...endpoint,
