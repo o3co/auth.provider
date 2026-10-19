@@ -1,7 +1,13 @@
 import { assemble, BootRefused, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { afterEach, expect, it, vi } from "vitest";
-import { outbound, outboundPolicy, signedOutbound } from "../src/contract.ts";
+import {
+	type Narrower,
+	type OutboundRefusals,
+	outbound,
+	outboundRefusals,
+	signedOutbound,
+} from "../src/contract.ts";
 import outboundModule, { section } from "../src/module.ts";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -209,11 +215,14 @@ it("boots without a proxy, and refuses a destination before sending", async () =
 
 it("answers at boot why the policy refuses a URL, or nothing when it lets it through", async () => {
 	onlyProxy();
+	/** The reason an explanation leads with. */
+	const reasonOf = (p: OutboundRefusals, url: string, n?: Narrower) =>
+		p.explained(url, n)?.split(":")[0];
 	const named = (
 		await boot({ allow: ["api.example", "127.0.0.1"], "plain-loopback": ["127.0.0.1:8080"] })
-	).get(outboundPolicy);
+	).get(outboundRefusals);
 	const answers = (policy: typeof named, urls: Record<string, string | undefined>) =>
-		Object.fromEntries(Object.keys(urls).map((url) => [url, policy.refusalOf(url)]));
+		Object.fromEntries(Object.keys(urls).map((url) => [url, reasonOf(policy, url)]));
 	const asNamed = {
 		"https://api.example/x": undefined,
 		"https://other.example/": "not-allowed",
@@ -225,8 +234,10 @@ it("answers at boot why the policy refuses a URL, or nothing when it lets it thr
 		"ftp://api.example/": "scheme",
 	};
 	expect(answers(named, asNamed)).toEqual(asNamed);
-	expect(named.refusalOf("https://api.example/", { hosts: ["other.example"] })).toBe("not-allowed");
-	const any = (await boot({ "allow-any-public": true, deny: ["bad.example"] })).get(outboundPolicy);
+	expect(reasonOf(named, "https://api.example/", { hosts: ["other.example"] })).toBe("not-allowed");
+	const any = (await boot({ "allow-any-public": true, deny: ["bad.example"] })).get(
+		outboundRefusals,
+	);
 	const asAny = {
 		"https://name.example/": undefined,
 		"https://bad.example/": "denied",
@@ -238,11 +249,63 @@ it("answers at boot why the policy refuses a URL, or nothing when it lets it thr
 	// A private address written in the URL passes for an internal host the caller names as its operator's.
 	const inside = (
 		await boot({ "allow-any-public": true, "internal-hosts": ["10.0.0.5", "127.0.0.1"] })
-	).get(outboundPolicy);
-	expect(inside.refusalOf("https://10.0.0.5/", { internal: true })).toBeUndefined();
-	expect(inside.refusalOf("https://10.0.0.5/")).toBe("special-address");
-	expect(inside.refusalOf("https://10.0.0.6/", { internal: true })).toBe("special-address");
-	expect(inside.refusalOf("https://127.0.0.1/", { internal: true })).toBe("special-address");
+	).get(outboundRefusals);
+	expect(reasonOf(inside, "https://10.0.0.5/", { internal: true })).toBeUndefined();
+	expect(reasonOf(inside, "https://10.0.0.5/")).toBe("special-address");
+	expect(reasonOf(inside, "https://10.0.0.6/", { internal: true })).toBe("special-address");
+	expect(reasonOf(inside, "https://127.0.0.1/", { internal: true })).toBe("special-address");
+});
+
+it("explains at boot why the policy refuses a URL by the keys that let it through, naming no value", async () => {
+	onlyProxy();
+	const named = (
+		await boot({
+			allow: ["api.example", "127.0.0.1"],
+			"plain-loopback": ["127.0.0.1:8080"],
+			deny: ["bad.example"],
+		})
+	).get(outboundRefusals);
+	const allow = "not-allowed: name the host in outbound.allow, or set outbound.allow-any-public";
+	const plain =
+		"scheme: plain http reaches only a host:port that outbound.plain-loopback names; otherwise write the URL with https";
+	const expected: Record<string, string | undefined> = {
+		"https://api.example/x": undefined,
+		"https://other.example/": allow,
+		"http://api.example/": plain,
+		"http://127.0.0.1:8081/": plain,
+		"ftp://api.example/": "scheme: only https and http URLs are reached",
+		"https://u:p@api.example/": "userinfo: write the URL without a user or password",
+		"https://api.example:0/": "port: the URL's port is one outbound never reaches",
+		"https://bad.example/": "denied: the host matches outbound.deny",
+	};
+	for (const [url, text] of Object.entries(expected)) expect(named.explained(url), url).toBe(text);
+	// A host the caller does not name for this URL is no operator's key to set.
+	expect(named.explained("https://api.example/", { hosts: ["other.example"] })).toBe(
+		"not-allowed: the host is not one the setting may reach",
+	);
+	const any = (await boot({ "allow-any-public": true, "internal-hosts": ["10.0.0.5"] })).get(
+		outboundRefusals,
+	);
+	expect(any.explained("https://10.0.0.6/")).toBe(
+		"special-address: the URL names a special-purpose address, which outbound never reaches",
+	);
+	expect(any.explained("https://10.0.0.6/", { internal: true })).toBe(
+		"special-address: the URL names a special-purpose address; a private one is reached only when outbound.internal-hosts names its host",
+	);
+	expect(any.explained("https://10.0.0.5/", { internal: true })).toBeUndefined();
+	// The value is never told: no host, port or pair is in any explanation.
+	for (const url of Object.keys(expected)) {
+		for (const value of [
+			"api.example",
+			"other.example",
+			"bad.example",
+			"127.0.0.1",
+			"8081",
+			"u:p",
+		]) {
+			expect(named.explained(url) ?? "", url).not.toContain(value);
+		}
+	}
 });
 
 it("takes the same host list in direct-hosts and internal-hosts, and refuses a wildcard, a dot before an address and an empty label", () => {

@@ -1,6 +1,6 @@
 import { defineModule } from "@mod/kernel";
 import { enrollmentWitnesses } from "@mod/mfa-witness";
-import { credentialPolicy, outbound, outboundPolicy } from "@mod/outbound";
+import { credentialPolicy, outbound, outboundRefusals } from "@mod/outbound";
 import { section } from "./section.ts";
 import { witnessAt } from "./witness.ts";
 
@@ -25,13 +25,13 @@ export default defineModule({ name: "mfa-witness-http", section, replicaSafe: tr
 			timeoutMs,
 			...(maxBytes === undefined ? {} : { maxBytes }),
 		};
-		const policy = await c.get(outboundPolicy);
+		const refusals = await c.get(outboundRefusals);
 		for (const [call, url] of Object.entries(urls)) {
-			const refusal = policy.refusalOf(url, narrower);
-			if (refusal !== undefined) {
+			const explained = refusals.explained(url, narrower);
+			if (explained !== undefined) {
 				return c.refuse(
 					`mfa-witness-http.${call}-url`,
-					`outbound's destination policy refuses it: ${refusal}`,
+					`outbound's destination policy refuses it: ${explained}`,
 				);
 			}
 		}

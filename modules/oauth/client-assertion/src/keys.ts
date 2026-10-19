@@ -1,7 +1,7 @@
 import type { Section } from "@mod/clients";
 import type { KeySource } from "@mod/external-jwt";
 import { publicJwk, verifiesUnder } from "@mod/keys";
-import type { OutboundPolicy } from "@mod/outbound";
+import type { OutboundRefusals } from "@mod/outbound";
 import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
 
@@ -51,14 +51,14 @@ export function keysOf(section: ClientKeys): KeySource {
 }
 
 /** The section with a check at boot that `outbound`'s policy lets a registered client's jwks-uri through. */
-export function clientKeysUnder(policy: OutboundPolicy): Section<ClientKeys> {
+export function clientKeysUnder(refusals: OutboundRefusals): Section<ClientKeys> {
 	return {
 		...clientKeys,
 		checkAtBoot: (section) => {
 			const source = keysOf(section);
 			if (!("jwks" in source)) return undefined;
-			const refused = policy.refusalOf(source.jwks.url, { hosts: source.jwks.hosts });
-			return refused && `outbound refuses the jwks-uri (${refused})`;
+			const refused = refusals.explained(source.jwks.url, { hosts: source.jwks.hosts });
+			return refused && `outbound's destination policy refuses the jwks-uri: ${refused}`;
 		},
 	};
 }

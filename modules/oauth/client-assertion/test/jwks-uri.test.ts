@@ -142,7 +142,9 @@ it("refuses boot for a client whose jwks-uri outbound's policy refuses", async (
 		refusals: [
 			{
 				where: "clients.registered.0.sections.client-assertion",
-				reason: expect.stringMatching(/jwks-uri/),
+				reason: expect.stringMatching(
+					/refuses the jwks-uri: not-allowed: name the host in outbound\.allow, or set outbound\.allow-any-public$/,
+				),
 			},
 		],
 	});

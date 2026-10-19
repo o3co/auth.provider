@@ -9,12 +9,14 @@ import {
 	type OutboundRequest,
 	type OutboundResponse,
 	outbound,
-	outboundPolicy,
+	outboundRefusals,
 } from "@mod/outbound";
 import { beforeEach, expect, it } from "vitest";
 import auditHttp from "../src/module.ts";
 import { auditHttpConfig } from "../src/testing.ts";
 
+/** How outbound explains a host its allow list leaves out. */
+const notAllowed = "not-allowed: name the host in outbound.allow, or set outbound.allow-any-public";
 const runtime = quietRuntime({
 	clock: { now: () => 1234 },
 	random: { bytes: (n) => new Uint8Array(n) },
@@ -36,10 +38,10 @@ const outboundAnswering = (answer: () => Promise<OutboundResponse>) =>
 				return answer();
 			},
 		})),
-		m.provide(outboundPolicy).by(() => ({
-			refusalOf: (url, narrower) => {
+		m.provide(outboundRefusals).by(() => ({
+			explained: (url, narrower) => {
 				checked.push(narrower);
-				return new URL(url).hostname === elsewhere ? "not-allowed" : undefined;
+				return new URL(url).hostname === elsewhere ? notAllowed : undefined;
 			},
 		})),
 		// As outbound's rule reads, with 127.0.0.1 standing for a named plain-loopback pair.
@@ -163,7 +165,12 @@ it("refuses a secret Authorization value with a URL outbound will not send a cre
 it("refuses boot on a URL outbound's policy refuses, saying why", async () => {
 	const booting = boot(status(204), { url: `https://${elsewhere}/events` });
 	await expect(booting).rejects.toMatchObject({
-		refusals: [{ where: "audit-http.url", reason: expect.stringContaining("not-allowed") }],
+		refusals: [
+			{
+				where: "audit-http.url",
+				reason: `outbound's destination policy refuses it: ${notAllowed}`,
+			},
+		],
 	});
 });
 

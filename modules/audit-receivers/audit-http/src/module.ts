@@ -1,6 +1,6 @@
 import { auditReceivers } from "@mod/audit";
 import { defineModule } from "@mod/kernel";
-import { credentialPolicy, outbound, outboundPolicy } from "@mod/outbound";
+import { credentialPolicy, outbound, outboundRefusals } from "@mod/outbound";
 import { section } from "./section.ts";
 
 /** The URL is the operator's own, so a collector at a host in `internal-hosts` is reached at a private address. */
@@ -9,9 +9,9 @@ const own = { internal: true } as const;
 export default defineModule({ name: "audit-http", section, replicaSafe: true }, (m) => [
 	m.contribute(auditReceivers).by(async (c) => {
 		const { url, authorization } = c.section;
-		const refusal = (await c.get(outboundPolicy)).refusalOf(url, own);
-		if (refusal !== undefined) {
-			return c.refuse("audit-http.url", `outbound's destination policy refuses it: ${refusal}`);
+		const refused = (await c.get(outboundRefusals)).explained(url, own);
+		if (refused !== undefined) {
+			return c.refuse("audit-http.url", `outbound's destination policy refuses it: ${refused}`);
 		}
 		if (authorization !== undefined && (await c.get(credentialPolicy)).refusalOf([url])) {
 			return c.refuse(

@@ -1,5 +1,5 @@
 import { setting } from "@mod/kernel";
-import type { OutboundPolicy } from "@mod/outbound";
+import type { OutboundRefusals } from "@mod/outbound";
 import {
 	clientSetting,
 	credentialSetting,
@@ -78,14 +78,14 @@ const section = clientSetting
  * The section; boot is refused on an endpoint this server sends to, Apple's own included, that
  * outbound's destination policy refuses with the endpoint's host alone.
  */
-export const settingsOf = (policy: OutboundPolicy) =>
+export const settingsOf = (refusals: OutboundRefusals) =>
 	section.superRefine((s, context) => {
 		for (const key of ["token-endpoint", "jwks-uri"] as const) {
 			// A value that is no URL is refused already, and zod still runs this: it is passed over.
 			if (!URL.canParse(s[key])) continue;
-			const refusal = policy.refusalOf(s[key], { hosts: [new URL(s[key]).hostname] });
-			if (refusal === undefined) continue;
-			const message = `outbound's destination policy refuses it: ${refusal}`;
+			const refused = refusals.explained(s[key], { hosts: [new URL(s[key]).hostname] });
+			if (refused === undefined) continue;
+			const message = `outbound's destination policy refuses it: ${refused}`;
 			context.addIssue({ code: "custom", path: [key], message });
 		}
 	});

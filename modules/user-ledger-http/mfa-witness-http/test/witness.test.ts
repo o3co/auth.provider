@@ -296,4 +296,17 @@ describe("mfa-witness-http", () => {
 			expect(JSON.stringify(refusals)).not.toContain(credential);
 		}
 	});
+
+	it("says which of outbound's keys lets a URL it refuses through, naming no value", async () => {
+		const error = await open(settings({ "enroll-url": "https://ledger.example/w/enroll" })).catch(
+			(e: unknown) => e,
+		);
+		expect((error as BootRefused).refusals).toEqual([
+			{
+				where: "mfa-witness-http.enroll-url",
+				reason:
+					"outbound's destination policy refuses it: not-allowed: name the host in outbound.allow, or set outbound.allow-any-public",
+			},
+		]);
+	});
 });

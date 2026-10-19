@@ -10,7 +10,7 @@ import {
 	kernelConfig,
 	type Runtime,
 } from "@mod/kernel";
-import { credentialPolicy, type Narrower, outbound, outboundPolicy } from "@mod/outbound";
+import { credentialPolicy, type Narrower, outbound, outboundRefusals } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Ledger, ledgers, userAttribute, users } from "@mod/users";
@@ -599,8 +599,8 @@ describe("users-http", () => {
 					};
 				},
 			})),
-			m.provide(outboundPolicy).by(() => ({
-				refusalOf: (_url, narrower) => {
+			m.provide(outboundRefusals).by(() => ({
+				explained: (_url, narrower) => {
 					checked.push(narrower);
 					return undefined;
 				},
@@ -624,17 +624,30 @@ describe("users-http", () => {
 		expect(sent).toMatchObject([{ internal: true }]);
 	});
 
-	it("refuses to start on a verify-url outbound's policy refuses, saying why", async () => {
+	it("refuses to start on a verify-url outbound's policy refuses, saying which of its keys to set", async () => {
 		const refused = [
-			[["ledger.example"], `http://${pair}/ledger/authenticate`, "not-allowed"],
-			[["127.0.0.1"], "http://127.0.0.1:8/ledger/authenticate", "scheme"],
+			[
+				["ledger.example"],
+				`http://${pair}/ledger/authenticate`,
+				"not-allowed: name the host in outbound.allow, or set outbound.allow-any-public",
+			],
+			[
+				["127.0.0.1"],
+				"http://127.0.0.1:8/ledger/authenticate",
+				"scheme: plain http reaches only a host:port that outbound.plain-loopback names; otherwise write the URL with https",
+			],
 		] as const;
 		for (const [allow, url, reason] of refused) {
 			await expect(
 				boot(settings({ "verify-url": url }), [], [...allow]),
 				url,
 			).rejects.toMatchObject({
-				refusals: [{ where: "users-http.verify-url", reason: expect.stringContaining(reason) }],
+				refusals: [
+					{
+						where: "users-http.verify-url",
+						reason: `outbound's destination policy refuses it: ${reason}`,
+					},
+				],
 			});
 		}
 	});

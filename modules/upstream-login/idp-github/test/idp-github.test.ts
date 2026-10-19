@@ -2,7 +2,7 @@ import { isUnavailable, Unavailable } from "@mod/kernel";
 import type {
 	Narrower,
 	Outbound,
-	OutboundPolicy,
+	OutboundRefusals,
 	OutboundRequest,
 	OutboundResponse,
 } from "@mod/outbound";
@@ -20,11 +20,13 @@ const ok = (json: unknown, status = 200): OutboundResponse => ({
 
 /** What the destination policy was asked at boot. */
 const policyAsked: { url: string; narrower: Narrower | undefined }[] = [];
+/** How outbound explains a host its allow list leaves out. */
+const notAllowed = "not-allowed: name the host in outbound.allow, or set outbound.allow-any-public";
 /** A destination policy refusing the `refused` hosts as not allowed. */
-const policyRefusing = (refused: readonly string[] = []): OutboundPolicy => ({
-	refusalOf: (url, narrower) => {
+const policyRefusing = (refused: readonly string[] = []): OutboundRefusals => ({
+	explained: (url, narrower) => {
 		policyAsked.push({ url, narrower });
-		return refused.includes(new URL(url).hostname) ? "not-allowed" : undefined;
+		return refused.includes(new URL(url).hostname) ? notAllowed : undefined;
 	},
 });
 const settings = settingsOf(policyRefusing());
@@ -162,7 +164,7 @@ describe("idp-github", () => {
 				.error?.issues.map((i) => [i.path, i.message]);
 		const refused = (key: string) => [
 			[key],
-			"outbound's destination policy refuses it: not-allowed",
+			`outbound's destination policy refuses it: ${notAllowed}`,
 		];
 		policyAsked.length = 0;
 		expect(refusalsOf(["github.com"])).toEqual([refused("token-endpoint")]);

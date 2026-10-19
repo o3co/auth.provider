@@ -18,7 +18,7 @@
 ## Invariants
 - Every request goes through `outbound`, narrowed to the one endpoint's host.
 - The client's secret goes only to the token endpoint, as HTTP Basic.
-- Boot is refused, at its key, where `outbound`'s destination policy refuses `token-endpoint` or `jwks-uri` with its host alone.
+- Boot is refused, at its key, where `outbound`'s destination policy refuses `token-endpoint` or `jwks-uri` with its host alone, saying which of its keys to set (`outbound.refusals`).
 - Google's own default endpoints are put to that policy too.
 - A callback carrying an `iss` other than exactly `https://accounts.google.com`, an empty one included, is refused before its code is used.
 - A callback without `iss` is refused while `require-iss` holds.

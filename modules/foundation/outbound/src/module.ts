@@ -7,11 +7,12 @@ import {
 	DestinationRefused,
 	type Narrower,
 	type Outbound,
-	type OutboundPolicy,
+	type OutboundRefusals,
 	type OutboundRequest,
 	OutboundUnavailable,
 	outbound,
-	outboundPolicy,
+	outboundRefusals,
+	type RefusalReason,
 	type SignedOutbound,
 	signedOutbound,
 } from "./contract.ts";
@@ -23,6 +24,7 @@ import {
 	isListEntry,
 	isPair,
 	listed,
+	remedyOf,
 } from "./policy.ts";
 import { type Resolver, type Route, send, systemResolver, type Trust } from "./transport.ts";
 
@@ -155,7 +157,7 @@ function places(max: number) {
 interface Paths {
 	readonly fetch: Outbound["fetch"];
 	readonly fetchSigned: SignedOutbound["fetch"];
-	readonly refusalOf: OutboundPolicy["refusalOf"];
+	readonly explained: OutboundRefusals["explained"];
 	readonly credentialRefusalOf: CredentialPolicy["refusalOf"];
 }
 
@@ -220,21 +222,26 @@ export function outboundOver(
 		const admitted = admitUrl(url, policy, narrower, signed);
 		return requestPlace(() => send(admitted, sent, limits, bounded, route, trust, deadlineOf));
 	};
+	/** Why the policy refuses the URL, or undefined when it lets it through; no name is resolved. */
+	const refusalOf = (url: string, narrower: Narrower = {}): RefusalReason | undefined => {
+		try {
+			const admitted = admitUrl(url, policy, narrower, false);
+			// An address written in the URL is checked now; a name's, once resolved, when sent.
+			if (isIP(admitted.host) !== 0) admitAddresses([admitted.host], admitted);
+			return undefined;
+		} catch (error) {
+			if (error instanceof DestinationRefused) return error.reason;
+			throw error;
+		}
+	};
 	return {
 		fetch: (url, request = {}, narrower = {}) => go(url, request, narrower, false),
 		fetchSigned: (url, request, narrower) => go(url, request, narrower, true),
-		refusalOf: (url, narrower = {}) => {
-			try {
-				const admitted = admitUrl(url, policy, narrower, false);
-				// An address written in the URL is checked now; a name's, once resolved, when sent.
-				if (isIP(admitted.host) !== 0) admitAddresses([admitted.host], admitted);
-				return undefined;
-			} catch (error) {
-				if (error instanceof DestinationRefused) return error.reason;
-				throw error;
-			}
-		},
 		credentialRefusalOf: (urls) => credentialRefusal(urls, policy.plainLoopback),
+		explained: (url, narrower = {}) => {
+			const reason = refusalOf(url, narrower);
+			return reason && `${reason}: ${remedyOf(reason, url, policy, narrower)}`;
+		},
 	};
 }
 
@@ -262,7 +269,7 @@ export default defineModule({ name: "outbound", section, replicaSafe: true }, (m
 	// One set of counts for both paths.
 	m.provide(outbound).by(async (c) => ({ fetch: (await c.get(paths)).fetch })),
 	m.provide(signedOutbound).by(async (c) => ({ fetch: (await c.get(paths)).fetchSigned })),
-	m.provide(outboundPolicy).by(async (c) => ({ refusalOf: (await c.get(paths)).refusalOf })),
+	m.provide(outboundRefusals).by(async (c) => ({ explained: (await c.get(paths)).explained })),
 	m.provide(credentialPolicy).by(async (c) => ({
 		refusalOf: (await c.get(paths)).credentialRefusalOf,
 	})),

@@ -1,6 +1,6 @@
 import type { Algorithm } from "@mod/external-jwt";
 import { setting } from "@mod/kernel";
-import { hostEntryOf, type OutboundPolicy } from "@mod/outbound";
+import { hostEntryOf, type OutboundRefusals } from "@mod/outbound";
 import {
 	clientSetting,
 	endpointSetting as endpoint,
@@ -30,7 +30,7 @@ export function hostsOf(s: {
  * The section, taking only the asymmetric algorithms external-jwt knows: never none nor HMAC. Boot is
  * refused on a URL it sends to that outbound's destination policy refuses.
  */
-export const settingsOf = (asymmetric: readonly Algorithm[], policy: OutboundPolicy) =>
+export const settingsOf = (asymmetric: readonly Algorithm[], refusals: OutboundRefusals) =>
 	clientSetting
 		.extend({
 			issuer: endpoint.describe(
@@ -108,9 +108,9 @@ export const settingsOf = (asymmetric: readonly Algorithm[], policy: OutboundPol
 				: { "token-endpoint": s["token-endpoint"], "jwks-uri": s["jwks-uri"] };
 			const hosts = hostsOf(s);
 			for (const [key, url] of Object.entries(sent)) {
-				const refusal = url === undefined ? undefined : policy.refusalOf(url, { hosts });
-				if (refusal === undefined) continue;
-				const message = `outbound's destination policy refuses it: ${refusal}`;
+				const refused = url === undefined ? undefined : refusals.explained(url, { hosts });
+				if (refused === undefined) continue;
+				const message = `outbound's destination policy refuses it: ${refused}`;
 				context.addIssue({ code: "custom", path: [key], message });
 			}
 		});
