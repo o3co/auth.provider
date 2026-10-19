@@ -515,6 +515,18 @@ export function sessionsContract(
 			}
 		});
 
+		it("says the state each close found the record in: open, closing while left pending, then closed", async () => {
+			const place = await open();
+			const done = await place.sessions.complete(place.request(), facts(place));
+			place.failClosing(true);
+			expect((await place.sessions.close(done.session.id)).from).toBe("open");
+			expect((await place.sessions.close(done.session.id)).from).toBe("closing");
+			place.failClosing(false);
+			expect((await place.sessions.close(done.session.id)).from).toBe("closing");
+			expect((await place.sessions.close(done.session.id)).from).toBe("closed");
+			expect((await place.sessions.close("x".repeat(43))).from).toBeUndefined();
+		});
+
 		it("names the session a close ended or left pending, by its handle and subject", async () => {
 			const place = await open();
 			const named = (done: { session: Session }) => ({ id: done.session.id, subject: "alice" });

@@ -140,21 +140,3 @@ describe("participants", () => {
 		expect(overlapped).toBe(false);
 	});
 });
-
-describe("close", () => {
-	it("says the state the stand-in's close found the record in: open, closing while left pending, then closed", async () => {
-		const place = await placeOver();
-		const done = await place.sessions.complete(place.request(), {
-			subject: "alice",
-			amr: ["pwd"],
-			authenticatedAt: place.now(),
-		});
-		place.failClosing(true);
-		expect((await place.sessions.close(done.session.id)).from).toBe("open");
-		expect((await place.sessions.close(done.session.id)).from).toBe("closing");
-		place.failClosing(false);
-		expect((await place.sessions.close(done.session.id)).from).toBe("closing");
-		expect((await place.sessions.close(done.session.id)).from).toBe("closed");
-		expect((await place.sessions.close("x".repeat(43))).from).toBeUndefined();
-	});
-});
