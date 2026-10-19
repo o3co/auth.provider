@@ -20,8 +20,8 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | POST | `/oauth/authorize` | `@mod/authorize` | form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
 | GET | `/oauth/consent` | `@mod/consent` | form |  | no |  |  |  |
 | POST | `/oauth/consent` | `@mod/consent` | form, json | `csrf` | yes | `csrf` | The user's session is authenticated; a per-source limit belongs to unauthenticated entries. |  |
-| POST | `/oauth/device/verification` | `@mod/device-grant` | json | `csrf` | yes | `csrf` |  |  |
-| POST | `/oauth/device_authorization` | `@mod/device-grant` | form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
+| POST | `/oauth/device/verification` | `@mod/device-grant` | json | `csrf` | yes | `csrf` | Every action counts against the subject in rate-limit's attempt limit, in the handler. |  |
+| POST | `/oauth/device_authorization` | `@mod/device-grant` | form | `rate-limit.requests-per-source` | yes | A device's client calls it with its own client authentication and reads no cookie. | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/federation-grants` | `@mod/federation-grants` | json, form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/federation-grants/*` | `@mod/federation-grants` | json, form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/federation/*` | `@mod/federation-tokens` | form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |

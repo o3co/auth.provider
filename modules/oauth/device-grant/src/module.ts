@@ -19,6 +19,8 @@ export default defineModule({ name: "device-grant", section }, (m) => [
 			method: "POST",
 			path: authorizationPath,
 			uses: [use(requestsPerSource, { name: "device-grant.authorization", window })],
+			crossSite:
+				"A device's client calls it with its own client authentication and reads no cookie.",
 			...(await authorizationOver(c)),
 		};
 	}),
@@ -27,6 +29,8 @@ export default defineModule({ name: "device-grant", section }, (m) => [
 		path: verificationPath,
 		takes: ["json"],
 		uses: [use(csrfChecked)],
+		unlimited:
+			"Every action counts against the subject in rate-limit's attempt limit, in the handler.",
 		...(await verificationOver(c)),
 	})),
 	m.contribute(metadata).by(async (c) => {
