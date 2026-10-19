@@ -9,6 +9,7 @@
 	},
 	"dependencies": {
 		"@mod/kernel": "workspace:*",
-		"@mod/mfa": "workspace:*"
+		"@mod/mfa": "workspace:*",
+		"@mod/mfa-extensions": "workspace:*"
 	}
 }

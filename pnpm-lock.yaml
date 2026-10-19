@@ -2246,6 +2246,9 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../mfa
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
 
   modules/second-factor/mfa-totp:
     dependencies:
