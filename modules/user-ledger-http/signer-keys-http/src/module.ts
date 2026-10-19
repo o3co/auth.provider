@@ -1,6 +1,6 @@
 import { signerKeys } from "@mod/jwt-bearer";
 import { defineModule } from "@mod/kernel";
-import { credentialPolicy, outbound, outboundRefusals } from "@mod/outbound";
+import { credentialPolicy, destinationRefusal, outbound, outboundRefusals } from "@mod/outbound";
 import { keysAt } from "./lookup.ts";
 import { section } from "./section.ts";
 
@@ -14,12 +14,9 @@ export default defineModule({ name: "signer-keys-http", section, replicaSafe: tr
 			...(maxBytes === undefined ? {} : { maxBytes }),
 			...(timeoutMs === undefined ? {} : { timeoutMs }),
 		};
-		const refused = (await c.get(outboundRefusals)).explained(url, narrower);
+		const refused = destinationRefusal(await c.get(outboundRefusals), url, narrower);
 		if (refused !== undefined) {
-			return c.refuse(
-				"signer-keys-http.keys-url",
-				`outbound's destination policy refuses it: ${refused}`,
-			);
+			return c.refuse("signer-keys-http.keys-url", refused);
 		}
 		const { credential } = c.section;
 		if (credential !== undefined && (await c.get(credentialPolicy)).refusalOf([url])) {
