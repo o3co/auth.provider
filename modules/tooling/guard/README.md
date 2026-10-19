@@ -2,8 +2,7 @@
 
 ## Responsibilities
 - Checks the workspace's invariants, each reported by its id, place and what went over:
-  - G1: no cycles.
-  - G2: common depends on nothing in the workspace.
+  - G1, G2: no cycles, and common depends on nothing in the workspace.
   - G3: only assembly uses composition definitions (`./module`); product code only, not tests.
   - G4: contract tests (`./testing`) are used only from tests.
   - G5: a package exports `.`, `./testing`, `./module` and `./audit-events` (its events, as `audit` declares them) only.
@@ -23,6 +22,7 @@
   - G22: only a wiring-kind package wires (`wires` in its manifest), and a feature that declares `storeWiring` has one.
   - G24: a wiring keys its guarantees by the needs its feature declares: shipped code takes `keyof typeof` a name imported from the feature.
   - G25: an adapter declares exactly one of `replaces` and `adapts`, naming a workspace package; an axis has at most one `default`, and one when it has several adapters; `default` and `optIn` are `true` only, on an adapter and a feature; a wording adapter never `joins` its owner.
+  - G26: product code reaches the network through `outbound`, or as the words its manifest declares let it (the `network` internal module).
 - Measures each package's public surface: its exported values, and the members of its exported interfaces and type aliases.
 
 ## Not here

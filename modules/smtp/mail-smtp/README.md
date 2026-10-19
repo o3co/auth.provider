@@ -12,6 +12,7 @@
 - Operator section: `host` (required), `port` (default 587), `security` (`starttls` by default, `tls` or `none`), `from` (one address mail's `isAddress` takes, a display name allowed), `user` and `password` (both or neither), `deadline` (the whole send, 100ms–10m, default `40s`, written with its unit), `concurrent-sends` (sends at once on a host, 1–1000, default 20).
 
 ## Invariants
+- Connects to the relay itself, apart from `outbound`, which carries HTTP alone (`network`: `smtp`).
 - One connection per send, never reused. It holds no state but the count of sends at once, so it is safe on multiple instances.
 - Past `concurrent-sends`, a send is unavailable at once, opening no connection, logged as `mail-smtp.busy` with the purpose. A send ends at its answer or its deadline; a name lookup its deadline gave up on holds no socket and is bounded by the resolver's pool, not by this count.
 - `tls` is TLS from the first byte. `starttls` always uses STARTTLS and sends nothing more when it is missing or refused.

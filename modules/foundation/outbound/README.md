@@ -17,6 +17,7 @@
 - Operator section `outbound`: the policy, the caps, the proxy and `internal-hosts`; its keys are in the configuration reference.
 
 ## Invariants
+- Sends every request that leaves the deployment itself, as no other package does (`network`: `outbound`).
 - No host is reached by name unless `allow` names it (`.name` for it and the names under it) or `allow-any-public` is set; `deny` is checked first.
 - Boot is refused on an `allow` or `deny` entry that is not a host, a `plain-loopback` entry that is not a host and a port written as 1–65535 without a leading zero, or a `direct-hosts` or `internal-hosts` entry that is neither a host nor `.name`, for the name and the names under it. An entry is read as written: letters, digits and hyphens, or a whole address; only case and Unicode are corrected.
 - A URL is https, without user information, on no port the Fetch standard calls bad nor port 0. Plain http reaches a named `plain-loopback` pair at loopback addresses alone; signed material also takes it at public addresses, from the caller's hosts only.
