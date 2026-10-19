@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { branchingImports, check, dependencyCards } from "../src/contract.ts";
@@ -779,6 +780,7 @@ describe("guard", () => {
 			`G11 a.ts:${12}`,
 		]);
 		const dir = p.dir;
+		mkdirSync(join(dir, "modules"));
 		const doc = (text: string) => check([], budget, [{ path: join(dir, "README.md"), text }]);
 		const found = (text: string) => doc(text).map((v) => `${v.rule.split(" ")[0]} ${v.detail}`);
 		expect(
@@ -796,6 +798,7 @@ describe("guard", () => {
 
 	it("G12 reads an inline path rooted at / as a location, and still reads a link target in full", () => {
 		const p = pkg("@t/routes", { "README.md": "x\n" });
+		mkdirSync(join(p.dir, "some"));
 		const doc = (text: string) => check([], budget, [{ path: join(p.dir, "README.md"), text }]);
 		const found = (text: string) => doc(text).map((v) => `${v.rule.split(" ")[0]} ${v.detail}`);
 		expect(
@@ -814,6 +817,8 @@ describe("guard", () => {
 
 	it("G12 tells a refused path whole, its extension too, and reads no file whose extension it does not know", () => {
 		const p = pkg("@t/whole", { "README.md": "x\n" });
+		mkdirSync(join(p.dir, "some"));
+		mkdirSync(join(p.dir, "other"));
 		const doc = (text: string) => check([], budget, [{ path: join(p.dir, "README.md"), text }]);
 		const found = (text: string) => doc(text).map((v) => `${v.rule.split(" ")[0]} ${v.detail}`);
 		expect(found("`some/dir/package.json` and `other/dir/notes.yaml`")).toEqual([
@@ -821,5 +826,25 @@ describe("guard", () => {
 			"G12 other/dir/notes.yaml",
 		]);
 		expect(found("`some/dir/view.tsx` and `some/dir/data.jsonl`")).toEqual([]);
+	});
+
+	it("G12 reads an inline path as the repository's only where its first part is beside the document", () => {
+		const p = pkg("@t/generated", { "README.md": "x\n", "docs/guide.md": "x\n" });
+		const doc = (text: string) => check([], budget, [{ path: join(p.dir, "README.md"), text }]);
+		const found = (text: string) => doc(text).map((v) => `${v.rule.split(" ")[0]} ${v.detail}`);
+		// No config/ or src/ beside the document: these name files of a generated app, fenced or not.
+		expect(
+			found(
+				"Edit `config/local.conf` and `config/application.conf`, then `src/main.ts`.\n\n```sh\ncp config/local.conf.example config/local.conf\n```\n",
+			),
+		).toEqual([]);
+		// docs/ is beside the document, so a missing file in it is still refused, fenced or not.
+		expect(found("`docs/guide.md`, `docs/missing.md`\n\n```\nsee docs/migraton.md\n```\n")).toEqual(
+			["G12 docs/missing.md", "G12 docs/migraton.md"],
+		);
+		// An explicitly relative path is read whatever its first part; a link target is read in full.
+		expect(found("`./config/local.conf`, `../other/file.md` and [cfg](config/local.conf)")).toEqual(
+			["G12 config/local.conf", "G12 ./config/local.conf", "G12 ../other/file.md"],
+		);
 	});
 });
