@@ -55,4 +55,4 @@ Fix the cause and run the workflow again for the same tag. A package already on 
 - Install the entrance from npm (`npx @o3co/create-auth-provider@<version>`), generate a pattern and boot it.
 - For a final release, check that `latest` names the version for every package, the placeholders' included.
 - The cross-component tests in the umbrella repository run by hand (`umbrella-e2e.yml`); its header says against which revisions.
-- Deprecating the 0.17 packages: `npm deprecate` each by version range (`<0.18.0`), so a name 0.18 reuses keeps its new versions undeprecated. The [migration guide](migration.md#packages) says which 0.17 package went where.
+- At the first final 0.18 release: deprecate the 0.17 packages with `npm deprecate`, each by version range (`<0.18.0`), so a name 0.18 reuses keeps its new versions undeprecated, and mark the 0.17 API site on GitHub Pages as 0.17's. The [migration guide](migration.md#packages) says which 0.17 package went where.
