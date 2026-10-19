@@ -105,6 +105,8 @@ async function serve(
 	options: {
 		revocation?: "denylist" | "unsupported";
 		lifetime?: number;
+		/** An access token's own lifetime, in seconds, when not tokens' default. */
+		accessLifetime?: number;
 		/** Whether a confidential client's families are bound too. */
 		bindConfidential?: boolean;
 		extra?: Module[];
@@ -119,7 +121,10 @@ async function serve(
 		modules: [
 			http,
 			switchedModule(
-				tokensStandIn({ revocable: (options.revocation ?? "denylist") === "denylist" }),
+				tokensStandIn({
+					revocable: (options.revocation ?? "denylist") === "denylist",
+					...(options.accessLifetime ? { lifetimeSeconds: options.accessLifetime } : {}),
+				}),
 				tokens,
 				down.tokens,
 			),
@@ -387,6 +392,18 @@ describe("refresh tokens", () => {
 		const id = familyNameOf(token);
 		const kept = (await s.stores.byFamily.members(id)).map((m) => m.remainingMs);
 		expect(Math.min(...kept)).toBeGreaterThan(Number(answer.body.expires_in) * 1000 + 110_000);
+	});
+
+	it("never issues an access token past the family's session, when the session ends first", async () => {
+		const s = await serve();
+		const entry = await s.app.get(sessions).entryOf(s.session.id);
+		if (entry.kind !== "entered") throw new Error("not entered");
+		// A minute before the session ends, the family (an hour from now) outlives it.
+		shift = entry.endsAt - Date.now() - 60_000;
+		const { refresh_token: token = "" } = await s.redeem();
+		const answer = await s.refresh(token);
+		expect(answer.status).toBe(200);
+		expect(Number(answer.body.expires_in)).toBeLessThanOrEqual(60);
 	});
 
 	it("asks the client's present allowance on every refresh", async () => {
@@ -743,8 +760,12 @@ describe("refresh tokens", () => {
 	});
 
 	it("revoke an access token its family's full list would drop, and fail rather than lose it", async () => {
-		// A family that outlives its tokens, so each token ends a second after the one before.
-		const s = await serve({ lifetime: 86_400, caps: { sessionFamilies: 1000, issuedAccess: 2 } });
+		// A family and a session that outlive its tokens, so each token ends a second after the one before.
+		const s = await serve({
+			lifetime: 86_400,
+			accessLifetime: 600,
+			caps: { sessionFamilies: 1000, issuedAccess: 2 },
+		});
 		const first = await s.redeem();
 		shift += 1000;
 		const second = await s.refresh(first.refresh_token);

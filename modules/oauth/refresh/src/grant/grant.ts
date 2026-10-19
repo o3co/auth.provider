@@ -41,15 +41,17 @@ function scopeFor(asked: string | undefined, granted: readonly string[]) {
 	return [...new Set(asking)];
 }
 
-async function stillValid(family: Family, checks: Checks) {
+/** When the family's next access token must end by; none when the family may no longer be used. */
+async function stillValid(family: Family, checks: Checks): Promise<number | undefined> {
 	// Only a session that enters at use keeps its family: one closed, ended or short of a requirement does not.
-	if (
-		family.session !== undefined &&
-		(await checks.sessions.entryOf(family.session)).kind !== "entered"
-	) {
-		return false;
+	let endsAt = family.expiresAt;
+	if (family.session !== undefined) {
+		const entry = await checks.sessions.entryOf(family.session);
+		if (entry.kind !== "entered") return undefined;
+		endsAt = Math.min(endsAt, entry.endsAt);
 	}
-	return (await checks.revocation.check(family.subject, family.authenticatedAt)) === "valid";
+	const valid = (await checks.revocation.check(family.subject, family.authenticatedAt)) === "valid";
+	return valid ? endsAt : undefined;
 }
 
 export function starting(
@@ -139,7 +141,8 @@ export function refreshGrant(
 			if (asked.kind === "error") return asked;
 			const { audience } = asked;
 			if (!clientAllowance.covers(client, { scope, audience }, issuer)) return refused;
-			if (!(await stillValid(family, checks))) return refused;
+			const notAfter = await stillValid(family, checks);
+			if (notAfter === undefined) return refused;
 			const next = text(random, 32);
 			// Only this access token is narrowed: the family keeps the original grant (RFC 6749 §6).
 			const rotated: Family = { ...family, current: hashOf(next) };
@@ -159,7 +162,7 @@ export function refreshGrant(
 				},
 				// A refresh continues a grant the policies already let through: they may judge it so.
 				{
-					notAfter: family.expiresAt,
+					notAfter,
 					continuing: true,
 					...(family.session ? { session: family.session } : {}),
 				},
