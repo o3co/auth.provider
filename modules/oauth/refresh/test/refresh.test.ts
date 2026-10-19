@@ -117,6 +117,7 @@ async function serve(
 	} = {},
 ) {
 	const simulated = simulatedStore();
+	const audited = auditStandIn();
 	const stores = memoryStores(options.caps);
 	const down = { tokens: unavailableSwitch<Tokens>("tokens") };
 	const both = ["authorization_code", "refresh_token"];
@@ -138,7 +139,7 @@ async function serve(
 			clientAllowanceModule,
 			tokenControl,
 			rateLimitStandIn,
-			auditStandIn().module,
+			audited.module,
 			sessionStandIn,
 			sessionRequirements,
 			sessionParticipants,
@@ -248,7 +249,7 @@ async function serve(
 		grant("refresh_token", as, { refresh_token: token ?? "", ...extra });
 	const active = async (token: string | undefined) =>
 		(await app.get(tokens).verifyAccess(token ?? "")).kind === "valid";
-	return { app, stores, down, session, post, redeem, refresh, active };
+	return { app, stores, down, session, post, redeem, refresh, active, audited: audited.events };
 }
 
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
@@ -432,11 +433,31 @@ describe("refresh tokens", () => {
 		expect(read?.kind).toBe("issued");
 	});
 
+	it("record the family a reuse revokes, with its subject and client, and never a token", async () => {
+		const s = await serve();
+		const first = await s.redeem();
+		const second = await s.refresh(first.refresh_token);
+		expect(s.audited.filter((e) => e.kind === "refresh.family_revoked")).toEqual([]);
+		await s.refresh(first.refresh_token);
+		const revoked = s.audited.filter((e) => e.kind === "refresh.family_revoked");
+		expect(revoked.map(({ subject, attributes }) => ({ subject, attributes }))).toEqual([
+			{ subject: "alice", attributes: { client: "app" } },
+		]);
+		for (const token of [first.refresh_token, second.body.refresh_token, first.access_token]) {
+			const [, secret = ""] = String(token).split(".");
+			expect(JSON.stringify(revoked)).not.toContain(secret);
+		}
+		// A family a reuse already ended takes no more uses, and records nothing more.
+		await s.refresh(second.body.refresh_token);
+		expect(s.audited.filter((e) => e.kind === "refresh.family_revoked")).toHaveLength(1);
+	});
+
 	it("treat the loser of a race to rotate the same token as a reuse", async () => {
 		const s = await serve();
 		const { refresh_token: token = "" } = await s.redeem();
 		const answers = await Promise.all([direct(s, token), direct(s, token)]);
 		expect(answers.filter((a) => a?.kind === "issued").length).toBeLessThanOrEqual(1);
+		expect(s.audited.filter((e) => e.kind === "refresh.family_revoked")).toHaveLength(1);
 		for (const a of answers) {
 			if (a?.kind !== "issued") continue;
 			expect((await s.refresh(String(a.body.refresh_token))).body.error).toBe("invalid_grant");

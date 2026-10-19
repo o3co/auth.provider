@@ -105,6 +105,12 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 |---|---|---|
 | `rate_limit.unavailable` | `limit`, `name`, `source`, `outcome` | a policy cannot count |
 
+## @mod/refresh
+
+| Kind | Attributes | Recorded when |
+|---|---|---|
+| `refresh.family_revoked` | `client` | a refresh token is used again (one already rotated, or the same one twice at once) and its family is revoked, with the subject |
+
 ## @mod/rp-logout
 
 | Kind | Attributes | Recorded when |

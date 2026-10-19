@@ -1461,6 +1461,9 @@ importers:
 
   modules/oauth/refresh:
     dependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
       '@mod/client-allowance':
         specifier: workspace:*
         version: link:../client-allowance
@@ -1501,9 +1504,6 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@mod/audit':
-        specifier: workspace:*
-        version: link:../../foundation/audit
       '@mod/code-grant-store':
         specifier: workspace:*
         version: link:../../templates/code-grant-store
