@@ -2015,6 +2015,16 @@ importers:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
 
+  modules/scaffold/trial:
+    dependencies:
+      '@o3co/ts.hocon':
+        specifier: 1.14.3
+        version: 1.14.3(zod@4.6.7)
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
   modules/second-factor/mfa:
     dependencies:
       '@mod/audit':
