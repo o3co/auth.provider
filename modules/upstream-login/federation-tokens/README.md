@@ -13,7 +13,7 @@
 - The upstream login and the IdP types (`upstreams`). What a refresh request holds (the IdP type). Checking and binding access tokens (`tokens`, `sender-binding`). The link of a token to its session (`session-tokens`). Offline delegation (federation-grants).
 
 ## Offers
-- Receiver `federation-tokens` for `upstreams`' upstream login receivers; its receipt is the kept entry's version, so `withdrawn` given it removes that entry only while it holds that version.
+- Receiver `federation-tokens` for `upstreams`' upstream login receivers; its receipt is the kept entry's version, so `withdrawn` given it removes that entry only while it holds that version, and without one removes nothing.
 - Participant `federation-tokens` for closing sessions.
 - `upstreamEndSessions.of` (session handle, return and state → the end of session of the first IdP the session holds tokens of, with its id_token as the hint / none).
   - It forgets nothing, so it is asked before the session closes.

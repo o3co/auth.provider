@@ -357,7 +357,10 @@ export function renewalWith(parts: Parts) {
 			if (idp === undefined || entry === undefined) return undefined;
 			return { idp, idToken: vault.open(session, idp, entry)?.idToken };
 		},
-		withdraw: forget,
+		/** Takes back what a login kept, by its receipt; without one, the login kept nothing. */
+		withdraw: async (session: string, idp: string, receipt: string | undefined) => {
+			if (receipt !== undefined) await forget(session, idp, receipt);
+		},
 		close: (session: string) => store.remove(session),
 	};
 }

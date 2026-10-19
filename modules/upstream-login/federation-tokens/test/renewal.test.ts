@@ -21,9 +21,9 @@ async function linked(
 ) {
 	const h = await harness({ ...settings, offered: { refresh } });
 	const session = await h.login();
-	await h.receive(session, given as Partial<UpstreamTokens>);
+	const receipt = await h.receive(session, given as Partial<UpstreamTokens>);
 	const { token } = await h.issue(session);
-	return { ...h, session, token, get: () => h.ask(token) };
+	return { ...h, session, token, receipt, get: () => h.ask(token) };
 }
 
 describe("when a token ends", () => {
@@ -269,7 +269,9 @@ describe("a refresh racing other writers", () => {
 			await during();
 			return answer({});
 		});
-		during = () => h.receive(h.session, { accessToken: "up-new", expiresInSeconds: 600 });
+		during = async () => {
+			await h.receive(h.session, { accessToken: "up-new", expiresInSeconds: 600 });
+		};
 		expect((await h.get()).status).toBe(503);
 		during = async () => {};
 		expect((await h.get()).json).toMatchObject({ access_token: "up-new" });
@@ -350,7 +352,7 @@ describe("as a receiver and a participant", () => {
 	it("withdraws one IdP's tokens and keeps the others", async () => {
 		const h = await linked({});
 		await h.receive(h.session, { accessToken: "up-o" }, "other");
-		await h.receivers[0]?.withdrawn(h.session.id, "corp");
+		await h.receivers[0]?.withdrawn(h.session.id, "corp", h.receipt);
 		expect((await h.get()).status).toBe(404);
 		expect((await h.ask(h.token, "other")).json).toMatchObject({ access_token: "up-o" });
 	});
@@ -380,14 +382,20 @@ describe("as a receiver and a participant", () => {
 		expect(await keeper?.received({ session, idp: "corp", tokens: refused })).toBeUndefined();
 	});
 
+	it("withdraws nothing without a receipt, as its login kept nothing", async () => {
+		const h = await linked({});
+		await h.receivers[0]?.withdrawn(h.session.id, "corp", undefined);
+		expect((await h.get()).json).toMatchObject({ access_token: "up-1" });
+	});
+
 	it("withdraws a closed session's tokens, whatever is left of it, and again harmlessly", async () => {
 		const h = await linked({});
 		h.stores.down.failNext("remove");
 		expect((await h.close(h.session)).kind).toBe("pending");
 		expect(await h.stores.records.read(h.session.id)).toBeDefined();
-		await h.receivers[0]?.withdrawn(h.session.id, "corp");
+		await h.receivers[0]?.withdrawn(h.session.id, "corp", h.receipt);
 		expect(await h.stores.records.read(h.session.id)).toBeUndefined();
-		await h.receivers[0]?.withdrawn(h.session.id, "corp");
+		await h.receivers[0]?.withdrawn(h.session.id, "corp", h.receipt);
 		expect(await h.stores.records.read(h.session.id)).toBeUndefined();
 	});
 
