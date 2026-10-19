@@ -59,6 +59,7 @@ export function handlersOver(p: HandlerParts) {
 		const session = await proving(request);
 		if ("status" in session) return session;
 		const fence = await p.factors.fenceOf(session.context.subject);
+		// Entering again reads the factors once more; `session` offers no lighter check of the boundary.
 		const still = await proving(request);
 		return "status" in still ? still : { session: still, fence };
 	};
