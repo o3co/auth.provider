@@ -11,14 +11,21 @@ import {
 } from "@mod/clients/testing";
 import cookiesModule from "@mod/cookies/module";
 import { csrfStandIn } from "@mod/csrf/testing";
-import { targetRules } from "@mod/grants";
+import { sessionIssuances, targetRules } from "@mod/grants";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { type MetadataItem, metadata } from "@mod/issuer";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
-import { assemble, contract, defineModule, kernelConfig, type Module } from "@mod/kernel";
+import {
+	assemble,
+	BootRefused,
+	contract,
+	defineModule,
+	kernelConfig,
+	type Module,
+} from "@mod/kernel";
 import { quietRuntime, recordingLog, unavailableSwitch } from "@mod/kernel/testing";
 import rateLimitModule from "@mod/rate-limit/module";
 import secretHashModule from "@mod/secret-hash/module";
@@ -74,10 +81,16 @@ const reader = defineModule({ name: "reader" }, (m) => [
 	m.provide(published).by((c) => c.collect(metadata)),
 ]);
 
+/** What records a token issued in a session to it, as session-tokens does where composed. */
+const recording = defineModule({ name: "recording" }, (m) => [
+	m.contribute(sessionIssuances).by(() => ({ issued: async () => {} })),
+]);
+
 async function serve(
 	settings: Partial<DeviceGrantSettings> = {},
 	extra: Module[] = [],
 	site: { readonly "public-origin"?: string } = { "public-origin": origin },
+	recorded = true,
 ) {
 	const kept = recordsStandIn(() => now);
 	const down = {
@@ -118,6 +131,7 @@ async function serve(
 			simulatedStore().module,
 			deviceGrant,
 			stores,
+			...(recorded ? [recording] : []),
 			...extra,
 		],
 		config: {
@@ -946,4 +960,13 @@ it("takes each setting in its bounds, a time with its unit in whole seconds, def
 	expect(parsed({}).data?.["complete-uri"]).toBe(false);
 	expect(parsed({ "verification-uri": "http://as.example/device" }).success).toBe(false);
 	expect(parsed({ unknown: 1 }).success).toBe(false);
+});
+
+it("refuses to start where nothing records a token to its session, so a logout could not end one it issued", async () => {
+	const refused = await serve({}, [], { "public-origin": origin }, false).catch((e: unknown) => e);
+	expect(refused).toBeInstanceOf(BootRefused);
+	expect((refused as BootRefused).refusals).toContainEqual({
+		where: "device-grant",
+		reason: expect.stringMatching(/recorded to the session/),
+	});
 });

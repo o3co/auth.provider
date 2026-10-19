@@ -1,8 +1,9 @@
-import { onNew } from "@mod/conformance";
-import { deviceArea } from "./area.ts";
+import { type NewPart, onNew } from "@mod/conformance";
+import { type DevicePart, deviceArea } from "./area.ts";
 
-onNew(deviceArea, (part) => ({
-	modules: ["@mod/device-grant"],
+/** The device grant, with session-tokens, which records its tokens to the session that approved them, as device-grant asks to boot. */
+export const setUp = (part: DevicePart): NewPart => ({
+	modules: ["@mod/device-grant", "@mod/session-tokens"],
 	store: "volatile",
 	config: {
 		"device-grant": {
@@ -10,4 +11,6 @@ onNew(deviceArea, (part) => ({
 			...(part.attempts ? { attempts: part.attempts } : {}),
 		},
 	},
-}));
+});
+
+onNew(deviceArea, setUp);
