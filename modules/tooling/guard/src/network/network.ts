@@ -132,6 +132,21 @@ export function reachesOf(path: string): string[] {
 		const module = nodeName(specifier.text);
 		return client ?? (reaching[module] || processes.includes(module) ? module : undefined);
 	};
+	/** A network global named as a property of the global object, by a dot or a string literal. */
+	const globalReached = (node: ts.Node) => {
+		const owner =
+			ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)
+				? node.expression
+				: undefined;
+		if (!owner || !ts.isIdentifier(owner) || !globalObjects.includes(owner.text) || local(owner))
+			return undefined;
+		const name = ts.isPropertyAccessExpression(node)
+			? node.name.text
+			: ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)
+				? node.argumentExpression.text
+				: undefined;
+		return name && globals.includes(name) ? name : undefined;
+	};
 	const uses = (node: ts.Node): void => {
 		if (ts.isCallExpression(node)) {
 			const callee = node.expression;
@@ -141,14 +156,8 @@ export function reachesOf(path: string): string[] {
 				if (reach) found.push(reach);
 			}
 		}
-		if (
-			ts.isPropertyAccessExpression(node) &&
-			ts.isIdentifier(node.expression) &&
-			globalObjects.includes(node.expression.text) &&
-			globals.includes(node.name.text)
-		) {
-			found.push(node.name.text);
-		}
+		const reached = globalReached(node);
+		if (reached) found.push(reached);
 		if (ts.isIdentifier(node) && globals.includes(node.text) && !local(node) && referenced(node)) {
 			found.push(node.text);
 		}
