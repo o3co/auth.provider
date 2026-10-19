@@ -15,7 +15,7 @@
 - The configuration reference's IdP type settings: what one IdP under `federation`'s `idps` holds for each type, by the package that adds the type, composed alike.
 - `reference.conf`: the section's keys as HOCON, each with its description as a comment; a key with a default as `key = value` (a time or size bare, `5m`), one without as a comment saying whether it is required. The module applies its defaults itself; no app loads the file.
 - The audit event reference: each module's events as its `./audit-events` declares them through `audit`.
-- The route reference: each route the full template with every opt-in serves, composed alike: its method, path, the package it is from, the bodies it takes, its policies in order, and whether it takes cross-origin requests. What a route answers stays in its package's card, as do the paths under a `*`.
+- The route reference: each route the full template with every opt-in serves, composed alike: its method, path, the package it is from, the bodies it takes, its policies in order, whether it changes state, what keeps other sites' requests out and what limits it by source (a marked policy or its reason), and whether it takes cross-origin requests. What a route answers stays in its package's card, as do the paths under a `*`.
 
 ## Invariants
 - Each reference is held to the committed file; a file that differs fails, naming the command.
@@ -28,4 +28,4 @@
 - The full template is assembled with the memory store in place of Redis, which is asked at assembly, and never started.
 
 ## Depends on
-- `create-app`'s workspace's package list, fragments, generation and trial settings; `combinations` (the full template and its opt-ins); `kernel`, to assemble it; `clients`' metadata sections, `upstreams`' IdP types and `http`'s routes, read from their contracts; the HOCON library, to read a written `reference.conf` back; `kernel`'s `setting`, the form its tests hold time and size keys to.
+- `create-app`'s workspace's package list, fragments, generation and trial settings; `combinations` (the full template and its opt-ins); `kernel`, to assemble it; `clients`' metadata sections, `upstreams`' IdP types and `http`'s routes and marks, read from their contracts; the HOCON library, to read a written `reference.conf` back; `kernel`'s `setting`, the form its tests hold time and size keys to.

@@ -1,5 +1,5 @@
 import { cookies } from "@mod/cookies";
-import { applying, policies, type Site, site } from "@mod/http";
+import { applying, marks, policies, type Site, site } from "@mod/http";
 import { contract, type Parts } from "@mod/kernel";
 import { checking, sameOriginOf } from "./check.ts";
 import { csrfChecked, csrfRefused, originEvidence } from "./contract.ts";
@@ -8,7 +8,7 @@ import { csrfChecked, csrfRefused, originEvidence } from "./contract.ts";
 const ours = contract<Site>("csrf.public-origin");
 
 /**
- * The policy's rule and the origin evidence, built alike by the module and its stand-in.
+ * The policy's rule, its mark and the origin evidence, built alike by the module and its stand-in.
  * Without a public origin the module refuses boot. The stand-in refuses every unsafe request
  * instead, until no test boots it without one.
  */
@@ -33,4 +33,8 @@ export const deciding = (m: Parts<undefined>, withoutOrigin: "refuse boot" | "re
 			request.method === "GET" || check(request) === "passed" ? "pass" : csrfRefused,
 		);
 	}),
+	m.contribute(marks).by(() => ({
+		guarantee: "own-site",
+		policies: [{ policy: csrfChecked, methods: ["POST", "PUT", "DELETE"] }],
+	})),
 ];

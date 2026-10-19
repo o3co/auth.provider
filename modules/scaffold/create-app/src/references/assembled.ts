@@ -21,13 +21,26 @@ export interface Contributed {
 	readonly schema: Schema;
 }
 
+interface Policy {
+	readonly label: string;
+}
+
 /** A route as `http` holds it, as far as the reference reads it. */
 interface Route {
 	readonly method: string;
 	readonly path: string;
 	readonly takes?: readonly string[];
-	readonly uses?: readonly { readonly policy: { readonly label: string } }[];
+	readonly uses?: readonly { readonly policy: Policy }[];
 	readonly cors?: object;
+	readonly changesState?: boolean;
+	readonly crossSite?: string;
+	readonly unlimited?: string;
+}
+
+/** A mark as `http` holds it: a guarantee, and the policies that keep it for the methods named. */
+interface Mark {
+	readonly guarantee: string;
+	readonly policies: readonly { readonly policy: Policy; readonly methods: readonly string[] }[];
 }
 
 /** A module as its definition holds it: its name, and the points it contributes to. */
@@ -48,7 +61,15 @@ export interface RouteSeen {
 	readonly takes?: readonly string[];
 	readonly policies: readonly string[];
 	readonly cors: boolean;
+	/** True for any method but GET; for a GET, as it declares. */
+	readonly changesState?: boolean;
+	/** What keeps other sites' requests out: the first policy marked `own-site` for the method, or the route's reason. */
+	readonly ownSite?: Kept;
+	/** What limits requests by source, likewise for `per-source`. */
+	readonly perSource?: Kept;
 }
+
+export type Kept = { readonly policy: string } | { readonly reason: string };
 
 /** What the assembly collected: the client metadata sections, the IdP types' settings, and the routes. */
 export interface Assembled {
@@ -91,27 +112,29 @@ async function collectedIn(root: string): Promise<Assembled> {
 		point: (await entryOf("@mod/upstreams", ".")).idpTypes,
 		read: ({ type, settings }) => ({ name: type, schema: settings }),
 	};
+	const http = await entryOf("@mod/http", ".");
+	const marked: Mark[] = [];
 	const routes: Point<Route, Omit<RouteSeen, "owner">> = {
-		point: (await entryOf("@mod/http", ".")).routes,
-		read: ({ method, path, takes, uses, cors }) => ({
-			method,
-			path,
-			...(takes ? { takes } : {}),
-			policies: (uses ?? []).map((u) => u.policy.label),
-			cors: cors !== undefined,
-		}),
+		point: http.routes,
+		read: (route) => seenRoute(route, marked),
 	};
 	const probed = contract<readonly (readonly unknown[])[]>("references.collected");
 	const probe = defineModule({ name: "references-probe" }, (m) => [
 		m
 			.provide(probed)
 			.by(async (c) =>
-				Promise.all([c.collect(clients.point), c.collect(types.point), c.collect(routes.point)]),
+				Promise.all([
+					c.collect(clients.point),
+					c.collect(types.point),
+					c.collect(routes.point),
+					c.collect(http.marks),
+				]),
 			),
 	]);
 	const config = await trialConfig(root);
 	const app = await assemble({ modules: [...modules.map((m) => m.module), probe], config });
-	const [sections = [], idps = [], served = []] = app.get(probed);
+	const [sections = [], idps = [], served = [], contributedMarks = []] = app.get(probed);
+	marked.push(...(contributedMarks as Mark[]));
 	/** Each contribution read, by the package whose module contributed it, in module order. */
 	const byOwner = <T, R>({ point, read }: Point<T, R>, collected: readonly unknown[]) => {
 		const owners = modules.flatMap(({ owner, module }) =>
@@ -126,6 +149,35 @@ async function collectedIn(root: string): Promise<Assembled> {
 		clientSections: byOwner(clients, sections),
 		idpTypes: byOwner(types, idps),
 		routes: byOwner(routes, served),
+	};
+}
+
+/** A route as the reference reads it, its guarantees from what it declares and the marks of its policies. */
+function seenRoute(route: Route, marks: readonly Mark[]): Omit<RouteSeen, "owner"> {
+	const { method, path, takes, uses, cors } = route;
+	const used = (uses ?? []).map((u) => u.policy);
+	const kept = (guarantee: string, reason: string | undefined): Kept | undefined => {
+		const policies = marks
+			.filter((mark) => mark.guarantee === guarantee)
+			.flatMap((mark) => mark.policies)
+			.filter((entry) => entry.methods.includes(method))
+			.map((entry) => entry.policy);
+		const first = used.find((policy) => policies.includes(policy));
+		if (first) return { policy: first.label };
+		return reason === undefined ? undefined : { reason };
+	};
+	const changesState = method === "GET" ? route.changesState : true;
+	const ownSite = kept("own-site", route.crossSite);
+	const perSource = kept("per-source", route.unlimited);
+	return {
+		method,
+		path,
+		...(takes ? { takes } : {}),
+		policies: used.map((policy) => policy.label),
+		cors: cors !== undefined,
+		...(changesState === undefined ? {} : { changesState }),
+		...(ownSite ? { ownSite } : {}),
+		...(perSource ? { perSource } : {}),
 	};
 }
 

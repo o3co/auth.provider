@@ -1,10 +1,10 @@
-import { policies } from "@mod/http";
+import { marks, policies } from "@mod/http";
 import { contract, defineModule } from "@mod/kernel";
 import type { Json } from "@mod/store";
 import { attemptLimit, lockouts, type RateLimit, rateLimit } from "./contract.ts";
 import { type LockoutStates, lockoutCounter } from "./lockout.ts";
 import { retryAfterMs } from "./partition.ts";
-import { limitingAttempts, limitingRequests } from "./per-source.ts";
+import { limitingAttempts, limitingRequests, perSourceMark } from "./per-source.ts";
 
 const idOf = (name: string, key: string) => `${name}\n${key}`;
 
@@ -77,4 +77,5 @@ export const rateLimitStandIn = defineModule({ name: "rate-limit" }, (m) => [
 		.by(async (c) =>
 			limitingRequests((await c.get(memory)).windows, { log: c.log, recorded: noAudit }, "closed"),
 		),
+	m.contribute(marks).by(() => perSourceMark),
 ]);

@@ -10,6 +10,7 @@
 - `rateLimit` and `attemptLimit`: count a name and key in a window, answering allowed or limited with a wait; attempts at credentials are counted apart.
 - `attemptsPerSource` for routes: by IPv4 address or IPv6 /64; over the limit `429` `too_many_attempts` with `retry-after`; uncounted `503` `service_unavailable`.
 - `requestsPerSource` for routes: keyed alike; over the limit `429` `rate_limited`; uncounted, `503` `service_unavailable`, or let through where the section's `fail-mode` is `open` (default `closed`, so a store outage never lifts a limit).
+- Both are marked `per-source` for every method at `http`'s `marks`; the stand-in marks them too.
 - An undetermined source is logged as a deployment error and answered `503` by both policies.
 - `sourceKey` (a source address, in `request-source`'s canonical form): the key both policies count it by, for a route counting in its own handler.
 - `lockouts`: check; record a failure; reserve an attempt; end a run on success; hand back an abandoned attempt; tell a release's standing; release, whole or on terms judged as written.
