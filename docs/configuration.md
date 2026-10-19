@@ -880,15 +880,15 @@ From `@mod/idp-oidc`.
 |---|---|---|---|---|
 | `federation.idps.<name>.client-id` | string |  | yes | The client ID this provider is registered under at the IdP. |
 | `federation.idps.<name>.client-secret` | string |  | yes | The client secret the IdP gave this provider, sent to its token endpoint. |
-| `federation.idps.<name>.issuer` | string |  | yes |  |
-| `federation.idps.<name>.token-auth` | client_secret_basic \| client_secret_post | `client_secret_basic` |  |  |
-| `federation.idps.<name>.discovery` | boolean | `true` |  |  |
-| `federation.idps.<name>.authorization-endpoint` | string |  |  |  |
-| `federation.idps.<name>.token-endpoint` | string |  |  |  |
-| `federation.idps.<name>.jwks-uri` | string |  |  |  |
-| `federation.idps.<name>.end-session-endpoint` | string |  |  |  |
-| `federation.idps.<name>.scopes` | list of string | `["openid"]` |  |  |
-| `federation.idps.<name>.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256","PS256","ES256","EdDSA"]` |  |  |
-| `federation.idps.<name>.endpoint-hosts` | list of string | `[]` |  |  |
-| `federation.idps.<name>.require-iss` | boolean | `false` |  |  |
-| `federation.idps.<name>.clock-skew` | string | `30s` |  |  |
+| `federation.idps.<name>.issuer` | string |  | yes | The IdP's issuer, which its id_tokens name and its description sits under. |
+| `federation.idps.<name>.token-auth` | client_secret_basic \| client_secret_post | `client_secret_basic` |  | How the client authenticates at the token endpoint. |
+| `federation.idps.<name>.discovery` | boolean | `true` |  | Reads the endpoints from the issuer's own description, checking it names the issuer; without it, the three endpoints are given. |
+| `federation.idps.<name>.authorization-endpoint` | string |  |  | Where the browser is sent to log in, without discovery. |
+| `federation.idps.<name>.token-endpoint` | string |  |  | Where a code is exchanged for tokens, without discovery. |
+| `federation.idps.<name>.jwks-uri` | string |  |  | Where the keys that sign the IdP's id_tokens are read, without discovery. |
+| `federation.idps.<name>.end-session-endpoint` | string |  |  | Where a session at the IdP ends, without discovery; none when not given. |
+| `federation.idps.<name>.scopes` | list of string | `["openid"]` |  | The scopes asked of the IdP at a login, `openid` among them. |
+| `federation.idps.<name>.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256","PS256","ES256","EdDSA"]` |  | The algorithms an id_token may be signed with: asymmetric ones only. |
+| `federation.idps.<name>.endpoint-hosts` | list of string | `[]` |  | Hosts besides the issuer's its endpoints may be on, as outbound reads a host list. |
+| `federation.idps.<name>.require-iss` | boolean | `false` |  | Asks every callback for `iss`, even where the issuer's description does not offer it. |
+| `federation.idps.<name>.clock-skew` | string | `30s` |  | How far the IdP's clock may be from ours, for its id_token's times: 0s to 5m. |

@@ -33,33 +33,58 @@ export function hostsOf(s: {
 export const settingsOf = (asymmetric: readonly Algorithm[], policy: OutboundPolicy) =>
 	clientSetting
 		.extend({
-			issuer: endpoint,
+			issuer: endpoint.describe(
+				"The IdP's issuer, which its id_tokens name and its description sits under.",
+			),
 			"token-auth": z
 				.enum(["client_secret_basic", "client_secret_post"])
-				.prefault("client_secret_basic"),
-			/** Reads the endpoints from the issuer's own description, checking it names the issuer. */
-			discovery: z.boolean().prefault(true),
-			"authorization-endpoint": endpoint.optional(),
-			"token-endpoint": endpoint.optional(),
-			"jwks-uri": endpoint.optional(),
-			/** Where a session at the upstream ends, without discovery; none when not given. */
-			"end-session-endpoint": endpoint.optional(),
+				.prefault("client_secret_basic")
+				.describe("How the client authenticates at the token endpoint."),
+			discovery: z
+				.boolean()
+				.prefault(true)
+				.describe(
+					"Reads the endpoints from the issuer's own description, checking it names the issuer; without it, the three endpoints are given.",
+				),
+			"authorization-endpoint": endpoint
+				.optional()
+				.describe("Where the browser is sent to log in, without discovery."),
+			"token-endpoint": endpoint
+				.optional()
+				.describe("Where a code is exchanged for tokens, without discovery."),
+			"jwks-uri": endpoint
+				.optional()
+				.describe("Where the keys that sign the IdP's id_tokens are read, without discovery."),
+			"end-session-endpoint": endpoint
+				.optional()
+				.describe("Where a session at the IdP ends, without discovery; none when not given."),
 			scopes: z
 				.array(scope)
 				.prefault(["openid"])
-				.refine((scopes) => scopes.includes("openid"), "scopes must hold openid"),
+				.refine((scopes) => scopes.includes("openid"), "scopes must hold openid")
+				.describe("The scopes asked of the IdP at a login, `openid` among them."),
 			algorithms: z
 				.array(z.enum(asymmetric as [Algorithm, ...Algorithm[]]))
 				.min(1)
-				.prefault(["RS256", "PS256", "ES256", "EdDSA"]),
-			/** Hosts besides the issuer's its endpoints may be on, as outbound reads a host list. */
+				.prefault(["RS256", "PS256", "ES256", "EdDSA"])
+				.describe("The algorithms an id_token may be signed with: asymmetric ones only."),
 			"endpoint-hosts": z
 				.array(z.string().refine((entry) => hostEntryOf(entry) !== undefined, "a host, or .name"))
-				.prefault([]),
-			/** Asks every callback for `iss`, even where the issuer's description does not offer it. */
-			"require-iss": z.boolean().prefault(false),
-			/** How far the upstream's clock may be from ours, for its id_token's times: 0s to 5m. */
-			"clock-skew": setting.duration("s").pipe(z.number().int().min(0).max(300)).prefault("30s"),
+				.prefault([])
+				.describe(
+					"Hosts besides the issuer's its endpoints may be on, as outbound reads a host list.",
+				),
+			"require-iss": z
+				.boolean()
+				.prefault(false)
+				.describe(
+					"Asks every callback for `iss`, even where the issuer's description does not offer it.",
+				),
+			"clock-skew": setting
+				.duration("s")
+				.pipe(z.number().int().min(0).max(300))
+				.prefault("30s")
+				.describe("How far the IdP's clock may be from ours, for its id_token's times: 0s to 5m."),
 		})
 		.refine(
 			(s) =>
