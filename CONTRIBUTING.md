@@ -6,7 +6,8 @@ Thank you for helping. This guide covers how the repository is laid out, what a 
 
 - **Node 24 or later** (`.nvmrc` names 24), and **pnpm** at the version `packageManager` in `package.json` names; `corepack enable` gives you that one.
 - `pnpm install`, then `pnpm check` should pass on a clean checkout.
-- **English only**, in code, comments, documents and commit messages.
+- **English only**, in code, comments, documents and commit messages; the Japanese README is the one exception (see Commits).
+- **A vulnerability** is reported privately, as the [security policy](SECURITY.md) says, never in an issue or a pull request.
 
 ## Where a change goes
 
@@ -43,6 +44,7 @@ The [guard](modules/tooling/guard/README.md) holds the workspace to its rules: n
 - **Conventional Commits**: `feat(<module>): …`, `fix(<module>): …`, `docs: …`, with `!` after the type for a breaking change.
 - **One module per commit.** The card changes in the same commit as the code it describes. A row of the owner map changes in its own commit, right after the module's.
 - **Changing an interface** takes three commits, each in one module: the provider adds the new form, each user switches to it, then the provider removes the old one.
+- **The README in two languages.** `README.ja.md` is a full translation of `README.md`; a commit that changes one changes the other.
 - A commit says why, not only what; the diff shows what.
 
 ## Pull requests
