@@ -43,7 +43,7 @@ What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc
 - `audit-http` reaches a collector at a `plain-loopback` pair over plain http too.
 - A managed Redis that refuses `CONFIG` is declared in `redis.server-settings`.
 - A configuration file that does not parse is refused at its line and column.
-- A missing or empty `audit.receivers` is refused saying what to name, and an empty or unparsable public or CORS origin is refused at boot instead of stopping the app with an error.
+- A missing or empty `audit.receivers` is refused saying what to name; an empty or unparsable public or CORS origin, WebAuthn origin, or upstream identity provider's endpoint is refused at boot instead of stopping the app with an error.
 - The command that generates an app is `create-auth-provider`.
 
 ### Added
