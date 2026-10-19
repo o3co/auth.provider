@@ -273,8 +273,11 @@ describe("idp-google", () => {
 		expect(sent?.request.headers).toEqual({
 			"content-type": "application/x-www-form-urlencoded",
 			accept: "application/json",
-			authorization: `Basic ${Buffer.from("client:s3cr%3Aet").toString("base64")}`,
 		});
+		// The client's secret is outbound's to send, as the request's credential.
+		expect(sent?.request.credential).toBe(
+			`Basic ${Buffer.from("client:s3cr%3Aet").toString("base64")}`,
+		);
 		expect(sent?.hosts).toEqual(["token.google.test"]);
 		// Every request, the keys' too, reaches only its own host.
 		for (const a of asked) expect(a.hosts, a.url).toEqual([new URL(a.url).hostname]);
