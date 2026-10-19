@@ -1,3 +1,4 @@
+import { deepFreeze } from "@mod/kernel";
 import type { HttpRequest, HttpResponse, Policy, PolicyRule, Route } from "../contract.ts";
 
 /** A route with its guard: the policies it uses, in its order; the first that answers ends the request. */
@@ -5,7 +6,7 @@ export type GuardedRoute = Route & {
 	readonly guard?: (request: HttpRequest) => Promise<HttpResponse | "pass">;
 };
 
-/** Routes guarded by their policies, matched by value (never label); or a policy with no rule, or two. */
+/** Routes guarded by their policies, matched by value (never label), each with a frozen copy of what it uses; or a policy with no rule, or two. */
 export function withPolicies(
 	routes: readonly Route[],
 	rules: readonly PolicyRule[],
@@ -25,18 +26,25 @@ export function withPolicies(
 	return {
 		kind: "applied",
 		routes: routes.map((route) => {
-			const uses = route.uses ?? [];
-			if (uses.length === 0) return route;
-			return {
+			const steps = Object.freeze(
+				(route.uses ?? []).map((use) =>
+					Object.freeze({
+						rule: ruleOf.get(use.policy) as PolicyRule,
+						options: deepFreeze(structuredClone(use.options)),
+					}),
+				),
+			);
+			if (steps.length === 0) return route;
+			return Object.freeze({
 				...route,
 				guard: async (request: HttpRequest) => {
-					for (const use of uses) {
-						const answer = await (ruleOf.get(use.policy) as PolicyRule).apply(request, use.options);
+					for (const { rule, options } of steps) {
+						const answer = await rule.apply(request, options);
 						if (answer !== "pass") return answer;
 					}
 					return "pass" as const;
 				},
-			};
+			});
 		}),
 	};
 }

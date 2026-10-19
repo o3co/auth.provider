@@ -10,7 +10,7 @@
 - Any name taken from request headers: the public origin comes only from configuration.
 
 ## Offers
-- `routes`: a method, a path and a handler, with the policies used (and their options), the bodies taken and cross-origin use when declared; a GET route also answers HEAD, with the same headers and no body.
+- `routes`: a method, a path and a handler, with the policies used (and their options), the bodies taken and cross-origin use when declared; a GET route also answers HEAD, with the same headers and no body, unless it changes state.
 - A route's `unavailable`: its answer to Unavailable, and `noted`, called first, whose fields join http's one warning, `http.unavailable`, with what was unavailable and the route's declared path; a `noted` that throws is logged `http.failed` by kind and the answer stands.
 - Paths: an exact path comes first, then the longest `/*` above it; a handler reads the URL parser's path (dot segments resolved, percent-encoding kept as sent), and a `/*` handler checks the segments under it by its own rules.
 - Bodies: a route may take a form, JSON, none, or several, and any other body is `415`, refused only after the route's policies have seen the request.
@@ -22,7 +22,8 @@
 - A preflight from a listed origin, for a method a declared route takes, names the methods of the path's declared routes, the request headers the route takes, and a max age of 600 seconds.
 - Any other preflight on such a path gets `204` with nothing to read by.
 - `loads`: what a page declares it loads (the origins it frames, its inline scripts); its answer's policy allows those and nothing else, and a frame a policy cannot name makes the answer `500`.
-- Policies: `policy` makes one, unique as a value; `use` is a route's use of one with its options; `policies` takes one rule per policy, which passes the request on or answers it; a route's policies run in its order before its handler, and the first answer ends the request.
+- Policies: `policy` makes one, unique as a value; `use` is a route's use of one with its options; `policies` takes one rule per policy, which passes the request on or answers it; a route's policies run in its order before its handler, and the first answer ends the request; what a route gives them is copied and frozen at boot.
+- `marks`: one per guarantee (`own-site`, `per-source`), a policy owner's claim that its policies keep it for the methods named, never a proof; a route declaring `changesState`, `crossSite` or `unlimited` is checked against them at boot (`guarantees`).
 - The request type, with its source as `request-source` decides it from the direct peer, the headers and this section's trusted proxies.
 - `listening` (the port) and `site` (the public origin; cookies can be made secure unless it is http; `proxied`, whether `trusted-proxies` names a proxy, without which no request's scheme is https nor its source told past a proxy); an answer's `cookies` are sent one `Set-Cookie` each; `client-certificate`'s `certificateForwarding` is provided from this section.
 - `requestEnds`: each request's end, once, answered or closed: the method sent, the declared path of the route reached (none when none), the status written or `closed` when the client closed first, and the milliseconds taken (never negative); an observer's throw is dropped.
@@ -32,7 +33,7 @@
 
 ## Invariants
 - Serves requests itself, as the one server of a deployment (`network`: `serves-http`).
-- Boot is refused, naming the route and the policy, when two routes take one method and path, a route uses a policy no module applies, or a policy has two rules; policies match by value, and a label only names one in a report.
+- Boot is refused, naming the route and the policy, when two routes take one method and path, a route uses a policy no module applies, a policy has two rules, or a route breaks what it declares; policies match by value, and a label only names one in a report.
 - Every answer it writes carries the security headers, set in one place: a Content-Security-Policy that loads nothing by default and lets no one frame the answer, HSTS, `nosniff`, `X-Frame-Options`, `Referrer-Policy: no-referrer` and the cross-origin ones; a route's own values of them, its policy included, are replaced; only `loads` widens a page's policy.
 - Stop refuses new connections and closes idle ones; requests in flight finish (`Connection: close`) until its deadline cuts them.
 - A request target that is not a URL gets `400`, an answer whose headers cannot be written gets `500`, no request stops the process, and error answers never show exception text or internal values.

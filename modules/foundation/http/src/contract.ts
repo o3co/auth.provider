@@ -53,7 +53,7 @@ export function policy<O = undefined>(label: string): Policy<O> {
 	return Object.freeze({ kind: "policy", label });
 }
 
-/** A route's use of a policy, with what the route gives it. */
+/** A route's use of a policy, with what the route gives it: plain data, copied and frozen at boot. */
 export interface PolicyUse {
 	readonly policy: Policy<unknown>;
 	readonly options: unknown;
@@ -85,6 +85,24 @@ export function applying<O>(
 /** The rules of the policies, one per policy; http matches them to policies by value. */
 export const policies = extensionPoint<PolicyRule>("http.policies", { multiplicity: "many" });
 
+/** What a route's policies keep: `own-site`, no other site's request reaches the handler; `per-source`, a source over its count does not. */
+export type Guarantee = "own-site" | "per-source";
+
+/** A policy owner's own claim that these policies keep a guarantee, each for the methods named; a claim, never a proof. */
+export interface Mark {
+	readonly guarantee: Guarantee;
+	readonly policies: readonly {
+		readonly policy: Policy<unknown>;
+		readonly methods: readonly Method[];
+	}[];
+}
+
+/** One mark per guarantee, matched to the policies a route uses by value. */
+export const marks = extensionPoint<Mark>("http.marks", {
+	multiplicity: "keyed",
+	keyOf: (mark) => mark.guarantee,
+});
+
 /** A form is `application/x-www-form-urlencoded`; JSON is `application/json`; none is no body at all. */
 export type BodyKind = "form" | "json" | "none";
 
@@ -105,6 +123,12 @@ export interface Route {
 	readonly takes?: readonly BodyKind[];
 	/** Takes cross-origin requests; without it, none is answered as one. */
 	readonly cors?: CorsRule;
+	/** Whether it changes what the server keeps or the access a cookie gives; a GET says, any other method does. */
+	readonly changesState?: boolean;
+	/** Why a route changing state uses no policy marked `own-site` for its method. */
+	readonly crossSite?: string;
+	/** Why a route changing state uses no policy marked `per-source` for its method. */
+	readonly unlimited?: string;
 	/** The answer when a policy or the handler throws Unavailable; without it, http's own. */
 	readonly unavailable?: UnavailableAnswer;
 	handle(request: HttpRequest): HttpResponse | Promise<HttpResponse>;

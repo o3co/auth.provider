@@ -105,9 +105,12 @@ function reaching(routes: readonly GuardedRoute[], path: string): readonly Guard
 	return under.filter((r) => r.path.length === longest);
 }
 
+/** A GET that changes state is never reached by HEAD, which must change nothing. */
+const answersHead = (r: GuardedRoute) => r.method === "GET" && r.changesState !== true;
+
 function routeFor(reached: readonly GuardedRoute[], method: string): GuardedRoute | undefined {
 	const route = reached.find((r) => r.method === method);
-	return route ?? (method === "HEAD" ? reached.find((r) => r.method === "GET") : undefined);
+	return route ?? (method === "HEAD" ? reached.find(answersHead) : undefined);
 }
 
 async function answer(
@@ -126,7 +129,7 @@ async function answer(
 	const route = routeFor(reaches, head.method);
 	if (!route) {
 		if (reaches.length === 0) return bare(404);
-		const allowed = reaches.flatMap((r) => (r.method === "GET" ? ["GET", "HEAD"] : [r.method]));
+		const allowed = reaches.flatMap((r) => (answersHead(r) ? ["GET", "HEAD"] : [r.method]));
 		return { status: 405, headers: { ...noStore, allow: allowed.join(", ") } };
 	}
 	nameRoute(route.path);
