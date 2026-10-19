@@ -11,7 +11,7 @@
 - Keeping sessions: their records, store interfaces, operator section and sweep (`session-lifecycle`, the default implementation).
 
 ## Offers
-- `enter`: request → session or none, throwing when unavailable; `entryOf` answers by handle the entry its cookie would get, at `use` unless another level is asked; `stillOpen`, `openContext` and `endsAt` answer the use check by handle, with the context or the end.
+- `enter`: request → session or none, throwing when unavailable; `entryOf` answers by handle the entry its cookie would get, at `use` unless another level is asked.
 - `complete`: login fact → session and cookie at `kernel`'s time; the carried session is closed first, and the login is unavailable when that close cannot be added to the closings, or the new session cannot be listed under its subject.
 - `enterFor`: request and level (use / none / credentials) → entered (with its end: the opening plus the lifetime in force), absent, or short with the requirement's name and its answer, passed on unread.
 - Extension point `entryRequirements`: context and level → admit or short, with the levels it `judges`; asked in name order, and with "use" by `enter` and the checks by handle. Where none judges `credentials`, it needs a sign-in at a known time within 300 s by default, else short `session` `{"error":"step_up_required"}`.
