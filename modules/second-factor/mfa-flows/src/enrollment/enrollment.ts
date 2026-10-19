@@ -277,8 +277,8 @@ export function enrollmentOver(p: EnrollmentParts) {
 		// reset's clear is fenced inside mfa's write; a revocation alone after this check is not.
 		if (await revokedSince(p.revocation, t)) return loginRequired;
 		const bound = await p.factors.bind(t.subject, pending, proved.state, label, askedFrom(t));
-		// A reset cleared the subject's factors since the binding began, and ended its sessions.
-		if (bound.kind === "cleared") return loginRequired;
+		// A reset or a revocation since the binding began, which ended its sessions too.
+		if (bound.kind === "cleared" || bound.kind === "fenced") return loginRequired;
 		// A first binding another factor beat: a login asks again, a session is told of the conflict.
 		if (bound.kind === "first-binding-closed") {
 			return t.purpose === "enroll-login" ? loginRequired : enrollmentConflict;
