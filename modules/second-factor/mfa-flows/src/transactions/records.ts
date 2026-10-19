@@ -26,7 +26,7 @@ export type ByPurpose =
 	/** The session it raises, or binds a factor from, and no other. */
 	| { readonly purpose: "step-up" | "enroll"; readonly handle: string };
 
-interface Common {
+export interface TransactionBase {
 	readonly subject: string;
 	/** The hash of the browser's mfa cookie: the transaction is no bearer. */
 	readonly browser: string;
@@ -44,13 +44,13 @@ interface Common {
 	readonly taken?: true;
 }
 
-export type Transaction = Common & ByPurpose;
+export type Transaction = TransactionBase & ByPurpose;
 /** What a start gives; the rest the transaction takes from its start. */
-export type Started = Pick<Common, "subject" | "held"> & ByPurpose;
+export type Started = Pick<TransactionBase, "subject" | "held"> & ByPurpose;
 
 export const hashOf = (value: string) => createHash("sha256").update(value).digest("base64url");
 /** Whose live transactions a transaction counts among: the session it is tied to, or the held login's subject. */
-export const holderOf = (t: Pick<Common, "subject"> & ByPurpose) =>
+export const holderOf = (t: Pick<TransactionBase, "subject"> & ByPurpose) =>
 	"handle" in t ? `session:${t.handle}` : `login:${t.subject}`;
 /** Format 1 kept a binding's own fields at the top; read, they become what it holds. */
 const formerlyTop = ["pending", "bindingChallenge", "bindingPassed", "proved"];

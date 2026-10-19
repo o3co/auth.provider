@@ -22,6 +22,8 @@
 - `lockout` in the section holds the lockout numbers (`budget` 10 by default, `budget-window` `7d`); `rate-limit` judges their shape, refusing boot when it does not fit.
 - Store interface for transactions by their unguessable identifier, never kept in clear: save for a lifetime, read, change from what it holds (the lifetime stays). Contents are not shown to it. Its needs: never evicted, survives a crash, never back after a failover.
 - Store interface for each holder's live transactions (a session's handle, or a held login's subject), each by a digest of its identifier for its lifetime: add (answering those pushed out past 5, a constant), members, remove. Its needs: never evicted, survives a crash and a failover, confirmed reads.
+- Extension point `enrollmentFlow` (at most one): the handlers of `POST enrollment` and `POST enrollment/complete`, and the answer to a challenge in an enrollment's transaction; the routes stay declared here, and where none is contributed the package's own `enrollment` answers.
+- Contract `flowParts`, for the module binding factors: the transactions, the resume of a held login, recording through this package's declaration, the common answers, the request helpers, and the lockout's name and policy (`seams`' card).
 - `./testing`: test configuration builders, and the store interfaces' contract tests for every implementation (see `transactions`' card).
 
 ## Invariants
@@ -35,10 +37,6 @@
 - If the subject was revoked after the transaction started, every route naming it answers `401 login_required`, and a POST ends it; a login opening meanwhile is closed. If the store cannot answer, `503`, never a negative verdict.
 - A transaction counts only while its holder's listing still holds it, read once each time it is used (`503` when the listing cannot tell). A holder keeps 5 at most, a constant: one more pushes out the one ending first, so a sixth device's held login can push out the first's. A taken one, or one out of attempts, leaves the listing; a removal that fails is logged and passed.
 - A step-up raises only the session that started it, under a new cookie.
-- A first factor bound after a binding proof passed counts at once: its login goes on, or its session is raised. Bound without one, it counts from the next sign-in.
-- A first binding another factor beat while it was under way binds nothing (`mfa` decides): a login gets `401 login_required`, a session `409 mfa_enrollment_conflict`.
-- A login's transaction binds only the subject's first factor (`mfa` decides, told the login it came from): begun or completed once a factor counts, it gets `401 login_required` and binds nothing.
-- Enrollment from a session enters the session at the credential-changing level (`mfa` contributes the requirement).
 
 ## Data
 - Transactions: one per identifier (256 random bits), kept for `transaction-lifetime`. Its needs say what the place must keep it through (a taken one coming back could finish a login twice); the wiring side meets them.
