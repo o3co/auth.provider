@@ -78,6 +78,7 @@ export default defineModule({ name, section }, (m) => [
 			method: "POST",
 			path: `${base}/*`,
 			uses: [use(requestsPerSource, { name, window })],
+			crossSite: "A client's own call, authenticated as that client; it reads no cookie.",
 			handle: (request) => federationTokens(flow, request),
 		};
 	}),
