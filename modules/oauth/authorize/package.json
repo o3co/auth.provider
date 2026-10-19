@@ -35,6 +35,7 @@
 		"@mod/cookies": "workspace:*",
 		"@mod/csrf": "workspace:*",
 		"@mod/records": "workspace:*",
+		"@mod/secret-hash": "workspace:*",
 		"@mod/session-tokens": "workspace:*",
 		"@mod/store": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",

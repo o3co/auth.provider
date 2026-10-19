@@ -20,6 +20,7 @@
 		"@mod/audit": "workspace:*",
 		"@mod/cookies": "workspace:*",
 		"@mod/login-gates": "workspace:*",
+		"@mod/mfa-extensions": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/seal": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",

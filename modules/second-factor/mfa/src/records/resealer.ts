@@ -1,7 +1,7 @@
 import { isUnavailable } from "@mod/kernel";
 import type { Resealer, Seal } from "@mod/seal";
+import type { FactorStore } from "../store.ts";
 import { factorsOf, listKeyOf, sealContext, storedList, subjectOf } from "./records.ts";
-import type { FactorStore } from "./store.ts";
 
 /** Walks every factor list, sealing again secrets a past key sealed; ones it cannot open are left. */
 export function resealerOver(store: FactorStore, seal: Seal): Resealer {

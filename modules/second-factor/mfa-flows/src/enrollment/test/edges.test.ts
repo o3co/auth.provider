@@ -1,7 +1,7 @@
 import { testRequest } from "@mod/http/testing";
 import { defineModule, Unavailable } from "@mod/kernel";
-import { factorKinds } from "@mod/mfa";
 import { bindingProofs } from "@mod/mfa-binding-proof";
+import { factorKinds } from "@mod/mfa-extensions";
 import { sessions } from "@mod/session";
 import { afterEach, expect, it } from "vitest";
 import { clock, serve } from "../../../test/harness.ts";

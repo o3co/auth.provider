@@ -19,6 +19,7 @@
 	"devDependencies": {
 		"@mod/clients": "workspace:*",
 		"@mod/http": "workspace:*",
+		"@mod/secret-hash": "workspace:*",
 		"@mod/session-tokens": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"vitest": "5.0.4"

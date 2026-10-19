@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { switchedModule, unavailableSwitch } from "@mod/kernel/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import { recordingChecker, testBcryptHash } from "@mod/secret-hash/testing";
 import { describe, expect, it } from "vitest";
 import {
@@ -36,7 +37,7 @@ const named = defineModule({ name: "test-idps" }, (m) => [
 
 const boot = (registered: unknown[]) =>
 	assemble({
-		modules: [usersModule, memoryUsersStores().module, named],
+		modules: [usersModule, secretHashModule, memoryUsersStores().module, named],
 		config: { ...kernelConfig(), users: { registered } },
 	});
 
@@ -52,8 +53,8 @@ const aliceEntry = {
 function counting() {
 	let checks: readonly string[] = [];
 	const stores = memoryUsersStores();
-	const source = registeredUsers([aliceEntry], randomBytes, (inUse, random) => {
-		const recording = recordingChecker(inUse, random);
+	const source = registeredUsers([aliceEntry], (inUse) => {
+		const recording = recordingChecker(inUse, randomBytes);
 		checks = recording.works;
 		return recording.checker;
 	});
@@ -237,7 +238,11 @@ it("answers unavailable, never none, when written links cannot be read", async (
 	down.unavailable("save", "read", "update");
 	const u = (
 		await assemble({
-			modules: [usersModule, switchedModule(memoryUsersStores().module, linkStore, down)],
+			modules: [
+				usersModule,
+				secretHashModule,
+				switchedModule(memoryUsersStores().module, linkStore, down),
+			],
 			config: { ...kernelConfig(), users: { registered: [testUser("a", "p")] } },
 		})
 	).get(users);
@@ -245,11 +250,29 @@ it("answers unavailable, never none, when written links cannot be read", async (
 	await expect(u.link("a", { idp: "idp", subject: "s" })).rejects.toSatisfy(isUnavailable);
 });
 
+it("checks passwords within its own assembly's secret-hash limit, whatever another assembly sets", async () => {
+	const assembled = (max: number) =>
+		assemble({
+			modules: [usersModule, secretHashModule, memoryUsersStores().module],
+			config: {
+				...kernelConfig(),
+				users: { registered: [testUser("a", "p")] },
+				"secret-hash": { "max-concurrent": max },
+			},
+		});
+	const one = (await assembled(1)).get(users);
+	// Built after, with its own limit; the first keeps its one.
+	await assembled(8);
+	const first = one.verify("a", "p");
+	await expect(one.verify("a", "p")).rejects.toSatisfy(isUnavailable);
+	expect((await first).kind).toBe("user");
+});
+
 describe("records", () => {
 	const open = () => {
 		const stores = memoryUsersStores();
 		const u = ledgerUsers(
-			registeredUsers([], randomBytes),
+			registeredUsers([], (inUse) => recordingChecker(inUse, randomBytes).checker),
 			stores.links.store,
 			stores.contacts.store,
 		);
@@ -288,7 +311,11 @@ describe("records", () => {
 			read: async () => undefined,
 			update: async () => undefined,
 		};
-		const u = ledgerUsers(registeredUsers([], randomBytes), vanishing, stores.contacts.store);
+		const u = ledgerUsers(
+			registeredUsers([], (inUse) => recordingChecker(inUse, randomBytes).checker),
+			vanishing,
+			stores.contacts.store,
+		);
 		await expect(u.link("s", { idp: "i", subject: "u" })).rejects.toSatisfy(isUnavailable);
 	});
 });

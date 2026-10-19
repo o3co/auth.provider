@@ -26,4 +26,4 @@
 - A long code is read from ASCII letters, digits, hyphens and spaces only, in any case, O read as 0 and I or L as 1; six digits are read with white space around them only (as `trim` takes it).
 
 ## Depends on
-- `kernel`, `mail`, `mfa`, `mfa-binding-proof`, `users` (claimed and verified contacts), `subject-attributes` (a session's vouched login attributes)
+- `kernel`, `mail`, `mfa-extensions` (the kind's contract), `mfa` (composed for it: it stays among this package's dependencies, so adding this kind composes `mfa`), `mfa-binding-proof`, `users` (claimed and verified contacts), `subject-attributes` (a session's vouched login attributes)

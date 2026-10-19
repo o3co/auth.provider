@@ -38,12 +38,12 @@
 - A unit's reading scope is its own files, the cards of the modules it lies in, and the cards of the packages it depends on (the package's declared ones, an internal module's imported ones).
 - The public surface counts per package, with a wider member limit for the kinds other modules are built on. Dependencies count per unit, as the workspace packages its shipped code imports, common ones aside; their cards together are limited too.
 - A package many depend on at run time has its card held to fewer lines.
-- Comment lines may reach the larger of a share of the source lines or a fixed count, so that making a module smaller does not make it trip.
+- Comment lines, the doc comments of the public surface aside, may reach the larger of a share of the source lines or a fixed count, so that making a module smaller does not make it trip.
 - Test tables (fixtures and vectors) are data, not test lines. A contract test suite published as `./testing` counts as test lines; every other rule checks it as shipped code.
 - An internal module whose shipped code imports nothing another unit of its package imports is reported as a branch, not refused.
 - A document copies a configuration list when one line lays out more consecutive values of a list (nested lists flattened) than the configuration allows, in order, with no word between them but `and`, `or` or `then`.
 - Documents are all Markdown in the repository. A target resolves from the document's directory, and is refused if it leaves it or names a missing file with an extension.
-- The map is the shallowest README that is no package's card. An owner cell made only of lowercase names and separators (`,`, `/`, `and`) lists packages; any other cell is a general phrase.
+- The map is the README of the deepest folder that holds every package. An owner cell made only of lowercase names and separators (`,`, `/`, `and`) lists packages; any other cell is a general phrase.
 - A dependency item names modules with the lowercase names it opens with, before any note in brackets or sentence after a full stop.
 
 ## Data

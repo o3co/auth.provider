@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { defineModule } from "@mod/kernel";
-import { factorKinds } from "@mod/mfa";
+import { factorKinds } from "@mod/mfa-extensions";
 
 const codesPerSet = 10;
 /** Crockford's base32: no letters that read like digits. */

@@ -14,6 +14,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
+import secretHashModule from "@mod/secret-hash/module";
 import { type Ledger, ledgers, type UpstreamNames, upstreamNames, type Verified } from "@mod/users";
 import usersModule from "@mod/users/module";
 import { memoryUsersStores } from "@mod/users/testing";
@@ -44,6 +45,7 @@ async function boot(answer: () => Promise<Verified>, issuers = [devices], extra:
 	const app = await assemble({
 		modules: [
 			usersModule,
+			secretHashModule,
 			memoryUsersStores().module,
 			defineModule({ name: "ledger" }, (m) => [
 				m.contribute(ledgers).by(() => ledgerAnswering(answer)),

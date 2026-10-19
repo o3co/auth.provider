@@ -1,6 +1,6 @@
 import { type AreaScene, area, sceneOf } from "@mod/conformance";
 import { codeArea } from "@mod/conformance-code";
-import { identityArea, type UserScene } from "@mod/conformance-identity";
+import { identityArea, type RevocationScene, type UserScene } from "@mod/conformance-identity";
 import { type KeysPart, keysArea } from "@mod/conformance-keys";
 import { type ClientScene, oauthArea } from "@mod/conformance-oauth";
 
@@ -65,6 +65,7 @@ export interface FederationScene extends FederationPart {
 	/** Clients that run the code flow, so a scene can ask whether a browser is logged in. */
 	readonly clients?: readonly ClientScene[];
 	readonly userinfo?: boolean;
+	readonly revocations?: RevocationScene;
 }
 
 export function federationScene(scene: FederationScene): AreaScene {
@@ -74,6 +75,7 @@ export function federationScene(scene: FederationScene): AreaScene {
 			origin: scene.origin,
 			users: scene.users,
 			login: { returnTargets: scene.returnTargets },
+			...(scene.revocations ? { revocations: scene.revocations } : {}),
 		}),
 		...(scene.clients
 			? [

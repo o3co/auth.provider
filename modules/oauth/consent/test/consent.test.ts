@@ -10,6 +10,7 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import { type Session, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
@@ -112,6 +113,7 @@ async function serve(
 		modules: [
 			http,
 			clientsModule,
+			secretHashModule,
 			documents,
 			recorded.module,
 			csrfStandIn,

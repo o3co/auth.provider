@@ -1,6 +1,7 @@
 import type { HttpRequest } from "@mod/http";
 import { testRequest } from "@mod/http/testing";
-import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
+import { assemble, defineModule, isUnavailable, kernelConfig, type Module } from "@mod/kernel";
+import secretHashModule from "@mod/secret-hash/module";
 import { testBcryptHash, testScryptHash } from "@mod/secret-hash/testing";
 import { expect, it, vi } from "vitest";
 import { type ClientRecord, type Clients, clientSources, clients } from "../src/contract.ts";
@@ -29,7 +30,7 @@ const confidential = (id: string, method: string, hash: string) => ({
 
 async function boot(list: unknown[], extra: readonly Module[] = []): Promise<Clients> {
 	const app = await assemble({
-		modules: [clientsModule, ...extra],
+		modules: [clientsModule, secretHashModule, ...extra],
 		config: { ...kernelConfig(), clients: { registered: list } },
 	});
 	return app.get(clients);
@@ -65,6 +66,28 @@ it("authenticates basic and post clients holding a bcrypt or a scrypt hash of th
 	] as const) {
 		expect(await c.authenticate(request)).toMatchObject(answer);
 	}
+});
+
+it("checks secrets within its own assembly's secret-hash limit, whatever another assembly sets", async () => {
+	const assembled = async (max: number) =>
+		(
+			await assemble({
+				modules: [clientsModule, secretHashModule],
+				config: {
+					...kernelConfig(),
+					clients: {
+						registered: [confidential("b", "client_secret_basic", testBcryptHash("b-secret"))],
+					},
+					"secret-hash": { "max-concurrent": max },
+				},
+			})
+		).get(clients);
+	const one = await assembled(1);
+	// Built after, with its own limit; the first keeps its one.
+	await assembled(8);
+	const first = one.authenticate(basicRequest("b", "b-secret"));
+	await expect(one.authenticate(basicRequest("b", "b-secret"))).rejects.toSatisfy(isUnavailable);
+	expect(await first).toMatchObject(as("b"));
 });
 
 it("refuses boot on a secret that is no bcrypt or scrypt hash, naming the client and never the value", async () => {

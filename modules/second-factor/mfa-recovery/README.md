@@ -21,7 +21,7 @@
 - The factor's state is the digests used so far, so the kind holds nothing between calls.
 
 ## Depends on
-- `kernel`, `mfa`
+- `kernel`, `mfa-extensions` (the kind's contract), `mfa` (composed for it: it stays among this package's dependencies, so adding this kind composes `mfa`)
 
 ## Vocabulary
 - Recovery code: a one-time code from a set, for when the user loses their other factors.

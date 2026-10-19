@@ -15,6 +15,14 @@ import {
 import { quietRuntime } from "@mod/kernel/testing";
 import { logins } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
+import * as extensions from "@mod/mfa-extensions";
+import {
+	type Enrolled,
+	factorKinds,
+	firstBindingGates,
+	type Opened,
+	type Sending,
+} from "@mod/mfa-extensions";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import {
@@ -27,16 +35,8 @@ import {
 import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-	type Enrolled,
-	factorKinds,
-	factors,
-	firstBindingGates,
-	isLabel,
-	type Opened,
-	proofSteps,
-	type Sending,
-} from "../src/contract.ts";
+import * as offered from "../src/contract.ts";
+import { factors, isLabel, proofSteps } from "../src/contract.ts";
 import mfaModule from "../src/module.ts";
 import { section } from "../src/section.ts";
 import { type MfaSettings, mfaConfig } from "../src/testing.ts";
@@ -1017,4 +1017,33 @@ describe("a gate contributed before a first counting factor", () => {
 
 it("refuses manage-within, now session's one recent-authentication window", () => {
 	expect(section.safeParse({ "manage-within": "5m" }).success).toBe(false);
+});
+
+describe("the extension points mfa-extensions offers", () => {
+	it("are offered by mfa-extensions alone, never again by mfa", () => {
+		for (const name of ["factorKinds", "firstBindingGates", "secondFactorAmr"]) {
+			expect(Object.keys(offered), name).not.toContain(name);
+		}
+	});
+
+	it("asks a gate contributed through mfa-extensions before a first binding, and a kind through it", async () => {
+		const gate = defineModule({ name: "gate-by-extensions" }, (m) => [
+			m.contribute(extensions.firstBindingGates).by(() => ({ admits: async () => false })),
+		]);
+		const { decided } = await serve({}, { extra: [gate] });
+		expect(await decided.begin("zed", "code")).toEqual({ kind: "binding-proof-required" });
+		const kind = defineModule({ name: "kind-by-extensions" }, (m) => [
+			m.contribute(extensions.factorKinds).by(() => ({
+				kind: "other",
+				amr: [],
+				addsSecondFactor: true,
+				guessable: false,
+				counts: true,
+				enroll: async () => ({ secret: "o", show: {} }),
+				verify: async () => ({ kind: "invalid" as const }),
+			})),
+		]);
+		const other = await serve({}, { extra: [kind] });
+		expect((await other.decided.begin("amy", "other")).kind).toBe("begun");
+	});
 });

@@ -3,7 +3,7 @@ import { areaTarget, type Started } from "@mod/conformance";
 import type { ClientScene } from "@mod/conformance-oauth";
 import { type Browser, browser as openBrowser } from "../../../test/browser.ts";
 import { type Authorized, fakeUpstream } from "../../../test/upstream.ts";
-import { federationScene, type GrantsPart } from "../../main.ts";
+import { type FederationScene, federationScene, type GrantsPart } from "../../main.ts";
 
 export const origin = "https://issuer.example";
 const landing = "https://app.example/home";
@@ -31,7 +31,10 @@ let sender = 0;
  * A deployment with federation grants for the connection `calendar` at a fake upstream, two
  * backends (`worker`, `other-worker`) and two users who log in through that upstream.
  */
-export async function grantsTarget(more: Partial<GrantsPart> = {}) {
+export async function grantsTarget(
+	more: Partial<GrantsPart> = {},
+	extra: Pick<FederationScene, "revocations"> = {},
+) {
 	const corp = await fakeUpstream(upstreamClient);
 	const scene = federationScene({
 		origin,
@@ -71,6 +74,7 @@ export async function grantsTarget(more: Partial<GrantsPart> = {}) {
 			connections: [{ name: "calendar", idp: "corp", scopes, maxAccessTokenSeconds: 3600 }],
 			...more,
 		},
+		...extra,
 	});
 	const running: Started = await areaTarget().start(scene);
 	if (running.kind !== "running") throw new Error(`refused:\n${running.output}`);
@@ -177,6 +181,7 @@ export async function grantsTarget(more: Partial<GrantsPart> = {}) {
 	const returned = (done: { location: string }) => new URL(done.location).searchParams;
 
 	return {
+		base,
 		corp,
 		call,
 		lodge,

@@ -49,12 +49,7 @@ export const settingsOf = (asymmetric: readonly Algorithm[], policy: OutboundPol
 				.prefault(["openid"])
 				.refine((scopes) => scopes.includes("openid"), "scopes must hold openid"),
 			algorithms: z
-				.array(
-					z.custom<Algorithm>(
-						(alg) => typeof alg === "string" && (asymmetric as readonly string[]).includes(alg),
-						"an asymmetric algorithm",
-					),
-				)
+				.array(z.enum(asymmetric as [Algorithm, ...Algorithm[]]))
 				.min(1)
 				.prefault(["RS256", "PS256", "ES256", "EdDSA"]),
 			/** Hosts besides the issuer's its endpoints may be on, as outbound reads a host list. */

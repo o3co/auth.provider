@@ -13,6 +13,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import refreshModule from "@mod/refresh/module";
 import { refreshConfig } from "@mod/refresh/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { simulatedStore } from "@mod/store/testing";
@@ -44,6 +45,7 @@ async function boot() {
 			tokensStandIn(),
 			issuerModule,
 			clientsModule,
+			secretHashModule,
 			grantCaller,
 			clientAllowanceModule,
 			tokenControl,

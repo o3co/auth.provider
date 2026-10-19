@@ -1,16 +1,10 @@
 import { audit } from "@mod/audit";
 import { defineModule } from "@mod/kernel";
 import { amrSources } from "@mod/login-gates";
+import { factorKinds, firstBindingGates, secondFactorAmr } from "@mod/mfa-extensions";
 import { resealers, seal } from "@mod/seal";
 import { entryRequirements, sessions } from "@mod/session";
-import {
-	factorKinds,
-	factorStore,
-	factors,
-	firstBindingGates,
-	proofSteps,
-	secondFactorAmr,
-} from "./contract.ts";
+import { factorStore, factors, proofSteps } from "./contract.ts";
 import {
 	addsMfa,
 	byKind,
@@ -19,8 +13,8 @@ import {
 	secondFactorAt,
 	signedInAt,
 } from "./factors.ts";
-import { factorRecords } from "./records.ts";
-import { resealerOver } from "./resealer.ts";
+import { factorRecords } from "./records/records.ts";
+import { resealerOver } from "./records/resealer.ts";
 import { section } from "./section.ts";
 
 const admit = { kind: "admit" } as const;

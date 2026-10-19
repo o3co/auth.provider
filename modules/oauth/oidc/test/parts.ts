@@ -14,6 +14,7 @@ import {
 } from "@mod/kernel";
 import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import { type AuthContext, sessions } from "@mod/session";
 import { stubSessions } from "@mod/session/testing";
 import subjectAttributes from "@mod/subject-attributes/module";
@@ -67,6 +68,7 @@ export const booted = (p: {
 			issuerModule,
 			memoryUsersStores().module,
 			...(p.usersAs ?? [usersModule]),
+			secretHashModule,
 			p.sessionsAs ?? sessionsOf(),
 			subjectAttributes,
 			oidc,

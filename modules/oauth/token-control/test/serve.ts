@@ -17,6 +17,7 @@ import { assemble, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime, recordingLog, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import rateLimitModule from "@mod/rate-limit/module";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import { simulatedStore } from "@mod/store/testing";
 import { grantCaller } from "@mod/token-endpoint/testing";
 import { type IssueLimits, type Tokens, tokens } from "@mod/tokens";
@@ -59,6 +60,7 @@ export async function serve(
 			switchedModule(tokensStandIn({ revocable }), tokens, down),
 			issuerModule,
 			clientsModule,
+			secretHashModule,
 			grantCaller,
 			clientAllowanceModule,
 			tokenControl,

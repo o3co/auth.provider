@@ -8,16 +8,10 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
 import gatesModule from "@mod/login-gates/module";
-import {
-	type FactorStore,
-	factorKinds,
-	factorStore,
-	factors,
-	proofSteps,
-	type StoredFactors,
-} from "@mod/mfa";
+import { type FactorStore, factorStore, factors, proofSteps, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
 import { type MfaSettings, mfaConfig } from "@mod/mfa/testing";
+import { factorKinds } from "@mod/mfa-extensions";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { memoryRecords } from "@mod/records/testing";
 import sealModule from "@mod/seal/module";

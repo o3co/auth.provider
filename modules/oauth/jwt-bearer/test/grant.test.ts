@@ -22,6 +22,7 @@ import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/tes
 import { type Narrower, type Outbound, outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
 import { memoryRecords } from "@mod/records/testing";
+import secretHashModule from "@mod/secret-hash/module";
 import storeModule from "@mod/store/module";
 import { storeConfig } from "@mod/store/testing";
 import { revocations } from "@mod/subject-revocation";
@@ -91,6 +92,7 @@ async function serve(
 			tokensStandIn(),
 			issuerModule,
 			clientsModule,
+			secretHashModule,
 			grantCaller,
 			clientAllowanceModule,
 			out,

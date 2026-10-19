@@ -11,9 +11,9 @@ export interface Allowances {
 export const allowances: Section<Allowances> = {
 	name: "client-allowance",
 	schema: z.strictObject({
-		grants: z.array(z.string()).default([]),
-		scopes: z.array(z.string()).default([]),
+		grants: z.array(z.string()).prefault([]),
+		scopes: z.array(z.string()).prefault([]),
 		"default-scopes": z.array(z.string()).optional(),
-		audiences: z.array(z.string()).default([]),
+		audiences: z.array(z.string()).prefault([]),
 	}),
 };

@@ -28,6 +28,7 @@
 	},
 	"devDependencies": {
 		"@mod/records": "workspace:*",
+		"@mod/secret-hash": "workspace:*",
 		"@mod/subject-attributes": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/users": "workspace:*",

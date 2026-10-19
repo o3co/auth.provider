@@ -1,7 +1,8 @@
 import { acrEntries, isAmrSets } from "@mod/acr";
 import { assemble, BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
-import { type Factors, factors, secondFactorAmr } from "@mod/mfa";
+import { type Factors, factors } from "@mod/mfa";
+import { secondFactorAmr } from "@mod/mfa-extensions";
 import { expect, it } from "vitest";
 import bridge from "../src/module.ts";
 

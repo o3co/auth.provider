@@ -19,6 +19,7 @@ import {
 import { quietRuntime } from "@mod/kernel/testing";
 import rateLimitModule from "@mod/rate-limit/module";
 import { type Beginning, lineage } from "@mod/refresh";
+import secretHashModule from "@mod/secret-hash/module";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
@@ -113,6 +114,7 @@ async function serve(section: Record<string, unknown> = {}, extra: Module[] = []
 		modules: [
 			http,
 			clientsModule,
+			secretHashModule,
 			issuerModule,
 			tokensStandIn(),
 			grantCaller,

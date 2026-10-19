@@ -15,6 +15,7 @@
 		"@mod/audit": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/login-gates": "workspace:*",
+		"@mod/mfa-extensions": "workspace:*",
 		"@mod/seal": "workspace:*",
 		"@mod/session": "workspace:*",
 		"zod": "4.6.7"
