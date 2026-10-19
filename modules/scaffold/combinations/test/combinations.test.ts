@@ -120,3 +120,14 @@ it("composes federation, once, wherever a composed module reaches it: in full, a
 		for (const name of add) expect(composed, name).toContain(name);
 	}
 }, 30_000);
+
+it("composes mfa wherever a factor kind is added alone, so a kind is never composed without what asks it", () => {
+	for (const kind of [
+		"@mod/mfa-totp",
+		"@mod/mfa-recovery",
+		"@mod/mfa-webauthn",
+		"@mod/mfa-email",
+	]) {
+		expect(needed([kind]), kind).toContain("@mod/mfa");
+	}
+}, 30_000);
