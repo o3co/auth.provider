@@ -43,6 +43,8 @@ export interface NewPart {
 	readonly whole?: readonly string[];
 	/** A store that may lose data on restart, or one on a server that can be paused. */
 	readonly store?: "volatile" | "pausable";
+	/** A configuration file's text, as an operator writes it: booted below the scene's sections. */
+	readonly layer?: string;
 }
 
 type SetUp = (part: unknown, scene: AreaScene, modules: readonly string[]) => NewPart;
