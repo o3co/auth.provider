@@ -4,6 +4,8 @@ import { z } from "zod";
 import { ledgers, type UpstreamNames, upstreamNames, users } from "./contract.ts";
 import { contributedSource } from "./ledger/contributed.ts";
 import { ledgerUsers } from "./ledger.ts";
+import { keptLinks } from "./links/kept.ts";
+import { ledgerLinks } from "./links/ledger.ts";
 import { keyOf, record, registeredUsers } from "./registered.ts";
 import { contactStore, linkStore } from "./store.ts";
 
@@ -91,6 +93,10 @@ export default defineModule({ name: "users", section }, (m) => [
 		const source = ledger
 			? contributedSource(ledger, c.log)
 			: registeredUsers(c.section.registered, (inUse) => checkers.checkerOf(inUse));
-		return ledgerUsers(source, await c.get(linkStore), await c.get(contactStore));
+		// A ledger that looks users up by upstream identity has the last word there, so no link store is asked for.
+		const linking = ledger?.byUpstream
+			? ledgerLinks(source)
+			: keptLinks(source, await c.get(linkStore));
+		return ledgerUsers(source, linking, await c.get(contactStore));
 	}),
 ]);
