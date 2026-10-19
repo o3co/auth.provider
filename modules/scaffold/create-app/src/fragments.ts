@@ -162,7 +162,7 @@ export function localConfExample(fragments: readonly Fragment[]): string {
 export function envExample(settings: readonly Setting[]): string {
 	const quoted = (value: string) => (/^[^\s"'#\\]*$/.test(value) ? value : JSON.stringify(value));
 	return example(
-		"Copy to .env, uncomment each line and replace its placeholder; git and the image leave .env out.",
+		"Copy to .env, uncomment each line you set and replace its placeholder; a value of several lines, such as a PEM key, goes in the local layer instead. Git and the image leave .env out.",
 		settings.map((s) => `${s.env}=${quoted(s.placeholder)}`),
 	);
 }

@@ -167,6 +167,13 @@ describe.each(named)("the pattern %s", (name) => {
 	);
 });
 
+it("tells, as the repository's guide does, that a value of several lines goes in the local layer, not in .env", async () => {
+	const target = await generatedPattern("simple-web");
+	const note = "a value of several lines, such as a PEM key, goes in the local layer instead";
+	expect(await read(target, "README.md")).toContain(note);
+	expect(await read(target, ".env.example")).toMatch(new RegExp(`^## .*${note}`));
+});
+
 it("lists each pattern with its use and areas, full among them", () => {
 	const listed = patterns();
 	expect(listed.map((p) => p.name)).toEqual([...named, "full"]);

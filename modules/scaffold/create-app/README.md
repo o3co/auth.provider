@@ -37,6 +37,7 @@
 - The full template's and a pattern's configuration file reads the collected fragments' scalar keys from env only, holding no values; each variable is the section and key path joined by `_`, upper-cased, `-` as `_`.
 - Two keys reading one variable refuse generation, naming both.
 - Neither example holds a live value line: the local layer's holds each fragment list with its placeholders and each value spanning sections (`audit.receivers`), the environment's each variable, all as comments; a copy sets nothing, and boot refuses each key still needed. A value spanning sections never goes to env.
+- The guide and the env example say a value of several lines, such as a PEM key, goes in the local layer, as an env file holds one line a variable.
 - Git leaves out every env file but `.env.example`, the local layer, `*.pem` and `*.key`; the image's build context leaves out those, `.env.example` and `.git`.
 - The image pins Node by version and digest and corepack by version, installs the locked production dependencies in a stage of their own, runs node under `tini` as a user other than root, and checks liveness (`/_healthcheck`, after a start period).
 - The app exits 78 on a refused boot, writing each refusal on standard error.
