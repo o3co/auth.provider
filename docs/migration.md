@@ -668,10 +668,8 @@ A ledger can also be asked for a user by subject, so a user who signs in upstrea
 - **A grant of your own**: it declares `readsAmbient`: `cookie` when it reads the session's cookie, and then checks the request's origin itself, or `none`. A grant without it refuses boot.
 - **HEAD on a GET that changes state** (`/oauth/authorize`, `/oauth/logout`, and the browser routes of `federation` and `federation-grants`) is answered `405` with the path's methods in `Allow`; rc.1 ran the GET.
 - **Federation grants' consent**: a `POST /session/federation-grants/consent` from another site is refused before it is counted against the source's requests, so it no longer uses up the window.
+- **Second factors and revocation**: `mfa-revocation` is new, a bridge of `mfa` and `subject-revocation` that `combinations` composes with them: a revocation is complete only once no second factor's enrollment begun before it can bind, and `503 incomplete` while `mfa`'s store cannot answer. An app composed by hand must add it. `mfa`'s `bind` answers `fenced` (a reset or a revocation since the binding began) where rc.1 had no such answer.
 
-## Operational notes- **Second factors and revocation**: `mfa-revocation` is new, a bridge of `mfa` and `subject-revocation` that `combinations` composes with them: a revocation is complete only once no second factor's enrollment begun before it can bind, and `503 incomplete` while `mfa`'s store cannot answer. An app composed by hand must add it. `mfa`'s `bind` answers `fenced` (a reset or a revocation since the binding began) where rc.1 had no such answer.
-
-## Operational notes
 ## Operational notes
 
 ### Clocks
