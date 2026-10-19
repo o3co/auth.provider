@@ -190,11 +190,44 @@ jobs:
   # a day on the default branch (develop): the new system's conformance and the
   # legacy system's (0.17.0, built from this repository's own v0.17.0 tag), then
   # the scenes on each pattern's app. A release is tested before it reaches
-  # main, so the push to main does not run it again.
-  conformance:
+  # main, so the push to main does not run it again. Each area and each pattern
+  # runs in a job of its own; `conformance` passes only once all of them have.
+  #
+  # What the jobs run, read from the repository: an area is a package with a
+  # `conformance` script, and a pattern is a run `patterns --list` names.
+  conformance-plan:
     if: github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    outputs:
+      areas: ${{ steps.plan.outputs.areas }}
+      patterns: ${{ steps.plan.outputs.patterns }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      - id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          areas=$(jq -c -s 'map(select(.scripts.conformance) | .name)' modules/*/*/package.json)
+          patterns=$(pnpm --silent --filter @mod/conformance run patterns --list)
+          echo "areas=$areas" >> "$GITHUB_OUTPUT"
+          echo "patterns=$patterns" >> "$GITHUB_OUTPUT"
+
+  # One area: its scenes on the new system, then on the legacy one. A scene the
+  # legacy system cannot be set up for, or answers by a decided difference, is
+  # skipped; any other fails.
+  conformance-area:
+    needs: conformance-plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        area: ${{ fromJSON(needs.conformance-plan.outputs.areas) }}
     env:
       LEGACY_SOURCE: ${{ github.workspace }}
       LEGACY_BRANCH: v0.17.0
@@ -232,14 +265,52 @@ jobs:
           if [ ! -d "$LEGACY_DIR" ]; then
             pnpm --filter @mod/conformance-legacy run prepare-legacy
           fi
-      - run: pnpm conformance
-      # The same scenes on the legacy system. A scene it cannot be set up for,
-      # or answers by a decided difference, is skipped; any other fails.
+      - name: Conformance on the new system
+        run: pnpm --filter "${{ matrix.area }}" run conformance
       - name: Conformance on the legacy system
         env:
           CONFORMANCE_TARGET: legacy
-        run: pnpm conformance
-      - run: pnpm conformance:patterns
+        run: pnpm --filter "${{ matrix.area }}" run conformance
+
+  # One pattern's app, on each area it composes.
+  conformance-pattern:
+    needs: conformance-plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        pattern: ${{ fromJSON(needs.conformance-plan.outputs.patterns) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm conformance:patterns "${{ matrix.pattern }}"
+
+  # The check required of a release: every area and every pattern passed.
+  conformance:
+    needs: [conformance-plan, conformance-area, conformance-pattern]
+    if: always() && (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every area and every pattern passed
+        run: |
+          for result in "${{ needs.conformance-plan.result }}" "${{ needs.conformance-area.result }}" "${{ needs.conformance-pattern.result }}"; do
+            [ "$result" = success ] || { echo "a conformance job ended $result"; exit 1; }
+          done
 
   # On a pull request to main and on the release branches: what a release would publish.
   # `pnpm release:check` packs every bundle and the entrance, makes an app of
