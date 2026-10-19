@@ -110,11 +110,10 @@ Each promise below holds across every module composed. Each names what keeps it 
   - Every request that changes state needs same-origin evidence or the double-submit token. Any cross-origin evidence refuses it with 403.
   - Every route declares whether it changes state, and one that does either uses a policy that keeps other sites' requests out and one that limits each source, or says why not; boot refuses a route that does neither. The [route reference](routes.md) lists each route's. A declaration is its owner's claim, not a proof.
   - Revoking a subject's sessions closes each of them.
-  - With second factors composed, `mfa-entry` holds sessions to them: under `mfa.mode = required` using a session needs one, and changing credentials needs one proven recently (or a recent sign-in while none is held). Every credentials entry first reads the subject's factors, judged against the witness, so a factor store that cannot answer makes every credentials route unavailable, witness or not.
+  - With second factors composed, `mfa-entry` holds sessions to them: under `mfa.mode = required` using a session needs one, and changing credentials needs one proven recently (or a recent sign-in while none is held). Every credentials entry first reads the subject's factors, judged against the witness, so a factor store that cannot answer makes every credentials route unavailable, witness or not. `mfa` refuses to boot without it, whatever the mode, so no app holds factors that sessions are not held to.
 - **Left to you:**
   - Keeping other subdomains of your origin from being taken over: double submit relies on them being unable to set the cookie.
   - Ending sessions with revocation, not by waiting out their lifetime, when they must end now.
-  - In an app composed by hand, composing `mfa-entry` beside `mfa`: `combinations` always does. Without `mfa-management`, which needs it, an app with `mfa` and `mfa-flows` boots without it, and sessions then need no second factor to be used or to change credentials.
 
 ## Tokens
 
