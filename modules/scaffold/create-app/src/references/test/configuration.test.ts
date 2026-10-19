@@ -126,7 +126,6 @@ const clientsDescribedLater = [
 	"authorize",
 	"client-allowance",
 	"client-secret",
-	"consent",
 	"federation-grants",
 	"federation-tokens",
 	"rp-logout",
