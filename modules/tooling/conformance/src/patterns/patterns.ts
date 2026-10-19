@@ -30,6 +30,10 @@ export function runsOf(summaries: readonly PatternSummary[], args: readonly stri
 	return [{ pattern: named, areas: areas.length > 0 ? areas : run.areas }];
 }
 
+/** The pattern of every run, `full+opt-ins` included, as JSON may list them for a job each. */
+export const patternNames = (summaries: readonly PatternSummary[]) =>
+	runsOf(summaries, []).map((run) => run.pattern);
+
 /** An ANSI escape sequence, as a terminal that colours output writes one (ESC, then CSI). */
 const ansiEscape = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
 
@@ -95,4 +99,8 @@ export function runPatterns(
 	return ok;
 }
 
-if (import.meta.main) process.exitCode = runPatterns(process.argv.slice(2)) ? 0 : 1;
+if (import.meta.main) {
+	const args = process.argv.slice(2);
+	if (args[0] === "--list") console.log(JSON.stringify(patternNames(patterns())));
+	else process.exitCode = runPatterns(args) ? 0 : 1;
+}
