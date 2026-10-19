@@ -135,7 +135,7 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 	const sessionOf = (handle: string, record: AuthContext): Session =>
 		Object.freeze({ id: handle, context: contextOf(record) });
 	const endedAt = (record: OpenRecord, at: number) => record.openedAt + lifetimeMs <= at;
-	/** Closed, and kept for the lifetime from now; an ended session is closed so, calling no participants. */
+	/** Closed, and kept for the lifetime from now. */
 	const closedOf = (was: SessionRecord): ChangedSession => ({
 		value: toStored({ ...was, state: "closed" }),
 		lifetimeMs,
@@ -150,9 +150,9 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		const step = (stored: StoredSession): ChangedSession | undefined => {
 			const was = fromStored(stored);
 			if (!was) return undefined;
-			const ended = was.state === "open" && endedAt(was, at);
-			if (was.state === "closed" || target === "closed" || ended) return closedOf(was);
-			// A closing is kept until it is closed, so its participants are never skipped.
+			if (was.state === "closed" || target === "closed") return closedOf(was);
+			// A closing is kept until it is closed, so its participants are never skipped, even for a
+			// session the lifetime in force has ended: its tokens still live.
 			const closing = { ...was, state: "closing" as const, closingSince: was.closingSince ?? at };
 			return { value: toStored(closing), lifetimeMs: "endless" };
 		};

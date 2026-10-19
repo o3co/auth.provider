@@ -19,7 +19,7 @@ Internal module of `session-lifecycle`: a session's record, its cookie, and its 
 - The handle a well-formed session cookie opens, and the cookie's secret.
 - The record of a live session: open, within the lifetime in force, and after the subject's revocation boundary.
 - Entry at a level.
-- A read or a close that finds an open record ended by the lifetime in force closes it there, calling no participants.
+- A read that finds an open record ended by the lifetime in force closes it there, calling no participants; a close that finds one calls them, as any close does.
 - `open` (as `complete`), `close` (as `close`) and `closeIn` (as `closeRequest`).
 - One sweep of pending closings, which goes on past a failing one.
 - A sweep ends at the stop signal, and the host waits for it.

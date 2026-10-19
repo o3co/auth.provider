@@ -565,13 +565,13 @@ describe("session closing", () => {
 		expect((await s.close(handle)).kind).toBe("closed");
 	});
 
-	it("calls no participants when closing a session the lifetime in force has ended, as by expiry", async () => {
+	it("calls the participants when closing a session the lifetime in force has ended, as any close does", async () => {
 		const { stores, closer, login, handleOf, configured } = await boot();
 		const handle = await handleOf(await login());
 		const shorter = (await configured({ lifetime: "1m" })).get(sessions);
 		now += 60_000;
 		expect((await shorter.close(handle)).kind).toBe("closed");
-		expect(closer.calls).toBe(0);
+		expect(closer.calls).toBe(1);
 		expect(stores.kept.peek(handle)).toMatchObject({ state: "closed" });
 		expect(stores.kept.pending()).toEqual([]);
 	});
