@@ -829,17 +829,17 @@ From `@mod/idp-apple`.
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
 | `federation.idps.<name>.client-id` | string |  | yes | The client ID this provider is registered under at the IdP. |
-| `federation.idps.<name>.client-secret` | string |  |  |  |
-| `federation.idps.<name>.team-id` | string |  |  |  |
-| `federation.idps.<name>.key-id` | string |  |  |  |
-| `federation.idps.<name>.private-key` | string |  |  |  |
-| `federation.idps.<name>.secret-lifetime` | string | `5m` |  |  |
-| `federation.idps.<name>.scopes` | list of name \| email | `["email"]` |  |  |
-| `federation.idps.<name>.authorization-endpoint` | string | `https://appleid.apple.com/auth/authorize` |  |  |
-| `federation.idps.<name>.token-endpoint` | string | `https://appleid.apple.com/auth/token` |  |  |
-| `federation.idps.<name>.jwks-uri` | string | `https://appleid.apple.com/auth/keys` |  |  |
-| `federation.idps.<name>.clock-skew` | string | `30s` |  |  |
-| `federation.idps.<name>.end-session-endpoint` | string |  |  |  |
+| `federation.idps.<name>.client-secret` | string |  |  | A fixed client secret, in place of the three that sign one. |
+| `federation.idps.<name>.team-id` | string |  |  | The Apple team that signs the client secret, with key-id and private-key. |
+| `federation.idps.<name>.key-id` | string |  |  | The ID of the team's key that signs the client secret, with team-id and private-key. |
+| `federation.idps.<name>.private-key` | string |  |  | The team's P-256 key, as PKCS8 PEM, that signs the client secret. |
+| `federation.idps.<name>.secret-lifetime` | string | `5m` |  | How long a signed client secret lives: 1m to 15777000s (about half a year). |
+| `federation.idps.<name>.scopes` | list of name \| email | `["email"]` |  | The scopes asked of Apple at a login: `name`, `email` or both. |
+| `federation.idps.<name>.authorization-endpoint` | string | `https://appleid.apple.com/auth/authorize` |  | Where the browser is sent to log in at Apple; Apple's own unless named. |
+| `federation.idps.<name>.token-endpoint` | string | `https://appleid.apple.com/auth/token` |  | Where a code is exchanged for tokens; Apple's own unless named. |
+| `federation.idps.<name>.jwks-uri` | string | `https://appleid.apple.com/auth/keys` |  | Where the keys that sign Apple's id_tokens are read; Apple's own unless named. |
+| `federation.idps.<name>.clock-skew` | string | `30s` |  | How far Apple's clock may be from ours, for its id_token's times: 0s to 5m. |
+| `federation.idps.<name>.end-session-endpoint` | string |  |  | Where to end the session at Apple, which has none of its own. |
 
 ### federation.idps.<name> (type = github)
 
