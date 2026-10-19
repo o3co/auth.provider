@@ -6,7 +6,8 @@
 	"kind": "feature",
 	"exports": {
 		"./testing": "./src/testing.ts",
-		"./module": "./src/module.ts"
+		"./module": "./src/module.ts",
+		"./audit-events": "./src/audit-events.ts"
 	},
 	"dependencies": {
 		"@mod/acr": "workspace:*",

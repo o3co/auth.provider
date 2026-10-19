@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { acrEntries } from "@mod/acr";
 import acrModule from "@mod/acr/module";
 import { acrConfig } from "@mod/acr/testing";
+import type { AuditEvent } from "@mod/audit";
 import { auditStandIn } from "@mod/audit/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
@@ -54,6 +55,7 @@ import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
 import { type IssuanceRequest, issuancePolicies, type Tokens, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { afterEach, describe, expect, it } from "vitest";
+import declared from "../src/audit-events.ts";
 import authorizeModule from "../src/module.ts";
 import { section } from "../src/section.ts";
 import { authorizeConfig } from "../src/testing.ts";
@@ -123,6 +125,7 @@ async function serve(
 		asks: memoryRecords<StoredAsk>(() => now, { shards: 1, perShard: 1 }),
 	});
 	const audit = auditStandIn();
+	recorded = audit.events;
 	const app = await assemble({
 		modules: [
 			http,
@@ -505,6 +508,20 @@ describe("authorize: the section", () => {
 	});
 });
 
+/** The audit events of the latest composition. */
+let recorded: readonly AuditEvent[] = [];
+// Every authorize event a test records is one the module declares, with attributes it declares.
+afterEach(() => {
+	for (const { kind, attributes } of recorded.filter((e) => e.kind.startsWith("authorize."))) {
+		const known: readonly string[] = declared[kind as keyof typeof declared]?.attributes ?? [];
+		expect(known, `${kind} is declared`).not.toEqual([]);
+		expect(
+			Object.keys(attributes ?? {}).filter((name) => !known.includes(name)),
+			kind,
+		).toEqual([]);
+	}
+	recorded = [];
+});
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
 const narrowing = defineModule({ name: "narrowing" }, (m) => [
 	m.contribute(targetRules).by(() => ({
