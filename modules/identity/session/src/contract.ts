@@ -124,6 +124,36 @@ export const entryRequirements = extensionPoint<EntryRequirement>("session.entry
 	keyOf: (requirement) => requirement.name,
 });
 
+/** What the entry requirements answer of a session at a level: the first short, or admitted with whether one judged the level. */
+export type Judgement =
+	| { readonly kind: "admit"; readonly judged: boolean }
+	| { readonly kind: "short"; readonly requirement: string; readonly answer: Answer };
+
+/** The one judge of the entry requirements, contributed by the module that keeps them; its factory, and what it collects, take `sessions` only late. */
+export interface EntryJudge {
+	judge(context: AuthContext, level: EntryLevel): Promise<Judgement>;
+}
+
+/** The one place an implementation asks the entry requirements: at most one contribution. */
+export const entryJudge = extensionPoint<EntryJudge>("session.entry-judge", {
+	multiplicity: "keyed",
+	keyOf: () => "entry-judge",
+});
+
+/** The one caller of a closing session's participants, contributed by the module that keeps them; its factory, and what it collects, take `sessions` only late. */
+export interface ClosingParticipants {
+	/** Calls each participant; answers each that failed, by name and the error's kind, none when all finished. */
+	closing(
+		session: Session,
+	): Promise<readonly { readonly participant: string; readonly kind: string }[]>;
+}
+
+/** The one place an implementation calls the participants: at most one contribution. */
+export const closingParticipants = extensionPoint<ClosingParticipants>(
+	"session.closing-participants",
+	{ multiplicity: "keyed", keyOf: () => "closing-participants" },
+);
+
 export const participants = extensionPoint<Participant>("session.participants", {
 	multiplicity: "keyed",
 	keyOf: (participant) => participant.name,

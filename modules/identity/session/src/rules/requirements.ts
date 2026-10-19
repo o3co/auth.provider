@@ -1,4 +1,10 @@
-import type { AuthContext, EntryLevel, EntryRequirement } from "../contract.ts";
+import type {
+	AuthContext,
+	EntryJudge,
+	EntryLevel,
+	EntryRequirement,
+	Judgement,
+} from "../contract.ts";
 
 /** Asks the requirements in name order; the first that falls short is the answer. */
 export function firstShortOf(given: readonly EntryRequirement[]) {
@@ -35,5 +41,21 @@ export function entryShortOf(
 		const recent =
 			!context.authenticatedAtUnknown && now() - context.authenticatedAt <= credentialsMs;
 		return recent ? undefined : stepUp;
+	};
+}
+
+/**
+ * The judge's answer; then, at `credentials` where nothing judged it (or no judge is contributed),
+ * a sign-in at a known time that `recent` holds recent, else `session` short with `step_up_required`.
+ */
+export function judgedShortOf(judge: EntryJudge | undefined, recent: (at: number) => boolean) {
+	return async (context: AuthContext, level: EntryLevel) => {
+		const judged: Judgement = judge
+			? await judge.judge(context, level)
+			: { kind: "admit", judged: false };
+		if (judged.kind === "short") return { requirement: judged.requirement, answer: judged.answer };
+		if (level !== "credentials" || judged.judged) return undefined;
+		const known = !context.authenticatedAtUnknown && recent(context.authenticatedAt);
+		return known ? undefined : stepUp;
 	};
 }

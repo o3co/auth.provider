@@ -4,7 +4,6 @@
 - Owns the contract of user sessions: their cookie, their listing under their subject, and their lifecycle (open → closing → closed), as every implementation keeps them; a session is opened only once listed, so a revocation finds every live one.
 - Owns the entry decision, and nothing outside an implementation of it decides: a record exists, is open, within the lifetime in force, and after the subject's revocation boundary.
 - A login opens a new session under a new handle, closing the one the request carried (fixation prevention); the cookie holds an unguessable secret and lives as long as the session.
-- A closing session stays closing until every participant has finished; a session's authentication can be raised (step-up).
 
 ## Not here
 - Authentication methods, what is issued after a session, the table of authentication levels, and what each amr value means (its giver's vocabulary).
@@ -18,12 +17,13 @@
 - `refusedEntry`: an entry that did not enter → its answer, absent `401` `{"error":"login_required"}`, short `403` with the requirement's answer, both kept out of caches.
 - `raise`: request and amr → the raised session and a new cookie, or none; it adds the amr and keeps the raise time (`kernel`'s clock).
 - `recent`: a time (`kernel`'s clock) → whether it is within the one recent-authentication window, at most `longestRecentMs` (1 hour); the checker passes the time of what it judges.
-- `closeRequest` closes, in any state, the session the request's cookie opens, and destroys any session cookie it carries, even one opening nothing; `close`: handle → closed or pending, destroying the cookie only when the request's cookie opens that session. Both name the moved session (handle and subject) while its record is kept, and the state they found it in (`from`: open, even past its lifetime, closing or closed).
+- `closeRequest` closes, in any state, the session the request's cookie opens, and destroys any session cookie it carries, even one opening nothing; `close`: handle → closed, or pending (the session stays closing) until every participant has finished, destroying the cookie only when the request's cookie opens that session. Both name the moved session (handle and subject) while its record is kept, and the state they found it in (`from`: open, even past its lifetime, closing or closed).
 - A revoked subject's listed sessions are each closed through `close`; the revocation answers incomplete while one fails or is left pending (it stays listed). A session pushed out of a full listing (one ending first, never the one being opened) is closed through `close`.
 - Extension point `participants`: called with the handle and the context, never the cookie secret, one at a time in collect order; a failing one does not stop the rest.
   - None is called for a session that ends by expiry alone, while a close calls them for a session whose record it finds, even one the lifetime in force has ended.
   - Each must be safe to call any number of times, from several hosts at once.
   - `sessionRules` holds these orders (participants, requirements, a subject's listed sessions) for an implementation and the stand-in alike.
+- Extension points `entryJudge` (context and level → the first requirement short, or admitted with whether one judged the level) and `closingParticipants` (session → each participant that failed, by name and kind): at most one contribution each, by the module keeping the requirements or the participants, whose factory takes `sessions` only late.
 - `./testing`: a stub, a stand-in in memory behind cookies by `cookies`' rule (each subject's listing as the contract has it; a pending close goes on only when asked again), and contract tests of the sessions.
 
 ## Invariants
