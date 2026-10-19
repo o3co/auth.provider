@@ -1,6 +1,6 @@
 import { assemble, BootRefused, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
-import { type OutboundRefusals, outboundRefusals } from "@mod/outbound-policy";
+import { type OutboundRefusals, outboundLimits, outboundRefusals } from "@mod/outbound-policy";
 import { afterEach, expect, it, vi } from "vitest";
 import { type Narrower, outbound, signedOutbound } from "../src/contract.ts";
 import outboundModule, { section } from "../src/module.ts";
@@ -206,6 +206,19 @@ it("boots without a proxy, and refuses a destination before sending", async () =
 	await expect(
 		open.get(signedOutbound).fetch("http://10.0.0.1/", {}, { hosts: ["10.0.0.1"] }),
 	).rejects.toMatchObject({ reason: "special-address" });
+});
+
+it("answers at boot where a request is cut, as fetch cuts it: the caps narrowed, never widened", async () => {
+	onlyProxy();
+	const limits = (
+		await boot({ "allow-any-public": true, timeout: "2s", "max-response-size": "1KiB" })
+	).get(outboundLimits);
+	expect(limits.of()).toEqual({ timeoutMs: 2000, maxBytes: 1024 });
+	expect(limits.of({ timeoutMs: 500, maxBytes: 99_999 })).toEqual({
+		timeoutMs: 500,
+		maxBytes: 1024,
+	});
+	expect(() => limits.of({ timeoutMs: 0 })).toThrow(RangeError);
 });
 
 it("answers at boot why the policy refuses a URL, or nothing when it lets it through", async () => {
