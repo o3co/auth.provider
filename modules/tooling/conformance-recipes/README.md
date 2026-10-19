@@ -9,7 +9,7 @@
 - Generating and starting apps (`create-app`, `conformance`). The fake ledger's answers (`users-http`'s `./testing`).
 
 ## Offers
-- Area `recipes`: its part names the modules a recipe's command composes, set up on Redis with a second factor required. It has no legacy set-up: recipes run on the new system only.
+- Area `recipes`: its part names the modules a recipe's command composes, set up on Redis where the command composes it and with a second factor required where it composes `mfa`, and `localConf`, the `config/local.conf` its reader writes, which the app boots as written, below the set-up's sections. It has no legacy set-up: recipes run on the new system only.
 - `commands`: each recipe's generate command after the target, and `shownCommand`, the command as a reader types it.
 - `composedBy` (command, workspace → the modules the app it generates depends on), `transcript` (a recorder of a scene's exchanges, by block), `withBlocks` (a document and its blocks' text → the document rewritten).
 - `pnpm --filter @mod/conformance-recipes run examples`: rewrites each recipe's generated blocks from a run.
