@@ -25,6 +25,7 @@
 		"@mod/rate-limit": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
 		"@mod/session": "workspace:*",
+		"@mod/session-participants": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/token-control": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",

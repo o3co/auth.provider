@@ -23,7 +23,7 @@ What auth-provider 0.18 guarantees, and what it leaves to the deployment. Each g
 Each promise below holds across every module composed. Each names what keeps it (a contract, a check at boot, a guard rule) and the conformance scenes that test it, by area and scene; where no scene tests a part yet, it says so. An exception is never silent: it is a declaration, in a package manifest or on a route, and the [route reference](routes.md) lists the routes' reasons.
 
 1. **Closing a session closes every path for the tokens issued from it.**
-   - Kept by: `session`'s participants, which `session-lifecycle` calls on every close; `session-tokens` and `refresh` take part, and `code-grant` voids a code whose session ended.
+   - Kept by: `session-participants`' participants, which `session-lifecycle` calls on every close through `session`'s `closingParticipants`, refusing to boot without it; `session-tokens` and `refresh` take part, and `code-grant` voids a code whose session ended.
    - Scenes: code ("tokens and logout", "refresh: what a token may do", "session grant", "OpenID Connect userinfo"), exchange ("token exchange of a session's token"), federation ("federation tokens: refusals").
    - A close left pending is not done: the session stays closing until every participant has finished. Each host sweeps every `session-lifecycle.sweep-interval`, and takes a pending close up again once its retry time comes: after half its age so far, from the sweep interval up to an hour, and `logout` and RP-initiated logout answer it `503`, never as logged out.
    - No scene yet for a device approval. A session that ends by expiry alone calls no participant.

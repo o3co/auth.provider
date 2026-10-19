@@ -14,6 +14,7 @@ import {
 import { quietRuntime, recordingLog, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import sessionParticipants from "@mod/session-participants/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { referenceOf, type Tokens, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
@@ -85,6 +86,7 @@ async function boot(
 					down,
 				),
 			sessionStandIn,
+			sessionParticipants,
 			subjectRevocationStandIn,
 			issued.module,
 			sessionTokensModule,

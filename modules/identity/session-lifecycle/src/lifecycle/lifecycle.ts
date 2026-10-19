@@ -3,10 +3,10 @@ import type { HttpRequest } from "@mod/http";
 import { type Clock, type Log, type Random, Unavailable } from "@mod/kernel";
 import {
 	type AuthContext,
+	type ClosingParticipants,
 	type Entry,
+	type EntryJudge,
 	type EntryLevel,
-	type EntryRequirement,
-	type Participant,
 	type Session,
 	type Sessions,
 	sessionRules,
@@ -36,16 +36,16 @@ export interface LifecycleParts {
 	readonly closings: ClosingList;
 	readonly listed: SubjectSessions;
 	readonly revocation: SubjectRevocation;
-	readonly participants: readonly Participant[];
-	readonly requirements: readonly EntryRequirement[];
+	readonly closing: ClosingParticipants;
+	readonly judge: EntryJudge;
 	readonly jar: Cookies;
 	readonly clock: Clock;
 	readonly random: Random;
 	readonly log: Log;
 	readonly lifetimeMs: number;
 	readonly sweepMs: number;
-	/** How recent a sign-in must be to change credentials where no requirement judges that. */
-	readonly credentialsMs: number;
+	/** Whether a time is within the recent-authentication window, the floor's for changing credentials. */
+	readonly recent: (at: number) => boolean;
 }
 
 export interface Lifecycle {
@@ -72,9 +72,9 @@ const maxRetryMs = 3_600_000;
 const secretShape = /^[A-Za-z0-9_-]{43}$/;
 
 export function lifecycleOver(parts: LifecycleParts): Lifecycle {
-	const { kept, index, closings, listed, revocation, participants, jar, clock, log } = parts;
+	const { kept, index, closings, listed, revocation, jar, clock, log } = parts;
 	const { lifetimeMs, sweepMs } = parts;
-	const shortOf = sessionRules.entryShortOf(parts.requirements, clock.now, parts.credentialsMs);
+	const shortOf = sessionRules.judgedShortOf(parts.judge, parts.recent);
 	/** When this host may next sweep a closing whose record it cannot read, and since when it failed. */
 	const unread = new Map<string, { readonly since: number; readonly retryAt: number }>();
 	/** When to retry a closing that failed: after half its age, from the sweep interval up to an hour. Logged. */
@@ -189,7 +189,7 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 			...(from === undefined ? {} : { from }),
 		};
 		if (record.state === "closing") {
-			const failed = await sessionRules.failedParticipants(participants, sessionOf(handle, record));
+			const failed = await parts.closing.closing(sessionOf(handle, record));
 			for (const failure of failed) log.warn("session-lifecycle.participant_failed", failure);
 			if (failed.length > 0) {
 				await putOff(handle, record);

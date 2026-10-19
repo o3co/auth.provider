@@ -150,6 +150,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
@@ -578,6 +581,38 @@ importers:
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../session-participants
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../session-requirements
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
+  modules/identity/session-participants:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../session
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
+  modules/identity/session-requirements:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../session
+    devDependencies:
       vitest:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
@@ -771,6 +806,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       '@mod/session-tokens':
         specifier: workspace:*
         version: link:../session-tokens
@@ -937,6 +975,12 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/session-tokens':
         specifier: workspace:*
         version: link:../session-tokens
@@ -1059,6 +1103,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
@@ -1324,6 +1371,9 @@ importers:
       '@mod/cookies':
         specifier: workspace:*
         version: link:../../foundation/cookies
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -1435,6 +1485,9 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -1466,6 +1519,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/session-tokens':
         specifier: workspace:*
         version: link:../session-tokens
@@ -1533,6 +1589,9 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -1543,6 +1602,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/subject-attributes':
         specifier: workspace:*
         version: link:../../identity/subject-attributes
@@ -1632,6 +1694,9 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       '@mod/tokens':
         specifier: workspace:*
         version: link:../tokens
@@ -1978,6 +2043,9 @@ importers:
       '@mod/seal':
         specifier: workspace:*
         version: link:../../foundation/seal
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
@@ -2185,6 +2253,9 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -2253,6 +2324,9 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
     devDependencies:
       '@mod/http':
         specifier: workspace:*
@@ -2334,6 +2408,9 @@ importers:
       '@mod/seal':
         specifier: workspace:*
         version: link:../../foundation/seal
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
@@ -2389,6 +2466,9 @@ importers:
       '@mod/seal':
         specifier: workspace:*
         version: link:../../foundation/seal
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -2571,6 +2651,12 @@ importers:
       '@mod/session-lifecycle':
         specifier: workspace:*
         version: link:../../identity/session-lifecycle
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/session-store':
         specifier: workspace:*
         version: link:../session-store
@@ -2802,6 +2888,9 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -2864,6 +2953,12 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -3394,6 +3489,9 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       '@mod/session-tokens':
         specifier: workspace:*
         version: link:../../oauth/session-tokens
@@ -3416,6 +3514,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store

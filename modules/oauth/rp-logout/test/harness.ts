@@ -26,6 +26,8 @@ import { redirects } from "@mod/redirect-uris";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import sessionParticipants from "@mod/session-participants/module";
+import sessionRequirements from "@mod/session-requirements/module";
 import subjectAttributes from "@mod/subject-attributes/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import usersModule from "@mod/users/module";
@@ -129,6 +131,8 @@ export async function harness(
 			clientsModule,
 			redirectsSection,
 			options.sessionsModule ?? sessionStandIn,
+			sessionRequirements,
+			sessionParticipants,
 			subjectRevocationStandIn,
 			recorded.module,
 			options.clientsDown

@@ -26,6 +26,8 @@
 	},
 	"devDependencies": {
 		"@mod/records": "workspace:*",
+		"@mod/session-participants": "workspace:*",
+		"@mod/session-requirements": "workspace:*",
 		"vitest": "5.0.4"
 	}
 }

@@ -9,7 +9,7 @@ Internal module of `refresh`: the stores, the revoker, and what revokes families
 - When a family is revoked (`grant`, `lineage`, the contributions below).
 
 ## Offers
-- `settlingIn` (the build context) → the stores, the revoker and the family lifetime, refusing where access tokens cannot be revoked; `revocableOver` → `token-control`'s revocable kind; `participantOver` → `session`'s participant.
+- `settlingIn` (the build context) → the stores, the revoker and the family lifetime, refusing where access tokens cannot be revoked; `revocableOver` → `token-control`'s revocable kind; `participantOver` → `session-participants`' participant.
 
 ## Invariants
 - Revocation lists the family, writes the mark (even with no record, so a family mid-start never comes alive), revokes its access tokens, then unlists it.

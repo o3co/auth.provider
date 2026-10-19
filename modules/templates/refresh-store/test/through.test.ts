@@ -16,6 +16,7 @@ import { refreshConfig } from "@mod/refresh/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import sessionParticipants from "@mod/session-participants/module";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import tokenControl from "@mod/token-control/module";
@@ -52,6 +53,7 @@ async function boot() {
 			rateLimitStandIn,
 			auditStandIn().module,
 			sessionStandIn,
+			sessionParticipants,
 			subjectRevocationStandIn,
 			simulated.module,
 			refreshModule,
@@ -102,7 +104,8 @@ async function boot() {
 			.call("refresh_token", "app", { grant_type: "refresh_token", refresh_token: token });
 		return outcome.kind === "issued" ? String(outcome.body.refresh_token) : outcome.error;
 	};
-	return { simulated, start, refresh };
+	const close = () => app.get(sessions).close(session.id);
+	return { app, simulated, start, refresh, close };
 }
 
 it("rotates once through a lost answer to the rotation, and keeps the rotation through a failover", async () => {
@@ -133,4 +136,15 @@ it("keeps a family a reuse revoked revoked through a failover", async () => {
 	expect(await refresh(first)).toBe("invalid_grant");
 	await simulated.failover();
 	expect(await refresh(next)).toBe("invalid_grant");
+});
+
+it("revokes a session's family and its access tokens when the session closes, through refresh's participant", async () => {
+	const { app, start, close } = await boot();
+	const params = { grant_type: "refresh_token", refresh_token: await start() };
+	const outcome = await app.get(grantCalls).call("refresh_token", "app", params);
+	if (outcome.kind !== "issued") throw new Error(outcome.error);
+	const access = String(outcome.body.access_token);
+	expect((await app.get(tokens).verifyAccess(access)).kind).toBe("valid");
+	expect((await close()).kind).toBe("closed");
+	expect((await app.get(tokens).verifyAccess(access)).kind).toBe("invalid");
 });

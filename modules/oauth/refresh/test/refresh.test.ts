@@ -32,8 +32,11 @@ import {
 import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import secretHashModule from "@mod/secret-hash/module";
-import { entryRequirements, sessions } from "@mod/session";
+import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import sessionParticipants from "@mod/session-participants/module";
+import { entryRequirements } from "@mod/session-requirements";
+import sessionRequirements from "@mod/session-requirements/module";
 import { sessionTokens } from "@mod/session-tokens";
 import sessionTokensModule from "@mod/session-tokens/module";
 import { sessionTokensInMemory } from "@mod/session-tokens/testing";
@@ -137,6 +140,8 @@ async function serve(
 			rateLimitStandIn,
 			auditStandIn().module,
 			sessionStandIn,
+			sessionRequirements,
+			sessionParticipants,
 			subjectRevocationStandIn,
 			simulated.module,
 			sessionTokensModule,

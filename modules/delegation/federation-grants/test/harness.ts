@@ -18,8 +18,10 @@ import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import secretHashModule from "@mod/secret-hash/module";
-import { type EntryRequirement, entryRequirements, sessions } from "@mod/session";
+import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import { type EntryRequirement, entryRequirements } from "@mod/session-requirements";
+import sessionRequirements from "@mod/session-requirements/module";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import {
@@ -192,6 +194,7 @@ export async function harness(
 			clientsModule,
 			secretHashModule,
 			sessionStandIn,
+			sessionRequirements,
 			csrfStandIn,
 			cookiesModule,
 			subjectRevocationStandIn,

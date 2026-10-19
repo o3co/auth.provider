@@ -1,9 +1,9 @@
 import { cookies } from "@mod/cookies";
 import { defineModule } from "@mod/kernel";
 import {
+	closingParticipants,
 	type EntryLevel,
-	entryRequirements,
-	participants,
+	entryJudge,
 	sessionRules,
 	sessions,
 } from "@mod/session";
@@ -16,6 +16,20 @@ import { closingList, cookieIndex, sessionStore, subjectSessions } from "./store
 export default defineModule({ name: "session-lifecycle", section, replicaSafe: true }, (m) => [
 	m.provide(sessions).by(async (c) => {
 		const kept = await c.get(sessionStore);
+		// Kept elsewhere, as session's seams: none composed is refused, never taken as no rule.
+		const [judge] = await c.collect(entryJudge);
+		const [closing] = await c.collect(closingParticipants);
+		if (!judge || !closing) {
+			const missing = [
+				...(judge ? [] : [entryJudge.label]),
+				...(closing ? [] : [closingParticipants.label]),
+			];
+			const reason = "needs exactly one contribution (0)";
+			return c.refuseAll(missing.map((where) => ({ where, reason })));
+		}
+		// The one recent-authentication window, for entry's floor and for `recent` alike.
+		const recentMs = c.section["recent-authentication"] * 1000;
+		const recent = (at: number) => c.clock.now() - at <= recentMs;
 		const lifetimeMs = c.section.lifetime * 1000;
 		const sweepMs = c.section["sweep-interval"] * 1000;
 		const lifecycle = lifecycleOver({
@@ -24,17 +38,16 @@ export default defineModule({ name: "session-lifecycle", section, replicaSafe: t
 			closings: await c.get(closingList),
 			listed: await c.get(subjectSessions),
 			revocation: await c.get(subjectRevocation),
-			participants: await c.collect(participants),
-			requirements: await c.collect(entryRequirements),
+			judge,
+			closing,
 			jar: await c.get(cookies),
 			clock: c.clock,
 			random: c.random,
 			log: c.log,
 			lifetimeMs,
 			sweepMs,
-			credentialsMs: c.section["recent-authentication"] * 1000,
+			recent,
 		});
-		const recentMs = c.section["recent-authentication"] * 1000;
 		c.every(sweepMs, lifecycle.sweep);
 		const enteredAt = async (handle: string) => {
 			const entry = await lifecycle.entryAt(handle, "use");
@@ -54,7 +67,7 @@ export default defineModule({ name: "session-lifecycle", section, replicaSafe: t
 			raise: raiseOver({ lifecycle, kept, clock: c.clock, lifetimeMs }),
 			closeRequest: lifecycle.closeIn,
 			close: lifecycle.close,
-			recent: (at: number) => c.clock.now() - at <= recentMs,
+			recent,
 		};
 	}),
 	m.contribute(revocationFollowers).by(async (c) => {

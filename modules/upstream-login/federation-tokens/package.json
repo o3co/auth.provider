@@ -21,6 +21,7 @@
 		"@mod/seal": "workspace:*",
 		"@mod/sender-binding": "workspace:*",
 		"@mod/session": "workspace:*",
+		"@mod/session-participants": "workspace:*",
 		"@mod/session-tokens": "workspace:*",
 		"@mod/tokens": "workspace:*",
 		"@mod/upstreams": "workspace:*",
@@ -33,6 +34,7 @@
 		"@mod/issuer": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
+		"@mod/session-requirements": "workspace:*",
 		"@mod/store": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
 		"vitest": "5.0.4"

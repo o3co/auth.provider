@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import http from "@mod/http/module";
-import { httpConfig } from "@mod/http/testing";
+import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import gatesModule from "@mod/login-gates/module";
@@ -13,7 +13,9 @@ import { factorKinds } from "@mod/mfa-extensions";
 import { memoryRecords } from "@mod/records/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
+import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import sessionRequirements from "@mod/session-requirements/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, expect, it } from "vitest";
 import { bindingProof, bindingProofs } from "../src/contract.ts";
@@ -83,6 +85,7 @@ async function serve(mode?: "never" | "when-available" | "always", proofs = [own
 			http,
 			auditStandIn().module,
 			sessionStandIn,
+			sessionRequirements,
 			subjectRevocationStandIn,
 			store,
 			sealModule,
@@ -124,7 +127,7 @@ async function serve(mode?: "never" | "when-available" | "always", proofs = [own
 		if (proved.kind !== "valid") throw new Error(proved.kind);
 		return decided.bind(subject, begun.pending, proved.state);
 	};
-	return { asking, decided, passOf, bindCode, inAMinute };
+	return { asking, decided, passOf, bindCode, inAMinute, sessions: app.get(sessions) };
 }
 
 it("asks the available proof of a subject holding no counting factor, and nothing of one it is not available to or one holding a factor", async () => {
@@ -218,6 +221,23 @@ it("passes where an ask came from to the proof unread", async () => {
 	await asking.challenge("ann", inAMinute(), login); // available, then send
 	await decided.begin("ann", "code", undefined, "t", login); // the gate's available
 	expect(contact.from).toEqual([session, login, login, login]);
+});
+
+it("holds the sessions it composes to mfa's entry requirement: a subject holding a factor changes credentials only after proving one", async () => {
+	const { passOf, bindCode, sessions: open } = await serve();
+	expect((await bindCode("ann", await passOf("ann"))).kind).toBe("bound");
+	const facts = { subject: "ann", amr: ["pwd"], authenticatedAt: runtime.clock.now() };
+	const { cookies } = await open.complete(testRequest(), facts);
+	const cookie = cookies.map((c) => c.split(";")[0]).join("; ");
+	const request = testRequest({
+		headers: new Map([["cookie", cookie]]),
+		source: { scheme: "https" },
+	});
+	expect(await open.enterFor(request, "credentials")).toMatchObject({
+		kind: "short",
+		requirement: "mfa",
+		answer: { error: "step_up_required" },
+	});
 });
 
 it("asks for a proof when one is available, when the operator sets no mode", () => {

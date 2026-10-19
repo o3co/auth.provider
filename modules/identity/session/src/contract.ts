@@ -101,31 +101,36 @@ export interface CloseOutcome {
 	readonly from?: "open" | "closing" | "closed";
 }
 
-export interface Participant {
-	readonly name: string;
-	closing(session: Session): Promise<void>;
-}
-
 export const sessions = contract<Sessions>("session");
 
-/** What a session must meet to be entered at a level, contributed by the module that owns the rule. */
-export interface EntryRequirement {
-	readonly name: string;
-	/** The levels it judges; where none judges `credentials`, `session`'s floor does. */
-	readonly judges: readonly EntryLevel[];
-	admits(
-		context: AuthContext,
-		level: EntryLevel,
-	): Promise<{ readonly kind: "admit" } | { readonly kind: "short"; readonly answer: Answer }>;
+/** What the entry requirements answer of a session at a level: the first short, or admitted with whether one judged the level. */
+export type Judgement =
+	| { readonly kind: "admit"; readonly judged: boolean }
+	| { readonly kind: "short"; readonly requirement: string; readonly answer: Answer };
+
+/** The one judge of the entry requirements, contributed by the module that keeps them; its factory, and what it collects, take `sessions` only late. */
+export interface EntryJudge {
+	judge(context: AuthContext, level: EntryLevel): Promise<Judgement>;
 }
 
-export const entryRequirements = extensionPoint<EntryRequirement>("session.entry-requirements", {
+/** The one place an implementation asks the entry requirements: at most one contribution. */
+export const entryJudge = extensionPoint<EntryJudge>("session.entry-judge", {
 	multiplicity: "keyed",
-	keyOf: (requirement) => requirement.name,
+	keyOf: () => "entry-judge",
 });
 
-export const participants = extensionPoint<Participant>("session.participants", {
-	multiplicity: "keyed",
-	keyOf: (participant) => participant.name,
-});
+/** The one caller of a closing session's participants, contributed by the module that keeps them; its factory, and what it collects, take `sessions` only late. */
+export interface ClosingParticipants {
+	/** Calls each participant; answers each that failed, by name and the error's kind, none when all finished. */
+	closing(
+		session: Session,
+	): Promise<readonly { readonly participant: string; readonly kind: string }[]>;
+}
+
+/** The one place an implementation calls the participants: at most one contribution. */
+export const closingParticipants = extensionPoint<ClosingParticipants>(
+	"session.closing-participants",
+	{ multiplicity: "keyed", keyOf: () => "closing-participants" },
+);
+
 export { sessionRules } from "./rules/rules.ts";

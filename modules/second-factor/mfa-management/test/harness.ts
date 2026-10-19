@@ -20,6 +20,7 @@ import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import sessionRequirements from "@mod/session-requirements/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach } from "vitest";
 import type { z } from "zod";
@@ -137,6 +138,7 @@ export async function serve(settings: Settings = {}) {
 			csrfStandIn,
 			cookiesModule,
 			sessionStandIn,
+			sessionRequirements,
 			subjectRevocationStandIn,
 			rateLimitStandIn,
 			factorStand(),

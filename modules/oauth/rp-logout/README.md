@@ -13,7 +13,7 @@
 - Extension point `upstreamEnds`: at most one; two or more refuse boot.
 - Client metadata section `rp-logout` (`registration`).
 - Contribution to `code-grant`'s session redemptions: keeps the client until the session ends, and at least `remember-for`.
-- `session`'s participant `notices`: answers once each notice is kept, then tries each once.
+- `session-participants`' participant `notices`: answers once each notice is kept, then tries each once.
 - `issuer`'s metadata items: `end_session_endpoint` (on `http`'s public origin), and `frontchannel_logout_supported`, `frontchannel_logout_session_supported`, `backchannel_logout_supported` and `backchannel_logout_session_supported` (true).
 - Audit events with the subject and `sid`, and `source` and `userAgent` when known: `logout.success`, `logout.cascade_failed` (with `store` `session`, the module whose close failed); `logout.close_pending` with `sid` and `source` only, declared exactly as `logout` declares it. All declared in `./audit-events`.
 - Operator section: `remember-for` (1m–30d, default `1d`), `notify-within` (1m–7d, default `1d`), `sweep-interval` (1s–1h, default `1m`), `requests` (logout requests per source in each `window`, a GET and a POST together, before any hint is checked; 1–100000, default 60) and `window` (1s–1d, default `1m`); times are written with their unit, a bare number refused.
@@ -44,7 +44,7 @@
 - A client gone or without a back-channel URL settles it.
 
 ## Depends on
-- `audit`, `clients`, `code-grant`, `http`, `issuer`, `keys`, `oidc`, `outbound`, `redirect-uris`, `request-source` (the source), `session`
+- `audit`, `clients`, `code-grant`, `http`, `issuer`, `keys`, `oidc`, `outbound`, `redirect-uris`, `request-source` (the source), `session`, `session-participants`
 
 ## Vocabulary
 - notice: one client to tell that a session closed, until it is given up.

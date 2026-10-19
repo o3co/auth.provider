@@ -6,11 +6,11 @@ import { revocationFollowers, subjectRevocation } from "@mod/subject-revocation"
 import { describe, expect, it } from "vitest";
 import {
 	type AuthContext,
+	closingParticipants,
 	type Entry,
 	type EntryLevel,
-	entryRequirements,
+	entryJudge,
 	type LoginFacts,
-	participants,
 	type Session,
 	type Sessions,
 	sessionRules,
@@ -595,8 +595,10 @@ export function failStandInListing(stand: Sessions): void {
 
 /**
  * A stand-in for tests of the modules that use sessions: records kept in memory on the
- * composition's clock, behind cookies by `cookies`' rule. It asks the contributed entry requirements and
- * subject revocation as the contract has it, and calls the participants when a session closes. A
+ * composition's clock, behind cookies by `cookies`' rule. It asks the entry requirements and subject
+ * revocation as the contract has it, and calls the participants when a session closes, through
+ * `session`'s seams where a module contributes them; none contributed is no requirement and no
+ * participant, the credentials floor still kept. A
  * pending close goes on only when it is asked again: there is no sweep. It lists each subject's
  * sessions as the contract has it, up to `standInListingCap`, and closes them through `close`
  * when the listing pushes one out or the subject is revoked.
@@ -605,8 +607,12 @@ export const sessionStandIn = defineModule({ name: "session" }, (m) => [
 	m.provide(sessions).by(async (c) => {
 		const jar = cookiesFor((await c.get(site)).secureCookies);
 		const revocation = await c.get(subjectRevocation);
-		const shortOf = sessionRules.entryShortOf(await c.collect(entryRequirements), c.clock.now);
-		const closers = await c.collect(participants);
+		// `session`'s seams, where a module keeps them; none is taken as no requirement and no participant.
+		const [judge] = await c.collect(entryJudge);
+		const [closing] = await c.collect(closingParticipants);
+		const recentMs = sessionRules.credentialsSecondsDefault * 1000;
+		const recent = (at: number) => c.clock.now() - at <= recentMs;
+		const shortOf = sessionRules.judgedShortOf(judge, recent);
 		const lifetimeMs = standInLifetimeSeconds * 1000;
 		type Kept = {
 			context: AuthContext;
@@ -683,7 +689,7 @@ export const sessionStandIn = defineModule({ name: "session" }, (m) => [
 			const from = found.state;
 			if (found.state !== "closed") {
 				found.state = "closing";
-				const failed = await sessionRules.failedParticipants(closers, sessionOf(handle, found));
+				const failed = closing ? await closing.closing(sessionOf(handle, found)) : [];
 				for (const failure of failed) c.log.warn("session.participant_failed", failure);
 				if (failed.length > 0) return { kind: "pending" as const, cookies: removed, session, from };
 			}
@@ -694,7 +700,7 @@ export const sessionStandIn = defineModule({ name: "session" }, (m) => [
 			return { kind: "closed" as const, cookies: removed, session, from };
 		};
 		const stand: Sessions = {
-			recent: (at) => c.clock.now() - at <= sessionRules.credentialsSecondsDefault * 1000,
+			recent,
 			enter: async (request) => (await enteredAt(handleIn(request)))?.session,
 			enterFor: (request, level) => enterAt(handleIn(request), level),
 			entryOf: (handle, level = "use") => enterAt(handle, level),

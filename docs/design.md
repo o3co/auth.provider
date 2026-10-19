@@ -61,7 +61,7 @@ Use the following ladder one step at a time, based on actual responsibilities, d
 
 When no external callers remain, remove the step-3 function and return to step 2. Follow the interface-change process in `CONTRIBUTING`: add the replacement, migrate callers, then remove the old interface.
 
-For example, `mtls`'s PKI code is at step 1. `external-jwt`, which verifies JWTs against external keys, is a foundation at step 4. Like `outbound` and `rate-limit`, it may be used directly by features; `records` may not. `session`'s entry requirements illustrate step 3: bridges use the extension points exposed by their owners.
+For example, `mtls`'s PKI code is at step 1. `external-jwt`, which verifies JWTs against external keys, is a foundation at step 4. Like `outbound` and `rate-limit`, it may be used directly by features; `records` may not. `session-requirements`' entry requirements illustrate step 3: bridges use the extension points exposed by their owners.
 
 ## Decisions
 
