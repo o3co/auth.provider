@@ -7,7 +7,7 @@ import {
 	setting,
 	Unavailable,
 } from "@mod/kernel";
-import { participants } from "@mod/session";
+import { participants } from "@mod/session-participants";
 import { referenceOf, type Tokens, tokens } from "@mod/tokens";
 import { z } from "zod";
 import { sessionTokens } from "./contract.ts";

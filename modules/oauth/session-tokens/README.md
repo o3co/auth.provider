@@ -37,7 +37,7 @@
 - References of the tokens issued in each session, and the token index, each kept for the token's remaining lifetime on `kernel`'s clock plus an allowance. If lost, tokens would survive a closed session, or answer no session. Pushed-out references still to revoke are kept until done.
 
 ## Depends on
-- `kernel`, `session`, `tokens`, `grants`
+- `kernel`, `session`, `session-participants`, `tokens`, `grants`
 
 ## Vocabulary
 - reference: what names an issued token for revoking it later, without the token itself (`tokens`' own).

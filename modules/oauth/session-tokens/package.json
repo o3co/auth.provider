@@ -19,6 +19,7 @@
 		"@mod/grants": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/session": "workspace:*",
+		"@mod/session-participants": "workspace:*",
 		"@mod/tokens": "workspace:*",
 		"zod": "4.6.7"
 	},

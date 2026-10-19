@@ -1670,6 +1670,9 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       '@mod/tokens':
         specifier: workspace:*
         version: link:../tokens
