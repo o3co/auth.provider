@@ -2457,6 +2457,9 @@ importers:
       '@mod/seal':
         specifier: workspace:*
         version: link:../../foundation/seal
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
