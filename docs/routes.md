@@ -36,7 +36,7 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | POST | `/oauth/webauthn/registration/options` | `@mod/passkey-registration` | json, none | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/webauthn/registration/verify` | `@mod/passkey-registration` | json, none | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | GET | `/readyz` | `@mod/http-ops` | none |  | no |  |  |  |
-| GET | `/session/csrf` | `@mod/csrf` | form |  |  |  |  |  |
+| GET | `/session/csrf` | `@mod/csrf` | form |  | no |  |  |  |
 | GET | `/session/federation-grants/callback/*` | `@mod/federation-grants` | form | `rate-limit.requests-per-source` | yes | The upstream's redirect back, matched to the state of a connection this browser started. | `rate-limit.requests-per-source` |  |
 | GET | `/session/federation-grants/connect` | `@mod/federation-grants` | form | `rate-limit.requests-per-source` | yes | A navigation the client sends the user on, carrying a request only that client could make. | `rate-limit.requests-per-source` |  |
 | GET | `/session/federation-grants/consent` | `@mod/federation-grants` | form | `rate-limit.requests-per-source` | no |  | `rate-limit.requests-per-source` |  |

@@ -12,6 +12,7 @@ export default defineModule({ name: "csrf" }, (m) => [
 		const jar = await c.get(cookies);
 		return {
 			method: "GET",
+			changesState: false,
 			path: "/session/csrf",
 			handle: (request) => {
 				// A valid token is kept, so forms open in other tabs stay usable.
