@@ -98,7 +98,7 @@ export interface Grant {
 	 * What it reads that a browser sends by itself: `cookie` for a grant reading the session's cookie,
 	 * which then checks the request's origin itself; `none` otherwise. A declaration, never a proof.
 	 */
-	readonly readsAmbient?: "none" | "cookie";
+	readonly readsAmbient: "none" | "cookie";
 	handle(input: GrantInput): Promise<GrantOutcome | Refused>;
 }
 
