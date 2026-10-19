@@ -8,7 +8,7 @@
 - When a session closes, and which closes call the participants (`session` and its implementation). What is logged of a failure (the implementation). What each participant cleans up (its contributor).
 
 ## Offers
-- Extension point `participants` (`session`'s object, re-exported): a participant's name, and `closing` (the session, its handle and context, never the cookie secret).
+- Extension point `participants`: a participant's name, and `closing` (the session, its handle and context, never the cookie secret).
 - Contribution to `session`'s `closingParticipants`.
 
 ## Invariants
