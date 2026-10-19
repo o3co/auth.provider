@@ -9,7 +9,7 @@
 
 ## Offers
 - `secondFactors.provenRecently(context)`: whether the session proved a second factor within `session`'s recent window; a recent sign-in never stands for one.
-- Contribution to `session`'s entry requirements, named `mfa` as answers and records outside name it, judging `use` and `credentials`.
+- Contribution to `session`'s entry requirements, named `mfa` as answers and records outside name it, judging `use` and `credentials`. Contribution to `mfa`'s `enforcers`, without which `mfa` refuses to boot.
 
 ## Invariants
 - Under `mfa.mode = required`, using a session needs `mfa` among its amr, else `mfa_required`; boot is refused unless a composed kind both counts and adds `mfa`, since no session could then be used.
