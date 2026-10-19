@@ -34,4 +34,4 @@
 - Kept documents, remembered refusals and running fetches, in this process only (see `fetching`). Safe on multiple instances.
 
 ## Depends on
-- `kernel`, `clients`, `client-allowance`, `outbound`, `redirect-uris`, `grants`, `code-grant`, `refresh`, `consent`, `issuer`
+- `kernel`, `clients`, `client-allowance`, `outbound`, `outbound-policy`, `redirect-uris`, `grants`, `code-grant`, `refresh`, `consent`, `issuer`

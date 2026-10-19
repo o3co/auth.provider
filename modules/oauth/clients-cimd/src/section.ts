@@ -1,5 +1,5 @@
 import { setting } from "@mod/kernel";
-import { hostEntryOf } from "@mod/outbound";
+import { hostEntryOf } from "@mod/outbound-policy";
 import { z } from "zod";
 
 const hostEntry = z

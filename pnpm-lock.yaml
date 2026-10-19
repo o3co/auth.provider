@@ -878,6 +878,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/redirect-uris':
         specifier: workspace:*
         version: link:../redirect-uris
