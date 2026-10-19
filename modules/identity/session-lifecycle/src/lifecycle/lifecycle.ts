@@ -144,8 +144,14 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 	const created = async (saving: Promise<"created" | "exists">) => {
 		if ((await saving) !== "created") throw new Unavailable("session");
 	};
-	/** Moves forward to `target`, never back, always writing to confirm it; a missing record is marked closed. */
-	const advance = async (handle: string, target: "closing" | "closed") => {
+	/**
+	 * Moves forward to `target`, never back, always writing to confirm it; a missing record is marked
+	 * closed. Answers the record after, and the state it was found in (none when there was no record).
+	 */
+	const advance = async (
+		handle: string,
+		target: "closing" | "closed",
+	): Promise<{ readonly record: SessionRecord; readonly from?: SessionRecord["state"] }> => {
 		const at = clock.now();
 		const step = (stored: StoredSession): ChangedSession | undefined => {
 			const was = fromStored(stored);
@@ -160,24 +166,28 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		if (written) {
 			// A record this cannot read is left as it is, and its close cannot go on.
 			const after = fromStored(written.after);
-			if (!after) {
+			const before = fromStored(written.before);
+			if (!after || !before) {
 				putOffUnread(handle);
 				throw new Unavailable("session");
 			}
-			return after;
+			return { record: after, from: before.state };
 		}
 		const mark: SessionRecord = { format: 2, state: "closed" };
 		// A record placed meanwhile is moved on when the close is asked again.
 		await created(kept.save(handle, toStored(mark), lifetimeMs));
-		return mark;
+		return { record: mark };
 	};
 	const close: Sessions["close"] = async (handle, request) => {
 		const cookies =
 			request && (await handleIn(request)) === handle ? [jar.write("session", "", 0)] : [];
 		// Added to the closings first, so a closing that stops halfway is found and finished.
 		await closings.add(handle);
-		const record = await advance(handle, "closing");
-		const moved = "subject" in record ? { session: { id: handle, subject: record.subject } } : {};
+		const { record, from } = await advance(handle, "closing");
+		const moved = {
+			...("subject" in record ? { session: { id: handle, subject: record.subject } } : {}),
+			...(from === undefined ? {} : { from }),
+		};
 		if (record.state === "closing") {
 			const failed = await sessionRules.failedParticipants(participants, sessionOf(handle, record));
 			for (const failure of failed) log.warn("session-lifecycle.participant_failed", failure);
