@@ -117,7 +117,7 @@ export interface Factors {
 					| "malformed-label"
 					| "duplicate"
 					| "first-binding-closed"
-					/** A reset or a revocation since the binding began: nothing is written. */
+					/** A reset or a revocation since the binding began: no factor is written (a witness mark set first may stay). */
 					| "fenced";
 		  }
 	>;
