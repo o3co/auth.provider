@@ -771,8 +771,8 @@ From `@mod/federation-tokens`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.federation-tokens.receives` | boolean | `false` |  |  |
-| `sections.federation-tokens.post-logout-redirect-uris` | list of string | `[]` |  |  |
+| `sections.federation-tokens.receives` | boolean | `false` |  | Whether the client may be handed its sessions' upstream tokens; only a client the operator registers may. |
+| `sections.federation-tokens.post-logout-redirect-uris` | list of string | `[]` |  | Where an upstream logout this client asks may send the browser back, each matched exactly. |
 
 ### sections.rp-logout
 

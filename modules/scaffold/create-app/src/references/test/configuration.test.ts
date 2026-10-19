@@ -122,7 +122,7 @@ it("describes every key of every section", async () => {
 });
 
 /** Client metadata sections whose keys their owners describe later: one leaves once described, and the list only shrinks. */
-const clientsDescribedLater = ["federation-tokens"];
+const clientsDescribedLater: string[] = [];
 
 it("describes every key of every client metadata section, outside those listed as described later", async () => {
 	const clients = await clientSectionsOf(root);

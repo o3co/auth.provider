@@ -21,8 +21,18 @@ export const clientSection: Section<{
 }> = {
 	name: "federation-tokens",
 	schema: z.strictObject({
-		receives: z.boolean().prefault(false),
-		"post-logout-redirect-uris": z.array(z.string().min(1)).prefault([]),
+		receives: z
+			.boolean()
+			.prefault(false)
+			.describe(
+				"Whether the client may be handed its sessions' upstream tokens; only a client the operator registers may.",
+			),
+		"post-logout-redirect-uris": z
+			.array(z.string().min(1))
+			.prefault([])
+			.describe(
+				"Where an upstream logout this client asks may send the browser back, each matched exactly.",
+			),
 	}),
 };
 
