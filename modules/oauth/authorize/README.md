@@ -15,7 +15,7 @@
 - Contribution to `issuer`'s metadata items: `authorization_endpoint` (on `http`'s public origin), `response_types_supported` (`code`), `code_challenge_methods_supported` (`S256`), `response_modes_supported` (`query`), `request_uri_parameter_supported` (`false`)
 - Contribution of `redirect-uris`' client metadata section (`authorize`) to `clients`
 - Operator section: `login-page` (the login page. The return URL is added as `redirect_to`), `step-up-page` (the page that raises authentication. Optional); both https URLs (http only on a loopback host) by `url-setting`'s part for configured URLs, `oidc-mode` (`oidc-required` or `dual`), `requests` (requests per source in each window, over both methods), `window`
-- Audit events (to `audit`):
+- Audit events (to `audit`, declared in `./audit-events`):
   - `authorize.granted` when a code is given, with the subject, `client` and `response_type` `code`.
   - `authorize.rejected` on a refusal decided for the client or its consent, with no subject, and `client` and `reason`.
   - `reason` is `grant_type_not_allowed`, `scope_omitted_without_default`, `client_not_first_party`, `consent_required`, or an issuance policy's reason with `policy` its name.
