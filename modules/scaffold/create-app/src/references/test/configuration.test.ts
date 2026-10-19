@@ -46,6 +46,15 @@ it("describes each key by its schema: type and bounds, default, whether required
 	).toContain("| `s.mode` | a \\| b | `a` |  |  |  |  |");
 });
 
+it("writes an example of several lines on one line of its table, as JSON writes it", () => {
+	const at = () => ({ example: "-----BEGIN KEY-----\nREPLACE-KEY\n-----END KEY-----" });
+	const rows = rowsOf({ type: "object", properties: { pem: { type: "string" } } }, ["s"], at);
+	const line = referenceOf([{ section: "s", owner: "@mod/s", rows }])
+		.split("\n")
+		.find((l) => l.startsWith("| `s.pem`"));
+	expect(line).toContain('`"-----BEGIN KEY-----\\nREPLACE-KEY\\n-----END KEY-----"`');
+});
+
 it("requires a key inside an object only when the object is required too", () => {
 	const key = { type: "object", required: ["id"], properties: { id: { type: "string" } } };
 	const schema = { type: "object", required: ["current"], properties: { current: key, next: key } };
