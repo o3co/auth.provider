@@ -14,6 +14,7 @@ What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc
 - `mfa-flows`: recovery codes that were never shown could stay usable.
 - `federation-grants`: a refresh could hand out a token after the grant had ended or its subject had been revoked, a request that waited for the refresh lock included; a grant past its end is treated as ended everywhere.
 - `session-lifecycle`: an explicit close of a session past its lifetime did not revoke the session's tokens.
+- `code-grant`, `device-grant`: an access token could live past the end of the session it was issued in.
 - `rp-logout`: a close left pending was answered as a logout; the logout taken before authentication had no per-source limit.
 - `jwt-bearer`, `exchange-id-tokens`: the allowance for the issuer's clock could let an assertion or an id_token from just before the subject's revocation boundary through; `jwt-bearer` checks the key id and the issuer more strictly.
 - `keys`: a bearer token of too little randomness was accepted.
