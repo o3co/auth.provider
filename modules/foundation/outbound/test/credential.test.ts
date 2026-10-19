@@ -57,6 +57,27 @@ it("refuses a credential beside an Authorization header of any case, or one that
 	expect(seen.length).toBe(before);
 });
 
+it("refuses an Authorization header a caller writes, in any case and with no credential, signed material too, telling no value", async () => {
+	const before = seen.length;
+	const plain = `http://127.0.0.1:${port}/`;
+	for (const headers of [
+		{ AuThOrIzAtIoN: secret },
+		{ authorization: secret },
+		{ Authorization: secret, authorization: "Basic other-value" },
+	]) {
+		for (const run of [
+			over().fetch(plain, { headers }),
+			over().fetchSigned("http://public.example/", { headers }, { hosts: ["public.example"] }),
+		]) {
+			const told = await said(run);
+			expect(told, JSON.stringify(Object.keys(headers))).toMatch(/^TypeError: outbound: /);
+			expect(told).not.toContain("s3cr3t");
+			expect(told).not.toContain("other-value");
+		}
+	}
+	expect(seen.length).toBe(before);
+});
+
 it("never sends a credential for signed material, which may go over plain http", async () => {
 	const before = seen.length;
 	const signed = over().fetchSigned(`http://127.0.0.1:${port}/`, { credential: secret } as never, {

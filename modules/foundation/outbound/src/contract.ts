@@ -43,7 +43,7 @@ export interface OutboundRequest {
 	readonly method?: "GET" | "POST";
 	readonly headers?: Readonly<Record<string, string>>;
 	readonly body?: string | Uint8Array;
-	/** The Authorization value, sent as that header; a secret never told. Not beside an Authorization header. */
+	/** The Authorization value, sent as that header; a secret never told. The only way to send one: headers may not name it. */
 	readonly credential?: string;
 }
 

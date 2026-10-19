@@ -165,13 +165,14 @@ const headerValue = /^[\x21-\x7e](?:[\x20-\x7e]*[\x21-\x7e])?$/;
 /** The request as sent: its credential as the Authorization header; none for signed material. Its value is never told. */
 function sentRequest(request: OutboundRequest, signed: boolean): OutboundRequest {
 	const { credential, ...rest } = request;
+	// An Authorization value goes only as a credential, under its rules: never one a caller writes.
+	if (Object.keys(rest.headers ?? {}).some((name) => name.toLowerCase() === "authorization")) {
+		throw new TypeError("outbound: an Authorization value goes as the request's credential");
+	}
 	if (credential === undefined) return rest;
 	if (signed) throw new DestinationRefused("credential");
 	if (!headerValue.test(credential)) {
 		throw new TypeError("outbound: a credential is one header value, printable ASCII on one line");
-	}
-	if (Object.keys(rest.headers ?? {}).some((name) => name.toLowerCase() === "authorization")) {
-		throw new TypeError("outbound: a credential and an Authorization header are both given");
 	}
 	return { ...rest, headers: { ...rest.headers, authorization: credential } };
 }
