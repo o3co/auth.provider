@@ -1334,6 +1334,19 @@ importers:
         specifier: workspace:*
         version: link:../../identity/session
 
+  modules/oauth/redirect-uris:
+    dependencies:
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../../identity/clients
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
   modules/oauth/refresh:
     dependencies:
       '@mod/client-allowance':
