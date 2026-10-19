@@ -26,11 +26,36 @@ describe("G26 the network is reached through outbound, or as a package declares"
 		]);
 	});
 
+	it("refuses the network reached by a dynamic import, a global's property, a resolver or a process", () => {
+		const p = pkg("@t/around", {
+			"src/a.ts": 'export const a = async () => (await import("node:https")).request;\n',
+			"src/b.ts": "export const b = (name: string) => import(name);\n",
+			"src/c.ts": "export const c = () => globalThis.fetch('https://x.example');\n",
+			"src/d.ts": "export const d = fetch;\n",
+			"src/e.ts": 'import { lookup } from "node:dns/promises";\nexport const e = lookup;\n',
+			"src/f.ts": 'import { spawn } from "node:child_process";\nexport const f = spawn;\n',
+			"src/g.ts": 'export const g = async () => (await import("undici")).request;\n',
+			"src/h.ts":
+				"export const local = (fetch: () => void) => fetch();\nexport const h = () => fetch('https://x.example');\n",
+		});
+		expect(said(p)).toEqual([
+			"src/a.ts node:https",
+			"src/b.ts import()",
+			"src/c.ts fetch",
+			"src/d.ts fetch",
+			"src/e.ts node:dns/promises lookup",
+			"src/f.ts node:child_process",
+			"src/g.ts undici",
+			"src/h.ts fetch",
+		]);
+	});
+
 	it("counts no type-only import, no function that never reaches the network, no local fetch, and no test", () => {
 		const p = pkg("@t/quiet", {
 			"src/a.ts":
 				'import type { Socket } from "node:net";\nimport { type Server } from "node:http";\nimport { isIP, BlockList } from "node:net";\nexport type A = Socket | Server;\nexport const a = [isIP, BlockList];\n',
-			"src/b.ts": "export const b = (fetch: (u: string) => unknown) => fetch('x');\n",
+			"src/b.ts":
+				"export const b = (fetch: (u: string) => unknown) => fetch('x');\nexport interface Source { fetch(url: string): Promise<unknown>; }\nexport const s = { fetch: () => 1, async get() { return this.fetch(); } };\nexport type F = typeof fetch;\n",
 			"test/c.test.ts":
 				'import { createServer } from "node:http";\nexport const c = createServer;\n',
 		});
