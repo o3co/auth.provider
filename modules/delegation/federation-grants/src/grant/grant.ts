@@ -121,14 +121,14 @@ export const clientSection: Section<{
 }> = {
 	name: "federation-grants",
 	schema: z.strictObject({
-		connections: z.array(z.string().min(1)).default([]),
+		connections: z.array(z.string().min(1)).prefault([]),
 		"return-uris": z
 			.array(
 				z
 					.url()
 					.refine((uri) => !reserved(uri), "a return URI may not hold grant_id, state or error"),
 			)
-			.default([]),
+			.prefault([]),
 	}),
 };
 
