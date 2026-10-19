@@ -171,24 +171,26 @@ export function endingOver(p: EndingParts) {
 					...more,
 				},
 			});
-		// A session already ended still has its close asked, for the cookie, but is no logout of its own;
-		// one short of a requirement is live, so closing it is a logout.
-		const open = (await p.sessions.entryOf(sid)).kind !== "absent";
+		// Nothing reads the session before its close: a read can end one past its lifetime, and the close
+		// would then call no participants. What the close found tells whether this is the logout.
 		const closed = await closeOf(sid, request);
 		if (!closed) {
 			record("logout.cascade_failed", checked.subject, { store: "session" });
 			return unavailable;
 		}
 		const { cookies, session } = closed;
-		if (!open || !session) return loggedOut(cookies);
-		// Closing, but the tokens it holds live until the close is swept: not logged out yet, as logout answers it.
+		// Closing, but the tokens it holds live until the close is swept: not logged out yet, as logout
+		// answers it. Asked before any answer of done, so a close sent again while pending is never one.
 		if (closed.kind === "pending") {
 			declaredAudit(p.audit, events).record("logout.close_pending", {
-				subject: session.subject,
+				subject: session?.subject ?? checked.subject,
 				attributes: { sid, ...(source ? { source } : {}) },
 			});
 			return jsonAnswer(503, { error: "temporarily_unavailable" }, { cookies });
 		}
+		// One closed before, or gone, still has its close asked, for the cookie, but is no logout of its own.
+		if (!session || (closed.from !== "open" && closed.from !== "closing"))
+			return loggedOut(cookies);
 		record("logout.success", session.subject);
 		return answer(request, { sid, held, cookies }, upstream ?? (back && withState(back, state)));
 	};

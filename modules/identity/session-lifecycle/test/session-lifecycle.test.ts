@@ -474,6 +474,7 @@ describe("session closing", () => {
 			kind: "closed",
 			cookies: [],
 			session: { id: handle, subject: "alice" },
+			from: "closing",
 		});
 		expect((await s.close(handle, withCookie(cookie))).cookies[0]).toBe(
 			jar.write("session", "", 0),
@@ -568,7 +569,11 @@ describe("session closing", () => {
 		const handle = await handleOf(await login());
 		const shorter = (await configured({ lifetime: "1m" })).get(sessions);
 		now += 60_000;
-		expect((await shorter.close(handle)).kind).toBe("closed");
+		expect(await shorter.close(handle)).toMatchObject({ kind: "closed", from: "open" });
+		expect(closer.calls).toBe(1);
+		// Closed already, or no record at all: the close says so, and calls no one again.
+		expect((await shorter.close(handle)).from).toBe("closed");
+		expect((await shorter.close("x".repeat(43))).from).toBeUndefined();
 		expect(closer.calls).toBe(1);
 		expect(stores.kept.peek(handle)).toMatchObject({ state: "closed" });
 		expect(stores.kept.pending()).toEqual([]);

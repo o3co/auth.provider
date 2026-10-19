@@ -11,7 +11,12 @@ import { type MetadataItem, metadata } from "@mod/issuer";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, contract, defineModule, kernelConfig, type Module } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import {
+	quietRuntime,
+	recordingLog,
+	switchedModule,
+	type UnavailableSwitch,
+} from "@mod/kernel/testing";
 import { keys } from "@mod/keys";
 import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
@@ -27,6 +32,7 @@ import usersModule from "@mod/users/module";
 import { memoryUsersStores, usersConfig } from "@mod/users/testing";
 import { afterEach } from "vitest";
 import rpLogout from "../src/module.ts";
+import { type SessionClients, sessionClients } from "../src/store.ts";
 import { type RpLogoutSettings, rpLogoutConfig } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
 
@@ -57,6 +63,8 @@ export async function harness(
 		readonly redirects?: Readonly<Record<string, readonly string[]>>;
 		readonly extra?: readonly Module[];
 		readonly sessionsModule?: Module;
+		/** Makes rp-logout's session clients store fail as it says. */
+		readonly clientsDown?: UnavailableSwitch<SessionClients>;
 	} = {},
 ) {
 	let now = 1_800_000_000_000;
@@ -123,7 +131,9 @@ export async function harness(
 			options.sessionsModule ?? sessionStandIn,
 			subjectRevocationStandIn,
 			recorded.module,
-			stores.module,
+			options.clientsDown
+				? switchedModule(stores.module, sessionClients, options.clientsDown)
+				: stores.module,
 			outside,
 			rateLimitStandIn,
 			rpLogout,

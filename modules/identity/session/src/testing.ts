@@ -310,10 +310,10 @@ export function sessionsContract(
 			const raised = await place.sessions.raise(place.request(done.cookies), ["strong"]);
 			place.advance(place.lifetimeMs);
 			for (const cookies of [done.cookies, raised?.cookies]) {
-				expect(await place.sessions.close(done.session.id, place.request(cookies))).toEqual({
-					kind: "closed",
-					cookies: [],
-				});
+				const closed = await place.sessions.close(done.session.id, place.request(cookies));
+				// What the close found (`from`) is the implementation's: a record gone, or one it ended.
+				expect(closed).toMatchObject({ kind: "closed", cookies: [] });
+				expect(closed.session).toBeUndefined();
 			}
 			expect(place.closed).toEqual([]);
 		});
@@ -515,6 +515,18 @@ export function sessionsContract(
 			}
 		});
 
+		it("says the state each close found the record in: open, closing while left pending, then closed", async () => {
+			const place = await open();
+			const done = await place.sessions.complete(place.request(), facts(place));
+			place.failClosing(true);
+			expect((await place.sessions.close(done.session.id)).from).toBe("open");
+			expect((await place.sessions.close(done.session.id)).from).toBe("closing");
+			place.failClosing(false);
+			expect((await place.sessions.close(done.session.id)).from).toBe("closing");
+			expect((await place.sessions.close(done.session.id)).from).toBe("closed");
+			expect((await place.sessions.close("x".repeat(43))).from).toBeUndefined();
+		});
+
 		it("names the session a close ended or left pending, by its handle and subject", async () => {
 			const place = await open();
 			const named = (done: { session: Session }) => ({ id: done.session.id, subject: "alice" });
@@ -667,17 +679,18 @@ export const sessionStandIn = defineModule({ name: "session" }, (m) => [
 				return { kind: "closed" as const, cookies: removed };
 			}
 			const session = { id: handle, subject: found.context.subject };
+			const from = found.state;
 			if (found.state !== "closed") {
 				found.state = "closing";
 				const failed = await sessionRules.failedParticipants(closers, sessionOf(handle, found));
 				for (const failure of failed) c.log.warn("session.participant_failed", failure);
-				if (failed.length > 0) return { kind: "pending" as const, cookies: removed, session };
+				if (failed.length > 0) return { kind: "pending" as const, cookies: removed, session, from };
 			}
 			// A closed record is kept for the lifetime from its last close, and no longer listed.
 			found.state = "closed";
 			found.until = c.clock.now() + lifetimeMs;
 			listing.get(found.context.subject)?.delete(handle);
-			return { kind: "closed" as const, cookies: removed, session };
+			return { kind: "closed" as const, cookies: removed, session, from };
 		};
 		const stand: Sessions = {
 			recent: (at) => c.clock.now() - at <= sessionRules.credentialsSecondsDefault * 1000,
