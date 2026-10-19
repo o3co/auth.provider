@@ -252,6 +252,14 @@ To replace an implementation, such as the store or the user ledger, implement it
 
 For modules inside this repository, the [combinations README](modules/scaffold/combinations/README.md) explains how a module's manifest declares adapters and the modules that connect it to others.
 
+**Assembling without the generator.** If you keep your own composition root instead of a generated project:
+
+1. Install `@o3co/auth-provider-scaffold` and get the module names from `@o3co/auth-provider-scaffold/combinations`: `composed` for a selection, or `needed` for the modules you list. Both refuse a name they do not know.
+2. Pass the names to `published`. For each, it gives the package to depend on and the path to import the module from (`<entry>/module`).
+3. Add those packages to your `package.json` at the scaffold bundle's version (every bundle of a release shares it), with the one holding `@mod/kernel` (`published(["@mod/kernel"])`) for `assemble`.
+4. If the names hold no log sink, add one, such as `@mod/log-stdout`; without one, log lines go nowhere.
+5. Boot it. Where boot is refused for a setting only you can decide, such as `tokens.subject-check = none` when nothing checks subjects, set it in your configuration.
+
 ## Versions and support
 
 The generator picks the packages your app needs. Published packages are named `@o3co/auth-provider-<concern>`, share one version and expose each module as a subpath. The [migration guide](docs/migration.md#packages) maps the 0.17 packages to their 0.18 replacements.
