@@ -1,9 +1,28 @@
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 import { budgetsAsTest, type Scope } from "../units.ts";
 import type { Pkg } from "../workspace.ts";
 
+/** Names that ask a resolver, and so reach the network. */
+const resolving = [
+	"lookup",
+	"lookupService",
+	"resolve",
+	"resolve4",
+	"resolve6",
+	"resolveAny",
+	"resolveCaa",
+	"resolveCname",
+	"resolveMx",
+	"resolveNaptr",
+	"resolveNs",
+	"resolvePtr",
+	"resolveSoa",
+	"resolveSrv",
+	"resolveTxt",
+	"reverse",
+	"Resolver",
+];
 /** Each Node module's names that open a connection or a server; any other name is not counted. */
 const reaching: Readonly<Record<string, readonly string[]>> = {
 	"node:http": ["request", "get", "Agent", "ClientRequest", "createServer", "Server"],
@@ -12,11 +31,17 @@ const reaching: Readonly<Record<string, readonly string[]>> = {
 	"node:tls": ["connect", "createServer", "Server", "TLSSocket"],
 	"node:dgram": ["createSocket", "Socket"],
 	"node:http2": ["connect", "createServer", "createSecureServer"],
+	"node:dns": [...resolving, "promises"],
+	"node:dns/promises": resolving,
 };
+/** Modules any value import of which reaches out: a process started can reach anything. */
+const processes = ["node:child_process"];
 /** Libraries that are network clients, by package name. */
 const clients = ["ioredis", "nodemailer", "undici", "ws", "node-fetch", "axios", "got"];
 /** Globals that reach the network when no local binding of the name hides them. */
 const globals = ["fetch", "WebSocket", "EventSource"];
+/** Names of the global object, through which a global can be reached as a property. */
+const globalObjects = ["globalThis", "global", "self", "window"];
 
 /** What each word lets a package reach: `module name` pairs, a module whole, or a client library. */
 const words: Readonly<Record<string, readonly string[]>> = {
@@ -28,6 +53,8 @@ const words: Readonly<Record<string, readonly string[]>> = {
 		"node:https Agent",
 		"node:net connect",
 		"node:tls connect",
+		"node:dns lookup",
+		"node:dns/promises lookup",
 	],
 	redis: ["ioredis"],
 	smtp: ["node:net connect", "node:tls connect", "nodemailer"],
@@ -38,19 +65,39 @@ const nodeName = (specifier: string) =>
 const clientOf = (specifier: string) =>
 	clients.find((c) => specifier === c || specifier.startsWith(`${c}/`));
 
+/** Whether an identifier is read as a value: not a property's name, a declaration's name, or in a type. */
+function referenced(node: ts.Identifier): boolean {
+	const parent = node.parent;
+	if (ts.isPropertyAccessExpression(parent) && parent.name === node) return false;
+	if (
+		(ts.isPropertyAssignment(parent) ||
+			ts.isPropertyDeclaration(parent) ||
+			ts.isPropertySignature(parent) ||
+			ts.isMethodDeclaration(parent) ||
+			ts.isMethodSignature(parent) ||
+			ts.isImportSpecifier(parent) ||
+			ts.isExportSpecifier(parent)) &&
+		parent.name === node
+	) {
+		return false;
+	}
+	for (let at: ts.Node = parent; !ts.isSourceFile(at); at = at.parent) {
+		if (ts.isTypeNode(at)) return false;
+	}
+	return true;
+}
+
 /** Each place a file reaches the network, as `module name`, `module` (imported whole), a client, or a global. */
 export function reachesOf(path: string): string[] {
-	const file = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true);
+	// The file alone, bound by the compiler: a name resolves to the declaration in scope where it is used.
+	const program = ts.createProgram([path], { noLib: true, noResolve: true, types: [] });
+	const file = program.getSourceFile(path) as ts.SourceFile;
+	const checker = program.getTypeChecker();
 	const found: string[] = [];
-	const bound = new Set<string>();
-	const visit = (node: ts.Node): void => {
-		if ((ts.isParameter(node) || ts.isVariableDeclaration(node)) && ts.isIdentifier(node.name)) {
-			bound.add(node.name.text);
-		}
-		if (ts.isFunctionDeclaration(node) && node.name) bound.add(node.name.text);
-		ts.forEachChild(node, visit);
-	};
-	visit(file);
+	/** Whether the name used here is declared in this file, so not the global. */
+	const local = (name: ts.Identifier) =>
+		checker.getSymbolAtLocation(name)?.declarations?.some((d) => d.getSourceFile() === file) ===
+		true;
 	for (const statement of file.statements) {
 		if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier))
 			continue;
@@ -60,6 +107,10 @@ export function reachesOf(path: string): string[] {
 		const client = clientOf(specifier);
 		if (client) {
 			found.push(client);
+			continue;
+		}
+		if (processes.includes(nodeName(specifier))) {
+			found.push(nodeName(specifier));
 			continue;
 		}
 		const names = reaching[nodeName(specifier)];
@@ -74,20 +125,36 @@ export function reachesOf(path: string): string[] {
 			}
 		}
 	}
-	const calls = (node: ts.Node): void => {
-		const callee =
-			ts.isCallExpression(node) || ts.isNewExpression(node) ? node.expression : undefined;
-		if (
-			callee &&
-			ts.isIdentifier(callee) &&
-			globals.includes(callee.text) &&
-			!bound.has(callee.text)
-		) {
-			found.push(callee.text);
-		}
-		ts.forEachChild(node, calls);
+	/** A module loaded by `import()` or `require` reaches as one imported whole; one named at run time, unknown. */
+	const loaded = (specifier: ts.Expression | undefined) => {
+		if (!specifier || !ts.isStringLiteralLike(specifier)) return "import()";
+		const client = clientOf(specifier.text);
+		const module = nodeName(specifier.text);
+		return client ?? (reaching[module] || processes.includes(module) ? module : undefined);
 	};
-	calls(file);
+	const uses = (node: ts.Node): void => {
+		if (ts.isCallExpression(node)) {
+			const callee = node.expression;
+			const requiring = ts.isIdentifier(callee) && callee.text === "require" && !local(callee);
+			if (callee.kind === ts.SyntaxKind.ImportKeyword || requiring) {
+				const reach = loaded(node.arguments[0]);
+				if (reach) found.push(reach);
+			}
+		}
+		if (
+			ts.isPropertyAccessExpression(node) &&
+			ts.isIdentifier(node.expression) &&
+			globalObjects.includes(node.expression.text) &&
+			globals.includes(node.name.text)
+		) {
+			found.push(node.name.text);
+		}
+		if (ts.isIdentifier(node) && globals.includes(node.text) && !local(node) && referenced(node)) {
+			found.push(node.text);
+		}
+		ts.forEachChild(node, uses);
+	};
+	uses(file);
 	return found;
 }
 
