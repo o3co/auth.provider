@@ -13,26 +13,46 @@ const signing = ["team-id", "key-id", "private-key"] as const;
 /** The Services ID as `client-id`, and its secret: a fixed one, or one the team's key signs. */
 const section = clientSetting
 	.extend({
-		/** A fixed secret, in place of the three that sign one. */
-		"client-secret": credentialSetting.optional(),
-		"team-id": credentialSetting.optional(),
-		"key-id": credentialSetting.optional(),
-		/** The team's P-256 key, as PKCS8 PEM. */
-		"private-key": credentialSetting.optional(),
-		/** How long a signed secret lives: 1m to 15777000s (about half a year). */
+		"client-secret": credentialSetting
+			.optional()
+			.describe("A fixed client secret, in place of the three that sign one."),
+		"team-id": credentialSetting
+			.optional()
+			.describe("The Apple team that signs the client secret, with key-id and private-key."),
+		"key-id": credentialSetting
+			.optional()
+			.describe(
+				"The ID of the team's key that signs the client secret, with team-id and private-key.",
+			),
+		"private-key": credentialSetting
+			.optional()
+			.describe("The team's P-256 key, as PKCS8 PEM, that signs the client secret."),
 		"secret-lifetime": setting
 			.duration("s")
 			.pipe(z.number().int().min(60).max(15_777_000))
-			.prefault("5m"),
-		scopes: z.array(z.enum(["name", "email"])).prefault(["email"]),
-		/** Apple's own unless the operator names others. */
-		"authorization-endpoint": endpoint.prefault("https://appleid.apple.com/auth/authorize"),
-		"token-endpoint": endpoint.prefault("https://appleid.apple.com/auth/token"),
-		"jwks-uri": endpoint.prefault("https://appleid.apple.com/auth/keys"),
-		/** How far Apple's clock may be from ours, for its id_token's times: 0s to 5m. */
-		"clock-skew": setting.duration("s").pipe(z.number().int().min(0).max(300)).prefault("30s"),
-		/** Where to end the upstream session; Apple has none of its own. */
-		"end-session-endpoint": endpoint.optional(),
+			.prefault("5m")
+			.describe("How long a signed client secret lives: 1m to 15777000s (about half a year)."),
+		scopes: z
+			.array(z.enum(["name", "email"]))
+			.prefault(["email"])
+			.describe("The scopes asked of Apple at a login: `name`, `email` or both."),
+		"authorization-endpoint": endpoint
+			.prefault("https://appleid.apple.com/auth/authorize")
+			.describe("Where the browser is sent to log in at Apple; Apple's own unless named."),
+		"token-endpoint": endpoint
+			.prefault("https://appleid.apple.com/auth/token")
+			.describe("Where a code is exchanged for tokens; Apple's own unless named."),
+		"jwks-uri": endpoint
+			.prefault("https://appleid.apple.com/auth/keys")
+			.describe("Where the keys that sign Apple's id_tokens are read; Apple's own unless named."),
+		"clock-skew": setting
+			.duration("s")
+			.pipe(z.number().int().min(0).max(300))
+			.prefault("30s")
+			.describe("How far Apple's clock may be from ours, for its id_token's times: 0s to 5m."),
+		"end-session-endpoint": endpoint
+			.optional()
+			.describe("Where to end the session at Apple, which has none of its own."),
 	})
 	.superRefine((s, context) => {
 		const given = signing.filter((name) => s[name] !== undefined);

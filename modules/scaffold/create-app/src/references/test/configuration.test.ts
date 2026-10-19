@@ -128,17 +128,9 @@ it("describes every key of every client metadata section", async () => {
 	expect(lacking).toEqual([]);
 });
 
-/** IdP types whose settings their owners describe later: one leaves once described, and the list only shrinks. */
-const typesDescribedLater = ["apple", "github", "google", "oidc"];
-
-it("describes every key of every IdP type's settings, outside the types listed as described later", async () => {
-	const types = await idpTypesOf(root);
-	const lacking = types
-		.filter((t) => !typesDescribedLater.includes(t.section))
-		.flatMap(({ rows }) => rows.filter((r) => !r.description).map((r) => r.key));
+it("describes every key of every IdP type's settings", async () => {
+	const lacking = (await idpTypesOf(root)).flatMap(({ rows }) =>
+		rows.filter((r) => !r.description).map((r) => r.key),
+	);
 	expect(lacking).toEqual([]);
-	const described = types
-		.filter((t) => typesDescribedLater.includes(t.section) && t.rows.every((r) => r.description))
-		.map((t) => `${t.section}: describes every key, so it leaves the list`);
-	expect(described).toEqual([]);
 });

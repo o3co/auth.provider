@@ -19,12 +19,12 @@
 
 ## Invariants
 - Each reference is held to the committed file; a file that differs fails, naming the command.
-- A key with no description fails, outside the sections listed as described later.
+- A key with no description fails.
 - Every `.prefault` value reads through its key's own schema.
 - In every section, a time or size key is read by `kernel`'s `setting.duration` or `setting.size` (a bare number refused) under a name with no unit (`-seconds`, `-ms`, `-bytes`), and a default is a `.prefault`, never a `.default()`.
-- A section listed as described later leaves the list once it describes every key, and never comes back. A failure of the time, size and prefault rules names the key and the rule it breaks.
+- A failure of the time, size and prefault rules names the key and the rule it breaks.
 - A kind two modules declare must be declared alike in the audit event reference.
-- Client metadata sections and IdP types' settings are held to the same rules as the sections: a description for every key (outside the IdP types listed as described later), the time and size keys, and `.prefault`.
+- Client metadata sections and IdP types' settings are held to the same rules as the sections: a description for every key, the time and size keys, and `.prefault`.
 - The full template is assembled with the memory store in place of Redis, which is asked at assembly, and never started.
 
 ## Depends on

@@ -25,8 +25,12 @@ export const credentialSetting = z
 
 /** The client's ID and secret an IdP's settings name; a type adds its own settings by `extend`. */
 export const clientSetting = z.strictObject({
-	"client-id": credentialSetting,
-	"client-secret": credentialSetting,
+	"client-id": credentialSetting.describe(
+		"The client ID this provider is registered under at the IdP.",
+	),
+	"client-secret": credentialSetting.describe(
+		"The client secret the IdP gave this provider, sent to its token endpoint.",
+	),
 });
 
 /** Runs a type's call; throws only UpstreamRefused or Unavailable, so no library text reaches federation. */
