@@ -13,7 +13,8 @@ Internal module of `federation-grants`: the browser half of a connection.
 
 ## Invariants
 - Every step enters the session at `use` as the intent's subject; a short session is told whose it is at `none` before anything else.
-- Only the subject's short session goes to the step-up page, once per intent; on its way back still short, it is refused.
+- Only the subject's short session goes to the step-up page, told the requirement it falls short of, once per requirement and login; back still short of the same requirement in the same login, it is refused.
+- Whether the link's client may still use the connection is told only to the subject's session, before any trip to raise it.
 - The first session to take a question holds the intent; another browser starts again.
 - A question and a state are each taken once; a state only at its connection, before the code is exchanged.
 - The upstream start is built before the question is spent: a throw is `503` and keeps it; a refusal ends the intent as `grant_not_authorizable`.

@@ -63,7 +63,7 @@ describe("the link", () => {
 
 	it("gives the one step-up only to the request that marked it, and to the intent it was for", async () => {
 		for (const raced of [
-			{ stepped: true },
+			{ stepped: { requirement: "mfa", at: 1_800_000_000_000 } },
 			{ id: "another-intent", stepped: undefined },
 		] as const) {
 			const h = await connector({
@@ -75,6 +75,71 @@ describe("the link", () => {
 			const opened = await h.open(link, await h.login());
 			expect(opened.opened.status, JSON.stringify(raced)).toBe(403);
 		}
+	});
+
+	it("names the requirement to the step-up page, and gives each requirement and each later login a trip of its own", async () => {
+		const asked = { requirement: "mfa" };
+		const h = await connector({
+			settings: { "step-up-page": `${origin}/raise` },
+			requirements: [
+				{
+					name: "mfa",
+					judges: ["use", "credentials"],
+					admits: async (_context, level) =>
+						level === "use" && asked.requirement === "mfa"
+							? { kind: "short", answer: { error: "mfa_required" } }
+							: { kind: "admit" },
+				},
+				{
+					name: "email",
+					judges: ["use", "credentials"],
+					admits: async (_context, level) =>
+						level === "use" && asked.requirement === "email"
+							? { kind: "short", answer: { error: "email_unverified" } }
+							: { kind: "admit" },
+				},
+			],
+		});
+		const { link } = await h.lodge();
+		const alice = await h.login();
+		const first = (await h.open(link, alice)).opened;
+		expect(first.status).toBe(303);
+		expect(h.location(first).searchParams.get("requirement")).toBe("mfa");
+		// Back still short of the same requirement, in the same login: refused, not sent round again.
+		expect((await h.open(link, alice)).opened.status).toBe(403);
+		// Short of another requirement: a trip of its own.
+		asked.requirement = "email";
+		const other = (await h.open(link, alice)).opened;
+		expect(h.location(other).searchParams.get("requirement")).toBe("email");
+		expect((await h.open(link, alice)).opened.status).toBe(403);
+		// A later login, short again: a trip again.
+		h.advance(1000);
+		const again = (await h.open(link, await h.login())).opened;
+		expect(h.location(again).searchParams.get("requirement")).toBe("email");
+	});
+
+	it("reads an intent marked by an earlier version as a trip for no requirement", async () => {
+		const h = await connector({
+			settings: { "step-up-page": `${origin}/raise` },
+			requirements: [shortToUse()],
+		});
+		const { link } = await h.lodge({ stepped: true } as never);
+		const alice = await h.login();
+		expect((await h.open(link, alice)).opened.status).toBe(303);
+		expect((await h.open(link, alice)).opened.status).toBe(403);
+	});
+
+	it("tells a short session the link's client or connection is gone before it sends it to raise", async () => {
+		const h = await connector({
+			settings: { "step-up-page": `${origin}/raise` },
+			requirements: [shortToUse()],
+		});
+		const { link } = await h.lodge();
+		h.relist([], [back]);
+		expect((await h.open(link, await h.login())).opened).toMatchObject({
+			status: 403,
+			text: "This connection is not available.",
+		});
 	});
 
 	it("refuses a link the client may no longer use, or whose connection is gone", async () => {

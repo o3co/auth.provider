@@ -158,16 +158,38 @@ export function connectWith(p: ConnectParts) {
 			const changed = next(now.intent);
 			return changed && { value: records.stored({ ...now, intent: changed }) };
 		});
-	/** Marks the intent's one trip to raise the session; true only for the request that marked it. */
-	const stepUpOnce = async (grant: Grant, intent: Intent) => {
-		if (intent.stepped) return false;
-		const marked = await changeIntent(grant, intent, (i) =>
-			i.stepped ? undefined : { ...i, stepped: true },
-		);
+	/** The intent's last trip to raise the session, if any. */
+	const tripOf = (stepped: Intent["stepped"]) => (stepped === true ? { at: 0 } : stepped);
+	/** A trip is due unless the last was for the same requirement, in a login no later than it. */
+	const mayStep = (stepped: Intent["stepped"], requirement: string, authenticatedAt: number) => {
+		const last = tripOf(stepped);
 		return (
-			records.grantOf(marked?.before)?.intent?.stepped !== true &&
-			records.grantOf(marked?.after)?.intent?.stepped === true
+			!last ||
+			!("requirement" in last) ||
+			last.requirement !== requirement ||
+			authenticatedAt > last.at
 		);
+	};
+	/** Marks the intent's trip to raise the session for `requirement`; true only for the request that marked it. */
+	const stepUpOnce = async (
+		grant: Grant,
+		intent: Intent,
+		requirement: string,
+		authenticatedAt: number,
+	) => {
+		if (!mayStep(intent.stepped, requirement, authenticatedAt)) return false;
+		const trip = { requirement, at: p.clock.now() };
+		const marked = await changeIntent(grant, intent, (i) =>
+			mayStep(i.stepped, requirement, authenticatedAt) ? { ...i, stepped: trip } : undefined,
+		);
+		const before = tripOf(records.grantOf(marked?.before)?.intent?.stepped);
+		const after = tripOf(records.grantOf(marked?.after)?.intent?.stepped);
+		const ours = (t: typeof after) =>
+			t !== undefined &&
+			"requirement" in t &&
+			t.requirement === trip.requirement &&
+			t.at === trip.at;
+		return ours(after) && !ours(before);
 	};
 	/** Takes a step once: answers it as it was, or none when it was taken already or does not match. */
 	const take = async (
@@ -194,7 +216,8 @@ export function connectWith(p: ConnectParts) {
 		// A short entry names no subject: the level that grants nothing tells whose session it is.
 		const bare = await p.sessions.enterFor(request, "none");
 		if (bare.kind !== "entered") return { kind: "unknown" } as const;
-		return bare.session.context.subject === grant.subject ? entry : other;
+		const { context } = bare.session;
+		return context.subject === grant.subject ? { ...entry, context } : other;
 	};
 
 	const connect = async (request: HttpRequest): Promise<HttpResponse> => {
@@ -217,19 +240,22 @@ export function connectWith(p: ConnectParts) {
 			auditFailure(grant, "reauthentication_required", request);
 			return plain(403, "Sign in again to continue.");
 		}
+		// Told only to the subject's own session, so a link's holder learns nothing of the client.
+		const client = await p.clients.find(grant.client);
+		if (!permits(client, grant.connection) || !connections.of(grant.connection)) {
+			return plain(403, "This connection is not available.");
+		}
 		if (entry.kind === "short") {
 			const page = settings["step-up-page"];
-			if (!page || !(await stepUpOnce(grant, intent))) {
+			const { requirement, context } = entry;
+			if (!page || !(await stepUpOnce(grant, intent, requirement, context.authenticatedAt))) {
 				auditFailure(grant, "reauthentication_required", request);
 				return plain(403, "Sign in again to continue.");
 			}
 			const raise = new URL(page);
+			raise.searchParams.set("requirement", requirement);
 			raise.searchParams.set("redirect_to", self);
 			return see(raise.href);
-		}
-		const client = await p.clients.find(grant.client);
-		if (!permits(client, grant.connection) || !connections.of(grant.connection)) {
-			return plain(403, "This connection is not available.");
 		}
 		// The first browser to take a question holds the intent; another is told to start again.
 		const session = entry.session.id;

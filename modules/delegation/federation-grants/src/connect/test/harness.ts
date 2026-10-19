@@ -104,7 +104,7 @@ export async function connector(
 		readonly stores?: ReturnType<typeof memoryStores>;
 	} = {},
 ) {
-	const now = 1_800_000_000_000;
+	let now = 1_800_000_000_000;
 	const logged = recordingLog();
 	const runtime = quietRuntime({ clock: { now: () => now }, log: logged.log });
 	const stores = options.stores ?? memoryStores(() => now, 3);
@@ -298,5 +298,8 @@ export async function connector(
 				return { ...r, ...more, intent: { ...r.intent, ...intent } } as never;
 			}),
 		now: () => now,
+		advance: (ms: number) => {
+			now += ms;
+		},
 	};
 }
