@@ -217,6 +217,22 @@ describe("idp-apple", () => {
 		}
 	});
 
+	it("refuses at boot an endpoint that is empty or no URL, never throwing on it", () => {
+		const fixed = { "client-id": "com.example.web", "client-secret": "x" };
+		for (const name of [
+			"authorization-endpoint",
+			"token-endpoint",
+			"jwks-uri",
+			"end-session-endpoint",
+		]) {
+			for (const value of ["", "not a url"]) {
+				const read = () => settings.safeParse({ ...fixed, [name]: value });
+				expect(read, `${name} ${value}`).not.toThrow();
+				expect(read().success, `${name} ${value}`).toBe(false);
+			}
+		}
+	});
+
 	it("takes exactly one of a fixed secret and the three that sign one", () => {
 		const parsed = (more: Record<string, unknown>) =>
 			settings.safeParse({ "client-id": "com.example.web", ...more });

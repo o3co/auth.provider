@@ -75,6 +75,9 @@ export const settingsOf = (asymmetric: readonly Algorithm[], policy: OutboundPol
 			},
 		)
 		.superRefine((s, context) => {
+			// A value that is no URL is refused already, and zod still runs this: it is passed over.
+			const urls = [s.issuer, s["authorization-endpoint"], s["token-endpoint"], s["jwks-uri"]];
+			if (!urls.every((url) => url === undefined || URL.canParse(url))) return;
 			const sent = s.discovery
 				? { issuer: descriptionUrl(s.issuer) }
 				: { "token-endpoint": s["token-endpoint"], "jwks-uri": s["jwks-uri"] };

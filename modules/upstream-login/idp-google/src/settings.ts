@@ -30,6 +30,8 @@ const section = clientSetting.extend({
 export const settingsOf = (policy: OutboundPolicy) =>
 	section.superRefine((s, context) => {
 		for (const key of ["token-endpoint", "jwks-uri"] as const) {
+			// A value that is no URL is refused already, and zod still runs this: it is passed over.
+			if (!URL.canParse(s[key])) continue;
 			const refusal = policy.refusalOf(s[key], { hosts: [new URL(s[key]).hostname] });
 			if (refusal === undefined) continue;
 			const message = `outbound's destination policy refuses it: ${refusal}`;

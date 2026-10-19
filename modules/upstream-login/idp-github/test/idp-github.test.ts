@@ -259,6 +259,17 @@ describe("idp-github", () => {
 		});
 	});
 
+	it("refuses at boot an endpoint or API that is empty or no URL, never throwing on it", () => {
+		const both = { "client-id": "cid", "client-secret": "sec" };
+		for (const name of ["authorization-endpoint", "token-endpoint", "api"]) {
+			for (const value of ["", "not a url"]) {
+				const read = () => settings.safeParse({ ...both, [name]: value });
+				expect(read, `${name} ${value}`).not.toThrow();
+				expect(read().success, `${name} ${value}`).toBe(false);
+			}
+		}
+	});
+
 	it("refuses at boot an empty issuer", () => {
 		const both = { "client-id": "cid", "client-secret": "sec" };
 		expect(settings.safeParse({ ...both, issuer: "" }).success).toBe(false);

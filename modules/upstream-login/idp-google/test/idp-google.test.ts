@@ -181,6 +181,22 @@ describe("idp-google", () => {
 		]);
 	});
 
+	it("refuses at boot an endpoint that is empty or no URL, never throwing on it", () => {
+		const both = { "client-id": "client", "client-secret": "s3cr:et" };
+		for (const name of [
+			"authorization-endpoint",
+			"token-endpoint",
+			"jwks-uri",
+			"end-session-endpoint",
+		]) {
+			for (const value of ["", "not a url"]) {
+				const read = () => settings.safeParse({ ...both, [name]: value });
+				expect(read, `${name} ${value}`).not.toThrow();
+				expect(read().success, `${name} ${value}`).toBe(false);
+			}
+		}
+	});
+
 	it("refuses at boot a client ID or secret that is empty or not well-formed text", () => {
 		const both = { "client-id": "client", "client-secret": "s3cr:et" };
 		expect(settings.safeParse(both).success).toBe(true);

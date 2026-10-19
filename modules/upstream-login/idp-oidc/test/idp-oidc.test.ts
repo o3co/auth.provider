@@ -474,6 +474,34 @@ describe("idp-oidc", () => {
 		expect(refused?.[0]?.message).not.toMatch(/HS256|none/);
 	});
 
+	it("refuses at boot an issuer or endpoint that is empty or no URL, never throwing on it", () => {
+		const settings = settingsOf(asymmetric, policyRefusing());
+		const client = { "client-id": "c", "client-secret": "s" };
+		const given = {
+			discovery: false,
+			"authorization-endpoint": `${issuer}/a`,
+			"token-endpoint": `${issuer}/t`,
+			"jwks-uri": `${issuer}/j`,
+		};
+		const cases: Record<string, unknown>[] = [];
+		for (const value of ["", "not a url"]) {
+			cases.push({ ...client, issuer: value });
+			for (const name of [
+				"authorization-endpoint",
+				"token-endpoint",
+				"jwks-uri",
+				"end-session-endpoint",
+			]) {
+				cases.push({ ...client, issuer, ...given, [name]: value });
+			}
+		}
+		for (const asked of cases) {
+			const read = () => settings.safeParse(asked);
+			expect(read, JSON.stringify(asked)).not.toThrow();
+			expect(read().success, JSON.stringify(asked)).toBe(false);
+		}
+	});
+
 	it("takes a clock skew of whole seconds from 0s to 5m, written with its unit", () => {
 		const settings = settingsOf(asymmetric, policyRefusing());
 		const base = { issuer, "client-id": "c", "client-secret": "s" };
