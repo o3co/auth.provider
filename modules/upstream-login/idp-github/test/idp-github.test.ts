@@ -113,12 +113,13 @@ describe("idp-github", () => {
 			client_id: "cid",
 			client_secret: "sec",
 		});
-		// The User-Agent GitHub's API requires is outbound's own; this module sends none.
+		// The User-Agent GitHub's API requires is outbound's own; this module sends none. The token is
+		// outbound's to send, as the request's credential.
 		expect(user?.request.headers).toEqual({
-			authorization: "Bearer gho_x",
 			accept: "application/vnd.github+json",
 			"x-github-api-version": "2022-11-28",
 		});
+		expect(user?.request.credential).toBe("Bearer gho_x");
 	});
 
 	it("gives the user's public profile, its email never verified, as GitHub's user answer cannot say so", async () => {
