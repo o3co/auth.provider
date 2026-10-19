@@ -1,18 +1,27 @@
-import { createServer } from "node:net";
+import { connect } from "node:net";
 import { assemble, BootRefused, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
-import { expect, it } from "vitest";
+import { beforeAll, expect, it } from "vitest";
 import redisModule from "../src/module.ts";
 
-/** A port nothing listens on. */
-const closedPort = () =>
-	new Promise<number>((resolve) => {
-		const server = createServer();
-		server.listen(0, "127.0.0.1", () => {
-			const address = server.address();
-			server.close(() => resolve(typeof address === "object" && address ? address.port : 0));
+/** A port no test takes: `listen(0)` picks from the ephemeral range, never port 1. */
+const refusedPort = 1;
+
+beforeAll(async () => {
+	const answer = await new Promise<string>((resolve) => {
+		const socket = connect(refusedPort, "127.0.0.1");
+		socket.once("connect", () => {
+			socket.destroy();
+			resolve("connected");
 		});
+		socket.once("error", (error: NodeJS.ErrnoException) => resolve(error.code ?? "error"));
 	});
+	if (answer !== "ECONNREFUSED") {
+		throw new Error(
+			`127.0.0.1:${refusedPort} must refuse connections for these tests (got ${answer})`,
+		);
+	}
+});
 
 /** Boots the module alone, keeping every warning with its fields. */
 async function refusalOf(redis: unknown) {
@@ -60,7 +69,7 @@ it("refuses boot on a URL that is not redis or rediss, a prefix of other charact
 });
 
 it("refuses boot without telling the URL's password, in the refusal or in a warning", async () => {
-	const url = `redis://user:s3cr3t-pass@127.0.0.1:${await closedPort()}`;
+	const url = `redis://user:s3cr3t-pass@127.0.0.1:${refusedPort}`;
 	const { refused, warned } = await refusalOf({ url, "connect-timeout": "100ms" });
 	expect(refused).toBeInstanceOf(BootRefused);
 	expect(JSON.stringify(refused.refusals)).not.toContain("s3cr3t");
