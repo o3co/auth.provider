@@ -36,7 +36,7 @@ Each promise below holds across every module composed. Each names what keeps it 
    - No scene yet for a password login.
 3. **A dependency that cannot answer never grants anything.**
    - It covers what an authorization decision waits on; a notice sent best effort, such as an audit event or a logout notice to a client, decides nothing.
-   - Kept by: `kernel`'s `Unavailable`, which `http` answers `503`, or as the route declares.
+   - Kept by: `kernel`'s `Unavailable`, which `http` answers `503`, or as the route declares; the authorization endpoint, once it trusts the redirect URI, answers it to the client by a redirect with `error=temporarily_unavailable`.
    - Scenes: each area's "the store failing" scenes (code, exchange, oauth, federation, second factor, passkey), identity ("password login: a user ledger over HTTP"), mtls (the CRL and OCSP outage scenes).
    - Declared exceptions, each the operator's choice: `rate-limit.fail-mode = open` and `mtls.revocation.on-unavailable = allow`.
    - While an issuer's key set cannot be fetched, the last one fetched is still used, up to `external-jwt.key-set-max-age` (`1d` by default) after its fetch.
@@ -49,8 +49,8 @@ Each promise below holds across every module composed. Each names what keeps it 
    - Scenes: code ("a subject the ledger revokes over HTTP"), federation ("federation grants: a subject the ledger revokes"), second factor ("a subject the ledger revokes").
    - No scene yet for a code not yet redeemed, a device code or a token exchange.
 5. **What is used once is used once, on any number of instances.**
-   - Kept by: `store`'s take-once writes and each store interface's declared needs; `kernel.deployment = multi` refuses a module that declares itself unsafe on several instances (a module that declares nothing is taken as safe).
-   - Does not hold with a store that does not persist (`store.accept-volatile`): a restart forgets what was used.
+   - Kept by: `store`'s take-once writes and each store interface's declared needs; `kernel.deployment = multi` refuses a module that declares itself unsafe on several instances: `store`, the store kept in memory, and `mail`, which only logs mail (a module that declares nothing is taken as safe).
+   - Does not hold where the operator accepts losing what was used: with a store that does not persist (`store.accept-volatile`), a restart forgets it; with `redis.durability = none`, a crash can lose the latest writes, spent assertion and proof ids and lockout records among them; with `redis.replication = none`, a failover would lose writes.
    - Upgrading from rc.1 leaves a window in which JWT bearer assertions spent and id_tokens exchanged under rc.1 are not seen, as [From 0.18.0-rc.1](migration.md#from-0180-rc1) says.
    - Scenes: code (a code redeemed once, a refresh token rotated once, two concurrent uses), oauth ("refuses a replayed assertion"), device ("decides a code once").
    - No scene yet for an exchanged id_token or a recovery code used twice, and no scene runs several instances.
@@ -179,8 +179,8 @@ Each promise below holds across every module composed. Each names what keeps it 
 ## Storage
 
 - **Guaranteed:**
-  - Data that must never be lost is kept only where Redis is checked to keep it: no eviction, an append-only file written on every command, and, with replicas, every replica holding it before it counts.
-  - An outage or an unknown outcome is unavailable, answered 503, and never read as "absent" or "allowed".
+  - Data that must never be lost is kept only where Redis is checked to keep it: no eviction, an append-only file written on every command, and, with replicas, every replica holding it before it counts. This does not hold where the operator states `redis.durability = none` or `redis.replication = none`, accepting that a crash or a failover can lose the latest writes.
+  - An outage or an unknown outcome is unavailable, answered 503, and never read as "absent" or "allowed". A record a store answers as missing is read as truly missing (a subject never revoked, for one), because a failing store throws rather than answering, and the spaces kept without end are never evicted.
 - **Left to you:**
   - Keeping a lagging replica from being promoted.
   - The replicas' own persistence.
