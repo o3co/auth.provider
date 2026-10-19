@@ -48,6 +48,8 @@ export const during = {
 	backup: undefined as (() => Promise<void>) | undefined,
 	/** Runs once while the next code is judged, as another request would. */
 	code: undefined as (() => Promise<void>) | undefined,
+	/** Runs once after the factor store's next write, before it answers, as a slow store would. */
+	written: undefined as (() => Promise<void>) | undefined,
 	/** How many of the next revocations move the boundary but answer that a close did not finish. */
 	unfinishedRecords: 0,
 };
@@ -137,15 +139,26 @@ const backup = defineModule({ name: "kind-backup" }, (m) => [
 	})),
 ]);
 
+/** A write's answer, held while `during.written` runs once. */
+const afterWrite = async <T>(write: Promise<T>) => {
+	const done = await write;
+	const run = during.written;
+	during.written = undefined;
+	await run?.();
+	return done;
+};
+
 /** mfa's factor lists on the records stand-in, kept without end. */
 const factorStand = () => {
 	const stand = memoryRecords<StoredFactors>(() => 0, { shards: 1, perShard: 1 });
 	return defineModule({ name: "factor-store" }, (m) => [
 		m.provide(factorStore).by(() =>
 			factorsDown.wrap({
-				save: (key: string, record: StoredFactors) => stand.records.create(key, record, "endless"),
+				save: (key: string, record: StoredFactors) =>
+					afterWrite(stand.records.create(key, record, "endless")),
 				read: stand.records.read,
-				update: stand.records.change,
+				update: (...args: Parameters<typeof stand.records.change>) =>
+					afterWrite(stand.records.change(...args)),
 				scan: stand.records.scan,
 			}),
 		),

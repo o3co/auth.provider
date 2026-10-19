@@ -31,6 +31,7 @@ Internal module of `mfa-flows`: binding a new factor, from a session or within a
 - A first factor bound in a transaction where a binding proof passed counts at once, by the amr `mfa` answers for its first proof: a login goes on through the resume, answering `done` with the factor and recovery codes once it opens; a session is raised, and the factor and codes answered whatever the raise came to.
 - A first factor bound without one counts from the next sign-in: binding it answers the factor and recovery codes and ends the transaction, never the login.
 - Completing an enrollment checks for a revocation again after the proof, just before `mfa` writes, and a reset since it began, or a revocation once complete (`mfa-revocation` moves the fence), is stopped in that write (`fenced`); both answer `401 login_required` and bind nothing.
+- Recovery codes a first factor brought are shown only where no revocation came since the transaction started, checked once the factor is written; else they are taken back and the answer is `401 login_required`.
 
 ## Depends on
 - `audit`; `http` (the request type); `mfa` (factor decisions, the label's shape); `mfa-binding-proof` (the binding proof); `session` (entry, raising); `subject-revocation`; `transactions`; `proof`'s resume, given by the package; the package's routing helpers; `recording`
