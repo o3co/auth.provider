@@ -723,10 +723,10 @@ From `@mod/client-allowance`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.client-allowance.grants` | list of string | `[]` |  |  |
-| `sections.client-allowance.scopes` | list of string | `[]` |  |  |
-| `sections.client-allowance.default-scopes` | list of string |  |  |  |
-| `sections.client-allowance.audiences` | list of string | `[]` |  |  |
+| `sections.client-allowance.grants` | list of string | `[]` |  | The grant types the client may use; none allows no grant. |
+| `sections.client-allowance.scopes` | list of string | `[]` |  | The scopes the client may ask for; none allows no scope. |
+| `sections.client-allowance.default-scopes` | list of string |  |  | The scopes given when the client asks none; left out, a request without a scope is refused while scopes are allowed, and an empty list gives no scope. |
+| `sections.client-allowance.audiences` | list of string | `[]` |  | The audiences the client's tokens may name, the first given when none is asked; none means the issuer. |
 
 ### sections.client-assertion
 
@@ -771,8 +771,8 @@ From `@mod/federation-tokens`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.federation-tokens.receives` | boolean | `false` |  |  |
-| `sections.federation-tokens.post-logout-redirect-uris` | list of string | `[]` |  |  |
+| `sections.federation-tokens.receives` | boolean | `false` |  | Whether the client may be handed its sessions' upstream tokens; only a client the operator registers may. |
+| `sections.federation-tokens.post-logout-redirect-uris` | list of string | `[]` |  | Where an upstream logout this client asks may send the browser back, each matched exactly. |
 
 ### sections.rp-logout
 
