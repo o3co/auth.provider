@@ -16,6 +16,8 @@ export function optionsRoute(passkeys: Passkeys, window: Window): Route {
 		path: "/oauth/webauthn/authentication/options",
 		uses: [use(requestsPerSource, { name: "webauthn-login", window })],
 		takes: ["json", "form", "none"],
+		crossSite:
+			"It reads no cookie and answers options the same for everyone, the challenge made for the client that asks.",
 		handle: async (request) => {
 			const requester = requesterOf(request);
 			if (requester === false) {

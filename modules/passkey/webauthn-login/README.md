@@ -14,7 +14,7 @@
 ## Offers
 - Composition definition, and `passkeyAmr` (`["hwk"]`).
 - The grant takes a JSON body only: `assertion` (the authenticator's response, an object) and `scope`.
-- Route `POST /oauth/webauthn/authentication/options`: takes JSON, a form or no body, and reads only `client_id`.
+- Route `POST /oauth/webauthn/authentication/options`: takes JSON, a form or no body, and reads only `client_id`; declared to take requests from other sites.
   - It answers `passkeys`' options with `no-store`, their challenge made for that client.
   - A missing `client_id`, or one that is not one non-empty string, is `400 invalid_request`.
 - Audit event `passkey.login.refused`, with `client` and `reason`: a kind from a fixed list, one per refusal of `passkeys`, and `authentication_revoked`.
