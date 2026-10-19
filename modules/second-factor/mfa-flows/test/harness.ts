@@ -50,8 +50,28 @@ export const during = {
 	code: undefined as (() => Promise<void>) | undefined,
 	/** Runs once after the factor store's next write, before it answers, as a slow store would. */
 	written: undefined as (() => Promise<void>) | undefined,
+	/** Runs once after the next session raised or opened, before it answers, as a slow store would. */
+	entered: undefined as (() => Promise<void>) | undefined,
 	/** How many of the next revocations move the boundary but answer that a close did not finish. */
 	unfinishedRecords: 0,
+};
+/** Sessions whose next raise or opening holds its answer while `during.entered` runs once. */
+const entering = {
+	...sessionsDown,
+	wrap: (kept: Sessions): Sessions => {
+		const held = async <T>(answer: Promise<T>) => {
+			const done = await answer;
+			const run = during.entered;
+			during.entered = undefined;
+			await run?.();
+			return done;
+		};
+		return sessionsDown.wrap({
+			...kept,
+			raise: (...args: Parameters<Sessions["raise"]>) => held(kept.raise(...args)),
+			complete: (...args: Parameters<Sessions["complete"]>) => held(kept.complete(...args)),
+		});
+	},
 };
 const recording = {
 	...revocationsDown,
@@ -195,7 +215,7 @@ export async function serve(settings: Settings = {}, extra: Module[] = []) {
 			audit.module,
 			csrfStandIn,
 			cookiesModule,
-			switchedModule(sessionStandIn, sessions, sessionsDown),
+			switchedModule(sessionStandIn, sessions, entering),
 			switchedModule(subjectRevocationStandIn, revocations, recording),
 			simulated.module,
 			factorStand(),

@@ -4,8 +4,9 @@ import { factors } from "@mod/mfa";
 import { bindingProofs } from "@mod/mfa-binding-proof";
 import { factorKinds, type Sending } from "@mod/mfa-extensions";
 import { sessions } from "@mod/session";
+import { revocations } from "@mod/subject-revocation";
 import { afterEach, describe, expect, it } from "vitest";
-import { serve, sessionsDown } from "../../../test/harness.ts";
+import { clock, during, serve, sessionsDown } from "../../../test/harness.ts";
 
 /** How the binding proof answers its next send, and whether it can read what it checks; each sent one keeps its own code. */
 const contact = { sent: 0, answer: undefined as Sending | undefined, unreadable: false };
@@ -141,6 +142,37 @@ describe("a binding proof before a first factor", () => {
 		expect([done.status, done.body.recovery_codes]).toEqual([503, undefined]);
 		const held = await s.app.get(factors).held("sam");
 		expect(held.map((f) => f.kind)).toEqual(["code"]);
+	});
+
+	it("shows no recovery codes when a revocation completes while the session is raised, or the login goes on, taking them back", async () => {
+		const s = await serve({ mode: "required" }, [contactProof]);
+		const revokedAsItEnters = (subject: string) => {
+			clock.shift += 1000;
+			during.entered = async () => {
+				await s.app.get(revocations).record(subject);
+				clock.shift += 1000;
+			};
+		};
+		await s.signIn("uli");
+		const asked = await s.call("POST", "/session/mfa/enrollment", { kind: "code" });
+		revokedAsItEnters("uli");
+		const raised = await boundOnProof(s, String(asked.body.transaction));
+		expect([raised.status, raised.body.error, raised.body.recovery_codes]).toEqual([
+			401,
+			"login_required",
+			undefined,
+		]);
+		expect((await s.app.get(factors).held("uli")).map((f) => f.kind)).toEqual(["code"]);
+		const { tx } = await s.heldLogin("val");
+		await s.call("POST", "/session/mfa/enrollment", { kind: "code", transaction_id: tx });
+		revokedAsItEnters("val");
+		const resumed = await boundOnProof(s, tx);
+		expect([resumed.status, resumed.body.error, resumed.body.recovery_codes]).toEqual([
+			401,
+			"login_required",
+			undefined,
+		]);
+		expect((await s.app.get(factors).held("val")).map((f) => f.kind)).toEqual(["code"]);
 	});
 
 	it("asks it before a session's first factor begins, counts a wrong one as an attempt, and begins once it passes", async () => {

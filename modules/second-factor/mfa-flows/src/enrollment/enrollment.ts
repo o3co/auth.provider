@@ -303,7 +303,13 @@ export function enrollmentOver(p: EnrollmentParts) {
 		// Either can fail after the codes were made: then they go, as no one would ever see them.
 		const shown = async (answer: () => Promise<HttpResponse>) => {
 			try {
-				return await answer();
+				const answered = await answer();
+				// The last wait before the codes go out is the revocation's: none may come after it.
+				if (bound.recoveryCodesFactor !== undefined && (await revokedSince(p.revocation, t))) {
+					await takeBack().catch(() => undefined);
+					return loginRequired;
+				}
+				return answered;
 			} catch (error) {
 				// One that cannot go stays unseen, as before; the failure answered is the first.
 				await takeBack().catch(() => undefined);
