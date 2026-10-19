@@ -1,5 +1,5 @@
-/** The request headers a reader needs to repeat a step; cookies are the browser's and left out. */
-const sentShown = ["content-type", "x-csrf-token", "mfa-transaction"];
+/** The request headers a reader needs to repeat a step; cookies are the browser's and left out, and a credential is shown only under a name. */
+const sentShown = ["authorization", "content-type", "x-csrf-token", "mfa-transaction"];
 /** The answer headers a reader acts on. */
 const answerShown = ["content-type", "location", "retry-after", "www-authenticate"];
 

@@ -8,7 +8,8 @@
 		".": "./src/main.ts"
 	},
 	"scripts": {
-		"examples": "RECIPES_WRITE=1 vitest run --root ../../.. --config vitest.integration.config.ts modules/tooling/conformance-recipes"
+		"examples": "RECIPES_WRITE=1 vitest run --root ../../.. --config vitest.integration.config.ts modules/tooling/conformance-recipes",
+		"external": "vitest run --config vitest.release.config.ts"
 	},
 	"dependencies": {
 		"@mod/conformance": "workspace:*",

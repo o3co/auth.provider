@@ -1,0 +1,147 @@
+# Recipe: a grant of your own, in your own package
+
+The module cards are the source of truth. Where this page and a card disagree, the card wins. This page orders the steps and points to the cards; the package, the code and the exchange below are built and run against the published packages before each release, so they do not go stale.
+
+It writes an OAuth grant as an npm package outside this repository, modelled on the built-in client credentials grant, and adds it to an app the generator made.
+
+## The package
+
+Depend on the published packages your module imports, all at the one version of the release you run: every package of a release shares it. Keep them as peers, so the app installs one copy of each. The kernel finds contracts and extension points by the object itself, never by name, so a second copy of a package is a different contract, and your grant would reach no token endpoint (the `kernel` card).
+
+Export the module the app imports at `./module`, as every module of the provider does (the `guard` card's G5).
+
+<!-- generated:package-json -->
+```json
+{
+	"name": "example-grant",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		"./module": {
+			"types": "./module.d.ts",
+			"default": "./module.js"
+		}
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.json"
+	},
+	"peerDependencies": {
+		"@o3co/auth-provider-foundation": "<version>",
+		"@o3co/auth-provider-identity": "<version>",
+		"@o3co/auth-provider-oauth": "<version>"
+	}
+}
+```
+<!-- end generated -->
+
+## The grant
+
+A grant is a contribution to the `grants` extension point (the `grants` card). This one gives a confidential client a token for itself, within what its allowance lets it ask, as the built-in client credentials grant does (the `token-endpoint` card). `readsAmbient` says the grant reads nothing the request carries beside its parameters; a grant that reads the session's cookie must say `cookie` and check the request's origin itself.
+
+<!-- generated:module -->
+```ts
+import { defineModule } from "@o3co/auth-provider-foundation/kernel";
+import { clientAllowance } from "@o3co/auth-provider-oauth/client-allowance";
+import { type Grant, grants } from "@o3co/auth-provider-oauth/grants";
+import { issuer } from "@o3co/auth-provider-oauth/issuer";
+
+/** The grant type a client names; a URI, as RFC 6749 asks of an extension grant. */
+const grantType = "urn:example:params:oauth:grant-type:example";
+
+/** A confidential client's token for itself, within what its allowance lets it ask. */
+const example = (issuerUrl: string): Grant => ({
+	grantType,
+	readsAmbient: "none",
+	handle: async ({ client, param, issue }) => {
+		if (client.kind !== "confidential") return { kind: "error", error: "unauthorized_client" };
+		const allowed = clientAllowance.allowedIssuance(client, param("scope"), issuerUrl);
+		if (allowed.kind === "error") return allowed;
+		const { scope, audience } = allowed;
+		const issued = await issue({ subject: client.id, issuedTo: client.id, audience, scope });
+		if (issued.kind === "refused") return issued;
+		const { token, tokenType, expiresIn } = issued.access;
+		return {
+			kind: "issued",
+			body: {
+				access_token: token,
+				token_type: tokenType,
+				expires_in: expiresIn,
+				scope: scope.join(" "),
+			},
+		};
+	},
+});
+
+export default defineModule({ name: "example-grant" }, (m) => [
+	m.contribute(grants).by(async (c) => example((await c.get(issuer)).url)),
+]);
+```
+<!-- end generated -->
+
+If your grant calls another server, take `outbound`'s contract and send the request through it (the `outbound` card), so the operator's destination policy and limits apply. The guard's rule that holds the provider's own packages to that (G26, and the `network` declaration in a package manifest) reads only the provider's repository: in your package, nothing checks it but you.
+
+## Add it to the app
+
+Generate the app as the README's quick start shows, add your package to its dependencies, and add your module to the list the generated `src/main.ts` passes to `assemble`:
+
+<!-- generated:main -->
+```ts
+import exampleGrant from "example-grant/module";
+// …
+	.then((config) => assemble({ modules: [exampleGrant, m0, m1, …], config }))
+```
+<!-- end generated -->
+
+## Allow it for a client
+
+The token endpoint answers `unauthorized_client` to a client whose `client-allowance` does not list the grant type (the `client-allowance` card). Register the client with the grant and the scopes it may ask:
+
+<!-- generated:client -->
+```hocon
+clients.registered = [{
+  "id": "example-client",
+  "kind": "confidential",
+  "method": "client_secret_basic",
+  "sections": {
+    "client-secret": {
+      "hash": "<a bcrypt or scrypt hash of its secret>"
+    },
+    "client-allowance": {
+      "grants": [
+        "urn:example:params:oauth:grant-type:example"
+      ],
+      "scopes": [
+        "example"
+      ]
+    }
+  }
+}]
+```
+<!-- end generated -->
+
+## Ask for a token
+
+<!-- generated:request -->
+```http
+POST /oauth/token
+content-type: application/x-www-form-urlencoded
+authorization: Basic <base64 of example-client:its-secret>
+
+grant_type=urn%3Aexample%3Aparams%3Aoauth%3Agrant-type%3Aexample&scope=example
+```
+
+```http
+200
+content-type: application/json
+
+{
+  "access_token": "<access_token>",
+  "token_type": "Bearer",
+  "expires_in": "<seconds>",
+  "scope": "example"
+}
+```
+<!-- end generated -->
+
+The endpoint names your grant type in the discovery document's `grant_types_supported`, as it does each grant contributed.

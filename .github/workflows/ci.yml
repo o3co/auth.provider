@@ -272,6 +272,11 @@ jobs:
           pnpm bundles
           .github/scripts/pack-published.sh "$RUNNER_TEMP/tarballs"
           .github/scripts/check-tarball-license.sh "$RUNNER_TEMP/tarballs" LICENSE
+      # The recipes written against the published packages, built and run from the tarballs just packed.
+      - name: The recipes against the packed release
+        env:
+          RECIPES_TARBALLS: ${{ runner.temp }}/tarballs
+        run: pnpm --filter @mod/conformance-recipes run external
 
   # Daily on the default branch, and on every push: known vulnerabilities in
   # what an app installs.
