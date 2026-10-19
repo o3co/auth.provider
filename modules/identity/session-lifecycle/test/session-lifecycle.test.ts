@@ -276,16 +276,17 @@ describe("session entry", () => {
 		expect(await s.enter(withCookie(second))).toBeDefined();
 	});
 
-	it("tells by handle whether a session still lets its holder in", async () => {
+	it("tells by handle the entry a session gives its holder", async () => {
 		const { s, login, handleOf } = await boot();
 		const cookie = await login();
 		const handle = await handleOf(cookie);
-		expect(await s.stillOpen(handle)).toBe(true);
-		expect(await s.openContext(handle)).toMatchObject({ subject: "alice", amr: ["pwd"] });
+		expect(await s.entryOf(handle)).toMatchObject({
+			kind: "entered",
+			session: { context: { subject: "alice", amr: ["pwd"] } },
+		});
 		await s.close(handle);
-		expect(await s.stillOpen(handle)).toBe(false);
-		expect(await s.openContext(handle)).toBeUndefined();
-		expect(await s.stillOpen("unknown")).toBe(false);
+		expect((await s.entryOf(handle)).kind).toBe("absent");
+		expect((await s.entryOf("unknown")).kind).toBe("absent");
 	});
 
 	it("lets nobody in past the subject's revocation", async () => {
@@ -309,7 +310,7 @@ describe("session entry", () => {
 		expect(await shorter.enter(withCookie(cookie))).toBeUndefined();
 		expect(stores.kept.peek(handle)).toMatchObject({ state: "closed" });
 		expect(await s.enter(withCookie(cookie))).toBeUndefined();
-		expect(await s.stillOpen(handle)).toBe(false);
+		expect((await s.entryOf(handle)).kind).toBe("absent");
 		expect(closer.calls).toBe(0);
 	});
 
@@ -341,16 +342,14 @@ describe("session entry", () => {
 		const asks = [
 			() => s.enter(withCookie(cookie)),
 			() => s.enterFor(withCookie(cookie), "use"),
-			() => s.stillOpen(handle),
-			() => s.openContext(handle),
-			() => s.endsAt(handle),
+			() => s.entryOf(handle),
 			() => s.raise(withCookie(cookie), ["otp"]),
 		];
 		for (const ask of asks) {
 			stores.down.sessions.failNext("read");
 			await expect(ask()).rejects.toSatisfy(isUnavailable);
 		}
-		expect(await s.stillOpen(handle)).toBe(true);
+		expect((await s.entryOf(handle)).kind).toBe("entered");
 	});
 
 	it("looks up only a cookie shaped as a secret", async () => {
@@ -491,8 +490,7 @@ describe("session closing", () => {
 		await pause(10);
 		expect(closer.calls).toBe(1);
 		expect(await s.enter(withCookie(cookie))).toBeUndefined();
-		expect(await s.stillOpen(handle)).toBe(false);
-		expect(await s.openContext(handle)).toBeUndefined();
+		expect((await s.entryOf(handle)).kind).toBe("absent");
 		expect(await s.raise(withCookie(cookie), ["otp"])).toBeUndefined();
 		gate.resolve();
 		expect((await closing).kind).toBe("closed");
@@ -833,7 +831,7 @@ describe("session raise", () => {
 		expect((await s.enter(withCookie(fresh)))?.context.amr).toEqual(["pwd", "otp", "mfa"]);
 		expect(await s.enter(withCookie(cookie))).toBeUndefined();
 		expect(await s.raise(withCookie(cookie), ["otp"])).toBeUndefined();
-		expect(await s.stillOpen(before.id)).toBe(true);
+		expect((await s.entryOf(before.id)).kind).toBe("entered");
 		await s.close(before.id);
 		expect(await s.raise(withCookie(fresh), ["otp"])).toBeUndefined();
 	});
@@ -987,10 +985,10 @@ describe("each subject's sessions", () => {
 		const { session } = await shorter.get(sessions).complete(testRequest(), facts());
 		const longer = (await configured({ lifetime: "1h" })).get(sessions);
 		now += 59_999;
-		expect(await longer.stillOpen(session.id)).toBe(true);
+		expect((await longer.entryOf(session.id)).kind).toBe("entered");
 		now += 1;
 		expect(await listed(stores, "alice")).toEqual([]);
-		expect(await longer.stillOpen(session.id)).toBe(false);
+		expect((await longer.entryOf(session.id)).kind).toBe("absent");
 	});
 
 	it("keeps a pending close listed until it is closed", async () => {

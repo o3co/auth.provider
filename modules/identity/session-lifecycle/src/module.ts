@@ -50,9 +50,6 @@ export default defineModule({ name: "session-lifecycle", section, replicaSafe: t
 				return handle ? lifecycle.entryAt(handle, level) : { kind: "absent" };
 			},
 			entryOf: (handle: string, level: EntryLevel = "use") => lifecycle.entryAt(handle, level),
-			stillOpen: async (handle) => (await enteredAt(handle)) !== undefined,
-			openContext: async (handle) => (await enteredAt(handle))?.session.context,
-			endsAt: async (handle) => (await enteredAt(handle))?.endsAt,
 			complete: lifecycle.open,
 			raise: raiseOver({ lifecycle, kept, clock: c.clock, lifetimeMs }),
 			closeRequest: lifecycle.closeIn,

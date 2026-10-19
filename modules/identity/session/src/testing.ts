@@ -28,9 +28,6 @@ export function stubSessions(parts: Partial<Sessions> = {}): Sessions {
 		close: async () => ({ kind: "closed", cookies: [] }),
 		closeRequest: async () => ({ kind: "closed", cookies: [] }),
 		entryOf: async () => ({ kind: "absent" }),
-		stillOpen: async () => false,
-		openContext: async () => undefined,
-		endsAt: async () => undefined,
 		recent: () => false,
 		...parts,
 	};
@@ -127,13 +124,19 @@ export function sessionsContract(
 			const first = await place.sessions.complete(place.request(), facts(place));
 			const raised = await place.sessions.raise(place.request(first.cookies), ["strong"]);
 			expect(raised?.session.context.subject).toBe("alice");
-			expect((await place.sessions.openContext(first.session.id))?.subject).toBe("alice");
+			expect(await place.sessions.entryOf(first.session.id)).toMatchObject({
+				kind: "entered",
+				session: { context: { subject: "alice" } },
+			});
 			const second = await place.sessions.complete(
 				place.request(raised?.cookies),
 				facts(place, "bob"),
 			);
-			expect(await place.sessions.openContext(first.session.id)).toBeUndefined();
-			expect((await place.sessions.openContext(second.session.id))?.subject).toBe("bob");
+			expect((await place.sessions.entryOf(first.session.id)).kind).toBe("absent");
+			expect(await place.sessions.entryOf(second.session.id)).toMatchObject({
+				kind: "entered",
+				session: { context: { subject: "bob" } },
+			});
 		});
 
 		it("ends a session at its lifetime, and when its subject is revoked", async () => {
@@ -142,13 +145,13 @@ export function sessionsContract(
 			const revoked = await place.sessions.complete(place.request(), facts(place, "bob"));
 			await place.revokeSubject("bob");
 			expect(await place.sessions.enter(place.request(revoked.cookies))).toBeUndefined();
-			expect(await place.sessions.stillOpen(revoked.session.id)).toBe(false);
-			expect(await place.sessions.endsAt(revoked.session.id)).toBeUndefined();
+			expect((await place.sessions.entryOf(revoked.session.id)).kind).toBe("absent");
+			expect((await place.sessions.entryOf(revoked.session.id)).kind).toBe("absent");
 			place.advance(place.lifetimeMs - 1);
-			expect(await place.sessions.stillOpen(lived.session.id)).toBe(true);
+			expect((await place.sessions.entryOf(lived.session.id)).kind).toBe("entered");
 			place.advance(1);
 			expect(await place.sessions.enter(place.request(lived.cookies))).toBeUndefined();
-			expect(await place.sessions.openContext(lived.session.id)).toBeUndefined();
+			expect((await place.sessions.entryOf(lived.session.id)).kind).toBe("absent");
 		});
 
 		it("answers by handle the entry its cookie would get: entered with its end, short at a level it falls short of, absent once closed or revoked", async () => {
@@ -183,13 +186,19 @@ export function sessionsContract(
 				kind: "entered",
 				endsAt,
 			});
-			expect(await place.sessions.endsAt(done.session.id)).toBe(endsAt);
+			expect(await place.sessions.entryOf(done.session.id)).toMatchObject({
+				kind: "entered",
+				endsAt: endsAt,
+			});
 			place.advance(endsAt - place.now() - 1);
 			expect((await place.sessions.enterFor(asked, "use")).kind).toBe("entered");
-			expect(await place.sessions.endsAt(done.session.id)).toBe(endsAt);
+			expect(await place.sessions.entryOf(done.session.id)).toMatchObject({
+				kind: "entered",
+				endsAt: endsAt,
+			});
 			place.advance(1);
 			expect((await place.sessions.enterFor(asked, "use")).kind).toBe("absent");
-			expect(await place.sessions.endsAt(done.session.id)).toBeUndefined();
+			expect((await place.sessions.entryOf(done.session.id)).kind).toBe("absent");
 		});
 
 		it("asks the entry requirements at the level asked, and admits once a raise meets them", async () => {
@@ -327,11 +336,14 @@ export function sessionsContract(
 		it("closes once every participant is done, and lets nobody in meanwhile", async () => {
 			const place = await open();
 			const done = await place.sessions.complete(place.request(), facts(place));
-			expect(await place.sessions.openContext(done.session.id)).toMatchObject({ subject: "alice" });
+			expect(await place.sessions.entryOf(done.session.id)).toMatchObject({
+				kind: "entered",
+				session: { context: { subject: "alice" } },
+			});
 			place.failClosing(true);
 			expect((await place.sessions.close(done.session.id)).kind).toBe("pending");
 			expect(await place.sessions.enter(place.request(done.cookies))).toBeUndefined();
-			expect(await place.sessions.stillOpen(done.session.id)).toBe(false);
+			expect((await place.sessions.entryOf(done.session.id)).kind).toBe("absent");
 			place.failClosing(false);
 			expect((await place.sessions.close(done.session.id)).kind).toBe("closed");
 			expect(place.closed).toEqual(["alice"]);
@@ -376,7 +388,8 @@ export function sessionsContract(
 			);
 			const raised = await place.sessions.raise(place.request(done.cookies), ["strong"]);
 			expect(raised?.session.context.attributes).toEqual(kept);
-			expect((await place.sessions.openContext(done.session.id))?.attributes).toEqual(kept);
+			const entry = await place.sessions.entryOf(done.session.id);
+			expect(entry.kind === "entered" && entry.session.context.attributes).toEqual(kept);
 			const bare = await place.sessions.complete(place.request(), facts(place, "bob"));
 			expect(bare.session.context).not.toHaveProperty("attributes");
 		});
@@ -456,7 +469,7 @@ export function sessionsContract(
 			const other = await place.sessions.complete(place.request(), facts(place, "bob"));
 			await place.revokeSubject("alice");
 			expect(place.closed).toEqual(["alice", "alice"]);
-			expect(await place.sessions.stillOpen(other.session.id)).toBe(true);
+			expect((await place.sessions.entryOf(other.session.id)).kind).toBe("entered");
 		});
 
 		it("answers a revocation incomplete while a close it made is left pending, and complete once finished", async () => {
@@ -478,8 +491,8 @@ export function sessionsContract(
 				await place.sessions.complete(place.request(), facts(place));
 			}
 			expect(place.closed).toEqual(["alice"]);
-			expect(await place.sessions.stillOpen(first.session.id)).toBe(false);
-			expect(await place.sessions.stillOpen(others.session.id)).toBe(true);
+			expect((await place.sessions.entryOf(first.session.id)).kind).toBe("absent");
+			expect((await place.sessions.entryOf(others.session.id)).kind).toBe("entered");
 		});
 
 		it("fails a login whose session cannot be listed under its subject", async () => {
@@ -489,7 +502,7 @@ export function sessionsContract(
 				isUnavailable,
 			);
 			const done = await place.sessions.complete(place.request(), facts(place));
-			expect(await place.sessions.stillOpen(done.session.id)).toBe(true);
+			expect((await place.sessions.entryOf(done.session.id)).kind).toBe("entered");
 		});
 
 		it("names a closed session for the lifetime from its last close", async () => {
@@ -671,9 +684,6 @@ export const sessionStandIn = defineModule({ name: "session" }, (m) => [
 			enter: async (request) => (await enteredAt(handleIn(request)))?.session,
 			enterFor: (request, level) => enterAt(handleIn(request), level),
 			entryOf: (handle, level = "use") => enterAt(handle, level),
-			stillOpen: async (handle) => (await enteredAt(handle)) !== undefined,
-			openContext: async (handle) => (await enteredAt(handle))?.session.context,
-			endsAt: async (handle) => (await enteredAt(handle))?.endsAt,
 			complete: async (request, facts) => {
 				const carried = handleIn(request);
 				if (carried !== undefined) await close(carried);

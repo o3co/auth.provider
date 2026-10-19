@@ -11,7 +11,7 @@
 - Keeping sessions: their records, store interfaces, operator section and sweep (`session-lifecycle`, the default implementation).
 
 ## Offers
-- `enter`: request → session or none, throwing when unavailable; `entryOf` answers by handle the entry its cookie would get, at `use` unless another level is asked; `stillOpen`, `openContext` and `endsAt` answer the use check by handle, with the context or the end.
+- `enter`: request → session or none, throwing when unavailable; `entryOf` answers by handle the entry its cookie would get, at `use` unless another level is asked.
 - `complete`: login fact → session and cookie at `kernel`'s time; the carried session is closed first, and the login is unavailable when that close cannot be added to the closings, or the new session cannot be listed under its subject.
 - `enterFor`: request and level (use / none / credentials) → entered (with its end: the opening plus the lifetime in force), absent, or short with the requirement's name and its answer, passed on unread.
 - Extension point `entryRequirements`: context and level → admit or short, with the levels it `judges`; asked in name order, and with "use" by `enter` and the checks by handle. Where none judges `credentials`, it needs a sign-in at a known time within 300 s by default, else short `session` `{"error":"step_up_required"}`.
@@ -20,7 +20,10 @@
 - `recent`: a time (`kernel`'s clock) → whether it is within the one recent-authentication window, at most `longestRecentMs` (1 hour); the checker passes the time of what it judges.
 - `closeRequest` closes, in any state, the session the request's cookie opens, and destroys any session cookie it carries, even one opening nothing; `close`: handle → closed or pending, destroying the cookie only when the request's cookie opens that session. Both name the moved session (handle and subject) while its record is kept.
 - A revoked subject's listed sessions are each closed through `close`; the revocation answers incomplete while one fails or is left pending (it stays listed). A session pushed out of a full listing (one ending first, never the one being opened) is closed through `close`.
-- Extension point `participants`: called with the handle and the context, never the cookie secret, one at a time in collect order; a failing one does not stop the rest; none is called for a session that ends by expiry alone, while a close calls them for a session whose record it finds, even one the lifetime in force has ended; each must be safe to call any number of times, from several hosts at once. `sessionRules` holds these orders (participants, requirements, a subject's listed sessions) for an implementation and the stand-in alike.
+- Extension point `participants`: called with the handle and the context, never the cookie secret, one at a time in collect order; a failing one does not stop the rest.
+  - None is called for a session that ends by expiry alone, while a close calls them for a session whose record it finds, even one the lifetime in force has ended.
+  - Each must be safe to call any number of times, from several hosts at once.
+  - `sessionRules` holds these orders (participants, requirements, a subject's listed sessions) for an implementation and the stand-in alike.
 - `./testing`: a stub, a stand-in in memory behind cookies by `cookies`' rule (each subject's listing as the contract has it; a pending close goes on only when asked again), and contract tests of the sessions.
 
 ## Invariants
