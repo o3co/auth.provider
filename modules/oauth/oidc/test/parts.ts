@@ -23,10 +23,20 @@ import usersModule from "@mod/users/module";
 import { memoryUsersStores, usersConfig } from "@mod/users/testing";
 import oidc from "../src/module.ts";
 
-/** Sessions known by handle, open as given. */
+/** Sessions known by handle, entered as given, asked by the entry or the context alike. */
 export const sessionsOf = (byHandle: Record<string, AuthContext> = {}) =>
 	defineModule({ name: "sessions" }, (m) => [
-		m.provide(sessions).by(() => stubSessions({ openContext: async (handle) => byHandle[handle] })),
+		m.provide(sessions).by(() =>
+			stubSessions({
+				entryOf: async (handle) => {
+					const context = byHandle[handle];
+					return context === undefined
+						? { kind: "absent" }
+						: { kind: "entered", session: { id: handle, context }, endsAt: 1 };
+				},
+				openContext: async (handle) => byHandle[handle],
+			}),
+		),
 	]);
 
 /** A ledger that cannot look users up by subject. */
