@@ -4,13 +4,61 @@ import { defineModule } from "@mod/kernel";
 import { switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import { requestsPerSource } from "@mod/rate-limit";
 import { entryRequirements, participants, type Sessions, sessions } from "@mod/session";
-import { sessionStandIn } from "@mod/session/testing";
+import { sessionStandIn, stubSessions } from "@mod/session/testing";
 import { describe, expect, it } from "vitest";
 import { upstreamEnds } from "../src/contract.ts";
+import type { SessionClients } from "../src/store.ts";
 import { back, issuer, servedEach } from "./harness.ts";
 
 const serve = servedEach();
 const noCache = { "cache-control": "no-store", pragma: "no-cache" };
+
+/**
+ * Sessions in memory whose read ends one past its lifetime calling no participants, and whose close
+ * calls them for any record it finds open, past its lifetime too: as session-lifecycle keeps them
+ * while a record outlives its end (a host's clock behind another's, or a lifetime shortened since).
+ */
+function readEndingSessions(lifetimeMs: number) {
+	return defineModule({ name: "session" }, (m) => [
+		m.provide(sessions).by(async (c) => {
+			const closers = await c.collect(participants);
+			type Kept = { subject: string; openedAt: number; state: "open" | "closing" | "closed" };
+			const kept = new Map<string, Kept>();
+			const sessionOf = (id: string, r: Kept) => ({
+				id,
+				context: { subject: r.subject, amr: ["pwd"], authenticatedAt: r.openedAt },
+			});
+			return stubSessions({
+				complete: async (_request, facts) => {
+					const id = `s${kept.size + 1}`;
+					const r: Kept = { subject: facts.subject, openedAt: c.clock.now(), state: "open" };
+					kept.set(id, r);
+					return { session: sessionOf(id, r), cookies: [`session=${id}`] };
+				},
+				entryOf: async (id) => {
+					const r = kept.get(id);
+					if (r?.state !== "open") return { kind: "absent" };
+					if (r.openedAt + lifetimeMs <= c.clock.now()) {
+						r.state = "closed";
+						return { kind: "absent" };
+					}
+					return { kind: "entered", session: sessionOf(id, r), endsAt: r.openedAt + lifetimeMs };
+				},
+				close: async (id) => {
+					const r = kept.get(id);
+					if (!r) return { kind: "closed", cookies: [] };
+					const from = r.state;
+					if (r.state !== "closed") {
+						r.state = "closing";
+						for (const closer of closers) await closer.closing(sessionOf(id, r));
+						r.state = "closed";
+					}
+					return { kind: "closed", cookies: [], session: { id, subject: r.subject }, from };
+				},
+			});
+		}),
+	]);
+}
 
 describe("the logout a client starts", () => {
 	it("ends the session the hint names and clears the cookie of a browser in it", async () => {
@@ -148,6 +196,27 @@ describe("the logout a client starts", () => {
 		expect(h.events.map((e) => e.kind)).toEqual(["logout.close_pending", "logout.close_pending"]);
 	});
 
+	it("closes a session past its lifetime through its participants when its logout comes, as any close does", async () => {
+		const closing: string[] = [];
+		const watcher = defineModule({ name: "watcher" }, (m) => [
+			m.contribute(participants).by(() => ({
+				name: "watcher",
+				closing: async (session) => {
+					closing.push(session.id);
+				},
+			})),
+		]);
+		const h = await serve({ sessionsModule: readEndingSessions(60_000), extra: [watcher] });
+		const { session } = await h.login();
+		const hint = await h.hintFor(session.id);
+		h.advance(60_000);
+		const answered = await h.call("POST", { id_token_hint: hint });
+		expect(answered.status).toBe(200);
+		expect(closing).toEqual([session.id]);
+		// Its record was still open: this close is the logout.
+		expect(h.events.map((e) => e.kind)).toEqual(["logout.success"]);
+	});
+
 	it("answers a session already gone as logged out, with no event", async () => {
 		const h = await serve();
 		const { session } = await h.login();
@@ -182,15 +251,17 @@ describe("the logout a client starts", () => {
 	});
 
 	it("answers 503 when a check cannot tell, logging what failed", async () => {
-		const down = unavailableSwitch<Sessions>("session");
-		const h = await serve({ sessionsModule: switchedModule(sessionStandIn, sessions, down) });
+		const down = unavailableSwitch<SessionClients>("rp-logout");
+		const h = await serve({ clientsDown: down });
 		const { session } = await h.login();
-		down.failNext("entryOf");
+		down.failNext("members");
 		const out = await h.call("POST", { id_token_hint: await h.hintFor(session.id) });
 		expect([out.status, out.json]).toEqual([503, { error: "temporarily_unavailable" }]);
 		expect(h.logs().filter((l) => l.event === "rp-logout.unavailable")).toEqual([
-			{ level: "warn", event: "rp-logout.unavailable", fields: { what: "session" } },
+			{ level: "warn", event: "rp-logout.unavailable", fields: { what: "rp-logout" } },
 		]);
+		// Nothing was closed: the session still enters.
+		expect(await h.stillOpen(session.id)).toBe(true);
 	});
 
 	it("answers 503 and records the failed close when the session cannot be closed", async () => {

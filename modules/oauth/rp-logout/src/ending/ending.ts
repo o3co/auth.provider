@@ -171,9 +171,8 @@ export function endingOver(p: EndingParts) {
 					...more,
 				},
 			});
-		// A session already ended still has its close asked, for the cookie, but is no logout of its own;
-		// one short of a requirement is live, so closing it is a logout.
-		const open = (await p.sessions.entryOf(sid)).kind !== "absent";
+		// Nothing reads the session before its close: a read can end one past its lifetime, and the close
+		// would then call no participants. What the close found tells whether this is the logout.
 		const closed = await closeOf(sid, request);
 		if (!closed) {
 			record("logout.cascade_failed", checked.subject, { store: "session" });
@@ -189,7 +188,9 @@ export function endingOver(p: EndingParts) {
 			});
 			return jsonAnswer(503, { error: "temporarily_unavailable" }, { cookies });
 		}
-		if (!open || !session) return loggedOut(cookies);
+		// One closed before, or gone, still has its close asked, for the cookie, but is no logout of its own.
+		if (!session || (closed.from !== "open" && closed.from !== "closing"))
+			return loggedOut(cookies);
 		record("logout.success", session.subject);
 		return answer(request, { sid, held, cookies }, upstream ?? (back && withState(back, state)));
 	};
