@@ -170,6 +170,11 @@ describe("registration from a session", () => {
 			{ response: [] },
 			{ response: {}, nickname: "" },
 			{ response: {}, nickname: "x".repeat(65) },
+			{ response: {}, nickname: "\u{1f511}".repeat(65) },
+			{ response: {}, nickname: "desk\u0000top" },
+			{ response: {}, nickname: "desk‮top" },
+			{ response: {}, nickname: "desk⁦top" },
+			{ response: {}, nickname: "x\ud800" },
 			{ response: {}, nickname: 7 },
 		]) {
 			const answer = await post("verify", body);
@@ -178,7 +183,10 @@ describe("registration from a session", () => {
 		}
 		expect((await post("verify")).body.error).toBe("invalid_request");
 		expect((await post("verify", { response: {}, nickname: "x".repeat(64) })).status).toBe(200);
-		expect(asked).toHaveLength(1);
+		expect((await post("verify", { response: {}, nickname: "\u{1f511}".repeat(64) })).status).toBe(
+			200,
+		);
+		expect(asked).toHaveLength(2);
 	});
 
 	it("answers each refusal of webauthn in the words clients of these routes know", async () => {

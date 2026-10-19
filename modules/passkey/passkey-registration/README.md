@@ -16,7 +16,7 @@
 
 ## Invariants
 - The subject comes from the session, never from the body.
-- `response` must be an object, and a `nickname` sent is 1 to 64 UTF-16 code units; otherwise `invalid_request`, before `webauthn` is asked.
+- `response` must be an object, and a `nickname` sent is a label (`labels`' `isLabel`); otherwise `invalid_request`, before `webauthn` is asked.
 - Client data that does not read is `invalid_request`; `webauthn`'s `no-challenge` is `challenge_invalid`.
 - `credential_id_conflict` tells a signed-in session that some subject lists an id. Ids are high-entropy, made by the authenticator, so this answers only for an id already known.
 - Each refusal of `webauthn` maps to one error word here, and nowhere else.
@@ -24,4 +24,4 @@
 - Entry at `credentials` is `mfa`'s judgement where it is composed; else `session` needs a recent sign-in at a known time.
 
 ## Depends on
-- `kernel`, `http`, `webauthn`, `session`, `csrf`, `rate-limit`
+- `kernel`, `http`, `labels`, `webauthn`, `session`, `csrf`, `rate-limit`

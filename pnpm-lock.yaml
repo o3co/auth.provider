@@ -1872,6 +1872,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/labels':
+        specifier: workspace:*
+        version: link:../../foundation/labels
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit

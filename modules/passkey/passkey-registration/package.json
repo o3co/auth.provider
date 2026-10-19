@@ -16,6 +16,7 @@
 		"@mod/csrf": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/kernel": "workspace:*",
+		"@mod/labels": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/webauthn": "workspace:*",
