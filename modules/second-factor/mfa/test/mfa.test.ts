@@ -5,7 +5,6 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import {
 	assemble,
 	BootRefused,
-	contract,
 	defineModule,
 	isUnavailable,
 	kernelConfig,
@@ -27,13 +26,7 @@ import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { seal } from "@mod/seal";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
-import {
-	type AuthContext,
-	type EntryRequirement,
-	entryRequirements,
-	sessionRules,
-	sessions,
-} from "@mod/session";
+import { type AuthContext, sessionRules, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
@@ -647,79 +640,6 @@ describe("decisions on the subject's factors", () => {
 	});
 });
 
-describe("the entry requirements mfa sets", () => {
-	it("says it judges using a session and changing credentials", async () => {
-		const seen = contract<readonly EntryRequirement[]>("seen");
-		const reader = defineModule({ name: "reader" }, (m) => [
-			m.provide(seen).by((c) => c.collect(entryRequirements)),
-		]);
-		const { app } = await serve({}, { extra: [reader] });
-		const mfa = app.get(seen).find((requirement) => requirement.name === "mfa");
-		expect(mfa?.judges).toEqual(["use", "credentials"]);
-	});
-
-	it("asks a recent second factor to change credentials, and a second factor to use the session under required mode", async () => {
-		const { app, bindCode, signedIn } = await serve({ mode: "required" });
-		const opened = app.get(sessions);
-		const bare = await signedIn("bea", ["pwd"]);
-		expect((await opened.enterFor(bare, "credentials")).kind).toBe("entered");
-		expect((await opened.enterFor(bare, "use")).kind).toBe("short");
-		await bindCode("bea");
-		expect((await opened.enterFor(bare, "credentials")).kind).toBe("short");
-		const proved = await signedIn("bea", ["pwd", "otp", "mfa"]);
-		expect((await opened.enterFor(proved, "use")).kind).toBe("entered");
-		expect((await opened.enterFor(proved, "credentials")).kind).toBe("entered");
-		shift += recentMs + 1000;
-		expect((await opened.enterFor(proved, "credentials")).kind).toBe("short");
-		const raised = await opened.raise(proved, ["otp", "mfa"]);
-		const after = withCookie(raised?.cookies[0] ?? "");
-		expect((await opened.enterFor(after, "credentials")).kind).toBe("entered");
-	});
-
-	it("never takes a sign-in at an unknown time as recent, a second factor it says it proved included", async () => {
-		const { app, signedIn } = await serve();
-		const opened = app.get(sessions);
-		// No counting factor: only a sign-in known to be recent opens credentials.
-		const unknown = await signedIn("dee", ["fed"], "unknown");
-		expect(await opened.enterFor(unknown, "credentials")).toMatchObject({ kind: "short" });
-		// An upstream that says it proved a second factor, at a time it does not give.
-		const mapped = await signedIn("dee", ["fed", "mfa"], "unknown");
-		expect(await opened.enterFor(mapped, "credentials")).toMatchObject({ kind: "short" });
-		// A raise that adds one is known to be now.
-		const raised = await opened.raise(mapped, ["otp", "mfa"]);
-		const after = withCookie(raised?.cookies[0] ?? "");
-		expect((await opened.enterFor(after, "credentials")).kind).toBe("entered");
-	});
-
-	it("takes only a raise that added a second factor as a recent second factor", async () => {
-		const { app, bindCode, signedIn } = await serve();
-		const opened = app.get(sessions);
-		await bindCode("cid");
-		const request = await signedIn("cid", ["pwd"]);
-		shift += recentMs + 1000;
-		const raised = await opened.raise(request, ["pwd"]);
-		const after = withCookie(raised?.cookies[0] ?? "");
-		expect((await opened.enterFor(after, "credentials")).kind).toBe("short");
-	});
-
-	it("counts a second factor recent by session's one window: a fresh sign-in over an older proof is short", async () => {
-		const { app, bindCode, signedIn } = await serve();
-		const opened = app.get(sessions);
-		await bindCode("eve");
-		const proved = await signedIn("eve", ["pwd", "otp", "mfa"]);
-		shift += recentMs + 1000;
-		// A raise without a second factor: the session's latest authentication is now, its proof is not.
-		const raised = await opened.raise(proved, ["pwd"]);
-		const fresh = withCookie(raised?.cookies[0] ?? "");
-		expect((await opened.enterFor(fresh, "credentials")).kind).toBe("short");
-		// The window's edge, judged on a clock that stands still between reading it and asking.
-		stopped = Date.now();
-		const now = runtime.clock.now();
-		expect(app.get(factors).recent(now - recentMs)).toBe(true);
-		expect(app.get(factors).recent(now - recentMs - 1)).toBe(false);
-	});
-});
-
 it("takes only a second factor proven recently as proven, never a recent sign-in alone", async () => {
 	const { app } = await serve();
 	const now = runtime.clock.now();
@@ -992,7 +912,7 @@ describe("a binding begun", () => {
 	});
 });
 
-it("refuses to start under required when no composed kind both counts and adds the second factor", async () => {
+it("refuses to start under required when no composed kind counts", async () => {
 	const told = defineModule({ name: "kind-told" }, (m) => [
 		m.contribute(factorKinds).by(() => ({
 			kind: "told",
@@ -1004,10 +924,12 @@ it("refuses to start under required when no composed kind both counts and adds t
 			verify: async () => ({ kind: "valid" as const, state: null }),
 		})),
 	]);
-	const refused = await serve({ mode: "required" }, { kinds: [told, backup] }).catch((e) => e);
+	// A kind that counts but adds no second factor is mfa-entry's to refuse; one that counts at all is mfa's.
+	await expect(serve({ mode: "required" }, { kinds: [told, backup] })).resolves.toBeDefined();
+	const refused = await serve({ mode: "required" }, { kinds: [backup] }).catch((e) => e);
 	expect(refused).toBeInstanceOf(BootRefused);
 	expect((refused as BootRefused).refusals.map((r) => r.where)).toEqual(["mfa.mode"]);
-	await expect(serve({ mode: "optional" }, { kinds: [told, backup] })).resolves.toBeDefined();
+	await expect(serve({ mode: "optional" }, { kinds: [backup] })).resolves.toBeDefined();
 });
 
 it("refuses to start without a step that proves factors, naming what it lacks", async () => {
@@ -1137,16 +1059,13 @@ describe("an enrollment witness", () => {
 	});
 
 	it("answers unavailable where a wiped store would read as never enrolled: login, a first binding, and credentials", async () => {
-		const { app, decided, bindCode, wipe, signedIn, events } = await witnessed();
+		const { decided, bindCode, wipe, events } = await witnessed();
 		await bindCode("bea");
 		await wipe("bea");
 		events.length = 0;
 		await expect(decided.asks("bea")).rejects.toSatisfy(isUnavailable);
 		await expect(decided.begin("bea", "code")).rejects.toSatisfy(isUnavailable);
-		const request = await signedIn("bea", ["pwd"]);
-		await expect(app.get(sessions).enterFor(request, "credentials")).rejects.toSatisfy(
-			isUnavailable,
-		);
+		await expect(decided.countingHeld("bea", "credentials")).rejects.toSatisfy(isUnavailable);
 		expect(events.map((e) => [e.kind, e.attributes])).toEqual([
 			["mfa.enrollment_inconsistent", { at: "login" }],
 			["mfa.enrollment_inconsistent", { at: "binding" }],
@@ -1277,33 +1196,15 @@ describe("an enrollment witness", () => {
 	});
 
 	it("answers unavailable, writing nothing, wherever the witness cannot be read", async () => {
-		const { app, decided, provedCode, witness, signedIn, counted } = await witnessed();
+		const { decided, provedCode, witness, counted } = await witnessed();
 		witness.failing.read = 3;
 		await expect(decided.asks("kim")).rejects.toSatisfy(isUnavailable);
 		await expect(decided.begin("kim", "code")).rejects.toSatisfy(isUnavailable);
-		const request = await signedIn("kim", ["pwd"]);
-		await expect(app.get(sessions).enterFor(request, "credentials")).rejects.toSatisfy(
-			isUnavailable,
-		);
+		await expect(decided.countingHeld("kim", "credentials")).rejects.toSatisfy(isUnavailable);
 		const begun = await provedCode("kim");
 		witness.failing.read = 1;
 		await expect(decided.bind("kim", begun.pending, begun.state)).rejects.toSatisfy(isUnavailable);
 		expect(await counted("kim")).toBe(1);
-	});
-
-	it("answers credentials unavailable even for a recent second factor, where the witness contradicts the store or cannot be read", async () => {
-		const { app, bindCode, wipe, signedIn, witness } = await witnessed();
-		await bindCode("ola");
-		await wipe("ola");
-		const proved = await signedIn("ola", ["pwd", "otp", "mfa"]);
-		await expect(app.get(sessions).enterFor(proved, "credentials")).rejects.toSatisfy(
-			isUnavailable,
-		);
-		witness.failing.read = 1;
-		const unread = await signedIn("pia", ["pwd", "otp", "mfa"]);
-		await expect(app.get(sessions).enterFor(unread, "credentials")).rejects.toSatisfy(
-			isUnavailable,
-		);
 	});
 
 	it("keeps today's behaviour without a witness: a wiped store reads as never enrolled", async () => {
