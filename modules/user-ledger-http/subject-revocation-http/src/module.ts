@@ -23,6 +23,9 @@ export default defineModule(
 				method: "POST",
 				path: "/ledger/subject-revocations",
 				takes: ["json"],
+				crossSite: "A server's call proved by its own credential; it reads no cookie.",
+				unlimited:
+					"It checks the source and the credential first, then counts failures and authenticated requests apart, per source, in the handler.",
 				handle: endpointOf({
 					credentials: previous === undefined ? [credential] : [credential, previous],
 					sources: addressesOf(c.section.sources),

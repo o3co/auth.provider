@@ -14,7 +14,7 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | GET | `/.well-known/openid-configuration` | `@mod/discovery` | form |  |  |  |  | yes |
 | GET | `/.well-known/openid-configuration/` | `@mod/discovery` | form |  |  |  |  | yes |
 | GET | `/_healthcheck` | `@mod/http-ops` | none |  |  |  |  |  |
-| POST | `/ledger/subject-revocations` | `@mod/subject-revocation-http` | json |  | yes |  |  |  |
+| POST | `/ledger/subject-revocations` | `@mod/subject-revocation-http` | json |  | yes | A server's call proved by its own credential; it reads no cookie. | It checks the source and the credential first, then counts failures and authenticated requests apart, per source, in the handler. |  |
 | GET | `/metrics` | `@mod/metrics-prometheus` | none |  |  |  |  |  |
 | GET | `/oauth/authorize` | `@mod/authorize` | form | `rate-limit.requests-per-source` |  |  | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/authorize` | `@mod/authorize` | form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
