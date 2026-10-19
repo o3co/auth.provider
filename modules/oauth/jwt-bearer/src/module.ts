@@ -242,7 +242,7 @@ export default defineModule({ name: "jwt-bearer", section }, (m) => [
 						access_token: token.token,
 						token_type: token.tokenType,
 						expires_in: token.expiresIn,
-						...(scope.length > 0 ? { scope: scope.join(" ") } : {}),
+						scope: scope.join(" "),
 					},
 				};
 			},
