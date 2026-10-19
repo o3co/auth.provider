@@ -533,8 +533,11 @@ describe("idp-oidc", () => {
 		expect(sent?.request.headers).toEqual({
 			"content-type": "application/x-www-form-urlencoded",
 			accept: "application/json",
-			authorization: `Basic ${Buffer.from("client:s3cr%3Aet").toString("base64")}`,
 		});
+		// The client's secret is outbound's to send, as the request's credential.
+		expect(sent?.request.credential).toBe(
+			`Basic ${Buffer.from("client:s3cr%3Aet").toString("base64")}`,
+		);
 	});
 
 	it("reads the profile from the checked id_token, its email verified only by a boolean true", async () => {
@@ -591,7 +594,7 @@ describe("idp-oidc", () => {
 		const sent = asked.find((a) => a.url === `${issuer}/token`);
 		const form = new URLSearchParams(String(sent?.request.body));
 		expect([form.get("client_id"), form.get("client_secret")]).toEqual(["client", "s3cr:et"]);
-		expect(sent?.request.headers?.authorization).toBeUndefined();
+		expect(sent?.request.credential).toBeUndefined();
 	});
 
 	it("refuses an answer from another issuer before using its code, and one without iss where iss is asked", async () => {
@@ -789,7 +792,7 @@ describe("idp-oidc", () => {
 			refresh_token: "rt",
 			scope: "openid email",
 		});
-		expect(sent?.request.headers?.authorization).toMatch(/^Basic /);
+		expect(sent?.request.credential).toMatch(/^Basic /);
 		expect(sent?.hosts).toEqual(["idp.example"]);
 		await offered(upstream.refresh, "refresh")("rt", []);
 		const unscoped = asked.filter((a) => a.url === `${issuer}/token`).at(-1);

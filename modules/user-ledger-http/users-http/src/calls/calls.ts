@@ -70,14 +70,11 @@ export function calls(parts: CallParts): Calls {
 		warn("users-http.ledger_failed", why);
 		return new Unavailable("users-http");
 	};
-	const headers = deepFreeze({
-		accept: "application/json",
-		"content-type": "application/json",
-		...(credential === undefined ? {} : { authorization: `Bearer ${credential}` }),
-	});
+	const headers = deepFreeze({ accept: "application/json", "content-type": "application/json" });
+	const sent = credential === undefined ? {} : { credential: `Bearer ${credential}` };
 	const post = (url: string, body: unknown) =>
 		out
-			.fetch(url, { method: "POST", headers, body: JSON.stringify(body) }, narrowerOf(url))
+			.fetch(url, { method: "POST", headers, body: JSON.stringify(body), ...sent }, narrowerOf(url))
 			.catch((error: unknown) => {
 				throw failed({ reason: kindOf(error) });
 			});

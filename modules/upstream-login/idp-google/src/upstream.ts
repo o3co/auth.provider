@@ -42,7 +42,7 @@ export function opened(
 		},
 		at.clock,
 	);
-	const authorization = basicAuthorization(client, s["client-secret"]);
+	const credential = basicAuthorization(client, s["client-secret"]);
 	/** Posts to the token endpoint, the only host the client's secret goes to. */
 	const post = (form: URLSearchParams) =>
 		outbound.fetch(
@@ -52,9 +52,9 @@ export function opened(
 				headers: {
 					"content-type": "application/x-www-form-urlencoded",
 					accept: "application/json",
-					authorization,
 				},
 				body: form.toString(),
+				credential,
 			},
 			{ hosts: [hostOf(s["token-endpoint"])] },
 		);

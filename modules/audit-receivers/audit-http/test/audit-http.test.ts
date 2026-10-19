@@ -3,6 +3,7 @@ import auditModule from "@mod/audit/module";
 import { assemble, BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import {
+	credentialPolicy,
 	DestinationRefused,
 	type Narrower,
 	type OutboundRequest,
@@ -40,6 +41,13 @@ const outboundAnswering = (answer: () => Promise<OutboundResponse>) =>
 				checked.push(narrower);
 				return new URL(url).hostname === elsewhere ? "not-allowed" : undefined;
 			},
+		})),
+		// As outbound's rule reads, with 127.0.0.1 standing for a named plain-loopback pair.
+		m.provide(credentialPolicy).by(() => ({
+			refusalOf: (urls) =>
+				urls.every((u) => u.startsWith("https://") || u.startsWith("http://127.0.0.1:"))
+					? undefined
+					: "scheme",
 		})),
 	]);
 const status = (code: number) => async () => ({
@@ -89,10 +97,13 @@ it("sends the collector's Authorization header where the operator gives one, and
 	(await boot(status(204), { url, authorization: secret })).record({ kind: "k" });
 	(await boot(status(204), { url })).record({ kind: "k" });
 	await settled();
-	expect(sent.map((s) => s.request?.headers)).toEqual([
-		{ "content-type": "application/json", authorization: secret },
-		{ "content-type": "application/json" },
+	expect(sent.map((s) => s.request)).toMatchObject([
+		{ headers: { "content-type": "application/json" }, credential: secret },
+		{ headers: { "content-type": "application/json" } },
 	]);
+	// outbound sends the credential as the header; audit-http writes none of its own.
+	expect(sent.map((s) => s.request?.headers?.authorization)).toEqual([undefined, undefined]);
+	expect(sent[1]?.request?.credential).toBeUndefined();
 });
 
 it("sends the test builder's Authorization value to its https URL", async () => {
@@ -100,8 +111,8 @@ it("sends the test builder's Authorization value to its https URL", async () => 
 	(await boot(status(204), section)).record({ kind: "k" });
 	await settled();
 	expect(section.url).toMatch(/^https:\/\//);
-	expect(sent.map((s) => [s.url, s.request?.headers])).toEqual([
-		[section.url, { "content-type": "application/json", authorization: section.authorization }],
+	expect(sent.map((s) => [s.url, s.request?.credential])).toEqual([
+		[section.url, section.authorization],
 	]);
 });
 
@@ -120,7 +131,12 @@ it("refuses an Authorization value that is not printable ASCII on one line, with
 	const refused = await boot(status(204), { url, authorization: secret }).catch((error) => error);
 	expect(refused).toBeInstanceOf(BootRefused);
 	expect(JSON.stringify(refused.refusals)).not.toContain("s3cr3t");
-	const others = { empty: "", "a leading space": " Bearer x", "not ASCII": "Bearer \u00e9" };
+	const others = {
+		empty: "",
+		"a leading space": " Bearer x",
+		"a trailing space": "Bearer x ",
+		"not ASCII": "Bearer \u00e9",
+	};
 	for (const [name, value] of Object.entries(others)) {
 		await expect(boot(status(204), { url, authorization: value }), name).rejects.toBeInstanceOf(
 			BootRefused,
@@ -128,14 +144,20 @@ it("refuses an Authorization value that is not printable ASCII on one line, with
 	}
 });
 
-it("refuses a secret Authorization value with a URL that is not https", async () => {
+it("refuses a secret Authorization value with a URL outbound will not send a credential to, and takes a named plain-loopback collector", async () => {
 	const plain = { url: "http://audit.example/events", authorization: "Bearer s3cr3t" };
 	await expect(boot(status(204), plain)).rejects.toMatchObject({
 		refusals: [
-			{ where: "audit-http.url", reason: "a secret Authorization value goes over https alone" },
+			{
+				where: "audit-http.url",
+				reason:
+					"a secret Authorization value goes over https alone, or to a named plain-loopback pair",
+			},
 		],
 	});
 	await expect(boot(status(204), { url: plain.url })).resolves.toBeDefined();
+	const local = { url: "http://127.0.0.1:9000/events", authorization: "Bearer s3cr3t" };
+	await expect(boot(status(204), local)).resolves.toBeDefined();
 });
 
 it("refuses boot on a URL outbound's policy refuses, saying why", async () => {
