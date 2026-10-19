@@ -44,7 +44,7 @@ What auth-provider 0.18 guarantees, and what it leaves to the deployment. Each g
   - Terminating TLS. The app speaks plain HTTP behind your proxy; an http public origin needs `http.insecure-origin = true`.
   - Setting `http.trusted-proxies` whenever a proxy is in front.
   - Making the proxy strip or overwrite `X-Forwarded-For`, the forwarded scheme and the client-certificate header that clients send.
-  - Bounding slow requests, upload rates and connections in front: the app takes Node's default timeouts.
+  - Bounding upload rates and connections per client in front. The app bounds a request's headers and the whole request (`http.headers-timeout`, `http.request-timeout`) and the connections it holds (`http.max-connections`), all clients together.
   - Synchronizing host clocks.
   - Accepting that RP-initiated logout by GET with a recent `id_token_hint` closes a session without asking.
   - The [runbook's list](runbook.md#before-you-deploy) of what the deployment must provide.
@@ -140,4 +140,4 @@ What auth-provider 0.18 guarantees, and what it leaves to the deployment. Each g
   - Stored secrets (TOTP secrets, upstream tokens, delegated credentials) are sealed with AES-256-GCM.
 - **Left to you:**
   - Rotating keys as the [runbook](runbook.md#rotating-the-signing-key) describes.
-  - Retiring a sealing key is not supported in 0.18: values sealed with it become unavailable once it is removed.
+  - Retiring a sealing key only after a `reseal` run that exited 0, as the [runbook](runbook.md#rotating-the-sealing-key) describes. A value a removed key still sealed becomes unavailable until the key is put back.
