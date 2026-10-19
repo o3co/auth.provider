@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { area, type NewPart, onNew, sceneOf } from "../src/areas.ts";
+import { appConfig } from "../src/drivers/app.ts";
 import { composition } from "../src/drivers/composed.ts";
 
 const probe = area<NewPart>("composed-probe");
@@ -61,5 +62,15 @@ describe("the new system composed of a scene's parts", () => {
 		expect(() => composed({ modules: ["@mod/logout"], without: ["@mod/session"] })).toThrow(
 			"absence of @mod/session",
 		);
+	});
+
+	it("keeps each part's configuration file as written, and boots it below the scene's sections and over the rest", () => {
+		const layer = "users { registered = [] }\n";
+		expect(composed({ modules: ["@mod/keys"], layer }).layers).toEqual([layer]);
+		expect(composed({ modules: ["@mod/keys"] }).layers).toEqual([]);
+		expect(appConfig("scene.conf", ["part.conf"], "local.conf")).toBe(
+			"scene.conf,part.conf,local.conf,config/application.conf",
+		);
+		expect(appConfig("scene.conf", [])).toBe("scene.conf,config/application.conf");
 	});
 });

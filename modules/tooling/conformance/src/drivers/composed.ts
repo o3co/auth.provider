@@ -27,7 +27,9 @@ export function composition(scene: AreaScene) {
 	const standIn = (m: string) => needed([m])[0] ?? m;
 	const absent = parts.flatMap((p) => p.without ?? []).filter((m) => composed.includes(standIn(m)));
 	if (absent.length > 0) throw new Error(`the scene is about the absence of ${absent.join(", ")}`);
-	return { modules: composed, config: sectionsOf(newPartsOf(scene, composed)), store };
+	const set = newPartsOf(scene, composed);
+	const layers = set.flatMap((p) => (p.layer === undefined ? [] : [p.layer]));
+	return { modules: composed, config: sectionsOf(set), layers, store };
 }
 
 /** The new system, composed of the modules each area's part asks for. */
@@ -35,9 +37,9 @@ const composedDriver = {
 	can: () => true,
 	differs: () => false,
 	async start(scene: AreaScene) {
-		const { modules, config, store } = composition(scene);
+		const { modules, config, layers, store } = composition(scene);
 		const dir = await generated(modules.join(","), (target) => ({ target, modules, workspace }));
-		return started(dir, config, scene, store);
+		return started(dir, config, scene, store, undefined, layers);
 	},
 };
 

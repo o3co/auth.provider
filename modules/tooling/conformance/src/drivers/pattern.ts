@@ -107,7 +107,8 @@ export function patternDriver(name: string): AreaDriver {
 			const leave = [...new Set(parts.flatMap((p) => p.whole ?? []))];
 			// The app's mail goes to a fake relay, unless the scene names its own.
 			const smtp = modules.includes("@mod/mail-smtp") && !config["mail-smtp"];
-			return started(dir, config, scene, store, { leave, parties, smtp });
+			const layers = parts.flatMap((p) => (p.layer === undefined ? [] : [p.layer]));
+			return started(dir, config, scene, store, { leave, parties, smtp }, layers);
 		},
 	};
 }

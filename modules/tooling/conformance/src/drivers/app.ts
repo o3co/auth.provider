@@ -51,6 +51,10 @@ export function sectionsOf(parts: readonly NewPart[], fallback = true): Sections
 	return config;
 }
 
+/** The files the app reads, first winning: the scene's sections, the parts' own files, the trial's layer, the generated file. */
+export const appConfig = (scene: string, layers: readonly string[], local?: string) =>
+	[scene, ...layers, ...(local ? [local] : []), "config/application.conf"].join(",");
+
 /** Tries at a new port when another process takes the one chosen before the app binds it. */
 const portAttempts = 3;
 
@@ -70,6 +74,7 @@ export async function started(
 		readonly parties?: readonly Party[];
 		readonly smtp?: boolean;
 	},
+	layers: readonly string[] = [],
 ): Promise<Started> {
 	const parties = trial?.parties ?? [];
 	const stopParties = () => Promise.all(parties.map((p) => p.stop()));
@@ -125,7 +130,14 @@ export async function started(
 		const scratch = await mkdtemp(join(tmpdir(), "conformance-scene-"));
 		const file = join(scratch, "scene.conf");
 		await writeFile(file, JSON.stringify(settings));
-		const layers = [file];
+		const written = await Promise.all(
+			layers.map(async (text, i) => {
+				const layer = join(scratch, `layer-${i}.conf`);
+				await writeFile(layer, text);
+				return layer;
+			}),
+		);
+		let local: string | undefined;
 		if (trial) {
 			const appended = (key: string, values: readonly unknown[]) =>
 				values.map((value) => `${key} += ${JSON.stringify(value)}`);
@@ -145,15 +157,14 @@ export async function started(
 						: []),
 				].join("\n"),
 			});
-			const local = join(scratch, "local.conf");
+			local = join(scratch, "local.conf");
 			await writeFile(local, given);
-			layers.push(local);
 		}
 		return launch({
 			command: process.execPath,
 			args: ["src/main.ts"],
 			cwd: dir,
-			env: { ...baseEnv(), APP_CONFIG: [...layers, "config/application.conf"].join(",") },
+			env: { ...baseEnv(), APP_CONFIG: appConfig(file, written, local) },
 			port,
 		});
 	};
