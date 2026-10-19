@@ -103,18 +103,8 @@ describe("a route's declared guarantees", () => {
 		const module = defineModule({ name: "named" }, (m) => [
 			m.contribute(policies).by(() => applying(named, () => "pass")),
 		]);
-		const booting = assemble({
-			modules: [http, owner([post("/named", [use(named), use(limit, open)])]), module],
-			config: { ...kernelConfig(), http: { port: 0 } },
-			runtime,
-		});
-		expect(await booting.then(() => "booted")).toBe("booted");
 		const declared = assemble({
-			modules: [
-				http,
-				owner([post("/named", [use(named), use(limit, open)], { changesState: true })]),
-				module,
-			],
+			modules: [http, owner([post("/named", [use(named), use(limit, open)])]), module],
 			config: { ...kernelConfig(), http: { port: 0 } },
 			runtime,
 		});
@@ -193,9 +183,21 @@ describe("a route's declared guarantees", () => {
 		]);
 	});
 
-	it("leaves a route declaring nothing as it was, in any order", async () => {
-		const base = await serveWith(owner([post("/undeclared", [use(limit, open), use(site)])], []));
-		expect((await fetch(`${base}/undeclared`, { method: "POST" })).status).toBe(204);
+	it("checks a route that declares nothing as well: a GET must say, and any other must keep both or say why", async () => {
+		const booting = serveWith(
+			owner([{ method: "GET", path: "/silent", handle: answered }, post("/bare", [])]),
+		);
+		expect(await refusalsOf(booting)).toEqual([
+			["http.routes:GET /silent", "a GET route says whether it changes state (changesState)"],
+			[
+				"http.routes:POST /bare",
+				"changes state with no policy marked own-site for POST, nor a reason in crossSite",
+			],
+			[
+				"http.routes:POST /bare",
+				"changes state with no policy marked per-source for POST, nor a reason in unlimited",
+			],
+		]);
 	});
 
 	it("applies what each route used at boot, whatever is changed afterwards", async () => {
