@@ -17,6 +17,7 @@ What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc
 - `session-lifecycle`: an explicit close of a session past its lifetime did not revoke the session's tokens; a session revoked while its entry requirements were asked could still enter.
 - `refresh`: an access token from a refresh could outlive the session of its family.
 - `code-grant`, `device-grant`: an access token could live past the end of the session it was issued in.
+- `device-grant`: a device approval's token could be recorded nowhere, and outlive a logout, where no module recorded session tokens; such an app now refuses to boot.
 - `rp-logout`: a close left pending was answered as a logout; the logout taken before authentication had no per-source limit; a retried logout could answer success while its revocation was still pending; a logout of a session past its lifetime but still kept could skip its participants.
 - `jwt-bearer`, `exchange-id-tokens`: the allowance for the issuer's clock could let an assertion or an id_token from just before the subject's revocation boundary through; `jwt-bearer` checks the key id and the issuer more strictly.
 - `keys`: a bearer token of too little randomness was accepted.
@@ -60,7 +61,7 @@ What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc
 - The metric `auth_rate_limit_uncounted_total`, for each request a limit could not count.
 - Each route declares whether it changes state, and why it takes other sites' requests or counts no source where it does not; `http` checks the declarations at boot, and the [route reference](docs/routes.md) lists them.
 - For modules of your own: `session`'s `entryOf`, a route's declared `unavailable` answer, and `@mod/mfa-extensions` for second factors.
-- Documents: the [route reference](docs/routes.md), a [login page guide](docs/login-page.md), a [recipe for a login page with a second factor](docs/recipe-mfa-page.md), recorded from a running app and checked on every change by the new `conformance-recipes` tests, a [release guide](docs/releasing.md), the [security policy](SECURITY.md), a [contributing guide](CONTRIBUTING.md) and the README in Japanese.
+- Documents: the [route reference](docs/routes.md), a [login page guide](docs/login-page.md), a [recipe for a login page with a second factor](docs/recipe-mfa-page.md), recorded from a running app and checked on every change by the new `conformance-recipes` tests, a [recipe for a grant of your own](docs/recipe-external-grant.md), in a package outside the repository, built and checked against the published packages before each release, a [release guide](docs/releasing.md), the [security policy](SECURITY.md), a [contributing guide](CONTRIBUTING.md) and the README in Japanese.
 
 ### Removed
 
