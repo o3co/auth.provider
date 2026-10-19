@@ -79,7 +79,15 @@ const untied = defineModule({ name: "untied" }, (m) => [
 		adopt: async () => "adopted",
 		start: async () => undefined,
 	})),
-	m.provide(sessions).by(() => stubSessions({ stillOpen: async () => true })),
+	m.provide(sessions).by(() =>
+		stubSessions({
+			entryOf: async (id) => ({
+				kind: "entered",
+				session: { id, context: { subject: "alice", amr: [], authenticatedAt: 0 } },
+				endsAt: Number.MAX_SAFE_INTEGER,
+			}),
+		}),
+	),
 	m.provide(sessionTokens).by(() => ({ sessionOf: async () => ({ kind: "unbound" }) })),
 ]);
 const dpopKind = defineModule({ name: "dpop-kind" }, (m) => [
