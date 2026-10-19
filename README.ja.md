@@ -255,7 +255,7 @@ SIGTERM と SIGINT を受け取ると、アプリは `kernel.stop-deadline`（�
 
 [担当モジュール一覧](modules/README.md)から必要な契約を探し、そのモジュールの README を読んでください。
 
-`@o3co/auth-provider-foundation/kernel` の `defineModule` でモジュールを定義し、生成された `src/main.ts` が `assemble` に渡すモジュール一覧に追加します。モジュール API は [kernel の README](modules/foundation/kernel/README.md) で説明しています。
+`@o3co/auth-provider-foundation/kernel` の `defineModule` でモジュールを定義し、生成された `src/main.ts` が `assemble` に渡すモジュール一覧に追加します。独自のパッケージとして公開パッケージに対して作る例は、[独自のグラントのレシピ](docs/recipe-external-grant.md)にあります。モジュール API は [kernel の README](modules/foundation/kernel/README.md) で説明しています。
 
 ストアやユーザー台帳などの実装を置き換えるには、その契約を実装し、`testing` サブパスで公開されている契約テストを実行してください。たとえば `@o3co/auth-provider-foundation/store/testing` です。
 
