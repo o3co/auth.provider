@@ -617,6 +617,15 @@ it("states the public origin it was given, and refuses one with a path", async (
 	}
 });
 
+it("refuses an empty or unparsable public origin or CORS origin at boot, never throwing on it", async () => {
+	for (const origin of ["", "not a url", "https://"]) {
+		await expect(boot({ "public-origin": origin }), `public ${origin}`).rejects.toThrow(
+			BootRefused,
+		);
+		await expect(boot({ "cors-origins": [origin] }), `cors ${origin}`).rejects.toThrow(BootRefused);
+	}
+});
+
 it("answers 500 for an answer whose headers cannot be written, and keeps serving", async () => {
 	const base = await serveWith(
 		handlers([
