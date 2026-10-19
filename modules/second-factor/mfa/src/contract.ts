@@ -2,21 +2,6 @@ import { contract, extensionPoint } from "@mod/kernel";
 import type { AskedFrom, RefusedReason } from "@mod/mfa-extensions";
 import type { AuthContext } from "@mod/session";
 
-export {
-	type AskedFrom,
-	type Enrolled,
-	type FactorKind,
-	type FirstBindingAsk,
-	type FirstBindingGate,
-	factorKinds,
-	firstBindingGates,
-	type Opened,
-	type RefusedReason,
-	type Sending,
-	secondFactorAmr,
-	type Verified,
-} from "@mod/mfa-extensions";
-
 /** A step where a user proves a factor at login; without one, a factor could never be proven. */
 export interface ProofStep {
 	readonly name: string;

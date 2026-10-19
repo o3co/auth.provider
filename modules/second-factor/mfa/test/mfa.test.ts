@@ -16,6 +16,13 @@ import { quietRuntime } from "@mod/kernel/testing";
 import { logins } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
 import * as extensions from "@mod/mfa-extensions";
+import {
+	type Enrolled,
+	factorKinds,
+	firstBindingGates,
+	type Opened,
+	type Sending,
+} from "@mod/mfa-extensions";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import {
@@ -28,17 +35,8 @@ import {
 import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-	type Enrolled,
-	factorKinds,
-	factors,
-	firstBindingGates,
-	isLabel,
-	type Opened,
-	proofSteps,
-	type Sending,
-	secondFactorAmr,
-} from "../src/contract.ts";
+import * as offered from "../src/contract.ts";
+import { factors, isLabel, proofSteps } from "../src/contract.ts";
 import mfaModule from "../src/module.ts";
 import { section } from "../src/section.ts";
 import { type MfaSettings, mfaConfig } from "../src/testing.ts";
@@ -1022,10 +1020,10 @@ it("refuses manage-within, now session's one recent-authentication window", () =
 });
 
 describe("the extension points mfa-extensions offers", () => {
-	it("are the very objects mfa offers, so a contribution through either reaches the one mfa collects", async () => {
-		expect(factorKinds).toBe(extensions.factorKinds);
-		expect(firstBindingGates).toBe(extensions.firstBindingGates);
-		expect(secondFactorAmr).toBe(extensions.secondFactorAmr);
+	it("are offered by mfa-extensions alone, never again by mfa", () => {
+		for (const name of ["factorKinds", "firstBindingGates", "secondFactorAmr"]) {
+			expect(Object.keys(offered), name).not.toContain(name);
+		}
 	});
 
 	it("asks a gate contributed through mfa-extensions before a first binding, and a kind through it", async () => {
