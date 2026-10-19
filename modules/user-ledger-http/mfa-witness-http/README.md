@@ -31,4 +31,4 @@
 - Holds no state, so it is safe on multiple instances.
 
 ## Depends on
-- `kernel`, `mfa-witness`, `outbound`, `url-setting`, `keys` (the credential's rule)
+- `kernel`, `mfa-witness`, `outbound`, `outbound-policy`, `url-setting`, `keys` (the credential's rule)

@@ -1,6 +1,7 @@
 import { defineModule } from "@mod/kernel";
 import { enrollmentWitnesses } from "@mod/mfa-witness";
-import { credentialPolicy, destinationRefusal, outbound, outboundRefusals } from "@mod/outbound";
+import { outbound } from "@mod/outbound";
+import { credentialPolicy, destinationRefusal, outboundRefusals } from "@mod/outbound-policy";
 import { section } from "./section.ts";
 import { witnessAt } from "./witness.ts";
 
