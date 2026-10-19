@@ -14,6 +14,7 @@
 		"@mod/client-certificate": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/request-source": "workspace:*",
+		"@mod/url-setting": "workspace:*",
 		"zod": "4.6.7"
 	}
 }

@@ -617,6 +617,22 @@ it("states the public origin it was given, and refuses one with a path", async (
 	}
 });
 
+it("takes origins as url-setting does: an origin alone, in the form the parser writes it, with no pattern", async () => {
+	const refusals = (http: Record<string, unknown>) =>
+		boot(http).then(
+			() => [],
+			(error: BootRefused) => error.refusals,
+		);
+	expect(await refusals({ "public-origin": "https://as.example/x" })).toEqual([
+		{ where: "http.public-origin", reason: "a URL: an origin alone, with no path or query" },
+	]);
+	for (const origin of ["https://*.example", "https://App.example", "https://app.example:443"]) {
+		expect(await refusals({ "cors-origins": [origin] }), origin).toEqual([
+			{ where: "http.cors-origins.0", reason: expect.any(String) },
+		]);
+	}
+});
+
 it("refuses an empty or unparsable public origin or CORS origin at boot, never throwing on it", async () => {
 	for (const origin of ["", "not a url", "https://"]) {
 		await expect(boot({ "public-origin": origin }), `public ${origin}`).rejects.toThrow(

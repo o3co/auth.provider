@@ -213,6 +213,9 @@ importers:
       '@mod/request-source':
         specifier: workspace:*
         version: link:../request-source
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../url-setting
       zod:
         specifier: 4.6.7
         version: 4.6.7
