@@ -123,6 +123,8 @@ export interface Factors {
 					| "fenced";
 		  }
 	>;
+	/** Moves the subject's fence: no binding begun before binds (`fenced`). For a revocation's follower. */
+	fence(subject: string): Promise<void>;
 	rename(
 		subject: string,
 		factor: string,

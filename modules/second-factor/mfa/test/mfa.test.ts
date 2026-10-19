@@ -360,19 +360,53 @@ describe("decisions on the subject's factors", () => {
 		await bindCode("ivy");
 		const before = await provedCode("ivy");
 		await decided.clear("ivy");
-		expect(await decided.bind("ivy", before.pending, before.state)).toEqual({ kind: "cleared" });
+		expect(await decided.bind("ivy", before.pending, before.state)).toEqual({ kind: "fenced" });
 		expect(await decided.held("ivy")).toEqual([]);
 		// Even a subject that held nothing: the clear is counted all the same.
 		const none = await provedCode("una");
 		await decided.clear("una");
-		expect(await decided.bind("una", none.pending, none.state)).toEqual({ kind: "cleared" });
+		expect(await decided.bind("una", none.pending, none.state)).toEqual({ kind: "fenced" });
 		expect(await decided.held("una")).toEqual([]);
 		// A clear that lands between the check and the write: the write sees it.
 		await bindCode("eve");
 		const racing = await provedCode("eve");
-		place.raceNextChange((record) => ({ ...record, factors: [], clears: 1 }));
-		expect(await decided.bind("eve", racing.pending, racing.state)).toEqual({ kind: "cleared" });
+		place.raceNextChange((record) => ({ ...record, factors: [], fences: 1 }));
+		expect(await decided.bind("eve", racing.pending, racing.state)).toEqual({ kind: "fenced" });
 		expect(await decided.held("eve")).toEqual([]);
+	});
+
+	it("binds nothing begun before the subject's fence moved, as a revocation moves it", async () => {
+		const { decided, bindCode, provedCode } = await serve();
+		await bindCode("lia");
+		const before = await provedCode("lia");
+		await decided.fence("lia");
+		expect(await decided.bind("lia", before.pending, before.state)).toEqual({ kind: "fenced" });
+		expect((await decided.held("lia")).filter((f) => f.kind === "code")).toHaveLength(1);
+		// A subject holding nothing is fenced as well.
+		const none = await provedCode("ned");
+		await decided.fence("ned");
+		expect(await decided.bind("ned", none.pending, none.state)).toEqual({ kind: "fenced" });
+		expect(await decided.held("ned")).toEqual([]);
+	});
+
+	it("answers unavailable when it cannot move the fence", async () => {
+		const { decided, place } = await serve();
+		place.down.unavailable("update", "save");
+		await expect(decided.fence("ola")).rejects.toSatisfy(isUnavailable);
+	});
+
+	it("counts a reset and a fence landing together, each once", async () => {
+		const { decided, bindCode, place } = await serve();
+		await bindCode("pia");
+		// A reset's clear lands while the fence is written; the fence reads again.
+		place.raceNextChange((record) => {
+			const fences = (record as unknown as { fences?: number }).fences ?? 0;
+			return { ...record, factors: [], fences: fences + 1 };
+		});
+		await decided.fence("pia");
+		const stored = (await place.factors.read(listKeyOf("pia"))) as unknown as { fences?: number };
+		expect(stored.fences).toBe(2);
+		expect(await decided.held("pia")).toEqual([]);
 	});
 
 	it("answers whether a factor can be guessed", async () => {
@@ -1176,9 +1210,9 @@ describe("an enrollment witness", () => {
 		// While this binding writes, a reset clears the factors and the mark, and a newer binding marks.
 		place.raceNextChange((record) => {
 			witness.marks.set("gil", "newer");
-			return { ...record, factors: [], clears: 1 };
+			return { ...record, factors: [], fences: 1 };
 		});
-		expect(await decided.bind("gil", begun.pending, begun.state)).toEqual({ kind: "cleared" });
+		expect(await decided.bind("gil", begun.pending, begun.state)).toEqual({ kind: "fenced" });
 		expect(await counted("gil")).toBe(0);
 		expect(witness.marks.get("gil")).toBe("newer");
 	});
