@@ -8,7 +8,7 @@
 - What makes a session live, the levels, and the `credentials` floor where no requirement judges that level (`session`). What each requirement asks (its contributor).
 
 ## Offers
-- Extension point `entryRequirements` (`session`'s object, re-exported): a requirement's name, the levels it `judges`, and `admits` (context and level → admit, or short with an answer for the client, passed on unread).
+- Extension point `entryRequirements`: a requirement's name, the levels it `judges`, and `admits` (context and level → admit, or short with an answer for the client, passed on unread).
 - Contribution to `session`'s `entryJudge`.
 
 ## Invariants
