@@ -12,8 +12,10 @@ import {
 	type Runtime,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
-import { entryRequirements, participants, type Session, sessions } from "@mod/session";
+import { type Session, sessions } from "@mod/session";
+import { participants } from "@mod/session-participants";
 import sessionParticipants from "@mod/session-participants/module";
+import { entryRequirements } from "@mod/session-requirements";
 import sessionRequirements from "@mod/session-requirements/module";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
