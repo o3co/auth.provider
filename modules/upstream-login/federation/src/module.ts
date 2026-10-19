@@ -34,6 +34,9 @@ export default defineModule({ name: "federation", section }, (m) => [
 		m.contribute(routes).by(async (c) => ({
 			method,
 			path: `${base}/*`,
+			...(method === "GET" ? { changesState: true } : {}),
+			crossSite:
+				"Its start is the user's own navigation and its callback the IdP's redirect or form_post; the start's origin is checked before any transaction is made.",
 			...(await c.get(federationRoute)),
 		})),
 	),

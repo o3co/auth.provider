@@ -245,6 +245,24 @@ describe("federation", () => {
 		expect((await s.begin("?link=yes")).status).toBe(302);
 	});
 
+	it("checks a link start's origin before it makes any transaction, so another site starts none", async () => {
+		const s = await serve();
+		const first = await s.begin();
+		const loggedIn = await s.callback(
+			`code=good&state=${first.state}&iss=https://idp.example`,
+			first.cookie,
+		);
+		const session = loggedIn.cookies.filter((c) => !c.includes("federation.corp=")).join("; ");
+		const kept = s.saved.length;
+		const refused = await s.get(`${base}/corp?link=1`, session, { "sec-fetch-site": "cross-site" });
+		expect([refused.status, refused.body]).toEqual([
+			403,
+			{ error: "link_requires_trusted_origin" },
+		]);
+		expect(s.saved.length).toBe(kept);
+		expect(refused.cookies.filter((c) => c.includes("federation.corp"))).toEqual([]);
+	});
+
 	it("ends a link's round trip in the link, never in a login", async () => {
 		const s = await serve();
 		const first = await s.begin();

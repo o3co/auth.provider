@@ -37,6 +37,15 @@ async function linked(
 }
 
 describe("the token route", () => {
+	it("takes requests from other sites as a client's own call, which reads no cookie, and limits them per source", async () => {
+		const h = await harness();
+		const route = h.routes.find((r) => r.path === "/oauth/federation/*");
+		expect(route?.crossSite).toBe(
+			"A client's own call, authenticated as that client; it reads no cookie.",
+		);
+		expect(route?.uses?.map((u) => u.policy.label)).toEqual(["rate-limit.requests-per-source"]);
+	});
+
 	it("hands a receiver the upstream access token of its session, never kept", async () => {
 		const h = await linked({}, { expiresInSeconds: 300 });
 		const got = await h.ask(h.token);
