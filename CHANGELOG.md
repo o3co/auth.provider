@@ -16,7 +16,7 @@ What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc
 - `session-lifecycle`: an explicit close of a session past its lifetime did not revoke the session's tokens.
 - `refresh`: an access token from a refresh could outlive the session of its family.
 - `code-grant`, `device-grant`: an access token could live past the end of the session it was issued in.
-- `rp-logout`: a close left pending was answered as a logout; the logout taken before authentication had no per-source limit.
+- `rp-logout`: a close left pending was answered as a logout; the logout taken before authentication had no per-source limit; a retried logout could answer success while its revocation was still pending; a logout of a session past its lifetime but still kept could skip its participants.
 - `jwt-bearer`, `exchange-id-tokens`: the allowance for the issuer's clock could let an assertion or an id_token from just before the subject's revocation boundary through; `jwt-bearer` checks the key id and the issuer more strictly.
 - `keys`: a bearer token of too little randomness was accepted.
 - `outbound`: an `Authorization` header a caller wrote could be sent without the credential rules.
