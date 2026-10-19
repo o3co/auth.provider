@@ -93,7 +93,7 @@ codeStoreContract("records stand-in", async () => {
 			now += ms;
 		},
 		raceNextUpdate: (_name, change) => stand.raceNextChange(change),
-		crowd: { limit: size.perShard, hashes: crowdingFor(size).jobs },
+		crowd: { limit: size.perShard, names: crowdingFor(size).jobs },
 	};
 });
 const verifier = "v".repeat(43);
