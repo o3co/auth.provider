@@ -22,6 +22,7 @@ Internal module of `http`: the server that answers each request with the route i
 - A body the route does not take is refused only after the route's policies have seen the request.
 - The request a policy or handler gets is frozen, and its maps cannot be written to.
 - A policy's or handler's failure is logged by its kind only, never its message.
+- Unavailable from a policy or handler is warned once, `http.unavailable`, with what was unavailable, the route's declared path and the fields its `noted` gives; the answer is the route's declared one, else `503` `service_unavailable`.
 - Any other failure is answered `500` and logged as a warning, `http.unexpected_failure`, by the route reached (when known) and its kind only, never its message.
 - A request target that is not a URL, or whose query is not well-formed UTF-8, gets `400` before any route.
 - An answer whose headers cannot be written gets `500`, with none of its own headers.
