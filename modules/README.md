@@ -43,6 +43,7 @@ What each module contains is described by that module's contract card (each modu
 | Received values: a name's single value, and the names repeated | vocabulary | http |
 | Signing, verification, publishing public keys | contract | keys |
 | Outbound HTTP requests and the destination policy | contract / setting | outbound |
+| Where outbound requests may go: the destination policy, its boot questions and host lists | contract / setting | outbound-policy |
 | Fetching signed material (plain http from named hosts, its size cap) | contract / setting | outbound |
 | Which destinations a feature reaches | setting | the module that sends the request |
 | Rate limiting, lockout | contract | rate-limit |
