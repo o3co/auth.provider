@@ -355,7 +355,7 @@ export function factorDecisions(p: FactorParts): Factors {
 			const removed = await records.decide<"unknown" | "last" | "fenced" | { kind: string }>(
 				subject,
 				(all, fences) => {
-					if (fence !== undefined && fences !== fence) return { verdict: "fenced" };
+					if (fences !== fence) return { verdict: "fenced" };
 					const kind = all.find((f) => f.id === target)?.kind;
 					if (kind === undefined) return { verdict: "unknown" };
 					const rest = all.filter((f) => f.id !== target);
@@ -375,7 +375,7 @@ export function factorDecisions(p: FactorParts): Factors {
 			const codes = await recovery(subject);
 			// Decided on the factors as written: no codes land beside no counting factor, and the old set goes in the same write.
 			const counted = await records.decide<boolean | "fenced">(subject, (all, fences) => {
-				if (fence !== undefined && fences !== fence) return { verdict: "fenced" };
+				if (fences !== fence) return { verdict: "fenced" };
 				const holds = counting(all, p.kinds).length > 0;
 				const next =
 					holds && codes

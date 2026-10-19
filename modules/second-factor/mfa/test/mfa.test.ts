@@ -484,7 +484,7 @@ describe("decisions on the subject's factors", () => {
 	it("keeps the last counting factor under required mode, and renames", async () => {
 		const { decided, bindCode } = await serve({ mode: "required" });
 		const bound = await bindCode("zed");
-		expect(await decided.remove("zed", bound.factor.id)).toBe("last");
+		expect(await decided.remove("zed", bound.factor.id, await decided.fenceOf("zed"))).toBe("last");
 		expect(await decided.rename("zed", bound.factor.id, "work")).toBe("renamed");
 		expect(await decided.rename("zed", "none", "work")).toBe("unknown");
 		expect((await decided.held("zed")).find((f) => f.id === bound.factor.id)?.label).toBe("work");
@@ -493,16 +493,22 @@ describe("decisions on the subject's factors", () => {
 	it("asks nothing of a subject without factors under optional mode, and replaces the recovery codes", async () => {
 		const { decided, bindCode, idOf } = await serve();
 		expect(await decided.asks("ann")).toBe("nothing");
-		expect((await decided.reissue("ann")).kind).toBe("no-qualifying-factor");
+		expect((await decided.reissue("ann", await decided.fenceOf("ann"))).kind).toBe(
+			"no-qualifying-factor",
+		);
 		const bound = await bindCode("ann");
 		expect(await decided.asks("ann")).toBe("proof");
 		expect(await decided.asks("amy")).toBe("nothing");
-		const reissued = await decided.reissue("ann");
+		const reissued = await decided.reissue("ann", await decided.fenceOf("ann"));
 		if (reissued.kind !== "reissued") throw new Error(reissued.kind);
 		expect((await decided.held("ann")).filter((f) => f.kind === "backup")).toHaveLength(1);
 		expect((await decided.prove("ann", await idOf("ann", "backup"), "b1")).kind).toBe("valid");
-		expect(await decided.remove("ann", bound.factor.id)).toBe("removed");
-		expect(await decided.remove("ann", bound.factor.id)).toBe("unknown");
+		expect(await decided.remove("ann", bound.factor.id, await decided.fenceOf("ann"))).toBe(
+			"removed",
+		);
+		expect(await decided.remove("ann", bound.factor.id, await decided.fenceOf("ann"))).toBe(
+			"unknown",
+		);
 	});
 
 	it("answers no proof valid while its state cannot be written, records nothing, and takes it once it can", async () => {
@@ -530,9 +536,13 @@ describe("decisions on the subject's factors", () => {
 		expect((await decided.prove("ida", backupId, "b1")).kind).toBe("valid");
 		expect((await decided.prove("ida", backupId, "b1")).kind).toBe("replayed");
 		expect((await decided.prove("ida", bound.factor.id, `${bound.secret}:1`)).kind).toBe("valid");
-		expect((await decided.reissue("ida")).kind).toBe("reissued");
-		expect(await decided.remove("ida", bound.factor.id)).toBe("removed");
-		expect(await decided.remove("ida", bound.factor.id)).toBe("unknown");
+		expect((await decided.reissue("ida", await decided.fenceOf("ida"))).kind).toBe("reissued");
+		expect(await decided.remove("ida", bound.factor.id, await decided.fenceOf("ida"))).toBe(
+			"removed",
+		);
+		expect(await decided.remove("ida", bound.factor.id, await decided.fenceOf("ida"))).toBe(
+			"unknown",
+		);
 		const of = (kind: string, attributes: Record<string, string>) => ({
 			kind,
 			subject: "ida",
@@ -555,18 +565,24 @@ describe("decisions on the subject's factors", () => {
 			mode: "required",
 			"max-factors": 3,
 		});
-		expect((await decided.reissue("jon")).kind).toBe("no-qualifying-factor");
+		expect((await decided.reissue("jon", await decided.fenceOf("jon"))).kind).toBe(
+			"no-qualifying-factor",
+		);
 		expect(events).toEqual([]);
 		const bound = await bindCode("jon");
 		const [one, two] = [await provedCode("jon"), await provedCode("jon")];
 		expect((await decided.bind("jon", one.pending, one.state)).kind).toBe("bound");
 		events.length = 0;
 		expect((await decided.bind("jon", two.pending, two.state)).kind).toBe("full");
-		expect(await decided.remove("jon", "none")).toBe("unknown");
+		expect(await decided.remove("jon", "none", await decided.fenceOf("jon"))).toBe("unknown");
 		expect(events).toEqual([]);
-		expect(await decided.remove("jon", bound.factor.id)).toBe("removed");
+		expect(await decided.remove("jon", bound.factor.id, await decided.fenceOf("jon"))).toBe(
+			"removed",
+		);
 		events.length = 0;
-		expect(await decided.remove("jon", await idOf("jon", "code"))).toBe("last");
+		expect(
+			await decided.remove("jon", await idOf("jon", "code"), await decided.fenceOf("jon")),
+		).toBe("last");
 		expect(events).toEqual([]);
 	});
 
@@ -574,9 +590,13 @@ describe("decisions on the subject's factors", () => {
 		const { decided, bindCode } = await serve();
 		const one = await bindCode("liv");
 		const two = await bindCode("liv");
-		expect(await decided.remove("liv", one.factor.id)).toBe("removed");
+		expect(await decided.remove("liv", one.factor.id, await decided.fenceOf("liv"))).toBe(
+			"removed",
+		);
 		expect((await decided.held("liv")).map((f) => f.kind).sort()).toEqual(["backup", "code"]);
-		expect(await decided.remove("liv", two.factor.id)).toBe("removed");
+		expect(await decided.remove("liv", two.factor.id, await decided.fenceOf("liv"))).toBe(
+			"removed",
+		);
 		expect(await decided.held("liv")).toEqual([]);
 		expect(await decided.asks("liv")).toBe("nothing");
 	});
@@ -587,7 +607,9 @@ describe("decisions on the subject's factors", () => {
 		events.length = 0;
 		// Another request removes every factor before the reissue writes.
 		place.raceNextChange((record) => ({ ...record, factors: [] }));
-		expect(await decided.reissue("max")).toEqual({ kind: "no-qualifying-factor" });
+		expect(await decided.reissue("max", await decided.fenceOf("max"))).toEqual({
+			kind: "no-qualifying-factor",
+		});
 		expect(await decided.held("max")).toEqual([]);
 		expect(await decided.asks("max")).toBe("nothing");
 		expect(events).toEqual([]);
@@ -596,7 +618,9 @@ describe("decisions on the subject's factors", () => {
 	it("counts the recovery codes a binding brings against the limit", async () => {
 		const { decided, provedCode, bindCode, idOf } = await serve({ "max-factors": 2 });
 		const first = await bindCode("kai");
-		expect(await decided.remove("kai", await idOf("kai", "backup"))).toBe("removed");
+		expect(
+			await decided.remove("kai", await idOf("kai", "backup"), await decided.fenceOf("kai")),
+		).toBe("removed");
 		const { pending, state } = await provedCode("kai");
 		expect(await decided.bind("kai", pending, state)).toEqual({ kind: "full" });
 		expect(await decided.held("kai")).toEqual([first.factor]);
@@ -785,7 +809,9 @@ describe("values no two factors may hold", () => {
 		expect(await bindKind("ann", "card", "c1")).toEqual({ kind: "duplicate" });
 		expect([await decided.held("bob"), events]).toEqual([[], []]);
 		expect(await bindKind("bob", "card", "c2")).toMatchObject({ kind: "bound" });
-		expect(await decided.remove("ann", await idOf("ann", "card"))).toBe("removed");
+		expect(
+			await decided.remove("ann", await idOf("ann", "card"), await decided.fenceOf("ann")),
+		).toBe("removed");
 		expect(await bindKind("bob", "card", "c1")).toMatchObject({ kind: "bound" });
 	});
 
@@ -874,7 +900,9 @@ describe("values no two factors may hold", () => {
 		expect(events.filter((e) => e.kind === "mfa.factor.enrolled")).toHaveLength(1);
 		// Once the factor holding it goes, two new ones race for its stale claim.
 		const [gone] = (await decided.held(first)).filter((f) => f.kind === "card");
-		expect(await decided.remove(first, gone?.id ?? "")).toBe("removed");
+		expect(await decided.remove(first, gone?.id ?? "", await decided.fenceOf(first))).toBe(
+			"removed",
+		);
 		await race(["eli", "fay"]);
 	});
 });
@@ -897,7 +925,9 @@ describe("a binding begun", () => {
 		expect(await bindKind("ann", "told", "t1")).toMatchObject({ kind: "bound" });
 		expect(await decided.begin("bob", "told")).toEqual({ kind: "duplicate" });
 		expect(await decided.begin("ann", "told")).toEqual({ kind: "duplicate" });
-		expect(await decided.remove("ann", await idOf("ann", "told"))).toBe("removed");
+		expect(
+			await decided.remove("ann", await idOf("ann", "told"), await decided.fenceOf("ann")),
+		).toBe("removed");
 		expect((await decided.begin("bob", "told")).kind).toBe("begun");
 	});
 
@@ -1177,7 +1207,9 @@ describe("an enrollment witness", () => {
 	it("never removes the last counting factor under optional mode, as only a reset clears the mark", async () => {
 		const { decided, bindCode, idOf } = await witnessed();
 		await bindCode("ivy");
-		expect(await decided.remove("ivy", await idOf("ivy", "code"))).toBe("last");
+		expect(
+			await decided.remove("ivy", await idOf("ivy", "code"), await decided.fenceOf("ivy")),
+		).toBe("last");
 	});
 
 	it("clears the mark after a reset's removal, and answers unavailable while it cannot, the factors gone", async () => {

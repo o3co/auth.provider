@@ -141,14 +141,14 @@ export interface Factors {
 	remove(
 		subject: string,
 		factor: string,
-		fence?: Fence,
+		fence: Fence,
 	): Promise<"removed" | "unknown" | "last" | "fenced">;
 	/** Removes every factor of the subject, of any kind, and answers how many and of which kinds; nothing is recorded. */
 	clear(subject: string): Promise<{ readonly count: number; readonly kinds: readonly string[] }>;
 	/** Replaces the recovery codes, for a subject holding a counting factor; nothing once the fence moved past `fence`. */
 	reissue(
 		subject: string,
-		fence?: Fence,
+		fence: Fence,
 	): Promise<
 		| { readonly kind: "reissued"; readonly codes: unknown }
 		| { readonly kind: "no-qualifying-factor" | "unknown-kind" | "fenced" }
