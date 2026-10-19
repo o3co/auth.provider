@@ -2890,6 +2890,12 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
