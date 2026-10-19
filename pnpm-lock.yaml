@@ -2597,6 +2597,12 @@ importers:
       '@mod/session-lifecycle':
         specifier: workspace:*
         version: link:../../identity/session-lifecycle
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/session-store':
         specifier: workspace:*
         version: link:../session-store

@@ -23,6 +23,8 @@ import senderBindingModule from "@mod/sender-binding/module";
 import { sessions } from "@mod/session";
 import sessionLifecycle from "@mod/session-lifecycle/module";
 import { sessionLifecycleConfig } from "@mod/session-lifecycle/testing";
+import sessionParticipants from "@mod/session-participants/module";
+import sessionRequirements from "@mod/session-requirements/module";
 import sessionStore from "@mod/session-store/module";
 import bridgeModule from "@mod/session-tokens/module";
 import sessionTokensStore from "@mod/session-tokens-store/module";
@@ -57,6 +59,8 @@ it("redeems a code once through code-grant wired to records, and revokes what it
 			rateLimitStandIn,
 			auditStandIn().module,
 			sessionLifecycle,
+			sessionRequirements,
+			sessionParticipants,
 			cookiesModule,
 			sessionStore,
 			revocationModule,
