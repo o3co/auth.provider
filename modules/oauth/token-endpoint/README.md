@@ -34,6 +34,7 @@
 - Error descriptions keep printable ASCII but `"` and `\`; any other character shows as `?`.
 - Unavailable is the route's declared `503` `temporarily_unavailable`, never audited, warned by `http` as `http.unavailable` with the route, what was unavailable and only a grant type dispatched to.
 - No token or secret is ever audited or logged.
+- Boot is refused, naming the grant type, when a composed grant declares neither `readsAmbient` `none` nor `cookie`: the token route has no own-site policy and relies on that declaration.
 
 ## Depends on
 - `kernel`, `http`, `request-source`, `grants`, `clients`, `client-allowance`, `issuer`, `tokens`, `sender-binding`, `rate-limit`, `audit`

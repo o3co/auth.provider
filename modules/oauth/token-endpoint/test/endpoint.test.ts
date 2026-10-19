@@ -256,6 +256,27 @@ describe("the audience a request asks for", () => {
 		).toEqual({ by: "echo" });
 	});
 
+	it("refuses to boot with a grant that does not say what it reads that a browser sends by itself", async () => {
+		const silent = defineModule({ name: "silent" }, (m) => [
+			m.contribute(grants).by(
+				() =>
+					({
+						grantType: "urn:test:silent",
+						handle: async () => ({ kind: "issued", body: {} }),
+					}) as unknown as Grant,
+			),
+		]);
+		await expect(serve([silent])).rejects.toSatisfy(
+			(error) =>
+				error instanceof BootRefused &&
+				error.refusals.some(
+					(r) =>
+						r.where === "grants:urn:test:silent" &&
+						r.reason === "declares neither readsAmbient none nor cookie",
+				),
+		);
+	});
+
 	it("refuses to boot with two rules", async () => {
 		await expect(serve([narrowing("one"), narrowing("two")])).rejects.toSatisfy(
 			(error) =>
