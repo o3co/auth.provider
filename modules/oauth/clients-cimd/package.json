@@ -9,7 +9,6 @@
 		"./module": "./src/module.ts"
 	},
 	"dependencies": {
-		"@mod/authorize": "workspace:*",
 		"@mod/client-allowance": "workspace:*",
 		"@mod/clients": "workspace:*",
 		"@mod/code-grant": "workspace:*",
@@ -18,6 +17,7 @@
 		"@mod/issuer": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/outbound": "workspace:*",
+		"@mod/redirect-uris": "workspace:*",
 		"@mod/refresh": "workspace:*",
 		"zod": "4.6.7"
 	},

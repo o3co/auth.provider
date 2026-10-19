@@ -1,7 +1,7 @@
 import { contract } from "@mod/kernel";
 
 declare const stored: unique symbol;
-/** A re-authentication's record as the store keeps it: the store never reads it, and only authorize opens it. */
+/** A re-authentication's record as the store keeps it: the store never reads it, and only `reauth` opens it. */
 export type StoredReauth = { readonly [stored]: true };
 
 /** Where re-authentications are kept, by their name, an unguessable value never kept in clear. Every call throws Unavailable when the place cannot tell. */
@@ -15,7 +15,7 @@ export interface ReauthStore {
 	): Promise<{ readonly before: StoredReauth; readonly after: StoredReauth } | undefined>;
 }
 
-export const reauthStore = contract<ReauthStore>("authorize.reauth-store");
+export const reauthStore = contract<ReauthStore>("reauth.store");
 
 /**
  * A re-authentication taken once that came back would count twice; one lost to memory only sends

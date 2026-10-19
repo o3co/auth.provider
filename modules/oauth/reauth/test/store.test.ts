@@ -1,5 +1,5 @@
 import { memoryRecords } from "@mod/records/testing";
-import type { StoredReauth } from "../src/store.ts";
+import type { StoredReauth } from "../src/contract.ts";
 import { reauthStoreContract } from "../src/testing.ts";
 
 reauthStoreContract("records stand-in", async () => {

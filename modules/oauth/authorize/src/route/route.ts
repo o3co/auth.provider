@@ -5,12 +5,11 @@ import type { HttpRequest, HttpResponse, Route } from "@mod/http";
 import { noStore, site } from "@mod/http";
 import { issuer as named } from "@mod/issuer";
 import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
+import { answerTo, matches, redirects } from "@mod/redirect-uris";
 import { determinedSource } from "@mod/request-source";
 import { oauthError } from "@mod/token-endpoint";
-import { redirects } from "../contract.ts";
 import { type Decision, refusal } from "../decision.ts";
 import { type Flow, flowOver, type Place } from "../flow/flow.ts";
-import { answerTo, matches } from "../redirect-uris/redirect-uris.ts";
 import type { Settings } from "../section.ts";
 
 export const path = "/oauth/authorize";

@@ -1,5 +1,5 @@
-import { redirectsAt, registrable } from "@mod/authorize";
 import type { Client, Section } from "@mod/clients";
+import { redirectsAt, registrable } from "@mod/redirect-uris";
 import { z } from "zod";
 
 /** What a client registers for logouts. */
@@ -43,7 +43,7 @@ export const registration: Section<Registration> = {
 			.array(z.string().refine(registrable, "a URI a client may register to be sent back to"))
 			.prefault([])
 			.describe(
-				"Where a logout may send the browser back to, each a URI `authorize` lets a client register; a return asked for is used only when it matches one exactly.",
+				"Where a logout may send the browser back to, each a URI `redirect-uris` lets a client register; a return asked for is used only when it matches one exactly.",
 			),
 		"frontchannel-logout-uri": z
 			.string()

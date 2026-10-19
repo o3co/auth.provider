@@ -37,7 +37,11 @@ import { amrSources } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
 import rateLimitModule from "@mod/rate-limit/module";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
+import { type ReauthStore, reauthStore, type StoredReauth } from "@mod/reauth";
+import reauthModule from "@mod/reauth/module";
 import { memoryRecords } from "@mod/records/testing";
+import { redirects } from "@mod/redirect-uris";
+import { redirectsFor } from "@mod/redirect-uris/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Session, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
@@ -49,11 +53,9 @@ import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
 import { type IssuanceRequest, issuancePolicies, type Tokens, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
 import { afterEach, describe, expect, it } from "vitest";
-import { redirects } from "../src/contract.ts";
 import authorizeModule from "../src/module.ts";
 import { section } from "../src/section.ts";
-import { type ReauthStore, reauthStore, type StoredReauth } from "../src/store.ts";
-import { authorizeConfig, redirectsFor } from "../src/testing.ts";
+import { authorizeConfig } from "../src/testing.ts";
 
 let now = 1_800_000_000_000;
 const logged = recordingLog();
@@ -142,6 +144,7 @@ async function serve(
 			codeGrantStore,
 			authorizeModule,
 			reauthStand,
+			reauthModule,
 			options.rateLimit ?? rateLimitModule,
 			audit.module,
 			acrModule,
@@ -684,22 +687,6 @@ describe("authorize: the code grant", () => {
 	});
 });
 
-it("refuses to register redirect URIs with a fragment, userinfo, control characters or answer names", async () => {
-	const { registrable } = await import("../src/contract.ts");
-	expect(registrable("https://app.example/cb?x=1")).toBe(true);
-	for (const bad of [
-		"https://app.example/cb#f",
-		"https://u:p@app.example/cb",
-		"https://app.example/c\nb",
-		"https://app.example/cb?code=1",
-		"https://app.example/cb?state=1",
-		"/relative",
-		"https://app.example/c b",
-	]) {
-		expect(registrable(bad)).toBe(false);
-	}
-});
-
 describe("authorize: what the reviews asked to pin down", () => {
 	const codeFrom = (res: { at?: URL | undefined }) => res.at?.searchParams.get("code") ?? "";
 
@@ -930,35 +917,6 @@ describe("authorize: what the reviews asked to pin down", () => {
 		await new Promise((resolve) => setTimeout(resolve, 1300));
 		expect((await t.verifyAccess(String(first.body.access_token))).kind).toBe("invalid");
 	});
-});
-
-it("registers https, http to localhost or loopback literals, and reverse-domain app schemes only", async () => {
-	const { registrable, matches } = await import("../src/redirect-uris/redirect-uris.ts");
-	for (const ok of [
-		"https://app.example/cb",
-		"http://localhost:8080/cb",
-		"http://127.0.0.2/cb",
-		"http://[::1]:9000/cb",
-		"com.example.app:/cb",
-		"com.example.app://cb",
-	]) {
-		expect(registrable(ok)).toBe(true);
-	}
-	for (const bad of [
-		"http://app.example/cb",
-		"http://localhost.example/cb",
-		"myapp:/cb",
-		"javascript:alert(1)",
-		"javascript.foo:/x",
-		"data:text/html,x",
-		"file:///x",
-		"urn:ietf:wg:oauth:2.0:oob",
-	]) {
-		expect(registrable(bad)).toBe(false);
-	}
-	expect(matches("http://127.0.0.2:9000/cb", "http://127.0.0.2/cb")).toBe(true);
-	expect(matches("http://127.0.0.1:9000/cb", "http://127.0.0.2:9000/cb")).toBe(false);
-	expect(matches("http://localhost:8080/cb", "http://localhost:9999/cb")).toBe(false);
 });
 
 it("binds a re-authentication to the whole request", async () => {

@@ -5,10 +5,10 @@ import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { redirectsFor } from "@mod/redirect-uris/testing";
 import { expect, it } from "vitest";
 import { type Decision, recorded as refused } from "../src/decision.ts";
 import { routeWith } from "../src/route/route.ts";
-import { redirectsFor } from "../src/testing.ts";
 
 const callback = "https://app.example/cb";
 const sections: Record<string, unknown> = redirectsFor([callback]);

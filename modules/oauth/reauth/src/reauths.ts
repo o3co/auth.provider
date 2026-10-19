@@ -1,9 +1,8 @@
 import { createHash } from "node:crypto";
 import { type BuildContext, type Clock, type Random, Unavailable } from "@mod/kernel";
-import type { AuthContext } from "@mod/session";
-import type { Settings } from "../section.ts";
-import { type ReauthStore, reauthStore } from "../store.ts";
-import { fromStored, type Reauth, toStored } from "./reauth.ts";
+import type { Reauths } from "./contract.ts";
+import { fromStored, toStored } from "./record.ts";
+import { type ReauthStore, reauthStore } from "./store.ts";
 
 const lifetimeMs = 600_000;
 
@@ -20,28 +19,6 @@ const canonical = (params: ReadonlyMap<string, string>) =>
 			])
 			.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
 	);
-
-/** Re-authentications asked for one request (its parameters, each one's first value), each taken once. */
-export interface Reauths {
-	/** Keeps a new record for the request, from a login at `at` on, and gives its name. */
-	remember(params: ReadonlyMap<string, string>, at: number, stepUp?: true): Promise<string>;
-	/** Takes the named record; it counts only when this call took it and it was made for the request. */
-	take(name: string | undefined, params: ReadonlyMap<string, string>): Promise<Reauth | undefined>;
-	/**
-	 * Whether the session's login is fresh enough for `prompt=login` and `max_age`, and its time known
-	 * when one is needed; an unknown time never is.
-	 */
-	fresh(
-		asked: {
-			readonly login: boolean;
-			readonly maxAgeMs: number | undefined;
-			/** An essential `auth_time` was asked. */
-			readonly knownTime: boolean;
-		},
-		context: Pick<AuthContext, "authenticatedAt" | "authenticatedAtUnknown">,
-		taken: Reauth | undefined,
-	): boolean;
-}
 
 export interface ReauthsParts {
 	readonly store: ReauthStore;
@@ -61,7 +38,7 @@ export function reauthsWith({ store, clock, random }: ReauthsParts): Reauths {
 				...(stepUp && { stepUp }),
 			});
 			const written = await store.save(reauth, record, lifetimeMs);
-			if (written !== "created") throw new Unavailable("authorize");
+			if (written !== "created") throw new Unavailable("reauth");
 			return reauth;
 		},
 		async take(name, params) {
@@ -90,5 +67,5 @@ export function reauthsWith({ store, clock, random }: ReauthsParts): Reauths {
 }
 
 /** The records over the store the assembly gives. */
-export const reauthsOver = async (c: BuildContext<Settings>) =>
+export const reauthsOver = async (c: BuildContext<unknown>) =>
 	reauthsWith({ store: await c.get(reauthStore), clock: c.clock, random: c.random });

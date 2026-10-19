@@ -709,6 +709,12 @@ importers:
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
+      '@mod/reauth':
+        specifier: workspace:*
+        version: link:../reauth
+      '@mod/redirect-uris':
+        specifier: workspace:*
+        version: link:../redirect-uris
       '@mod/request-source':
         specifier: workspace:*
         version: link:../../foundation/request-source
@@ -823,9 +829,6 @@ importers:
 
   modules/oauth/clients-cimd:
     dependencies:
-      '@mod/authorize':
-        specifier: workspace:*
-        version: link:../authorize
       '@mod/client-allowance':
         specifier: workspace:*
         version: link:../client-allowance
@@ -850,6 +853,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/redirect-uris':
+        specifier: workspace:*
+        version: link:../redirect-uris
       '@mod/refresh':
         specifier: workspace:*
         version: link:../refresh
@@ -1340,6 +1346,38 @@ importers:
         specifier: workspace:*
         version: link:../../identity/session
 
+  modules/oauth/reauth:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
+  modules/oauth/redirect-uris:
+    dependencies:
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../../identity/clients
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
   modules/oauth/refresh:
     dependencies:
       '@mod/client-allowance':
@@ -1428,9 +1466,6 @@ importers:
       '@mod/audit':
         specifier: workspace:*
         version: link:../../foundation/audit
-      '@mod/authorize':
-        specifier: workspace:*
-        version: link:../authorize
       '@mod/clients':
         specifier: workspace:*
         version: link:../../identity/clients
@@ -1458,6 +1493,9 @@ importers:
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
+      '@mod/redirect-uris':
+        specifier: workspace:*
+        version: link:../redirect-uris
       '@mod/request-source':
         specifier: workspace:*
         version: link:../../foundation/request-source
@@ -2420,12 +2458,12 @@ importers:
 
   modules/templates/authorize-store:
     dependencies:
-      '@mod/authorize':
-        specifier: workspace:*
-        version: link:../../oauth/authorize
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/reauth':
+        specifier: workspace:*
+        version: link:../../oauth/reauth
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records

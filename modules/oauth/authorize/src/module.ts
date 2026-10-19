@@ -4,7 +4,7 @@ import { metadata } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
 import { returnPaths } from "@mod/login-gates";
 import { requestsPerSource } from "@mod/rate-limit";
-import { redirects } from "./contract.ts";
+import { redirects } from "@mod/redirect-uris";
 import { endpointOver, path, routeOver } from "./route/route.ts";
 import { section } from "./section.ts";
 

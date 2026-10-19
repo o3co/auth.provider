@@ -21,5 +21,5 @@ Internal module of `clients-cimd`: reading and judging a client's metadata docum
 - A refusal's reason is the field refused, the status, `not a JSON object`, or `outbound`'s refusal or failure.
 
 ## Depends on
-- `outbound` (the fetch, its refusals, reading JSON), `authorize` (the redirects section), `client-allowance` (scope words, allowances within the ceiling), `consent` (its section), `code-grant` and `refresh` (the grants' names), `clients` (the record type), `kernel` (the build context, the log)
+- `outbound` (the fetch, its refusals, reading JSON), `redirect-uris` (the redirects section), `client-allowance` (scope words, allowances within the ceiling), `consent` (its section), `code-grant` and `refresh` (the grants' names), `clients` (the record type), `kernel` (the build context, the log)
 - The package's section and `fetching`'s loader answer

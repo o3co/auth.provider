@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { StoredReauth } from "../store.ts";
+import type { StoredReauth } from "./store.ts";
 
 /** A re-authentication asked for one request, taken once. */
 export interface Reauth {

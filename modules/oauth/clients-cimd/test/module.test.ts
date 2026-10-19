@@ -1,4 +1,3 @@
-import { redirects } from "@mod/authorize";
 import { clientAllowance } from "@mod/client-allowance";
 import { type Client, clients, metadataSections } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
@@ -23,6 +22,7 @@ import {
 	OutboundUnavailable,
 	outbound,
 } from "@mod/outbound";
+import { redirects } from "@mod/redirect-uris";
 import secretHashModule from "@mod/secret-hash/module";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
