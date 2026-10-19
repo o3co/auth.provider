@@ -723,10 +723,10 @@ From `@mod/client-allowance`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.client-allowance.grants` | list of string | `[]` |  |  |
-| `sections.client-allowance.scopes` | list of string | `[]` |  |  |
-| `sections.client-allowance.default-scopes` | list of string |  |  |  |
-| `sections.client-allowance.audiences` | list of string | `[]` |  |  |
+| `sections.client-allowance.grants` | list of string | `[]` |  | The grant types the client may use; none allows no grant. |
+| `sections.client-allowance.scopes` | list of string | `[]` |  | The scopes the client may ask for; none allows no scope. |
+| `sections.client-allowance.default-scopes` | list of string |  |  | The scopes given when the client asks none; left out, a request without a scope is refused while scopes are allowed, and an empty list gives no scope. |
+| `sections.client-allowance.audiences` | list of string | `[]` |  | The audiences the client's tokens may name, the first given when none is asked; none means the issuer. |
 
 ### sections.client-assertion
 
