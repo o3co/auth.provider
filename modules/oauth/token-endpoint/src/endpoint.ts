@@ -2,7 +2,7 @@ import type { Audit } from "@mod/audit";
 import { clientAllowance } from "@mod/client-allowance";
 import type { Client, Clients } from "@mod/clients";
 import type { Grant, GrantInput, SessionIssuance, TargetRule } from "@mod/grants";
-import { type HttpRequest, type HttpResponse, noStore, type Route } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer, type Route } from "@mod/http";
 import { determinedSource } from "@mod/request-source";
 import type { Binding, ClientBindings, SenderBindings } from "@mod/sender-binding";
 import type { Tokens } from "@mod/tokens";
@@ -198,11 +198,7 @@ export function tokenEndpoint(
 			return status === 401 ? challenged(response, authenticated.challenges) : response;
 		}
 		record(grantType);
-		return {
-			status: 200,
-			headers: noStore,
-			body: { json: answeredBody(outcome.body) },
-		};
+		return jsonAnswer(200, answeredBody(outcome.body));
 	};
 	return {
 		handle: answer,
