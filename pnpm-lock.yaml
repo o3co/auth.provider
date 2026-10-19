@@ -2436,6 +2436,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/reauth':
+        specifier: workspace:*
+        version: link:../../oauth/reauth
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records

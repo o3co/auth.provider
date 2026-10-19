@@ -11,6 +11,7 @@
 	"dependencies": {
 		"@mod/authorize": "workspace:*",
 		"@mod/kernel": "workspace:*",
+		"@mod/reauth": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/store": "workspace:*"
 	}
