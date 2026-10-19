@@ -899,6 +899,51 @@ describe("guard", () => {
 		]);
 	});
 
+	it("G30 refuses an audit event recorded on the audit contract itself, outside the package and its tests", () => {
+		const contract = [
+			"export interface AuditRecord { readonly kind: string }",
+			"export interface Audit { record(event: AuditRecord): void; lost(): number }",
+			"export const auditEvents = <E>(events: E) => events;",
+			'export function declaredAudit<E>(recorder: Pick<Audit, "record">, events: E) {',
+			"\treturn { record(kind: keyof E & string): void { recorder.record({ kind }); } };",
+			"}",
+		].join("\n");
+		const audit = pkg("@c/audit", {
+			"src/contract.ts": `${contract}\n`,
+			// The package itself hands events on: its own calls are not counted.
+			"src/hub.ts": `import type { Audit } from "./contract.ts";\nexport const on = (a: Audit) => a.record({ kind: "x" });\n`,
+		});
+		const feature = pkg(
+			"@c/feature",
+			{
+				"src/audit-events.ts": `import { auditEvents } from "@c/audit";\nexport default auditEvents({ "f.done": {} });\n`,
+				"src/module.ts": [
+					`import { type Audit, declaredAudit } from "@c/audit";`,
+					`import events from "./audit-events.ts";`,
+					`const records = { record: (n: number) => n };`,
+					`export const raw = (audit: Audit) => audit.record({ kind: "f.done" });`,
+					`export const picked = (p: { audit: Pick<Audit, "record"> }) => p.audit.record({ kind: "f.done" });`,
+					`export const declared = (audit: Audit) => declaredAudit(audit, events).record("f.done");`,
+					`export const other = () => records.record(1);`,
+					`export const lost = (audit: Audit) => (audit as any).record({ kind: "f.done" });`,
+				].join("\n"),
+				"test/module.test.ts": `import type { Audit } from "@c/audit";\nexport const t = (a: Audit) => a.record({ kind: "f.done" });\n`,
+			},
+			{
+				exports: { ".": "./src/module.ts", "./audit-events": "./src/audit-events.ts" },
+				dependencies: { "@c/audit": "*" },
+			},
+		);
+		expect(
+			check([audit, feature], budget)
+				.filter((v) => v.rule.startsWith("G30"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual([
+			"@c/feature/src/module.ts:4 audit.record",
+			"@c/feature/src/module.ts:5 p.audit.record",
+		]);
+	});
+
 	it("G11 refuses line numbers in comments and documents, and G12 files outside a document's directory", () => {
 		const p = pkg("@t/refs", {
 			"src/contract.ts": `// see a.ts:${12}\nexport const s = "b.ts:${3}";\n`,

@@ -26,6 +26,7 @@
   - G27: a package whose declared `network` word reaches a server the deployment provides (`redis`, `smtp`) states what that server must be in a `## Deployment` section of its card (the `network` internal module).
   - G28: a dependency a manifest names in `helpers` lends functions and types alone: shipped code takes from it no value the kernel's `contract` or `extensionPoint` makes.
   - G29: a test file composing every module a feature bridge `joins` and a module contributing to the bridge's points composes the bridge too, so no contribution that decides an answer is silently lost.
+  - G30: outside the package each `./audit-events` declares through (`audit`), shipped code records an event only through the declared wrapper (`declaredAudit`), never on the contract's own `record`, so every event reaches the audit event reference (the `recorded` internal module).
 - Measures each package's public surface: its exported values, and the members of its exported interfaces and type aliases.
 
 ## Not here

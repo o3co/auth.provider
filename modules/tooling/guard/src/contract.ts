@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { budgetRules, dependencyCards } from "./budget/budget.ts";
 import { laidOut } from "./documents.ts";
 import { networkRules } from "./network/network.ts";
+import { declaredRecordRules } from "./recorded/recorded.ts";
 import { foreignFiles, namesLine } from "./references.ts";
 import {
 	branchesOf,
@@ -427,6 +428,7 @@ export function check(
 	wiringRules(s);
 	axisRules(s);
 	bridgeRules(s, surfaces);
+	declaredRecordRules(s);
 	documentRules(s, documents);
 	return violations;
 }
