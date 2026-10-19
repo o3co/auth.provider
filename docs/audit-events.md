@@ -65,7 +65,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `logout.close_pending` | `sid`, `source` | the session is closed but some of its close work is left for later |
+| `logout.close_pending` | `sid`, `source` | the session is closing, not yet closed: some of its close work is left for later |
 | `logout.succeeded` | `sid`, `source` | a logout is answered done, with or without a session |
 
 ## @mod/mfa
@@ -103,7 +103,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | Kind | Attributes | Recorded when |
 |---|---|---|
 | `logout.cascade_failed` | `sid`, `source`, `userAgent`, `store` | a logout a client started could not close the session (`store`: the module whose close failed) |
-| `logout.close_pending` | `sid`, `source` | the session is closed but some of its close work is left for later |
+| `logout.close_pending` | `sid`, `source` | the session is closing, not yet closed: some of its close work is left for later |
 | `logout.success` | `sid`, `source`, `userAgent` | a logout a client started closed the session it names |
 
 ## @mod/subject-revocation-http

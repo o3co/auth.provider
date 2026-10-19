@@ -8,6 +8,6 @@ export default auditEvents({
 	},
 	"logout.close_pending": {
 		attributes: ["sid", "source"],
-		when: "the session is closed but some of its close work is left for later",
+		when: "the session is closing, not yet closed: some of its close work is left for later",
 	},
 });

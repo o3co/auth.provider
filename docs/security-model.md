@@ -27,6 +27,8 @@ Each promise below holds across every module composed. Each names what keeps it 
    - Scenes: code ("tokens and logout", "refresh: what a token may do", "session grant", "OpenID Connect userinfo"), exchange ("token exchange of a session's token"), federation ("federation tokens: refusals").
    - A close left pending is not done: the session stays closing until every participant has finished. Each host sweeps every `session-lifecycle.sweep-interval`, and takes a pending close up again once its retry time comes: after half its age so far, from the sweep interval up to an hour, and `logout` and RP-initiated logout answer it `503`, never as logged out.
    - No scene yet for a device approval. A session that ends by expiry alone calls no participant.
+   - A session that ends by its lifetime leaves no token past it: each token issued from a session expires no later than the session's end, as the lifetime in force when it is issued sets it.
+   - One exception: shortening `session-lifecycle.lifetime` ends the sessions it now covers when they are next read, without their participants, and the tokens issued before then keep their earlier expiry.
    - Bridges such as `session-tokens` come in every app composed through `combinations`; an app composed by hand must compose them itself, or the promise does not hold for what they join.
 2. **`prompt=login` and `max_age` are met only by a fresh authentication.**
    - Kept by: `authorize`'s re-authentication record, taken once; `session` never counts an authentication time it does not know as fresh.
@@ -61,7 +63,9 @@ Each promise below holds across every module composed. Each names what keeps it 
    - No scene: the guard checks it.
 8. **Secrets appear neither in logs nor in answers, but for what the provider hands out on purpose.**
    - What it hands out on purpose: tokens and codes to the one they are issued to, and a secret a registration shows once to its owner (a one-time password app's secret, recovery codes).
-   - Kept by: `kernel`'s refusals and logs, which name a setting, never its value; `audit`, whose events carry no token or secret; `http`, which logs a failure by its kind only.
+   - Boot refusals name a setting by its key path, never its value.
+   - Log lines carry no secret, credential, token, request body or header value, but for header values from a fixed set (such as `Sec-Fetch-Site`). They may carry the identifiers an operator traces a problem by: a peer's or a proxy's address, a host name, a client's id (a metadata document's URL among them), a request's path, and a session's handle.
+   - Kept by: `kernel`'s refusals, by key path; `audit`, whose events carry no token or secret; `http`, which logs a failure by its kind only; and each module's own log lines.
    - Scenes: keys ("refusals about keys"), ops (metrics, readiness, refusals about the operations routes), identity (a ledger's credential at boot), and the audit scenes of the authorization endpoint, client credentials and second factor.
    - No scene reads a running server's log lines.
 9. **A browser route that changes state needs CSRF or origin evidence.**
