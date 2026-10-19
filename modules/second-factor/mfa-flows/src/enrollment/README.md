@@ -25,6 +25,7 @@ Internal module of `mfa-flows`: binding a new factor, from a session or within a
 - `mfa` refusing a binding, as it begins or binds, is answered: full `409 mfa_factor_limit`, duplicate `409 mfa_factor_duplicate`, limited `429 rate_limited`, refused `403 mfa_factor_refused`, binding proof required `403 mfa_binding_proof_required`; an unknown kind `400`.
 - A binding proof's challenge held is recorded `mfa.challenge.sent`, and a proof judged `mfa.verified` or `mfa.verify.failure` (`reason` `invalid`), each with the proof's name as `kind`, `purpose` and the source; never a code.
 - The secret in mid-enrollment is held in the transaction, still sealed by `mfa`; its contents are not read.
+- What a binding keeps (the binding begun, the binding proof's challenge and pass, whether a proof passed) is what the transaction holds, each change made by `transactions`' `keep` from what it holds.
 - Completion judges the label before an attempt is spent: one that is not a string or not of `mfa`'s shape is `400` `invalid label`, and a missing one binds no label.
 - Completion spends an attempt before the proof is judged, and takes the transaction before binding.
 - A binding proof or a first proof `mfa` cannot judge (unavailable) gives its attempt back.

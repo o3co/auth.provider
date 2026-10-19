@@ -11,7 +11,6 @@ import {
 	transactionStore,
 } from "../store.ts";
 import {
-	type BindingChallenge,
 	type ByPurpose,
 	type Challenge,
 	hashOf,
@@ -104,6 +103,7 @@ export function transactionsOver(parts: TransactionParts) {
 			const now = clock.now();
 			const value = {
 				...record,
+				format: 2 as const,
 				attemptsLeft: attempts,
 				browser: hashOf(browser),
 				startedAt: now,
@@ -170,22 +170,17 @@ export function transactionsOver(parts: TransactionParts) {
 			);
 			return changed.applied;
 		},
-		/** Holds the binding proof's challenge sent; false when the transaction is no longer in use. */
-		bindingSent: async (id: string, bindingChallenge: BindingChallenge) =>
-			(await changeLive(id, (t) => ({ ...t, bindingChallenge }))).applied,
-		/** Keeps the binding proof's pass, only while the challenge it answered is the one held. */
-		bindingPassed: async (id: string, sealed: string, passed: { kind: string; pass: string }) =>
-			(
-				await changeLive(id, ({ bindingChallenge, ...t }) =>
-					bindingChallenge?.sealed === sealed
-						? { ...t, bindingPassed: passed, proved: true }
-						: undefined,
-				)
-			).applied,
-		/** Holds a binding begun in the transaction, ending the pass it began with; false when it is no longer in use. */
-		hold: async (id: string, pending: string) =>
-			(await changeLive(id, ({ bindingPassed: _, ...t }) => ({ ...t, pending }))).after?.pending ===
-			pending,
+		/**
+		 * Changes what the transaction holds, from what it holds: what it holds now, or none when it is
+		 * no longer in use or the change gives nothing.
+		 */
+		keep: async (id: string, change: (held: unknown) => unknown) => {
+			const changed = await changeLive(id, (t) => {
+				const held = change(t.held);
+				return held === undefined ? undefined : { ...t, held };
+			});
+			return changed.applied ? { held: changed.after?.held } : undefined;
+		},
 		cleared: () => jar.write("mfa", "", 0),
 	};
 }
