@@ -1,5 +1,5 @@
 import { type Audit, declaredAudit } from "@mod/audit";
-import { applying, type HttpRequest, type HttpResponse, noStore } from "@mod/http";
+import { applying, type HttpRequest, type HttpResponse, type Mark, noStore } from "@mod/http";
 import { isUnavailable, type Log } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
 import events from "./audit-events.ts";
@@ -82,3 +82,14 @@ export const limitingRequests = (counting: RateLimit, told: Told, failMode: Fail
 			uncounted: failMode === "open" ? "pass" : unavailable,
 		}),
 	);
+
+const every = ["GET", "POST", "PUT", "DELETE"] as const;
+
+/** Both policies count every method by source; contributed alike by the module and its stand-in. */
+export const perSourceMark: Mark = {
+	guarantee: "per-source",
+	policies: [
+		{ policy: attemptsPerSource, methods: every },
+		{ policy: requestsPerSource, methods: every },
+	],
+};

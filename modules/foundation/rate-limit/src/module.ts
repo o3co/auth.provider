@@ -1,5 +1,5 @@
 import { audit } from "@mod/audit";
-import { policies } from "@mod/http";
+import { marks, policies } from "@mod/http";
 import { contract, defineModule, isUnavailable, Unavailable } from "@mod/kernel";
 import { type Counter, instruments, counter as metricCounter } from "@mod/metrics";
 import { type Space, type Store, spaces, store } from "@mod/store";
@@ -7,7 +7,7 @@ import { z } from "zod";
 import { attemptLimit, lockouts, type RateLimit, rateLimit, type Window } from "./contract.ts";
 import { lockoutCounter, lockoutSpace, storedStates } from "./lockout.ts";
 import { partitionOf, retryAfterMs } from "./partition.ts";
-import { limitingAttempts, limitingRequests } from "./per-source.ts";
+import { limitingAttempts, limitingRequests, perSourceMark } from "./per-source.ts";
 
 /** Kept from eviction, which a flood of requests could otherwise force to reset the count. */
 const windows: Space = { name: "rate-limit.windows", guarantees: ["no-eviction"] };
@@ -96,4 +96,5 @@ export default defineModule({ name: "rate-limit", section }, (m) => [
 				c.section["fail-mode"],
 			),
 		),
+	m.contribute(marks).by(() => perSourceMark),
 ]);
