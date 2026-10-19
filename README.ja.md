@@ -43,7 +43,7 @@ auth-provider は、TypeScript で書かれた Node.js 向けのセルフホス�
 
 ### 自分で用意するもの
 
-- ログインページと、同意が必要なクライアントがある場合は同意ページ。プロバイダーは `redirect_to` パラメーターを付けて、ブラウザーをログインページにリダイレクトします。ログインページでは `GET /session/csrf` で CSRF トークンを取得し、ユーザー名、パスワード、トークン、`redirect_to` を `POST /session/login` に送信します。その後、応答で受け取った `redirect_to` にブラウザーを移動します。ページはプロバイダーの公開オリジンから配信してください。たとえば、同じリバースプロキシの背後に配置します。別のオリジンから送信されたログイン要求は拒否されます。[login-password](modules/identity/login-password/README.md) と [csrf](modules/identity/csrf/README.md) を参照してください。
+- ログインページと、同意が必要なクライアントがある場合は同意ページ。プロバイダーは `redirect_to` パラメーターを付けて、ブラウザーをログインページにリダイレクトします。ログインページでは `GET /session/csrf` で CSRF トークンを取得し、ユーザー名、パスワード、トークン、`redirect_to` を `POST /session/login` に送信します。その後、応答で受け取った `redirect_to` にブラウザーを移動します。ページはプロバイダーの公開オリジンから配信してください。たとえば、同じリバースプロキシの背後に配置します。別のオリジンから送信されたログイン要求は拒否されます。要るリクエストと答えは[ログインページの手引き](docs/login-page.md)に、契約は [login-password](modules/identity/login-password/README.md) と [csrf](modules/identity/csrf/README.md) にあります。
 - ユーザーアカウント。設定に列挙するか、プロバイダーが呼び出す独自の HTTP サービスで管理します。この HTTP サービスをドキュメントではユーザー台帳（user ledger）と呼びます（[users-http](modules/user-ledger-http/users-http/README.md)）。ユーザー登録とパスワード復旧の機能は含まれません。
 - TLS を終端するリバースプロキシ。アプリ自体は平文の HTTP で待ち受けます。
 - 各サービス内での認可。トークンで何を許可するかは、各サービスまたは別のポリシーエンジンが判断します。[関連プロジェクト](#関連プロジェクト)を参照してください。
