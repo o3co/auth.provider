@@ -792,8 +792,8 @@ From `@mod/sender-binding`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.sender-binding.required` | boolean | `false` |  |  |
-| `sections.sender-binding.kinds` | list of string |  |  |  |
+| `sections.sender-binding.required` | boolean | `false` |  | Whether every token issued to the client is bound to its sender: a request that proves no binding is refused. |
+| `sections.sender-binding.kinds` | list of string |  |  | The binding kinds the client's tokens may be bound by, by the names they give operators (such as dpop), each one composed; unwritten, any. |
 
 ### sections.token-exchange
 
