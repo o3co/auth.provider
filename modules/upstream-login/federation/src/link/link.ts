@@ -1,11 +1,11 @@
 import { type Audit, audit } from "@mod/audit";
 import { type OriginEvidence, originEvidence } from "@mod/csrf";
+import { jsonAnswer } from "@mod/http";
 import type { BuildContext, Log } from "@mod/kernel";
 import { type Sessions, sessions } from "@mod/session";
 import { type Users, users } from "@mod/users";
 import { type Handoff, handoff } from "../handoff/handoff.ts";
 import {
-	answer,
 	type Continuation,
 	landingIn,
 	type Recorded,
@@ -52,14 +52,14 @@ export function linkWith(p: LinkParts): Continuation {
 			if (!p.origin.sameOrigin(request)) {
 				const secFetchSite = loggable(request.headers.get("sec-fetch-site"));
 				p.log.warn("federation.link_start_rejected", { idp: name, secFetchSite });
-				return { answer: answer(403, { error: "link_requires_trusted_origin" }) };
+				return { answer: jsonAnswer(403, { error: "link_requires_trusted_origin" }) };
 			}
 			const entry = await p.sessions.enterFor(request, "credentials");
-			if (entry.kind === "absent") return { answer: answer(401, { error: "login_required" }) };
+			if (entry.kind === "absent") return { answer: jsonAnswer(401, { error: "login_required" }) };
 			if (entry.kind === "short") {
 				// The requirement's own answer, and its name.
 				const said = isObject(entry.answer) ? entry.answer : { answer: entry.answer };
-				return { answer: answer(403, { ...said, requirement: entry.requirement }) };
+				return { answer: jsonAnswer(403, { ...said, requirement: entry.requirement }) };
 			}
 			const { id, context } = entry.session;
 			return { carried: { link: { session: id, subject: context.subject } } };
@@ -81,7 +81,7 @@ export function linkWith(p: LinkParts): Continuation {
 			if (!link) throw new Error("a link's transaction names its session");
 			const refused = (status: number, reason: string, error = reason) => {
 				record("link_refused", name, { subject: link.subject, reason, source, userAgent });
-				return answer(status, { error }, cleared);
+				return jsonAnswer(status, { error }, { cookies: cleared });
 			};
 			// The browser in no session lets the recorded one decide (a posted answer carries no cookie);
 			// one in another session logged in as someone else since.
@@ -119,7 +119,7 @@ export function linkWith(p: LinkParts): Continuation {
 				};
 				if (!(await stillHeld())) {
 					await p.handoff.withdrawn(link.session, name, joined);
-					return answer(401, { error: "login_required" }, cleared);
+					return jsonAnswer(401, { error: "login_required" }, { cookies: cleared });
 				}
 			}
 			return sent(transaction.redirectTo ?? p.landing, cleared);

@@ -23,4 +23,4 @@ Internal module of `federation`: a round trip that links the upstream identity t
 - A session read again after its tokens joined it: closed, short of a requirement or logged in as someone else, `401 login_required`, recording nothing more; unable to tell, unavailable. Either way the link stays and the join's tokens are withdrawn from each receiver given them, leaving any written since.
 
 ## Depends on
-- `csrf` (origin evidence); `session` (entry); `users` (link); `audit`; `handoff` (join); `round-trip` (the continuation, the answers, the landing); `federation`'s section
+- `csrf` (origin evidence); `session` (entry); `users` (link); `audit`; `handoff` (join); `round-trip` (the continuation, the redirect, the landing); `http` (the JSON answer); `federation`'s section
