@@ -378,6 +378,13 @@ describe.runIf(areaTarget().can(auditEvents.need))("G. second factor: audit even
 			proof: totp(secret, 1),
 		});
 		expect(proved.status).toBe(200);
+		// A second counting factor, so the one removed is not the last: with a witness, only a reset ends an enrollment.
+		const added = await beginBinding(b, { kind: "totp" }, s.mail());
+		const bound = await b.send("POST", "/session/mfa/enrollment/complete", {
+			transaction_id: String(added.body.transaction),
+			proof: totp(String(added.body.secret)),
+		});
+		expect(bound.status).toBe(200);
 		const reissued = await during(() => b.send("POST", "/session/mfa/recovery-codes"));
 		const removed = await during(() =>
 			b.send("POST", "/session/mfa/factors/remove", { factor_id: factor }),

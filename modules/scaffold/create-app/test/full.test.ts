@@ -262,6 +262,24 @@ it("gives signer-keys-http an issuer and keys-url of the trial's own, its host a
 	expect(local.get("jwt-bearer")).toBeUndefined();
 });
 
+it("gives mfa-witness-http three URLs of the trial's own at one origin, its host allowed, and a credential", async () => {
+	const target = await mkdtemp(join(tmpdir(), "create-app-trial-"));
+	mkdirSync(join(target, "src"));
+	await writeFile(
+		join(target, "src", "main.ts"),
+		'import o from "@mod/outbound/module";\nimport w from "@mod/mfa-witness-http/module";\n',
+	);
+	const trial = await trialSettings(target, { redisUrl: "redis://127.0.0.1:1" });
+	const local = parseString(trial.local);
+	expect(local.get("mfa-witness-http")).toEqual({
+		"read-url": "https://ledger.example.invalid/mfa-witness/read",
+		"enroll-url": "https://ledger.example.invalid/mfa-witness/enroll",
+		"clear-url": "https://ledger.example.invalid/mfa-witness/clear",
+	});
+	expect(local.get("outbound.allow")).toEqual(["ledger.example.invalid"]);
+	expect(trial.env.MFA_WITNESS_HTTP_CREDENTIAL).toMatch(/^[A-Za-z0-9_-]{43}$/);
+});
+
 it("names signer-keys-http's issuer among jwt-bearer's issuers where both are composed, its keys contributed", async () => {
 	const target = await mkdtemp(join(tmpdir(), "create-app-trial-"));
 	mkdirSync(join(target, "src"));
