@@ -171,10 +171,10 @@ export interface UpstreamLoginReceiver {
 		readonly tokens: UpstreamTokens;
 	}): Promise<Receipt | undefined | void>;
 	/**
-	 * When a later step fails, deletes what `received` kept, whatever the session's state; idempotent.
-	 * Given its receipt, only what that `received` kept, and nothing written since.
+	 * When a later step fails, deletes what `received` kept and nothing written since, by its receipt,
+	 * whatever the session's state; idempotent. With none, `received` kept nothing, and nothing goes.
 	 */
-	withdrawn(sessionId: string, idp: string, receipt?: Receipt): Promise<void>;
+	withdrawn(sessionId: string, idp: string, receipt: Receipt | undefined): Promise<void>;
 }
 
 export const upstreamLoginReceivers = extensionPoint<UpstreamLoginReceiver>(
