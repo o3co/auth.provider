@@ -793,4 +793,22 @@ describe("guard", () => {
 			"G12 modules/x/y.ts",
 		]);
 	});
+
+	it("G12 reads an inline path rooted at / as a location, and still reads a link target in full", () => {
+		const p = pkg("@t/routes", { "README.md": "x\n" });
+		const doc = (text: string) => check([], budget, [{ path: join(p.dir, "README.md"), text }]);
+		const found = (text: string) => doc(text).map((v) => `${v.rule.split(" ")[0]} ${v.detail}`);
+		expect(
+			found("| `GET /.well-known/jwks.json` | `POST /oauth/token` | `/etc/app/config.json` |"),
+		).toEqual([]);
+		// Read from any later position, each tail would name a missing file and be refused.
+		expect(
+			found("`/modules/x/README.md`, (/a/b.ts), '/c/d.json', \"/e/../f.md\" and /g/h.yaml"),
+		).toEqual([]);
+		expect(found("[card](/modules/x/README.md)")).toEqual(["G12 /modules/x/README.md"]);
+		expect(found("`../other/file.md` and `some/dir/missing.md`")).toEqual([
+			"G12 ../other/file.md",
+			"G12 some/dir/missing.md",
+		]);
+	});
 });

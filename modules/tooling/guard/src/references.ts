@@ -5,9 +5,13 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
 const lineReference = /[\w.-]+\.(?:ts|js|json|md|ya?ml|xml|hocon|conf):\d+|#L\d+|\bline \d+\b/i;
 const extension = /\.(?:ts|js|json|md|ya?ml|xml|hocon|conf)$/;
 const linkTarget = /\]\(([^)\s]+)/g;
-/** A path with a directory and a file extension, or one that climbs out with `../`. */
+/**
+ * A path with a directory and a file extension, or one that climbs out with `../`. A token rooted at `/` is a
+ * location (a URL path or a system path), not a document reference, so it is not read; the token must start
+ * right after a space, quote or bracket, so no later position inside it is read either.
+ */
 const pathToken =
-	/(?:^|[\s`'"(])((?:\.{1,2}\/|\/)?[\w.-]+(?:\/[\w.-]+)+\.(?:ts|js|json|md|ya?ml|xml|hocon|conf)|\.\.\/[\w./-]*)/g;
+	/(?:^|[\s`'"(])((?:\.{1,2}\/)?[\w.-]+(?:\/[\w.-]+)+\.(?:ts|js|json|md|ya?ml|xml|hocon|conf)|\.\.\/[\w./-]*)/g;
 
 export const namesLine = (text: string) => lineReference.exec(text)?.[0];
 
