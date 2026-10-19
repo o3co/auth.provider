@@ -9,9 +9,6 @@ import { addsMfa, byKind, factorDecisions } from "./factors.ts";
 import { resealerOver } from "./records/resealer.ts";
 import { section } from "./section.ts";
 
-const _admit = { kind: "admit" } as const;
-const _short = (error: string) => ({ kind: "short", answer: { error } }) as const;
-
 export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => [
 	m.contribute(amrSources).by(async (c) => {
 		const kinds = await c.collect(factorKinds);

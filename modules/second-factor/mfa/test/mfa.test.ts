@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import http from "@mod/http/module";
-import { httpConfig, testRequest } from "@mod/http/testing";
+import { httpConfig } from "@mod/http/testing";
 import {
 	assemble,
 	BootRefused,
@@ -26,7 +26,6 @@ import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { seal } from "@mod/seal";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
-import { sessionRules, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
@@ -41,8 +40,6 @@ import { memoryFactors } from "./stores.ts";
 let shift = 0;
 /** Where set, the clock stands at this time (before the shift), so a test can judge a window's very edge. */
 let stopped: number | undefined;
-/** `session`'s recent-authentication window, as its stand-in counts it. */
-const _recentMs = sessionRules.credentialsSecondsDefault * 1000;
 const runtime = quietRuntime({ clock: { now: () => (stopped ?? Date.now()) + shift } });
 let stop = async () => {};
 afterEach(async () => {
@@ -225,10 +222,10 @@ async function serve(
 		modules: [
 			http,
 			audit.module,
-			sessionStandIn,
 			subjectRevocationStandIn,
 			place.module,
 			sealModule,
+			sessionStandIn,
 			gatesModule,
 			mfaModule,
 			...kinds,
@@ -272,16 +269,6 @@ async function serve(
 	/** The identifier of the subject's first factor of the kind. */
 	const idOf = async (subject: string, kind: string) =>
 		(await decided.held(subject)).find((f) => f.kind === kind)?.id ?? "";
-	/** A browser's request carrying a session for the subject, as the facts say it was proved. */
-	const signedIn = async (
-		subject: string,
-		amr: string[],
-		authenticatedAt: number | "unknown" = runtime.clock.now(),
-	) => {
-		const facts = { subject, amr, authenticatedAt };
-		const { cookies } = await app.get(sessions).complete(testRequest(), facts);
-		return withCookie(cookies[0] ?? "");
-	};
 	return {
 		app,
 		decided,
@@ -289,13 +276,10 @@ async function serve(
 		bindCode,
 		bindKind,
 		idOf,
-		signedIn,
 		events: audit.events,
 		place,
 	};
 }
-const withCookie = (set: string) =>
-	testRequest({ headers: new Map([["cookie", set.split(";")[0] ?? ""]]) });
 
 describe("decisions on the subject's factors", () => {
 	it("binds in three steps, refusing a kind that does not count, and unavailable on another subject's pending", async () => {
