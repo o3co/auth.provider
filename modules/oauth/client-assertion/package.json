@@ -18,6 +18,7 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/keys": "workspace:*",
 		"@mod/outbound": "workspace:*",
+		"@mod/outbound-policy": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"@mod/url-setting": "workspace:*",
 		"jose": "6.2.12",

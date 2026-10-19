@@ -826,6 +826,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/token-endpoint':
         specifier: workspace:*
         version: link:../token-endpoint
