@@ -22,6 +22,7 @@
 - A refused issuance is a value the grant returns unread; it is answered for every grant as `400 invalid_grant` with the policy's description.
 - `target`: the audience `targets` answers within the grant's ceiling.
 - A grant that takes its audience from the request declares `targets`; any other is first asked the rule's `untargeted`, and its refusal is answered before the grant runs.
+- A grant declares `readsAmbient`: `cookie` when it reads the session's cookie, which a browser sends by itself, and then checks the request's origin itself; `none` otherwise. The token endpoint's route has no own-site policy and relies on it; it is a declaration, never a proof.
 - Extension point `sessionIssuances`: told the session and the token's id and expiry by `issue` given a session. One failing revokes the token, and `issue` throws it on.
 - Extension point `targetRules`: at most one rule; two refuse boot.
 - A rule's `target` is given the request's parameters, the default audience and whether the issuance may have another; it answers the audience, or `invalid_target` with a description, which is the answer.
