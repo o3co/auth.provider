@@ -85,13 +85,6 @@ export function vaultWith(seal: Seal) {
 			read(session, idp, entry)?.kept,
 		/** Opened tokens with one opening, and the entry sealed again where a past key sealed it; none as `open`. */
 		read,
-		/** The entry sealed again under the current key when a past key sealed it, else as it is; none when it does not open. */
-		resealed: (session: string, idp: string, entry: Entry): Entry | undefined => {
-			const opened = seal.open(entry.sealed, contextOf(session, idp));
-			if (opened.kind !== "opened") return undefined;
-			if (!opened.stale) return entry;
-			return { version: entry.version, sealed: seal.seal(opened.plain, contextOf(session, idp)) };
-		},
 		seal: (session: string, idp: string, kept: Kept, version: string): Entry => ({
 			version,
 			sealed: seal.seal(JSON.stringify(keptShape.parse(kept)), contextOf(session, idp)),
