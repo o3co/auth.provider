@@ -10,6 +10,7 @@ How to run auth-provider 0.18: Redis, rotating keys, upgrading, and what to watc
 - [Rotating the sealing key](#rotating-the-sealing-key)
 - [Upgrading](#upgrading)
 - [Revoking a user from the ledger](#revoking-a-user-from-the-ledger)
+- [Keeping the second-factor witness at the ledger](#keeping-the-second-factor-witness-at-the-ledger)
 - [Probes and alerts](#probes-and-alerts)
 - [Stopping](#stopping)
 
@@ -139,6 +140,28 @@ When the outside user ledger suspends a user, its answers stop new logins and gr
 - Stopped: the subject's open sessions (and with them the session's refresh tokens, its access tokens, and the local copy of its upstream tokens; relying parties are sent logout notices), and from then on every refresh, device poll, JWT bearer grant, exchange, passkey login and second-factor step; access tokens too where `subject-tokens` is composed. With `delegations: "end"`, federation grants end.
 - Left until they expire: access tokens not bound to a session where `tokens.subject-check = none`, JWTs a resource server checks itself, and tokens already handed to an upstream. A request already past its checks when the revocation is recorded may finish.
 - Every subject revoked keeps its record with no end, so the records grow with the subjects you revoke.
+
+## Keeping the second-factor witness at the ledger
+
+Compose `mfa-witness-http` to have the outside user ledger remember which subjects hold a second factor, apart from the provider's own records: losing those records then never reads as a subject that never enrolled one. The provider asks the ledger whenever a subject holding no counting factor logs in, starts a first enrollment or changes their credentials, so the ledger's answers gate those steps for those subjects.
+
+**Setting it up.**
+
+- Serve `read-url`, `enroll-url` and `clear-url` on one origin, over https (or a plain-http `host:port` at loopback named in `outbound.plain-loopback`). Boot is refused on URLs at two origins. Allow the host in `outbound.allow`, and in `outbound.internal-hosts` when it has a private address.
+- Make the credential random, at least 32 bytes (for example `openssl rand -base64 32`), and set it as `mfa-witness-http.credential`. The provider sends it as `Authorization: Bearer` on every call.
+
+**What the ledger must do.** The provider cannot check any of this; it is yours to keep.
+
+- `POST read-url` with `{"subject"}`: answer `200 {"enrolled": true|false}`, whether the subject carries the mark.
+- `POST enroll-url` with `{"subject", "token", "deadline"}`: set the subject's mark to `token` unless one is set, as one atomic step, and answer `200 {"owner": true|false}`, whether the mark is that token's. The same token sent again answers alike.
+- `POST clear-url` with `{"subject", "deadline"}`: remove the mark and answer `204`. The provider asks it only when an operator resets a subject's second factors.
+- Per subject, the three calls take effect one at a time, in the order they are answered. An answered write survives a crash or a failover, and no read answers older than the last answered write: no lagging replica or cache answers a read.
+- Never carry out an enroll or a clear received after its `deadline` (epoch milliseconds on the provider's clock): the provider stopped waiting for it then. Keep the ledger's clock synchronized with the provider's hosts.
+- Any other answer, `404` included, makes the call unavailable (`503`), never "not enrolled".
+
+**The deadline.** It is the time a write is sent plus `mfa-witness-http.timeout` (default `5s`, as `outbound.timeout`'s). Keep `outbound.timeout` no shorter: the provider gives up at the shorter of the two, and a deadline past that leaves the ledger time to carry out a write the provider no longer waits for.
+
+**While the ledger cannot answer.** Subjects holding no counting factor get `503` at login, when they start their first enrollment and when they change their credentials, until it answers; subjects holding one are let through without asking it.
 
 ## Probes and alerts
 
