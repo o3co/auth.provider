@@ -2,10 +2,17 @@ import { createHash } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import cookiesModule from "@mod/cookies/module";
 import { csrfStandIn } from "@mod/csrf/testing";
-import { listening } from "@mod/http";
+import { listening, type Route, requestEnds, routes } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
-import { assemble, BootRefused, defineModule, kernelConfig, type Module } from "@mod/kernel";
+import {
+	assemble,
+	BootRefused,
+	contract,
+	defineModule,
+	kernelConfig,
+	type Module,
+} from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { loginSource } from "@mod/login-attributes";
 import { type LoginFrom, loginGates, logins, openedAfterHold, returnPaths } from "@mod/login-gates";
@@ -214,6 +221,7 @@ async function serve(setup: Setup = {}) {
 	};
 	return {
 		saved,
+		declared: <T>(of: ReturnType<typeof contract<T>>) => app.get(of),
 		resume,
 		login,
 		upstreams: () => app.get(upstreams),
@@ -769,6 +777,40 @@ describe("federation", () => {
 		for (const name of ["other", "constructor", "__proto__", "Corp"]) {
 			expect(of(name), name).toBeUndefined();
 		}
+	});
+
+	it("declares its start and its callback apart, each with its own reason and its rate limit, and each reaches its own", async () => {
+		const declared = contract<readonly Route[]>("test.declared");
+		const reached: string[] = [];
+		const probe = defineModule({ name: "probe" }, (m) => [
+			m.provide(declared).by((c) => c.collect(routes)),
+			m.contribute(requestEnds).by(() => ({ ended: (end) => void reached.push(end.route ?? "") })),
+		]);
+		const s = await serve({ extra: [probe] });
+		const ours = s.declared(declared).filter((r) => r.path.startsWith(`${base}/`));
+		expect(ours.map((r) => `${r.method} ${r.path}`).sort()).toEqual([
+			`GET ${base}/*`,
+			`GET ${base}/*/callback`,
+			`POST ${base}/*/callback`,
+		]);
+		const reasonOf = (path: string) =>
+			new Set(ours.filter((r) => r.path === path).map((r) => r.crossSite));
+		expect([...reasonOf(`${base}/*`)]).toEqual([
+			expect.stringMatching(/^A start is the user's own navigation/),
+		]);
+		expect([...reasonOf(`${base}/*/callback`)]).toEqual([
+			expect.stringMatching(/^A callback is the IdP's redirect or form_post/),
+		]);
+		for (const route of ours) {
+			// A GET says it changes state; any other method does.
+			if (route.method === "GET") expect(route.changesState, route.path).toBe(true);
+			expect(route.uses?.length, route.path).toBe(1);
+		}
+		const started = await s.begin();
+		await s.callback(`code=good&state=${started.state}`, started.cookie);
+		await s.post(`${base}/corp/callback`, "code=good");
+		await expect.poll(() => reached.length).toBe(3);
+		expect(reached).toEqual([`${base}/*`, `${base}/*/callback`, `${base}/*/callback`]);
 	});
 
 	it("limits starts and callbacks per source", async () => {

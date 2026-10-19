@@ -7,14 +7,14 @@ Internal module of `http`: the server that answers each request with the route i
 
 ## Not here
 - What a request's body holds (`bodies`), how policies apply (`guards`), cross-origin answers (`cors`), the security headers (`security-headers`), and telling a request's end (`ending`).
-- Checking the segments under a `/*` path: a `/*` handler checks them by its own rules.
+- Checking the segments a `*` takes: its handler checks them by its own rules.
 
 ## Offers
 - `serve`: the routes, guarded by their policies, answered on a Node HTTP server.
 - `drain`: stops the server, cutting what is left once the stop's deadline passes.
 
 ## Invariants
-- Paths: an exact path comes first, then the longest `/*` above it.
+- Paths: a middle `*` segment takes exactly one non-empty segment, and a last `/*` everything under it; of the declared paths reaching a path, the one with a literal at the first segment they differ comes first, and a middle `*` before a last.
 - A handler reads the URL parser's path (dot segments resolved, percent-encoding kept as sent).
 - A GET route also answers HEAD, with the same headers and no body.
 - A path no route reaches gets `404`, and a path whose routes take other methods gets `405` naming them in `Allow`.

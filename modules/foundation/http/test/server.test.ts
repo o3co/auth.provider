@@ -327,6 +327,82 @@ describe("http", () => {
 		expect([wrong.status, wrong.headers.get("allow")]).toEqual([405, "GET, HEAD"]);
 	});
 
+	it("serves a path from a route with a middle * for exactly one segment, the declaration literal earliest first", async () => {
+		const base = await serveWith(
+			handlers(
+				(
+					[
+						["GET", "/fed/*", 201],
+						["GET", "/fed/*/callback", 202],
+						["POST", "/fed/*/callback", 203],
+						["GET", "/m/*/c", 205],
+						["GET", "/m/b/*", 206],
+					] as const
+				).map(([method, path, status]) => ({ method, path, handle: () => ({ status }) })),
+			),
+		);
+		const port = Number(new URL(base).port);
+		const status = (target: string, method = "GET") =>
+			rawStatus(
+				port,
+				`${method} ${target} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`,
+			);
+		expect(await status("/fed/google")).toBe(201);
+		expect(await status("/fed/google/callback")).toBe(202);
+		expect(await status("/fed/google/callback", "POST")).toBe(203);
+		expect(await status("/fed/google/callback/more")).toBe(201);
+		// An empty segment, an escaped slash and dot segments reach no declaration they do not match.
+		expect(await status("/fed//callback")).toBe(201);
+		expect(await status("/fed/google%2Fcallback")).toBe(201);
+		expect(await status("/fed/google/callback/..")).toBe(201);
+		expect(await status("/fed/%2e%2e/callback")).toBe(404);
+		expect(await status("/fed/x/../google/callback")).toBe(202);
+		expect(await status("/fed/google", "POST")).toBe(405);
+		expect(await status("/m/b/c")).toBe(206);
+		expect(await status("/m/x/c")).toBe(205);
+		expect(await status("/m/x/d")).toBe(404);
+	});
+
+	it("reaches the same declaration whatever order the routes are declared in, a trailing slash and case read as written, and HEAD only from the declaration reached", async () => {
+		const declaredRoutes: Route[] = (
+			[
+				["GET", "/fed/*", 201],
+				["POST", "/fed/*/callback", 203],
+				["GET", "/h/*/x", 207],
+				["GET", "/h/*", 208],
+			] as const
+		).map(([method, path, status]) => ({ method, path, handle: () => ({ status }) }));
+		// A GET that changes state, which HEAD never reaches.
+		const changing: Route = {
+			method: "GET",
+			path: "/fed/*/callback",
+			changesState: true,
+			crossSite: "a test route",
+			unlimited: "a test route",
+			handle: () => ({ status: 202 }),
+		};
+		for (const order of [[...declaredRoutes, changing], [...declaredRoutes, changing].reverse()]) {
+			await stop();
+			const port = Number(new URL(await serveWith(handlers(order))).port);
+			const status = (target: string, method = "GET") =>
+				rawStatus(
+					port,
+					`${method} ${target} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`,
+				);
+			expect(await status("/fed/google/callback")).toBe(202);
+			expect(await status("/fed/google/callback", "POST")).toBe(203);
+			expect(await status("/fed/google/callback/")).toBe(201);
+			expect(await status("/fed/google/")).toBe(201);
+			expect(await status("/fed/google/Callback")).toBe(201);
+			expect(await status("/FED/google")).toBe(404);
+			// HEAD is answered by the declaration a path reaches, never one broader than it.
+			expect(await status("/fed/google/callback", "HEAD")).toBe(405);
+			expect(await status("/fed/google", "HEAD")).toBe(201);
+			expect(await status("/h/a/x", "HEAD")).toBe(207);
+			expect(await status("/h/a/y", "HEAD")).toBe(208);
+		}
+	});
+
 	it("answers Unavailable with a retryable 503 and other failures without detail", async () => {
 		const recorded = recordingLog();
 		const base = await serveWith(
@@ -899,6 +975,13 @@ describe("route policies", () => {
 		const twice = handlers([route, { ...route, method: "POST" }, route]);
 		expect(await refusalsOf(serveWith(twice))).toEqual([
 			["http.routes:GET /x", "more than one contribution for the same key"],
+		]);
+	});
+
+	it("refuses at boot two routes of one method and the same shape with a middle *, naming the route", async () => {
+		const route: Route = { method: "GET", path: "/x/*/y", handle: () => ({ status: 204 }) };
+		expect(await refusalsOf(serveWith(handlers([route, route])))).toEqual([
+			["http.routes:GET /x/*/y", "more than one contribution for the same key"],
 		]);
 	});
 

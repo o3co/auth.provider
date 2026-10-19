@@ -23,6 +23,7 @@ import { crossOrigin, preflight } from "../cors/cors.ts";
 import { ending } from "../ending/ending.ts";
 import type { GuardedRoute } from "../guards/guards.ts";
 import { secured } from "../security-headers/security-headers.ts";
+import { firstReaching } from "./paths.ts";
 
 /** The request as far as its route is known; the body is read as the route says. */
 type Head = Omit<HttpRequest, "form" | "json" | "fields">;
@@ -96,13 +97,13 @@ function serialized(response: HttpResponse) {
 
 const bare = (status: number): HttpResponse => ({ status, headers: noStore });
 
-/** The routes a path reaches: those of exactly that path, or else of the longest `/*` above it. */
+/** The routes a path reaches: those of the declared path that comes first for it. */
 function reaching(routes: readonly GuardedRoute[], path: string): readonly GuardedRoute[] {
-	const exact = routes.filter((r) => r.path === path);
-	if (exact.length > 0) return exact;
-	const under = routes.filter((r) => r.path.endsWith("/*") && path.startsWith(r.path.slice(0, -1)));
-	const longest = Math.max(0, ...under.map((r) => r.path.length));
-	return under.filter((r) => r.path.length === longest);
+	const first = firstReaching(
+		routes.map((r) => r.path),
+		path,
+	);
+	return routes.filter((r) => first.has(r.path));
 }
 
 /** A GET that changes state is never reached by HEAD, which must change nothing. */
