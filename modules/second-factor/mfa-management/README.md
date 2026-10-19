@@ -19,7 +19,7 @@
 ## Invariants
 - The list needs a live session; the others enter it at the credential-changing level (`mfa-entry` contributes the requirement, named `mfa`).
 - Removing a factor and reissuing codes also ask a second factor proven recently (`mfa-entry`'s `provenRecently`), else `403 step_up_required`: a recent sign-in holding no counting factor, judged before a factor is bound, never stands for one.
-- Removing a factor and reissuing codes read the subject's fence after the session's checks and check the session again before the change: a reset or a revocation complete after that check leaves the change undone (`mfa`'s `fenced`), answered `401 login_required`. A revocation the session's boundary does not yet show is outside this.
+- Removing a factor and reissuing codes read the subject's fence after the session's checks and check the session again before the change: a reset or a revocation complete after that check, before the write, leaves the change undone (`mfa`'s `fenced`), answered `401 login_required`. A revocation the session's boundary does not yet show is outside this.
 - Reissued codes are shown only to a session still entered after they are written; one revoked by then is refused as any entry is, and the codes, though they replaced the old ones, are shown to no one.
 - Renaming takes `mfa`'s refusal of a label, after the session enters and before the factor; a missing label is refused too.
 - Every POST declares `csrf`'s policy, then `rate-limit`'s requests per source, and takes a form or JSON body read by name, a JSON member that is not a string being absent.
