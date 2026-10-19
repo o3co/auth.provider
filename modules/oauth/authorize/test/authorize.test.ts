@@ -45,6 +45,7 @@ import { redirectsFor } from "@mod/redirect-uris/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Session, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import sessionParticipants from "@mod/session-participants/module";
 import bridgeModule from "@mod/session-tokens/module";
 import { sessionTokensInMemory } from "@mod/session-tokens/testing";
 import { simulatedStore } from "@mod/store/testing";
@@ -132,6 +133,7 @@ async function serve(
 			grantCaller,
 			clientAllowanceModule,
 			sessionStandIn,
+			sessionParticipants,
 			subjectRevocationStandIn,
 			consentModule,
 			consentStores,

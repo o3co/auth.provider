@@ -806,6 +806,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       '@mod/session-tokens':
         specifier: workspace:*
         version: link:../session-tokens
