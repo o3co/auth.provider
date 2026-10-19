@@ -14,6 +14,7 @@ What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc
 - `mfa-flows`: recovery codes that were never shown could stay usable; an enrollment could complete after a reset or a revocation that came while it was under way.
 - `federation-grants`: a refresh could hand out a token after the grant had ended or its subject had been revoked, a request that waited for the refresh lock included; a grant past its end is treated as ended everywhere.
 - `session-lifecycle`: an explicit close of a session past its lifetime did not revoke the session's tokens.
+- `refresh`: an access token from a refresh could outlive the session of its family.
 - `code-grant`, `device-grant`: an access token could live past the end of the session it was issued in.
 - `rp-logout`: a close left pending was answered as a logout; the logout taken before authentication had no per-source limit.
 - `jwt-bearer`, `exchange-id-tokens`: the allowance for the issuer's clock could let an assertion or an id_token from just before the subject's revocation boundary through; `jwt-bearer` checks the key id and the issuer more strictly.
@@ -42,6 +43,7 @@ What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc
 - `audit-http` reaches a collector at a `plain-loopback` pair over plain http too.
 - A managed Redis that refuses `CONFIG` is declared in `redis.server-settings`.
 - A configuration file that does not parse is refused at its line and column.
+- A missing or empty `audit.receivers` is refused saying what to name, and an empty or unparsable public or CORS origin is refused at boot instead of stopping the app with an error.
 - The command that generates an app is `create-auth-provider`.
 
 ### Added
