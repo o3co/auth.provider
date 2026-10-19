@@ -36,20 +36,23 @@ Each promise below holds across every module composed. Each names what keeps it 
    - Declared exceptions, each the operator's choice: `rate-limit.fail-mode = open` and `mtls.revocation.on-unavailable = allow`.
 4. **A subject's revocation boundary refuses everything made before it.**
    - Kept by: `subject-revocation`'s boundaries, which every holder of a subject's state compares against, and its followers.
+   - Does not hold for access tokens where `tokens.subject-check = none` is chosen: they live until they expire.
    - Scenes: code ("a subject the ledger revokes over HTTP"), federation ("federation grants: a subject the ledger revokes"), second factor ("a subject the ledger revokes").
    - No scene yet for a code not yet redeemed, a device code or a token exchange.
 5. **What is used once is used once, on any number of instances.**
-   - Kept by: `store`'s take-once writes and each store interface's declared needs; `kernel.deployment = multi` refuses a module that is safe on one instance only.
+   - Kept by: `store`'s take-once writes and each store interface's declared needs; `kernel.deployment = multi` refuses a module that declares itself unsafe on several instances (a module that declares nothing is taken as safe).
+   - Does not hold with a store that does not persist (`store.accept-volatile`): a restart forgets what was used.
    - Scenes: code (a code redeemed once, a refresh token rotated once, two concurrent uses), oauth ("refuses a replayed assertion"), device ("decides a code once").
    - No scene yet for an exchanged id_token or a recovery code used twice, and no scene runs several instances.
 6. **A token bound to a key or a certificate is never used as a bearer token.**
    - Kept by: `sender-binding`, which refuses a bound token presented in another scheme.
    - Scenes: code (userinfo with a DPoP-bound token and with an mTLS-bound one, "refresh: binding a public client's family"), exchange ("token exchange: a binding washed off").
 7. **Every request to another server goes through `outbound`.**
-   - Kept by: guard G26, which lets product code reach the network only through `outbound` or as its manifest's `network` declares.
+   - Kept by: guard G26, which lets product code reach the network only through `outbound` or as its manifest's `network` declares. It reads how the code is written: static imports of network modules and clients, and calls of `fetch`, `WebSocket` and `EventSource`; a dynamic import or a reach it cannot read from the code is not seen.
    - Declared exceptions: `http` serves, `mail-smtp` speaks SMTP and `redis` speaks to Redis, each by its manifest's `network`.
    - No scene: the guard checks it.
-8. **Secrets appear neither in logs nor in answers.**
+8. **Secrets appear neither in logs nor in answers, but for what the provider hands out on purpose.**
+   - What it hands out on purpose: tokens and codes to the one they are issued to, and a secret a registration shows once to its owner (a one-time password app's secret, recovery codes).
    - Kept by: `kernel`'s refusals and logs, which name a setting, never its value; `audit`, whose events carry no token or secret; `http`, which logs a failure by its kind only.
    - Scenes: keys ("refusals about keys"), ops (metrics, readiness, refusals about the operations routes), identity (a ledger's credential at boot), and the audit scenes of the authorization endpoint, client credentials and second factor.
    - No scene reads a running server's log lines.
@@ -98,7 +101,7 @@ Each promise below holds across every module composed. Each names what keeps it 
 
 - **Guaranteed:**
   - Each login gets a new session handle, so a session cannot be fixed in advance. The cookie holds an unguessable secret.
-  - Where the public origin is https, cookies are `__Host-` and Secure. Cookies are always `Path=/`, `HttpOnly` and `SameSite=Lax`. Cookies on a plain-http request are not read.
+  - Where the public origin is https, cookies are `__Host-` and Secure. Cookies are always `Path=/` and `HttpOnly`, and `SameSite=Lax` but for one: the transaction cookie of an upstream identity provider that answers in a posted form is `SameSite=None`, and so always `__Host-` and Secure. Cookies on a plain-http request are not read.
   - Every request that changes state needs same-origin evidence or the double-submit token. Any cross-origin evidence refuses it with 403.
   - Every route declares whether it changes state, and one that does either uses a policy that keeps other sites' requests out and one that limits each source, or says why not; boot refuses a route that does neither. The [route reference](routes.md) lists each route's. A declaration is its owner's claim, not a proof.
   - Revoking a subject's sessions closes each of them.
@@ -151,9 +154,9 @@ Each promise below holds across every module composed. Each names what keeps it 
 - **Guaranteed:**
   - No host is reached by name unless `outbound.allow` lists it or `outbound.allow-any-public` is set. `outbound.deny` is checked first.
   - A name is resolved once, every address it resolves to is checked, and the request connects only to a checked address.
-  - Loopback, link-local, the cloud metadata addresses and other special-purpose addresses are never reached.
+  - Loopback, link-local, the cloud metadata addresses and other special-purpose addresses are never reached, but for a `plain-loopback` pair the operator names.
   - Private addresses are reached only by URLs a module takes from your own configuration and names so (the audit-http collector, the users-http ledger), at hosts in `outbound.internal-hosts`.
-  - Redirects are refused, and only https is used, except plain http to a `plain-loopback` pair.
+  - Redirects are refused, and only https is used, except plain http to a named `plain-loopback` pair, and signed material (whose signature is checked), fetched from its caller's named hosts.
   - Proxy environment variables are never read.
 - **Left to you:**
   - With `outbound.proxy` set, the proxy resolves names and checks where they lead (boot warns so).
