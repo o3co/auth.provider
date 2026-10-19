@@ -30,7 +30,7 @@
 - Every request goes through `outbound`, narrowed to the one endpoint's host.
 - The client's secret goes only to the token endpoint, in the form.
 - The client's secret is never made for the authorization request.
-- Boot is refused, at its key, where `outbound`'s destination policy refuses `token-endpoint` or `jwks-uri` with its host alone.
+- Boot is refused, at its key, where `outbound`'s destination policy refuses `token-endpoint` or `jwks-uri` with its host alone, saying which of its keys to set (`outbound.refusals`).
 - Apple's own default endpoints are put to that policy too.
 - A signed secret lives `secret-lifetime`, on `kernel`'s clock.
 - The id_token is checked with RS256 only, Apple's issuer exactly, the client among its audiences, and `clock-skew`.
