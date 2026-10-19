@@ -23,6 +23,7 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/login-gates": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
+		"@mod/redirect-uris": "workspace:*",
 		"@mod/request-source": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",

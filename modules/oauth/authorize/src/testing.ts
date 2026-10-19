@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
-import { redirects } from "./contract.ts";
 import type { section } from "./section.ts";
 import type { ReauthStore, StoredReauth } from "./store.ts";
 
@@ -8,10 +7,6 @@ export type AuthorizeSettings = z.input<typeof section>;
 
 export function authorizeConfig(settings: Partial<AuthorizeSettings> = {}) {
 	return { authorize: { "login-page": "https://as.example/login", ...settings } };
-}
-
-export function redirectsFor(uris: readonly string[]) {
-	return { [redirects.name]: { "redirect-uris": uris } };
 }
 
 /** A place that keeps authorize's re-authentications, as one implementation of its store interface offers it. */
