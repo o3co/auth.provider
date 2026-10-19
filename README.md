@@ -8,7 +8,7 @@ English | [日本語](README.ja.md)
 
 auth-provider is a self-hosted OAuth 2.0 authorization server and OpenID Connect (OIDC) provider for Node.js, written in TypeScript. Generate an app with the features you need, then run it on Node.js or build its Docker image.
 
-The generator adds the modules those features depend on. At startup the app checks its configuration and lists every problem it finds, by setting name.
+The generator adds the modules those features depend on. At startup the app checks its configuration and lists every problem it finds, naming the setting or the module.
 
 0.18 rewrites 0.17 under new package names, and it is still in prerelease. Until 0.18.0 is final, install it with the npm `next` tag. Without the tag, npm installs 0.17. To move an existing 0.17 deployment, read the [migration guide](docs/migration.md) first: there is no in-place upgrade, the configuration must be rewritten, and stored state is not migrated.
 
@@ -51,7 +51,7 @@ Other modules cover consent, step-up authentication, keeping upstream tokens for
 ## Requirements
 
 - Node.js 24 or later.
-- pnpm, at the version in the generated project's `packageManager` field. `corepack enable` installs that version for you.
+- pnpm, at the version in the generated project's `packageManager` field. `corepack enable` installs that version for you; Node.js 25 and later ship without Corepack, so run `npm install -g corepack` first.
 - Redis 7.0 or later, if you use the Redis adapter for persistent state or several instances. See [Before production](#before-production).
 - Docker, if you want to build and run the generated image.
 
@@ -74,9 +74,10 @@ The generated `README.md` explains the pattern and its settings. In both example
 In `.env`, set:
 
 - `ISSUER_URL` and `HTTP_PUBLIC_ORIGIN`: the URL clients see, with no trailing slash, and its scheme, host and port. The two must have the same origin.
+  - The public origin must be https by default. To try the provider over plain http on your machine, set both to `http://127.0.0.1:8080` and add `http.insecure-origin = true` to `config/local.conf`, written below.
 - `KEYS_SIGNING_KID` and `KEYS_SIGNING_ALG`. The example uses EdDSA, for an Ed25519 key.
-- `AUTHORIZE_LOGIN_PAGE`: the URL of your login page. `CONSENT_PAGE` is the URL of your consent page; leave it unset if all your clients are first-party.
-- `KERNEL_DEPLOYMENT=single`, `STORE_ACCEPT_VOLATILE=true`, `MAIL_ACCEPT_UNSENT=true` and `TOKENS_REVOCATION=denylist`, as in the example. They state that this deployment runs one instance, keeps its state in memory (lost on restart) and sends no mail.
+- `AUTHORIZE_LOGIN_PAGE`: the URL of your login page, on the provider's own origin, such as `http://127.0.0.1:8080/login` behind a proxy that serves the page and passes the rest to the app. The app does not serve this page. A page on another origin lets the app start, but every login from it is refused `403 csrf`. `CONSENT_PAGE` is the URL of your consent page; leave it unset if all your clients are first-party.
+- `KERNEL_DEPLOYMENT=single`, `STORE_ACCEPT_VOLATILE=true`, `MAIL_ACCEPT_UNSENT=true` and `TOKENS_REVOCATION=denylist`, as in the example. They state that this deployment runs one instance, keeps its state in memory (lost on restart) and sends no mail. `TOKENS_REVOCATION=denylist` keeps revoked access tokens in a denylist and refuses them; `unsupported` answers revocation as unsupported.
 
 Generate a signing key:
 
@@ -123,19 +124,13 @@ clients.registered = [
 
 A client is allowed no grants and no scopes until you list them in `client-allowance`. A code-flow client also needs its `redirect-uris`, and `first-party = true` skips the consent page. A confidential client uses `kind = "confidential"`, a `method` such as `client_secret_basic`, and a hash of its secret in `sections.client-secret.hash`. The [configuration reference](docs/configuration.md#client-metadata-sections) lists every client section.
 
-The public origin must be https by default. To try the provider over plain http on your machine, set `ISSUER_URL` and `HTTP_PUBLIC_ORIGIN` to `http://127.0.0.1:8080` and add this line to `config/local.conf`:
-
-```hocon
-http.insecure-origin = true
-```
-
 Start the app:
 
 ```sh
 APP_CONFIG=config/local.conf,config/application.conf pnpm start
 ```
 
-If a setting is missing or invalid, the app prints one `refused <setting>: <reason>` line for each problem on standard error and exits with status 78. Fix them and start again.
+If a setting is missing or invalid, the app prints one `refused <setting or module>: <reason>` line for each problem on standard error and exits with status 78. Fix them and start again; fixing one round can bring the next round's refusals.
 
 With the default port and the local issuer above, check that it is up:
 
@@ -144,7 +139,21 @@ curl http://127.0.0.1:8080/readyz
 curl http://127.0.0.1:8080/.well-known/openid-configuration
 ```
 
-A browser sign-in also needs your login page. If your issuer URL has a path, the discovery document is under that path.
+If your issuer URL has a path, the discovery document is under that path.
+
+A browser sign-in also needs your login page. To check a sign-in without a browser, walk the steps a login page and a client take: a CSRF token, the login, the authorization request with PKCE, and the code redeemed at the token endpoint. With the user and client above:
+
+```sh
+V=$(node -e 'console.log(require("crypto").randomBytes(32).toString("base64url"))')
+C=$(node -e 'console.log(require("crypto").createHash("sha256").update(process.argv[1]).digest("base64url"))' "$V")
+AUTH="http://127.0.0.1:8080/oauth/authorize?response_type=code&client_id=my-web-app&redirect_uri=http%3A%2F%2F127.0.0.1%3A3000%2Fcallback&scope=openid&state=xyz&code_challenge=$C&code_challenge_method=S256"
+TOKEN=$(curl -s -c jar -b jar http://127.0.0.1:8080/session/csrf | node -pe 'JSON.parse(require("fs").readFileSync(0)).csrf_token')
+curl -s -c jar -b jar -H "X-CSRF-Token: $TOKEN" --data-urlencode username=alice --data-urlencode password=your-password --data-urlencode "redirect_to=$AUTH" http://127.0.0.1:8080/session/login
+curl -s -o /dev/null -w '%{redirect_url}\n' -b jar "$AUTH"
+curl -s http://127.0.0.1:8080/oauth/token -d grant_type=authorization_code -d client_id=my-web-app --data-urlencode redirect_uri=http://127.0.0.1:3000/callback -d code=<code> -d code_verifier="$V"
+```
+
+The third request prints the redirect to `http://127.0.0.1:3000/callback` with the code; put it in place of `<code>` in the last one, which answers the tokens. The [login page guide](docs/login-page.md) gives each request and answer.
 
 ## Choose a pattern and add features
 
