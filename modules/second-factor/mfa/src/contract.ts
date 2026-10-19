@@ -1,6 +1,5 @@
 import { contract, extensionPoint } from "@mod/kernel";
 import type { AskedFrom, RefusedReason } from "@mod/mfa-extensions";
-import type { AuthContext } from "@mod/session";
 
 /** A step where a user proves a factor at login; without one, a factor could never be proven. */
 export interface ProofStep {
@@ -55,10 +54,10 @@ export interface Factors {
 	held(subject: string): Promise<readonly Shown[]>;
 	/**
 	 * Whether the subject holds a counting factor, judged against the witness where one is composed: a
-	 * subject it marks while holding none is unavailable, recorded with where it was asked (`binding`
-	 * when not said).
+	 * subject it marks while holding none is unavailable,
+	 * recorded with where it was asked.
 	 */
-	countingHeld(subject: string, at?: Asked): Promise<boolean>;
+	countingHeld(subject: string, at: Asked): Promise<boolean>;
 	/** Whether every session needs a second factor to be used (`mode = required`). */
 	secondFactorRequired(): boolean;
 	/** What a login asks of the subject: nothing, a proof of a factor, or a first binding. */
@@ -67,10 +66,6 @@ export interface Factors {
 	guessable(subject: string, factor: string): Promise<boolean | undefined>;
 	/** Whether every factor of a guessable kind the subject holds was bound after `after` (epoch ms, kernel's clock); true when it holds none. */
 	guessableBoundAfter(subject: string, after: number): Promise<boolean>;
-	/** Whether a proof at `at` (epoch ms, kernel's clock) is still recent, by `session`'s one window. */
-	recent(at: number): boolean;
-	/** Whether the session proved a second factor recently, by `recent`; a recent sign-in never stands for one, whatever the subject holds. */
-	provenRecently(context: AuthContext): boolean;
 	/** Sends the factor's challenge, good at most until `until` (epoch ms on kernel's clock). */
 	challenge(subject: string, factor: string, until: number, from?: AskedFrom): Promise<Challenged>;
 	/** Judges a proof, given the sealed challenge kept; the next state is kept only over the state judged. */

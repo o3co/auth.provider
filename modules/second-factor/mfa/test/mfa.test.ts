@@ -26,7 +26,7 @@ import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { seal } from "@mod/seal";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
-import { type AuthContext, sessionRules, sessions } from "@mod/session";
+import { sessionRules, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
@@ -42,7 +42,7 @@ let shift = 0;
 /** Where set, the clock stands at this time (before the shift), so a test can judge a window's very edge. */
 let stopped: number | undefined;
 /** `session`'s recent-authentication window, as its stand-in counts it. */
-const recentMs = sessionRules.credentialsSecondsDefault * 1000;
+const _recentMs = sessionRules.credentialsSecondsDefault * 1000;
 const runtime = quietRuntime({ clock: { now: () => (stopped ?? Date.now()) + shift } });
 let stop = async () => {};
 afterEach(async () => {
@@ -638,24 +638,6 @@ describe("decisions on the subject's factors", () => {
 		const named = await decided.bind("eve", proved.pending, proved.state, "desk");
 		expect(named.kind === "bound" && named.factor.label).toBe("desk");
 	});
-});
-
-it("takes only a second factor proven recently as proven, never a recent sign-in alone", async () => {
-	const { app } = await serve();
-	const now = runtime.clock.now();
-	const proven = (context: Partial<AuthContext>) =>
-		app
-			.get(factors)
-			.provenRecently({ subject: "x", amr: ["pwd"], authenticatedAt: now, ...context });
-	expect(proven({ amr: ["pwd", "otp", "mfa"] })).toBe(true);
-	expect(proven({})).toBe(false);
-	expect(proven({ amr: ["pwd", "mfa"], authenticatedAt: now - recentMs - 1000 })).toBe(false);
-	expect(proven({ amr: ["pwd", "mfa"], authenticatedAtUnknown: true })).toBe(false);
-	const old = now - recentMs - 1000;
-	expect(proven({ authenticatedAt: old, raisedAt: now, raisedAmr: ["otp", "mfa"] })).toBe(true);
-	expect(
-		proven({ amr: ["pwd", "mfa"], authenticatedAt: old, raisedAt: now, raisedAmr: ["pwd"] }),
-	).toBe(false);
 });
 
 it("declares mfa and the amr of every kind contributed as what it can prove", async () => {

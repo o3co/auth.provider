@@ -2032,9 +2032,6 @@ importers:
       '@mod/seal':
         specifier: workspace:*
         version: link:../../foundation/seal
-      '@mod/session':
-        specifier: workspace:*
-        version: link:../../identity/session
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -2045,6 +2042,9 @@ importers:
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation

@@ -18,12 +18,12 @@
 		"@mod/mfa-extensions": "workspace:*",
 		"@mod/mfa-witness": "workspace:*",
 		"@mod/seal": "workspace:*",
-		"@mod/session": "workspace:*",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"@mod/http": "workspace:*",
 		"@mod/records": "workspace:*",
+		"@mod/session": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
 		"vitest": "5.0.4"
 	},

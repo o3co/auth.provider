@@ -4,7 +4,6 @@ import { amrSources } from "@mod/login-gates";
 import { factorKinds, firstBindingGates, secondFactorAmr } from "@mod/mfa-extensions";
 import { enrollmentWitnesses } from "@mod/mfa-witness";
 import { resealers, seal } from "@mod/seal";
-import { sessions } from "@mod/session";
 import { factorStore, factors, proofSteps } from "./contract.ts";
 import { addsMfa, byKind, factorDecisions } from "./factors.ts";
 import { resealerOver } from "./records/resealer.ts";
@@ -20,7 +19,6 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 		return { name: "mfa", amr: [...second, ...kinds.flatMap((k) => k.amr)] };
 	}),
 	m.provide(factors).by(async (c) => {
-		const open = c.late(sessions);
 		await c.collect(proofSteps);
 		const kinds = await c.collect(factorKinds);
 		if (c.section.mode === "required" && !kinds.some((k) => k.counts)) {
@@ -37,7 +35,6 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 			gates: await c.collect(firstBindingGates),
 			random: c.random.bytes,
 			now: c.clock.now,
-			recent: (at) => open().recent(at),
 			audit: await c.get(audit),
 			witness,
 			log: c.log,

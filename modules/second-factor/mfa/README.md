@@ -12,8 +12,7 @@
 - `proofSteps`: at least one, or `mfa` refuses to boot.
 - Factor kinds and first-binding gates come through `mfa-extensions`: `factorKinds`, asked at each binding and proof, and `firstBindingGates`, asked by `begin`, with what the caller gave, while no counting factor is held.
 - `factors`, its decisions:
-  - Reading: `held`; `countingHeld` (judged against the witness, recording where it was asked); `asks` (nothing / proof / binding); `guessable`; `guessableBoundAfter` (whether every factor of a guessable kind was bound after a time; an unknown kind, or a record with no time, as bound before).
-  - Of a session: `secondFactorRequired`; `recent` (whether a proof at a time is within `session`'s recent-authentication window); `provenRecently` (a second factor proven within it; a sign-in alone never).
+  - Reading: `held`; `countingHeld` (judged against the witness, recording where it was asked); `secondFactorRequired`; `asks` (nothing / proof / binding); `guessable`; `guessableBoundAfter` (whether every factor of a guessable kind was bound after a time; an unknown kind, or a record with no time, as bound before).
   - Proving: `challenge` (sent with the kind, what to show and the challenge sealed / none / limited / refused with the kind, and `contact-changed` when the kind gives it / unknown); `prove`, given the sealed challenge (valid with amr / invalid / replayed / raced).
   - Binding: `begin`, given what the caller holds for the gates (begun with what to show / unknown kind / full / limited / refused / duplicate / binding proof required / first binding closed); `provePending` (valid with the proof's own amr / invalid / unknown); `bind` (bound, with the recovery codes and their factor when it brings them / full / unknown / malformed label / duplicate / fenced); `fence` (no binding begun before binds).
   - Managing: `rename`; `remove`; `clear` (every factor of the subject, of any kind → how many, and their kinds sorted once each); `reissue`.
@@ -41,4 +40,4 @@
 - With a witness, the last counting factor is never removed; `clear` removes the factors, then the mark. Without one, a lost store reads as never enrolled.
 
 ## Depends on
-- `kernel`, `session`, `login-gates`, `seal`, `audit`, `mfa-extensions` (the kinds and gates), `mfa-witness` (the witness)
+- `kernel`, `login-gates`, `seal`, `audit`, `mfa-extensions` (the kinds and gates), `mfa-witness` (the witness)

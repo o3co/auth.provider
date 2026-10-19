@@ -8,22 +8,11 @@ import {
 } from "@mod/mfa-extensions";
 import type { EnrollmentWitness } from "@mod/mfa-witness";
 import type { Seal } from "@mod/seal";
-import type { AuthContext } from "@mod/session";
 import events from "./audit-events.ts";
 import { type Factors, isLabel, type Shown } from "./contract.ts";
 import { type Factor, factorRecords, sealContext } from "./records/records.ts";
 import type { FactorStore } from "./store.ts";
 import { markedBy, standingOf } from "./witness/witness.ts";
-
-/** When the sign-in was, where it is known: a time the upstream did not give is never recent. */
-export const signedInAt = (context: AuthContext) =>
-	context.authenticatedAtUnknown ? undefined : context.authenticatedAt;
-/** When a second factor was last proven: a raise that added one, else a login that did; any other raise says nothing of one. */
-export const secondFactorAt = (context: AuthContext) => {
-	const raised = context.raisedAmr?.includes(secondFactorAmr) ? context.raisedAt : undefined;
-	if (raised !== undefined) return raised;
-	return context.amr.includes(secondFactorAmr) ? signedInAt(context) : undefined;
-};
 
 export interface FactorParts {
 	readonly stored: FactorStore;
@@ -34,8 +23,6 @@ export interface FactorParts {
 	readonly gates: readonly FirstBindingGate[];
 	readonly random: (n: number) => Uint8Array;
 	readonly now: () => number;
-	/** Whether a time is within `session`'s recent-authentication window. */
-	readonly recent: (at: number) => boolean;
 	readonly audit: Audit;
 	/** Who remembers, apart from the store, that a subject enrolled; none composed leaves the store alone to tell. */
 	readonly witness: EnrollmentWitness | undefined;
@@ -170,7 +157,7 @@ export function factorDecisions(p: FactorParts): Factors {
 	};
 	return {
 		held: async (subject) => usable(await records.list(subject), p.kinds).map(shown),
-		countingHeld: async (subject, at = "binding") => {
+		countingHeld: async (subject, at) => {
 			const counts = counting(await records.list(subject), p.kinds).length > 0;
 			return (await standing(subject, counts, at)) === "held";
 		},
@@ -193,11 +180,6 @@ export function factorDecisions(p: FactorParts): Factors {
 				if (kind === undefined) return false;
 				return !guessing(kind) || (f.boundAt !== undefined && f.boundAt > after);
 			}),
-		recent: p.recent,
-		provenRecently: (context) => {
-			const at = secondFactorAt(context);
-			return at !== undefined && p.recent(at);
-		},
 		challenge: async (subject, target, until, from) => {
 			const factor = (await records.list(subject)).find((f) => f.id === target);
 			const kind = factor && p.kinds.get(factor.kind);
