@@ -320,7 +320,7 @@ describe("device authorization", () => {
 		const failed = await s.authorize();
 		expect([failed.status, failed.body.error]).toEqual([503, "temporarily_unavailable"]);
 		expect(warnedSince(from)).toEqual([
-			["device-grant.unavailable", { what: "device store", route: "authorization" }],
+			["http.unavailable", { what: "device store", route: "/oauth/device_authorization" }],
 		]);
 	});
 });
@@ -851,7 +851,7 @@ describe("verification", () => {
 		const lost = await s.verify(cookie, { action: "approve", user_code: user });
 		expect([lost.status, lost.body.error]).toEqual([503, "temporarily_unavailable"]);
 		expect(warnedSince(from)).toEqual([
-			["device-grant.unavailable", { what: "device store", route: "verification" }],
+			["http.unavailable", { what: "device store", route: "/oauth/device/verification" }],
 		]);
 		expect(s.events).toEqual([
 			{

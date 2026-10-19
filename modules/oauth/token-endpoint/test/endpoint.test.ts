@@ -512,8 +512,8 @@ describe("token endpoint", () => {
 		expect(logged.lines().slice(before)).toEqual([
 			{
 				level: "warn",
-				event: "token-endpoint.unavailable",
-				fields: { what: "test", grant_type: "urn:test:echo" },
+				event: "http.unavailable",
+				fields: { what: "test", route: "/oauth/token", grant_type: "urn:test:echo" },
 			},
 		]);
 	});
@@ -543,7 +543,11 @@ describe("token endpoint", () => {
 			body: "grant_type=urn%3Atest%3Akept-out",
 		});
 		expect(res.status).toBe(503);
-		expect(logged.lines().at(-1)).toMatchObject({ fields: { what: "audit" } });
+		expect(logged.lines().at(-1)).toEqual({
+			level: "warn",
+			event: "http.unavailable",
+			fields: { what: "audit", route: "/oauth/token" },
+		});
 		expect(JSON.stringify(logged.lines().at(-1))).not.toContain("kept-out");
 	});
 

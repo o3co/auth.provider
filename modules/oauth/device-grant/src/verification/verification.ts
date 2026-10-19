@@ -1,10 +1,10 @@
 import { type Audit, audit, declaredAudit } from "@mod/audit";
-import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer, type Route } from "@mod/http";
 import type { BuildContext, Runtime } from "@mod/kernel";
 import { attemptLimit, type RateLimit } from "@mod/rate-limit";
 import { determinedSource } from "@mod/request-source";
 import { type Sessions, sessions } from "@mod/session";
-import { answeringUnavailable, oauthError } from "@mod/token-endpoint";
+import { oauthError } from "@mod/token-endpoint";
 import { type Tokens, tokens } from "@mod/tokens";
 import events from "../audit-events.ts";
 import { normalized } from "../codes.ts";
@@ -28,7 +28,7 @@ export interface Verifying {
  * RFC 8628 §3.3, as an interface for the deployment's page: a signed-in user looks up a code, and
  * approves or denies it once. Every decision counts against the subject, so codes cannot be guessed.
  */
-export function verificationWith(v: Verifying) {
+export function verificationWith(v: Verifying): Pick<Route, "handle" | "unavailable"> {
 	const window = {
 		limit: v.settings.attempts,
 		ms: v.settings["attempts-window"] * 1000,
@@ -141,9 +141,7 @@ export function verificationWith(v: Verifying) {
 		const status = action === "approve" ? "approved" : "denied";
 		return jsonAnswer(200, { status, client_id: device.clientId });
 	};
-	return answeringUnavailable(answer, (_request, { what }) => {
-		v.runtime.log.warn("device-grant.unavailable", { what, route: "verification" });
-	});
+	return { handle: answer, unavailable: { response: oauthError(503, "temporarily_unavailable") } };
 }
 
 /** The handler over the contracts the assembly gives. */

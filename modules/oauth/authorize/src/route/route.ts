@@ -1,12 +1,12 @@
 import { type Audit, audit } from "@mod/audit";
 import { type Clients, clients } from "@mod/clients";
 import { type TargetRule, targets } from "@mod/grants";
-import type { HttpRequest, HttpResponse } from "@mod/http";
+import type { HttpRequest, HttpResponse, Route } from "@mod/http";
 import { noStore, site } from "@mod/http";
 import { issuer as named } from "@mod/issuer";
-import { type BuildContext, isUnavailable, type Log, type Unavailable } from "@mod/kernel";
+import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
-import { answeringUnavailable, oauthError } from "@mod/token-endpoint";
+import { oauthError } from "@mod/token-endpoint";
 import { redirects } from "../contract.ts";
 import { type Decision, refusal } from "../decision.ts";
 import { type Flow, flowOver, type Place } from "../flow/flow.ts";
@@ -32,7 +32,7 @@ export interface RouteParts extends Place {
 	readonly rule: Pick<TargetRule, "repeated">;
 }
 
-/** Answers both methods of the endpoint. */
+/** Answers both methods of the endpoint; Unavailable before the redirect URI is trusted is `http`'s to warn of. */
 export function routeWith({
 	issuer,
 	self,
@@ -41,9 +41,7 @@ export function routeWith({
 	flow,
 	log,
 	rule,
-}: RouteParts): (request: HttpRequest) => Promise<HttpResponse> {
-	const warned = ({ what }: Unavailable) =>
-		log.warn("authorize.unavailable", { what, route: path });
+}: RouteParts): Pick<Route, "handle" | "unavailable"> {
 	const urlWith = (params: Iterable<readonly [string, string]>) =>
 		`${self}?${new URLSearchParams([...params].map(([k, v]) => [k, v]))}`;
 
@@ -121,11 +119,11 @@ export function routeWith({
 			return reply(decided);
 		} catch (error) {
 			if (!isUnavailable(error)) throw error;
-			warned(error);
+			log.warn("authorize.unavailable", { what: error.what, route: path });
 			return reply(refusal("temporarily_unavailable"));
 		}
 	};
-	return answeringUnavailable(answer, (_request, unavailable) => warned(unavailable));
+	return { handle: answer, unavailable: { response: oauthError(503, "temporarily_unavailable") } };
 }
 
 /** This endpoint's URL on `http`'s public origin; none without one. */
@@ -134,7 +132,7 @@ export const endpointOver = async (c: BuildContext<Settings>) => {
 	return origin && `${origin}${path}`;
 };
 
-/** The handler over the contracts the assembly gives; refuses to start without a public origin. */
+/** The handler and its answer to Unavailable over the contracts the assembly gives; refuses to start without a public origin. */
 export async function routeOver(c: BuildContext<Settings>) {
 	const self = await endpointOver(c);
 	if (self === undefined) return c.refuse("authorize", "a public origin is required");

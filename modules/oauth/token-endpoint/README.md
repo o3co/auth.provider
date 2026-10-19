@@ -14,7 +14,6 @@
 - Provides `grants`' `composedGrants` (the grant types it dispatches to) and `targets`.
 - Where the token endpoint is: its absolute URL on `http`'s public origin, none without one.
 - `oauthError`: an error response with the status, the code, an optional description, and the members `grants` lets a grant's refusal keep.
-- `answeringUnavailable`: wraps an OAuth endpoint's handler to answer Unavailable `503 temporarily_unavailable` (after an optional note of what was unavailable) and throw anything else on.
 - `authenticateClient`, for other OAuth endpoints too: two methods at once or malformed credentials are `400 invalid_request`, others `401 invalid_client`.
 - For tests (`./testing`): `grantCaller` calls a contributed grant as the endpoint does once the client is in, the grant allowed and the binding read, beside `client-allowance`, refusing a mistyped parameter and asking the rule's `untargeted` first; `grantInput` is what it hands the grant.
 - `issuer`'s metadata items: `token_endpoint` (none without a public origin), `grant_types_supported`, `token_endpoint_auth_methods_supported` and `token_endpoint_auth_signing_alg_values_supported` (left out when `clients` names none).
@@ -32,7 +31,7 @@
 - The binding is read through `sender-binding`: its refusal is answered with its own code and headers, unavailable as `503`, and two bindings are `invalid_request`. A client that must bind and shows none is `invalid_request`, and one bound by a kind it does not name `unauthorized_client`.
 - A grant's `401` carries the challenges `clients` answers with the client: its method's, or every method's when it names none.
 - Error descriptions keep printable ASCII but `"` and `\`; any other character shows as `?`.
-- Unavailable is `503`, never audited, and logged naming only what was unavailable and a grant type dispatched to.
+- Unavailable is the route's declared `503` `temporarily_unavailable`, never audited, warned by `http` as `http.unavailable` with the route, what was unavailable and only a grant type dispatched to.
 - No token or secret is ever audited or logged.
 
 ## Depends on

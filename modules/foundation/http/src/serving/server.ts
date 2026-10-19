@@ -8,13 +8,14 @@ import {
 } from "node:http";
 import type { Socket } from "node:net";
 import { ignoredCertificates } from "@mod/client-certificate";
-import { type Clock, isUnavailable, type Log } from "@mod/kernel";
+import { type Clock, isUnavailable, type Log, type Unavailable } from "@mod/kernel";
 import { ignoredForwarding, sourceOf, type TrustedProxies } from "@mod/request-source";
 import { bodyOf } from "../bodies/body.ts";
 import { paramsOf, readOnly } from "../bodies/values.ts";
 import {
 	type HttpRequest,
 	type HttpResponse,
+	jsonAnswer,
 	noStore,
 	type RequestEndObserver,
 } from "../contract.ts";
@@ -147,13 +148,32 @@ async function handled(
 		if (refused) return bare(refused);
 		return await route.handle(request);
 	} catch (error) {
-		if (isUnavailable(error)) {
-			log.warn("http.unavailable", { what: error.what });
-			return bare(503);
-		}
-		log.error("http.failed", { kind: error instanceof Error ? error.name : typeof error });
+		if (isUnavailable(error)) return unavailable(route, request, error, log);
+		failed(error, log);
 		return bare(500);
 	}
+}
+
+/** A policy's or handler's failure, by its kind only. */
+function failed(error: unknown, log: Log): void {
+	log.error("http.failed", { kind: error instanceof Error ? error.name : typeof error });
+}
+
+/** The route's answer to Unavailable, or http's own, after one warning with what the route notes. */
+function unavailable(
+	route: GuardedRoute,
+	request: HttpRequest,
+	error: Unavailable,
+	log: Log,
+): HttpResponse {
+	let noted: Readonly<Record<string, string>> | undefined;
+	try {
+		noted = route.unavailable?.noted?.(request, error);
+	} catch (failure) {
+		failed(failure, log);
+	}
+	log.warn("http.unavailable", { ...noted, what: error.what, route: route.path });
+	return route.unavailable?.response ?? jsonAnswer(503, { error: "service_unavailable" });
 }
 
 /** Warns of the forwarded headers a request's peer sent and were ignored, in http's words. */

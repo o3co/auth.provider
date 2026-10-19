@@ -19,7 +19,7 @@ export default defineModule({ name: "device-grant", section }, (m) => [
 			method: "POST",
 			path: authorizationPath,
 			uses: [use(requestsPerSource, { name: "device-grant.authorization", window })],
-			handle: await authorizationOver(c),
+			...(await authorizationOver(c)),
 		};
 	}),
 	m.contribute(routes).by(async (c) => ({
@@ -27,7 +27,7 @@ export default defineModule({ name: "device-grant", section }, (m) => [
 		path: verificationPath,
 		takes: ["json"],
 		uses: [use(csrfChecked)],
-		handle: await verificationOver(c),
+		...(await verificationOver(c)),
 	})),
 	m.contribute(metadata).by(async (c) => {
 		const { origin } = await c.get(site);

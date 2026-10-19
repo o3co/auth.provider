@@ -3,7 +3,7 @@
 ## Responsibilities
 - Owns the HTTP entry point: it connects the routes that modules contribute and applies the policies each route declares.
 - Reads what a request sends (query, form, JSON, headers) once at the boundary into read-only maps; a query or form whose percent-escapes decode to invalid UTF-8 is refused with `400`.
-- Answers unavailable with `503`: retryable, with no body, kept out of caches (`noStore`: `no-store`, `Pragma: no-cache`).
+- Answers Unavailable from a route's policy or handler with the route's declared answer, else `503` `service_unavailable`: retryable, kept out of caches (`noStore`: `no-store`, `Pragma: no-cache`).
 
 ## Not here
 - What a route means and its error vocabulary (the contributing module's); what a policy decides and answers (its owner's).
@@ -11,6 +11,7 @@
 
 ## Offers
 - `routes`: a method, a path and a handler, with the policies used (and their options), the bodies taken and cross-origin use when declared; a GET route also answers HEAD, with the same headers and no body.
+- A route's `unavailable`: its answer to Unavailable, and `noted`, called first, whose fields join http's one warning, `http.unavailable`, with what was unavailable and the route's declared path; a `noted` that throws is logged `http.failed` by kind and the answer stands.
 - Paths: an exact path comes first, then the longest `/*` above it; a handler reads the URL parser's path (dot segments resolved, percent-encoding kept as sent), and a `/*` handler checks the segments under it by its own rules.
 - Bodies: a route may take a form, JSON, none, or several, and any other body is `415`, refused only after the route's policies have seen the request.
 - A form and a JSON body share one size limit of 64 KiB: a larger form is read as empty, and a larger JSON body is `413`.

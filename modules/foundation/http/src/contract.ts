@@ -1,4 +1,4 @@
-import { contract, extensionPoint } from "@mod/kernel";
+import { contract, extensionPoint, type Unavailable } from "@mod/kernel";
 import type { Source } from "@mod/request-source";
 import type { Values } from "./bodies/values.ts";
 
@@ -105,7 +105,19 @@ export interface Route {
 	readonly takes?: readonly BodyKind[];
 	/** Takes cross-origin requests; without it, none is answered as one. */
 	readonly cors?: CorsRule;
+	/** The answer when a policy or the handler throws Unavailable; without it, http's own. */
+	readonly unavailable?: UnavailableAnswer;
 	handle(request: HttpRequest): HttpResponse | Promise<HttpResponse>;
+}
+
+/** A route's answer to Unavailable, given after http's one warning of it. */
+export interface UnavailableAnswer {
+	readonly response: HttpResponse;
+	/** What only the route knows: fields for http's warning, and anything it records itself (an audit event). */
+	noted?(
+		request: HttpRequest,
+		unavailable: Unavailable,
+	): Readonly<Record<string, string>> | undefined;
 }
 
 export interface Listening {

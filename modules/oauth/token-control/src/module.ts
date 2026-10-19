@@ -36,12 +36,11 @@ export default defineModule({ name: "token-control", section }, (m) => [
 		method: "POST",
 		path: introspectPath,
 		uses: limited(c, "introspect"),
-		handle: introspection(
+		...introspection(
 			await c.get(clients),
 			await c.get(tokens),
 			(await c.get(issuer)).url,
 			await c.get(audit),
-			c.log,
 		),
 	})),
 	m.contribute(routes).by(async (c) => {
@@ -54,11 +53,10 @@ export default defineModule({ name: "token-control", section }, (m) => [
 			path: revokePath,
 			uses: limited(c, "revoke"),
 			cors: revokeCors,
-			handle: revocation(
+			...revocation(
 				await c.get(clients),
 				[accessKind(await c.get(tokens)), ...contributed],
 				await c.get(audit),
-				c.log,
 			),
 		};
 	}),
