@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
 import { expect, it, vi } from "vitest";
 import { root } from "../../../test/full-app.ts";
-import { referenceFile, referenceOf, rowsOf, sectionsIn } from "../configuration.ts";
+import {
+	clientSectionsOf,
+	referenceFile,
+	referenceOf,
+	rowsOf,
+	sectionsIn,
+} from "../configuration.ts";
 
 // These tests read the whole workspace, which is slow when the machine is busy.
 vi.setConfig({ testTimeout: 60_000 });
@@ -70,8 +76,24 @@ it("finds keys in every section, so none is left out by a shape the reference ca
 	expect(empty).toEqual([]);
 });
 
+it("writes a client metadata section under `sections`, by the module that adds it, after the sections", () => {
+	const schema = { type: "object", properties: { hosts: { type: "array", default: [] } } };
+	const rows = rowsOf(schema, ["sections", "c"], () => ({}));
+	const reference = referenceOf([], [{ section: "c", owner: "@mod/c", rows }]);
+	expect(reference).toContain("## Client metadata sections");
+	expect(reference).toContain("### sections.c\n\nFrom `@mod/c`.");
+	expect(reference).toContain("| `sections.c.hosts` | list of any | `[]` |  |  |");
+});
+
+it("finds the client metadata sections that full with every opt-in composes, each by its contributor", async () => {
+	const found = await clientSectionsOf(root);
+	expect(found.find((s) => s.section === "client-secret")?.owner).toBe("@mod/clients");
+	expect(found.filter((s) => s.rows.length === 0).map((s) => s.section)).toEqual([]);
+});
+
 it("holds, committed, the reference generated from the workspace as it is now", async () => {
-	expect(readFileSync(referenceFile(root), "utf8")).toBe(referenceOf(await sectionsIn(root)));
+	const reference = referenceOf(await sectionsIn(root), await clientSectionsOf(root));
+	expect(readFileSync(referenceFile(root), "utf8")).toBe(reference);
 });
 
 it("describes every key of every section", async () => {
@@ -79,4 +101,30 @@ it("describes every key of every section", async () => {
 		rows.filter((r) => !r.description).map((r) => r.key),
 	);
 	expect(lacking).toEqual([]);
+});
+
+/** Client metadata sections whose keys their owners describe later: one leaves once described, and the list only shrinks. */
+const clientsDescribedLater = [
+	"authorize",
+	"client-allowance",
+	"client-assertion",
+	"client-secret",
+	"consent",
+	"federation-grants",
+	"federation-tokens",
+	"rp-logout",
+	"sender-binding",
+	"token-exchange",
+];
+
+it("describes every key of every client metadata section, outside those listed as described later", async () => {
+	const clients = await clientSectionsOf(root);
+	const lacking = clients
+		.filter((s) => !clientsDescribedLater.includes(s.section))
+		.flatMap(({ rows }) => rows.filter((r) => !r.description).map((r) => r.key));
+	expect(lacking).toEqual([]);
+	const described = clients
+		.filter((s) => clientsDescribedLater.includes(s.section) && s.rows.every((r) => r.description))
+		.map((s) => `${s.section}: describes every key, so it leaves the list`);
+	expect(described).toEqual([]);
 });

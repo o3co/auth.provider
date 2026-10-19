@@ -3,7 +3,13 @@ import { setting } from "@mod/kernel";
 import { parseString } from "@o3co/ts.hocon";
 import { expect, it, vi } from "vitest";
 import { root } from "../../../test/full-app.ts";
-import { referenceConfFile, referenceConfOf, type Section, sectionsIn } from "../configuration.ts";
+import {
+	type ClientSection,
+	clientSectionsOf,
+	referenceConfFile,
+	referenceConfOf,
+	sectionsIn,
+} from "../configuration.ts";
 import {
 	accepts,
 	type Node,
@@ -17,7 +23,12 @@ import {
 vi.setConfig({ testTimeout: 60_000 });
 
 const sections = sectionsIn(root);
-const nodes = (s: Section) => nodesOf(s.schema as unknown as Node, [s.section]);
+/** Each section held to the rules: the operator's, then those modules add to client records. */
+const checked = Promise.all([sections, clientSectionsOf(root)]).then(([own, clients]) => [
+	...own,
+	...clients,
+]);
+const nodes = (s: ClientSection) => nodesOf(s.schema as unknown as Node, [s.section]);
 
 it("writes a section's defaults as HOCON: each described, a unit value bare, a key without a default as a comment", () => {
 	const rows = [
@@ -56,7 +67,7 @@ const prefaultReads =
 
 it("reads every section's prefault through the schema of its key", async () => {
 	const unread = [];
-	for (const s of await sections) {
+	for (const s of await checked) {
 		for (const { node, path } of nodes(s)) {
 			const { type, innerType, defaultValue } = node._zod.def;
 			if (type === "prefault" && innerType && !(await accepts(innerType, defaultValue))) {
@@ -85,7 +96,7 @@ it("tells a key that reads time or size with its unit asked for from one that ta
 /** Each place that breaks `rule`, by its key path. */
 async function breaking(rule: string, breaks: (placed: Placed) => Promise<boolean>) {
 	const found: string[] = [];
-	for (const s of await sections) {
+	for (const s of await checked) {
 		for (const placed of nodes(s)) {
 			if (await breaks(placed)) found.push(`${placed.path.join(".")}: ${rule}`);
 		}

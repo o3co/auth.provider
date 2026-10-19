@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Fragment, fragmentsIn, settingsOf } from "../fragments.ts";
 import { kernel, workspacePackages } from "../project.ts";
+import { clientSectionsIn, type Schema } from "./assembled.ts";
 
 /** The part of a JSON Schema the reference reads. */
 export interface JsonSchema {
@@ -116,11 +117,6 @@ function fragmentRows(fragment: Fragment, at: (key: string) => { env?: string })
 	return walk(fragment.tree as Record<string, unknown>, [fragment.section]);
 }
 
-/** A section's schema, as its module exports it: a Standard Schema that can describe itself. */
-interface Schema {
-	readonly "~standard": { readonly jsonSchema?: { input(o: object): unknown } };
-}
-
 /** A section of the workspace: its owner, the owner's directory, its schema and its rows. */
 export interface Section {
 	readonly section: string;
@@ -174,6 +170,20 @@ export async function sectionsIn(root: string): Promise<Section[]> {
 	return found.sort((a, b) => (a.section < b.section ? -1 : 1));
 }
 
+/** A section modules add to client records: its name, its contributor, its schema and its rows under `sections`. */
+export type ClientSection = Omit<Section, "dir">;
+
+/** Every client metadata section the full template with every opt-in composes, by name. */
+export async function clientSectionsOf(root: string): Promise<ClientSection[]> {
+	return (await clientSectionsIn(root))
+		.map(({ owner, name, schema }) => {
+			const read = schema["~standard"].jsonSchema?.input({ target: "draft-2020-12" });
+			const rows = read ? rowsOf(read as JsonSchema, ["sections", name], () => ({})) : [];
+			return { section: name, owner, schema, rows };
+		})
+		.sort((a, b) => (a.section < b.section ? -1 : 1));
+}
+
 const cell = (value: unknown) =>
 	value === undefined
 		? ""
@@ -181,8 +191,11 @@ const cell = (value: unknown) =>
 const text = (value: string | undefined) =>
 	(value ?? "").replaceAll("|", "\\|").replaceAll("\n", " ");
 
-/** The reference, generated: one table per section. */
-export function referenceOf(sections: readonly Omit<Section, "dir" | "schema">[]): string {
+/** The reference, generated: one table per section, then one per client metadata section. */
+export function referenceOf(
+	sections: readonly Omit<Section, "dir" | "schema">[],
+	clients: readonly Omit<ClientSection, "schema">[] = [],
+): string {
 	const blocks = sections.map(({ section, owner, rows }) => {
 		const lines = rows.map(
 			(r) =>
@@ -205,9 +218,38 @@ export function referenceOf(sections: readonly Omit<Section, "dir" | "schema">[]
 		"A variable is read by the configuration `create-app` generates, for a key the module's example holds; any other key is written in the local layer.",
 		"",
 		...blocks.flatMap((b) => [b, ""]),
+		...(clients.length > 0 ? [clientPartOf(clients), ""] : []),
 	]
 		.join("\n")
 		.trimEnd()}\n`;
+}
+
+/** The client metadata sections: what a client record holds under `sections`, by the module that adds each. */
+function clientPartOf(clients: readonly Omit<ClientSection, "schema">[]): string {
+	const blocks = clients.map(({ section, owner, rows }) =>
+		[
+			`### sections.${section}`,
+			"",
+			`From \`${owner}\`.`,
+			"",
+			"| Key | Type | Default | Required | Description |",
+			"|---|---|---|---|---|",
+			...rows.map(
+				(r) =>
+					`| \`${r.key}\` | ${text(r.type)} | ${cell(r.default)} | ${r.required ? "yes" : ""} | ${text(r.description)} |`,
+			),
+		].join("\n"),
+	);
+	return [
+		"## Client metadata sections",
+		"",
+		"What a client record holds under `sections`, each added by the module named, which reads it.",
+		"Shown as the full template with every opt-in composes them on the trial's settings: a section whose shape follows the composition (`client-assertion` by the outbound policy, `sender-binding` by the bindings composed) can differ in another app.",
+		"",
+		...blocks.flatMap((b) => [b, ""]),
+	]
+		.join("\n")
+		.trimEnd();
 }
 
 /** Where the reference lies in the workspace. */

@@ -4,6 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { auditReferenceFile, auditReferenceOf, declarationsIn } from "./audit-events.ts";
 import {
+	clientSectionsOf,
 	referenceConfFile,
 	referenceConfOf,
 	referenceFile,
@@ -14,6 +15,6 @@ import {
 const root = join(import.meta.dirname, "..", "..", "..", "..", "..");
 await mkdir(dirname(referenceFile(root)), { recursive: true });
 const sections = await sectionsIn(root);
-await writeFile(referenceFile(root), referenceOf(sections));
+await writeFile(referenceFile(root), referenceOf(sections, await clientSectionsOf(root)));
 for (const s of sections) await writeFile(referenceConfFile(s.dir), referenceConfOf(s));
 await writeFile(auditReferenceFile(root), auditReferenceOf(await declarationsIn(root)));
