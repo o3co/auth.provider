@@ -108,3 +108,30 @@ describe("G26 the network is reached through outbound, or as a package declares"
 		expect(said(declaring(pkg("@t/mail", files, both), "- (`network`: `smtp`)"))).toEqual([]);
 	});
 });
+
+describe("G27 a package that talks to a server the deployment provides states that server under Deployment", () => {
+	const g27 = (p: Pkg) =>
+		check([p], budget)
+			.filter((v) => v.rule.startsWith("G27"))
+			.map((v) => `${v.where} ${v.detail}`);
+	const files = {
+		"src/a.ts": 'import Redis from "ioredis";\nexport const a = Redis;\n',
+	};
+	const manifest = { exports: { ".": "./src/contract.ts" }, network: "redis" };
+
+	it("refuses a card without a Deployment section where a declared word reaches such a server", () => {
+		expect(g27(declaring(pkg("@t/store", files, manifest), "- (`network`: `redis`)"))).toEqual([
+			"@t/store card has no `## Deployment` section",
+		]);
+	});
+
+	it("takes the section, and asks it of no word whose reach the deployment does not provide", () => {
+		const stated = "## Invariants\n- (`network`: `redis`)\n\n## Deployment\n- Redis.";
+		expect(g27(declaring(pkg("@t/store", files, manifest), stated))).toEqual([]);
+		const out = {
+			"src/a.ts": 'import { connect } from "node:tls";\nexport const a = connect;\n',
+		};
+		const outbound = { exports: { ".": "./src/contract.ts" }, network: "outbound" };
+		expect(g27(declaring(pkg("@t/out", out, outbound), "- (`network`: `outbound`)"))).toEqual([]);
+	});
+});

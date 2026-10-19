@@ -1,6 +1,6 @@
 # network
 
-Internal module of `guard`: G26, how product code may reach the network.
+Internal module of `guard`: G26, how product code may reach the network, and G27, where a card states the server it needs.
 
 ## Responsibilities
 - Finds where a product package's shipped code reaches the network, and holds it to the words its manifest declares in `network`, each stated on its card as `` `network`: `<word>` ``.
@@ -10,7 +10,7 @@ Internal module of `guard`: G26, how product code may reach the network.
 - Reaching the network in ways a file's syntax does not show: code run by `eval` or a `Worker`, a native addon, a function handed in from elsewhere, the global object reached under another name, or a property named at run time. Review judges those.
 
 ## Offers
-- `networkRules` (G26) and `reachesOf` (a file's places that reach the network).
+- `networkRules` (G26, G27) and `reachesOf` (a file's places that reach the network).
 
 ## Invariants
 - A place reaches the network where shipped code does one of these:
@@ -24,6 +24,7 @@ Internal module of `guard`: G26, how product code may reach the network.
   - `outbound`: `node:http`'s and `node:https`'s `request` and `Agent`, `node:net`'s and `node:tls`'s `connect`, and `lookup` from `node:dns` and `node:dns/promises`.
   - `redis`: the `ioredis` client.
   - `smtp`: `node:net`'s and `node:tls`'s `connect`, and `nodemailer`.
+- `redis` and `smtp` reach a server the deployment provides: a package declaring either has a `## Deployment` section on its card, stating what that server must be (G27).
 - A place no declared word lets through is refused, as is a word guard does not know, a declared word the package reaches nothing with, and a word its card does not state. Tests, test tables and verification and assembly packages are not read.
 
 ## Depends on

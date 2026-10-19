@@ -59,6 +59,8 @@ const words: Readonly<Record<string, readonly string[]>> = {
 	redis: ["ioredis"],
 	smtp: ["node:net connect", "node:tls connect", "nodemailer"],
 };
+/** Words whose reach is a server the deployment provides, which the package's card then states under Deployment. */
+const provided = ["redis", "smtp"];
 
 const nodeName = (specifier: string) =>
 	specifier.startsWith("node:") ? specifier : `node:${specifier}`;
@@ -171,7 +173,7 @@ export function reachesOf(path: string): string[] {
 const covers = (allowed: readonly string[], reach: string) =>
 	allowed.includes(reach) || allowed.some((a) => a.split(" ")[0] === reach);
 
-/** G26: product code reaches the network only as the words its manifest declares let it, each stated on its card. */
+/** G26: product code reaches the network only as the words its manifest declares let it, each stated on its card. G27: a word reaching a server the deployment provides asks a Deployment section. */
 export function networkRules(s: Scope, p: Pkg) {
 	if (!s.budget.productKinds.includes(s.kindOf(p))) return;
 	const rule = "G26 the network is reached through outbound, or as a package declares";
@@ -197,5 +199,13 @@ export function networkRules(s: Scope, p: Pkg) {
 		if (![...reached].some((reach) => covers(words[word] ?? [], reach))) {
 			s.report(rule, p.name, `${word} reaches nothing here`);
 		}
+	}
+	// G27: what the server must be is the operator's to read on the card, in one place.
+	if (known.some((word) => provided.includes(word)) && !/^## Deployment$/m.test(p.card ?? "")) {
+		s.report(
+			"G27 a package that talks to a server the deployment provides states that server under Deployment",
+			p.name,
+			"card has no `## Deployment` section",
+		);
 	}
 }

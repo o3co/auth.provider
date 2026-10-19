@@ -23,6 +23,7 @@
   - G24: a wiring keys its guarantees by the needs its feature declares: shipped code takes `keyof typeof` a name imported from the feature.
   - G25: an adapter declares exactly one of `replaces` and `adapts`, naming a workspace package; an axis has at most one `default`, and one when it has several adapters; `default` and `optIn` are `true` only, on an adapter and a feature; a wording adapter never `joins` its owner.
   - G26: product code reaches the network through `outbound`, or as the words its manifest declares let it (the `network` internal module).
+  - G27: a package whose declared `network` word reaches a server the deployment provides (`redis`, `smtp`) states what that server must be in a `## Deployment` section of its card (the `network` internal module).
 - Measures each package's public surface: its exported values, and the members of its exported interfaces and type aliases.
 
 ## Not here
