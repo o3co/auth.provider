@@ -91,6 +91,7 @@ export async function writeDeployment(
 			...guideLists(settings, writtenOf(fragments)),
 			cards: cardLines(packages.cards(names)),
 			askedOfDeployment: deploymentLines(packages.cards(names)),
+			firstLogin: firstLoginLine(packages.release()),
 			port: String(httpPort),
 			hostEnv: envName("http.host"),
 			portEnv: envName("http.port"),
@@ -118,6 +119,12 @@ function deploymentLines(cards: readonly Card[]): string {
 		...asking,
 		"",
 	].join("\n");
+}
+
+/** The release's walk to a first login, where its repository is stated; nothing otherwise. */
+function firstLoginLine(release: Release): string {
+	const at = atRelease(release, "docs/recipe-first-login.md");
+	return at ? `A first login, step by step: ${at}\n\n` : "";
 }
 
 /** Where a document of the release lies, at its version's tag; none without a repository. */
