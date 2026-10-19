@@ -117,7 +117,7 @@ describe("the logout a client starts", () => {
 		}
 	});
 
-	it("records a close left pending by its sid and source alone, as logout declares it, then the logout", async () => {
+	it("answers a close left pending 503, clearing the cookie and recording it by its sid and source alone, never as a logout", async () => {
 		const unfinished = defineModule({ name: "unfinished" }, (m) => [
 			m.contribute(participants).by(() => ({
 				name: "unfinished",
@@ -129,10 +129,16 @@ describe("the logout a client starts", () => {
 		const h = await serve({ extra: [unfinished] });
 		const { session, cookie } = await h.login();
 		const hint = await h.hintFor(session.id);
-		await h.call("POST", { id_token_hint: hint }, { cookie, "user-agent": "ua/1" });
+		const answered = await h.call(
+			"POST",
+			{ id_token_hint: hint },
+			{ cookie, "user-agent": "ua/1" },
+		);
+		// The session is closing, but tokens it holds live until the close is swept: no success yet.
+		expect([answered.status, answered.json]).toEqual([503, { error: "temporarily_unavailable" }]);
+		expect(answered.cookies.length).toBeGreaterThan(0);
 		expect(h.events.map((e) => [e.kind, e.attributes])).toEqual([
 			["logout.close_pending", { sid: session.id, source: "127.0.0.1" }],
-			["logout.success", { sid: session.id, source: "127.0.0.1", userAgent: "ua/1" }],
 		]);
 	});
 
