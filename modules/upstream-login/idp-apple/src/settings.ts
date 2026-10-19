@@ -5,6 +5,7 @@ import {
 	credentialSetting,
 	endpointSetting as endpoint,
 } from "@mod/upstream-client";
+import { urlsChecked } from "@mod/url-setting";
 import { z } from "zod";
 
 /** The three settings that sign the client's secret, together. */
@@ -79,15 +80,23 @@ const section = clientSetting
  * outbound's destination policy refuses with the endpoint's host alone.
  */
 export const settingsOf = (refusals: OutboundRefusals) =>
-	section.superRefine((s, context) => {
-		for (const key of ["token-endpoint", "jwks-uri"] as const) {
-			// A value that is no URL is refused already, and zod still runs this: it is passed over.
-			if (!URL.canParse(s[key])) continue;
-			const refused = refusals.explained(s[key], { hosts: [new URL(s[key]).hostname] });
-			if (refused === undefined) continue;
-			const message = `outbound's destination policy refuses it: ${refused}`;
-			context.addIssue({ code: "custom", path: [key], message });
-		}
-	});
+	section.superRefine(
+		urlsChecked(
+			(url, hosts) => {
+				const refused = refusals.explained(url, { hosts });
+				return refused && `outbound's destination policy refuses it: ${refused}`;
+			},
+			{
+				urls: (s) => [s["token-endpoint"], s["jwks-uri"]],
+				sent: (s) => ({
+					"token-endpoint": {
+						url: s["token-endpoint"],
+						hosts: [new URL(s["token-endpoint"]).hostname],
+					},
+					"jwks-uri": { url: s["jwks-uri"], hosts: [new URL(s["jwks-uri"]).hostname] },
+				}),
+			},
+		),
+	);
 
 export type Settings = z.output<typeof section>;

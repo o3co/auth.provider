@@ -3337,6 +3337,9 @@ importers:
       '@mod/upstreams':
         specifier: workspace:*
         version: link:../upstreams
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../../foundation/url-setting
       jose:
         specifier: 6.2.12
         version: 6.2.12
