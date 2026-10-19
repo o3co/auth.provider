@@ -33,7 +33,7 @@ export const section = z.strictObject({
 		.array(z.string())
 		.prefault([])
 		.describe("The audiences such a client's tokens may name, as the operator allows."),
-	// Outbound's caps bound max-size and timeout too: a narrower never widens them.
+	// Outbound's caps bound max-size and timeout too: one above them is refused at boot.
 	"max-size": setting
 		.size("B")
 		.pipe(count(1, 16_777_216))
