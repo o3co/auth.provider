@@ -1,6 +1,6 @@
 import type { Algorithm } from "@mod/external-jwt";
 import { setting } from "@mod/kernel";
-import { destinationRefusal, hostEntryOf, type OutboundRefusals } from "@mod/outbound";
+import { destinationRefusal, hostEntryOf, type OutboundRefusals } from "@mod/outbound-policy";
 import {
 	clientSetting,
 	endpointSetting as endpoint,

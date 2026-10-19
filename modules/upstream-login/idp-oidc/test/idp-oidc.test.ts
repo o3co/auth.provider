@@ -13,13 +13,11 @@ import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import {
 	type Narrower,
 	type Outbound,
-	type OutboundRefusals,
 	type OutboundRequest,
 	type OutboundResponse,
 	outbound,
-	outboundRefusals,
-	withinHosts,
 } from "@mod/outbound";
+import { type OutboundRefusals, outboundRefusals, withinHosts } from "@mod/outbound-policy";
 import {
 	type AuthorizationStart,
 	type CodeExchange,
