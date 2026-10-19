@@ -44,8 +44,8 @@ export interface LifecycleParts {
 	readonly log: Log;
 	readonly lifetimeMs: number;
 	readonly sweepMs: number;
-	/** How recent a sign-in must be to change credentials where no requirement judges that. */
-	readonly credentialsMs: number;
+	/** Whether a time is within the recent-authentication window, the floor's for changing credentials. */
+	readonly recent: (at: number) => boolean;
 }
 
 export interface Lifecycle {
@@ -74,8 +74,7 @@ const secretShape = /^[A-Za-z0-9_-]{43}$/;
 export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 	const { kept, index, closings, listed, revocation, jar, clock, log } = parts;
 	const { lifetimeMs, sweepMs } = parts;
-	const recent = (at: number) => clock.now() - at <= parts.credentialsMs;
-	const shortOf = sessionRules.judgedShortOf(parts.judge, recent);
+	const shortOf = sessionRules.judgedShortOf(parts.judge, parts.recent);
 	/** When this host may next sweep a closing whose record it cannot read, and since when it failed. */
 	const unread = new Map<string, { readonly since: number; readonly retryAt: number }>();
 	/** When to retry a closing that failed: after half its age, from the sweep interval up to an hour. Logged. */

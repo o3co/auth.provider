@@ -147,7 +147,10 @@ describe("session cookies", () => {
 			runtime,
 		}).catch((error) => error);
 		expect(refused).toBeInstanceOf(BootRefused);
-		expect((refused as BootRefused).refusals.map((r) => r.where)).toEqual(["session.entry-judge"]);
+		expect((refused as BootRefused).refusals.map((r) => r.where)).toEqual([
+			"session.entry-judge",
+			"session.closing-participants",
+		]);
 	});
 
 	it("uses the lifetime it is given, to the millisecond", async () => {

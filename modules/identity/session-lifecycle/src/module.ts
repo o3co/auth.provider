@@ -17,10 +17,19 @@ export default defineModule({ name: "session-lifecycle", section, replicaSafe: t
 	m.provide(sessions).by(async (c) => {
 		const kept = await c.get(sessionStore);
 		// Kept elsewhere, as session's seams: none composed is refused, never taken as no rule.
-		const none = "needs exactly one contribution (0)";
-		const judge = (await c.collect(entryJudge))[0] ?? c.refuse(entryJudge.label, none);
-		const closing =
-			(await c.collect(closingParticipants))[0] ?? c.refuse(closingParticipants.label, none);
+		const [judge] = await c.collect(entryJudge);
+		const [closing] = await c.collect(closingParticipants);
+		if (!judge || !closing) {
+			const missing = [
+				...(judge ? [] : [entryJudge.label]),
+				...(closing ? [] : [closingParticipants.label]),
+			];
+			const reason = "needs exactly one contribution (0)";
+			return c.refuseAll(missing.map((where) => ({ where, reason })));
+		}
+		// The one recent-authentication window, for entry's floor and for `recent` alike.
+		const recentMs = c.section["recent-authentication"] * 1000;
+		const recent = (at: number) => c.clock.now() - at <= recentMs;
 		const lifetimeMs = c.section.lifetime * 1000;
 		const sweepMs = c.section["sweep-interval"] * 1000;
 		const lifecycle = lifecycleOver({
@@ -37,9 +46,8 @@ export default defineModule({ name: "session-lifecycle", section, replicaSafe: t
 			log: c.log,
 			lifetimeMs,
 			sweepMs,
-			credentialsMs: c.section["recent-authentication"] * 1000,
+			recent,
 		});
-		const recentMs = c.section["recent-authentication"] * 1000;
 		c.every(sweepMs, lifecycle.sweep);
 		const enteredAt = async (handle: string) => {
 			const entry = await lifecycle.entryAt(handle, "use");
@@ -59,7 +67,7 @@ export default defineModule({ name: "session-lifecycle", section, replicaSafe: t
 			raise: raiseOver({ lifecycle, kept, clock: c.clock, lifetimeMs }),
 			closeRequest: lifecycle.closeIn,
 			close: lifecycle.close,
-			recent: (at: number) => c.clock.now() - at <= recentMs,
+			recent,
 		};
 	}),
 	m.contribute(revocationFollowers).by(async (c) => {
