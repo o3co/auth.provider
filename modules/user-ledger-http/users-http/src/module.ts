@@ -1,6 +1,6 @@
 import { deepFreeze, defineModule, setting } from "@mod/kernel";
 import { bearerToken } from "@mod/keys";
-import { credentialPolicy, outbound, outboundRefusals } from "@mod/outbound";
+import { credentialPolicy, destinationRefusal, outbound, outboundRefusals } from "@mod/outbound";
 import { urlSetting } from "@mod/url-setting";
 import { type Ledger, ledgers } from "@mod/users";
 import { z } from "zod";
@@ -72,13 +72,9 @@ export default defineModule({ name: "users-http", section, replicaSafe: true }, 
 		const refusals = await c.get(outboundRefusals);
 		for (const key of urlKeys) {
 			const url = c.section[key];
-			const explained = url === undefined ? undefined : refusals.explained(url, narrowerOf(url));
-			if (explained !== undefined) {
-				return c.refuse(
-					`users-http.${key}`,
-					`outbound's destination policy refuses it: ${explained}`,
-				);
-			}
+			const refused =
+				url === undefined ? undefined : destinationRefusal(refusals, url, narrowerOf(url));
+			if (refused !== undefined) return c.refuse(`users-http.${key}`, refused);
 		}
 		if (refused === "scheme") return c.refuse("users-http.credential", credentialRefusals.scheme);
 		const ask = calls({

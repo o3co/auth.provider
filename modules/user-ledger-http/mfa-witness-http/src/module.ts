@@ -1,6 +1,6 @@
 import { defineModule } from "@mod/kernel";
 import { enrollmentWitnesses } from "@mod/mfa-witness";
-import { credentialPolicy, outbound, outboundRefusals } from "@mod/outbound";
+import { credentialPolicy, destinationRefusal, outbound, outboundRefusals } from "@mod/outbound";
 import { section } from "./section.ts";
 import { witnessAt } from "./witness.ts";
 
@@ -27,13 +27,8 @@ export default defineModule({ name: "mfa-witness-http", section, replicaSafe: tr
 		};
 		const refusals = await c.get(outboundRefusals);
 		for (const [call, url] of Object.entries(urls)) {
-			const explained = refusals.explained(url, narrower);
-			if (explained !== undefined) {
-				return c.refuse(
-					`mfa-witness-http.${call}-url`,
-					`outbound's destination policy refuses it: ${explained}`,
-				);
-			}
+			const refused = destinationRefusal(refusals, url, narrower);
+			if (refused !== undefined) return c.refuse(`mfa-witness-http.${call}-url`, refused);
 		}
 		const refused = (await c.get(credentialPolicy)).refusalOf(Object.values(urls));
 		if (refused !== undefined) {
