@@ -22,13 +22,18 @@ export interface Setting {
 	readonly placeholder: string;
 }
 
-/** A key the configuration file does not read from env: a list, or a value the operator writes. */
+/** A key written in a local layer: a list, a value the operator writes, or one of several lines. */
 export interface Written {
 	readonly key: string;
 	readonly example: string;
 	/** Whether it spans sections: the fragment's value is for its schema only, and the operator writes it. */
 	readonly spansSections: boolean;
+	/** Whether its example is several lines: still read from env, but never in a one-line env file. */
+	readonly severalLines?: boolean;
 }
+
+/** A scalar its owner's example gives in several lines, as a PEM key is. */
+const severalLines = (value: unknown) => typeof value === "string" && value.includes("\n");
 
 /** Values spanning sections, in a fragment for its schema only: copied, they would boot; the operator writes them. */
 const spanningSections: ReadonlyMap<string, string> = new Map([
@@ -102,13 +107,16 @@ export function settingsOf(fragments: readonly Fragment[]): Setting[] {
 	return settings;
 }
 
-/** The keys the operator writes in a local layer: the fragments' lists, and the values that span sections. */
+/** The keys the operator writes in a local layer: the fragments' lists, the values that span sections, and those of several lines. */
 export function writtenOf(fragments: readonly Fragment[]): Written[] {
 	return fragments.flatMap((f) =>
 		leaves(f.tree, [f.section]).flatMap(([path, value]): Written[] => {
 			const key = path.join(".");
 			const noted = spanningSections.get(key);
 			if (noted !== undefined) return [{ key, example: noted, spansSections: true }];
+			if (severalLines(value)) {
+				return [{ key, example: `"""\n${value}\n"""`, spansSections: false, severalLines: true }];
+			}
 			return Array.isArray(value)
 				? [{ key, example: JSON.stringify(value, null, "\t"), spansSections: false }]
 				: [];
@@ -163,6 +171,8 @@ export function envExample(settings: readonly Setting[]): string {
 	const quoted = (value: string) => (/^[^\s"'#\\]*$/.test(value) ? value : JSON.stringify(value));
 	return example(
 		"Copy to .env, uncomment each line you set and replace its placeholder; a value of several lines, such as a PEM key, goes in the local layer instead. Git and the image leave .env out.",
-		settings.map((s) => `${s.env}=${quoted(s.placeholder)}`),
+		settings
+			.filter((s) => !severalLines(s.placeholder))
+			.map((s) => `${s.env}=${quoted(s.placeholder)}`),
 	);
 }

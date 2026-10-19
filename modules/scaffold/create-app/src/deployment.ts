@@ -103,7 +103,8 @@ const guideLists = (settings: readonly Setting[], written: readonly Written[]) =
 		.join("\n"),
 	written: written
 		.map(
-			(w) => `- \`${w.key}\`${w.spansSections ? " (spans sections: written by the operator)" : ""}`,
+			(w) =>
+				`- \`${w.key}\`${w.spansSections ? " (spans sections: written by the operator)" : ""}${w.severalLines ? " (several lines: written here or set in the process environment, never in .env)" : ""}`,
 		)
 		.join("\n"),
 });

@@ -3,7 +3,15 @@ import { join } from "node:path";
 import { assemble } from "@mod/kernel";
 import { parse } from "@o3co/ts.hocon";
 import { expect, it, vi } from "vitest";
-import { fragmentFile, fragmentsIn, settingsOf } from "../src/fragments.ts";
+import {
+	envExample,
+	fragmentFile,
+	fragmentsIn,
+	fragmentsOf,
+	localConfExample,
+	settingsOf,
+	writtenOf,
+} from "../src/fragments.ts";
 import { isTree, packageDirs, root, type Tree } from "./full-app.ts";
 
 // These tests read the whole workspace, which is slow when the machine is busy.
@@ -261,4 +269,22 @@ it("skips a package without a fragment, and refuses one holding other than one s
 	await expect(fragmentsIn([join(fixtures, "one"), join(fixtures, "one")])).rejects.toThrow(
 		"a second fragment for audit-http",
 	);
+});
+
+it("keeps a value its owner's example gives in several lines out of the env example, read from env still and written in the local layer", () => {
+	const text =
+		'k {\n\tid = "REPLACE-KEY-ID"\n\tpem = """-----BEGIN KEY-----\nREPLACE-KEY\n-----END KEY-----"""\n}\n';
+	const fragments = fragmentsOf([{ from: "k", text }]);
+	expect(settingsOf(fragments).map((s) => s.env)).toEqual(["K_ID", "K_PEM"]);
+	expect(envExample(settingsOf(fragments))).not.toContain("K_PEM");
+	expect(envExample(settingsOf(fragments))).toContain("# K_ID=REPLACE-KEY-ID");
+	expect(writtenOf(fragments)).toEqual([
+		{
+			key: "k.pem",
+			example: '"""\n-----BEGIN KEY-----\nREPLACE-KEY\n-----END KEY-----\n"""',
+			spansSections: false,
+			severalLines: true,
+		},
+	]);
+	expect(localConfExample(fragments)).toContain('# k.pem = """\n# -----BEGIN KEY-----');
 });
