@@ -13,6 +13,7 @@ import {
 	users,
 } from "../src/contract.ts";
 import { ledgerUsers } from "../src/ledger.ts";
+import { keptLinks } from "../src/links/kept.ts";
 import usersModule from "../src/module.ts";
 import { record, registeredUsers } from "../src/registered.ts";
 import {
@@ -58,7 +59,7 @@ function counting() {
 		checks = recording.works;
 		return recording.checker;
 	});
-	const counted = ledgerUsers(source, stores.links.store, stores.contacts.store);
+	const counted = ledgerUsers(source, keptLinks(source, stores.links.store), stores.contacts.store);
 	return { source, users: counted, checks };
 }
 
@@ -269,13 +270,11 @@ it("checks passwords within its own assembly's secret-hash limit, whatever anoth
 });
 
 describe("records", () => {
+	const empty = () => registeredUsers([], (inUse) => recordingChecker(inUse, randomBytes).checker);
 	const open = () => {
 		const stores = memoryUsersStores();
-		const u = ledgerUsers(
-			registeredUsers([], (inUse) => recordingChecker(inUse, randomBytes).checker),
-			stores.links.store,
-			stores.contacts.store,
-		);
+		const source = empty();
+		const u = ledgerUsers(source, keptLinks(source, stores.links.store), stores.contacts.store);
 		return { u, stores };
 	};
 
@@ -311,11 +310,8 @@ describe("records", () => {
 			read: async () => undefined,
 			update: async () => undefined,
 		};
-		const u = ledgerUsers(
-			registeredUsers([], (inUse) => recordingChecker(inUse, randomBytes).checker),
-			vanishing,
-			stores.contacts.store,
-		);
+		const source = empty();
+		const u = ledgerUsers(source, keptLinks(source, vanishing), stores.contacts.store);
 		await expect(u.link("s", { idp: "i", subject: "u" })).rejects.toSatisfy(isUnavailable);
 	});
 });

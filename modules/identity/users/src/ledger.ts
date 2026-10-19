@@ -1,26 +1,11 @@
-import { deepFreeze, Unavailable } from "@mod/kernel";
+import { deepFreeze } from "@mod/kernel";
 import { canonicalAddress } from "@mod/mail";
 import { type Contact, isWellFormedSubject, type Users, userAttribute } from "./contract.ts";
-import { keyOf, none, type UserSource, unanswerable } from "./registered.ts";
-import type {
-	Changed,
-	ContactStore,
-	LinkStore,
-	RecordStore,
-	StoredContacts,
-	StoredLink,
-} from "./store.ts";
+import { none, type UserSource, unanswerable } from "./registered.ts";
+import { type ContactStore, type StoredContacts, written } from "./store.ts";
 
 const maxPasswordBytes = 1024;
 const maxContacts = 20;
-
-/** A link holds its subject; one removed holds none, and is taken again from what it holds. */
-const linkRecord = (subject: string | null) => ({ subject }) as unknown as StoredLink;
-/** The subject a record links to, or none when it holds no link. */
-const holderOf = (record: StoredLink | undefined) => {
-	const subject = (record as { subject?: unknown } | null | undefined)?.subject;
-	return typeof subject === "string" ? subject : undefined;
-};
 
 const isContact = (item: unknown): item is Contact =>
 	(item as Contact | null)?.kind === "email" && typeof (item as Contact).value === "string";
@@ -34,62 +19,24 @@ function required(...parts: string[]) {
 	if (parts.some((part) => part === "")) throw new TypeError("users: an empty part names no one");
 }
 
-/** Changes the record, or saves `first` where there is none; one saved meanwhile is changed from what it holds. */
-async function written<T>(
-	store: RecordStore<T>,
-	key: string,
-	first: T,
-	change: (record: T) => Changed<T> | undefined,
-): Promise<{ readonly before: T | undefined; readonly after: T }> {
-	const changed = await store.update(key, change);
-	if (changed) return changed;
-	if ((await store.save(key, first, "endless")) === "created")
-		return { before: undefined, after: first };
-	const again = await store.update(key, change);
-	// The key held a record a moment ago, and records never end.
-	if (!again) throw new Unavailable("users");
-	return again;
-}
+/** Who answers by upstream identity and keeps links: users through its link store, or the ledger. */
+export type Linking = Pick<Users, "byUpstream" | "link" | "unlink">;
 
-/** The source's users, with the links and contacts written through the store interfaces. */
-export function ledgerUsers(source: UserSource, links: LinkStore, contacts: ContactStore): Users {
+/** The source's users, linked as `linking` links them, with the contacts written through the store interface. */
+export function ledgerUsers(source: UserSource, linking: Linking, contacts: ContactStore): Users {
 	return {
 		verify: async (identifier, password) =>
 			// The length is the sender's choice, so answering early tells nothing about users.
 			Buffer.byteLength(password) > maxPasswordBytes ? none : source.verify(identifier, password),
 		bySubject: source.bySubject,
-		byUpstream: async (idp, upstreamSubject) => {
-			const fixed = await source.byUpstream(idp, upstreamSubject);
-			if (source.upstreamLast) return fixed;
-			if (fixed.kind === "user") return fixed;
-			const subject = holderOf(await links.read(keyOf({ idp, subject: upstreamSubject })));
-			if (subject === undefined) return none;
-			const found = await source.bySubject(subject);
-			if (found.kind === "unanswerable") throw new Unavailable("users");
-			return found;
-		},
+		byUpstream: linking.byUpstream,
 		link: async (subject, upstream) => {
 			required(subject, upstream.idp, upstream.subject);
 			if (!isWellFormedSubject(subject))
 				throw new TypeError("users: a subject is 1 to 255 ASCII characters");
-			const fixed = await source.byUpstream(upstream.idp, upstream.subject);
-			if (fixed.kind === "user") return fixed.user.subject === subject ? "already" : "conflict";
-			if (source.upstreamLast) return "conflict";
-			const take = (record: StoredLink) =>
-				holderOf(record) === undefined ? { value: linkRecord(subject) } : undefined;
-			const { before, after } = await written(links, keyOf(upstream), linkRecord(subject), take);
-			if (holderOf(after) !== subject) return "conflict";
-			return holderOf(before) === subject ? "already" : "linked";
+			return linking.link(subject, upstream);
 		},
-		unlink: async (subject, upstream) => {
-			const fixed = await source.byUpstream(upstream.idp, upstream.subject);
-			if (fixed.kind === "user") return fixed.user.subject === subject ? "fixed" : "none";
-			if (source.upstreamLast) return "none";
-			const release = (record: StoredLink) =>
-				holderOf(record) === subject ? { value: linkRecord(null) } : undefined;
-			const changed = await links.update(keyOf(upstream), release);
-			return changed && holderOf(changed.before) === subject ? "unlinked" : "none";
-		},
+		unlink: linking.unlink,
 		verifiedContact: async (subject, contact) => {
 			required(subject, contact.value);
 			if (contact.kind !== "email") throw new TypeError("users: an unknown kind of contact");

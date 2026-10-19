@@ -1,4 +1,4 @@
-import { contract } from "@mod/kernel";
+import { contract, Unavailable } from "@mod/kernel";
 
 declare const storedLink: unique symbol;
 /** Who an upstream identity is linked to, as the store keeps it: only users opens it. */
@@ -23,6 +23,23 @@ export interface RecordStore<T> {
 		key: string,
 		change: (record: T) => Changed<T> | undefined,
 	): Promise<{ readonly before: T; readonly after: T } | undefined>;
+}
+
+/** Changes the record, or saves `first` where there is none; one saved meanwhile is changed from what it holds. */
+export async function written<T>(
+	store: RecordStore<T>,
+	key: string,
+	first: T,
+	change: (record: T) => Changed<T> | undefined,
+): Promise<{ readonly before: T | undefined; readonly after: T }> {
+	const changed = await store.update(key, change);
+	if (changed) return changed;
+	if ((await store.save(key, first, "endless")) === "created")
+		return { before: undefined, after: first };
+	const again = await store.update(key, change);
+	// The key held a record a moment ago, and records never end.
+	if (!again) throw new Unavailable("users");
+	return again;
 }
 
 export type LinkStore = RecordStore<StoredLink>;

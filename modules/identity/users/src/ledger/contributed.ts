@@ -61,7 +61,6 @@ export function contributedSource(ledger: Ledger, log: Log): UserSource {
 	const { byUpstream } = ledger;
 	const upstream = byUpstream
 		? {
-				upstreamLast: true as const,
 				byUpstream: async (idp: string, upstreamSubject: string) => {
 					if (idp === "" || upstreamSubject === "") return none;
 					const answer = copyOf(

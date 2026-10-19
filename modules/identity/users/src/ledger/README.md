@@ -7,7 +7,7 @@
 - Links, contacts and which answer users gives: users' own.
 
 ## Offers
-- `contributedSource(ledger, log)`: the ledger as a source of users, marked as having the last word by upstream identity where it looks users up so.
+- `contributedSource(ledger, log)`: the ledger as a source of users; by upstream identity none where the ledger does not look users up so.
 
 ## Invariants
 - A ledger's answer is read once into a frozen copy of `subject` and `attributes`; its failure, an ill-formed subject, attributes that are no object, or another subject's user is unavailable, never none.

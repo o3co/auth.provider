@@ -70,9 +70,7 @@ export const unanswerable: Unanswerable = deepFreeze({ kind: "unanswerable" });
 /** Makes the checker for the hashes in use, as `secret-hash`'s checkers do; tests may record the work each check does. */
 export type CheckerOf = (inUse: Iterable<SecretHash>) => SecretChecker;
 
-export interface UserSource extends Pick<Users, "verify" | "bySubject" | "byUpstream"> {
-	readonly upstreamLast?: true;
-}
+export type UserSource = Pick<Users, "verify" | "bySubject" | "byUpstream">;
 
 /** The users the settings register, checked by a checker `secret-hash` makes for their hashes. */
 export function registeredUsers(
