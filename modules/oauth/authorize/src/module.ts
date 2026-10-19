@@ -28,7 +28,7 @@ export default defineModule({ name: "authorize", section }, (m) => [
 				method,
 				path,
 				uses: [use(requestsPerSource, { name: "authorize", window })],
-				handle: await routeOver(c),
+				...(await routeOver(c)),
 			};
 		}),
 	),

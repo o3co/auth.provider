@@ -21,7 +21,7 @@
   - `authorize.rejected` on a refusal decided for the client or its consent (no subject; `client`, `reason`: `grant_type_not_allowed`, `scope_omitted_without_default`, `client_not_first_party`, `consent_required` or an issuance policy's reason, with `policy` its name).
   - `source` only when `request-source` determined it.
   - Never the code, `state`, the redirect URI or the scope.
-  - Nothing for a malformed request, an unknown client or redirect URI, or unavailable (logged as a warning naming only what and the route).
+  - Nothing for a malformed request, an unknown client or redirect URI, or unavailable (a warning naming only what and the route: `http.unavailable` before the redirect URI is confirmed, `authorize.unavailable` after).
 - Test configuration builders (`./testing`)
 - Store interface (the assembly wires the implementation): re-authentications (per name, an unguessable value the place never keeps in clear; put / rewrite from the current contents). Record contents are not shown to the store. Requirements: survives a crash, never rolled back by failover, names that derive from the unguessable value
 - Contract test of the store interface (`./testing`), for every implementation
@@ -35,7 +35,7 @@
 - Under `oidc-mode` `oidc-required`, a request whose own `scope` does not name `openid` is `invalid_scope`, even when the client's default scope holds it. Under `dual`, a request without `openid` gets the scope it asks or the client's default.
 - A client that is not first-party, once logged in, is refused with `unauthorized_client` while `consent` is not `asking`. Next, before consent, `tokens`' issuance policies are asked for the code's access token (`authorization_code`, the session); a refusal is `access_denied` with the policy's description.
 - A first-party client (by `consent`) is never asked for consent. Any other is asked when `consent`'s records do not cover the scope, or with `prompt=consent`; a denial comes back as `access_denied`.
-- Until the client and redirect URI are confirmed, errors are JSON with no redirect (unavailable: `503`). After that every answer, errors and unavailable included, is a redirect to the redirect URI carrying `state` (when given once and not too long) and `iss`.
+- Until the client and redirect URI are confirmed, errors are JSON with no redirect (unavailable: the routes' declared `503` `temporarily_unavailable`). After that every answer, errors and unavailable included, is a redirect to the redirect URI carrying `state` (when given once and not too long) and `iss`.
 - A fresh login that `prompt=login` or `max_age` demands counts only through a re-authentication record, never values in the URL: made for the whole request when the browser is sent to log in, taken once by that request, gone after 10 minutes. A session whose authentication time `session` answers as unknown meets neither, nor an essential `auth_time`, so a login is asked again.
 - Back from its login (its record taken) with the authentication time still unknown, a request is refused with `login_required`.
 

@@ -1,8 +1,10 @@
 import type { AuditRecord } from "@mod/audit";
 import type { Client, Section } from "@mod/clients";
-import { testRequest } from "@mod/http/testing";
-import { Unavailable } from "@mod/kernel";
-import { recordingLog } from "@mod/kernel/testing";
+import { listening, routes } from "@mod/http";
+import http from "@mod/http/module";
+import { httpConfig, testRequest } from "@mod/http/testing";
+import { assemble, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { type Decision, recorded as refused } from "../src/decision.ts";
 import { routeWith } from "../src/route/route.ts";
@@ -27,7 +29,7 @@ function route(
 ) {
 	const recorded: AuditRecord[] = [];
 	const logged = recordingLog();
-	const answer = routeWith({
+	const declared = routeWith({
 		issuer: "https://as.example",
 		self: "https://as.example/oauth/authorize",
 		clients: { find },
@@ -37,7 +39,7 @@ function route(
 		// No rule composed: a repeated parameter is a malformed request.
 		rule: {},
 	});
-	return { answer, recorded, lines: logged.lines };
+	return { answer: declared.handle, declared, recorded, lines: logged.lines };
 }
 
 const query = new Map([
@@ -59,23 +61,57 @@ it("records the request's source only when http determined it", async () => {
 	]);
 });
 
-it("leaves one warning naming what was unavailable and the route, before the redirect URI is trusted and after", async () => {
-	const down = async (): Promise<never> => {
+it("answers Unavailable once the redirect URI is trusted by sending temporarily_unavailable back, warning what and the route", async () => {
+	const after = route(async (): Promise<never> => {
 		throw new Unavailable("reauth store");
-	};
-	const after = route(down);
+	});
 	const sent = await after.answer(testRequest({ query }));
-	const before = route(undefined, down);
-	const local = await before.answer(testRequest({ query }));
 	expect([sent.status, new URL(sent.headers?.location ?? "").searchParams.get("error")]).toEqual([
 		302,
 		"temporarily_unavailable",
 	]);
-	expect(local.status).toBe(503);
-	const warned = { level: "warn", event: "authorize.unavailable" };
-	expect([...after.lines(), ...before.lines()]).toEqual([
-		{ ...warned, fields: { what: "reauth store", route: "/oauth/authorize" } },
-		{ ...warned, fields: { what: "reauth store", route: "/oauth/authorize" } },
+	expect(after.lines()).toEqual([
+		{
+			level: "warn",
+			event: "authorize.unavailable",
+			fields: { what: "reauth store", route: "/oauth/authorize" },
+		},
 	]);
-	expect([after.recorded, before.recorded]).toEqual([[], []]);
+	expect(after.recorded).toEqual([]);
+});
+
+it("leaves Unavailable before the redirect URI is trusted to http, which answers 503 temporarily_unavailable and warns once", async () => {
+	const before = route(undefined, async (): Promise<never> => {
+		throw new Unavailable("clients");
+	});
+	const logged = recordingLog();
+	const app = await assemble({
+		modules: [
+			http,
+			defineModule({ name: "authorize-route" }, (m) => [
+				m
+					.contribute(routes)
+					.by(() => ({ method: "GET", path: "/oauth/authorize", ...before.declared })),
+			]),
+		],
+		config: { ...kernelConfig(), ...httpConfig() },
+		runtime: quietRuntime({ log: logged.log }),
+	});
+	await app.start();
+	try {
+		const res = await fetch(
+			`http://127.0.0.1:${app.get(listening).port()}/oauth/authorize?client_id=nocode`,
+		);
+		expect([res.status, await res.json()]).toEqual([503, { error: "temporarily_unavailable" }]);
+	} finally {
+		await app.stop(1000);
+	}
+	expect([...before.lines(), ...logged.lines().filter((line) => line.level === "warn")]).toEqual([
+		{
+			level: "warn",
+			event: "http.unavailable",
+			fields: { what: "clients", route: "/oauth/authorize" },
+		},
+	]);
+	expect(before.recorded).toEqual([]);
 });
