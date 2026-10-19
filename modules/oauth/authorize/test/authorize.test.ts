@@ -432,7 +432,7 @@ it("counts a login made at the very time a re-authentication was asked", async (
 	expect((await authorize(resume.search.slice(1), fresh)).at?.searchParams.has("code")).toBe(true);
 });
 
-it("counts a login reported within the second the re-authentication was asked, not one a second before", async () => {
+it("counts a login from the moment the re-authentication was asked, to the millisecond, not one before it in the same second", async () => {
 	const { authorize, login } = await serve();
 	const old = await login();
 	now += 10_500;
@@ -442,10 +442,10 @@ it("counts a login reported within the second the re-authentication was asked, n
 	};
 	const sameSecond = await resumeOf();
 	const early = await login("alice", ["pwd"], now - 500);
-	expect((await authorize(sameSecond, early)).at?.searchParams.has("code")).toBe(true);
-	const secondBefore = await resumeOf();
-	const earlier = await login("alice", ["pwd"], now - 1000);
-	expect((await authorize(secondBefore, earlier)).at?.pathname).toBe("/login");
+	expect((await authorize(sameSecond, early)).at?.pathname).toBe("/login");
+	const atTheMoment = await resumeOf();
+	const then = await login("alice", ["pwd"], now);
+	expect((await authorize(atTheMoment, then)).at?.searchParams.has("code")).toBe(true);
 });
 
 it("limits requests per source over both methods", async () => {

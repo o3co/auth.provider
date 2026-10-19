@@ -29,9 +29,9 @@
 - The state is compared in constant time. No cookie, no state, or no transaction to take is `invalid_state`. From the take on, every answer clears the cookie, unavailable included.
 - An `error` or no code is `upstream_refused`, with no exchange.
 - A failed exchange is logged with the IdP and its kind only. An unavailable upstream is 503.
-- A login reports the upstream's login time as when the user authenticated, on our clock (a time within the type's clock allowance before the start's second counts as that second), or that it is unknown.
+- A login reports the upstream's login time as when the user authenticated, on our clock (a time before the start but within the type's clock allowance before the start's second counts as the start, to the millisecond), or that it is unknown.
 - After `prompt=login` or a max age, a login counts only when the upstream says when the user logged in.
-- Fresh enough: after `prompt=login`, the upstream's login time plus the type's clock allowance is not before the start's second; with a max age, it is within the max age of now.
+- Fresh enough: after `prompt=login`, the upstream's login time plus the type's clock allowance is not before the start's second (so an upstream that does not authenticate again passes a login up to that allowance before the start); with a max age, it is within the max age of now.
 - The local user is found only by the IdP's name and the upstream subject. An unknown identity is refused, and nothing is created.
 - Only a start that asks links, from this deployment's own page (`csrf`'s origin evidence), for a session entered at `credentials`.
 - Its callback links only while that session is open with the same subject and the browser is in no other session; never by email.

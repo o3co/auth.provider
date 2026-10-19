@@ -16,7 +16,7 @@ Internal module of `authorize`: re-authentication records, asked for one request
 - Taking rewrites the record as taken; it counts only when that rewrite found it untaken and made for the same request. A name that is not 43 base64url characters is not looked up.
 - A new record's name is made from 32 random bytes. If the name is already held, unavailable.
 - A login whose authentication time `session` answers as unknown is never fresh: it meets no record, no `max_age` and no need for a known time.
-- A login meets a record when its authentication time falls in the record's second or later, compared in whole seconds.
+- A login meets a record when its authentication time is the record's moment or later, compared to the millisecond.
 - `max_age` is compared on `kernel`'s clock.
 - Records are written in format 1 and checked on every read; one of another format or shape reads as none.
 
