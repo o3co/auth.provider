@@ -6,3 +6,4 @@
 - Factors are sealed with the `seal` key ring (`seal.current`, and `seal.previous` while one rotates).
 - Whether a second factor is required: `mfa.mode`.
 - The deployment serves the login page (`authorize.login-page`), the page that raises authentication (`authorize.step-up-page`), and the consent page (`consent.page`) only for clients that are not first-party.
+- Users are listed in `users.registered`, which no example holds: write it in the local layer.
