@@ -83,10 +83,8 @@ export function reauthsWith({ store, clock, random }: ReauthsParts): Reauths {
 			if (!login && maxAgeMs === undefined) return true;
 			if (!login && maxAgeMs !== undefined && clock.now() - authenticatedAt <= maxAgeMs)
 				return true;
-			// In whole seconds: an authentication time may be known only to the second.
-			return (
-				taken !== undefined && Math.floor(authenticatedAt / 1000) >= Math.floor(taken.at / 1000)
-			);
+			// To the millisecond: a login the upstream told in whole seconds comes lifted to the start of its round trip.
+			return taken !== undefined && authenticatedAt >= taken.at;
 		},
 	};
 }
