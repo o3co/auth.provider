@@ -3087,6 +3087,37 @@ importers:
         specifier: 6.2.12
         version: 6.2.12
 
+  modules/tooling/conformance-recipes:
+    dependencies:
+      '@mod/conformance':
+        specifier: workspace:*
+        version: link:../conformance
+      '@mod/create-app':
+        specifier: workspace:*
+        version: link:../../scaffold/create-app
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+    devDependencies:
+      '@mod/conformance-code':
+        specifier: workspace:*
+        version: link:../conformance-code
+      '@mod/conformance-identity':
+        specifier: workspace:*
+        version: link:../conformance-identity
+      '@mod/conformance-keys':
+        specifier: workspace:*
+        version: link:../conformance-keys
+      '@mod/conformance-oauth':
+        specifier: workspace:*
+        version: link:../conformance-oauth
+      '@mod/conformance-second-factor':
+        specifier: workspace:*
+        version: link:../conformance-second-factor
+      '@mod/users-http':
+        specifier: workspace:*
+        version: link:../../user-ledger-http/users-http
+
   modules/tooling/conformance-second-factor:
     dependencies:
       '@mod/conformance':
