@@ -216,9 +216,14 @@ it("lists a session before an add within the margin of its cap, and not before o
 	expect(await s.issued.pendingListed()).toEqual([s.session.id]);
 });
 
-it("refuses to start with a margin that is not below the cap", async () => {
+it("refuses to start with a margin that is not below the cap, telling neither number", async () => {
 	await expect(boot({ size: 4, margin: 4 })).rejects.toMatchObject({
-		refusals: [{ where: "session-tokens.push-out-margin" }],
+		refusals: [
+			{
+				where: "session-tokens.push-out-margin",
+				reason: "it must stay below the number of references the store keeps to a session",
+			},
+		],
 	});
 });
 

@@ -331,6 +331,25 @@ describe("exchange-id-tokens", () => {
 		}
 	});
 
+	it("names the client that took a pair first by its key path, never as a value", async () => {
+		const shared = {
+			google: {
+				clients: {
+					"android-app": { audiences: ["srv"] },
+					"web-backend": { audiences: ["srv"] },
+				},
+			},
+		};
+		const error = await boot(shared).catch((e: unknown) => e);
+		expect((error as BootRefused).refusals).toEqual([
+			{
+				where: "exchange-id-tokens.google.clients.web-backend",
+				reason:
+					"takes an (aud, azp) pair that exchange-id-tokens.google.clients.android-app takes too; one app's id_token is one client's",
+			},
+		]);
+	});
+
 	it("tells users each upstream name it takes, with its issuer, so another module's same name refuses boot unless the issuer is the same", async () => {
 		const naming = (issuer: string) =>
 			defineModule({ name: "federation-like" }, (m) => [
@@ -345,7 +364,8 @@ describe("exchange-id-tokens", () => {
 			(e: unknown) => e,
 		);
 		expect(refused).toBeInstanceOf(BootRefused);
-		expect(JSON.stringify((refused as BootRefused).refusals)).toContain("google");
+		// users names the modules that declare the name, never the name or an issuer.
+		expect(JSON.stringify((refused as BootRefused).refusals)).toContain("federation-like");
 		await expect(
 			boot({ google: { ...settings.google, upstream: "work" } }, [naming("https://idp.example")]),
 		).resolves.toBeDefined();

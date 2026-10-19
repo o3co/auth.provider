@@ -35,7 +35,7 @@ export async function sharedOver(c: BuildContext<Settings>) {
 	const found = await c.get(upstreams);
 	for (const [connection, { idp }] of named) {
 		if (!found.of(idp)?.delegation) {
-			c.refuse(`${name}.connections.${connection}`, `the IdP ${idp} offers no delegation`);
+			c.refuse(`${name}.connections.${connection}.idp`, "the IdP it names offers no delegation");
 		}
 	}
 	const maxMs = c.section["max-lifetime"] * 1000;

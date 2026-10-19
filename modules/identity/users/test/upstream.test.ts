@@ -118,7 +118,7 @@ describe("IdP names declared to users", () => {
 		await expect(boot(ledgerOf(), memoryUsersStores(), names)).resolves.toBeDefined();
 	});
 
-	it("refuses a name declared for two issuers, naming it, the issuers and the modules", async () => {
+	it("refuses a name declared for two issuers, naming the modules that declare it and never the name or an issuer", async () => {
 		const twice = [
 			named("google", google, "federation"),
 			named("google", "https://evil.example", "x"),
@@ -130,18 +130,22 @@ describe("IdP names declared to users", () => {
 		for (const names of [twice, sameModule]) {
 			const refused = await boot(ledgerOf(), memoryUsersStores(), names).catch((e) => e);
 			expect(refused).toBeInstanceOf(BootRefused);
-			const told = (refused as BootRefused).refusals.map((r) => r.reason).join("; ");
-			for (const d of names) {
-				expect(told).toContain(d.declaredBy);
-				for (const n of d.names) {
-					expect(told).toContain(n.name);
-					expect(told).toContain(n.issuer);
-				}
+			const said = (refused as BootRefused).refusals;
+			const by = [...new Set(names.map((d) => d.declaredBy))];
+			const verb = by.length === 1 ? "declares" : "declare";
+			expect(said).toEqual([
+				{
+					where: "users",
+					reason: `an IdP name stands for more than one issuer, as ${by.join(", ")} ${verb} it`,
+				},
+			]);
+			for (const n of names.flatMap((d) => d.names)) {
+				expect(JSON.stringify(said)).not.toContain(n.issuer);
 			}
 		}
 	});
 
-	it("refuses a registered user's upstream IdP no module declares, naming it at its key", async () => {
+	it("refuses a registered user's upstream IdP no module declares, at its key and never by its name", async () => {
 		const linked = (idp: string) => ({
 			identifier: "alice",
 			subject: "s-alice",
@@ -179,15 +183,17 @@ describe("IdP names declared to users", () => {
 					? ["users.registered.0.upstream.0.idp", "users.registered.0.upstream.1.idp"]
 					: ["users.registered.0.upstream.1.idp"],
 			);
-			expect(said.at(-1)?.reason).toContain("corp");
+			expect(said.at(-1)?.reason).toBe("no module declares this IdP name");
+			expect(JSON.stringify(said)).not.toContain("corp");
 		}
 	});
 
-	it("refuses an empty name or an empty issuer", async () => {
+	it("refuses an empty name or an empty issuer, naming the module that declares it and no value", async () => {
 		for (const name of [named("", google), named("google", "")]) {
-			await expect(boot(ledgerOf(), memoryUsersStores(), [name])).rejects.toBeInstanceOf(
-				BootRefused,
-			);
+			const refused = await boot(ledgerOf(), memoryUsersStores(), [name]).catch((e) => e);
+			expect((refused as BootRefused).refusals).toEqual([
+				{ where: "users", reason: "an IdP name or its issuer is empty, as a declares it" },
+			]);
 		}
 	});
 });

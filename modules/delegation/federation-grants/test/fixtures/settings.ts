@@ -55,7 +55,7 @@ export const bootCases = [
 	{
 		name: "a connection whose IdP offers no delegation",
 		settings: { connections: { cal: { ...conn, idp: "other" } } },
-		refused: "federation-grants.connections.cal: the IdP other offers no delegation",
+		refused: "federation-grants.connections.cal.idp: the IdP it names offers no delegation",
 	},
 	{
 		name: "a window written as a bare number",
