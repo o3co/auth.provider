@@ -29,11 +29,14 @@
 - A sealed value given back comes only from mfa's records or `mfa-flows`' transactions, so one that will not open is unavailable.
 - A binding whose unique value another factor holds, of any subject, is refused as duplicate and leaves nothing, even when two bind at once; `begin` refuses it already when the secret alone tells the value.
 - A way back that will not enrol fails a first binding as unavailable.
-- A binding begun while the subject held no counting factor binds only if none counts when it is written; else it writes nothing, answers `first-binding-closed`, and records `mfa.first_binding_conflict` (`kind`). Of two first bindings at once, one binds.
+- A binding begun while the subject held no counting factor binds only if none counts when it is written; else it writes nothing, answers `first-binding-closed`, and records `mfa.first_binding_conflict` (`kind`, `reason`). Of two first bindings at once, one binds.
 - A binding asked from a login holds the password alone: it begins and binds only as the subject's first counting factor, whenever it began; once one counts, `begin` and `bind` answer `first-binding-closed` and record the conflict.
 - A proof adds its own amr kept to its kind's (else its kind's), and `mfa` when its kind adds it. A label not of its shape is refused before anything is read.
 - Changing credentials needs `mfa` added recently (as `session`'s `recent` tells), or a recent login while no counting factor is held; else `step_up_required`. A login at a time the upstream did not give is never recent, nor is the `mfa` it says it proved. Under "required", using a session needs `mfa`.
 - A first counting factor begins only where every gate contributed admits it, given what the caller holds (`mfa-binding-proof`'s asks its proof); `begin` asks the kind for nothing before. With no gate, the first factor trusts whoever binds it.
+- With a witness (`mfa-witness`, at most one, two refusing boot), a subject it marks while holding no counting factor is unavailable to login, a first binding and credentials, recorded as `mfa.enrollment_inconsistent`; a witness that cannot be read is unavailable alike.
+- A first binding marks the witness with its own token before it writes, and binds nothing (`first-binding-closed`) where another binding's mark stands or a reset cleared its own as it wrote.
+- With a witness, the last counting factor is never removed; `clear` removes the factors, then the mark. Without one, a lost store reads as never enrolled.
 
 ## Depends on
-- `kernel`, `session`, `login-gates`, `seal`, `audit`, `mfa-extensions` (the kinds and gates)
+- `kernel`, `session`, `login-gates`, `seal`, `audit`, `mfa-extensions` (the kinds and gates), `mfa-witness` (the witness)

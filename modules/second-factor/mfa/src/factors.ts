@@ -1,17 +1,19 @@
 import { type Audit, declaredAudit } from "@mod/audit";
-import { Unavailable } from "@mod/kernel";
+import { isUnavailable, type Log, Unavailable } from "@mod/kernel";
 import {
 	type FactorKind,
 	type FirstBindingGate,
 	type Opened,
 	secondFactorAmr,
 } from "@mod/mfa-extensions";
+import type { EnrollmentWitness } from "@mod/mfa-witness";
 import type { Seal } from "@mod/seal";
 import type { AuthContext } from "@mod/session";
 import events from "./audit-events.ts";
 import { type Factors, isLabel, type Shown } from "./contract.ts";
 import { type Factor, factorRecords, sealContext } from "./records/records.ts";
 import type { FactorStore } from "./store.ts";
+import { markedBy, standingOf } from "./witness/witness.ts";
 
 /** When the sign-in was, where it is known: a time the upstream did not give is never recent. */
 export const signedInAt = (context: AuthContext) =>
@@ -35,6 +37,9 @@ export interface FactorParts {
 	/** Whether a time is within `session`'s recent-authentication window. */
 	readonly recent: (at: number) => boolean;
 	readonly audit: Audit;
+	/** Who remembers, apart from the store, that a subject enrolled; none composed leaves the store alone to tell. */
+	readonly witness: EnrollmentWitness | undefined;
+	readonly log: Pick<Log, "warn">;
 }
 
 export const byKind = (kinds: readonly FactorKind[]) => new Map(kinds.map((k) => [k.kind, k]));
@@ -66,6 +71,8 @@ interface Pending {
 	readonly secret: string;
 	/** Begun while the subject held no counting factor: it binds only while it would still be the first. */
 	readonly first?: true;
+	/** The first binding's own mark at the witness, never shown or logged. */
+	readonly token?: string;
 }
 
 const isWayBack = (kind: FactorKind) => !kind.counts && !guessing(kind);
@@ -106,7 +113,9 @@ export function factorDecisions(p: FactorParts): Factors {
 	const pendingOf = (subject: string, pending: string) => {
 		const value = JSON.parse(opened(pending, sealContext(subject, "pending"))) as Pending;
 		const kind = p.kinds.get(value.kind);
-		return kind ? { kind, secret: value.secret, first: value.first === true } : undefined;
+		return kind
+			? { kind, secret: value.secret, first: value.first === true, token: value.token }
+			: undefined;
 	};
 	const recovery = async (subject: string) => {
 		const kind = [...p.kinds.values()].find(isWayBack);
@@ -127,17 +136,41 @@ export function factorDecisions(p: FactorParts): Factors {
 		};
 		return { factor, show: enrolled.show };
 	};
-	const clear = (subject: string) =>
-		records.decide(subject, (all) => ({
+	const standing = standingOf(p);
+	/** A first binding refused, recorded with why; nothing of it is kept. */
+	const closed = (subject: string, kind: string, reason: "competing" | "reset-cleared") => {
+		audited.record("mfa.first_binding_conflict", { subject, attributes: { kind, reason } });
+		return { kind: "first-binding-closed" } as const;
+	};
+	/** The factors removed, once more where the store cannot answer the first time. */
+	const dropped = async (subject: string, gone: ReadonlySet<string>) => {
+		const drop = () =>
+			records.decide(subject, (all) => ({
+				next: all.filter((f) => !gone.has(f.id)),
+				verdict: undefined,
+			}));
+		await drop().catch((error: unknown) => {
+			if (!isUnavailable(error)) throw error;
+			return drop();
+		});
+	};
+	// Factors first, then the mark: a failure between leaves a mark and no factor, which stops logins.
+	const clear = async (subject: string) => {
+		const cleared = await records.decide(subject, (all) => ({
 			next: all.length > 0 ? [] : undefined,
 			verdict: { count: all.length, kinds: [...new Set(all.map((f) => f.kind))].sort() },
 		}));
+		await p.witness?.clear(subject);
+		return cleared;
+	};
 	return {
 		held: async (subject) => usable(await records.list(subject), p.kinds).map(shown),
 		countingHeld: async (subject) => counting(await records.list(subject), p.kinds).length > 0,
 		asks: async (subject) => {
 			const all = await records.list(subject);
-			if (p.required && counting(all, p.kinds).length === 0) return "binding";
+			const counts = counting(all, p.kinds).length > 0;
+			const held = (await standing(subject, counts, "login")) === "held";
+			if (p.required && !held) return "binding";
 			return usable(all, p.kinds).length === 0 ? "nothing" : "proof";
 		},
 		guessable: async (subject, factor) => {
@@ -211,12 +244,10 @@ export function factorDecisions(p: FactorParts): Factors {
 			if (!kind?.counts) return { kind: "unknown-kind" };
 			const all = await records.list(subject);
 			if (all.length >= p.maxFactors) return { kind: "full" };
-			const first = counting(all, p.kinds).length === 0;
+			const counts = counting(all, p.kinds).length > 0;
+			const first = (await standing(subject, counts, "binding")) === "none";
 			// A login's ask holds the password alone, which lets it bind a first factor and never add one.
-			if (!first && from?.kind === "login") {
-				audited.record("mfa.first_binding_conflict", { subject, attributes: { kind: name } });
-				return { kind: "first-binding-closed" };
-			}
+			if (!first && from?.kind === "login") return closed(subject, name, "competing");
 			if (p.gates.length > 0 && first) {
 				const ask = { subject, kind: name, transaction, passed, from };
 				for (const gate of p.gates) {
@@ -232,7 +263,7 @@ export function factorDecisions(p: FactorParts): Factors {
 			const value: Pending = {
 				kind: kind.kind,
 				secret: enrolled.secret,
-				...(first ? { first } : {}),
+				...(first ? { first, token: id() } : {}),
 			};
 			const pending = p.seal.seal(JSON.stringify(value), sealContext(subject, "pending"));
 			return { kind: "begun", pending, show: enrolled.show };
@@ -250,6 +281,12 @@ export function factorDecisions(p: FactorParts): Factors {
 			if (!found) return { kind: "unknown" };
 			// Asked from a login, it binds only as the first, whenever and however it began.
 			const asFirst = found.first || from?.kind === "login";
+			// The mark goes first: a first factor never stands unwitnessed, and another binding's mark closes this one.
+			const witness = asFirst ? p.witness : undefined;
+			if (witness) {
+				const owned = found.token !== undefined && (await markedBy(witness, subject, found.token));
+				if (!owned) return closed(subject, found.kind.kind, "competing");
+			}
 			const fid = id();
 			const factor: Factor = {
 				id: fid,
@@ -275,20 +312,19 @@ export function factorDecisions(p: FactorParts): Factors {
 				},
 			);
 			if (written === "full") return { kind: "full" };
-			if (written === "closed") {
-				audited.record("mfa.first_binding_conflict", {
-					subject,
-					attributes: { kind: factor.kind },
-				});
-				return { kind: "first-binding-closed" };
-			}
+			if (written === "closed") return closed(subject, factor.kind, "competing");
 			const { brought } = written;
+			const ours = new Set([fid, ...(brought ? [brought.factor.id] : [])]);
+			// A reset that cleared the mark meanwhile cleared this subject: what was written goes too.
+			if (witness && !(await witness.read(subject))) {
+				await dropped(subject, ours);
+				return closed(subject, factor.kind, "reset-cleared");
+			}
 			const unique = found.kind.uniqueSecret?.({ secret: found.secret, state });
 			if (unique !== undefined && !(await records.claim(subject, factor.kind, unique, fid))) {
 				// Another factor holds the value: this one goes again, with the codes it brought.
-				const gone = new Set([fid, ...(brought ? [brought.factor.id] : [])]);
 				await records.decide(subject, (all) => ({
-					next: all.filter((f) => !gone.has(f.id)),
+					next: all.filter((f) => !ours.has(f.id)),
 					verdict: undefined,
 				}));
 				return { kind: "duplicate" };
@@ -325,7 +361,8 @@ export function factorDecisions(p: FactorParts): Factors {
 					if (kind === undefined) return { verdict: "unknown" };
 					const rest = all.filter((f) => f.id !== target);
 					const counted = counting(rest, p.kinds).length > 0;
-					if (p.required && !counted) return { verdict: "last" };
+					// Under a witness only a reset ends an enrollment: its mark stays, so no factor would stand for it.
+					if ((p.required || p.witness) && !counted) return { verdict: "last" };
 					// A way back left alone would hold every login once its codes run out: it goes with the last counting factor.
 					return { next: counted ? rest : rest.filter((f) => !wayBack(f)), verdict: { kind } };
 				},

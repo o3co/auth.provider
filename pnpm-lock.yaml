@@ -2020,6 +2020,9 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-witness':
+        specifier: workspace:*
+        version: link:../mfa-witness
       '@mod/seal':
         specifier: workspace:*
         version: link:../../foundation/seal

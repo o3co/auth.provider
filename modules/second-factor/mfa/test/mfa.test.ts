@@ -23,6 +23,8 @@ import {
 	type Opened,
 	type Sending,
 } from "@mod/mfa-extensions";
+import { witnessStandIn } from "@mod/mfa-witness/testing";
+import { seal } from "@mod/seal";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import {
@@ -38,6 +40,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as offered from "../src/contract.ts";
 import { factors, isLabel, proofSteps } from "../src/contract.ts";
 import mfaModule from "../src/module.ts";
+import { listKeyOf, storedList } from "../src/records/records.ts";
 import { section } from "../src/section.ts";
 import { type MfaSettings, mfaConfig } from "../src/testing.ts";
 import { memoryFactors } from "./stores.ts";
@@ -825,7 +828,7 @@ describe("values no two factors may hold", () => {
 			expect.objectContaining({
 				kind: "mfa.first_binding_conflict",
 				subject: "liz",
-				attributes: { kind: "code" },
+				attributes: { kind: "code", reason: "competing" },
 			}),
 		]);
 		// Begun once one counts, a binding is no first one, and binds beside it.
@@ -845,7 +848,7 @@ describe("values no two factors may hold", () => {
 			expect.objectContaining({
 				kind: "mfa.first_binding_conflict",
 				subject: "ned",
-				attributes: { kind: "code" },
+				attributes: { kind: "code", reason: "competing" },
 			}),
 		]);
 		// A pending begun beside a counting factor, as one begun before a login could be refused.
@@ -1045,5 +1048,177 @@ describe("the extension points mfa-extensions offers", () => {
 		]);
 		const other = await serve({}, { extra: [kind] });
 		expect((await other.decided.begin("amy", "other")).kind).toBe("begun");
+	});
+});
+
+describe("an enrollment witness", () => {
+	/** mfa beside a witness in memory; `wipe` loses a subject's factors, as a store wiped or rolled back would. */
+	const witnessed = async (settings: Partial<MfaSettings> = {}) => {
+		const witness = witnessStandIn();
+		const served = await serve(settings, { extra: [witness.module] });
+		const wipe = (subject: string) =>
+			served.place.factors.update(listKeyOf(subject), () => ({ value: storedList(subject, []) }));
+		const counted = async (subject: string) =>
+			(await served.decided.held(subject)).filter((f) => f.kind === "code").length;
+		return { ...served, witness, wipe, counted };
+	};
+
+	it("refuses to start with two witnesses", async () => {
+		const [one, two] = [witnessStandIn("witness-one"), witnessStandIn("witness-two")];
+		await expect(serve({}, { extra: [one.module, two.module] })).rejects.toBeInstanceOf(
+			BootRefused,
+		);
+	});
+
+	it("marks the subject before its first counting factor is written, and only then", async () => {
+		const { bindCode, witness } = await witnessed();
+		await bindCode("ana");
+		expect(witness.marks.has("ana")).toBe(true);
+		witness.marks.clear();
+		await bindCode("ana");
+		expect(witness.marks.has("ana")).toBe(false);
+	});
+
+	it("answers unavailable where a wiped store would read as never enrolled: login, a first binding, and credentials", async () => {
+		const { app, decided, bindCode, wipe, signedIn, events } = await witnessed();
+		await bindCode("bea");
+		await wipe("bea");
+		events.length = 0;
+		await expect(decided.asks("bea")).rejects.toSatisfy(isUnavailable);
+		await expect(decided.begin("bea", "code")).rejects.toSatisfy(isUnavailable);
+		const request = await signedIn("bea", ["pwd"]);
+		await expect(app.get(sessions).enterFor(request, "credentials")).rejects.toSatisfy(
+			isUnavailable,
+		);
+		expect(events.map((e) => [e.kind, e.attributes])).toEqual([
+			["mfa.enrollment_inconsistent", { at: "login" }],
+			["mfa.enrollment_inconsistent", { at: "binding" }],
+			["mfa.enrollment_inconsistent", { at: "credentials" }],
+		]);
+	});
+
+	it("refuses a first binding begun before the owner's, once the store is wiped, writing nothing", async () => {
+		const { decided, provedCode, bindCode, wipe, counted, events } = await witnessed();
+		const stale = await provedCode("cid");
+		await bindCode("cid");
+		await wipe("cid");
+		events.length = 0;
+		expect(await decided.bind("cid", stale.pending, stale.state)).toEqual({
+			kind: "first-binding-closed",
+		});
+		expect(await counted("cid")).toBe(0);
+		expect(events.map((e) => [e.kind, e.attributes])).toEqual([
+			["mfa.first_binding_conflict", { kind: "code", reason: "competing" }],
+		]);
+	});
+
+	it("asks the witness again with the same token, three times at most, before it writes nothing", async () => {
+		const { decided, provedCode, witness, counted } = await witnessed();
+		const begun = await provedCode("dan");
+		witness.failing.enroll = 2;
+		expect((await decided.bind("dan", begun.pending, begun.state)).kind).toBe("bound");
+		const other = await provedCode("eli");
+		witness.failing.enroll = 4;
+		await expect(decided.bind("eli", other.pending, other.state)).rejects.toSatisfy(isUnavailable);
+		expect([await counted("eli"), witness.marks.has("eli")]).toEqual([0, false]);
+	});
+
+	it("binds over a mark its own token set when its answer was lost", async () => {
+		const { decided, provedCode, witness, counted } = await witnessed();
+		const begun = await provedCode("fay");
+		witness.lost.enroll = 1;
+		expect((await decided.bind("fay", begun.pending, begun.state)).kind).toBe("bound");
+		expect(await counted("fay")).toBe(1);
+	});
+
+	it("takes back its own factor when a reset cleared the mark while it was being written", async () => {
+		const { decided, provedCode, witness, counted, events } = await witnessed();
+		const begun = await provedCode("gus");
+		// The reset's clear lands after the enroll that set the mark, before the factor is read again.
+		witness.next.afterEnroll = () => witness.marks.delete("gus");
+		events.length = 0;
+		expect(await decided.bind("gus", begun.pending, begun.state)).toEqual({
+			kind: "first-binding-closed",
+		});
+		expect(await counted("gus")).toBe(0);
+		expect(events.map((e) => [e.kind, e.attributes])).toEqual([
+			["mfa.first_binding_conflict", { kind: "code", reason: "reset-cleared" }],
+		]);
+	});
+
+	it("takes back its own factor once more when the store cannot answer the first time", async () => {
+		const { decided, provedCode, witness, counted, place } = await witnessed();
+		const begun = await provedCode("guy");
+		witness.next.afterEnroll = () => witness.marks.delete("guy");
+		// The store fails the first take-back, which comes after the mark is read again.
+		witness.next.beforeRead = () => place.down.failNext("update");
+		expect(await decided.bind("guy", begun.pending, begun.state)).toEqual({
+			kind: "first-binding-closed",
+		});
+		expect(await counted("guy")).toBe(0);
+	});
+
+	it("refuses a first pending that holds no token, as one sealed before the witness was composed", async () => {
+		const { app, decided, counted } = await witnessed();
+		const sealed = app
+			.get(seal)
+			.seal(JSON.stringify({ kind: "code", secret: "s", first: true }), "hal\npending");
+		expect(await decided.bind("hal", sealed, 0)).toEqual({ kind: "first-binding-closed" });
+		expect(await counted("hal")).toBe(0);
+	});
+
+	it("never removes the last counting factor under optional mode, as only a reset clears the mark", async () => {
+		const { decided, bindCode, idOf } = await witnessed();
+		await bindCode("ivy");
+		expect(await decided.remove("ivy", await idOf("ivy", "code"))).toBe("last");
+	});
+
+	it("clears the mark after a reset's removal, and answers unavailable while it cannot, the factors gone", async () => {
+		const { decided, bindCode, witness, counted } = await witnessed();
+		await bindCode("jo");
+		expect((await decided.clear("jo")).count).toBe(2);
+		expect(witness.marks.has("jo")).toBe(false);
+		await bindCode("jo");
+		witness.failing.clear = 1;
+		await expect(decided.clear("jo")).rejects.toSatisfy(isUnavailable);
+		expect([await counted("jo"), witness.marks.has("jo")]).toEqual([0, true]);
+		await expect(decided.asks("jo")).rejects.toSatisfy(isUnavailable);
+	});
+
+	it("answers unavailable, writing nothing, wherever the witness cannot be read", async () => {
+		const { app, decided, provedCode, witness, signedIn, counted } = await witnessed();
+		witness.failing.read = 3;
+		await expect(decided.asks("kim")).rejects.toSatisfy(isUnavailable);
+		await expect(decided.begin("kim", "code")).rejects.toSatisfy(isUnavailable);
+		const request = await signedIn("kim", ["pwd"]);
+		await expect(app.get(sessions).enterFor(request, "credentials")).rejects.toSatisfy(
+			isUnavailable,
+		);
+		const begun = await provedCode("kim");
+		witness.failing.read = 1;
+		await expect(decided.bind("kim", begun.pending, begun.state)).rejects.toSatisfy(isUnavailable);
+		expect(await counted("kim")).toBe(1);
+	});
+
+	it("answers credentials unavailable even for a recent second factor, where the witness contradicts the store or cannot be read", async () => {
+		const { app, bindCode, wipe, signedIn, witness } = await witnessed();
+		await bindCode("ola");
+		await wipe("ola");
+		const proved = await signedIn("ola", ["pwd", "otp", "mfa"]);
+		await expect(app.get(sessions).enterFor(proved, "credentials")).rejects.toSatisfy(
+			isUnavailable,
+		);
+		witness.failing.read = 1;
+		const unread = await signedIn("pia", ["pwd", "otp", "mfa"]);
+		await expect(app.get(sessions).enterFor(unread, "credentials")).rejects.toSatisfy(
+			isUnavailable,
+		);
+	});
+
+	it("keeps today's behaviour without a witness: a wiped store reads as never enrolled", async () => {
+		const { decided, bindCode, place } = await serve();
+		await bindCode("lee");
+		await place.factors.update(listKeyOf("lee"), () => ({ value: storedList("lee", []) }));
+		expect(await decided.asks("lee")).toBe("nothing");
 	});
 });
