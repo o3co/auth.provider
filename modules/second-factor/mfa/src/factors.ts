@@ -170,7 +170,11 @@ export function factorDecisions(p: FactorParts): Factors {
 	};
 	return {
 		held: async (subject) => usable(await records.list(subject), p.kinds).map(shown),
-		countingHeld: async (subject) => counting(await records.list(subject), p.kinds).length > 0,
+		countingHeld: async (subject, at = "binding") => {
+			const counts = counting(await records.list(subject), p.kinds).length > 0;
+			return (await standing(subject, counts, at)) === "held";
+		},
+		secondFactorRequired: () => p.required,
 		asks: async (subject) => {
 			const all = await records.list(subject);
 			const counts = counting(all, p.kinds).length > 0;

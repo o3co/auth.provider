@@ -10,6 +10,9 @@ export interface ProofStep {
 /** The steps that prove factors. mfa refuses to start without at least one. */
 export const proofSteps = extensionPoint<ProofStep>("mfa.proof-steps", { multiplicity: "some" });
 
+/** Where a subject's standing is asked, as an inconsistency with the witness is recorded. */
+export type Asked = "login" | "binding" | "credentials";
+
 /** A factor as the user sees it. */
 export interface Shown {
 	readonly id: string;
@@ -50,8 +53,14 @@ export type Challenged =
 export interface Factors {
 	/** The factors of kinds this deployment knows. */
 	held(subject: string): Promise<readonly Shown[]>;
-	/** Whether the subject holds a counting factor. */
-	countingHeld(subject: string): Promise<boolean>;
+	/**
+	 * Whether the subject holds a counting factor, judged against the witness where one is composed: a
+	 * subject it marks while holding none is unavailable, recorded with where it was asked (`binding`
+	 * when not said).
+	 */
+	countingHeld(subject: string, at?: Asked): Promise<boolean>;
+	/** Whether every session needs a second factor to be used (`mode = required`). */
+	secondFactorRequired(): boolean;
 	/** What a login asks of the subject: nothing, a proof of a factor, or a first binding. */
 	asks(subject: string): Promise<"nothing" | "proof" | "binding">;
 	/** Whether guessing can beat this factor; nothing when the subject holds no such factor. */

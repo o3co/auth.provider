@@ -3,8 +3,7 @@ import { isUnavailable, type Log, Unavailable } from "@mod/kernel";
 import type { EnrollmentWitness } from "@mod/mfa-witness";
 import events from "../audit-events.ts";
 
-/** Where a standing is judged, as the inconsistency is recorded. */
-export type Judged = "login" | "binding" | "credentials";
+import type { Asked } from "../contract.ts";
 
 export interface StandingParts {
 	/** None composed leaves the store alone to tell. */
@@ -20,7 +19,7 @@ export interface StandingParts {
  */
 export function standingOf(p: StandingParts) {
 	const audited = declaredAudit(p.audit, events);
-	return async (subject: string, counts: boolean, at: Judged) => {
+	return async (subject: string, counts: boolean, at: Asked) => {
 		if (counts) return "held" as const;
 		if (p.witness === undefined || !(await p.witness.read(subject))) return "none" as const;
 		audited.record("mfa.enrollment_inconsistent", { subject, attributes: { at } });

@@ -1066,9 +1066,9 @@ describe("a gate contributed before a first counting factor", () => {
 			{ subject: "ann", kind: "code", transaction: undefined, passed: undefined, from: undefined },
 			{ subject: "ann", kind: "code", transaction: "t", passed: "ok", from: login },
 		]);
-		expect(await decided.countingHeld("ann")).toBe(false);
+		expect(await decided.countingHeld("ann", "binding")).toBe(false);
 		await bindCode("ann", undefined, "ok");
-		expect(await decided.countingHeld("ann")).toBe(true);
+		expect(await decided.countingHeld("ann", "binding")).toBe(true);
 		asked.length = 0;
 		expect((await decided.begin("ann", "code")).kind).toBe("begun");
 		expect(asked).toEqual([]);
@@ -1152,6 +1152,26 @@ describe("an enrollment witness", () => {
 			["mfa.enrollment_inconsistent", { at: "binding" }],
 			["mfa.enrollment_inconsistent", { at: "credentials" }],
 		]);
+	});
+
+	it("judges whether a counting factor is held against the witness, recording where it was asked", async () => {
+		const { decided, bindCode, wipe, events } = await witnessed();
+		await bindCode("dee");
+		expect(await decided.countingHeld("dee", "credentials")).toBe(true);
+		await wipe("dee");
+		events.length = 0;
+		await expect(decided.countingHeld("dee", "credentials")).rejects.toSatisfy(isUnavailable);
+		await expect(decided.countingHeld("dee", "binding")).rejects.toSatisfy(isUnavailable);
+		expect(events.map((e) => [e.kind, e.attributes])).toEqual([
+			["mfa.enrollment_inconsistent", { at: "credentials" }],
+			["mfa.enrollment_inconsistent", { at: "binding" }],
+		]);
+		expect(await decided.countingHeld("eli", "login")).toBe(false);
+	});
+
+	it("tells whether every session needs a second factor, as the mode says", async () => {
+		expect((await serve({ mode: "required" })).decided.secondFactorRequired()).toBe(true);
+		expect((await serve({ mode: "optional" })).decided.secondFactorRequired()).toBe(false);
 	});
 
 	it("refuses a first binding begun before the owner's, once the store is wiped, writing nothing", async () => {
