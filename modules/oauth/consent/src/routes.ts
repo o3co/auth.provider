@@ -36,6 +36,7 @@ export async function showRoute(c: BuildContext<unknown>): Promise<Route> {
 	return {
 		method: "GET",
 		path: "/oauth/consent",
+		changesState: false,
 		handle: guarded(async (request) => {
 			const session = await opened.enter(request);
 			if (!session) return jsonAnswer(401, { error: "no_session" });
@@ -71,6 +72,8 @@ export async function answerRoute(c: BuildContext<unknown>): Promise<Route> {
 		method: "POST",
 		path: "/oauth/consent",
 		uses: [use(csrfChecked)],
+		unlimited:
+			"The user's session is authenticated; a per-source limit belongs to unauthenticated entries.",
 		takes: ["form", "json"],
 		handle: guarded(async (request) => {
 			if (request.fields.repeated().length > 0) {

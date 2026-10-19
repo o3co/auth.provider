@@ -18,8 +18,8 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | GET | `/metrics` | `@mod/metrics-prometheus` | none |  |  |  |  |  |
 | GET | `/oauth/authorize` | `@mod/authorize` | form | `rate-limit.requests-per-source` |  |  | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/authorize` | `@mod/authorize` | form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
-| GET | `/oauth/consent` | `@mod/consent` | form |  |  |  |  |  |
-| POST | `/oauth/consent` | `@mod/consent` | form, json | `csrf` | yes | `csrf` |  |  |
+| GET | `/oauth/consent` | `@mod/consent` | form |  | no |  |  |  |
+| POST | `/oauth/consent` | `@mod/consent` | form, json | `csrf` | yes | `csrf` | The user's session is authenticated; a per-source limit belongs to unauthenticated entries. |  |
 | POST | `/oauth/device/verification` | `@mod/device-grant` | json | `csrf` | yes | `csrf` |  |  |
 | POST | `/oauth/device_authorization` | `@mod/device-grant` | form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/federation-grants` | `@mod/federation-grants` | json, form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
