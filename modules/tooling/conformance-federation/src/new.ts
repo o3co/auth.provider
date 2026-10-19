@@ -60,7 +60,7 @@ const grantsSection = (at: GrantsPart) => ({
 	...(at.lodges ? { lodges: at.lodges.limit, "lodge-window": `${at.lodges.windowSeconds}s` } : {}),
 });
 
-onNew(federationArea, (part) => ({
+onNew(federationArea, (part, _, modules) => ({
 	modules: [
 		"@mod/outbound",
 		"@mod/external-jwt",
@@ -69,7 +69,6 @@ onNew(federationArea, (part) => ({
 		...(part.idps.some((idp) => idp.type === "github") ? ["@mod/idp-github"] : []),
 		...(part.idps.some((idp) => idp.type === "google") ? ["@mod/idp-google"] : []),
 		...(part.idps.some((idp) => idp.type === "apple") ? ["@mod/idp-apple"] : []),
-		"@mod/seal",
 		...(part.keepsUpstreamTokens ? ["@mod/federation-tokens"] : []),
 		...(part.grants ? ["@mod/federation-grants"] : []),
 	],
@@ -79,8 +78,10 @@ onNew(federationArea, (part) => ({
 			idps: Object.fromEntries(part.idps.map((idp) => [idp.name, settingsOf(idp)])),
 			landing: part.landing,
 		},
-		// Sealing, kept tokens' or a handoff's, takes a key of the scene's own.
-		seal: { current: { id: "scene", key: randomBytes(32).toString("base64") } },
+		// Sealing, where what is composed brings it (kept tokens, grants), takes a key of the scene's own.
+		...(modules.includes("@mod/seal")
+			? { seal: { current: { id: "scene", key: randomBytes(32).toString("base64") } } }
+			: {}),
 		...(part.grants ? { "federation-grants": grantsSection(part.grants) } : {}),
 		// Every upstream is named so outbound reaches it, and those on plain http at loopback as such.
 		outbound: {
