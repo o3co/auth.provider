@@ -46,6 +46,8 @@ export const during = {
 	release: undefined as (() => Promise<void>) | undefined,
 	/** Runs once while the next recovery code is judged, as another request would. */
 	backup: undefined as (() => Promise<void>) | undefined,
+	/** Runs once while the next code is judged, as another request would. */
+	code: undefined as (() => Promise<void>) | undefined,
 	/** How many of the next revocations move the boundary but answer that a close did not finish. */
 	unfinishedRecords: 0,
 };
@@ -98,6 +100,9 @@ const code = defineModule({ name: "kind-code" }, (m) => [
 			return { secret, show: { secret } };
 		},
 		verify: async (secret, state, proof) => {
+			const run = during.code;
+			during.code = undefined;
+			await run?.();
 			const [given, n] = proof.split(":");
 			const last = typeof state === "number" ? state : -1;
 			if (given !== secret) return { kind: "invalid" as const };
