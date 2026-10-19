@@ -23,6 +23,7 @@
 - A kind two modules declare must be declared alike in the audit event reference.
 - For full and a pattern: the project's manifest and app, the configuration file, the local layer's and the environment's examples, a Dockerfile, a `.dockerignore`, a README and `AGENTS.md`; a pattern's README opens with its use and carries its card.
   - The README lists each composed module's card as installed, and points at the `## Deployment` section of each card that has one (the index marks those when published).
+  - The README tells how to try the app over plain http on this machine, and that a deployment keeps an https origin.
   - `AGENTS.md` indexes where each composed module's card and section defaults lie as installed, and where the release's configuration and route references lie; it states nothing of its own.
 
 ## Invariants
