@@ -115,7 +115,7 @@ export function writtenOf(fragments: readonly Fragment[]): Written[] {
 			const noted = spanningSections.get(key);
 			if (noted !== undefined) return [{ key, example: noted, spansSections: true }];
 			if (severalLines(value)) {
-				return [{ key, example: `"""\n${value}\n"""`, spansSections: false, severalLines: true }];
+				return [{ key, example: `"""${value}"""`, spansSections: false, severalLines: true }];
 			}
 			return Array.isArray(value)
 				? [{ key, example: JSON.stringify(value, null, "\t"), spansSections: false }]

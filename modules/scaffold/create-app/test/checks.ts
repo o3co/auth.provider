@@ -43,6 +43,9 @@ function fragmentLeaves(names: readonly string[]): Map<string, unknown> {
 export const envOf = (key: string) => key.replaceAll(".", "_").replaceAll("-", "_").toUpperCase();
 
 /** Each scalar of the modules' fragments is read from env, one variable each, and the files hold no value. */
+/** A value its owner's example gives in several lines, which a one-line env file cannot hold. */
+const severalLines = (value: unknown) => typeof value === "string" && value.includes("\n");
+
 export async function readsScalarsFromEnv(target: string, modules: readonly string[]) {
 	const fragment = fragmentLeaves([kernel, ...modules]);
 	const scalars = [...fragment].filter(
@@ -70,7 +73,11 @@ export async function readsScalarsFromEnv(target: string, modules: readonly stri
 			const m = /^# ([A-Z0-9_]+)=(.*)$/.exec(line);
 			return m ? [[m[1], unquoted(m[2] ?? "")]] : [];
 		}),
-	).toEqual(scalars.map(([key, value]) => [envOf(key), String(value)]));
+	).toEqual(
+		scalars
+			.filter(([, value]) => !severalLines(value))
+			.map(([key, value]) => [envOf(key), String(value)]),
+	);
 	const readme = await read(target, "README.md");
 	for (const [key] of scalars) {
 		expect(readme).toContain(`| \`${key}\` | \`${envOf(key)}\` |`);
@@ -80,7 +87,7 @@ export async function readsScalarsFromEnv(target: string, modules: readonly stri
 /** The fragments' lists, and a value spanning sections, go to the local layer's example as comments only. */
 export async function writesListsLocally(target: string, modules: readonly string[]) {
 	const fragment = fragmentLeaves([kernel, ...modules]);
-	const lists = [...fragment].filter(([, value]) => Array.isArray(value));
+	const lists = [...fragment].filter(([, value]) => Array.isArray(value) || severalLines(value));
 	expect(lists.length).toBeGreaterThan(0);
 	const example = await read(target, "config/local.conf.example");
 	// No live value line, so a copy sets nothing until a key is uncommented.

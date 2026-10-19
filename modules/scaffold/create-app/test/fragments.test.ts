@@ -56,6 +56,13 @@ function notPlaceholder(value: unknown, path = ""): string | undefined {
 		return invalid(domain) ? undefined : "a mail address not under .invalid";
 	}
 	if (isReplace(value)) return undefined;
+	// A value of several lines is a sample where its lines are a PEM frame around REPLACE- samples.
+	if (value.includes("\n")) {
+		const lines = value.split("\n");
+		const frame = (line: string) => /^-----(BEGIN|END) [A-Z ]+-----$/.test(line);
+		const sampled = lines.every((line) => frame(line) || isReplace(line)) && lines.some(isReplace);
+		return sampled ? undefined : "several lines not a PEM frame around REPLACE-…";
+	}
 	if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(value)) {
 		return invalid(value) ? undefined : "a host not under .invalid";
 	}
@@ -72,6 +79,7 @@ it("tells a placeholder from a value that could be real", () => {
 		"Auth <auth@example.invalid>",
 		"destination.example.invalid",
 		"REPLACE-PKCS8-PEM-PRIVATE-KEY",
+		"-----BEGIN PRIVATE KEY-----\nREPLACE-PKCS8-PEM-PRIVATE-KEY\n-----END PRIVATE KEY-----",
 		"EdDSA",
 		"self-signed",
 		1000,
@@ -88,6 +96,7 @@ it("tells a placeholder from a value that could be real", () => {
 		"0123456789abcdef0123456789abcdef",
 		"00000000000000000000000000000000",
 		"-----BEGIN PRIVATE KEY-----",
+		"-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIA==\n-----END PRIVATE KEY-----",
 		"a display name",
 		null,
 	]) {
@@ -281,10 +290,10 @@ it("keeps a value its owner's example gives in several lines out of the env exam
 	expect(writtenOf(fragments)).toEqual([
 		{
 			key: "k.pem",
-			example: '"""\n-----BEGIN KEY-----\nREPLACE-KEY\n-----END KEY-----\n"""',
+			example: '"""-----BEGIN KEY-----\nREPLACE-KEY\n-----END KEY-----"""',
 			spansSections: false,
 			severalLines: true,
 		},
 	]);
-	expect(localConfExample(fragments)).toContain('# k.pem = """\n# -----BEGIN KEY-----');
+	expect(localConfExample(fragments)).toContain('# k.pem = """-----BEGIN KEY-----\n# REPLACE-KEY');
 });
