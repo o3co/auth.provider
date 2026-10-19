@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { laidOut } from "./documents.ts";
+import { networkRules } from "./network/network.ts";
 import { foreignFiles, namesLine } from "./references.ts";
 import {
 	branchesOf,
@@ -495,6 +496,7 @@ export function check(
 	for (const p of packages) {
 		dependencyRules(s, p);
 		sourceRules(s, p);
+		networkRules(s, p);
 		commonVocabulary(s, p, surfaces);
 		budgetRules(s, p, surfaces, importedCards);
 	}

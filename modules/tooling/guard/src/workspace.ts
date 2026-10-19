@@ -20,6 +20,8 @@ export interface Pkg {
 		/** Whether a feature is left off the full template; only `true`. */
 		readonly optIn?: unknown;
 		readonly joins?: unknown;
+		/** The words naming how its shipped code reaches the network, other than through outbound. */
+		readonly network?: string | readonly string[];
 		readonly exports?: Record<string, string>;
 		readonly dependencies?: Record<string, string>;
 		readonly peerDependencies?: Record<string, string>;
