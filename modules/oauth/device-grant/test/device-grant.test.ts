@@ -552,6 +552,23 @@ describe("polling", () => {
 		for (const session of asked) expect(session).toBe(approval.session);
 	});
 
+	it("ends the access token no later than the approving session, when the session ends first", async () => {
+		const s = await serve();
+		const cookie = await s.login();
+		now += 3_000_000;
+		const { code, user } = await s.started();
+		await s.verify(cookie, { action: "approve", user_code: user });
+		const approval = (await s.stored(code)).approval as { session: string };
+		const entry = await s.app.get(sessions).entryOf(approval.session);
+		if (entry.kind !== "entered") throw new Error("not entered");
+		const { endsAt } = entry;
+		const issued = (await s.poll(code)) as Record<string, string>;
+		const checked = await s.app.get(tokens).verifyAccess(String(issued.access_token));
+		if (checked.kind !== "valid") throw new Error("not valid");
+		expect(checked.expiresAt).toBeLessThanOrEqual(endsAt);
+		expect(Number(issued.expires_in)).toBeLessThanOrEqual(600);
+	});
+
 	it("issues nothing once the approving session closed, as a code redemption does", async () => {
 		const s = await serve();
 		const { code, user } = await s.started();

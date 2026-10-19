@@ -164,11 +164,16 @@ export function codeGrant(parts: {
 				return refused;
 			}
 			if (!presented(record)) return refused;
-			if (!(await enters(record.session))) return refused;
+			const entry = await sessions.entryOf(record.session);
+			if (entry.kind !== "entered") return refused;
 			// Asked again on what was used up: a look before use that missed the code asked nothing.
 			const again = target(record.audience, (audience) => record.audience.includes(audience));
 			if (again.kind === "error") return again;
-			const allowed = await issue(accessOf(record, client.id), { session: record.session });
+			// The token ends no later than its session, as a refreshed one ends with its family.
+			const allowed = await issue(accessOf(record, client.id), {
+				session: record.session,
+				notAfter: entry.endsAt,
+			});
 			if (allowed.kind === "refused") return allowed;
 			const issued = allowed.access;
 			// Read once, outside the change: it may run again on a race.
