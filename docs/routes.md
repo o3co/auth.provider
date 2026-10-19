@@ -16,8 +16,8 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | GET | `/_healthcheck` | `@mod/http-ops` | none |  |  |  |  |  |
 | POST | `/ledger/subject-revocations` | `@mod/subject-revocation-http` | json |  | yes | A server's call proved by its own credential; it reads no cookie. | It checks the source and the credential first, then counts failures and authenticated requests apart, per source, in the handler. |  |
 | GET | `/metrics` | `@mod/metrics-prometheus` | none |  |  |  |  |  |
-| GET | `/oauth/authorize` | `@mod/authorize` | form | `rate-limit.requests-per-source` |  |  | `rate-limit.requests-per-source` |  |
-| POST | `/oauth/authorize` | `@mod/authorize` | form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
+| GET | `/oauth/authorize` | `@mod/authorize` | form | `rate-limit.requests-per-source` | yes | An authorization request arrives as a navigation from the client's site by design; it only starts what the user's own login and consent complete. | `rate-limit.requests-per-source` |  |
+| POST | `/oauth/authorize` | `@mod/authorize` | form | `rate-limit.requests-per-source` | yes | An authorization request arrives as a navigation from the client's site by design; it only starts what the user's own login and consent complete. | `rate-limit.requests-per-source` |  |
 | GET | `/oauth/consent` | `@mod/consent` | form |  | no |  |  |  |
 | POST | `/oauth/consent` | `@mod/consent` | form, json | `csrf` | yes | `csrf` | The user's session is authenticated; a per-source limit belongs to unauthenticated entries. |  |
 | POST | `/oauth/device/verification` | `@mod/device-grant` | json | `csrf` | yes | `csrf` | Every action counts against the subject in rate-limit's attempt limit, in the handler. |  |
