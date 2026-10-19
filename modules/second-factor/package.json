@@ -1,3 +1,9 @@
 {
-	"private": false
+	"private": false,
+	"description": "Multi-factor authentication for auth-provider, a self-hosted OAuth 2.0 authorization server and OpenID Connect provider for Node.js: TOTP, codes sent by mail, recovery codes and their management.",
+	"keywords": [
+		"mfa",
+		"2fa",
+		"totp"
+	]
 }

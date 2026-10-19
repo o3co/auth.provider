@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { bundleManifest, type MemberManifest, publicNameOf, published } from "../src/publish.ts";
+import {
+	aboutOf,
+	bundleManifest,
+	type MemberManifest,
+	publicNameOf,
+	published,
+} from "../src/publish.ts";
 
 const member = (name: string, more: Partial<MemberManifest> = {}): MemberManifest => ({
 	name: `@mod/${name}`,
@@ -23,7 +29,45 @@ describe("public names", () => {
 	});
 });
 
+describe("what a package says of itself", () => {
+	it("is its own description, and the release's keywords then its own, each once", () => {
+		const release = { version: "0.18.0", keywords: ["oauth2", "oidc"] };
+		expect(aboutOf("p", { description: "D.", keywords: ["dpop", "oidc"] }, release)).toEqual({
+			about: { description: "D.", keywords: ["oauth2", "oidc", "dpop"] },
+		});
+		expect(aboutOf("p", { description: "D." }, { version: "0.18.0" })).toEqual({
+			about: { description: "D.", keywords: [] },
+		});
+	});
+
+	it("refuses a package without a description, or whose keywords are not a list of words", () => {
+		const release = { version: "0.18.0" };
+		expect(aboutOf("p", {}, release)).toEqual({ problem: "p: states no description" });
+		expect(aboutOf("p", { description: " " }, release)).toEqual({
+			problem: "p: states no description",
+		});
+		expect(aboutOf("p", { description: "D.", keywords: "dpop" }, release)).toEqual({
+			problem: "p: its keywords are not a list of words",
+		});
+	});
+});
+
 describe("a bundle's manifest", () => {
+	it("says what the bundle is, its keywords only when it has some", () => {
+		const members = [member("tokens")];
+		const release = { version: "0.18.0" };
+		const about = { description: "D.", keywords: ["oauth2"] };
+		const made = bundleManifest({ dir: "/repo/modules/oauth", members, about }, release, bundleOf);
+		expect("manifest" in made && made.manifest).toMatchObject(about);
+		const bare = {
+			dir: "/repo/modules/oauth",
+			members,
+			about: { description: "D.", keywords: [] },
+		};
+		const unworded = bundleManifest(bare, release, bundleOf);
+		expect("manifest" in unworded && "keywords" in unworded.manifest).toBe(false);
+	});
+
 	it("offers each member's entries under its directory's name, built, with their types", () => {
 		const made = bundleManifest(
 			{ dir: "/repo/modules/oauth", members: [member("tokens"), member("authorize")] },

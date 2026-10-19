@@ -1,3 +1,8 @@
 {
-	"private": false
+	"private": false,
+	"description": "SMTP mail sender for auth-provider, a self-hosted OAuth 2.0 authorization server and OpenID Connect provider for Node.js.",
+	"keywords": [
+		"smtp",
+		"email"
+	]
 }

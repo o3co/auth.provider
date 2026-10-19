@@ -31,5 +31,6 @@ export function releaseOf(root: string): Release | undefined {
 		...(typeof workspace.license === "string" ? { license: workspace.license } : {}),
 		...(repository ? { repository } : {}),
 		...(notice ? { notice } : {}),
+		...(Array.isArray(workspace.keywords) ? { keywords: workspace.keywords } : {}),
 	};
 }

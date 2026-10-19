@@ -1,8 +1,26 @@
 {
 	"private": false,
+	"description": "App patterns and the generator that create-auth-provider runs, for auth-provider, a self-hosted OAuth 2.0 authorization server and OpenID Connect provider for Node.js.",
+	"keywords": [
+		"create-app",
+		"scaffold"
+	],
 	"index": "index.json",
 	"entrances": {
 		"@o3co/create-auth-provider": {
+			"description": "Generate a self-hosted OAuth 2.0 authorization server and OpenID Connect provider for Node.js, written in TypeScript.",
+			"keywords": [
+				"create-app",
+				"pkce",
+				"dpop",
+				"mtls",
+				"device-flow",
+				"token-exchange",
+				"passkey",
+				"webauthn",
+				"mfa",
+				"totp"
+			],
 			"bin": "create-auth-provider",
 			"runs": "@mod/create-app"
 		}
