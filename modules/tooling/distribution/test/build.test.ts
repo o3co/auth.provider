@@ -40,6 +40,7 @@ beforeAll(() => {
 	);
 	write("modules/base/kernel/config.example", "kernel {}\n");
 	write("modules/base/kernel/trial.conf", "kernel {}\n");
+	write("modules/base/kernel/README.md", "# kernel\n\n## Deployment\n- A server it reaches.\n");
 	write("modules/base/kernel/reference.conf", "kernel {\n}\n");
 	write(
 		"modules/feature/package.json",
@@ -131,7 +132,7 @@ it("writes the index a bundle asks for: each shipped member's manifest, public n
 	buildBundles({ bundles: bundles(), release: { version: "0.18.0", repository }, out });
 	const index = JSON.parse(readFileSync(join(out, "feature/index.json"), "utf8"));
 	expect(index.version).toBe("0.18.0");
-	// Where the release's documents are, and which members ship their section's defaults.
+	// Where the release's documents are, which members ship their section's defaults, and whose card asks of the deployment.
 	expect(index.repository).toBe(repository);
 	expect(index.packages).toEqual([
 		{
@@ -147,6 +148,7 @@ it("writes the index a bundle asks for: each shipped member's manifest, public n
 			manifest: expect.objectContaining({ name: "@mod/kernel" }),
 			fragment: "kernel {}\n",
 			references: true,
+			deployment: true,
 		},
 	]);
 	expect(existsSync(join(out, "base/index.json"))).toBe(false);

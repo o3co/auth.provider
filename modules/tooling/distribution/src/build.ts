@@ -66,6 +66,10 @@ type Manifests = ReadonlyMap<
 	{ readonly bundle: string; readonly path: string; readonly written: MemberManifest }
 >;
 
+/** Whether a card has a section of what its module asks of the deployment. */
+const asksOfDeployment = (card: string) =>
+	existsSync(card) && /^## Deployment$/m.test(readFileSync(card, "utf8"));
+
 /**
  * The index a bundle may ask for: each shipped member's manifest as written, its public package
  * and entry, and its section's example, for a module that composes them from a bundle.
@@ -91,6 +95,8 @@ function indexOf(
 				...(existsSync(fragment) ? { fragment: readFileSync(fragment, "utf8") } : {}),
 				// The section's defaults ship beside the member, for an app to point at.
 				...(existsSync(join(path, "reference.conf")) ? { references: true } : {}),
+				// Its card asks something of the deployment, for an app to point at that section.
+				...(asksOfDeployment(join(path, "README.md")) ? { deployment: true } : {}),
 			};
 		});
 	const { version, repository } = release;
