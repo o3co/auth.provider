@@ -39,7 +39,7 @@
 - Needs: never evicted, survives a crash and a failover (losing one lets an assertion be reused).
 
 ## Depends on
-- `kernel`, `grants`, `token-endpoint`, `issuer`, `external-jwt`, `outbound`, `keys`, `subject-revocation`
+- `kernel`, `grants`, `token-endpoint`, `issuer`, `external-jwt`, `outbound`, `outbound-policy`, `keys`, `subject-revocation`
 
 ## Vocabulary
 - Trusted issuer: an issuer whose assertions are accepted.

@@ -19,6 +19,7 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/keys": "workspace:*",
 		"@mod/outbound": "workspace:*",
+		"@mod/outbound-policy": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"jose": "6.2.12",
