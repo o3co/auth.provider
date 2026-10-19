@@ -117,8 +117,6 @@ export interface Factors {
 					| "malformed-label"
 					| "duplicate"
 					| "first-binding-closed"
-					/** The subject's factors were cleared (a reset) since the binding began: nothing is written. */
-					| "cleared"
 					/** A reset or a revocation since the binding began: nothing is written. */
 					| "fenced";
 		  }
