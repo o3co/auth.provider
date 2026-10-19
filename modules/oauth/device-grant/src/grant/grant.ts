@@ -73,6 +73,7 @@ export function grantWith(
 		approval.session === undefined || (await open.entryOf(approval.session)).kind === "entered";
 	return {
 		grantType: deviceGrantType,
+		readsAmbient: "none",
 		handle: async ({ client, param, admits, issue }) => {
 			const code = param("device_code");
 			if (!code)

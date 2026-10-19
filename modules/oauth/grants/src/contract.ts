@@ -94,6 +94,11 @@ export interface Grant {
 	readonly bodies?: readonly Exclude<BodyKind, "none">[];
 	/** Whether it takes its audience from the request, through `target` or reading the parameters itself. */
 	readonly targets?: true;
+	/**
+	 * What it reads that a browser sends by itself: `cookie` for a grant reading the session's cookie,
+	 * which then checks the request's origin itself; `none` otherwise. A declaration, never a proof.
+	 */
+	readonly readsAmbient?: "none" | "cookie";
 	handle(input: GrantInput): Promise<GrantOutcome | Refused>;
 }
 

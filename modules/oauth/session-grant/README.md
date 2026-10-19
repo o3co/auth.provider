@@ -20,7 +20,7 @@
   - A session that can no longer be entered once its token is recorded: `invalid_grant`.
 
 ## Invariants
-- A request without same-origin evidence is refused before the session is read; the cookie alone never issues.
+- A request without same-origin evidence is refused before the session is read; the cookie alone never issues. The grant declares `readsAmbient: cookie`, as `grants` asks of one reading the session's cookie.
 - Only the authenticated client counts. A `client_id` in the body is never read.
 - The scope and audience are `client-allowance`'s allowed issuance for the client; a scope left out is the client's defaults.
 - The subject, amr and authentication time (or that it is not known) are those of the session entered at level `use`; the token never outlives that session.

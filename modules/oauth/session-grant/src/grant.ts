@@ -55,6 +55,7 @@ export function sessionGrant(parts: Parts): Grant {
 
 	return {
 		grantType: "session",
+		readsAmbient: "cookie",
 		handle: async ({ request, client, param, issue }) => {
 			// The cookie rides on requests from other sites too, so it alone proves nothing.
 			if (!parts.evidence.sameOrigin(request)) return unauthorized;

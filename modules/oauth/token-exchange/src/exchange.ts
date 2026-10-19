@@ -215,6 +215,7 @@ export function exchangeGrant(parts: Parts): Grant {
 
 	return {
 		grantType,
+		readsAmbient: "none",
 		// It reads `audience` and `resource` itself, by its own exact rule.
 		targets: true,
 		handle: async (input) => {
