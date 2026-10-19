@@ -92,14 +92,13 @@ export function idTokens(parts: VerifierParts): ExchangeVerifier {
 				parts.skewMs,
 			);
 			if (revoked === "revoked") return invalid;
+			// Another issuer's token for one app: what it may give is that client's allowance alone.
 			return {
+				kind: "foreign",
 				subject,
-				issuer: taken.iss[0],
-				audience: [],
-				scope: [],
+				issuer: taken.iss[0] as string,
 				expiresAt: exp * 1000,
-				clients,
-				ceiling: "client",
+				clients: [clients[0] as string],
 				...(nonce !== undefined && digestShape.test(nonce) ? { holderDigest: nonce } : {}),
 			};
 		},

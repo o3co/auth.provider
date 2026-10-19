@@ -128,6 +128,7 @@ const outside = (answer: (call: number) => unknown): ExchangeVerifier => {
 	return { tokenType: outsideType, verify: async () => answer(++calls) as never };
 };
 const outsideAnswer = {
+	kind: "own",
 	subject: "erin",
 	issuer: "https://idp.example",
 	issuedTo: "app",
@@ -798,7 +799,12 @@ describe("token-exchange: what any verifier may answer", () => {
 			tokenType: outsideType,
 			verify: async () => {
 				calls.push("verify");
-				return { ...outsideAnswer, issuedTo: "nobody", audience: [], scope: [], ...more } as never;
+				const { subject, issuer, expiresAt } = outsideAnswer;
+				return (
+					(more as { kind?: string }).kind === "foreign"
+						? { subject, issuer, expiresAt, ...more }
+						: { ...outsideAnswer, issuedTo: "nobody", audience: [], scope: [], ...more }
+				) as never;
 			},
 			...(consume
 				? {
@@ -816,7 +822,7 @@ describe("token-exchange: what any verifier may answer", () => {
 	const dpop = (jkt: string): Binding => ({ member: "jkt", confirmation: jkt, tokenType: "DPoP" });
 
 	it("lets only the clients a verifier names exchange its token, whatever names the client otherwise", async () => {
-		const { verifier } = answering({ issuedTo: "app", clients: ["gate"], ceiling: "client" });
+		const { verifier } = answering({ kind: "foreign", clients: ["gate"] });
 		const s = await serve({ verifier });
 		expect(said(await s.exchange("app", outsider))).toEqual([
 			"invalid_request",
@@ -824,7 +830,7 @@ describe("token-exchange: what any verifier may answer", () => {
 		]);
 		expect(said(await s.exchange("gate", outsider))).toEqual(["issued"]);
 		const listed = await serve({
-			verifier: answering({ clients: ["app"], ceiling: "client" }).verifier,
+			verifier: answering({ kind: "foreign", clients: ["app"] }).verifier,
 		});
 		expect(said(await listed.exchange("gate", outsider))).toEqual([
 			"invalid_request",
@@ -832,8 +838,8 @@ describe("token-exchange: what any verifier may answer", () => {
 		]);
 	});
 
-	it("takes the scope and audience from the client's allowance alone under the client's ceiling", async () => {
-		const { verifier } = answering({ clients: ["app"], ceiling: "client" });
+	it("takes the scope and audience of a foreign token from the client's allowance alone", async () => {
+		const { verifier } = answering({ kind: "foreign", clients: ["app"] });
 		const s = await serve({ verifier });
 		const grant = (await s.issued(await s.exchange("app", { ...outsider, scope: "write" }))).grant;
 		expect([grant.subject, grant.scope, grant.audience]).toEqual(["erin", ["write"], [api]]);
@@ -851,7 +857,7 @@ describe("token-exchange: what any verifier may answer", () => {
 
 	it("uses a once-only token up after it is checked twice and the policies admit it, issuing only once", async () => {
 		let left = 1;
-		const { verifier, calls } = answering({ clients: ["app"], ceiling: "client" }, async () =>
+		const { verifier, calls } = answering({ kind: "foreign", clients: ["app"] }, async () =>
 			left-- > 0 ? "consumed" : "replayed",
 		);
 		const s = await serve({ verifier });
@@ -873,7 +879,7 @@ describe("token-exchange: what any verifier may answer", () => {
 						: { kind: "allowed" },
 			})),
 		]);
-		const once = answering({ clients: ["app"], ceiling: "client" }, async () => "consumed");
+		const once = answering({ kind: "foreign", clients: ["app"] }, async () => "consumed");
 		const s = await serve({ verifier: once.verifier, extra: [refusing] });
 		expect(said(await s.exchange("app", outsider))[0]).not.toBe("issued");
 		expect(once.calls.filter((call) => call.startsWith("consume"))).toEqual([]);
@@ -882,7 +888,8 @@ describe("token-exchange: what any verifier may answer", () => {
 			tokenType: outsideType,
 			verify: outside((call) => {
 				if (call > 1) throw new Unavailable("outside");
-				return { ...outsideAnswer, clients: ["app"], ceiling: "client" };
+				const { subject, issuer, expiresAt } = outsideAnswer;
+				return { kind: "foreign", subject, issuer, expiresAt, clients: ["app"] };
 			}).verify,
 			consume: async () => {
 				consumed += 1;
@@ -892,15 +899,15 @@ describe("token-exchange: what any verifier may answer", () => {
 		const t = await serve({ verifier: failing });
 		await expect(t.exchange("app", outsider)).rejects.toThrow(Unavailable);
 		expect(consumed).toBe(0);
-		const odd = answering({ clients: ["app"], ceiling: "client" }, async () => "maybe" as never);
+		const odd = answering({ kind: "foreign", clients: ["app"] }, async () => "maybe" as never);
 		const u = await serve({ verifier: odd.verifier });
 		await expect(u.exchange("app", outsider)).rejects.toThrow(Unavailable);
 	});
 
-	it("refuses a once-only token, or one under the client's ceiling, as the actor", async () => {
+	it("refuses a once-only token, or a foreign one, as the actor", async () => {
 		for (const [more, consume] of [
 			[{}, async () => "consumed" as const],
-			[{ ceiling: "client" }, undefined],
+			[{ kind: "foreign", clients: ["app"] }, undefined],
 		] as const) {
 			const { verifier } = answering({ issuedTo: "app", ...more }, consume);
 			const s = await serve({ verifier });
@@ -913,8 +920,8 @@ describe("token-exchange: what any verifier may answer", () => {
 
 	it("lets a public client exchange only when it opts in and proves by DPoP the key the token names", async () => {
 		const { verifier } = answering({
+			kind: "foreign",
 			clients: ["device", "spa"],
-			ceiling: "client",
 			holderDigest: digestOf("k1"),
 		});
 		const s = await serve({ verifier });
@@ -930,31 +937,84 @@ describe("token-exchange: what any verifier may answer", () => {
 		const issued = await s.issued(await s.exchange("device", outsider, dpop("k1")));
 		expect(issued.binding).toEqual(dpop("k1"));
 		const bare = await serve({
-			verifier: answering({ clients: ["device"], ceiling: "client" }).verifier,
+			verifier: answering({ kind: "foreign", clients: ["device"] }).verifier,
 		});
 		expect(said(await bare.exchange("device", outsider, dpop("k1")))).toEqual(refusal);
 	});
 
 	it("reads no holder digest for a confidential client", async () => {
 		const { verifier } = answering({
+			kind: "foreign",
 			clients: ["app"],
-			ceiling: "client",
 			holderDigest: digestOf("k1"),
 		});
 		const s = await serve({ verifier });
 		expect(said(await s.exchange("app", outsider))).toEqual(["issued"]);
 	});
 
-	it("takes an answer's clients, ceiling and holder digest only in their shape", async () => {
+	it("takes a foreign answer's clients and holder digest only in their shape, and no kind it does not know", async () => {
 		for (const more of [
-			{ clients: [] },
-			{ clients: [""] },
-			{ ceiling: "token" },
-			{ holderDigest: "short" },
-			{ holderDigest: `${digestOf("k1")}=` },
+			{ kind: "foreign", clients: [] },
+			{ kind: "foreign", clients: [""] },
+			{ kind: "foreign", clients: ["app"], holderDigest: "short" },
+			{ kind: "foreign", clients: ["app"], holderDigest: `${digestOf("k1")}=` },
+			{ kind: "other", issuedTo: "app" },
 		]) {
-			const s = await serve({ verifier: answering({ issuedTo: "app", ...more }).verifier });
+			const s = await serve({ verifier: answering(more).verifier });
 			expect(said(await s.exchange("app", outsider)), JSON.stringify(more)).toEqual([
+				"invalid_request",
+				"subject_token validation failed",
+			]);
+		}
+	});
+});
+
+describe("token-exchange: an answer told by its kind", () => {
+	/** An outside verifier answering exactly `answer`. */
+	const exactly = (answer: object): ExchangeVerifier => ({
+		tokenType: outsideType,
+		verify: async () => answer as never,
+	});
+	const outsider = { ...subjectOf("outside", outsideType), scope: "read" };
+	const base = { subject: "erin", issuer: "https://idp.example", expiresAt: now + 60_000 };
+
+	it("lets only the clients a foreign token lists exchange it, within their allowance alone", async () => {
+		const s = await serve({ verifier: exactly({ ...base, kind: "foreign", clients: ["gate"] }) });
+		expect(said(await s.exchange("app", outsider))).toEqual([
+			"invalid_request",
+			"subject_token does not name this client",
+		]);
+		const grant = (await s.issued(await s.exchange("gate", { ...outsider, scope: "write" }))).grant;
+		expect([grant.subject, grant.scope, grant.audience]).toEqual(["erin", ["write"], [api]]);
+	});
+
+	it("never lets a foreign token act", async () => {
+		const s = await serve({ verifier: exactly({ ...base, kind: "foreign", clients: ["app"] }) });
+		const actor = { actor_token: "outside", actor_token_type: outsideType };
+		expect(
+			said(await s.exchange("app", { ...subjectOf((await s.issue()).token), ...actor })),
+		).toEqual(["invalid_request", "actor_token cannot act"]);
+	});
+
+	it("names the client of an own token by issued-to or audience, within the token's scope", async () => {
+		const s = await serve({ verifier: exactly({ ...outsideAnswer, kind: "own" }) });
+		expect(said(await s.exchange("app", outsider))).toEqual(["issued"]);
+		expect(said(await s.exchange("app", { ...outsider, scope: "write" }))[0]).toBe("invalid_scope");
+	});
+
+	it("takes an answer without a kind as no answer", async () => {
+		const { kind: _, ...unkinded } = outsideAnswer;
+		const s = await serve({ verifier: exactly(unkinded) });
+		expect(said(await s.exchange("app", outsider))).toEqual([
+			"invalid_request",
+			"subject_token validation failed",
+		]);
+	});
+
+	it("takes a foreign answer listing no client as no answer", async () => {
+		for (const clients of [[], undefined]) {
+			const s = await serve({ verifier: exactly({ ...base, kind: "foreign", clients }) });
+			expect(said(await s.exchange("app", outsider))).toEqual([
 				"invalid_request",
 				"subject_token validation failed",
 			]);
