@@ -285,10 +285,23 @@ export function enrollmentOver(p: EnrollmentParts) {
 		// login never finishes that login.
 		if (!t.proved) return jsonAnswer(200, body, { cookies: [p.transactions.cleared()] });
 		// Bound on a binding proof, it counts at once by its first proof: the login goes on, or the session is raised.
-		if (t.purpose === "enroll-login") return p.resume(request, t, proved.amr, body);
-		const raised = await p.sessions.raise(request, proved.amr);
-		const cookies = [...(raised?.cookies ?? []), p.transactions.cleared()];
-		return jsonAnswer(200, body, { cookies });
+		// Either can fail after the codes were made: then they go, as no one would ever see them.
+		const shown = async (answer: () => Promise<HttpResponse>) => {
+			try {
+				return await answer();
+			} catch (error) {
+				const codes = bound.recoveryCodesFactor;
+				// One that cannot go stays unseen, as before; the failure answered is the first.
+				if (codes) await p.factors.remove(t.subject, codes).catch(() => undefined);
+				throw error;
+			}
+		};
+		if (t.purpose === "enroll-login") return shown(() => p.resume(request, t, proved.amr, body));
+		return shown(async () => {
+			const raised = await p.sessions.raise(request, proved.amr);
+			const cookies = [...(raised?.cookies ?? []), p.transactions.cleared()];
+			return jsonAnswer(200, body, { cookies });
+		});
 	};
 
 	return { enroll, complete, challengeBinding };

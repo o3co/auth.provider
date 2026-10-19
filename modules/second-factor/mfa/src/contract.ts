@@ -107,6 +107,8 @@ export interface Factors {
 				readonly kind: "bound";
 				readonly factor: Shown;
 				readonly recoveryCodes?: unknown;
+				/** The codes' own factor, so a caller that cannot show them can take them back with `remove`. */
+				readonly recoveryCodesFactor?: string;
 		  }
 		| {
 				readonly kind:

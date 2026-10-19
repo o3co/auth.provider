@@ -5,7 +5,7 @@ import { bindingProofs } from "@mod/mfa-binding-proof";
 import { factorKinds, type Sending } from "@mod/mfa-extensions";
 import { sessions } from "@mod/session";
 import { afterEach, describe, expect, it } from "vitest";
-import { serve } from "../../../test/harness.ts";
+import { serve, sessionsDown } from "../../../test/harness.ts";
 
 /** How the binding proof answers its next send, and whether it can read what it checks; each sent one keeps its own code. */
 const contact = { sent: 0, answer: undefined as Sending | undefined, unreadable: false };
@@ -119,6 +119,28 @@ describe("a binding proof before a first factor", () => {
 		const entry = await s.app.get(sessions).enterFor(request, "credentials");
 		expect(entry.kind).toBe("entered");
 		expect(await s.app.get(factors).rename("ora", factor, "a")).toBe("renamed");
+	});
+
+	it("takes back the recovery codes a first factor brought when the session cannot be raised to show them", async () => {
+		const s = await serve({}, [contactProof]);
+		await s.signIn("rae");
+		const asked = await s.call("POST", "/session/mfa/enrollment", { kind: "code" });
+		sessionsDown.failNext("raise");
+		const done = await boundOnProof(s, String(asked.body.transaction));
+		expect([done.status, done.body.recovery_codes]).toEqual([503, undefined]);
+		const held = await s.app.get(factors).held("rae");
+		expect(held.map((f) => f.kind)).toEqual(["code"]);
+	});
+
+	it("takes back the recovery codes a login's first factor brought when the login cannot go on to show them", async () => {
+		const s = await serve({ mode: "required" }, [contactProof]);
+		const { tx } = await s.heldLogin("sam");
+		await s.call("POST", "/session/mfa/enrollment", { kind: "code", transaction_id: tx });
+		sessionsDown.failNext("complete");
+		const done = await boundOnProof(s, tx);
+		expect([done.status, done.body.recovery_codes]).toEqual([503, undefined]);
+		const held = await s.app.get(factors).held("sam");
+		expect(held.map((f) => f.kind)).toEqual(["code"]);
 	});
 
 	it("asks it before a session's first factor begins, counts a wrong one as an attempt, and begins once it passes", async () => {
