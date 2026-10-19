@@ -152,9 +152,15 @@ describe("signer-keys-http", () => {
 			keys: [deviceJwk],
 			algorithms: ["EdDSA", "ES256", "RS256"],
 		});
+		// A key holding any member but its type's public ones and those describing it is never handed on.
+		const held = [
+			{ ...deviceJwk, d: "secret" },
+			{ ...deviceJwk, priv: "secret" },
+			{ ...deviceJwk, x: 5 },
+		];
 		script = () => ({
 			status: 200,
-			json: { keys: [{ ...deviceJwk, d: "secret" }, deviceJwk], algorithms: ["EdDSA"] },
+			json: { keys: [...held, deviceJwk], algorithms: ["EdDSA"] },
 		});
 		expect(await keys.keysOf({ subject: "dev-1" })).toEqual({
 			kind: "keys",
