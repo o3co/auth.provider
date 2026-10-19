@@ -1,5 +1,4 @@
 import { auditStandIn } from "@mod/audit/testing";
-import { redirects } from "@mod/authorize";
 import { metadataSections } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, publicClient } from "@mod/clients/testing";
@@ -23,6 +22,7 @@ import { keysConfig } from "@mod/keys/testing";
 import oidc from "@mod/oidc/module";
 import { type Outbound, type OutboundRequest, outbound } from "@mod/outbound";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
+import { redirects } from "@mod/redirect-uris";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
@@ -112,7 +112,7 @@ export async function harness(
 			},
 		}),
 	);
-	// authorize's section, which the front-channel URL is judged against; authorize is not composed.
+	// redirect-uris' section, which the front-channel URL is judged against; authorize is not composed.
 	const redirectsSection = defineModule({ name: "authorize-section" }, (m) => [
 		m.contribute(metadataSections).by(() => redirects),
 	]);

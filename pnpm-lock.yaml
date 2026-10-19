@@ -1438,9 +1438,6 @@ importers:
       '@mod/audit':
         specifier: workspace:*
         version: link:../../foundation/audit
-      '@mod/authorize':
-        specifier: workspace:*
-        version: link:../authorize
       '@mod/clients':
         specifier: workspace:*
         version: link:../../identity/clients
@@ -1468,6 +1465,9 @@ importers:
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
+      '@mod/redirect-uris':
+        specifier: workspace:*
+        version: link:../redirect-uris
       '@mod/request-source':
         specifier: workspace:*
         version: link:../../foundation/request-source

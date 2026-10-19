@@ -32,7 +32,7 @@
 - Every answer is `no-store` with `Pragma: no-cache`.
 - Each host sweeps the kept notices every `sweep-interval`, logging how many it keeps; a session's close never waits for a client.
 - A client the store pushes out of a session's set is logged.
-- A return is one `authorize` lets a client register. A front-channel or back-channel URL is http or https, without userinfo, a fragment, spaces or controls; a front-channel one has no `iss` or `sid` in its query, whatever its case, `-` or `_`, and its origin is one of the client's redirect URIs' (`authorize`'s `redirectsAt`): checked at boot for a registered client, and before framing for any other, whose frame is left out, logged.
+- A return is one `redirect-uris` lets a client register. A front-channel or back-channel URL is http or https, without userinfo, a fragment, spaces or controls; a front-channel one has no `iss` or `sid` in its query, whatever its case, `-` or `_`, and its origin is one of the client's redirect URIs' (`redirect-uris`' `redirectsAt`): checked at boot for a registered client, and before framing for any other, whose frame is left out, logged.
 - A record whose section does not fit is refused whole (`clients`).
 - Each frame's URL gets `iss`, and `sid` when its client asked for the session (OpenID Connect Front-Channel Logout 1.0 §2).
 - A frame whose origin a Content-Security-Policy host source cannot name is left out, logged.
@@ -44,7 +44,7 @@
 - A client gone or without a back-channel URL settles it.
 
 ## Depends on
-- `audit`, `authorize`, `clients`, `code-grant`, `http`, `issuer`, `keys`, `oidc`, `outbound`, `request-source` (the source), `session`
+- `audit`, `clients`, `code-grant`, `http`, `issuer`, `keys`, `oidc`, `outbound`, `redirect-uris`, `request-source` (the source), `session`
 
 ## Vocabulary
 - notice: one client to tell that a session closed, until it is given up.
