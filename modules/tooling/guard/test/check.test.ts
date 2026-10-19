@@ -784,6 +784,41 @@ describe("guard", () => {
 		).toEqual(["@t/g @t/g-store keys no guarantee by them"]);
 	});
 
+	it("G28 refuses a contract or an extension point imported from a dependency named as helpers", () => {
+		const mail = pkg("@t/mail", {
+			"src/contract.ts": `import { contract, extensionPoint } from "@t/kernel";\nexport { senders } from "./points.ts";\nexport const isAddress = (s: string) => s.includes("@");\nexport const mailer = contract<Mailer>("mail");\nexport interface Mailer { send(): void }\n`,
+			"src/points.ts": `import { extensionPoint } from "@t/kernel";\nexport const senders = extensionPoint<string>("mail.senders", { multiplicity: "many" });\n`,
+		});
+		const users = pkg(
+			"@t/users",
+			{
+				"src/contract.ts": `import { isAddress, type Mailer } from "@t/mail";\nexport const ok = (m: Mailer) => isAddress(String(m));\n`,
+				"src/module.ts": `import { mailer as m, senders } from "@t/mail";\nimport * as all from "@t/mail";\nexport const used = [m, senders, all];\n`,
+				"src/module.test.ts": `import { mailer } from "@t/mail";\nexport const t = mailer;\n`,
+			},
+			{
+				exports: { ".": "./src/contract.ts" },
+				dependencies: { "@t/mail": "*" },
+				helpers: ["@t/mail"],
+			},
+		);
+		// A dependency not named as helpers lends its contracts as ever.
+		const session = pkg(
+			"@t/session",
+			{ "src/contract.ts": `import { mailer } from "@t/mail";\nexport const s = mailer;\n` },
+			{ exports: { ".": "./src/contract.ts" }, dependencies: { "@t/mail": "*" } },
+		);
+		expect(
+			check([mail, users, session], budget)
+				.filter((v) => v.rule.startsWith("G28"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual([
+			"@t/users/src/module.ts mailer (@t/mail)",
+			"@t/users/src/module.ts senders (@t/mail)",
+			"@t/users/src/module.ts * (@t/mail)",
+		]);
+	});
+
 	it("G11 refuses line numbers in comments and documents, and G12 files outside a document's directory", () => {
 		const p = pkg("@t/refs", {
 			"src/contract.ts": `// see a.ts:${12}\nexport const s = "b.ts:${3}";\n`,

@@ -8,6 +8,8 @@ export interface Surface {
 	readonly hidden: readonly string[];
 	/** The members of the exported interfaces and type aliases, together. */
 	readonly members: number;
+	/** The exported values made by the kernel's `contract` or `extensionPoint`. */
+	readonly tokens: ReadonlySet<string>;
 	/** The doc comments on the exported declarations and their members, by file of the package: where each starts. */
 	readonly docs: ReadonlyMap<string, ReadonlySet<number>>;
 }
@@ -28,6 +30,14 @@ const named = (node: ts.Node) =>
 	ts.isTypeAliasDeclaration(node) ||
 	ts.isClassDeclaration(node) ||
 	ts.isEnumDeclaration(node);
+
+const tokenMakers = new Set(["contract", "extensionPoint"]);
+const madeAsToken = (node: ts.Node) =>
+	ts.isVariableDeclaration(node) &&
+	node.initializer !== undefined &&
+	ts.isCallExpression(node.initializer) &&
+	ts.isIdentifier(node.initializer.expression) &&
+	tokenMakers.has(node.initializer.expression.text);
 
 /** The parts of a declaration that make up its signature, without function bodies. */
 function signatureParts(node: ts.Node): ts.Node[] {
@@ -54,9 +64,10 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 	const moduleSymbol = source && checker.getSymbolAtLocation(source);
 	const values = new Set<string>();
 	const types = new Set<string>();
+	const tokens = new Set<string>();
 	const hidden = new Set<string>();
 	const docs = new Map<string, Set<number>>();
-	if (!moduleSymbol) return { values, types, hidden: [], members: 0, docs };
+	if (!moduleSymbol) return { values, types, hidden: [], members: 0, tokens, docs };
 	let members = 0;
 	// A primitive, or a union of them, has no members of its own: the platform's own are not the contract's.
 	const primitives =
@@ -93,6 +104,7 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 		for (const declaration of target.declarations ?? []) exportedDeclarations.add(declaration);
 		documented(target);
 		(target.flags & ts.SymbolFlags.Value ? values : types).add(symbol.name);
+		if ((target.declarations ?? []).some(madeAsToken)) tokens.add(symbol.name);
 		if (target.flags & (ts.SymbolFlags.Interface | ts.SymbolFlags.TypeAlias)) {
 			const type = checker.getDeclaredTypeOfSymbol(target);
 			if (primitive(type)) continue;
@@ -118,5 +130,5 @@ export function surfaceOf(entry: string, packageDir: string): Surface {
 			for (const part of signatureParts(declaration)) visit(part);
 		}
 	}
-	return { values, types, hidden: [...hidden].sort(), members, docs };
+	return { values, types, hidden: [...hidden].sort(), members, tokens, docs };
 }
