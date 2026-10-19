@@ -12,7 +12,7 @@
 - `outbound`: fetch a URL with a request and a narrower, answering status, headers and body, or throwing a destination refusal or unavailable with its failure.
 - `outbound.signed`: the same for signed material, with the narrower's hosts always named.
 - `DestinationRefused`, `RefusalReason` and `Narrower`, `outbound-policy`'s, as `fetch` throws and takes them. Composition definition, providing `outbound-policy`'s `outbound.refusals` and `outbound.credentials` from the section; reading an answer as JSON (one frozen UTF-8 object, at the status named, `200` by default).
-- Operator section `outbound`: `outbound-policy`'s keys, `max-concurrent`, the proxy and `direct-hosts`; its keys are in the configuration reference.
+- Operator section `outbound`: `outbound-policy`'s keys, `max-concurrent`, the proxy and `direct-hosts` (a host list, as `outbound-policy` reads one); its keys are in the configuration reference.
 
 ## Invariants
 - Sends every request that leaves the deployment itself, as no other package does (`network`: `outbound`).
