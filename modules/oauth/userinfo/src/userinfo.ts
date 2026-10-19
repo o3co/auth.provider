@@ -9,7 +9,7 @@ export interface UserinfoParts {
 	readonly senderBinding: Pick<SenderBindings, "admitted">;
 	readonly tokens: Pick<Tokens, "verifyAccess">;
 	readonly sessionTokens: Pick<SessionTokens, "sessionOf">;
-	readonly sessions: Pick<Sessions, "openContext">;
+	readonly sessions: Pick<Sessions, "entryOf">;
 	readonly claims: Pick<ReleasedClaims, "of">;
 }
 
@@ -20,8 +20,8 @@ export const unavailable = answer(503, { error: "temporarily_unavailable" });
 
 /**
  * Answers the subject of the access token the request presents, and the claims oidc releases for its
- * scope while the session it was issued in is open for that subject. Throws Unavailable when a check
- * cannot tell.
+ * scope while the session it was issued in enters at use for that subject. Throws Unavailable when a
+ * check cannot tell.
  */
 export function userinfoOver(p: UserinfoParts) {
 	return async (request: HttpRequest): Promise<HttpResponse> => {
@@ -42,8 +42,9 @@ export function userinfoOver(p: UserinfoParts) {
 		const bound = await p.sessionTokens.sessionOf(id);
 		// A token issued in no session (client credentials, say) is answered its subject only.
 		if (bound.kind === "unbound") return answer(200, { sub: grant.subject });
-		const context = await p.sessions.openContext(bound.handle);
-		if (context?.subject !== grant.subject) {
+		const entry = await p.sessions.entryOf(bound.handle);
+		// A session absent or short of a requirement at use is refused alike.
+		if (entry.kind !== "entered" || entry.session.context.subject !== grant.subject) {
 			// Challenged in the token's own scheme, as sender-binding challenges a token it refuses.
 			return answer(401, { error: "invalid_token" }, challengeOf(tokenType, "invalid_token"));
 		}
