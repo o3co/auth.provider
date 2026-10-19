@@ -25,6 +25,7 @@
   - G26: product code reaches the network through `outbound`, or as the words its manifest declares let it (the `network` internal module).
   - G27: a package whose declared `network` word reaches a server the deployment provides (`redis`, `smtp`) states what that server must be in a `## Deployment` section of its card (the `network` internal module).
   - G28: a dependency a manifest names in `helpers` lends functions and types alone: shipped code takes from it no value the kernel's `contract` or `extensionPoint` makes.
+  - G29: a test file composing every module a feature bridge `joins` and a module contributing to the bridge's points composes the bridge too, so no contribution that decides an answer is silently lost.
 - Measures each package's public surface: its exported values, and the members of its exported interfaces and type aliases.
 
 ## Not here
@@ -38,6 +39,8 @@
 - Checks are derived from the repository's current state. Nothing is enumerated, and there is no place to write exceptions.
 - A document copies a configuration list when one line lays out more consecutive values of a list (nested lists flattened) than the configuration allows, in order, with no word between them but `and`, `or` or `then`.
 - Documents are all Markdown in the repository. A target is a link target, or an inline path that is explicitly relative or whose first part is beside the document (any other, `/`-rooted ones too, names a place outside it); it resolves from the document's directory, and is refused if it leaves it or names a missing file with an extension.
+- G29 reads a test file's imports: a `./module` (its own package's by path) is composed, a `./testing` value named `…StandIn` composes its package, and an adapter composes its owner; a stand-in named otherwise, or a composition built elsewhere or at run time, is missed, not reported. A package contributes to a bridge when its shipped code takes one of the bridge's `extensionPoint` values.
+- G29 counts feature bridges only: a foundation bridge's points collect operational counts that decide no answer a test reads. Were one to collect what decides answers, the scope is to be looked at again.
 - G12 reads no fenced code block: a block's samples show another project's files, not references to this one. G11 and G21 read blocks as any text.
 - The map is the README of the deepest folder that holds every package. An owner cell made only of lowercase names and separators (`,`, `/`, `and`) lists packages; any other cell is a general phrase.
 - A dependency item names modules with the lowercase names it opens with, before any note in brackets or sentence after a full stop.
