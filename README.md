@@ -6,103 +6,281 @@
 
 English | [日本語](README.ja.md)
 
-An OAuth 2.0 and OpenID Connect provider, built from small modules that a generated app assembles. You choose the modules a deployment needs; each one brings its routes, its settings and its stores, and refuses to boot when what it needs is missing.
+auth-provider is a self-hosted OAuth 2.0 authorization server and OpenID Connect (OIDC) provider for Node.js, written in TypeScript. Generate an app with the features you need, then run it on Node.js or build its Docker image.
 
-0.18 is a rewrite of 0.17 under new package names. To move a 0.17 deployment, read the [migration guide](docs/migration.md) first.
+The generator adds the modules those features depend on. At startup the app checks its configuration and lists every problem it finds, by setting name.
 
-## What it does, and what it leaves to others
+0.18 rewrites 0.17 under new package names, and it is still in prerelease. Until 0.18.0 is final, install it with the npm `next` tag. Without the tag, npm installs 0.17. To move an existing 0.17 deployment, read the [migration guide](docs/migration.md) first: there is no in-place upgrade, the configuration must be rewritten, and stored state is not migrated.
 
-The provider holds the signing keys and the session state, so relying parties never hold a key that can mint tokens, and the layers that decide and enforce access can change on their own.
+## What it does
 
-It does:
+The provider signs users in, manages their sessions and issues tokens to your applications. It manages the signing keys and gives you endpoints to check and revoke tokens.
 
-- **Sign users in and keep their sessions**: by password checked against your user ledger, through upstream identity providers (OpenID Connect, Google, GitHub, Apple), or by passkey; with a second factor (an authenticator app, a code by email, recovery codes, a security key) when you compose one. It ends sessions by logout, including logout started by a relying party.
-- **Authenticate clients**: by secret, by signed assertion, as public clients with PKCE, and by client ID metadata documents.
-- **Issue and manage tokens**: authorization code, refresh, client credentials, JWT bearer, device authorization and token exchange grants; ID tokens and userinfo; consent; introspection and revocation; tokens bound to a key (DPoP) or a certificate (mTLS).
-- **Publish** its signing keys and its discovery document.
-- **Hold** the tokens upstream providers issue, and the grants users give to use them.
-- **Send mail** for the email second factor and for proving an account's address.
+| Feature | Specification | Module |
+|---|---|---|
+| Authorization code flow, with PKCE (S256) required for every client | RFC 6749, RFC 7636 | [authorize](modules/oauth/authorize/README.md), [code-grant](modules/oauth/code-grant/README.md) |
+| Refresh tokens, rotated on every use, with reuse detection | RFC 6749 | [refresh](modules/oauth/refresh/README.md) |
+| Client credentials grant | RFC 6749 | [token-endpoint](modules/oauth/token-endpoint/README.md) |
+| ID tokens and UserInfo | OpenID Connect Core 1.0 | [oidc](modules/oauth/oidc/README.md), [userinfo](modules/oauth/userinfo/README.md) |
+| Discovery documents and public signing keys (JWKS) | OpenID Connect Discovery 1.0, RFC 8414 | [discovery](modules/oauth/discovery/README.md), [keys](modules/foundation/keys/README.md) |
+| RP-initiated (client-initiated), front-channel and back-channel logout | OpenID Connect logout specifications | [rp-logout](modules/oauth/rp-logout/README.md) |
+| Token introspection and revocation | RFC 7662, RFC 7009 | [token-control](modules/oauth/token-control/README.md) |
+| Client secrets and `private_key_jwt`; public clients without client authentication | RFC 6749, RFC 7523 | [clients](modules/identity/clients/README.md), [client-assertion](modules/oauth/client-assertion/README.md) |
+| Client ID Metadata Documents (a URL as the client ID) | | [clients-cimd](modules/oauth/clients-cimd/README.md) |
+| JWT bearer grant | RFC 7523 | [jwt-bearer](modules/oauth/jwt-bearer/README.md) |
+| Device Authorization Grant | RFC 8628 | [device-grant](modules/oauth/device-grant/README.md) |
+| Token Exchange | RFC 8693 | [token-exchange](modules/oauth/token-exchange/README.md) |
+| Tokens bound to a client-held key (DPoP) | RFC 9449 | [dpop](modules/oauth/dpop/README.md) |
+| Certificate-bound tokens (mTLS) | RFC 8705 | [mtls](modules/cert-binding/mtls/README.md) |
+| Resource indicators | RFC 8707 | [resource-indicators](modules/oauth/resource-indicators/README.md) |
+| Passkey login and registration | WebAuthn | [webauthn-login](modules/passkey/webauthn-login/README.md), [passkey-registration](modules/passkey/passkey-registration/README.md) |
+| Second factors: authenticator apps (TOTP), email codes, recovery codes and security keys | RFC 6238, WebAuthn | [mfa](modules/second-factor/mfa/README.md) and the `mfa-*` modules |
+| Sign-in through an upstream OpenID Connect provider, Google, GitHub or Apple | OpenID Connect; GitHub OAuth | [federation](modules/upstream-login/federation/README.md) and the `idp-*` modules |
 
-It leaves to others:
+Passkey login is a custom grant at the token endpoint and does not open a browser session. The mTLS module binds tokens to a certificate; clients still authenticate with another method.
 
-- **Deciding** what a token allows: the policy verifier.
-- **Enforcing** that decision inside services: the service interceptors, or a token-validating proxy in front.
-- **The user ledger**: who the users are and their passwords. The provider asks your ledger (over HTTP, or a list in its settings) and keeps only what it needs beside it, such as links to upstream identities and proven contacts.
-- **Pages**: the login and consent pages are the deployment's.
-- **Sign-up and account recovery.**
+Other modules cover consent, step-up authentication, keeping upstream tokens for your clients, and ending a user's sessions when your user store revokes them. The [owner map](modules/README.md) lists every module and what it is responsible for.
+
+### What you provide
+
+- A login page, and a consent page if some clients need consent. The provider redirects the browser to your login page with a `redirect_to` parameter. Your page gets a CSRF token from `GET /session/csrf`, posts the username, password, token and `redirect_to` to `POST /session/login`, then sends the browser to the `redirect_to` it gets back. Serve the page from the provider's public origin (for example, behind the same reverse proxy): a login posted from another origin is refused. See [login-password](modules/identity/login-password/README.md) and [csrf](modules/identity/csrf/README.md).
+- User accounts, either listed in the configuration or in your own HTTP service that the provider calls, which the docs call a user ledger ([users-http](modules/user-ledger-http/users-http/README.md)). Sign-up and password recovery are not included.
+- A reverse proxy that terminates TLS. The app itself serves plain HTTP.
+- Authorization inside your services. Your services, or a separate policy engine, decide what a token allows; see [Related projects](#related-projects).
+
+## Requirements
+
+- Node.js 24 or later.
+- pnpm, at the version in the generated project's `packageManager` field. `corepack enable` installs that version for you.
+- Redis 7.0 or later, if you use the Redis adapter for persistent state or several instances. See [Before production](#before-production).
+- Docker, if you want to build and run the generated image.
+
+Some patterns also need an HTTP user ledger, an audit collector, an SMTP relay or upstream identity providers. `simple-web` needs none of them.
 
 ## Quick start
 
-Generate a deployment from one of the patterns:
+Start with `simple-web`. It keeps users in the configuration and state in memory, and gives you password login for web apps (authorization code flow, OIDC, refresh tokens) plus client credentials for services.
 
 ```sh
 npx @o3co/create-auth-provider@next my-provider --pattern simple-web
 cd my-provider
+pnpm install
+cp .env.example .env
+cp config/local.conf.example config/local.conf
 ```
 
-Then follow the generated `README.md`. It names the settings the pattern needs, and the project comes with a Dockerfile.
+The generated `README.md` explains the pattern and its settings. In both example files every line is commented out, so copying them sets nothing. Uncomment the settings you need and replace the example values.
 
-- **Patterns.** Each pattern is one kind of deployment; `simple-web`, a password login, needs no outside system. The [patterns card](modules/scaffold/create-app/src/patterns/README.md) and each pattern's own card say what they are for, and a name not known is refused with the names that are. `--add` adds a feature to a pattern, and `--help` tells the other options.
-- **Your own selection.** Name the modules instead of a pattern, and the app assembles those, with the wirings and bridges they need added for you.
+In `.env`, set:
 
-The [create-app card](modules/scaffold/create-app/README.md) describes what is generated.
+- `ISSUER_URL` and `HTTP_PUBLIC_ORIGIN`: the URL clients see, with no trailing slash, and its scheme, host and port. The two must have the same origin.
+- `KEYS_SIGNING_KID` and `KEYS_SIGNING_ALG`. The example uses EdDSA, for an Ed25519 key.
+- `AUTHORIZE_LOGIN_PAGE`: the URL of your login page. `CONSENT_PAGE` is the URL of your consent page; leave it unset if all your clients are first-party.
+- `KERNEL_DEPLOYMENT=single`, `STORE_ACCEPT_VOLATILE=true`, `MAIL_ACCEPT_UNSENT=true` and `TOKENS_REVOCATION=denylist`, as in the example. They state that this deployment runs one instance, keeps its state in memory (lost on restart) and sends no mail.
 
-## How it is built
+Generate a signing key:
 
-- **Modules.** Each concern is one module under `modules/<group>/<name>`. Its README, the module's card, is its contract: what it does, what it offers, what it promises, and what it depends on.
-- **The owner map.** [modules/README.md](modules/README.md) says which module owns each contract, setting, extension point and word. Look things up there before searching.
-- **The kernel.** Modules declare contracts and extension points and contribute to others' through the [kernel](modules/foundation/kernel/README.md), which boots them, reads their configuration sections and refuses boot with every problem at once.
-- **Composition.** [combinations](modules/scaffold/combinations/README.md) decides which wirings, adapters and bridges come with a selection.
-- **The guard.** `pnpm check` runs the [guard](modules/tooling/guard/README.md), which holds the workspace to its rules: dependency direction, the public surface of each package, and the size of each module and its card.
+```sh
+node -e 'const {generateKeyPairSync}=require("node:crypto");process.stdout.write(generateKeyPairSync("ed25519").privateKey.export({type:"pkcs8",format:"pem"}))' > signing.pem
+```
 
-## Extending
+Make a password hash for a test user. The provider accepts bcrypt or scrypt hashes, never plain passwords. This prints an scrypt hash:
 
-A module of your own is assembled the same way as the provided ones:
+```sh
+node -e 'const c=require("node:crypto");const s=c.randomBytes(16);const k=c.scryptSync(process.argv[1],s,32,{N:2**15,r:8,p:1,maxmem:64*1024*1024});const b=x=>x.toString("base64").replace(/=+$/,"");console.log(`$scrypt$ln=15,r=8,p=1$${b(s)}$${b(k)}`)' 'your-password'
+```
 
-- **Contracts and extension points** are described in the [kernel card](modules/foundation/kernel/README.md); each feature's card lists the extension points it offers.
-- **Adapters and bridges** declare what they stand in for or join in their manifest, as [combinations](modules/scaffold/combinations/README.md) describes.
-- **Contract tests.** Each module publishes its contract tests at `./testing`, for an implementation of your own to run against.
+Then write `config/local.conf`. It holds the key (leave `KEYS_SIGNING_PRIVATE_KEY` unset in `.env`), the audit receiver, your users and your clients. `users.registered` is not in the example file, so add it yourself:
 
-## Packages
+```hocon
+keys.signing.private-key = """
+<paste the contents of signing.pem>
+"""
 
-0.18 is published as one package per concern, `@o3co/auth-provider-<concern>`, all at the same version, with each module as a subpath. You rarely name them yourself: the generated app depends on what it composes. The [migration guide](docs/migration.md#packages) maps the 0.17 packages to these.
+audit.receivers = [log]
+
+users.registered = [
+  { identifier = "alice", password-hash = "<the hash printed above>" }
+]
+
+clients.registered = [
+  {
+    id = "my-web-app"
+    kind = "public"
+    method = "none"
+    sections {
+      authorize { redirect-uris = ["http://127.0.0.1:3000/callback"] }
+      client-allowance {
+        grants = ["authorization_code", "refresh_token"]
+        scopes = ["openid", "profile"]
+        default-scopes = ["openid"]
+      }
+      consent { first-party = true }
+    }
+  }
+]
+```
+
+A client is allowed no grants and no scopes until you list them in `client-allowance`. A code-flow client also needs its `redirect-uris`, and `first-party = true` skips the consent page. A confidential client uses `kind = "confidential"`, a `method` such as `client_secret_basic`, and a hash of its secret in `sections.client-secret.hash`. The [configuration reference](docs/configuration.md#client-metadata-sections) lists every client section.
+
+The public origin must be https by default. To try the provider over plain http on your machine, set `ISSUER_URL` and `HTTP_PUBLIC_ORIGIN` to `http://127.0.0.1:8080` and add this line to `config/local.conf`:
+
+```hocon
+http.insecure-origin = true
+```
+
+Start the app:
+
+```sh
+APP_CONFIG=config/local.conf,config/application.conf pnpm start
+```
+
+If a setting is missing or invalid, the app prints one `refused <setting>: <reason>` line for each problem on standard error and exits with status 78. Fix them and start again.
+
+With the default port and the local issuer above, check that it is up:
+
+```sh
+curl http://127.0.0.1:8080/readyz
+curl http://127.0.0.1:8080/.well-known/openid-configuration
+```
+
+A browser sign-in also needs your login page. If your issuer URL has a path, the discovery document is under that path.
+
+## Choose a pattern and add features
+
+A pattern is a ready-made selection of modules for one kind of deployment. Choose one with `--pattern`; the generated README lists what it needs. Each pattern has a short card in [modules/scaffold/create-app/src/patterns](modules/scaffold/create-app/src/patterns/README.md).
+
+| Pattern | Use it for | Storage and outside services |
+|---|---|---|
+| `simple-web` | Password login for web apps (code flow with refresh tokens), and client credentials for services | In-memory store, one instance; users in the configuration; audit to the log |
+| `mfa-web` | `simple-web` with TOTP, email codes and recovery codes | Redis and SMTP |
+| `device` | `simple-web` with the Device Authorization Grant, where users approve a code on another screen | In-memory store, one instance |
+| `native-app` | Native apps and single-page apps as public clients, with PKCE, refresh tokens and DPoP | In-memory store, one instance |
+| `a2a` | Service-to-service tokens with no users: client credentials or JWT bearer, `private_key_jwt`, mTLS and DPoP | In-memory store, one instance; a proxy that forwards client certificates for mTLS |
+| `sso-federated` | Sign-in through upstream providers, with no local passwords | In-memory store, one instance; HTTP user ledger and upstream providers |
+| `full` | Every feature except those you must opt in to (what 0.17 included by default) | Redis, HTTP user ledger, HTTP audit receiver and SMTP |
+
+If you leave out `--pattern`, you get `full`. Use `simple-web` to start without outside services.
+
+Add features with `--add`, using module names of the form `@mod/<name>`, where `<name>` is the module's directory under `modules/`:
+
+```sh
+npx @o3co/create-auth-provider@next my-provider-dpop --pattern simple-web --add @mod/dpop
+```
+
+Repeat `--add` for each feature. To keep `simple-web`'s store in Redis, add `--axis @mod/store=@mod/redis`. You can also replace a pattern's login methods, grants or other feature groups. Axis and group options need a pattern other than `full`. Run `npx @o3co/create-auth-provider@next --help` for all options.
+
+You can also list modules yourself instead of choosing a pattern. The generator then adds what they need to connect, and you write the configuration. See [create-app](modules/scaffold/create-app/README.md) for what each kind of project contains.
+
+To change an existing app's selection, generate a new project into an empty directory and copy your configuration into it. The generator never overwrites a directory that has files in it.
 
 ## Configuration
 
-Each module reads its own section of HOCON configuration, and refuses boot on an unknown key, a section for a module that is not loaded, or a value it cannot use. A project generated from a pattern reads its scalar settings from the environment; the [configuration reference](docs/configuration.md) lists every key, its default and what it means.
+Configuration uses HOCON, with one section per module, named after it: for example `issuer.url`, `keys.signing.alg` and `tokens.access-token-lifetime`. Unknown keys, sections for modules you have not loaded, and invalid values stop the app from starting. Error messages name the setting and never print its value. Times and sizes need a unit, such as `30s` or `5KiB`.
 
-## Operating
+A project generated from a pattern reads two local files. Both are left out of git and out of the Docker build context, so keep your secrets there.
 
-- [Operations runbook](docs/runbook.md): what the deployment must provide, Redis, rotating keys, upgrading, revoking a user, probes and alerts, stopping.
-- [Security model](docs/security-model.md): what the provider guarantees, and what it leaves to the deployment.
-- [Audit events](docs/audit-events.md): every event and its attributes.
-- [Configuration reference](docs/configuration.md).
-- [Migrating from 0.17](docs/migration.md).
-- [Releasing](docs/releasing.md): for maintainers.
+- `.env` supplies the environment variables that `config/application.conf` reads.
+- `config/local.conf` holds lists, multi-line values and any other setting you write directly in HOCON.
 
-## Versions
+A variable's name is the setting's path in upper case, with `.` and `-` replaced by `_`: `keys.signing.private-key` becomes `KEYS_SIGNING_PRIVATE_KEY`. A variable only affects a setting that `config/application.conf` reads from it; it is not a general override.
 
-Releases before 1.0 may break in a minor version; each breaking release has a migration guide. Release candidates are published under the npm `next` tag.
+`APP_CONFIG` lists the configuration files, separated by commas. Earlier files win over later ones. Without it, the app reads `config/application.conf`.
 
-Security fixes are released for the latest 0.18.x. To report a vulnerability, follow the [security policy](SECURITY.md).
+Replace every example value before you start. A secret's placeholder starts with `REPLACE-` and is refused if you leave it in.
 
-## Development
+The [configuration reference](docs/configuration.md) lists every setting with its type, default and environment variable. Each module directory in this repository also has a generated `reference.conf` with its defaults, for reading only.
+
+## Run in Docker
+
+Run `pnpm install` first so that `pnpm-lock.yaml` exists, then:
+
+```sh
+docker build -t auth-provider .
+docker run --env-file .env \
+  -e HTTP_HOST=0.0.0.0 \
+  -e HTTP_PORT=8080 \
+  -e APP_CONFIG=config/local.conf,config/application.conf \
+  -v "$PWD/config/local.conf:/app/config/local.conf:ro" \
+  -p 8080:8080 \
+  auth-provider
+```
+
+Docker env files take one line per variable, so keep multi-line values such as PEM keys in `config/local.conf`.
+
+The image uses Node 24, installs production dependencies only and runs as a non-root user. Its health check calls `/_healthcheck`.
+
+## Before production
+
+Replace the in-memory store with Redis, or with your own adapter that meets the store contract. The Redis adapter needs Redis 7.0 or later as a single primary; cluster mode is refused. The app checks the server's settings at startup. Read the [Redis requirements](docs/runbook.md#redis) for persistence, replication and managed services.
+
+Set `kernel.deployment` to `single` or `multi`. With `multi`, the app refuses to start with modules that cannot run across instances, such as the in-memory store and the logging-only mailer.
+
+Put the app behind a TLS-terminating proxy and set `http.trusted-proxies`. The proxy must remove any forwarded or client-certificate headers that clients send before it sets its own. Read the [deployment requirements](docs/runbook.md#before-you-deploy) and the [security model](docs/security-model.md) before you expose the service.
+
+## Endpoints
+
+The [route reference](docs/routes.md) lists the methods, request bodies and policies of every route in the full template with all optional features. Your app serves only the routes of the modules it loads.
+
+Common endpoints:
+
+- `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server`: discovery, when the issuer has no path;
+- `/.well-known/jwks.json`: the public signing keys;
+- `/oauth/authorize` and `/oauth/token`.
+
+Your deployment's discovery document lists the endpoints it serves.
+
+## Operations
+
+Use `GET /_healthcheck` for liveness and `GET /readyz` for readiness. Readiness returns 503 while a dependency such as Redis is down. Take that instance out of traffic until the dependency recovers; restarting it does not help.
+
+When it is loaded, the Prometheus publisher serves `/metrics` (change the path with `metrics-prometheus.path`). Restrict access to it at your proxy. Logs are JSON lines on standard output; set the level with `kernel.logging.level`.
+
+Choose audit receivers with `audit.receivers`. `log` is built in; `stdout` and `http` need their receiver modules (`audit-stdout`, `audit-http`). Delivery is best effort, so watch `auth_audit_events_lost_total`. The [audit event reference](docs/audit-events.md) lists every event and its attributes.
+
+SIGTERM and SIGINT shut the app down gracefully within `kernel.stop-deadline` (`30s` by default). Give your orchestrator a longer grace period.
+
+The [operations runbook](docs/runbook.md) covers deployment, rotating the signing and sealing keys, upgrades, revoking users and alerts.
+
+## Write your own module
+
+Find the contract you need in the [owner map](modules/README.md), then read that module's README.
+
+Define your module with `defineModule` from `@o3co/auth-provider-foundation/kernel`, and add it to the module list that the generated `src/main.ts` passes to `assemble`. The [kernel README](modules/foundation/kernel/README.md) describes the module API.
+
+To replace an implementation, such as the store or the user ledger, implement its contract and run the contract tests published at its `testing` subpath, for example `@o3co/auth-provider-foundation/store/testing`.
+
+For modules inside this repository, the [combinations README](modules/scaffold/combinations/README.md) explains how a module's manifest declares adapters and the modules that connect it to others.
+
+## Versions and support
+
+The generator picks the packages your app needs. Published packages are named `@o3co/auth-provider-<concern>`, share one version and expose each module as a subpath. The [migration guide](docs/migration.md#packages) maps the 0.17 packages to their 0.18 replacements.
+
+Before 1.0, a minor release may break compatibility, and so may a new release candidate. Read the migration guide and the [changelog](CHANGELOG.md) before you upgrade.
+
+Security fixes are released for the latest 0.18.x only; a fix found in a release candidate lands in the next one. Report a vulnerability privately with **Report a vulnerability** on this repository's Security tab, as [SECURITY.md](SECURITY.md) describes. Please don't open a public issue.
+
+## Contributing
+
+Use Node.js 24 or later and the pnpm version in the repository's `package.json` (`corepack enable` installs it):
 
 ```sh
 pnpm install
 pnpm check
 ```
 
-`pnpm check` runs the type check, lint, tests, the guard and the distribution check. Tests that need Docker run with `pnpm test:integration`.
+`pnpm check` runs type checking, lint, unit tests, the guard and the distribution check. `pnpm test:integration` runs the tests that need Docker.
 
-How changes are made, checked and committed is in [CONTRIBUTING.md](CONTRIBUTING.md).
+Modules live under `modules/<group>/<name>`, and each module's README is its contract. Find the module responsible for your change in the [owner map](modules/README.md). The [guard](modules/tooling/guard/README.md) checks dependency direction, each package's public surface and module size.
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before you open a pull request, and target `develop`. Maintainers cut releases as [docs/releasing.md](docs/releasing.md) describes.
 
 ## Related projects
 
 - [auth](https://github.com/o3co/auth): the umbrella repository, with the architecture and end-to-end tests across components.
 - [auth.policy-verifier](https://github.com/o3co/auth.policy-verifier): the policy engine that makes authorization decisions.
 - [auth.proxy](https://github.com/o3co/auth.proxy): an optional reverse proxy that validates tokens in front of services.
-- [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors): authorization inside gRPC and ConnectRPC services, asking this provider to introspect and the policy verifier to decide.
+- [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors): authorization inside gRPC and ConnectRPC services, using this provider's introspection and the policy verifier's decisions.
 
 ## License
 

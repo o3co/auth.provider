@@ -6,105 +6,283 @@
 
 [English](README.md) | 日本語
 
-OAuth 2.0 と OpenID Connect の provider です。小さな module を、生成した app が組み立てて作ります。配備に要る module を選ぶと、各 module が自分の route、設定、store を持ち込み、要るものが欠けていれば起動を拒みます。
+auth-provider は、TypeScript で書かれた Node.js 向けのセルフホスト型 OAuth 2.0 認可サーバー兼 OpenID Connect（OIDC）プロバイダーです。必要な機能を選んでアプリを生成し、Node.js で実行するか、Docker イメージをビルドして利用します。
 
-0.18 は、0.17 を新しい package 名で作り直したものです。0.17 の配備を移すときは、先に[移行の手引き](docs/migration.md)を読んでください。
+選んだ機能が依存するモジュールは、ジェネレーターが追加します。アプリは起動時に設定を検証し、見つかった問題を設定名とともにすべて表示します。
 
-## 何をして、何を他に任せるか
+0.18 は、パッケージ名を変更して 0.17 を書き直したバージョンで、まだプレリリース段階です。0.18.0 の正式リリースまでは、npm の `next` タグを指定してインストールしてください。タグを省略すると 0.17 がインストールされます。既存の 0.17 環境を移行する場合は、まず[移行ガイド](docs/migration.md)を読んでください。既存環境をそのままアップグレードすることはできません。設定の書き直しが必要で、保存済みの状態も移行されません。
 
-provider は署名の鍵と session の状態を持ちます。そのため relying party が token を作れる鍵を持つことはなく、アクセスを決める層と強制する層は、それぞれ独立に変えられます。
+## 主な機能
 
-すること:
+ユーザーのログインとセッションを管理し、アプリケーションにトークンを発行します。署名鍵を管理し、トークンの検証と失効のためのエンドポイントも提供します。
 
-- **利用者のログインと session の維持**: 利用者の台帳で確かめるパスワード、上流の identity provider (OpenID Connect、Google、GitHub、Apple)、passkey によるログイン。組み込めば第 2 要素 (認証アプリ、メールのコード、リカバリーコード、セキュリティキー) も使えます。logout で session を終えます。relying party から始まる logout も含みます。
-- **client の認証**: secret、署名した assertion、PKCE を使う public client、client ID metadata document。
-- **token の発行と管理**: authorization code、refresh、client credentials、JWT bearer、device authorization、token exchange の各 grant。ID token と userinfo。同意。introspection と revocation。鍵 (DPoP) や証明書 (mTLS) に結び付けた token。
-- **公開**: 署名の鍵と discovery document。
-- **保持**: 上流の provider が出す token と、それを使うために利用者が与える grant。
-- **メールの送信**: メールの第 2 要素と、アカウントのアドレスの証明のため。
+| 機能 | 仕様 | モジュール |
+|---|---|---|
+| 認可コードフロー（すべてのクライアントで PKCE（S256）が必須） | RFC 6749, RFC 7636 | [authorize](modules/oauth/authorize/README.md), [code-grant](modules/oauth/code-grant/README.md) |
+| リフレッシュトークン（使用するたびにローテーションし、再利用を検知） | RFC 6749 | [refresh](modules/oauth/refresh/README.md) |
+| クライアントクレデンシャルグラント | RFC 6749 | [token-endpoint](modules/oauth/token-endpoint/README.md) |
+| ID トークンと UserInfo | OpenID Connect Core 1.0 | [oidc](modules/oauth/oidc/README.md), [userinfo](modules/oauth/userinfo/README.md) |
+| ディスカバリードキュメントと署名検証用の公開鍵（JWKS） | OpenID Connect Discovery 1.0, RFC 8414 | [discovery](modules/oauth/discovery/README.md), [keys](modules/foundation/keys/README.md) |
+| RP 起点（クライアント起点）、フロントチャネル、バックチャネルのログアウト | OpenID Connect のログアウト関連仕様 | [rp-logout](modules/oauth/rp-logout/README.md) |
+| トークンイントロスペクションと失効 | RFC 7662, RFC 7009 | [token-control](modules/oauth/token-control/README.md) |
+| クライアントシークレットと `private_key_jwt` によるクライアント認証、クライアント認証なしのパブリッククライアント | RFC 6749, RFC 7523 | [clients](modules/identity/clients/README.md), [client-assertion](modules/oauth/client-assertion/README.md) |
+| Client ID Metadata Documents（URL をクライアント ID として使用） | | [clients-cimd](modules/oauth/clients-cimd/README.md) |
+| JWT ベアラーグラント | RFC 7523 | [jwt-bearer](modules/oauth/jwt-bearer/README.md) |
+| Device Authorization Grant | RFC 8628 | [device-grant](modules/oauth/device-grant/README.md) |
+| Token Exchange | RFC 8693 | [token-exchange](modules/oauth/token-exchange/README.md) |
+| クライアントが保持する鍵にバインドしたトークン（DPoP） | RFC 9449 | [dpop](modules/oauth/dpop/README.md) |
+| 証明書にバインドしたトークン（mTLS） | RFC 8705 | [mtls](modules/cert-binding/mtls/README.md) |
+| リソースインジケーター | RFC 8707 | [resource-indicators](modules/oauth/resource-indicators/README.md) |
+| パスキーによるログインと登録 | WebAuthn | [webauthn-login](modules/passkey/webauthn-login/README.md), [passkey-registration](modules/passkey/passkey-registration/README.md) |
+| 第2の認証要素：認証アプリ（TOTP）、メールコード、リカバリーコード、セキュリティキー | RFC 6238, WebAuthn | [mfa](modules/second-factor/mfa/README.md) と `mfa-*` モジュール |
+| 上流の OpenID Connect プロバイダー、Google、GitHub、Apple を通じたログイン | OpenID Connect、GitHub OAuth | [federation](modules/upstream-login/federation/README.md) と `idp-*` モジュール |
 
-他に任せること:
+パスキーログインはトークンエンドポイントのカスタムグラントで、ブラウザーのセッションは開始しません。mTLS モジュールはトークンを証明書にバインドします。クライアント認証には別の方式を使います。
 
-- **決めること**: token が何を許すか。policy verifier が決めます。
-- **強制すること**: その判断をサービスの中で強制すること。サービスの interceptor か、前に置く token を確かめる proxy が受け持ちます。
-- **利用者の台帳**: 利用者が誰で、パスワードは何か。provider はあなたの台帳 (HTTP 越し、または設定の中の一覧) に問い合わせ、その横に要るものだけを持ちます。上流の identity との結び付きや、証明済みの連絡先などです。
-- **頁**: ログインと同意の頁は配備のものです。
-- **利用者の登録とアカウントの回復。**
+このほか、同意、ステップアップ認証、クライアント向けに上流のトークンを保持する機能に対応するモジュールがあります。ユーザーストアで失効させたユーザーのセッションを終了するモジュールもあります。[担当モジュール一覧](modules/README.md)には、すべてのモジュールとその責務をまとめています。
 
-## はじめかた
+### 自分で用意するもの
 
-pattern の 1 つから配備を生成します。
+- ログインページと、同意が必要なクライアントがある場合は同意ページ。プロバイダーは `redirect_to` パラメーターを付けて、ブラウザーをログインページにリダイレクトします。ログインページでは `GET /session/csrf` で CSRF トークンを取得し、ユーザー名、パスワード、トークン、`redirect_to` を `POST /session/login` に送信します。その後、応答で受け取った `redirect_to` にブラウザーを移動します。ページはプロバイダーの公開オリジンから配信してください。たとえば、同じリバースプロキシの背後に配置します。別のオリジンから送信されたログイン要求は拒否されます。[login-password](modules/identity/login-password/README.md) と [csrf](modules/identity/csrf/README.md) を参照してください。
+- ユーザーアカウント。設定に列挙するか、プロバイダーが呼び出す独自の HTTP サービスで管理します。この HTTP サービスをドキュメントではユーザー台帳（user ledger）と呼びます（[users-http](modules/user-ledger-http/users-http/README.md)）。ユーザー登録とパスワード復旧の機能は含まれません。
+- TLS を終端するリバースプロキシ。アプリ自体は平文の HTTP で待ち受けます。
+- 各サービス内での認可。トークンで何を許可するかは、各サービスまたは別のポリシーエンジンが判断します。[関連プロジェクト](#関連プロジェクト)を参照してください。
+
+## 動作要件
+
+- Node.js 24 以降。
+- 生成したプロジェクトの `packageManager` フィールドに指定されたバージョンの pnpm。`corepack enable` でそのバージョンをインストールできます。
+- 状態の永続化や複数インスタンスでの運用に Redis アダプターを使う場合は、Redis 7.0 以降。[本番運用の前に](#本番運用の前に)を参照してください。
+- 生成したイメージをビルドして実行する場合は、Docker。
+
+パターンによっては、HTTP ユーザー台帳、監査ログの収集先、SMTP リレー、上流の ID プロバイダーも必要です。`simple-web` では、これらは不要です。
+
+## クイックスタート
+
+まずは `simple-web` から始めてください。ユーザーは設定で管理し、状態はメモリーに保持します。Web アプリ向けのパスワードログイン（認可コードフロー、OIDC、リフレッシュトークン）と、サービス向けのクライアントクレデンシャルを利用できます。
 
 ```sh
 npx @o3co/create-auth-provider@next my-provider --pattern simple-web
 cd my-provider
+pnpm install
+cp .env.example .env
+cp config/local.conf.example config/local.conf
 ```
 
-続きは生成された `README.md` に従ってください。pattern が要る設定を挙げていて、project には Dockerfile が付きます。
+生成された `README.md` に、パターンと設定の説明があります。2 つのサンプルファイルは、どちらも全行がコメントアウトされているため、コピーしただけでは何も設定されません。必要な設定のコメントを外し、サンプル値を置き換えてください。
 
-- **pattern。** 各 pattern は配備の種類の 1 つです。パスワードでログインする `simple-web` は、外のシステムを要りません。何のための pattern かは [patterns の card](modules/scaffold/create-app/src/patterns/README.md) と各 pattern の card にあります。知らない名前は拒まれ、使える名前が示されます。`--add` で pattern に機能を足せます。ほかの option は `--help` で分かります。
-- **自分で選ぶ。** pattern の代わりに module を挙げると、app はそれを組み立て、要る wiring と bridge を足します。
+`.env` には次を設定します。
 
-何が生成されるかは [create-app の card](modules/scaffold/create-app/README.md) にあります。
+- `ISSUER_URL` と `HTTP_PUBLIC_ORIGIN`：クライアントから見える URL（末尾のスラッシュなし）と、そのスキーム・ホスト・ポートです。両者のオリジンは一致させてください。
+- `KEYS_SIGNING_KID` と `KEYS_SIGNING_ALG`。サンプルでは Ed25519 鍵用に EdDSA を指定しています。
+- `AUTHORIZE_LOGIN_PAGE`：ログインページの URL です。`CONSENT_PAGE` は同意ページの URL です。すべてのクライアントがファーストパーティの場合は、未設定のままにしてください。
+- サンプルに従い、`KERNEL_DEPLOYMENT=single`、`STORE_ACCEPT_VOLATILE=true`、`MAIL_ACCEPT_UNSENT=true`、`TOKENS_REVOCATION=denylist` を設定します。これらは、単一インスタンスで動作し、状態をメモリーに保持し（再起動で失われます）、メールを送信しない構成であることを明示します。
 
-## 作り
+署名鍵を生成します。
 
-- **module。** 関心ごとに 1 つの module が `modules/<group>/<name>` にあります。その README (module の card) が契約です。何をするか、何を提供するか、何を約束するか、何に依存するかを書いています。
-- **owner map。** 契約、設定、拡張点、語のそれぞれをどの module が持つかは [modules/README.md](modules/README.md) にあります。探す前にここを引いてください。
-- **kernel。** module は [kernel](modules/foundation/kernel/README.md) を通して契約と拡張点を宣言し、ほかの module に contribution を出します。kernel は module を起動し、設定の section を読み、問題があればすべてを一度に挙げて起動を拒みます。
-- **組み合わせ。** 選んだものにどの wiring、adapter、bridge が付くかは [combinations](modules/scaffold/combinations/README.md) が決めます。
-- **guard。** `pnpm check` は [guard](modules/tooling/guard/README.md) を回します。guard は workspace を規則に従わせます。依存の向き、各 package の公開の面、各 module とその card の大きさです。
+```sh
+node -e 'const {generateKeyPairSync}=require("node:crypto");process.stdout.write(generateKeyPairSync("ed25519").privateKey.export({type:"pkcs8",format:"pem"}))' > signing.pem
+```
 
-## 拡張
+テスト用ユーザーのパスワードハッシュを作成します。プロバイダーが受け付けるのは bcrypt または scrypt のハッシュで、平文のパスワードは受け付けません。次のコマンドは scrypt ハッシュを出力します。
 
-自分の module も、提供される module と同じように組み立てられます。
+```sh
+node -e 'const c=require("node:crypto");const s=c.randomBytes(16);const k=c.scryptSync(process.argv[1],s,32,{N:2**15,r:8,p:1,maxmem:64*1024*1024});const b=x=>x.toString("base64").replace(/=+$/,"");console.log(`$scrypt$ln=15,r=8,p=1$${b(s)}$${b(k)}`)' 'your-password'
+```
 
-- **契約と拡張点** は [kernel の card](modules/foundation/kernel/README.md) に書いてあります。各機能の card は、その機能が提供する拡張点を挙げています。
-- **adapter と bridge** は、何の代わりになるか、何をつなぐかを manifest で宣言します。[combinations](modules/scaffold/combinations/README.md) が説明しています。
-- **契約の試験。** 各 module は契約の試験を `./testing` で公開しています。自分の実装をそれで確かめられます。
+次に `config/local.conf` を記述します。ここには署名鍵、監査ログの送信先、ユーザー、クライアントを設定します。`.env` の `KEYS_SIGNING_PRIVATE_KEY` は未設定のままにしてください。`users.registered` はサンプルファイルにないため、自分で追加してください。
 
-## package
+```hocon
+keys.signing.private-key = """
+<signing.pem の内容を貼り付けてください>
+"""
 
-0.18 は関心ごとに 1 つの package `@o3co/auth-provider-<concern>` として、すべて同じ版で公開します。各 module は subpath です。自分で名前を挙げることはほとんどありません。生成した app が、組み立てるものに依存します。0.17 の package との対応は[移行の手引き](docs/migration.md#packages)にあります。
+audit.receivers = [log]
+
+users.registered = [
+  { identifier = "alice", password-hash = "<上のコマンドで出力されたハッシュ>" }
+]
+
+clients.registered = [
+  {
+    id = "my-web-app"
+    kind = "public"
+    method = "none"
+    sections {
+      authorize { redirect-uris = ["http://127.0.0.1:3000/callback"] }
+      client-allowance {
+        grants = ["authorization_code", "refresh_token"]
+        scopes = ["openid", "profile"]
+        default-scopes = ["openid"]
+      }
+      consent { first-party = true }
+    }
+  }
+]
+```
+
+`client-allowance` に列挙するまで、クライアントにはグラントもスコープも許可されません。認可コードフローを使うクライアントには `redirect-uris` も必要です。`first-party = true` を設定すると、同意ページを省略します。コンフィデンシャルクライアントでは、`kind = "confidential"`、`client_secret_basic` などの `method`、`sections.client-secret.hash` にシークレットのハッシュを設定します。クライアントの全セクションは[設定リファレンス](docs/configuration.md#client-metadata-sections)にあります。
+
+デフォルトでは、公開オリジンは https でなければなりません。手元のマシンで平文の http を使って試すには、`ISSUER_URL` と `HTTP_PUBLIC_ORIGIN` を `http://127.0.0.1:8080` に設定し、`config/local.conf` に次の行を追加してください。
+
+```hocon
+http.insecure-origin = true
+```
+
+アプリを起動します。
+
+```sh
+APP_CONFIG=config/local.conf,config/application.conf pnpm start
+```
+
+設定に不足や誤りがあると、アプリは問題 1 件ごとに `refused <setting>: <reason>` という行を標準エラー出力に書き出し、終了ステータス 78 で終了します。設定を修正して、再度起動してください。
+
+デフォルトのポートと上記のローカル用 issuer を使う場合は、次のコマンドで起動を確認します。
+
+```sh
+curl http://127.0.0.1:8080/readyz
+curl http://127.0.0.1:8080/.well-known/openid-configuration
+```
+
+ブラウザーでログインするには、ログインページも必要です。issuer の URL にパスが含まれる場合、ディスカバリードキュメントはそのパスの下に配置されます。
+
+## パターンの選択と機能の追加
+
+パターンは、デプロイの用途に合わせてモジュールをあらかじめ組み合わせたものです。`--pattern` で選択します。必要なものは生成された README に記載されます。各パターンの短い説明は [modules/scaffold/create-app/src/patterns](modules/scaffold/create-app/src/patterns/README.md) にあります。
+
+| パターン | 用途 | ストレージと外部サービス |
+|---|---|---|
+| `simple-web` | Web アプリ向けのパスワードログイン（リフレッシュトークン付きの認可コードフロー）と、サービス向けのクライアントクレデンシャル | インメモリーストア、単一インスタンス。ユーザーは設定で管理し、監査ログはログに出力 |
+| `mfa-web` | `simple-web` に TOTP、メールコード、リカバリーコードを追加 | Redis と SMTP |
+| `device` | `simple-web` に Device Authorization Grant を追加。ユーザーが別の画面でコードを承認 | インメモリーストア、単一インスタンス |
+| `native-app` | パブリッククライアントとして動作するネイティブアプリとシングルページアプリ。PKCE、リフレッシュトークン、DPoP を使用 | インメモリーストア、単一インスタンス |
+| `a2a` | ユーザーを介さないサービス間のトークン発行。クライアントクレデンシャルまたは JWT ベアラー、`private_key_jwt`、mTLS、DPoP を使用 | インメモリーストア、単一インスタンス。mTLS 用にクライアント証明書を転送するプロキシ |
+| `sso-federated` | ローカルのパスワードを使わず、上流プロバイダーを通じてログイン | インメモリーストア、単一インスタンス。HTTP ユーザー台帳と上流プロバイダー |
+| `full` | 明示的な有効化が必要なものを除く全機能（0.17 でデフォルトで含まれていた機能） | Redis、HTTP ユーザー台帳、HTTP 監査ログ受信先、SMTP |
+
+`--pattern` を省略すると `full` になります。外部サービスなしで始めるには `simple-web` を使ってください。
+
+機能の追加には `--add` を使い、`@mod/<name>` 形式のモジュール名を指定します。`<name>` は `modules/` 配下にあるモジュールのディレクトリ名です。
+
+```sh
+npx @o3co/create-auth-provider@next my-provider-dpop --pattern simple-web --add @mod/dpop
+```
+
+機能ごとに `--add` を繰り返し指定してください。`simple-web` のストアを Redis にするには、`--axis @mod/store=@mod/redis` を追加します。パターンのログイン方式、グラント、その他の機能グループも置き換えられます。axis とグループのオプションは、`full` 以外のパターンで使えます。すべてのオプションは `npx @o3co/create-auth-provider@next --help` で確認できます。
+
+パターンを選ばず、モジュールを自分で列挙する方法もあります。その場合、モジュール同士の接続に必要なものはジェネレーターが追加し、設定は自分で記述します。各種プロジェクトに含まれるものは [create-app](modules/scaffold/create-app/README.md) を参照してください。
+
+既存アプリのモジュール構成を変更するには、空のディレクトリに新しいプロジェクトを生成し、設定をコピーしてください。ジェネレーターは、ファイルがあるディレクトリを上書きしません。
 
 ## 設定
 
-各 module は HOCON の設定のうち自分の section を読みます。知らない key、組んでいない module の section、使えない値があれば起動を拒みます。pattern から生成した project は、スカラーの設定を環境変数から読みます。すべての key、既定値、意味は[設定の一覧](docs/configuration.md)にあります。
+設定には HOCON を使います。モジュールごとに、モジュール名のセクションがあります。たとえば `issuer.url`、`keys.signing.alg`、`tokens.access-token-lifetime` です。未知のキー、読み込んでいないモジュールのセクション、不正な値があると、アプリは起動しません。エラーメッセージには設定名を表示し、値は表示しません。時間やサイズには、`30s` や `5KiB` のように単位が必要です。
+
+パターンから生成したプロジェクトは、2 つのローカルファイルを読み込みます。どちらも git と Docker のビルドコンテキストから除外されるため、シークレットはこれらのファイルに保存してください。
+
+- `.env` には、`config/application.conf` が読み取る環境変数を設定します。
+- `config/local.conf` には、リスト、複数行の値、その他 HOCON で直接記述する設定を保存します。
+
+環境変数名は、設定のパスを大文字にし、`.` と `-` を `_` に置き換えたものです。`keys.signing.private-key` は `KEYS_SIGNING_PRIVATE_KEY` になります。環境変数が反映されるのは、`config/application.conf` がその変数から読み取る設定だけです。任意の設定を上書きする仕組みではありません。
+
+`APP_CONFIG` には、設定ファイルをカンマ区切りで列挙します。前に指定したファイルが、後のファイルより優先されます。未指定の場合は `config/application.conf` を読み込みます。
+
+起動前に、すべてのサンプル値を置き換えてください。シークレットのプレースホルダーは `REPLACE-` で始まり、そのまま残っていると拒否されます。
+
+[設定リファレンス](docs/configuration.md)に、すべての設定の型、デフォルト値、環境変数を記載しています。このリポジトリの各モジュールディレクトリにも、デフォルト値を記載した生成済みの `reference.conf` があります。参照専用です。
+
+## Docker での実行
+
+まず `pnpm install` を実行して `pnpm-lock.yaml` を作成し、次を実行します。
+
+```sh
+docker build -t auth-provider .
+docker run --env-file .env \
+  -e HTTP_HOST=0.0.0.0 \
+  -e HTTP_PORT=8080 \
+  -e APP_CONFIG=config/local.conf,config/application.conf \
+  -v "$PWD/config/local.conf:/app/config/local.conf:ro" \
+  -p 8080:8080 \
+  auth-provider
+```
+
+Docker の env ファイルでは、変数ごとに 1 行で記述する必要があります。PEM 鍵などの複数行の値は `config/local.conf` に保存してください。
+
+イメージは Node 24 を使い、本番用の依存パッケージだけをインストールして、非 root ユーザーで実行します。ヘルスチェックでは `/_healthcheck` を呼び出します。
+
+## 本番運用の前に
+
+インメモリーストアを Redis、またはストアの契約を満たす独自のアダプターに置き換えてください。Redis アダプターには、単一プライマリー構成の Redis 7.0 以降が必要です。クラスターモードは拒否されます。アプリは起動時にサーバーの設定を検証します。永続化、レプリケーション、マネージドサービスについては、[Redis の要件](docs/runbook.md#redis)を読んでください。
+
+`kernel.deployment` を `single` または `multi` に設定してください。`multi` の場合、インメモリーストアやログ出力専用のメーラーなど、複数インスタンスで動作できないモジュールがあると、アプリは起動しません。
+
+アプリを TLS 終端プロキシの背後に配置し、`http.trusted-proxies` を設定してください。プロキシは、自身のヘッダーを設定する前に、クライアントが送った転送ヘッダーやクライアント証明書ヘッダーをすべて削除する必要があります。サービスを公開する前に、[デプロイの要件](docs/runbook.md#before-you-deploy)と[セキュリティモデル](docs/security-model.md)を読んでください。
+
+## エンドポイント
+
+[ルートリファレンス](docs/routes.md)には、すべてのオプション機能を含む full テンプレートの全ルートについて、メソッド、リクエストボディ、ポリシーを記載しています。アプリが提供するのは、読み込んだモジュールのルートだけです。
+
+主なエンドポイントは次のとおりです。
+
+- `/.well-known/openid-configuration` と `/.well-known/oauth-authorization-server`：issuer にパスがない場合のディスカバリー。
+- `/.well-known/jwks.json`：署名検証用の公開鍵。
+- `/oauth/authorize` と `/oauth/token`。
+
+実際に提供されるエンドポイントは、デプロイした環境のディスカバリードキュメントに記載されます。
 
 ## 運用
 
-- [運用の runbook](docs/runbook.md): 配備が用意するもの、Redis、鍵の入れ替え、更新、利用者の失効、probe と alert、停止。
-- [セキュリティモデル](docs/security-model.md): provider が保証することと、配備に任せること。
-- [audit event](docs/audit-events.md): すべての event とその属性。
-- [設定の一覧](docs/configuration.md)。
-- [0.17 からの移行](docs/migration.md)。
-- [リリース](docs/releasing.md): maintainer 向け。
+死活監視には `GET /_healthcheck`、リクエストを受け付けられるかの確認には `GET /readyz` を使います。Redis などの依存先が停止している間、`GET /readyz` は 503 を返します。依存先が復旧するまで、そのインスタンスへのトラフィックを停止してください。インスタンスを再起動しても解決しません。
 
-## 版
+Prometheus パブリッシャーを読み込むと、`/metrics` でメトリクスを公開します。パスは `metrics-prometheus.path` で変更できます。プロキシでアクセスを制限してください。ログは標準出力に 1 行 1 件の JSON 形式で出力します。ログレベルは `kernel.logging.level` で設定します。
 
-1.0 より前の release は、minor の版で互換性を壊すことがあります。壊す release にはそれぞれ移行の手引きがあります。release candidate は npm の `next` tag で公開します。
+監査ログの送信先は `audit.receivers` で選びます。`log` は組み込みです。`stdout` と `http` を使うには、それぞれの受信モジュール（`audit-stdout`、`audit-http`）が必要です。配送はベストエフォートのため、`auth_audit_events_lost_total` を監視してください。[監査イベントリファレンス](docs/audit-events.md)に、すべてのイベントとその属性を記載しています。
 
-セキュリティの直しは、最新の 0.18.x にだけ出します。弱点を見つけたら[セキュリティの方針](SECURITY.md)に従って報告してください。
+SIGTERM と SIGINT を受け取ると、アプリは `kernel.stop-deadline`（デフォルトは `30s`）以内に処理を終えて正常に停止します。オーケストレーターには、それより長い終了猶予時間を設定してください。
 
-## 開発
+[運用手順書](docs/runbook.md)では、デプロイ、署名鍵と封印鍵のローテーション、アップグレード、ユーザーの失効、アラートについて説明しています。
+
+## 独自モジュールの作成
+
+[担当モジュール一覧](modules/README.md)から必要な契約を探し、そのモジュールの README を読んでください。
+
+`@o3co/auth-provider-foundation/kernel` の `defineModule` でモジュールを定義し、生成された `src/main.ts` が `assemble` に渡すモジュール一覧に追加します。モジュール API は [kernel の README](modules/foundation/kernel/README.md) で説明しています。
+
+ストアやユーザー台帳などの実装を置き換えるには、その契約を実装し、`testing` サブパスで公開されている契約テストを実行してください。たとえば `@o3co/auth-provider-foundation/store/testing` です。
+
+このリポジトリ内のモジュールについては、[combinations の README](modules/scaffold/combinations/README.md) で、アダプターや他のモジュールとの接続に必要なモジュールをマニフェストで宣言する方法を説明しています。
+
+## バージョンとサポート
+
+アプリに必要なパッケージはジェネレーターが選びます。公開パッケージの名前は `@o3co/auth-provider-<concern>` で、すべて同じバージョンを使い、各モジュールをサブパスとして公開しています。[移行ガイド](docs/migration.md#packages)に、0.17 のパッケージと 0.18 での置き換え先を記載しています。
+
+1.0 より前は、マイナーリリースでも互換性が失われる場合があります。新しいリリース候補でも同様です。アップグレード前に、移行ガイドと[変更履歴](CHANGELOG.md)を読んでください。
+
+セキュリティ修正は、最新の 0.18.x にのみ提供します。リリース候補で見つかった問題の修正は、次のリリース候補に含めます。脆弱性は、[SECURITY.md](SECURITY.md) の説明に従い、このリポジトリの Security タブにある **Report a vulnerability** から非公開で報告してください。公開 issue は作成しないでください。
+
+## 開発への参加
+
+Node.js 24 以降と、リポジトリの `package.json` に指定されたバージョンの pnpm を使ってください（`corepack enable` でインストールできます）。
 
 ```sh
 pnpm install
 pnpm check
 ```
 
-`pnpm check` は型の確かめ、lint、試験、guard、distribution の確かめを回します。Docker が要る試験は `pnpm test:integration` で回します。
+`pnpm check` は、型チェック、lint、ユニットテスト、guard、配布物のチェックを実行します。`pnpm test:integration` は、Docker が必要なテストを実行します。
 
-変更の作り方、確かめ方、commit の仕方は [CONTRIBUTING.md](CONTRIBUTING.md) にあります。
+モジュールは `modules/<group>/<name>` にあり、各モジュールの README がその契約です。[担当モジュール一覧](modules/README.md)から、変更を担当するモジュールを探してください。[guard](modules/tooling/guard/README.md) は、依存関係の方向、各パッケージの公開範囲、モジュールのサイズを検査します。
 
-## 関連する project
+プルリクエストを作成する前に [CONTRIBUTING.md](CONTRIBUTING.md) を読み、マージ先を `develop` にしてください。メンテナーは [docs/releasing.md](docs/releasing.md) に従ってリリースします。
 
-- [auth](https://github.com/o3co/auth): 全体の repository です。構成の説明と、部品をまたぐ end-to-end の試験があります。
-- [auth.policy-verifier](https://github.com/o3co/auth.policy-verifier): 認可の判断をする policy の engine です。
-- [auth.proxy](https://github.com/o3co/auth.proxy): サービスの前で token を確かめる、任意の reverse proxy です。
-- [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors): gRPC と ConnectRPC のサービスの中の認可です。introspection をこの provider に、判断を policy verifier に頼みます。
+## 関連プロジェクト
 
-## License
+- [auth](https://github.com/o3co/auth)：全体をまとめるリポジトリです。アーキテクチャと、コンポーネントをまたぐ E2E テストがあります。
+- [auth.policy-verifier](https://github.com/o3co/auth.policy-verifier)：認可判断を行うポリシーエンジンです。
+- [auth.proxy](https://github.com/o3co/auth.proxy)：サービスの前段でトークンを検証する、任意で利用できるリバースプロキシです。
+- [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors)：このプロバイダーのイントロスペクションとポリシー検証器の判断を使い、gRPC と ConnectRPC のサービス内で認可を行います。
+
+## ライセンス
 
 [Apache License 2.0](LICENSE)。
 
