@@ -1,5 +1,6 @@
 import { type BuildContext, defineModule, Unavailable } from "@mod/kernel";
-import { type AskedFrom, factors, firstBindingGates } from "@mod/mfa";
+import { factors } from "@mod/mfa";
+import { type AskedFrom, firstBindingGates } from "@mod/mfa-extensions";
 import { type Seal, seal } from "@mod/seal";
 import { z } from "zod";
 import { type BindingProof, bindingProof, bindingProofs, type PassBound } from "./contract.ts";
