@@ -29,6 +29,25 @@ let upstreamPort = 0;
 /** Servers presenting a certificate for one address alone. */
 const byAddress: Record<"proxy" | "public", { server: Server; port: number }> = {} as never;
 
+/** A port no test takes: `listen(0)` picks from the ephemeral range, never port 1. */
+const refusedPort = 1;
+
+beforeAll(async () => {
+	const answer = await new Promise<string>((resolve) => {
+		const socket = connect(refusedPort, "127.0.0.1");
+		socket.once("connect", () => {
+			socket.destroy();
+			resolve("connected");
+		});
+		socket.once("error", (error: NodeJS.ErrnoException) => resolve(error.code ?? "error"));
+	});
+	if (answer !== "ECONNREFUSED") {
+		throw new Error(
+			`127.0.0.1:${refusedPort} must refuse connections for these tests (got ${answer})`,
+		);
+	}
+});
+
 beforeAll(async () => {
 	idp = createTlsServer(destination, (req: IncomingMessage, res) => {
 		const routes: Record<string, string> = {
@@ -191,11 +210,7 @@ it("holds a proxy that never answers CONNECT to the one deadline, as timeout", a
 });
 
 it("answers a proxy it cannot reach as unreachable", async () => {
-	const closed = createPlainServer();
-	await new Promise<void>((done) => closed.listen(0, "127.0.0.1", done));
-	const port = (closed.address() as AddressInfo).port;
-	await new Promise<void>((done) => closed.close(() => done()));
-	const out = paths({ proxy: `http://127.0.0.1:${port}` });
+	const out = paths({ proxy: `http://127.0.0.1:${refusedPort}` });
 	expect(await failureOf(out.fetch(at("/jwks")))).toBe("unreachable");
 });
 
