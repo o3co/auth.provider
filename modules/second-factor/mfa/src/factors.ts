@@ -73,7 +73,7 @@ interface Pending {
 	readonly first?: true;
 	/** The first binding's own mark at the witness, never shown or logged. */
 	readonly token?: string;
-	/** The subject's fence when it began: a reset or a revocation since leaves it nothing to bind. None reads as 0. */
+	/** The subject's fence when it began: a reset or a fence since leaves it nothing to bind. None reads as 0. */
 	readonly fences?: number;
 }
 
@@ -286,7 +286,7 @@ export function factorDecisions(p: FactorParts): Factors {
 			if (label !== undefined && !isLabel(label)) return { kind: "malformed-label" };
 			const found = pendingOf(subject, pending);
 			if (!found) return { kind: "unknown" };
-			// A reset or a revocation since it began leaves it nothing to bind; checked again in the write below.
+			// A reset or a fence since it began leaves it nothing to bind; checked again in the write below.
 			if ((await records.fences(subject)) !== found.fences) return { kind: "fenced" };
 			// Asked from a login, it binds only as the first, whenever and however it began.
 			const asFirst = found.first || from?.kind === "login";

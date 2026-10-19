@@ -117,11 +117,11 @@ export interface Factors {
 					| "malformed-label"
 					| "duplicate"
 					| "first-binding-closed"
-					/** A reset or a revocation since the binding began: no factor is written (a witness mark set first may stay). */
+					/** A reset or a fence since the binding began: no factor is written (a witness mark set first may stay). */
 					| "fenced";
 		  }
 	>;
-	/** Moves the subject's fence: no binding begun before binds (`fenced`). For a revocation's follower. */
+	/** Moves the subject's fence, when asked: no binding begun before binds (`fenced`). */
 	fence(subject: string): Promise<void>;
 	rename(
 		subject: string,

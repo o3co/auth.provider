@@ -34,7 +34,7 @@ export const subjectOf = (record: StoredFactors | undefined): string | undefined
 	const subject = (record as unknown as { subject?: unknown } | undefined)?.subject;
 	return typeof subject === "string" ? subject : undefined;
 };
-/** How far the subject's fence has moved: once per reset and per revocation; 0 for a list written before. */
+/** How far the subject's fence has moved: once per reset and per `fence` asked; 0 for a list written before. */
 export const fencesOf = (record: StoredFactors | undefined): number => {
 	const fences = (record as unknown as { fences?: unknown } | undefined)?.fences;
 	return typeof fences === "number" && Number.isSafeInteger(fences) && fences > 0 ? fences : 0;
