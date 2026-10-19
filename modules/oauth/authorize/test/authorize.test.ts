@@ -37,6 +37,8 @@ import { amrSources } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
 import rateLimitModule from "@mod/rate-limit/module";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
+import { type ReauthStore, reauthStore, type StoredReauth } from "@mod/reauth";
+import reauthModule from "@mod/reauth/module";
 import { memoryRecords } from "@mod/records/testing";
 import { redirectsFor } from "@mod/redirect-uris/testing";
 import secretHashModule from "@mod/secret-hash/module";
@@ -53,7 +55,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { redirects } from "../src/contract.ts";
 import authorizeModule from "../src/module.ts";
 import { section } from "../src/section.ts";
-import { type ReauthStore, reauthStore, type StoredReauth } from "../src/store.ts";
 import { authorizeConfig } from "../src/testing.ts";
 
 let now = 1_800_000_000_000;
@@ -143,6 +144,7 @@ async function serve(
 			codeGrantStore,
 			authorizeModule,
 			reauthStand,
+			reauthModule,
 			options.rateLimit ?? rateLimitModule,
 			audit.module,
 			acrModule,

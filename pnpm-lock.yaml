@@ -703,6 +703,9 @@ importers:
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
+      '@mod/reauth':
+        specifier: workspace:*
+        version: link:../reauth
       '@mod/redirect-uris':
         specifier: workspace:*
         version: link:../redirect-uris
