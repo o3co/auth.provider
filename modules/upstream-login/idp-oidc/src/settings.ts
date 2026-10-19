@@ -1,6 +1,6 @@
 import type { Algorithm } from "@mod/external-jwt";
 import { setting } from "@mod/kernel";
-import { hostEntryOf, type OutboundRefusals } from "@mod/outbound";
+import { destinationRefusal, hostEntryOf, type OutboundRefusals } from "@mod/outbound";
 import {
 	clientSetting,
 	endpointSetting as endpoint,
@@ -101,22 +101,16 @@ export const settingsOf = (asymmetric: readonly Algorithm[], refusals: OutboundR
 			},
 		)
 		.superRefine(
-			urlsChecked(
-				(url, hosts) => {
-					const refused = refusals.explained(url, { hosts });
-					return refused && `outbound's destination policy refuses it: ${refused}`;
-				},
-				{
-					urls: (s) => [s.issuer, s["authorization-endpoint"], s["token-endpoint"], s["jwks-uri"]],
-					sent: (s) =>
-						s.discovery
-							? { issuer: { url: descriptionUrl(s.issuer), hosts: hostsOf(s) } }
-							: {
-									"token-endpoint": { url: s["token-endpoint"], hosts: hostsOf(s) },
-									"jwks-uri": { url: s["jwks-uri"], hosts: hostsOf(s) },
-								},
-				},
-			),
+			urlsChecked((url, hosts) => destinationRefusal(refusals, url, { hosts }), {
+				urls: (s) => [s.issuer, s["authorization-endpoint"], s["token-endpoint"], s["jwks-uri"]],
+				sent: (s) =>
+					s.discovery
+						? { issuer: { url: descriptionUrl(s.issuer), hosts: hostsOf(s) } }
+						: {
+								"token-endpoint": { url: s["token-endpoint"], hosts: hostsOf(s) },
+								"jwks-uri": { url: s["jwks-uri"], hosts: hostsOf(s) },
+							},
+			}),
 		);
 
 export type Settings = z.output<ReturnType<typeof settingsOf>>;
