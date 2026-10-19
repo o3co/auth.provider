@@ -13,7 +13,9 @@ export interface WitnessParts {
 	readonly urls: { readonly read: string; readonly enroll: string; readonly clear: string };
 	readonly out: Outbound;
 	readonly credential: string;
-	readonly narrower: Narrower & { readonly timeoutMs: number };
+	readonly narrower: Narrower;
+	/** How long outbound holds a call made under `narrower`: a write's deadline is its sending time plus this. */
+	readonly heldMs: number;
 	readonly now: () => number;
 	readonly warn: (event: string, fields: LogFields) => void;
 }
@@ -32,7 +34,7 @@ function kindOf(error: unknown): string {
 
 /** The enrollment witness kept at the operator's ledger: every call asks it, nothing is kept here. */
 export function witnessAt(parts: WitnessParts): EnrollmentWitness {
-	const { urls, out, credential, narrower, now, warn } = parts;
+	const { urls, out, credential, narrower, heldMs, now, warn } = parts;
 	/** Logs why the ledger failed, by the call and its kind or status alone, and answers unavailable. */
 	const failed = (call: Call, why: { reason: string } | { status: number }) => {
 		warn("mfa-witness-http.ledger_failed", { call, ...why });
@@ -58,7 +60,7 @@ export function witnessAt(parts: WitnessParts): EnrollmentWitness {
 		return parsed.data;
 	};
 	// A write the ledger receives past its deadline is one the provider no longer waits for.
-	const deadline = () => now() + narrower.timeoutMs;
+	const deadline = () => now() + heldMs;
 	return {
 		read: async (subject) => (await answered("read", { subject }, readShape)).enrolled,
 		enroll: async (subject, token) =>

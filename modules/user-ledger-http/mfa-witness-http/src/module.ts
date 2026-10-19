@@ -1,7 +1,12 @@
 import { defineModule } from "@mod/kernel";
 import { enrollmentWitnesses } from "@mod/mfa-witness";
 import { outbound } from "@mod/outbound";
-import { credentialPolicy, destinationRefusal, outboundRefusals } from "@mod/outbound-policy";
+import {
+	credentialPolicy,
+	destinationRefusal,
+	outboundLimits,
+	outboundRefusals,
+} from "@mod/outbound-policy";
 import { section } from "./section.ts";
 import { witnessAt } from "./witness.ts";
 
@@ -40,6 +45,8 @@ export default defineModule({ name: "mfa-witness-http", section, replicaSafe: tr
 			out: await c.get(outbound),
 			credential: c.section.credential,
 			narrower,
+			// What outbound holds a call to, not the section's timeout alone: outbound's own may be shorter.
+			heldMs: (await c.get(outboundLimits)).of(narrower).timeoutMs,
 			now: c.clock.now,
 			warn: (event, fields) => c.log.warn(event, fields),
 		});

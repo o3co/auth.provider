@@ -111,13 +111,13 @@ const collected = contract<readonly EnrollmentWitness[]>("test.witnesses");
 const collector = defineModule({ name: "test-collector" }, (m) => [
 	m.provide(collected).by((c) => c.collect(enrollmentWitnesses)),
 ]);
-async function open(section: unknown = settings()) {
+async function open(section: unknown = settings(), outbound: Record<string, unknown> = {}) {
 	const logged = recordingLog();
 	const app = await assemble({
 		modules: [outboundModule, witnessHttp, collector],
 		config: {
 			...kernelConfig(),
-			outbound: { allow: ["127.0.0.1"], "plain-loopback": [pair, otherPair] },
+			outbound: { allow: ["127.0.0.1"], "plain-loopback": [pair, otherPair], ...outbound },
 			"mfa-witness-http": section,
 		},
 		runtime: quietRuntime({ log: logged.log, clock: { now: () => now } }),
@@ -159,6 +159,15 @@ describe("mfa-witness-http", () => {
 			{ subject: "alice", token: "t-1", deadline: now + 2000 },
 			{ subject: "alice", deadline: now + 2000 },
 		]);
+	});
+
+	it("gives a write the deadline outbound holds the call to, where outbound's timeout is the shorter", async () => {
+		const { witness } = await open(settings({ timeout: "2s" }), { timeout: "500ms" });
+		script = (asked) =>
+			asked.path === "/w/clear" ? { status: 204 } : { status: 200, json: { owner: true } };
+		await witness.enroll("alice", "t-1");
+		await witness.clear("alice");
+		expect(received.map((r) => JSON.parse(r.body).deadline)).toEqual([now + 500, now + 500]);
 	});
 
 	it("reads the mark and the ownership the ledger answers", async () => {
