@@ -154,7 +154,7 @@ describe("the logout a client starts", () => {
 		expect(h.events).toEqual([]);
 	});
 
-	it("answers a session short of a requirement to be used as one already gone: closed, with no event", async () => {
+	it("logs out a session short of a requirement to be used as any live one: recorded, closed, sent back", async () => {
 		const short = { now: false };
 		const requirement = defineModule({ name: "short-to-use" }, (m) => [
 			m.contribute(entryRequirements).by(() => ({
@@ -168,8 +168,11 @@ describe("the logout a client starts", () => {
 		const { session } = await h.login();
 		const hint = await h.hintFor(session.id);
 		short.now = true;
-		expect((await h.call("POST", { id_token_hint: hint })).json).toEqual({ logged_out: true });
-		expect(h.events).toEqual([]);
+		const sent = await h.call("GET", { id_token_hint: hint, post_logout_redirect_uri: back });
+		expect([sent.status, sent.headers.location]).toEqual([303, back]);
+		expect(h.events.map((e) => [e.kind, e.subject, e.attributes?.sid])).toEqual([
+			["logout.success", "alice", session.id],
+		]);
 		short.now = false;
 		expect(await h.stillOpen(session.id)).toBe(false);
 	});
