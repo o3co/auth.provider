@@ -18,18 +18,18 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | GET | `/metrics` | `@mod/metrics-prometheus` | none |  |  |  |  |  |
 | GET | `/oauth/authorize` | `@mod/authorize` | form | `rate-limit.requests-per-source` |  |  | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/authorize` | `@mod/authorize` | form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
-| GET | `/oauth/consent` | `@mod/consent` | form |  |  |  |  |  |
-| POST | `/oauth/consent` | `@mod/consent` | form, json | `csrf` | yes | `csrf` |  |  |
-| POST | `/oauth/device/verification` | `@mod/device-grant` | json | `csrf` | yes | `csrf` |  |  |
-| POST | `/oauth/device_authorization` | `@mod/device-grant` | form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
+| GET | `/oauth/consent` | `@mod/consent` | form |  | no |  |  |  |
+| POST | `/oauth/consent` | `@mod/consent` | form, json | `csrf` | yes | `csrf` | The user's session is authenticated; a per-source limit belongs to unauthenticated entries. |  |
+| POST | `/oauth/device/verification` | `@mod/device-grant` | json | `csrf` | yes | `csrf` | Every action counts against the subject in rate-limit's attempt limit, in the handler. |  |
+| POST | `/oauth/device_authorization` | `@mod/device-grant` | form | `rate-limit.requests-per-source` | yes | A device's client calls it with its own client authentication and reads no cookie. | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/federation-grants` | `@mod/federation-grants` | json, form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/federation-grants/*` | `@mod/federation-grants` | json, form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/federation/*` | `@mod/federation-tokens` | form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
-| POST | `/oauth/introspect` | `@mod/token-control` | form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
+| POST | `/oauth/introspect` | `@mod/token-control` | form | `rate-limit.requests-per-source` | yes | A resource server's call, authenticated as a client; it reads no cookie. | `rate-limit.requests-per-source` |  |
 | GET | `/oauth/logout` | `@mod/rp-logout` | form, none | `rate-limit.requests-per-source` |  |  | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/logout` | `@mod/rp-logout` | form, none | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
-| POST | `/oauth/revoke` | `@mod/token-control` | form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` | yes |
-| POST | `/oauth/token` | `@mod/token-endpoint` | form, json, none | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` | yes |
+| POST | `/oauth/revoke` | `@mod/token-control` | form | `rate-limit.requests-per-source` | yes | It reads no cookie: revoking needs the token itself, which a public client may revoke for itself (RFC 7009). | `rate-limit.requests-per-source` | yes |
+| POST | `/oauth/token` | `@mod/token-endpoint` | form, json, none | `rate-limit.requests-per-source` | yes | Authorization is per grant; a grant that reads a cookie declares it and checks the origin itself. | `rate-limit.requests-per-source` | yes |
 | GET | `/oauth/userinfo` | `@mod/userinfo` | form, json, none |  |  |  |  | yes |
 | POST | `/oauth/userinfo` | `@mod/userinfo` | form, json, none |  | yes |  |  | yes |
 | POST | `/oauth/webauthn/authentication/options` | `@mod/webauthn-login` | json, form, none | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |

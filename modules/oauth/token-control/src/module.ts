@@ -36,6 +36,7 @@ export default defineModule({ name: "token-control", section }, (m) => [
 		method: "POST",
 		path: introspectPath,
 		uses: limited(c, "introspect"),
+		crossSite: "A resource server's call, authenticated as a client; it reads no cookie.",
 		...introspection(
 			await c.get(clients),
 			await c.get(tokens),
@@ -52,6 +53,8 @@ export default defineModule({ name: "token-control", section }, (m) => [
 			method: "POST",
 			path: revokePath,
 			uses: limited(c, "revoke"),
+			crossSite:
+				"It reads no cookie: revoking needs the token itself, which a public client may revoke for itself (RFC 7009).",
 			cors: revokeCors,
 			...revocation(
 				await c.get(clients),
