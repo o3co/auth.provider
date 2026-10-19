@@ -63,6 +63,9 @@ export function keysAt(parts: LookupParts): SignerKeys {
 					parsed.data.keys.filter((jwk) => publicMembers(jwk) !== undefined)
 				: [];
 			if (!parsed?.success || keys.length === 0) throw failed({ reason: "malformed" });
+			// Some keys left out of an answer that still names one: told by their count alone.
+			const dropped = parsed.data.keys.length - keys.length;
+			if (dropped > 0) warn("signer-keys-http.keys_dropped", { count: dropped });
 			return deepFreeze({
 				kind: "keys",
 				keys,

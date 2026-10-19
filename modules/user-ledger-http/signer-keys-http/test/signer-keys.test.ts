@@ -146,7 +146,7 @@ describe("signer-keys-http", () => {
 	});
 
 	it("hands over the public keys with the grant's algorithms where none are named, asking on every call", async () => {
-		const { keys } = await open();
+		const { keys, logged } = await open();
 		expect(await keys.keysOf({ subject: "dev-1" })).toEqual({
 			kind: "keys",
 			keys: [deviceJwk],
@@ -168,6 +168,10 @@ describe("signer-keys-http", () => {
 			algorithms: ["EdDSA"],
 		});
 		expect(received).toHaveLength(2);
+		// The keys left out are counted in one warning, telling nothing they held.
+		const lines = logged.lines().map((line) => [line.event, line.fields]);
+		expect(lines).toEqual([["signer-keys-http.keys_dropped", { count: 3 }]]);
+		expect(JSON.stringify(logged.lines())).not.toContain("secret");
 	});
 
 	it("answers none to a 404, a 410, or a 200 that names no key, unlogged", async () => {
