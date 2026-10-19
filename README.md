@@ -74,7 +74,7 @@ The generated `README.md` explains the pattern and its settings. In both example
 In `.env`, set:
 
 - `ISSUER_URL` and `HTTP_PUBLIC_ORIGIN`: the URL clients see, with no trailing slash, and its scheme, host and port. The two must have the same origin.
-  - The public origin must be https by default. To try the provider over plain http on your machine, set both to `http://127.0.0.1:8080` and add `http.insecure-origin = true` to `config/local.conf`, written below.
+  - The public origin must be https by default. To try the provider over plain http on your machine, set both to `http://127.0.0.1:8080` and `HTTP_INSECURE_ORIGIN=true` in `.env`.
 - `KEYS_SIGNING_KID` and `KEYS_SIGNING_ALG`. The example uses EdDSA, for an Ed25519 key.
 - `AUTHORIZE_LOGIN_PAGE`: the URL of your login page, on the provider's own origin, such as `http://127.0.0.1:8080/login` behind a proxy that serves the page and passes the rest to the app. The app does not serve this page. A page on another origin lets the app start, but every login from it is refused `403 csrf`. `CONSENT_PAGE` is the URL of your consent page; leave it unset if all your clients are first-party.
 - `KERNEL_DEPLOYMENT=single`, `STORE_ACCEPT_VOLATILE=true`, `MAIL_ACCEPT_UNSENT=true` and `TOKENS_REVOCATION=denylist`, as in the example. They state that this deployment runs one instance, keeps its state in memory (lost on restart) and sends no mail. `TOKENS_REVOCATION=denylist` keeps revoked access tokens in a denylist and refuses them; `unsupported` answers revocation as unsupported.

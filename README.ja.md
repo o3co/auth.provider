@@ -74,7 +74,7 @@ cp config/local.conf.example config/local.conf
 `.env` には次を設定します。
 
 - `ISSUER_URL` と `HTTP_PUBLIC_ORIGIN`：クライアントから見える URL（末尾のスラッシュなし）と、そのスキーム・ホスト・ポートです。両者のオリジンは一致させてください。
-  - デフォルトでは、公開オリジンは https でなければなりません。手元のマシンで平文の http を使って試すには、両方を `http://127.0.0.1:8080` に設定し、後で書く `config/local.conf` に `http.insecure-origin = true` を追加してください。
+  - デフォルトでは、公開オリジンは https でなければなりません。手元のマシンで平文の http を使って試すには、両方を `http://127.0.0.1:8080` に設定し、`.env` に `HTTP_INSECURE_ORIGIN=true` を設定してください。
 - `KEYS_SIGNING_KID` と `KEYS_SIGNING_ALG`。サンプルでは Ed25519 鍵用に EdDSA を指定しています。
 - `AUTHORIZE_LOGIN_PAGE`：ログインページの URL です。プロバイダーと同じオリジンに置きます。たとえば `http://127.0.0.1:8080/login` とし、ページを配信して残りをアプリに渡すプロキシの背後に置きます。アプリはこのページを配信しません。別のオリジンのページでもアプリは起動しますが、そこからのログインは必ず `403 csrf` で拒否されます。`CONSENT_PAGE` は同意ページの URL です。すべてのクライアントがファーストパーティの場合は、未設定のままにしてください。
 - サンプルに従い、`KERNEL_DEPLOYMENT=single`、`STORE_ACCEPT_VOLATILE=true`、`MAIL_ACCEPT_UNSENT=true`、`TOKENS_REVOCATION=denylist` を設定します。これらは、単一インスタンスで動作し、状態をメモリーに保持し（再起動で失われます）、メールを送信しない構成であることを明示します。`TOKENS_REVOCATION=denylist` は失効したアクセストークンを denylist に置いて拒否し、`unsupported` は失効の要求に unsupported と答えます。
