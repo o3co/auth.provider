@@ -558,6 +558,34 @@ describe("refreshing alongside other writers", () => {
 			expect(said(await waiting), meanwhile).toBe(answer);
 		}
 	});
+
+	it("hands nothing another holder refreshed while it waited, once the subject is revoked or the grant ended", async () => {
+		for (const meanwhile of ["grant ended", "subject revoked"] as const) {
+			const r = await refresher(4);
+			r.advance(2100);
+			await r.stores.lockStore.hold("g", "another", 60_000);
+			const waiting = r.call();
+			// Long enough for the request to wait on the lock.
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			// The other holder refreshes, so the token read under the lock is not due.
+			const read = (await r.stored()) as Grant;
+			const at = read.createdAt + 2100;
+			const fresh = r.records.seal(read, {
+				accessToken: "up-other",
+				tokenType: "Bearer",
+				refreshToken: "up-refresh-2",
+				expiresAt: at + 300_000,
+				obtainedAt: at,
+				scope: shown,
+			});
+			await r.stores.grants.change("g", (g) => ({ value: { ...g, sealed: fresh } as never }));
+			if (meanwhile === "subject revoked") r.boundary.revoked = true;
+			else r.boundary.endsAt = 0;
+			await letGo(r.stores.lockStore);
+			expect(said(await waiting), meanwhile).toBe("gone");
+			expect(r.asked, meanwhile).toEqual([]);
+		}
+	});
 });
 
 describe("a grant revoked while its upstream is asked", () => {
