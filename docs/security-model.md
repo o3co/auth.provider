@@ -4,6 +4,7 @@ What auth-provider 0.18 guarantees, and what it leaves to the deployment. Each g
 
 ## Contents
 
+- [Promises across modules](#promises-across-modules)
 - [Boot](#boot)
 - [Secrets and logs](#secrets-and-logs)
 - [Requests and proxies](#requests-and-proxies)
@@ -16,6 +17,50 @@ What auth-provider 0.18 guarantees, and what it leaves to the deployment. Each g
 - [Storage](#storage)
 - [Audit](#audit)
 - [Keys](#keys)
+
+## Promises across modules
+
+Each promise below holds across every module composed. Each names what keeps it (a contract, a check at boot, a guard rule) and the conformance scenes that test it, by area and scene; where no scene tests a part yet, it says so. An exception is never silent: it is a declaration, in a package manifest or on a route, and the [route reference](routes.md) lists the routes' reasons.
+
+1. **Closing a session closes every path for the tokens issued from it.**
+   - Kept by: `session`'s participants, which `session-lifecycle` calls on every close; `session-tokens` and `refresh` take part, and `code-grant` voids a code whose session ended.
+   - Scenes: code ("tokens and logout", "refresh: what a token may do", "session grant", "OpenID Connect userinfo"), exchange ("token exchange of a session's token"), federation ("federation tokens: refusals").
+   - No scene yet for a device approval. A session that ends by expiry alone calls no participant.
+2. **`prompt=login` and `max_age` are met only by a fresh authentication.**
+   - Kept by: `authorize`'s re-authentication record, taken once; `session` never counts an authentication time it does not know as fresh.
+   - Scenes: federation ("federation logins meeting a client's demand for a fresh login", and the freshness scenes through Google and Apple).
+   - No scene yet for a password login.
+3. **A dependency that cannot answer never grants anything.**
+   - Kept by: `kernel`'s `Unavailable`, which `http` answers `503`, or as the route declares.
+   - Scenes: each area's "the store failing" scenes (code, exchange, oauth, federation, second factor, passkey), identity ("password login: a user ledger over HTTP"), mtls (the CRL and OCSP outage scenes).
+   - Declared exceptions, each the operator's choice: `rate-limit.fail-mode = open` and `mtls.revocation.on-unavailable = allow`.
+4. **A subject's revocation boundary refuses everything made before it.**
+   - Kept by: `subject-revocation`'s boundaries, which every holder of a subject's state compares against, and its followers.
+   - Scenes: code ("a subject the ledger revokes over HTTP"), federation ("federation grants: a subject the ledger revokes"), second factor ("a subject the ledger revokes").
+   - No scene yet for a code not yet redeemed, a device code or a token exchange.
+5. **What is used once is used once, on any number of instances.**
+   - Kept by: `store`'s take-once writes and each store interface's declared needs; `kernel.deployment = multi` refuses a module that is safe on one instance only.
+   - Scenes: code (a code redeemed once, a refresh token rotated once, two concurrent uses), oauth ("refuses a replayed assertion"), device ("decides a code once").
+   - No scene yet for an exchanged id_token or a recovery code used twice, and no scene runs several instances.
+6. **A token bound to a key or a certificate is never used as a bearer token.**
+   - Kept by: `sender-binding`, which refuses a bound token presented in another scheme.
+   - Scenes: code (userinfo with a DPoP-bound token and with an mTLS-bound one, "refresh: binding a public client's family"), exchange ("token exchange: a binding washed off").
+7. **Every request to another server goes through `outbound`.**
+   - Kept by: guard G26, which lets product code reach the network only through `outbound` or as its manifest's `network` declares.
+   - Declared exceptions: `http` serves, `mail-smtp` speaks SMTP and `redis` speaks to Redis, each by its manifest's `network`.
+   - No scene: the guard checks it.
+8. **Secrets appear neither in logs nor in answers.**
+   - Kept by: `kernel`'s refusals and logs, which name a setting, never its value; `audit`, whose events carry no token or secret; `http`, which logs a failure by its kind only.
+   - Scenes: keys ("refusals about keys"), ops (metrics, readiness, refusals about the operations routes), identity (a ledger's credential at boot), and the audit scenes of the authorization endpoint, client credentials and second factor.
+   - No scene reads a running server's log lines.
+9. **A browser route that changes state needs CSRF or origin evidence.**
+   - Kept by: `csrf`'s policy, marked `own-site` in `http.marks`; a route declares whether it changes state and, without such a policy, why it takes other sites' requests, and `http` checks the declarations at boot.
+   - Scenes: identity (login and logout without evidence), device (the verification interface), federation (the grant question, a link started from another site), code ("session grant: refusals").
+   - Declared exceptions: the route reference's "Other sites" reasons, among them RP-initiated logout, a navigation from the client's site that closes only the session a hint the provider signed names. No scene checks the boot check itself.
+10. **A `POST` taken before authentication is limited per source.**
+    - Kept by: `rate-limit`'s policies, marked `per-source`; a route without one declares why it counts no source.
+    - Scenes: oauth ("limits requests to the token endpoint per source"), identity (login attempts per sender), passkey ("passkey login: the options' limit"), ops (the operations routes and request counting).
+    - Declared exceptions: the route reference's "Per source" reasons.
 
 ## Boot
 
