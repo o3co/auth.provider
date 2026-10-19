@@ -1,7 +1,7 @@
 import type { Client, Clients } from "@mod/clients";
 import type { OAuthError } from "@mod/grants";
 import { type HttpRequest, type HttpResponse, noStore } from "@mod/http";
-import { contract, isUnavailable, type Unavailable } from "@mod/kernel";
+import { contract } from "@mod/kernel";
 import { challenged } from "./challenges.ts";
 
 /** The built-in grant's type (RFC 6749 §4.4). */
@@ -54,25 +54,6 @@ export function oauthError(
 				...(description ? { error_description: printable(description) } : {}),
 			},
 		},
-	};
-}
-
-/**
- * An OAuth endpoint's handler that answers Unavailable as `503 temporarily_unavailable`, after
- * `noted` when given, and throws anything else on.
- */
-export function answeringUnavailable<R>(
-	answer: (request: R) => Promise<HttpResponse>,
-	noted?: (request: R, unavailable: Unavailable) => void,
-): (request: R) => Promise<HttpResponse> {
-	return async (request) => {
-		try {
-			return await answer(request);
-		} catch (error) {
-			if (!isUnavailable(error)) throw error;
-			noted?.(request, error);
-			return oauthError(503, "temporarily_unavailable");
-		}
 	};
 }
 

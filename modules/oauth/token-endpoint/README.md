@@ -14,7 +14,6 @@
 - Provides `grants`' `composedGrants` (the grant types it dispatches to) and `targets`.
 - Where the token endpoint is: its absolute URL on `http`'s public origin, none without one.
 - `oauthError`: an error response with the status, the code, an optional description, and the members `grants` lets a grant's refusal keep.
-- `answeringUnavailable`: wraps an OAuth endpoint's handler to answer Unavailable `503 temporarily_unavailable` (after an optional note of what was unavailable) and throw anything else on.
 - `authenticateClient`, for other OAuth endpoints too: two methods at once or malformed credentials are `400 invalid_request`, others `401 invalid_client`.
 - For tests (`./testing`): `grantCaller` calls a contributed grant as the endpoint does once the client is in, the grant allowed and the binding read, beside `client-allowance`, refusing a mistyped parameter and asking the rule's `untargeted` first; `grantInput` is what it hands the grant.
 - `issuer`'s metadata items: `token_endpoint` (none without a public origin), `grant_types_supported`, `token_endpoint_auth_methods_supported` and `token_endpoint_auth_signing_alg_values_supported` (left out when `clients` names none).
