@@ -26,13 +26,16 @@ function standIn() {
 		sameOrigin: true,
 		entry: { kind: "entered", session: s1, endsAt: 0 } as Entry,
 		entered: s1 as Session | undefined,
-		open: alice as AuthContext | undefined,
+		/** The entry the recorded session's handle answers. */
+		byHandle: { kind: "entered", session: s1, endsAt: 0 } as Entry,
 		linked: "linked" as "linked" | "already" | "conflict",
 		/** What changes while the tokens join the session. */
 		onJoin: undefined as (() => void) | undefined,
 		down: undefined as "users" | "entering" | "session" | "handoff" | undefined,
 	};
 	const levels: unknown[] = [];
+	/** The handles the session was asked the entry of, with the level when one was named. */
+	const asked: unknown[] = [];
 	const events: AuditRecord[] = [];
 	const links: unknown[] = [];
 	const joined: unknown[] = [];
@@ -49,9 +52,10 @@ function standIn() {
 				if (set.down === "entering") throw new Unavailable("session");
 				return set.entered;
 			},
-			openContext: async () => {
+			entryOf: async (handle, level) => {
 				if (set.down === "session") throw new Unavailable("session");
-				return set.open;
+				asked.push(level === undefined ? handle : [handle, level]);
+				return set.byHandle;
 			},
 		},
 		users: {
@@ -93,7 +97,19 @@ function standIn() {
 		cleared: ["federation.corp=; Max-Age=0"],
 		...more,
 	});
-	return { set, levels, events, links, joined, withdrawn, logged, link, transaction, completing };
+	return {
+		set,
+		levels,
+		asked,
+		events,
+		links,
+		joined,
+		withdrawn,
+		logged,
+		link,
+		transaction,
+		completing,
+	};
 }
 /** What a start or a callback answered: its status and its JSON. */
 const answered = (response: { status: number; body?: unknown }) => [
@@ -145,6 +161,8 @@ it("links the identity to the session's subject, hands the tokens to that sessio
 	]);
 	expect(s.links).toEqual([["alice", { idp: "corp", subject: "u-1" }]]);
 	expect(s.joined).toEqual([["s1", "corp", "up-1"]]);
+	// The recorded session, at use, before the link and again after the join.
+	expect(s.asked).toEqual(["s1", "s1"]);
 	expect(s.events).toEqual([
 		{
 			kind: "federation.identity.linked",
@@ -192,19 +210,42 @@ it("takes an identity the account holds already without a record, and refuses an
 	]);
 });
 
-it("links nothing once the browser is in another session, or its session closed or changed hands", async () => {
-	const changes: Record<string, (set: Settings) => void> = {
-		another: (set) => {
-			set.entered = { id: "s2", context: alice };
-		},
-		closed: (set) => {
-			set.open = undefined;
-		},
-		subject: (set) => {
-			set.open = { ...alice, subject: "bob" };
-		},
+const short: Entry = { kind: "short", requirement: "mfa", answer: { error: "step_up_required" } };
+const enteredAs = (subject: string): Entry => ({
+	kind: "entered",
+	session: { id: "s1", context: { ...alice, subject } },
+	endsAt: 0,
+});
+
+it("links nothing once the browser is in another session, or its session closed, fell short of a requirement or changed hands", async () => {
+	const changes: Record<string, [(set: Settings) => void, string]> = {
+		another: [
+			(set) => {
+				set.entered = { id: "s2", context: alice };
+			},
+			"login_required",
+		],
+		closed: [
+			(set) => {
+				set.byHandle = { kind: "absent" };
+			},
+			"login_required",
+		],
+		// Answered as closed; recorded with its own reason.
+		short: [
+			(set) => {
+				set.byHandle = short;
+			},
+			"session_short",
+		],
+		subject: [
+			(set) => {
+				set.byHandle = enteredAs("bob");
+			},
+			"login_required",
+		],
 	};
-	for (const [change, apply] of Object.entries(changes)) {
+	for (const [change, [apply, reason]] of Object.entries(changes)) {
 		const s = standIn();
 		apply(s.set);
 		expect(answered(await s.link.complete(s.completing())), change).toEqual([
@@ -213,9 +254,9 @@ it("links nothing once the browser is in another session, or its session closed 
 		]);
 		expect([s.links, s.joined], change).toEqual([[], []]);
 		expect(
-			s.events.map((e) => e.attributes?.reason),
+			s.events.map((e) => [e.kind, e.attributes?.reason]),
 			change,
-		).toEqual(["login_required"]);
+		).toEqual([["federation.identity.link_refused", reason]]);
 	}
 });
 
@@ -236,13 +277,16 @@ it("fails as unavailable when the tokens cannot be handed over, the link and its
 	expect(s.events.map((e) => e.kind)).toEqual(["federation.identity.linked"]);
 });
 
-it("answers a session closed or logged in as someone else while joining as one before: 401, the link and its record kept, the tokens taken back", async () => {
+it("answers a session closed, short of a requirement or logged in as someone else while joining as one before: 401, the link and its record kept, the tokens taken back", async () => {
 	const changes: Record<string, (set: Settings) => void> = {
 		closed: (set) => {
-			set.open = undefined;
+			set.byHandle = { kind: "absent" };
+		},
+		short: (set) => {
+			set.byHandle = short;
 		},
 		subject: (set) => {
-			set.open = { ...alice, subject: "bob" };
+			set.byHandle = enteredAs("bob");
 		},
 	};
 	for (const [change, onJoin] of Object.entries(changes)) {
