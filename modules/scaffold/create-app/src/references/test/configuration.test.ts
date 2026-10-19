@@ -123,7 +123,6 @@ it("describes every key of every section", async () => {
 
 /** Client metadata sections whose keys their owners describe later: one leaves once described, and the list only shrinks. */
 const clientsDescribedLater = [
-	"authorize",
 	"client-allowance",
 	"client-secret",
 	"federation-grants",

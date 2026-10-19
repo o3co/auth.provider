@@ -715,7 +715,7 @@ From `@mod/authorize`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.authorize.redirect-uris` | list of string | `[]` |  |  |
+| `sections.authorize.redirect-uris` | list of string | `[]` |  | The redirect URIs the client may ask for, each matched as written: https, http to a loopback host, or a private-use reverse-domain scheme, with no fragment, userinfo or query parameter named like a response parameter. |
 
 ### sections.client-allowance
 
