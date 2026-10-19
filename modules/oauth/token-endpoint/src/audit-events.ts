@@ -1,0 +1,13 @@
+import { auditEvents } from "@mod/audit";
+
+/** What the token endpoint records once the client is authenticated; a token or secret is never held. */
+export default auditEvents({
+	"token.issued": {
+		attributes: ["client", "source", "grant_type"],
+		when: "a grant issues",
+	},
+	"token.issued.failure": {
+		attributes: ["client", "source", "grant_type", "reason", "error", "policy", "refusal"],
+		when: "a request is refused, with `reason` (`repeated_parameter`, `mistyped_parameter`, `missing_grant_type`, `unsupported_grant_type`, `grant_type_not_allowed`, `unsupported_body`, `multiple_bindings`, `binding_refused`, `binding_required`, `binding_kind_not_named`, `untargeted`, `grant_refused`, or `issuance_refused` with the refusing `policy` and its `refusal`) and the answer's `error`; `grant_type` once it is known",
+	},
+});

@@ -1,4 +1,4 @@
-import type { Audit } from "@mod/audit";
+import { type Audit, declaredAudit } from "@mod/audit";
 import { clientAllowance } from "@mod/client-allowance";
 import type { Client, Clients } from "@mod/clients";
 import type { Grant, GrantInput, SessionIssuance, TargetRule } from "@mod/grants";
@@ -7,6 +7,7 @@ import { determinedSource } from "@mod/request-source";
 import type { Binding, ClientBindings, SenderBindings } from "@mod/sender-binding";
 import type { Tokens } from "@mod/tokens";
 import { answeredBody } from "./answer.ts";
+import events from "./audit-events.ts";
 import { challenged } from "./challenges.ts";
 import { authenticateClient, oauthError } from "./contract.ts";
 import { issuanceFor, refusedAnswer } from "./issuance.ts";
@@ -75,6 +76,7 @@ export function tokenEndpoint(
 	targets: TargetRule,
 	audit: Audit,
 ): Pick<Route, "handle" | "unavailable"> {
+	const recorded = declaredAudit(audit, events);
 	const answer = async (request: HttpRequest): Promise<HttpResponse> => {
 		const authenticated = await authenticateClient(clients, request);
 		if (authenticated.kind === "refused") return authenticated.response;
@@ -83,17 +85,17 @@ export function tokenEndpoint(
 		// Once the client is known, each answer but an unavailable one is recorded; a known grant type is named.
 		const record = (
 			grantType: string | undefined,
-			failure?: { reason: string; error: string } & Record<string, string>,
-		) =>
-			audit.record({
-				kind: failure ? "token.issued.failure" : "token.issued",
-				attributes: {
-					client: client.id,
-					...(source === undefined ? {} : { source }),
-					...(grantType === undefined ? {} : { grant_type: grantType }),
-					...failure,
-				},
-			});
+			failure?: { reason: string; error: string; policy?: string; refusal?: string },
+		) => {
+			const attributes = {
+				client: client.id,
+				...(source === undefined ? {} : { source }),
+				...(grantType === undefined ? {} : { grant_type: grantType }),
+			};
+			if (failure)
+				recorded.record("token.issued.failure", { attributes: { ...attributes, ...failure } });
+			else recorded.record("token.issued", { attributes });
+		};
 		const refuse = (failure: {
 			readonly grantType?: string;
 			readonly reason: string;
