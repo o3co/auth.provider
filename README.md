@@ -153,7 +153,7 @@ curl -s -o /dev/null -w '%{redirect_url}\n' -b jar "$AUTH"
 curl -s http://127.0.0.1:8080/oauth/token -d grant_type=authorization_code -d client_id=my-web-app --data-urlencode redirect_uri=http://127.0.0.1:3000/callback -d code=<code> -d code_verifier="$V"
 ```
 
-The third request prints the redirect to `http://127.0.0.1:3000/callback` with the code; put it in place of `<code>` in the last one, which answers the tokens. The [login page guide](docs/login-page.md) gives each request and answer.
+The third request prints the redirect to `http://127.0.0.1:3000/callback` with the code; put it in place of `<code>` in the last one, which answers the tokens. The [login page guide](docs/login-page.md) gives each request and answer. A [recipe](docs/recipe-mfa-page.md) goes on to a second factor (TOTP), with every request and answer recorded from a running app.
 
 ## Choose a pattern and add features
 
