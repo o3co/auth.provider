@@ -26,7 +26,8 @@
 ## Invariants
 - A challenge is 32 random bytes, taken once, within its lifetime on `kernel`'s clock, whatever the store's expiry. A taken mark stays for the rest of it.
 - An assertion's challenge is redeemed by its requester alone; any other is `challenge`, after the challenge is taken. Its record keeps the requester's SHA-256, never the requester.
-- Origins match the list exactly: https, or http on `localhost`; never an IP literal. An Android app origin is `android:apk-key-hash:` and the unpadded base64url SHA-256 of its signing certificate, never a top origin. A reported top origin not listed is refused, and with none listed any frame is, for registration and assertion alike. The relying party ID must match; boot refuses one that is not each web origin's host or a domain it lies under. Algorithms are EdDSA, ES256 and RS256.
+- Origins match the list exactly: https, or http on `localhost`; never an IP literal. An Android app origin is `android:apk-key-hash:` and the unpadded base64url SHA-256 of its signing certificate, never a top origin.
+- An origin that is empty or no URL refuses boot at its place in the list. A reported top origin not listed is refused, and with none listed any frame is, for registration and assertion alike. The relying party ID must match; boot refuses one that is not each web origin's host or a domain it lies under. Algorithms are EdDSA, ES256 and RS256.
 - The count is compared after the signature verified, and must go up (0 after 0 passes). It is written only over the count judged; a lost race is `raced`.
 - `registrations`' creation options require a discoverable credential, as `passkeys` lists none to ask for.
 - `passkeys` refuses an assertion without a user handle before any store is read. The handle must be its holder's, judged after the signature.
