@@ -5,9 +5,9 @@ on:
     branches: [develop, main, 'release/**']
   pull_request:
     branches: [develop, main, 'release/**']
-  # Daily audit (see the `audit` job). A `schedule` event runs on the
-  # repository's default branch only; every job that builds or tests is gated
-  # on the event.
+  # Daily audit and conformance (see the `audit` and `conformance` jobs). A
+  # `schedule` event runs on the repository's default branch only; every other
+  # job that builds or tests is gated on the event.
   schedule:
     - cron: '17 3 * * *'
 
@@ -186,11 +186,12 @@ jobs:
           echo "checks: ${CHECKS}, integration: ${INTEGRATION}"
           [ "$CHECKS" = success ] && [ "$INTEGRATION" = success ]
 
-  # On main and the release branches only: the new system's conformance and
-  # the legacy system's (0.17.0, built from this repository's own v0.17.0 tag),
-  # then the scenes on each pattern's app.
+  # On main and the release branches, and once a day on the default branch
+  # (develop): the new system's conformance and the legacy system's (0.17.0,
+  # built from this repository's own v0.17.0 tag), then the scenes on each
+  # pattern's app.
   conformance:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    if: github.event_name == 'schedule' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')))
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
