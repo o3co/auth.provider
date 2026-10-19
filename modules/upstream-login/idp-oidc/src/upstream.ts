@@ -151,11 +151,11 @@ export async function opened(
 		const headers = {
 			"content-type": "application/x-www-form-urlencoded",
 			accept: "application/json",
-			...(post ? {} : { authorization: basicAuthorization(client, s["client-secret"]) }),
 		};
+		const sent = post ? {} : { credential: basicAuthorization(client, s["client-secret"]) };
 		return outbound.fetch(
 			endpoints.token,
-			{ method: "POST", headers, body: form.toString() },
+			{ method: "POST", headers, body: form.toString(), ...sent },
 			{ hosts },
 		);
 	};
