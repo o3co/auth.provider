@@ -1571,6 +1571,9 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -1581,6 +1584,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/subject-attributes':
         specifier: workspace:*
         version: link:../../identity/subject-attributes

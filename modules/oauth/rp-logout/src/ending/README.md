@@ -6,7 +6,7 @@ Internal module of `rp-logout`: the logout a client starts (OpenID Connect RP-In
 - Ends the session an ID token hint names, and sends the browser on: to the front-channel page, the upstream's end of session, the client's return, or a plain answer.
 
 ## Not here
-- Judging the hint (`oidc`). Closing the session and its cookie (`session`). Building the page (`page`). Back-channel notices (`notices`, through the session's participant).
+- Judging the hint (`oidc`). Closing the session and its cookie (`session`). Building the page (`page`). Back-channel notices (`notices`, through `session-participants`' participant).
 
 ## Offers
 - `endingFrom` (the build context, the upstream end if one is contributed) → the handler of `GET` and `POST /oauth/logout`.
