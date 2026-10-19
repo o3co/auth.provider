@@ -1,14 +1,15 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { legacyDir } from "../src/dir.ts";
+import { legacyDir, legacyVersion } from "../src/dir.ts";
 import { extras } from "./extras.mjs";
 
 const source = process.env.LEGACY_SOURCE;
-const branch = process.env.LEGACY_BRANCH;
-if (!source || !branch) {
+// The legacy version's tag, the one the build's dir is named for, unless another is asked.
+const branch = process.env.LEGACY_BRANCH || `v${legacyVersion}`;
+if (!source) {
 	process.stderr.write(
-		"set LEGACY_SOURCE (a local clone, read only) and LEGACY_BRANCH; LEGACY_DIR (a work dir) is optional\n",
+		`set LEGACY_SOURCE (a local clone, read only); LEGACY_BRANCH (default ${branch}) and LEGACY_DIR (a work dir) are optional\n`,
 	);
 	process.exit(64);
 }
