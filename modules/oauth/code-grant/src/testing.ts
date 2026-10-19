@@ -18,14 +18,8 @@ export interface CodePlace {
 	advance(ms: number): void;
 	/** Before the next update of `name` writes, another writer changes its record as given. */
 	raceNextUpdate(name: string, change: (record: StoredCode) => StoredCode): void;
-	/**
-	 * Names the void list keeps together, and how many it keeps before it refuses. `hashes`, the
-	 * former word for `names`, is read until every place gives `names`.
-	 */
-	readonly crowd: { readonly limit: number } & (
-		| { names(count: number): readonly string[] }
-		| { hashes(count: number): readonly string[] }
-	);
+	/** Names the void list keeps together, and how many it keeps before it refuses. */
+	readonly crowd: { readonly limit: number; names(count: number): readonly string[] };
 	/** Where answers can be lost: the next write takes effect, but its answer is lost. */
 	readonly loseNextAnswer?: () => void;
 	/** Where the place replicates: a replica takes over, keeping only what was confirmed. */
@@ -128,8 +122,7 @@ export function codeStoreContract(name: string, open: () => Promise<CodePlace>):
 
 		it("refuses a void past a full place without pushing out one it keeps", async () => {
 			const { voids, crowd } = await open();
-			const count = crowd.limit + 1;
-			const [over, ...kept] = "names" in crowd ? crowd.names(count) : crowd.hashes(count);
+			const [over, ...kept] = crowd.names(crowd.limit + 1);
 			for (const name of kept) await voids.add(name);
 			await expect(voids.add(over as string)).rejects.toSatisfy(isUnavailable);
 			expect(await listed(voids)).toEqual([...kept].sort());
