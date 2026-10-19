@@ -715,7 +715,7 @@ From `@mod/authorize`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.authorize.redirect-uris` | list of string | `[]` |  |  |
+| `sections.authorize.redirect-uris` | list of string | `[]` |  | The redirect URIs the client may ask for, each matched as written: https, http to a loopback host, or a private-use reverse-domain scheme, with no fragment, userinfo or query parameter named like a response parameter. |
 
 ### sections.client-allowance
 
@@ -743,7 +743,7 @@ From `@mod/clients`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.client-secret.hash` | string |  |  |  |
+| `sections.client-secret.hash` | string |  |  | A bcrypt or scrypt hash of the client's secret, as `secret-hash` reads it; a plain-text secret, or a hash it cannot read, is refused at boot. |
 
 ### sections.consent
 
@@ -762,8 +762,8 @@ From `@mod/federation-grants`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.federation-grants.connections` | list of string | `[]` |  |  |
-| `sections.federation-grants.return-uris` | list of string | `[]` |  |  |
+| `sections.federation-grants.connections` | list of string | `[]` |  | The operator's connections, by name, that the client may ask for; only a registered confidential client asks for any. |
+| `sections.federation-grants.return-uris` | list of string | `[]` |  | Where the browser may be sent back after the user connects or declines, each matched exactly; none may hold `grant_id`, `state` or `error`. |
 
 ### sections.federation-tokens
 

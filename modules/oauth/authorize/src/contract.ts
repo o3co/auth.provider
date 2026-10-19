@@ -18,7 +18,10 @@ export const redirects: Section<Redirects> = {
 						"an absolute URI without a fragment, userinfo, control characters, or a query named like a response parameter",
 					),
 			)
-			.prefault([]),
+			.prefault([])
+			.describe(
+				"The redirect URIs the client may ask for, each matched as written: https, http to a loopback host, or a private-use reverse-domain scheme, with no fragment, userinfo or query parameter named like a response parameter.",
+			),
 	}),
 };
 export * from "./store.ts";

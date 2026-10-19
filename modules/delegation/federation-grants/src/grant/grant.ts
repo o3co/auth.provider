@@ -126,14 +126,22 @@ export const clientSection: Section<{
 }> = {
 	name: "federation-grants",
 	schema: z.strictObject({
-		connections: z.array(z.string().min(1)).prefault([]),
+		connections: z
+			.array(z.string().min(1))
+			.prefault([])
+			.describe(
+				"The operator's connections, by name, that the client may ask for; only a registered confidential client asks for any.",
+			),
 		"return-uris": z
 			.array(
 				z
 					.url()
 					.refine((uri) => !reserved(uri), "a return URI may not hold grant_id, state or error"),
 			)
-			.prefault([]),
+			.prefault([])
+			.describe(
+				"Where the browser may be sent back after the user connects or declines, each matched exactly; none may hold `grant_id`, `state` or `error`.",
+			),
 	}),
 };
 
