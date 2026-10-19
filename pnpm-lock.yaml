@@ -1888,6 +1888,9 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../../second-factor/mfa
+      '@mod/mfa-entry':
+        specifier: workspace:*
+        version: link:../../second-factor/mfa-entry
       '@mod/mfa-store':
         specifier: workspace:*
         version: link:../../templates/mfa-store
