@@ -12,7 +12,10 @@ Internal module of `guard`: G26, how product code may reach the network.
 - `networkRules` (G26) and `reachesOf` (a file's places that reach the network).
 
 ## Invariants
-- A place reaches the network when shipped code imports, not as a type alone, a name that opens a connection or a server from `node:http`, `node:https`, `node:net`, `node:tls`, `node:dgram` or `node:http2`; imports one of those modules whole; imports a network client (`ioredis`, `nodemailer`, `undici`, `ws`, `node-fetch`, `axios`, `got`); or calls `fetch`, `WebSocket` or `EventSource` where no local binding of the name hides it. Functions that reach nothing, such as `isIP` and `BlockList`, are not counted.
+- A place reaches the network where shipped code does one of these:
+  - Imports, not as a type alone, a name that opens a connection or a server from `node:http`, `node:https`, `node:net`, `node:tls`, `node:dgram` or `node:http2`, or one of those modules whole. Functions that reach nothing, such as `isIP` and `BlockList`, are not counted.
+  - Imports a network client: `ioredis`, `nodemailer`, `undici`, `ws`, `node-fetch`, `axios` or `got`.
+  - Calls `fetch`, `WebSocket` or `EventSource` where no local binding of the name hides it.
 - The words, and what each lets a package reach:
   - `serves-http`: `node:http`'s `createServer` and `Server`.
   - `outbound`: `node:http`'s and `node:https`'s `request` and `Agent`, `node:net`'s and `node:tls`'s `connect`.
