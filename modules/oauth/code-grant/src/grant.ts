@@ -227,7 +227,7 @@ export function codeGrant(parts: {
 					access_token: issued.token,
 					token_type: issued.tokenType,
 					expires_in: issued.expiresIn,
-					...(record.scope.length > 0 ? { scope: record.scope.join(" ") } : {}),
+					scope: record.scope.join(" "),
 				},
 			};
 		},
