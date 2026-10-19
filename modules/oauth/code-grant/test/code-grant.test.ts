@@ -1024,3 +1024,17 @@ describe("tokens issued while the exchange goes wrong are revoked", () => {
 		}
 	});
 });
+
+it("offers the shape of an S256 challenge: 43 base64url characters, as RFC 7636 makes it", async () => {
+	const { challengeShape } = await import("../src/contract.ts");
+	expect(challengeShape.test("A".repeat(43))).toBe(true);
+	expect(challengeShape.test(`${"a".repeat(42)}_`)).toBe(true);
+	for (const refused of [
+		"A".repeat(42),
+		"A".repeat(44),
+		`${"A".repeat(42)}+`,
+		`${"A".repeat(42)}=`,
+	]) {
+		expect(challengeShape.test(refused), refused).toBe(false);
+	}
+});

@@ -1,5 +1,6 @@
 import { algorithms, type SignerKeys } from "@mod/jwt-bearer";
 import { deepFreeze, type LogFields, Unavailable } from "@mod/kernel";
+import { publicMembers } from "@mod/keys";
 import {
 	DestinationRefused,
 	jsonObjectOf,
@@ -17,9 +18,6 @@ export interface LookupParts {
 	readonly narrower: Narrower;
 	readonly warn: (event: string, fields: LogFields) => void;
 }
-
-/** A JWK's members that hold private key material: a key carrying any is never handed on. */
-const privateMembers = ["d", "p", "q", "dp", "dq", "qi", "oth", "k"];
 
 const answerShape = z.object({
 	keys: z.array(z.record(z.string(), z.unknown())),
@@ -61,7 +59,8 @@ export function keysAt(parts: LookupParts): SignerKeys {
 			// The ledger says the signer holds no key now.
 			if (parsed?.success && parsed.data.keys.length === 0) return { kind: "none" };
 			const keys = parsed?.success
-				? parsed.data.keys.filter((jwk) => !privateMembers.some((m) => Object.hasOwn(jwk, m)))
+				? // Only a key keys reads as public alone, its own members and those describing it, is handed on.
+					parsed.data.keys.filter((jwk) => publicMembers(jwk) !== undefined)
 				: [];
 			if (!parsed?.success || keys.length === 0) throw failed({ reason: "malformed" });
 			return deepFreeze({

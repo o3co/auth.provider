@@ -52,6 +52,5 @@ export const fromStored = (kept: StoredCode): CodeRecord | undefined => {
 
 export const s256 = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
 
-/** RFC 7636: a verifier is 43 to 128 unreserved characters; an S256 challenge is 43 base64url. */
+/** RFC 7636: a verifier is 43 to 128 unreserved characters. */
 export const verifierShape = /^[A-Za-z0-9._~-]{43,128}$/;
-export const challengeShape = /^[A-Za-z0-9_-]{43}$/;

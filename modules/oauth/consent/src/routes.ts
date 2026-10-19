@@ -12,10 +12,11 @@ import { shownOf } from "./client-section.ts";
 import { consents } from "./contract.ts";
 import { askStore } from "./store.ts";
 
-const challengeShape = /^[A-Za-z0-9_-]{43}$/;
+/** A consent challenge, consent's own handle on a pending request: 32 random bytes as base64url, no PKCE challenge. */
+const consentChallengeShape = /^[A-Za-z0-9_-]{43}$/;
 /** The challenge if it has the shape consent hands out. */
 const challengeIn = (value: string | undefined) =>
-	value !== undefined && challengeShape.test(value) ? value : undefined;
+	value !== undefined && consentChallengeShape.test(value) ? value : undefined;
 function guarded(handle: (request: HttpRequest) => Promise<HttpResponse>) {
 	return async (request: HttpRequest): Promise<HttpResponse> => {
 		try {

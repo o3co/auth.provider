@@ -14,13 +14,13 @@
 
   | Answer | Read as |
   |---|---|
-  | `200`, a JSON object with `keys`, a list of JWKs, and `algorithms`, optional, among `EdDSA`, `ES256` and `RS256` | the keys with no private member, and the algorithms, or all three when none are named |
+  | `200`, a JSON object with `keys`, a list of JWKs, and `algorithms`, optional, among `EdDSA`, `ES256` and `RS256` | the keys `keys` reads as public alone, and the algorithms, or all three when none are named |
   | `404` (not known) or `410` (known, and revoked), or a `200` whose `keys` is empty (no key now) | none |
-  | anything else, a `200` whose keys are all private or whose algorithms the grant does not take included | unavailable |
+  | anything else, a `200` with no key `keys` reads as public alone or whose algorithms the grant does not take included | unavailable |
 
 ## Invariants
 - Nothing is kept between assertions: each asks the ledger again.
-- A JWK with a private member (`d`, `p`, `q`, `dp`, `dq`, `qi`, `oth`, `k`) is never handed on; an answer with no other key is unavailable.
+- A JWK is handed on only where `keys`' `publicMembers` reads it as public alone: its type's public members, each a string in its one form, and members that describe it (`kid`, `alg`, `use`, `key_ops`); an answer with no such key is unavailable.
 - The ledger is reached only through `outbound`, at the URL's host alone; a redirect is not followed. The URL is an internal destination: a private address is reached only when its host is in `outbound.internal-hosts`.
 - Boot is refused on a `keys-url` that outbound's destination policy refuses, and on a `credential` that `outbound.credentials` will not send there (at `credential`); `outbound` sends the credential as its `credential`.
 - A destination refused when sending, or no answer in time or size, is unavailable. Each failure logs one `signer-keys-http.ledger_failed` warning with its status, or its kind alone: outbound's refusal reason or failure, `no-answer` or `malformed`. None is not logged. No text or bytes from the ledger, nor the credential, are logged.

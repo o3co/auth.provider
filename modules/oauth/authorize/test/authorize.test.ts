@@ -738,7 +738,10 @@ describe("authorize: what the reviews asked to pin down", () => {
 		expect(await error({ response_mode: "query" })).toBeNull();
 		expect(await error({ nonce: "n".repeat(257) })).toBe("invalid_request");
 		expect(await error({ prompt: "maybe" })).toBe("invalid_request");
-		expect(await error({ code_challenge: `${challenge}A` })).toBe("invalid_request");
+		// The shape code-grant issues a code for: 43 base64url characters, no more, no fewer.
+		for (const code_challenge of [`${challenge}A`, challenge.slice(1), `${challenge.slice(1)}+`]) {
+			expect(await error({ code_challenge }), code_challenge).toBe("invalid_request");
+		}
 		expect(await error({ max_age: "-1" })).toBe("invalid_request");
 		expect(await error({ response_type: "" })).toBe("invalid_request");
 		const long = await authorize(request({ state: "s".repeat(513) }), cookie);

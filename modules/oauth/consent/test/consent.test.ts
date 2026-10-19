@@ -322,7 +322,8 @@ describe("consent: the page", () => {
 		const { pendingFor, call } = await serve();
 		const { cookie } = await pendingFor("alice");
 		const unknown = [400, { error: "unknown_challenge" }];
-		for (const params of [{}, { challenge: "x" }]) {
+		const near = ["A".repeat(42), "A".repeat(44), `${"A".repeat(42)}+`];
+		for (const params of [{}, { challenge: "x" }, ...near.map((challenge) => ({ challenge }))]) {
 			const shown = await call("GET", cookie, params);
 			expect([shown.status, shown.body]).toEqual(unknown);
 			const answered = await call("POST", cookie, { ...params, decision: "accept" });
