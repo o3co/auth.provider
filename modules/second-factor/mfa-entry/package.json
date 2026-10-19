@@ -1,0 +1,22 @@
+{
+	"name": "@mod/mfa-entry",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"exports": {
+		".": "./src/contract.ts",
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/kernel": "workspace:*",
+		"@mod/mfa": "workspace:*",
+		"@mod/mfa-extensions": "workspace:*",
+		"@mod/session": "workspace:*"
+	},
+	"devDependencies": {
+		"@mod/http": "workspace:*",
+		"@mod/subject-revocation": "workspace:*",
+		"vitest": "5.0.4"
+	}
+}
