@@ -26,6 +26,7 @@
 		"@mod/issuer": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
+		"@mod/session-requirements": "workspace:*",
 		"@mod/session-tokens": "workspace:*",
 		"@mod/store": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",

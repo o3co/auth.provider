@@ -20,8 +20,10 @@ import {
 import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
 import { crowdingFor, memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
-import { entryRequirements, sessions } from "@mod/session";
+import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import { entryRequirements } from "@mod/session-requirements";
+import sessionRequirements from "@mod/session-requirements/module";
 import { sessionTokens } from "@mod/session-tokens";
 import bridgeModule from "@mod/session-tokens/module";
 import { sessionTokensInMemory } from "@mod/session-tokens/testing";
@@ -152,6 +154,7 @@ async function serve(
 			grantCaller,
 			clientAllowanceModule,
 			sessionStandIn,
+			sessionRequirements,
 			subjectRevocationStandIn,
 			simulated.module,
 			stores.module,
