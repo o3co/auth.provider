@@ -134,12 +134,13 @@ What each module contains is described by that module's contract card (each modu
 | Sessions' contract, entry | contract | session |
 | Session records, lifecycle | contract implementation / setting | session-lifecycle |
 | Session handle, and looking up a request's session | contract / vocabulary | session |
-| Entry requirements | extension point kind | session |
+| Entry requirements, and the one order they are asked in | extension point kind | session-requirements |
+| The seams an implementation asks the entry requirements and calls the participants through | extension point kind | session |
 | Raising authentication (step-up) and rotating the cookie secret | contract | session |
 | Login completion gates, and resuming a held login | extension point kind / contract | login-gates |
 | Telling the caller that a held login it asked for has opened | extension point kind | login-gates |
 | Declarations of the amr values this deployment can produce, and judging whether they can be produced | extension point kind / contract | login-gates |
-| Participants when a session closes | extension point kind | session |
+| Participants when a session closes, and the one order they are called in | extension point kind | session-participants |
 | Each subject's live sessions, and closing them when the subject is revoked | contract | session |
 | Closing a revoked subject's live sessions (a follower of subject-revocation) | contribution | session-lifecycle |
 | Authentication context | vocabulary | session |
