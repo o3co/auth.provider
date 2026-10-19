@@ -52,7 +52,7 @@ auth-provider は、TypeScript で書かれた Node.js 向けのセルフホス�
 
 - Node.js 24 以降。
 - 生成したプロジェクトの `packageManager` フィールドに指定されたバージョンの pnpm。`corepack enable` でそのバージョンをインストールできます。Node.js 25 以降には Corepack が同梱されていないため、先に `npm install -g corepack` を実行してください。
-- 状態の永続化や複数インスタンスでの運用に Redis アダプターを使う場合は、Redis 7.0 以降。[本番運用の前に](#本番運用の前に)を参照してください。
+- 状態の永続化や複数インスタンスでの運用に Redis アダプターを使う場合は、Redis 7.0 以降。[本番運用の前に](#本番運用の前に)を参照してください。サーバーに必要な設定 (append-only ファイル、eviction しないことなど) は、runbook の [Redis の節](docs/runbook.md#redis)にあります。アプリは起動時にそれを確かめます。
 - 生成したイメージをビルドして実行する場合は、Docker。
 
 パターンによっては、HTTP ユーザー台帳、監査ログの収集先、SMTP リレー、上流の ID プロバイダーも必要です。`simple-web` では、これらは不要です。

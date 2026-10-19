@@ -52,7 +52,7 @@ Other modules cover consent, step-up authentication, keeping upstream tokens for
 
 - Node.js 24 or later.
 - pnpm, at the version in the generated project's `packageManager` field. `corepack enable` installs that version for you; Node.js 25 and later ship without Corepack, so run `npm install -g corepack` first.
-- Redis 7.0 or later, if you use the Redis adapter for persistent state or several instances. See [Before production](#before-production).
+- Redis 7.0 or later, if you use the Redis adapter for persistent state or several instances. See [Before production](#before-production). The settings the server must have, such as an append-only file and no eviction, are in the runbook's [Redis section](docs/runbook.md#redis); the app checks them at startup.
 - Docker, if you want to build and run the generated image.
 
 Some patterns also need an HTTP user ledger, an audit collector, an SMTP relay or upstream identity providers. `simple-web` needs none of them.
