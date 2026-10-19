@@ -11,7 +11,8 @@ What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc
 ### Security
 
 - `mfa`: an enrollment begun at login could add a further factor after the account's first factor was registered; removing a factor or reissuing recovery codes could pass on what is allowed to an account with no factor while another request bound one; and two first enrollments at once could both bind.
-- `mfa-flows`: recovery codes that were never shown could stay usable; an enrollment could complete after a reset or a revocation that came while it was under way; an enrollment begun before a subject revocation could still bind after the revocation completed.
+- `mfa-flows`: recovery codes that were never shown could stay usable; an enrollment could complete after a reset or a revocation that came while it was under way; an enrollment begun before a subject revocation could still bind after the revocation completed; recovery codes from a first binding could be shown after a revocation completed.
+- `mfa-management`: a session opened before a subject revocation could remove a factor, or reissue and receive recovery codes, after the revocation completed.
 - `federation-grants`: a refresh could hand out a token after the grant had ended or its subject had been revoked, a request that waited for the refresh lock included; a grant past its end is treated as ended everywhere.
 - `session-lifecycle`: an explicit close of a session past its lifetime did not revoke the session's tokens; a session revoked while its entry requirements were asked could still enter.
 - `refresh`: an access token from a refresh could outlive the session of its family.
@@ -45,11 +46,12 @@ What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc
 - A configuration file that does not parse is refused at its line and column.
 - A required key left unset is refused as `required, and not set`; a missing or empty `audit.receivers` is refused saying what to name; an empty or unparsable public or CORS origin, WebAuthn origin, or upstream identity provider's endpoint is refused at boot instead of stopping the app with an error.
 - A destination outbound refuses at boot says which of outbound's keys lets it through, naming no value.
+- The credentials routes read the subject's second factors whatever is composed, and answer unavailable when the factors' store cannot answer.
 - The command that generates an app is `create-auth-provider`.
 
 ### Added
 
-- Modules: `subject-revocation-http` (an outside ledger ends a user's sessions and tokens here), `signer-keys-http` (an outside ledger supplies JWT bearer signers' keys), `jwt-bearer-users` (a JWT bearer subject linked to a user), `exchange-id-tokens` (an upstream id_token exchanged for this provider's tokens), `mfa-management` (managing factors), `mfa-witness` (the contract of an enrollment witness kept apart from the factors' store), `mfa-witness-http` (that witness kept at the operator's ledger over HTTP; what the ledger must keep is in the [runbook](docs/runbook.md#keeping-the-second-factor-witness-at-the-ledger)), `mfa-revocation` (moves a revoked subject's second-factor fence before the revocation completes; composed through `combinations`), and the store wirings `jwt-bearer-store` and `exchange-id-tokens-store`.
+- Modules: `subject-revocation-http` (an outside ledger ends a user's sessions and tokens here), `signer-keys-http` (an outside ledger supplies JWT bearer signers' keys), `jwt-bearer-users` (a JWT bearer subject linked to a user), `exchange-id-tokens` (an upstream id_token exchanged for this provider's tokens), `mfa-management` (managing factors), `mfa-witness` (the contract of an enrollment witness kept apart from the factors' store), `mfa-witness-http` (that witness kept at the operator's ledger over HTTP; what the ledger must keep is in the [runbook](docs/runbook.md#keeping-the-second-factor-witness-at-the-ledger)), `mfa-revocation` (moves a revoked subject's second-factor fence before the revocation completes; composed through `combinations`), `mfa-entry` (judges a session against its second factors; the entry requirement keeps the name `mfa`; composed through `combinations`, and added by hand to an app composed by hand), and the store wirings `jwt-bearer-store` and `exchange-id-tokens-store`.
 - `federation-grants.sweep-interval`: each instance erases the credentials of ended grants, though no request reads them.
 - `users-http.subject-url` and `upstream-url`, for a ledger that looks users up by subject or by upstream identity; `verify-url` is now optional.
 - `idp-google.hosted-domains`.
@@ -60,7 +62,7 @@ What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc
 
 ### Removed
 
-- For modules and adapters of your own: `session`'s `stillOpen`, `openContext` and `endsAt`; `Cookies.read`; `secretChecker`; `answeringUnavailable`; `outbound`'s `outboundPolicy`, replaced by `outboundRefusals`; and the `store` calls nothing used. Each one's replacement is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc1).
+- For modules and adapters of your own: `session`'s `stillOpen`, `openContext` and `endsAt`; `Cookies.read`; `secretChecker`; `answeringUnavailable`; `outbound`'s `outboundPolicy`, replaced by `outboundRefusals`; `mfa`'s `recent` and `provenRecently`, moved to `session` and `mfa-entry`; and the `store` calls nothing used. `mfa`'s `countingHeld` takes where it is asked, and its `remove` and `reissue` take the fence answered before the change. Each one's replacement is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc1).
 
 ## [0.18.0-rc.1] - 2026-10-17
 
