@@ -64,7 +64,7 @@ it("keeps a closed session closed through a lost answer and a failover, and fail
 	expect((await s.close(handle)).kind).toBe("closed");
 	await simulated.failover();
 	expect(await s.enter(withCookie(cookie))).toBeUndefined();
-	expect(await s.stillOpen(handle)).toBe(false);
+	expect((await s.entryOf(handle)).kind).toBe("absent");
 	simulated.unreachable(true);
 	await expect(s.enter(withCookie(cookie))).rejects.toThrow();
 });
