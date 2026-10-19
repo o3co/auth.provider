@@ -345,7 +345,8 @@ describe("exchange-id-tokens", () => {
 			(e: unknown) => e,
 		);
 		expect(refused).toBeInstanceOf(BootRefused);
-		expect(JSON.stringify((refused as BootRefused).refusals)).toContain("google");
+		// users names the modules that declare the name, never the name or an issuer.
+		expect(JSON.stringify((refused as BootRefused).refusals)).toContain("federation-like");
 		await expect(
 			boot({ google: { ...settings.google, upstream: "work" } }, [naming("https://idp.example")]),
 		).resolves.toBeDefined();
