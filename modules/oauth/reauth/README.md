@@ -8,7 +8,7 @@
 - When a record is asked for and what is answered without one (`authorize`). The table of authentication levels (`acr`).
 
 ## Offers
-- Contract `reauths`:
+- Contract `reauths` (its module provides it, over the store interface):
   - `remember` (the request's parameters, the time a login counts from, whether it is the step-up round trip → the record's name).
   - `take` (name, the request's parameters → the record, or none).
   - `fresh` (`prompt=login` asked, `max_age` in ms, whether a known authentication time is needed; the session's authentication time or that it is unknown; the taken record → yes / no).

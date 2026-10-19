@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
-import { Unavailable } from "@mod/kernel";
+import { assemble, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { memoryRecords } from "@mod/records/testing";
 import { describe, expect, it } from "vitest";
-import type { StoredReauth } from "../src/contract.ts";
+import { reauthStore, reauths, type StoredReauth } from "../src/contract.ts";
+import reauthModule from "../src/module.ts";
 import { reauthsWith } from "../src/reauths.ts";
 
 const setUp = () => {
@@ -94,4 +95,15 @@ describe("re-authentication records", () => {
 		advance(1);
 		expect(reauths.fresh(maxAge, { authenticatedAt: 999_000 }, undefined)).toBe(false);
 	});
+});
+
+it("provides the records over the store the assembly wires", async () => {
+	const stand = memoryRecords<StoredReauth>(() => 0, { shards: 1, perShard: 1 });
+	const place = defineModule({ name: "reauth-place" }, (m) => [
+		m.provide(reauthStore).by(() => ({ save: stand.records.create, update: stand.records.change })),
+	]);
+	const app = await assemble({ modules: [reauthModule, place], config: kernelConfig() });
+	const records = app.get(reauths);
+	const name = await records.remember(params({ a: "1" }), 5);
+	expect((await records.take(name, params({ a: "1" })))?.at).toBe(5);
 });
