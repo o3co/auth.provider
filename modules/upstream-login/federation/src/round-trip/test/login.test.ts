@@ -44,9 +44,9 @@ function loginOf(upstreamAmr: ReadonlyMap<string, string> = new Map()) {
 
 it("reports when the upstream says the user logged in, or that it is unknown where it says nothing", async () => {
 	const l = loginOf();
-	await l.complete({ subject: "u-1", amr: [], authenticatedAt: 1_800_000_000_000 });
+	await l.complete({ subject: "u-1", amr: [], authenticatedAt: 1_800_000_001_000 });
 	await l.complete({ subject: "u-1", amr: [] });
-	expect(l.handed.map((facts) => facts.authenticatedAt)).toEqual([1_800_000_000_000, "unknown"]);
+	expect(l.handed.map((facts) => facts.authenticatedAt)).toEqual([1_800_000_001_000, "unknown"]);
 });
 
 it("reports a login the upstream says came within its clock allowance before the start as made at the start", async () => {
@@ -54,14 +54,17 @@ it("reports a login the upstream says came within its clock allowance before the
 	for (const authenticatedAt of [
 		startSecond - skewMs,
 		startSecond - 1,
+		// Said in the start's own second, which the upstream gives only whole: before the start to the millisecond.
+		startSecond,
 		startSecond - skewMs - 1000,
 	]) {
 		await l.complete({ subject: "u-1", amr: [], authenticatedAt });
 	}
-	// Within the allowance it is our start's second, as the upstream's clock is mapped to ours; older stays as said.
+	// Within the allowance it is our start to the millisecond, as the upstream's clock is mapped to ours; older stays as said.
 	expect(l.handed.map((facts) => facts.authenticatedAt)).toEqual([
-		startSecond,
-		startSecond,
+		startedAt,
+		startedAt,
+		startedAt,
 		startSecond - skewMs - 1000,
 	]);
 });
