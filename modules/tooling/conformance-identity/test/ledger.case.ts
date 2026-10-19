@@ -43,13 +43,13 @@ const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * A ledger verifying passwords at `/ledger/authenticate`, behind the credential. It refuses an
- * unknown identifier with 401 and a wrong password with 403, both without a Bearer challenge.
+ * unknown identifier and a wrong password with 401, without a Bearer challenge.
  */
 async function asAlice(asked: { method: string; path: string; body: string }): Promise<Scripted> {
 	if (asked.method !== "POST" || asked.path !== "/ledger/authenticate") return { status: 404 };
 	const { email, password } = JSON.parse(asked.body);
 	if (email !== right.username) return { status: 401 };
-	return password === right.password ? { json: alice } : { status: 403 };
+	return password === right.password ? { json: alice } : { status: 401 };
 }
 
 let fake: Fake;
