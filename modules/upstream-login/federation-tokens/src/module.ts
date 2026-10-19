@@ -32,7 +32,7 @@ export default defineModule({ name, section }, (m) => [
 			store: await c.get(upstreamTokenStore),
 			locks: await c.get(refreshLocks),
 			upstreams: await c.get(upstreams),
-			sessions: { endsAt: (handle) => lateSessions().endsAt(handle) },
+			sessions: { entryOf: (handle, level) => lateSessions().entryOf(handle, level) },
 			vault: await vaultFrom(c),
 			clock: c.clock,
 			random: c.random,

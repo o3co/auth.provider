@@ -30,7 +30,7 @@ export interface Parts {
 	readonly store: UpstreamTokenStore;
 	readonly locks: RefreshLocks;
 	readonly upstreams: Upstreams;
-	readonly sessions: Pick<Sessions, "endsAt">;
+	readonly sessions: Pick<Sessions, "entryOf">;
 	readonly vault: Vault;
 	readonly clock: Clock;
 	readonly random: Random;
@@ -98,10 +98,13 @@ export function renewalWith(parts: Parts) {
 	const failedKey = (session: string, idp: string, kept: Kept) =>
 		`${session}\n${idp}\n${createHash("sha256").update(kept.accessToken).digest("base64url")}`;
 
-	/** What is left of the session, so its record never outlives it; none once it lets nobody in. */
+	/**
+	 * What is left of the session, so its record never outlives it; none once it lets nobody in at
+	 * use: closed, ended, revoked, or short of a requirement.
+	 */
 	const lifetimeOf = async (session: string) => {
-		const ends = await parts.sessions.endsAt(session);
-		const left = ends === undefined ? 0 : ends - parts.clock.now();
+		const entry = await parts.sessions.entryOf(session);
+		const left = entry.kind === "entered" ? entry.endsAt - parts.clock.now() : 0;
 		return left > 0 ? left : undefined;
 	};
 
@@ -112,7 +115,7 @@ export function renewalWith(parts: Parts) {
 		next: Entry | undefined,
 		version?: string,
 	) => {
-		// A session that lets nobody in has its record removed by its closing.
+		// A session that lets nobody in gets no write; what it holds goes with its closing or its lifetime.
 		const lifetimeMs = await lifetimeOf(session);
 		if (lifetimeMs === undefined) return false;
 		const changed = await store.update(session, (record) => {
@@ -328,7 +331,7 @@ export function renewalWith(parts: Parts) {
 			};
 			const entry = vault.seal(session, idp, kept, versionOf());
 			const written = await keep(session, idp, entry);
-			// A session that closed while they were written has run its closing: they go here.
+			// A session that closed, or fell short of a requirement, while they were written: they go here.
 			if (written && (await lifetimeOf(session)) !== undefined) return;
 			if (written) await forget(session, idp);
 			parts.log.warn("federation-tokens.login_tokens_not_kept", { idp });

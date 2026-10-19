@@ -211,7 +211,13 @@ describe("opening an entry", () => {
 				store: stores.records,
 				locks: stores.locks,
 				upstreams: { of: () => undefined } as unknown as Upstreams,
-				sessions: { endsAt: async () => runtime.clock.now() + 3_600_000 },
+				sessions: {
+					entryOf: async (id) => ({
+						kind: "entered",
+						session: { id, context: { subject: "s", amr: [], authenticatedAt: 0 } },
+						endsAt: runtime.clock.now() + 3_600_000,
+					}),
+				},
 				vault,
 				...runtime,
 				refreshBeforeMs: 30_000,
