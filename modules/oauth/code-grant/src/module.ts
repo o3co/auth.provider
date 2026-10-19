@@ -28,8 +28,11 @@ export default defineModule({ name: "code-grant", section }, (m) => [
 		return {
 			issue: async (facts) => {
 				if (!challengeShape.test(facts.challenge)) throw new TypeError("code-grant: bad challenge");
-				const context = await opened.openContext(facts.session);
-				if (!context || context.subject !== facts.subject)
+				const entry = await opened.entryOf(facts.session);
+				if (entry.kind !== "entered")
+					throw new TypeError(`code-grant: the session is ${entry.kind} at use`);
+				const context = entry.session.context;
+				if (context.subject !== facts.subject)
 					throw new TypeError("code-grant: not this session's subject");
 				const client = await known.find(facts.clientId);
 				if (

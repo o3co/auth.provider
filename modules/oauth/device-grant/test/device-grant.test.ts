@@ -561,6 +561,23 @@ describe("polling", () => {
 		expect(await s.poll(code)).toBe("invalid_grant");
 	});
 
+	it("issues nothing while the approving session falls short of a requirement to be used, as a closed one", async () => {
+		const short = { now: false };
+		const requirement = defineModule({ name: "short-to-use" }, (m) => [
+			m.contribute(entryRequirements).by(() => ({
+				name: "mfa",
+				judges: ["use"],
+				admits: async () =>
+					short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
+			})),
+		]);
+		const s = await serve({}, [requirement]);
+		const { code, user } = await s.started();
+		await s.verify(await s.login(), { action: "approve", user_code: user });
+		short.now = true;
+		expect(await s.poll(code)).toBe("invalid_grant");
+	});
+
 	it("answers no token issued while the approving session closed", async () => {
 		let asked = 0;
 		let close = async () => {};

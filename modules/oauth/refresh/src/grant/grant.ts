@@ -42,7 +42,11 @@ function scopeFor(asked: string | undefined, granted: readonly string[]) {
 }
 
 async function stillValid(family: Family, checks: Checks) {
-	if (family.session !== undefined && !(await checks.sessions.stillOpen(family.session))) {
+	// Only a session that enters at use keeps its family: one closed, ended or short of a requirement does not.
+	if (
+		family.session !== undefined &&
+		(await checks.sessions.entryOf(family.session)).kind !== "entered"
+	) {
 		return false;
 	}
 	return (await checks.revocation.check(family.subject, family.authenticatedAt)) === "valid";

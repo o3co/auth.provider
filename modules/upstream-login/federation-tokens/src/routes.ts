@@ -100,8 +100,8 @@ export async function federationTokens(flow: Flow, request: HttpRequest): Promis
 			}
 			return answer(status, { error }, status === 502 ? { "retry-after": "300" } : {});
 		}
-		// The session may have closed while the upstream answered.
-		if (!(await flow.caller.stillOpen(caller))) {
+		// The session may have closed, or fallen short of a requirement, while the upstream answered.
+		if (!(await flow.caller.stillEnters(caller))) {
 			return answer(
 				401,
 				{ error: "invalid_token" },

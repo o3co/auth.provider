@@ -32,7 +32,7 @@ import {
 import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import secretHashModule from "@mod/secret-hash/module";
-import { sessions } from "@mod/session";
+import { entryRequirements, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { sessionTokens } from "@mod/session-tokens";
 import sessionTokensModule from "@mod/session-tokens/module";
@@ -469,6 +469,22 @@ describe("refresh tokens", () => {
 		await s.app.get(sessions).close(s.session.id);
 		expect((await s.refresh(refreshed.body.refresh_token)).body.error).toBe("invalid_grant");
 		expect(await s.active(refreshed.body.access_token)).toBe(false);
+	});
+
+	it("stop working while the session falls short of a requirement to be used, as a closed one does", async () => {
+		const short = { now: false };
+		const requirement = defineModule({ name: "short-to-use" }, (m) => [
+			m.contribute(entryRequirements).by(() => ({
+				name: "mfa",
+				judges: ["use"],
+				admits: async () =>
+					short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
+			})),
+		]);
+		const s = await serve({ extra: [requirement] });
+		const first = await s.redeem();
+		short.now = true;
+		expect((await s.refresh(first.refresh_token)).body.error).toBe("invalid_grant");
 	});
 
 	it("stop working once the session has ended, before the family does", async () => {

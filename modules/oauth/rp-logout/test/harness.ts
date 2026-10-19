@@ -210,7 +210,9 @@ export async function harness(
 		advance: (ms: number) => {
 			now += ms;
 		},
-		stillOpen: (session: string) => app.get(sessions).stillOpen(session),
+		/** Whether the session enters at use. */
+		stillOpen: async (session: string) =>
+			(await app.get(sessions).entryOf(session)).kind === "entered",
 		stop: () => app.stop(1000),
 	};
 }

@@ -197,7 +197,7 @@ describe("released claims where users cannot look the subject up", () => {
 	it("is unavailable when session is, never an empty answer", async () => {
 		const down = unavailableSwitch<Sessions>("session");
 		const app = await unanswerable(switchedModule(sessionsOf(byHandle), sessions, down));
-		down.unavailable("openContext");
+		down.unavailable("entryOf");
 		await expect(app.get(releasedClaims).of("s-alice", scope, "u")).rejects.toSatisfy(
 			isUnavailable,
 		);

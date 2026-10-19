@@ -5,7 +5,7 @@ import { issuer } from "@mod/issuer";
 import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
 import { type IdTokenHints, idTokenHints } from "@mod/oidc";
 import { determinedSource } from "@mod/request-source";
-import { type CloseOutcome, sessions } from "@mod/session";
+import { type CloseOutcome, type Entry, sessions } from "@mod/session";
 import events from "../audit-events.ts";
 import type { LogoutReturn, UpstreamEnd } from "../contract.ts";
 import { type Frame, frontChannelPage } from "../page/page.ts";
@@ -17,7 +17,7 @@ export interface EndingParts {
 	readonly hints: IdTokenHints;
 	readonly clients: { find(id: string): Promise<Client | undefined> };
 	readonly sessions: {
-		stillOpen(id: string): Promise<boolean>;
+		entryOf(id: string): Promise<Entry>;
 		close(id: string, request: HttpRequest): Promise<CloseOutcome>;
 	};
 	readonly sessionClients: Pick<SessionClients, "members">;
@@ -171,8 +171,9 @@ export function endingOver(p: EndingParts) {
 					...more,
 				},
 			});
-		// A session already ended still has its close asked, for the cookie, but is no logout of its own.
-		const open = await p.sessions.stillOpen(sid);
+		// A session that does not enter at use (ended, or short of a requirement) still has its close
+		// asked, for the cookie, but is no logout of its own.
+		const open = (await p.sessions.entryOf(sid)).kind === "entered";
 		const closed = await closeOf(sid, request);
 		if (!closed) {
 			record("logout.cascade_failed", checked.subject, { store: "session" });

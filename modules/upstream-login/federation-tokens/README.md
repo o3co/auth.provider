@@ -34,11 +34,11 @@
 
 ## Invariants
 - A token goes out only to a client the operator made a receiver (`receives`).
-- A token goes out only for a presented access token `caller` accepts: its audience names its client, its family has not ended, and its session is open for the same subject.
+- A token goes out only for a presented access token `caller` accepts: its audience names its client, its family has not ended, and its session enters at `use` for the same subject (one short of a requirement does not).
 - The session is checked again before answering.
 - Only a bearer token goes out (any case). Any other type answers `502`, and the record stays.
-- A session's record lives no longer than the session (`session`'s `endsAt`).
-- Nothing is kept for a session that lets nobody in, even one that closes while a login's tokens are written.
+- A session's record lives no longer than the session (the end of its entry at `session`).
+- Nothing is kept for a session that lets nobody in at `use` (one short of a requirement included), even one that closes while a login's tokens are written.
 - An entry holds the access, refresh and id tokens, the end, the scope the login granted and the scope now. Nothing else of the upstream's is kept.
 - A write lands only over the version it read, so a removed or relinked entry is neither brought back nor written over.
 - Only a structured `invalid_grant`, or `interaction_required` (the upstream asks the user to act there first), removes an entry.

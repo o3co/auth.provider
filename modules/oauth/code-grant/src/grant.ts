@@ -124,6 +124,8 @@ export function codeGrant(parts: {
 	readonly redemptions: readonly SessionRedemption[];
 }): Grant {
 	const { store, sessions, settle, now, idToken, additions, redemptions } = parts;
+	/** Whether the code's session enters at use: not closed, ended or short of a requirement. */
+	const enters = async (session: string) => (await sessions.entryOf(session)).kind === "entered";
 	return {
 		grantType: codeGrantType,
 		targets: true,
@@ -161,7 +163,7 @@ export function codeGrant(parts: {
 				return refused;
 			}
 			if (!presented(record)) return refused;
-			if (!(await sessions.stillOpen(record.session))) return refused;
+			if (!(await enters(record.session))) return refused;
 			// Asked again on what was used up: a look before use that missed the code asked nothing.
 			const again = target(record.audience, (audience) => record.audience.includes(audience));
 			if (again.kind === "error") return again;
@@ -191,7 +193,7 @@ export function codeGrant(parts: {
 				await voidIfFails(() => redemption.redeemed(record.session, client.id));
 			}
 			// A reuse or a logout that came while the token was being made voids it.
-			if (after.void || !(await sessions.stillOpen(record.session))) {
+			if (after.void || !(await enters(record.session))) {
 				await settle(name);
 				return refused;
 			}

@@ -1,5 +1,5 @@
 import { Unavailable } from "@mod/kernel";
-import { sessions } from "@mod/session";
+import { type Entry, sessions } from "@mod/session";
 import type { UpstreamRefresh } from "@mod/upstreams";
 import { describe, expect, it, vi } from "vitest";
 import { back, harness, named, type Offered, unreadable } from "./harness.ts";
@@ -82,17 +82,32 @@ describe("the token route", () => {
 	});
 
 	it.each([
-		["no longer open", undefined],
+		["closed", "absent"],
+		["short of a requirement", "short"],
 		["open for another subject", "bob"],
-	])(
-		"refuses the refreshed token when the session is %s once the upstream answers",
-		async (_, subject) => {
+	] as const)(
+		"refuses the refreshed token when the session is %s once the upstream's tokens are written",
+		async (_, now) => {
 			const at: { h?: Awaited<ReturnType<typeof linked>> } = {};
 			const offered: Offered = {
 				refresh: async () => {
-					const { app, session } = at.h as Awaited<ReturnType<typeof linked>>;
-					vi.spyOn(app.get(sessions), "openContext").mockResolvedValue(
-						subject === undefined ? undefined : { ...session.context, subject },
+					const { app, session, stores } = at.h as Awaited<ReturnType<typeof linked>>;
+					const open = app.get(sessions);
+					const real = open.entryOf.bind(open);
+					const written = stores.given.length;
+					const told: Entry =
+						now === "absent"
+							? { kind: "absent" }
+							: now === "short"
+								? { kind: "short", requirement: "test-short", answer: { error: "test_short" } }
+								: {
+										kind: "entered",
+										session: { ...session, context: { ...session.context, subject: now } },
+										endsAt: Number.MAX_SAFE_INTEGER,
+									};
+					// Only once the refreshed tokens are written, so the write itself still finds the session.
+					vi.spyOn(open, "entryOf").mockImplementation(async (handle, level) =>
+						stores.given.length > written ? told : real(handle, level),
 					);
 					return refreshed();
 				},
@@ -104,6 +119,7 @@ describe("the token route", () => {
 				{ error: "invalid_token" },
 				'Bearer error="invalid_token"',
 			]);
+			expect(at.h.events).toEqual([]);
 		},
 	);
 
@@ -149,6 +165,21 @@ describe("the token route", () => {
 		await h.close(h.session);
 		expect((await h.ask(h.token)).status).toBe(401);
 		expect(await h.stores.records.read(h.session.id)).toBeUndefined();
+	});
+
+	it("refuses a token whose session is short of a requirement as one closed, keeping the session's upstream tokens", async () => {
+		const h = await linked();
+		h.shorten("alice");
+		for (const idp of ["corp", "other"]) {
+			const got = await h.ask(h.token, idp);
+			expect([got.status, got.json, got.headers["www-authenticate"]]).toEqual([
+				401,
+				{ error: "invalid_token" },
+				'Bearer error="invalid_token"',
+			]);
+		}
+		expect(h.events).toEqual([]);
+		expect(await h.stores.records.read(h.session.id)).toBeDefined();
 	});
 
 	it("refuses a client the operator did not make a receiver, even one whose own metadata says it receives", async () => {

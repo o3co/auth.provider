@@ -7,6 +7,7 @@ import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { releasedClaims } from "@mod/oidc";
 import { senderBinding } from "@mod/sender-binding";
 import { sessions } from "@mod/session";
+import { stubSessions } from "@mod/session/testing";
 import { sessionTokens } from "@mod/session-tokens";
 import { tokens } from "@mod/tokens";
 import { afterEach, expect, it } from "vitest";
@@ -40,15 +41,14 @@ const parts = defineModule({ name: "parts" }, (m) => [
 	m
 		.provide(sessionTokens)
 		.by(() => ({ sessionOf: async () => ({ kind: "bound", handle: "h" }) }) as never),
-	m.provide(sessions).by(
-		() =>
-			({
-				openContext: async () => {
-					if (failing === "unavailable") throw new Unavailable("session");
-					if (failing === "bug") throw new TypeError("bug");
-					return undefined;
-				},
-			}) as never,
+	m.provide(sessions).by(() =>
+		stubSessions({
+			entryOf: async () => {
+				if (failing === "unavailable") throw new Unavailable("session");
+				if (failing === "bug") throw new TypeError("bug");
+				return { kind: "absent" };
+			},
+		}),
 	),
 	m.provide(releasedClaims).by(() => ({ of: async () => ({}) })),
 	m.provide(items).by((c) => c.collect(metadata)),

@@ -16,7 +16,7 @@ import type { Settings } from "../section.ts";
 
 export interface LinkParts {
 	readonly origin: Pick<OriginEvidence, "sameOrigin">;
-	readonly sessions: Pick<Sessions, "enterFor" | "enter" | "openContext">;
+	readonly sessions: Pick<Sessions, "enterFor" | "enter" | "entryOf">;
 	readonly users: Pick<Users, "link">;
 	readonly audit: Pick<Audit, "record">;
 	readonly handoff: Pick<Handoff, "joined" | "withdrawn">;
@@ -88,19 +88,26 @@ export function linkWith(p: LinkParts): Continuation {
 			const current = await p.sessions.enter(request);
 			if (current !== undefined && current.id !== link.session)
 				return refused(401, "login_required");
-			const context = await p.sessions.openContext(link.session);
-			if (context?.subject !== link.subject) return refused(401, "login_required");
+			const held = await p.sessions.entryOf(link.session);
+			// Short of a requirement is answered as closed, but recorded with its own reason.
+			if (held.kind === "short") return refused(401, "session_short", "login_required");
+			if (held.kind !== "entered" || held.session.context.subject !== link.subject) {
+				return refused(401, "login_required");
+			}
+			const { context } = held.session;
 			const upstream = { idp: name, subject: upstreamLogin.subject };
 			const linked = await p.users.link(link.subject, upstream);
 			if (linked === "conflict") return refused(409, "conflict", "identity_conflict");
 			if (linked === "linked") record("linked", name, { subject: link.subject, source, userAgent });
 			if (upstreamLogin.tokens) {
 				await p.handoff.joined({ id: link.session, context }, name, upstreamLogin.tokens);
-				// Read again: a session closed or logged in as someone else while joining keeps none of the
-				// IdP's tokens, nor does one that cannot tell. Not `refused`: the link stands, so no refusal is recorded.
+				// Read again: a session closed, short of a requirement or logged in as someone else while
+				// joining keeps none of the IdP's tokens, nor does one that cannot tell. Not `refused`: the
+				// link stands, so no refusal is recorded.
 				const stillHeld = async () => {
 					try {
-						return (await p.sessions.openContext(link.session))?.subject === link.subject;
+						const again = await p.sessions.entryOf(link.session);
+						return again.kind === "entered" && again.session.context.subject === link.subject;
 					} catch (error) {
 						await p.handoff.withdrawn(link.session, name);
 						throw error;

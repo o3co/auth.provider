@@ -62,6 +62,8 @@ function ties(during: () => void = () => {}) {
 	const memberOf = new Map<string, string>();
 	const sessionOf = new Map<string, string>();
 	const open = new Set<string>();
+	/** Sessions that are open but short of a requirement to be used. */
+	const short = new Set<string>();
 	const handle = (name: string) => name as unknown as FamilyHandle;
 	const kept: Lineage = {
 		of: async (id) => {
@@ -84,9 +86,23 @@ function ties(during: () => void = () => {}) {
 		memberOf,
 		sessionOf,
 		open,
+		short,
 		module: defineModule({ name: "ties" }, (m) => [
 			m.provide(lineage).by(() => kept),
-			m.provide(sessions).by(() => stubSessions({ stillOpen: async (h) => open.has(h) })),
+			m.provide(sessions).by(() =>
+				stubSessions({
+					entryOf: async (h) =>
+						open.has(h)
+							? {
+									kind: "entered",
+									session: { id: h, context: { subject: "alice", amr: [], authenticatedAt: 0 } },
+									endsAt: Number.MAX_SAFE_INTEGER,
+								}
+							: short.has(h)
+								? { kind: "short", requirement: "mfa", answer: { error: "mfa_required" } }
+								: { kind: "absent" },
+				}),
+			),
 		]),
 		/** session-tokens in memory, recording what token-endpoint tells it. */
 		recording: defineModule({ name: "recording" }, (m) => [
@@ -631,6 +647,33 @@ describe("token-exchange: how the issued token ends", () => {
 			"invalid_request",
 			"subject_token session has ended",
 		]);
+	});
+
+	it("refuses a subject token whose session falls short of a requirement to be used, and says so", async () => {
+		const s = await serve();
+		const session = await s.issue();
+		s.tied.short.add("h");
+		s.tied.sessionOf.set(session.id, "h");
+		expect(said(await s.exchange("app", subjectOf(session.token)))).toEqual([
+			"invalid_request",
+			"subject_token session is short of a requirement",
+		]);
+	});
+
+	it("revokes what it issued when the session falls short while the token is recorded", async () => {
+		const tied = ties(() => {
+			tied.open.delete("h");
+			tied.short.add("h");
+		});
+		const s = await serve({ tied });
+		const session = await s.issue();
+		tied.open.add("h");
+		tied.sessionOf.set(session.id, "h");
+		expect(said(await s.exchange("app", subjectOf(session.token)))).toEqual([
+			"invalid_request",
+			"subject_token has ended",
+		]);
+		expect(s.revoked).toHaveLength(1);
 	});
 
 	it("has a token from a recorded subject token recorded to its session, as session-tokens answers it", async () => {

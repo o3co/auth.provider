@@ -418,6 +418,16 @@ describe("how long a session's record lives", () => {
 		expect(await h.stores.records.read(closed.id)).toBeUndefined();
 	});
 
+	it("writes no tokens for a session short of a requirement, as for one that lets nobody in", async () => {
+		const h = await harness();
+		const session = await h.login();
+		h.shorten("alice");
+		await h.receive(session);
+		expect(h.stores.given).toEqual([]);
+		expect(await h.stores.records.read(session.id)).toBeUndefined();
+		expect(warned(h, "login_tokens_not_kept")).toEqual([{ idp: "corp" }]);
+	});
+
 	it("keeps no tokens for a session that closes while they are written", async () => {
 		const h = await harness();
 		const session = await h.login();

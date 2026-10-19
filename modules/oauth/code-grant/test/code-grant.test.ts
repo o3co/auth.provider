@@ -20,7 +20,7 @@ import {
 import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
 import { crowdingFor, memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
-import { sessions } from "@mod/session";
+import { entryRequirements, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { sessionTokens } from "@mod/session-tokens";
 import bridgeModule from "@mod/session-tokens/module";
@@ -516,6 +516,27 @@ it("issues nothing for a code whose session closed before the exchange", async (
 	expect(keptOf(s, code)?.token).toBeUndefined();
 });
 
+/** A requirement a session falls short of at use while `short.now` is set. */
+const shortToUse = (short: { now: boolean }) =>
+	defineModule({ name: "short-to-use" }, (m) => [
+		m.contribute(entryRequirements).by(() => ({
+			name: "mfa",
+			judges: ["use"],
+			admits: async () =>
+				short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
+		})),
+	]);
+
+it("issues nothing for a code whose session falls short of a requirement to be used, as a closed one", async () => {
+	const short = { now: false };
+	const s = await serve({ extra: [shortToUse(short)] });
+	const code = await s.issue();
+	short.now = true;
+	expect((await s.redeem(code)).body).toEqual(refusedBody);
+	expect(keptOf(s, code)?.token).toBeUndefined();
+	await expect(s.app.get(codes).issue(s.facts), "a code for it").rejects.toThrow(TypeError);
+});
+
 it("keeps an unused code for code-lifetime, and no longer", async () => {
 	const s = await serve({ codeGrant: { "code-lifetime": "10s" } });
 	const code = await s.issue();
@@ -936,6 +957,21 @@ describe("tokens issued while the exchange goes wrong are revoked", () => {
 		const { answer, token } = await redeemWith(s);
 		expect(answer).toEqual(refusedOutcome);
 		expect(noted).toHaveLength(1);
+		expect(await revoked(s, token)).toBe(true);
+	});
+
+	it("when the session falls short of a requirement while the redemption is noted", async () => {
+		const short = { now: false };
+		const s = await serve({
+			extra: [
+				shortToUse(short),
+				noting([], async () => {
+					short.now = true;
+				}),
+			],
+		});
+		const { answer, token } = await redeemWith(s);
+		expect(answer).toEqual(refusedOutcome);
 		expect(await revoked(s, token)).toBe(true);
 	});
 

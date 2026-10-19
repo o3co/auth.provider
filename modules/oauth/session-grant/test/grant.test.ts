@@ -61,8 +61,8 @@ interface Options {
 	readonly entry?: Entry;
 	/** What recording a token does, after noting it. */
 	readonly recording?: () => void;
-	/** Whether the session can no longer be entered once the token is recorded. */
-	readonly closesWhileRecording?: true;
+	/** Whether the session can no longer be entered once the token is recorded: closed, or short of a requirement. */
+	readonly closesWhileRecording?: true | "short";
 	/** Whether the session cannot tell if it is still open once the token is recorded. */
 	readonly cannotTellOpen?: true;
 	readonly extra?: readonly Module[];
@@ -74,7 +74,7 @@ async function serve(options: Options = {}) {
 	const recorded = new Map<string, string>();
 	const revoked: string[] = [];
 	const asked: string[] = [];
-	let open = true;
+	let after: Entry = entered;
 	const standIn = tokensStandIn();
 	// The stand-in, with every revocation by reference noted.
 	const watched = {
@@ -103,9 +103,9 @@ async function serve(options: Options = {}) {
 					asked.push(level);
 					return options.entry ?? entered;
 				},
-				stillOpen: async () => {
+				entryOf: async () => {
 					if (options.cannotTellOpen) throw new Unavailable("session");
-					return open;
+					return after;
 				},
 			}),
 		),
@@ -114,7 +114,10 @@ async function serve(options: Options = {}) {
 		m.contribute(sessionIssuances).by(() => ({
 			issued: async (session, issued) => {
 				recorded.set(referenceOf(issued), session);
-				if (options.closesWhileRecording) open = false;
+				if (options.closesWhileRecording === true) after = { kind: "absent" };
+				if (options.closesWhileRecording === "short") {
+					after = { kind: "short", requirement: "mfa", answer: { error: "mfa_required" } };
+				}
 				options.recording?.();
 			},
 		})),
@@ -303,6 +306,17 @@ describe("session-grant", () => {
 
 	it("revokes what it issued and refuses when the session can no longer be entered once the token is recorded", async () => {
 		const s = await serve({ closesWhileRecording: true });
+		expect(await s.call("app")).toEqual({
+			kind: "error",
+			error: "invalid_grant",
+			description: "session_invalid",
+		});
+		expect(s.recorded.size).toBe(1);
+		expect(s.revoked).toEqual([...s.recorded.keys()]);
+	});
+
+	it("revokes what it issued and refuses when the session falls short of a requirement while it is recorded", async () => {
+		const s = await serve({ closesWhileRecording: "short" });
 		expect(await s.call("app")).toEqual({
 			kind: "error",
 			error: "invalid_grant",

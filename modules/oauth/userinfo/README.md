@@ -13,9 +13,9 @@
 ## Invariants
 - The token comes from the `Authorization` header only, admitted by `sender-binding`; a body or query `access_token` is never read. A refusal is passed on with its status and challenge; one for a request with no token carries no `error`.
 - A token whose scope lacks `openid` is refused `403 insufficient_scope`, challenged in the token's scheme, before its session is read.
-- The token's audience is not read: userinfo is the issuer's own resource, answering any token it issued whose session is open.
+- The token's audience is not read: userinfo is the issuer's own resource, answering any token it issued whose session enters.
 - A token issued in no session (client credentials, say) is answered `sub` only.
-- A token issued in a session is answered its claims only while that session is open for the token's subject; else `401 invalid_token`, challenged in the token's scheme.
+- A token issued in a session is answered its claims only while that session enters at `use` for the token's subject; else (closed, ended, revoked, short of a requirement, or another subject's) `401 invalid_token`, challenged in the token's scheme.
 - `sub` is always the token's subject, and `sid` is never answered.
 - Every answer is `no-store`. A check or the claims that cannot tell answer `503 temporarily_unavailable`, never a refusal or a claim, logged as `userinfo.unavailable` (warn) with what failed.
 

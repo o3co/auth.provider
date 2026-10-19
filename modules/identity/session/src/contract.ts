@@ -57,6 +57,8 @@ export const refusedEntry = (entry: Exclude<Entry, { kind: "entered" }>): HttpRe
 export interface Sessions {
 	enter(request: HttpRequest): Promise<Session | undefined>;
 	enterFor(request: HttpRequest, level: EntryLevel): Promise<Entry>;
+	/** The entry a request carrying this session's cookie would get at `level` (`use` unless said): entered with its end, short of a requirement, or absent once closed, ended or revoked. */
+	entryOf(handle: string, level?: EntryLevel): Promise<Entry>;
 	stillOpen(handle: string): Promise<boolean>;
 	openContext(handle: string): Promise<AuthContext | undefined>;
 	endsAt(handle: string): Promise<number | undefined>;

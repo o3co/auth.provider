@@ -3,7 +3,7 @@ import { use } from "@mod/http";
 import { defineModule } from "@mod/kernel";
 import { switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import { requestsPerSource } from "@mod/rate-limit";
-import { participants, type Sessions, sessions } from "@mod/session";
+import { entryRequirements, participants, type Sessions, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { describe, expect, it } from "vitest";
 import { upstreamEnds } from "../src/contract.ts";
@@ -154,11 +154,31 @@ describe("the logout a client starts", () => {
 		expect(h.events).toEqual([]);
 	});
 
+	it("answers a session short of a requirement to be used as one already gone: closed, with no event", async () => {
+		const short = { now: false };
+		const requirement = defineModule({ name: "short-to-use" }, (m) => [
+			m.contribute(entryRequirements).by(() => ({
+				name: "mfa",
+				judges: ["use"],
+				admits: async () =>
+					short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
+			})),
+		]);
+		const h = await serve({ extra: [requirement] });
+		const { session } = await h.login();
+		const hint = await h.hintFor(session.id);
+		short.now = true;
+		expect((await h.call("POST", { id_token_hint: hint })).json).toEqual({ logged_out: true });
+		expect(h.events).toEqual([]);
+		short.now = false;
+		expect(await h.stillOpen(session.id)).toBe(false);
+	});
+
 	it("answers 503 when a check cannot tell, logging what failed", async () => {
 		const down = unavailableSwitch<Sessions>("session");
 		const h = await serve({ sessionsModule: switchedModule(sessionStandIn, sessions, down) });
 		const { session } = await h.login();
-		down.failNext("stillOpen");
+		down.failNext("entryOf");
 		const out = await h.call("POST", { id_token_hint: await h.hintFor(session.id) });
 		expect([out.status, out.json]).toEqual([503, { error: "temporarily_unavailable" }]);
 		expect(h.logs().filter((l) => l.event === "rp-logout.unavailable")).toEqual([
