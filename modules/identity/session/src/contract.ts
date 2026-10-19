@@ -101,28 +101,7 @@ export interface CloseOutcome {
 	readonly from?: "open" | "closing" | "closed";
 }
 
-export interface Participant {
-	readonly name: string;
-	closing(session: Session): Promise<void>;
-}
-
 export const sessions = contract<Sessions>("session");
-
-/** What a session must meet to be entered at a level, contributed by the module that owns the rule. */
-export interface EntryRequirement {
-	readonly name: string;
-	/** The levels it judges; where none judges `credentials`, `session`'s floor does. */
-	readonly judges: readonly EntryLevel[];
-	admits(
-		context: AuthContext,
-		level: EntryLevel,
-	): Promise<{ readonly kind: "admit" } | { readonly kind: "short"; readonly answer: Answer }>;
-}
-
-export const entryRequirements = extensionPoint<EntryRequirement>("session.entry-requirements", {
-	multiplicity: "keyed",
-	keyOf: (requirement) => requirement.name,
-});
 
 /** What the entry requirements answer of a session at a level: the first short, or admitted with whether one judged the level. */
 export type Judgement =
@@ -154,8 +133,4 @@ export const closingParticipants = extensionPoint<ClosingParticipants>(
 	{ multiplicity: "keyed", keyOf: () => "closing-participants" },
 );
 
-export const participants = extensionPoint<Participant>("session.participants", {
-	multiplicity: "keyed",
-	keyOf: (participant) => participant.name,
-});
 export { sessionRules } from "./rules/rules.ts";
