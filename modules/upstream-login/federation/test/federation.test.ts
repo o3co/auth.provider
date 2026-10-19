@@ -245,6 +245,15 @@ describe("federation", () => {
 		expect((await s.begin("?link=yes")).status).toBe(302);
 	});
 
+	it("takes a login's start from another site's navigation, binding its state to the cookie it sets", async () => {
+		const s = await serve();
+		const kept = s.saved.length;
+		const started = await s.get(`${base}/corp`, "", { "sec-fetch-site": "cross-site" });
+		expect(started.status).toBe(302);
+		expect(s.saved.length).toBe(kept + 1);
+		expect(started.cookies.filter((c) => c.includes("federation.corp"))).toHaveLength(1);
+	});
+
 	it("checks a link start's origin before it makes any transaction, so another site starts none", async () => {
 		const s = await serve();
 		const first = await s.begin();
