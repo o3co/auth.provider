@@ -8,6 +8,7 @@ import gatesModule from "@mod/login-gates/module";
 import { factorStore, factors, proofSteps, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
 import { mfaConfig } from "@mod/mfa/testing";
+import mfaEntry from "@mod/mfa-entry/module";
 import { factorKinds } from "@mod/mfa-extensions";
 import { memoryRecords } from "@mod/records/testing";
 import sealModule from "@mod/seal/module";
@@ -87,6 +88,7 @@ async function serve(mode?: "never" | "when-available" | "always", proofs = [own
 			sealModule,
 			gatesModule,
 			mfaModule,
+			mfaEntry,
 			step,
 			counting("code"),
 			counting("key"),
