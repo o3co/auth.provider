@@ -13,7 +13,7 @@ What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc
 - `mfa`: an enrollment begun at login could add a further factor after the account's first factor was registered; removing a factor or reissuing recovery codes could pass on what is allowed to an account with no factor while another request bound one; and two first enrollments at once could both bind.
 - `mfa-flows`: recovery codes that were never shown could stay usable; an enrollment could complete after a reset or a revocation that came while it was under way; an enrollment begun before a subject revocation could still bind after the revocation completed.
 - `federation-grants`: a refresh could hand out a token after the grant had ended or its subject had been revoked, a request that waited for the refresh lock included; a grant past its end is treated as ended everywhere.
-- `session-lifecycle`: an explicit close of a session past its lifetime did not revoke the session's tokens.
+- `session-lifecycle`: an explicit close of a session past its lifetime did not revoke the session's tokens; a session revoked while its entry requirements were asked could still enter.
 - `refresh`: an access token from a refresh could outlive the session of its family.
 - `code-grant`, `device-grant`: an access token could live past the end of the session it was issued in.
 - `rp-logout`: a close left pending was answered as a logout; the logout taken before authentication had no per-source limit; a retried logout could answer success while its revocation was still pending; a logout of a session past its lifetime but still kept could skip its participants.
@@ -56,7 +56,7 @@ What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc
 - The metric `auth_rate_limit_uncounted_total`, for each request a limit could not count.
 - Each route declares whether it changes state, and why it takes other sites' requests or counts no source where it does not; `http` checks the declarations at boot, and the [route reference](docs/routes.md) lists them.
 - For modules of your own: `session`'s `entryOf`, a route's declared `unavailable` answer, and `@mod/mfa-extensions` for second factors.
-- Documents: the [route reference](docs/routes.md), a [login page guide](docs/login-page.md), a [release guide](docs/releasing.md), the [security policy](SECURITY.md), a [contributing guide](CONTRIBUTING.md) and the README in Japanese.
+- Documents: the [route reference](docs/routes.md), a [login page guide](docs/login-page.md), a [recipe for a login page with a second factor](docs/recipe-mfa-page.md), recorded from a running app and checked on every change by the new `conformance-recipes` tests, a [release guide](docs/releasing.md), the [security policy](SECURITY.md), a [contributing guide](CONTRIBUTING.md) and the README in Japanese.
 
 ### Removed
 
