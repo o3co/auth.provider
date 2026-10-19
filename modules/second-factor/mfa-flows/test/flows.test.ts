@@ -921,7 +921,8 @@ describe("mfa under races and misuse", () => {
 		const codes = done.body.recovery_codes as string[];
 		const one = await s.heldLogin("rex");
 		during.backup = async () => {
-			const reissued = await s.app.get(factors).reissue("rex");
+			const decided = s.app.get(factors);
+			const reissued = await decided.reissue("rex", await decided.fenceOf("rex"));
 			expect(reissued.kind).toBe("reissued");
 		};
 		const used = await s.call(
