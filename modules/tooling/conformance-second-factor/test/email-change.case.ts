@@ -27,7 +27,7 @@ describe.runIf(areaTarget().can(httpLedger))(
 				const given = JSON.parse(asked.body);
 				const email = stated.get(given.email);
 				if (email === undefined) return { status: 401 };
-				if (given.password !== password) return { status: 403 };
+				if (given.password !== password) return { status: 401 };
 				return { json: { id: `s-${given.email}`, username: given.email, email } };
 			});
 		});
