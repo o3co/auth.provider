@@ -90,7 +90,9 @@ export function calls(parts: CallParts): Calls {
 		async verify(url, identifier, password) {
 			// The identifier under the name the ledger's password call reads.
 			const answer = await post(url, { email: identifier, password });
-			if (answer.status === 401 || answer.status === 403) {
+			// A 401 alone refuses the user: a 403 may come from a proxy before the ledger while it fails, and
+			// read as a wrong password it would hold the account's logins back.
+			if (answer.status === 401) {
 				// A challenge refuses the credential; with none sent, it can only refuse the user.
 				const challenged = challengesBearer(answer.headers.get("www-authenticate"));
 				if (credential === undefined || !challenged) return none;

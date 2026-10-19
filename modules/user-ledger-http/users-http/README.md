@@ -22,9 +22,9 @@
   | Answer | Read as |
   |---|---|
   | `200`, a JSON object with an `id` of a subject's shape (`users`) and a non-empty string `username` | the user |
-  | `401` or `403` with a Bearer challenge, when a credential was sent | unavailable (the credential is refused) |
-  | `401` or `403` otherwise | none; to be read as a lookup's are in a later release |
-  | anything else, a `200` of another shape, `404` and other `2xx` included | unavailable |
+  | `401` with a Bearer challenge, when a credential was sent | unavailable (the credential is refused) |
+  | `401` otherwise | none; to be read as a lookup's is in a later release |
+  | anything else, `403` (a proxy before the ledger may send it while it fails), a `200` of another shape, `404` and other `2xx` included | unavailable |
 
 - A lookup, with the body `{"subject"}` by subject or `{"idp", "subject"}` by upstream identity:
 
@@ -41,7 +41,7 @@
 - The ledger is reached only through `outbound`, at each URL's host alone; a redirect is not followed. Each URL is an internal destination: a private address is reached only when its host is in `outbound.internal-hosts`.
 - Boot is refused with no URL, on a URL outbound's destination policy refuses (at that URL's key, with which of `outbound`'s keys to set), and with a `credential` where `outbound.credentials` refuses its URLs (more than one origin, or one neither https nor a named plain-loopback pair; at `credential`): the credential goes to one party alone, sent by `outbound` as its `credential`.
 - The password goes in the request body alone, never in a URL, a log line or an error.
-- A destination refused when sending, or no answer in time or size, is unavailable. A wrong `verify-url` makes verification unavailable, never "no such user", unless what answers there is a `401` or `403` without a Bearer challenge, which reads as none.
+- A destination refused when sending, or no answer in time or size, is unavailable. A wrong `verify-url` makes verification unavailable, never "no such user", unless what answers there is a `401` without a Bearer challenge, which reads as none.
 - Boot reports never show the credential.
 - The operator's ledger must do the same work for an unknown identifier as for a known one; this module sends the same one request either way.
 - Holds no state, so it is safe on multiple instances.
