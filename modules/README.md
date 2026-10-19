@@ -68,7 +68,7 @@ What each module contains is described by that module's contract card (each modu
 | Wiring code-grant's store interface to records | wiring | code-grant-store |
 | Wiring session-lifecycle's store interfaces to records | wiring | session-store |
 | Wiring refresh's store interfaces to records | wiring | refresh-store |
-| Wiring authorize's store interface to records | wiring | authorize-store |
+| Wiring reauth's store interface to records | wiring | authorize-store |
 | Wiring client-assertion's store interface to records | wiring | client-assertion-store |
 | Wiring device-grant's store interfaces to records | wiring | device-grant-store |
 | Wiring dpop's store interface to records | wiring | dpop-store |
@@ -120,7 +120,8 @@ What each module contains is described by that module's contract card (each modu
 | Allowed grants, allowed scopes and audiences (client metadata fields), and what a client may be issued and may see | vocabulary / setting / contract | client-allowance |
 | The audience a request asks for: the one rule (none reads nothing), asked with each issuance's default and ceiling | extension point kind / contract | grants |
 | Resource indicators (RFC 8707): reading `resource` and narrowing the audience issued to it | contribution | resource-indicators |
-| Redirect URIs (a client metadata field), PKCE required of every client by S256, and the rule for URIs a client may register to be sent back to | vocabulary / setting / contract | authorize |
+| Redirect URIs (a client metadata field), the rule for URIs a client may register to be sent back to, and how a given one matches | vocabulary / setting / contract | redirect-uris |
+| PKCE required of every client by S256 | contract | authorize |
 | Paths to return to after login | extension point kind | login-gates |
 | Where a login may return (listed targets, the check) | contract / setting | login-gates |
 | first-party, and the name, page and verified host the consent page shows (client metadata fields) | vocabulary / setting | consent |
@@ -175,7 +176,8 @@ What each module contains is described by that module's contract card (each modu
 | grant type names | vocabulary | the module that supplies that grant |
 | Kinds of revocable tokens | extension point kind | token-control |
 | Device Authorization Grant (device authorization, the verification interface, the device code grant) | contract / setting | device-grant |
-| Authorization endpoint, re-authentication requests, steering to the raise (step-up) screen | contract / setting | authorize |
+| Authorization endpoint, steering to the raise (step-up) screen | contract / setting | authorize |
+| Re-authentication requests: records asked for one authorization request, taken once, and whether a login is fresh enough | contract | reauth |
 | The acr table, and judging which acr values are known and which are satisfied | contract / setting | acr |
 | acr table entries | extension point kind | acr |
 | Contributed acr names and the amr values that satisfy them | vocabulary | the module that contributes that entry |
