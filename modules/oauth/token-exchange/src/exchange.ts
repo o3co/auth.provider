@@ -110,8 +110,10 @@ export function exchangeGrant(parts: Parts): Grant {
 		if (family.kind === "ended") return refused(`${role}_token family has ended`);
 		// A family's token is recorded to its session too: the policies hear of it on either path.
 		const bound = await parts.sessionTokens.sessionOf(token.issued);
-		if (bound.kind === "bound" && !(await parts.sessions.stillOpen(bound.handle))) {
-			return refused(`${role}_token session has ended`);
+		if (bound.kind === "bound") {
+			const entry = await parts.sessions.entryOf(bound.handle);
+			if (entry.kind === "absent") return refused(`${role}_token session has ended`);
+			if (entry.kind === "short") return refused(`${role}_token session is short of a requirement`);
 		}
 		const session = bound.kind === "bound" ? bound.handle : undefined;
 		if (family.kind === "family") {
@@ -171,7 +173,8 @@ export function exchangeGrant(parts: Parts): Grant {
 			return false;
 		}
 		// A logout that came while the token was being issued and recorded voids it.
-		if (tie.session === undefined || (await parts.sessions.stillOpen(tie.session))) return true;
+		if (tie.session === undefined) return true;
+		if ((await parts.sessions.entryOf(tie.session)).kind === "entered") return true;
 		await parts.tokens.revokeAccess(issued.token);
 		return false;
 	};
