@@ -819,6 +819,86 @@ describe("guard", () => {
 		]);
 	});
 
+	it("G29 refuses a test composing a feature bridge's modules and a module contributing to it, without the bridge", () => {
+		const session = pkg(
+			"@b/session",
+			{
+				"src/contract.ts": "export const session = 1;\n",
+				"src/testing.ts": "export const sessionStandIn = 1;\nexport const sessionRecords = 2;\n",
+			},
+			{ exports: { ".": "./src/contract.ts", "./testing": "./src/testing.ts" } },
+		);
+		const reqs = pkg(
+			"@b/reqs",
+			{
+				"src/contract.ts": `import { extensionPoint } from "@b/kernel";\nexport const entryRequirements = extensionPoint("r");\nexport const helper = 1;\n`,
+				"src/module.ts": "export default 1;\n",
+			},
+			{
+				exports: { ".": "./src/contract.ts", "./module": "./src/module.ts" },
+				joins: ["@b/session"],
+			},
+		);
+		const lifecycle = pkg(
+			"@b/lifecycle",
+			{ "src/module.ts": "export default 1;\n" },
+			{ exports: { "./module": "./src/module.ts" }, replaces: "@b/session" },
+			"adapter",
+		);
+		const entry = pkg(
+			"@b/entry",
+			{
+				"src/module.ts": `import { entryRequirements } from "@b/reqs";\nexport default entryRequirements;\n`,
+				// Its own test composes it by path, beside a stand-in for the bridge's module.
+				"test/own.test.ts": `import { sessionStandIn } from "@b/session/testing";\nimport entry from "../src/module.ts";\nexport const m = [entry, sessionStandIn];\n`,
+			},
+			{ exports: { "./module": "./src/module.ts" }, dependencies: { "@b/reqs": "*" } },
+		);
+		// A foundation bridge collects what decides no answer a test reads, such as counts.
+		const meter = pkg(
+			"@b/meter",
+			{
+				"src/contract.ts": `import { extensionPoint } from "@b/kernel";\nexport const meters = extensionPoint("m");\n`,
+				"src/module.ts": "export default 1;\n",
+			},
+			{
+				exports: { ".": "./src/contract.ts", "./module": "./src/module.ts" },
+				joins: ["@b/session"],
+			},
+			"foundation",
+		);
+		const counted = pkg(
+			"@b/counted",
+			{ "src/module.ts": `import { meters } from "@b/meter";\nexport default meters;\n` },
+			{ exports: { "./module": "./src/module.ts" }, dependencies: { "@b/meter": "*" } },
+		);
+		// Takes a helper from the bridge, never its point: it contributes nothing.
+		const plain = pkg(
+			"@b/plain",
+			{ "src/module.ts": `import { helper } from "@b/reqs";\nexport default helper;\n` },
+			{ exports: { "./module": "./src/module.ts" }, dependencies: { "@b/reqs": "*" } },
+		);
+		const app = pkg("@b/app", {
+			"test/missing.test.ts": `import { sessionStandIn } from "@b/session/testing";\nimport entry from "@b/entry/module";\nexport const m = [entry, sessionStandIn];\n`,
+			"test/adapter.test.ts": `import entry from "@b/entry/module";\nimport lifecycle from "@b/lifecycle/module";\nexport const m = [entry, lifecycle];\n`,
+			"test/composed.test.ts": `import { sessionStandIn } from "@b/session/testing";\nimport entry from "@b/entry/module";\nimport reqs from "@b/reqs/module";\nexport const m = [entry, reqs, sessionStandIn];\n`,
+			"test/no-session.test.ts": `import entry from "@b/entry/module";\nexport const m = [entry];\n`,
+			"test/not-a-stand-in.test.ts": `import { sessionRecords } from "@b/session/testing";\nimport entry from "@b/entry/module";\nexport const m = [entry, sessionRecords];\n`,
+			"test/plain.test.ts": `import { sessionStandIn } from "@b/session/testing";\nimport plain from "@b/plain/module";\nexport const m = [plain, sessionStandIn];\n`,
+			"test/counted.test.ts": `import { sessionStandIn } from "@b/session/testing";\nimport counted from "@b/counted/module";\nexport const m = [counted, sessionStandIn];\n`,
+		});
+		expect(
+			check([session, reqs, meter, counted, lifecycle, entry, plain, app], budget)
+				.filter((v) => v.rule.startsWith("G29"))
+				.map((v) => `${v.where} ${v.detail}`)
+				.sort(),
+		).toEqual([
+			"@b/app/test/adapter.test.ts @b/reqs (@b/entry)",
+			"@b/app/test/missing.test.ts @b/reqs (@b/entry)",
+			"@b/entry/test/own.test.ts @b/reqs (@b/entry)",
+		]);
+	});
+
 	it("G11 refuses line numbers in comments and documents, and G12 files outside a document's directory", () => {
 		const p = pkg("@t/refs", {
 			"src/contract.ts": `// see a.ts:${12}\nexport const s = "b.ts:${3}";\n`,

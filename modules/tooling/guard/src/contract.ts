@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { budgetRules, dependencyCards } from "./budget/budget.ts";
 import { laidOut } from "./documents.ts";
 import { networkRules } from "./network/network.ts";
@@ -239,6 +239,71 @@ function helperRules(s: Scope, p: Pkg, surfaces: ReadonlyMap<string, Surface>) {
 	}
 }
 
+/** G29: a test composing every module a feature bridge joins, and a module contributing to its points, composes the bridge. */
+function bridgeRules(s: Scope, surfaces: ReadonlyMap<string, Surface>) {
+	const rule =
+		"G29 a test composing a bridge's modules and a module contributing to it composes the bridge";
+	// A feature bridge's points collect what decides answers; a foundation bridge's, operational counts.
+	const bridges = s.packages.filter(
+		(p) => Array.isArray(p.manifest.joins) && s.kindOf(p) === s.budget.featureKind,
+	);
+	const text = (path: string) => readFileSync(path, "utf8");
+	// A package contributes to a bridge when its shipped code takes one of the bridge's points.
+	const contributes = new Map<string, Pkg[]>();
+	for (const p of s.packages) {
+		const shipped = s.sources(p).filter((file) => !s.isTest(file));
+		const takes = (b: Pkg) => {
+			const points = surfaces.get(b.name)?.points ?? new Set<string>();
+			return shipped.some((file) => {
+				const path = join(p.dir, file);
+				if (!text(path).includes(`"${b.name}"`)) return false;
+				return valuesFrom(path, b.name).some((name) => points.has(name));
+			});
+		};
+		contributes.set(
+			p.name,
+			bridges.filter((b) => b !== p && takes(b)),
+		);
+	}
+	const ownerOf = ({ manifest: { replaces, adapts } }: Pkg) =>
+		typeof replaces === "string" ? replaces : typeof adapts === "string" ? adapts : undefined;
+	for (const p of s.packages) {
+		const own = p.manifest.exports?.["./module"];
+		for (const file of s.sources(p).filter((f) => s.isTest(f))) {
+			const path = join(p.dir, file);
+			const composed = new Set<string>();
+			const compose = (name: string) => {
+				composed.add(name);
+				const q = s.byName.get(name);
+				const owner = q && ownerOf(q);
+				if (owner) composed.add(owner);
+			};
+			for (const use of importsOf(path)) {
+				if (use.specifier.startsWith(".")) {
+					if (own && resolve(dirname(path), use.specifier) === resolve(p.dir, own)) compose(p.name);
+					continue;
+				}
+				const target = packageOf(use.specifier);
+				if (!target || !s.byName.has(target.name)) continue;
+				if (target.subpath === "module") compose(target.name);
+				// A stand-in is a value a package's `./testing` names `…StandIn`.
+				const standIn = (name: string) => name.endsWith("StandIn");
+				if (target.subpath === "testing" && valuesFrom(path, use.specifier).some(standIn)) {
+					compose(target.name);
+				}
+			}
+			for (const name of composed) {
+				for (const b of contributes.get(name) ?? []) {
+					const joins = b.manifest.joins as readonly unknown[];
+					const all = joins.every((j) => typeof j === "string" && composed.has(j));
+					if (all && !composed.has(b.name))
+						s.report(rule, `${p.name}/${file}`, `${b.name} (${name})`);
+				}
+			}
+		}
+	}
+}
+
 /** G22, G24: which packages wire a feature's store interface, and how. */
 function wiringRules(s: Scope) {
 	const { kindOf, report } = s;
@@ -361,6 +426,7 @@ export function check(
 	}
 	wiringRules(s);
 	axisRules(s);
+	bridgeRules(s, surfaces);
 	documentRules(s, documents);
 	return violations;
 }
