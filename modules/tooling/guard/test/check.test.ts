@@ -828,6 +828,20 @@ describe("guard", () => {
 		]);
 	});
 
+	it("G12 reads no fenced code block, whose samples show another project's files; G11 and G21 still do", () => {
+		const p = pkg("@t/samples", { "README.md": "x\n" });
+		mkdirSync(join(p.dir, "some"));
+		const doc = (text: string) => check([], budget, [{ path: join(p.dir, "README.md"), text }]);
+		const found = (text: string) => doc(text).map((v) => `${v.rule.split(" ")[0]} ${v.detail}`);
+		const fence = "\x60\x60\x60";
+		const sample = `${fence}json\n{ "exports": { "./module": { "types": "./module.d.ts", "default": "./module.js" } } }\n[up](../other/README.md)\n${fence}`;
+		expect(found(`${sample}\n`)).toEqual([]);
+		expect(found(`${sample}\nsee \x60some/dir/missing.md\x60\n`)).toEqual([
+			"G12 some/dir/missing.md",
+		]);
+		expect(found(`${fence}\nat line ${12}\n${fence}\n`)).toEqual([`G11 line ${12}`]);
+	});
+
 	it("G12 tells a refused path whole, its extension too, and reads no file whose extension it does not know", () => {
 		const p = pkg("@t/whole", { "README.md": "x\n" });
 		mkdirSync(join(p.dir, "some"));
@@ -851,9 +865,9 @@ describe("guard", () => {
 				"Edit `config/local.conf` and `config/application.conf`, then `src/main.ts`.\n\n```sh\ncp config/local.conf.example config/local.conf\n```\n",
 			),
 		).toEqual([]);
-		// docs/ is beside the document, so a missing file in it is still refused, fenced or not.
+		// docs/ is beside the document, so a missing file in it is still refused; a code block is not read.
 		expect(found("`docs/guide.md`, `docs/missing.md`\n\n```\nsee docs/migraton.md\n```\n")).toEqual(
-			["G12 docs/missing.md", "G12 docs/migraton.md"],
+			["G12 docs/missing.md"],
 		);
 		// An explicitly relative path is read whatever its first part; a link target is read in full.
 		expect(found("`./config/local.conf`, `../other/file.md` and [cfg](config/local.conf)")).toEqual(
