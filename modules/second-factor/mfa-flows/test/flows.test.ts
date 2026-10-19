@@ -243,6 +243,21 @@ describe("mfa at login", () => {
 		expect(ended.status).toBe(400);
 	});
 
+	it("holds the sessions it composes to mfa's entry requirement: a password session is short at use under required mode", async () => {
+		const s = await serve({ mode: "required" });
+		await s.signIn("dina");
+		const cookie = [...s.jar()].map(([name, value]) => `${name}=${value}`).join("; ");
+		const request = testRequest({
+			headers: new Map([["cookie", cookie]]),
+			source: { scheme: "https" },
+		});
+		expect(await s.app.get(sessions).enterFor(request, "use")).toMatchObject({
+			kind: "short",
+			requirement: "mfa",
+			answer: { error: "mfa_required" },
+		});
+	});
+
 	it("asks a first binding under required mode, which counts from the next sign-in, not this one", async () => {
 		const s = await serve({ mode: "required" });
 		const held = await s.login("carol");

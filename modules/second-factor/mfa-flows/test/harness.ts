@@ -22,6 +22,7 @@ import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import { type Sessions, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import sessionRequirements from "@mod/session-requirements/module";
 import { simulatedStore } from "@mod/store/testing";
 import { type Revocations, revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
@@ -217,6 +218,7 @@ export async function serve(settings: Settings = {}, extra: Module[] = []) {
 			csrfStandIn,
 			cookiesModule,
 			switchedModule(sessionStandIn, sessions, entering),
+			sessionRequirements,
 			switchedModule(subjectRevocationStandIn, revocations, recording),
 			simulated.module,
 			factorStand(),

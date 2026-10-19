@@ -33,6 +33,7 @@
 		"@mod/mfa-entry": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/seal": "workspace:*",
+		"@mod/session-requirements": "workspace:*",
 		"@mod/store": "workspace:*",
 		"vitest": "5.0.4"
 	},
