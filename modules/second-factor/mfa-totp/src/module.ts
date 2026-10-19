@@ -1,6 +1,6 @@
 import { site } from "@mod/http";
 import { defineModule } from "@mod/kernel";
-import { factorKinds } from "@mod/mfa";
+import { factorKinds } from "@mod/mfa-extensions";
 import { algorithm, base32, digits, matchedStep, periodSeconds } from "./totp.ts";
 
 /** RFC 4226 recommends 160 bits, the length of a SHA-1 output. */

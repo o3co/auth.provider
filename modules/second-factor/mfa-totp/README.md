@@ -23,7 +23,7 @@
 - The otpauth issuer and label prefix are the public origin's host, port included, or `auth` without a public origin.
 
 ## Depends on
-- `kernel`, `http`, `mfa`
+- `kernel`, `http`, `mfa-extensions` (the kind's contract), `mfa` (composed for it: it stays among this package's dependencies, so adding this kind composes `mfa`)
 
 ## Vocabulary
 - Step: one 30-second period of TOTP, counted from the Unix epoch.
