@@ -50,7 +50,7 @@ export default defineModule({ name: "token-endpoint", section }, (m) => [
 		};
 	}),
 	m.contribute(routes).by(async (c) => {
-		const handle = tokenEndpoint(
+		const endpoint = tokenEndpoint(
 			await c.get(clients),
 			await c.get(tokens),
 			await c.collect(sessionIssuances),
@@ -59,11 +59,17 @@ export default defineModule({ name: "token-endpoint", section }, (m) => [
 			new Map((await c.collect(grants)).map((g) => [g.grantType, g])),
 			await c.get(targets),
 			await c.get(audit),
-			c.log,
 		);
 		const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 		const uses = [use(requestsPerSource, { name: "token-endpoint", window })];
 		// Each grant names the bodies it takes; the endpoint refuses the others.
-		return { method: "POST", path: tokenPath, uses, takes: ["form", "json", "none"], cors, handle };
+		return {
+			method: "POST",
+			path: tokenPath,
+			uses,
+			takes: ["form", "json", "none"],
+			cors,
+			...endpoint,
+		};
 	}),
 ]);

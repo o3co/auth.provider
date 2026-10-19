@@ -32,7 +32,7 @@
 - The binding is read through `sender-binding`: its refusal is answered with its own code and headers, unavailable as `503`, and two bindings are `invalid_request`. A client that must bind and shows none is `invalid_request`, and one bound by a kind it does not name `unauthorized_client`.
 - A grant's `401` carries the challenges `clients` answers with the client: its method's, or every method's when it names none.
 - Error descriptions keep printable ASCII but `"` and `\`; any other character shows as `?`.
-- Unavailable is `503`, never audited, and logged naming only what was unavailable and a grant type dispatched to.
+- Unavailable is the route's declared `503` `temporarily_unavailable`, never audited, warned by `http` as `http.unavailable` with the route, what was unavailable and only a grant type dispatched to.
 - No token or secret is ever audited or logged.
 
 ## Depends on
