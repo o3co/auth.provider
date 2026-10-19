@@ -1,6 +1,6 @@
 import { assemble, contract, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
-import { type FactorKind, factorKinds, type Opened, type Verified } from "@mod/mfa";
+import { type FactorKind, factorKinds, type Opened, type Verified } from "@mod/mfa-extensions";
 import { type AttributesAnswer, subjectAttributes } from "@mod/subject-attributes";
 import { challengeStore, passkeyStore } from "@mod/webauthn";
 import webauthnModule from "@mod/webauthn/module";

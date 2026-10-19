@@ -1,6 +1,6 @@
 import { assemble, contract, defineModule, kernelConfig, type Random } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
-import { type FactorKind, factorKinds } from "@mod/mfa";
+import { type FactorKind, factorKinds } from "@mod/mfa-extensions";
 import { expect, it } from "vitest";
 import recoveryModule from "../src/module.ts";
 

@@ -11,6 +11,7 @@
 	"dependencies": {
 		"@mod/kernel": "workspace:*",
 		"@mod/mfa": "workspace:*",
+		"@mod/mfa-extensions": "workspace:*",
 		"@mod/subject-attributes": "workspace:*",
 		"@mod/users": "workspace:*",
 		"@mod/webauthn": "workspace:*",

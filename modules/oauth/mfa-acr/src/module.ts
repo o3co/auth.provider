@@ -1,6 +1,7 @@
 import { acrEntries } from "@mod/acr";
 import { defineModule } from "@mod/kernel";
-import { factors, secondFactorAmr } from "@mod/mfa";
+import { factors } from "@mod/mfa";
+import { secondFactorAmr } from "@mod/mfa-extensions";
 
 /** The acr clients have asked for a second factor by; an operator may name it otherwise. */
 export const acr = "urn:o3co:acr:mfa";

@@ -2,7 +2,7 @@ import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { assemble, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
-import { type FactorKind, factorKinds } from "@mod/mfa";
+import { type FactorKind, factorKinds } from "@mod/mfa-extensions";
 import { expect, it } from "vitest";
 import totpModule from "../src/module.ts";
 import { base32, codeAt } from "../src/totp.ts";

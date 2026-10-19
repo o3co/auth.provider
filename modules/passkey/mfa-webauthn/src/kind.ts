@@ -1,5 +1,5 @@
 import { Unavailable } from "@mod/kernel";
-import type { FactorKind, Opened, Verified } from "@mod/mfa";
+import type { FactorKind, Opened, Verified } from "@mod/mfa-extensions";
 import type { SubjectAttributes } from "@mod/subject-attributes";
 import { userAttribute } from "@mod/users";
 import {

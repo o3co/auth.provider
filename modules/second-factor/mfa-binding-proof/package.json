@@ -11,6 +11,7 @@
 	"dependencies": {
 		"@mod/kernel": "workspace:*",
 		"@mod/mfa": "workspace:*",
+		"@mod/mfa-extensions": "workspace:*",
 		"@mod/seal": "workspace:*",
 		"zod": "4.6.7"
 	},

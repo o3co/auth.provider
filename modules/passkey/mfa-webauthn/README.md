@@ -21,4 +21,4 @@
 - A user who signs in with a passkey can meet this factor with another credential on the same authenticator; to keep the two factors on separate devices, do not compose this module.
 
 ## Depends on
-- `kernel`, `mfa`, `subject-attributes` (the name shown), `users` (attribute names), `webauthn` (ceremonies)
+- `kernel`, `mfa-extensions` (the kind's contract), `mfa` (composed for it: it stays among this package's dependencies, so adding this kind composes `mfa`), `subject-attributes` (the name shown), `users` (attribute names), `webauthn` (ceremonies)

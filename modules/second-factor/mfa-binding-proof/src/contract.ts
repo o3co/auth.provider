@@ -1,5 +1,5 @@
 import { contract, extensionPoint } from "@mod/kernel";
-import type { AskedFrom, Sending } from "@mod/mfa";
+import type { AskedFrom, Sending } from "@mod/mfa-extensions";
 
 /** A proof asked of a subject before a first counting factor, such as owning a contact. */
 export interface BindingProof {

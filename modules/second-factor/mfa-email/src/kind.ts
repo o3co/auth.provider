@@ -1,7 +1,7 @@
 import { sameSecret, Unavailable } from "@mod/kernel";
 import type { Mail } from "@mod/mail";
-import type { AskedFrom, FactorKind, Opened, Sending } from "@mod/mfa";
 import type { BindingProof } from "@mod/mfa-binding-proof";
+import type { AskedFrom, FactorKind, Opened, Sending } from "@mod/mfa-extensions";
 import type { SubjectAttributes } from "@mod/subject-attributes";
 import { type Users, userAttribute } from "@mod/users";
 import { z } from "zod";

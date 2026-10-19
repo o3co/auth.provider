@@ -9,13 +9,13 @@ import {
 } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { type Message, mail, mailPurposes, mailTemplates } from "@mod/mail";
-import { type FactorKind, factorKinds } from "@mod/mfa";
 import {
 	type BindingProof,
 	type BindingProofs,
 	bindingProof,
 	bindingProofs,
 } from "@mod/mfa-binding-proof";
+import { type FactorKind, factorKinds } from "@mod/mfa-extensions";
 import { subjectAttributes } from "@mod/subject-attributes";
 import { type Users, users } from "@mod/users";
 import { beforeEach, expect, it } from "vitest";

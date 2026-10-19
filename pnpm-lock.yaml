@@ -1293,6 +1293,9 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../../second-factor/mfa
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../../second-factor/mfa-extensions
 
   modules/oauth/oidc:
     dependencies:
@@ -1826,6 +1829,9 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../../second-factor/mfa
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../../second-factor/mfa-extensions
       '@mod/subject-attributes':
         specifier: workspace:*
         version: link:../../identity/subject-attributes
@@ -2011,6 +2017,9 @@ importers:
       '@mod/login-gates':
         specifier: workspace:*
         version: link:../../identity/login-gates
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
       '@mod/seal':
         specifier: workspace:*
         version: link:../../foundation/seal
@@ -2042,6 +2051,9 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../mfa
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
       '@mod/seal':
         specifier: workspace:*
         version: link:../../foundation/seal
@@ -2085,6 +2097,9 @@ importers:
       '@mod/mfa-binding-proof':
         specifier: workspace:*
         version: link:../mfa-binding-proof
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
       '@mod/subject-attributes':
         specifier: workspace:*
         version: link:../../identity/subject-attributes
@@ -2110,6 +2125,16 @@ importers:
       '@mod/mfa-email':
         specifier: workspace:*
         version: link:../mfa-email
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
+  modules/second-factor/mfa-extensions:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
     devDependencies:
       vitest:
         specifier: 5.0.4
@@ -2141,6 +2166,9 @@ importers:
       '@mod/mfa-binding-proof':
         specifier: workspace:*
         version: link:../mfa-binding-proof
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -2209,6 +2237,9 @@ importers:
       '@mod/login-gates':
         specifier: workspace:*
         version: link:../../identity/login-gates
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -2230,6 +2261,9 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../mfa
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
 
   modules/second-factor/mfa-totp:
     dependencies:
@@ -2242,6 +2276,9 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../mfa
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
 
   modules/smtp/mail-smtp:
     dependencies:

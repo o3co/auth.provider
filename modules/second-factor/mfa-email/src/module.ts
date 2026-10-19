@@ -1,7 +1,7 @@
 import { type BuildContext, defineModule } from "@mod/kernel";
 import { mail, mailPurposes } from "@mod/mail";
-import { factorKinds } from "@mod/mfa";
 import { bindingProof, bindingProofs } from "@mod/mfa-binding-proof";
+import { factorKinds } from "@mod/mfa-extensions";
 import { subjectAttributes } from "@mod/subject-attributes";
 import { users } from "@mod/users";
 import { purposes } from "./contract.ts";

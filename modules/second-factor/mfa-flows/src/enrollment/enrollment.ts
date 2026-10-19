@@ -1,7 +1,8 @@
 import type { Audit } from "@mod/audit";
 import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
-import { type AskedFrom, type Factors, isLabel } from "@mod/mfa";
+import { type Factors, isLabel } from "@mod/mfa";
 import type { BindingProofs } from "@mod/mfa-binding-proof";
+import type { AskedFrom } from "@mod/mfa-extensions";
 import type { Sessions } from "@mod/session";
 import type { SubjectRevocation } from "@mod/subject-revocation";
 import { auditedBy } from "../recording/recording.ts";

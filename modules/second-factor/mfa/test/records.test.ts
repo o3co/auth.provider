@@ -1,6 +1,6 @@
 import { isUnavailable } from "@mod/kernel";
 import { expect, it } from "vitest";
-import { type Factor, factorRecords } from "../src/records.ts";
+import { type Factor, factorRecords } from "../src/records/records.ts";
 import type { FactorStore, StoredFactors } from "../src/store.ts";
 import { memoryFactors } from "./stores.ts";
 

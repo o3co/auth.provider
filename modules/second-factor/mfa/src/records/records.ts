@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Unavailable } from "@mod/kernel";
-import type { FactorStore, StoredFactors } from "./store.ts";
+import type { FactorStore, StoredFactors } from "../store.ts";
 
 export interface Factor {
 	readonly id: string;
