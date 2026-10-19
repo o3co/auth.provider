@@ -1,11 +1,16 @@
 import { randomBytes } from "node:crypto";
 import { assemble, kernelConfig } from "@mod/kernel";
+import { quietRuntime } from "@mod/kernel/testing";
 import { resealing, type Seal, seal } from "@mod/seal";
 import sealModule from "@mod/seal/module";
+import type { Upstreams } from "@mod/upstreams";
 import { describe, expect, it } from "vitest";
+import { renewalWith } from "../src/renewal/renewal.ts";
 import type { StoredUpstreamTokens } from "../src/store.ts";
+import { resealerOver } from "../src/vault/resealer.ts";
 import { type Entry, vaultWith } from "../src/vault/vault.ts";
 import { harness } from "./harness.ts";
+import { memoryStores } from "./stores.ts";
 
 type Held = { readonly format: number; readonly idps: { readonly [idp: string]: Entry } };
 
@@ -179,5 +184,62 @@ describe("a rotation", () => {
 			{ name: "federation-tokens", resealed: 0, left: 0 },
 		]);
 		expect(await h.sealedNow()).toBe("current.x");
+	});
+});
+
+describe("opening an entry", () => {
+	/** A seal that counts its openings, and says every entry was sealed by a past key where `stale`. */
+	function counting(stale: boolean) {
+		const opened = { count: 0 };
+		const seal: Seal = {
+			seal: (plain) => `sealed:${plain}`,
+			open: (sealed) => {
+				opened.count++;
+				const plain = sealed.slice("sealed:".length);
+				return { kind: "opened", plain, ...(stale ? { stale: true as const } : {}) };
+			},
+		};
+		return { opened, vault: vaultWith(seal) };
+	}
+	const runtime = quietRuntime();
+
+	it("opens it once for each read of the token, a past key's entry too", async () => {
+		for (const stale of [false, true]) {
+			const { opened, vault } = counting(stale);
+			const stores = memoryStores(() => runtime.clock.now());
+			const renewal = renewalWith({
+				store: stores.records,
+				locks: stores.locks,
+				upstreams: { of: () => undefined } as unknown as Upstreams,
+				sessions: { endsAt: async () => runtime.clock.now() + 3_600_000 },
+				vault,
+				...runtime,
+				refreshBeforeMs: 30_000,
+				maxLifetimeMs: 86_400_000,
+				lockMs: 5000,
+			});
+			await renewal.receive("s", "corp", {
+				accessToken: "a",
+				tokenType: "Bearer",
+				scope: ["openid"],
+			});
+			opened.count = 0;
+			expect((await renewal.current("s", "corp")).kind).toBe("handed");
+			expect(opened.count, `stale: ${stale}`).toBe(1);
+		}
+	});
+
+	it("opens it once for each entry a walk seals again", async () => {
+		const { opened, vault } = counting(true);
+		const stores = memoryStores();
+		const entry = vault.seal(
+			"s",
+			"corp",
+			{ accessToken: "a", tokenType: "Bearer", granted: [], scope: [] },
+			"v",
+		);
+		await stores.records.save("s", vault.recordOf({ corp: entry }), 60_000);
+		expect(await resealerOver(stores.records, vault).reseal()).toEqual({ resealed: 1, left: 0 });
+		expect(opened.count).toBe(1);
 	});
 });
