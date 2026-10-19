@@ -1,4 +1,5 @@
 import { csrfChecked } from "@mod/csrf";
+import { requestsPerSource } from "@mod/rate-limit";
 import { describe, expect, it } from "vitest";
 import { back, harness, origin, scopes, upstreamLogin, upstreamTokens } from "./harness.ts";
 
@@ -48,6 +49,14 @@ describe("connecting a grant", () => {
 			(r) => r.method === "POST" && r.path === "/session/federation-grants/consent",
 		);
 		expect(answer?.uses?.map((u) => u.policy)).toContain(csrfChecked);
+	});
+
+	it("checks the consent's CSRF evidence before it counts the source, so another site's post spends no count", async () => {
+		const h = await harness();
+		const answer = h.routes.find(
+			(r) => r.method === "POST" && r.path === "/session/federation-grants/consent",
+		);
+		expect(answer?.uses?.map((u) => u.policy)).toEqual([csrfChecked, requestsPerSource]);
 	});
 
 	it("reads each part of the upstream's tokens once, refusing a part that throws", async () => {

@@ -22,8 +22,8 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | POST | `/oauth/consent` | `@mod/consent` | form, json | `csrf` | yes | `csrf` | The user's session is authenticated; a per-source limit belongs to unauthenticated entries. |  |
 | POST | `/oauth/device/verification` | `@mod/device-grant` | json | `csrf` | yes | `csrf` | Every action counts against the subject in rate-limit's attempt limit, in the handler. |  |
 | POST | `/oauth/device_authorization` | `@mod/device-grant` | form | `rate-limit.requests-per-source` | yes | A device's client calls it with its own client authentication and reads no cookie. | `rate-limit.requests-per-source` |  |
-| POST | `/oauth/federation-grants` | `@mod/federation-grants` | json, form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
-| POST | `/oauth/federation-grants/*` | `@mod/federation-grants` | json, form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
+| POST | `/oauth/federation-grants` | `@mod/federation-grants` | json, form | `rate-limit.requests-per-source` | yes | A confidential client's own call, authenticated as that client; it reads no cookie. | `rate-limit.requests-per-source` |  |
+| POST | `/oauth/federation-grants/*` | `@mod/federation-grants` | json, form | `rate-limit.requests-per-source` | yes | A confidential client's own call, authenticated as that client; it reads no cookie. | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/federation/*` | `@mod/federation-tokens` | form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/introspect` | `@mod/token-control` | form | `rate-limit.requests-per-source` | yes | A resource server's call, authenticated as a client; it reads no cookie. | `rate-limit.requests-per-source` |  |
 | GET | `/oauth/logout` | `@mod/rp-logout` | form, none | `rate-limit.requests-per-source` | yes | RP-initiated logout is a navigation from the RP's site by design; it closes only the session that a hint the provider signed names. | `rate-limit.requests-per-source` |  |
@@ -37,10 +37,10 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | POST | `/oauth/webauthn/registration/verify` | `@mod/passkey-registration` | json, none | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | GET | `/readyz` | `@mod/http-ops` | none |  |  |  |  |  |
 | GET | `/session/csrf` | `@mod/csrf` | form |  |  |  |  |  |
-| GET | `/session/federation-grants/callback/*` | `@mod/federation-grants` | form | `rate-limit.requests-per-source` |  |  | `rate-limit.requests-per-source` |  |
-| GET | `/session/federation-grants/connect` | `@mod/federation-grants` | form | `rate-limit.requests-per-source` |  |  | `rate-limit.requests-per-source` |  |
-| GET | `/session/federation-grants/consent` | `@mod/federation-grants` | form | `rate-limit.requests-per-source` |  |  | `rate-limit.requests-per-source` |  |
-| POST | `/session/federation-grants/consent` | `@mod/federation-grants` | form | `rate-limit.requests-per-source`, `csrf` | yes | `csrf` | `rate-limit.requests-per-source` |  |
+| GET | `/session/federation-grants/callback/*` | `@mod/federation-grants` | form | `rate-limit.requests-per-source` | yes | The upstream's redirect back, matched to the state of a connection this browser started. | `rate-limit.requests-per-source` |  |
+| GET | `/session/federation-grants/connect` | `@mod/federation-grants` | form | `rate-limit.requests-per-source` | yes | A navigation the client sends the user on, carrying a request only that client could make. | `rate-limit.requests-per-source` |  |
+| GET | `/session/federation-grants/consent` | `@mod/federation-grants` | form | `rate-limit.requests-per-source` | no |  | `rate-limit.requests-per-source` |  |
+| POST | `/session/federation-grants/consent` | `@mod/federation-grants` | form | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | POST | `/session/login` | `@mod/login-password` | form, json | `csrf`, `rate-limit.attempts-per-source` | yes | `csrf` | `rate-limit.attempts-per-source` |  |
 | POST | `/session/logout` | `@mod/logout` | form, json, none | `csrf` | yes | `csrf` |  |  |
 | POST | `/session/mfa/challenge` | `@mod/mfa-flows` | form, json | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
