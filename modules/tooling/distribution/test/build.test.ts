@@ -39,6 +39,7 @@ beforeAll(() => {
 		`import { kernel } from "./contract.ts";\nexport default kernel;\n`,
 	);
 	write("modules/base/kernel/config.example", "kernel {}\n");
+	write("modules/base/kernel/trial.conf", "kernel {}\n");
 	write(
 		"modules/feature/package.json",
 		JSON.stringify({
@@ -113,6 +114,7 @@ it("builds each shipped bundle: its members' files built and named publicly, the
 	expect(app("README.md")).toBe("# app\n");
 	expect(existsSync(join(out, "feature/app/src/test"))).toBe(false);
 	expect(readFileSync(join(out, "base/kernel/config.example"), "utf8")).toBe("kernel {}\n");
+	expect(existsSync(join(out, "base/kernel/trial.conf"))).toBe(false);
 	const feature = JSON.parse(readFileSync(join(out, "feature/package.json"), "utf8"));
 	expect(feature).toMatchObject({
 		name: "@o3co/auth-provider-feature",

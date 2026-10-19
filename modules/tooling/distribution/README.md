@@ -12,7 +12,7 @@
 
 ## Offers
 - `pnpm distribution`: prints each problem and exits 1, or prints `distribution: ok`.
-- `pnpm bundles`: builds each shipped bundle into `dist/bundles/<concern directory>` at the workspace's `version`: its members compiled to JS and declarations (tests and test tools left out), named publicly, with their other files, and its manifest. Prints each problem and exits 1, or how many it built.
+- `pnpm bundles`: builds each shipped bundle into `dist/bundles/<concern directory>` at the workspace's `version`: its members compiled to JS and declarations (tests and test tools, a trial file among them, left out), named publicly, with their other files, and its manifest. Prints each problem and exits 1, or how many it built.
 - `pnpm release:check`: packs every bundle and entrance, makes an app of each pattern with the packed `create-auth-provider`, installs it from the tarballs alone, type-checks it, and boots it to `/readyz` or to its refusals, each told. It also assembles an app by hand, as one keeping its own composition root does: `combinations`' full names, made published, installed from the tarballs, each module imported, and assembled to the kernel's refusals. Exits 1 on any problem.
 
 ## Invariants
