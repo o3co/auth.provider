@@ -1826,6 +1826,9 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../../second-factor/mfa
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../../second-factor/mfa-extensions
       '@mod/subject-attributes':
         specifier: workspace:*
         version: link:../../identity/subject-attributes

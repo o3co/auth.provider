@@ -1,5 +1,5 @@
 import { defineModule } from "@mod/kernel";
-import { factorKinds } from "@mod/mfa";
+import { factorKinds } from "@mod/mfa-extensions";
 import { subjectAttributes } from "@mod/subject-attributes";
 import { ceremonies } from "@mod/webauthn";
 import { webauthnKind } from "./kind.ts";
