@@ -3437,6 +3437,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/upstream-client':
         specifier: workspace:*
         version: link:../upstream-client
