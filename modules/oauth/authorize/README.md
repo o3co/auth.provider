@@ -14,16 +14,16 @@
 - Contribution of the return path `/oauth/authorize` to `login-gates`
 - Contribution to `issuer`'s metadata items: `authorization_endpoint` (on `http`'s public origin), `response_types_supported` (`code`), `code_challenge_methods_supported` (`S256`), `response_modes_supported` (`query`), `request_uri_parameter_supported` (`false`)
 - Contribution of `redirect-uris`' client metadata section (`authorize`) to `clients`
-- `redirects`, `registrable` and `redirectsAt`, re-exported from `redirect-uris` while callers move to it
 - Operator section: `login-page` (the login page. The return URL is added as `redirect_to`), `step-up-page` (the page that raises authentication. Optional); both https URLs (http only on a loopback host) by `url-setting`'s part for configured URLs, `oidc-mode` (`oidc-required` or `dual`), `requests` (requests per source in each window, over both methods), `window`
 - Audit events (to `audit`):
-  - `authorize.granted` when a code is given (the subject; `client`, `response_type` `code`).
-  - `authorize.rejected` on a refusal decided for the client or its consent (no subject; `client`, `reason`: `grant_type_not_allowed`, `scope_omitted_without_default`, `client_not_first_party`, `consent_required` or an issuance policy's reason, with `policy` its name).
+  - `authorize.granted` when a code is given, with the subject, `client` and `response_type` `code`.
+  - `authorize.rejected` on a refusal decided for the client or its consent, with no subject, and `client` and `reason`.
+  - `reason` is `grant_type_not_allowed`, `scope_omitted_without_default`, `client_not_first_party`, `consent_required`, or an issuance policy's reason with `policy` its name.
   - `source` only when `request-source` determined it.
   - Never the code, `state`, the redirect URI or the scope.
-  - Nothing for a malformed request, an unknown client or redirect URI, or unavailable (a warning naming only what and the route: `http.unavailable` before the redirect URI is confirmed, `authorize.unavailable` after).
+  - Nothing for a malformed request, an unknown client or an unknown redirect URI.
+  - Nothing for unavailable either: a warning naming only what and the route, `http.unavailable` before the redirect URI is confirmed, `authorize.unavailable` after.
 - Test configuration builders (`./testing`)
-- `reauthStore`, its needs and its contract test (`./testing`): the store interface `reauth` took over, kept while its wiring moves there; nothing here reads it.
 
 ## Invariants
 - Requests are limited per source by `rate-limit`'s policy, declared on both routes and counted together; over it, `429`.

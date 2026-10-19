@@ -5,7 +5,6 @@
 	"type": "module",
 	"kind": "feature",
 	"exports": {
-		".": "./src/contract.ts",
 		"./testing": "./src/testing.ts",
 		"./module": "./src/module.ts"
 	},
