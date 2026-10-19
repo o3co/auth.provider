@@ -2433,9 +2433,6 @@ importers:
 
   modules/templates/authorize-store:
     dependencies:
-      '@mod/authorize':
-        specifier: workspace:*
-        version: link:../../oauth/authorize
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
