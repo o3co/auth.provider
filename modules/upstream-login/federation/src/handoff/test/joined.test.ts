@@ -21,11 +21,13 @@ function joining(failing?: string, stuck?: string) {
 		received: async () => {
 			if (name === failing) throw new TypeError("refused");
 			calls.push(`received ${name}`);
+			// One receiver keeps nothing it could name.
+			return name === "three" ? undefined : `kept-by-${name}`;
 		},
 		// Thrown before any promise, as a receiver not written async would.
-		withdrawn: (id, idp) => {
+		withdrawn: (id, idp, receipt) => {
 			if (name === stuck) throw new TypeError("stuck");
-			calls.push(`withdrawn ${name} ${id} ${idp}`);
+			calls.push(`withdrawn ${name} ${id} ${idp} ${receipt}`);
 			return Promise.resolve();
 		},
 	});
@@ -51,7 +53,7 @@ it("hands a link's tokens to every receiver of the session it joined", async () 
 it("undoes what it gave when a receiver fails, and fails as unavailable, logging which", async () => {
 	const j = joining("two");
 	await expect(j.handoff.joined(session, "corp", tokens)).rejects.toSatisfy(isUnavailable);
-	expect(j.calls).toEqual(["received one", "withdrawn one s1 corp"]);
+	expect(j.calls).toEqual(["received one", "withdrawn one s1 corp kept-by-one"]);
 	expect(j.logged.lines().map((l) => [l.level, l.event, l.fields])).toEqual([
 		["error", "federation.link_join_failed", { receiver: "two", kind: "TypeError" }],
 	]);
@@ -60,17 +62,22 @@ it("undoes what it gave when a receiver fails, and fails as unavailable, logging
 it("still undoes the rest and fails as unavailable when one cannot undo, warning which", async () => {
 	const j = joining("three", "one");
 	await expect(j.handoff.joined(session, "corp", tokens)).rejects.toSatisfy(isUnavailable);
-	expect(j.calls).toEqual(["received one", "received two", "withdrawn two s1 corp"]);
+	expect(j.calls).toEqual(["received one", "received two", "withdrawn two s1 corp kept-by-two"]);
 	expect(j.logged.lines().map((l) => [l.level, l.event, l.fields])).toEqual([
 		["error", "federation.link_join_failed", { receiver: "three", kind: "TypeError" }],
 		["warn", "federation.link_join_undo_failed", { receiver: "one" }],
 	]);
 });
 
-it("takes a link's tokens back from every receiver, going on past one that cannot, warning which", async () => {
+it("takes a link's tokens back from each receiver it gave them to, with its receipt, going on past one that cannot, warning which", async () => {
 	const j = joining(undefined, "two");
-	await j.handoff.withdrawn("s1", "corp");
-	expect(j.calls).toEqual(["withdrawn one s1 corp", "withdrawn three s1 corp"]);
+	const joined = await j.handoff.joined(session, "corp", tokens);
+	j.calls.length = 0;
+	await j.handoff.withdrawn("s1", "corp", joined);
+	expect(j.calls).toEqual([
+		"withdrawn one s1 corp kept-by-one",
+		"withdrawn three s1 corp undefined",
+	]);
 	expect(j.logged.lines().map((l) => [l.level, l.event, l.fields])).toEqual([
 		["warn", "federation.link_join_undo_failed", { receiver: "two" }],
 	]);

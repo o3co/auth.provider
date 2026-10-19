@@ -20,7 +20,7 @@ Internal module of `federation`: a round trip that links the upstream identity t
 - A start not shown to come from this origin is logged (`federation.link_start_rejected`, warn) with the IdP and the browser's `Sec-Fetch-Site`, printable and cut short.
 - Records `federation.identity.linked`, or `link_refused` with the reason, for the recorded subject, by `round-trip`'s recorder (`idp`, and `source` and `userAgent` when known).
 - A join that fails is unavailable (`503`): the link stays, the tokens given are undone (`handoff`).
-- A session read again after its tokens joined it: closed, short of a requirement or logged in as someone else, `401 login_required`, recording nothing more; unable to tell, unavailable. Either way the link stays and the tokens are withdrawn from every receiver.
+- A session read again after its tokens joined it: closed, short of a requirement or logged in as someone else, `401 login_required`, recording nothing more; unable to tell, unavailable. Either way the link stays and the join's tokens are withdrawn from each receiver given them, leaving any written since.
 
 ## Depends on
 - `csrf` (origin evidence); `session` (entry); `users` (link); `audit`; `handoff` (join); `round-trip` (the continuation, the answers, the landing); `federation`'s section

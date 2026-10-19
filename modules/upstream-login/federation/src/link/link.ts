@@ -100,7 +100,11 @@ export function linkWith(p: LinkParts): Continuation {
 			if (linked === "conflict") return refused(409, "conflict", "identity_conflict");
 			if (linked === "linked") record("linked", name, { subject: link.subject, source, userAgent });
 			if (upstreamLogin.tokens) {
-				await p.handoff.joined({ id: link.session, context }, name, upstreamLogin.tokens);
+				const joined = await p.handoff.joined(
+					{ id: link.session, context },
+					name,
+					upstreamLogin.tokens,
+				);
 				// Read again: a session closed, short of a requirement or logged in as someone else while
 				// joining keeps none of the IdP's tokens, nor does one that cannot tell. Not `refused`: the
 				// link stands, so no refusal is recorded.
@@ -109,12 +113,12 @@ export function linkWith(p: LinkParts): Continuation {
 						const again = await p.sessions.entryOf(link.session);
 						return again.kind === "entered" && again.session.context.subject === link.subject;
 					} catch (error) {
-						await p.handoff.withdrawn(link.session, name);
+						await p.handoff.withdrawn(link.session, name, joined);
 						throw error;
 					}
 				};
 				if (!(await stillHeld())) {
-					await p.handoff.withdrawn(link.session, name);
+					await p.handoff.withdrawn(link.session, name, joined);
 					return answer(401, { error: "login_required" }, cleared);
 				}
 			}
