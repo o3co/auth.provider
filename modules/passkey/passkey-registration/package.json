@@ -30,6 +30,7 @@
 		"@mod/mfa-entry": "workspace:*",
 		"@mod/mfa-store": "workspace:*",
 		"@mod/seal": "workspace:*",
+		"@mod/session-requirements": "workspace:*",
 		"@mod/store": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/webauthn-store": "workspace:*",

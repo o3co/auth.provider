@@ -2034,6 +2034,9 @@ importers:
       '@mod/seal':
         specifier: workspace:*
         version: link:../../foundation/seal
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
