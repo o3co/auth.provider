@@ -142,6 +142,10 @@ describe("the logout a client starts", () => {
 		expect(h.events.map((e) => [e.kind, e.attributes])).toEqual([
 			["logout.close_pending", { sid: session.id, source: "127.0.0.1" }],
 		]);
+		// Sent again while the close is still pending: still 503, never a logout answered done.
+		const again = await h.call("POST", { id_token_hint: hint }, { "user-agent": "ua/1" });
+		expect([again.status, again.json]).toEqual([503, { error: "temporarily_unavailable" }]);
+		expect(h.events.map((e) => e.kind)).toEqual(["logout.close_pending", "logout.close_pending"]);
 	});
 
 	it("answers a session already gone as logged out, with no event", async () => {

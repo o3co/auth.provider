@@ -180,15 +180,16 @@ export function endingOver(p: EndingParts) {
 			return unavailable;
 		}
 		const { cookies, session } = closed;
-		if (!open || !session) return loggedOut(cookies);
-		// Closing, but the tokens it holds live until the close is swept: not logged out yet, as logout answers it.
+		// Closing, but the tokens it holds live until the close is swept: not logged out yet, as logout
+		// answers it. Asked before any answer of done, so a close sent again while pending is never one.
 		if (closed.kind === "pending") {
 			declaredAudit(p.audit, events).record("logout.close_pending", {
-				subject: session.subject,
+				subject: session?.subject ?? checked.subject,
 				attributes: { sid, ...(source ? { source } : {}) },
 			});
 			return jsonAnswer(503, { error: "temporarily_unavailable" }, { cookies });
 		}
+		if (!open || !session) return loggedOut(cookies);
 		record("logout.success", session.subject);
 		return answer(request, { sid, held, cookies }, upstream ?? (back && withState(back, state)));
 	};
