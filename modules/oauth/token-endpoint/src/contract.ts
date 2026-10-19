@@ -1,6 +1,6 @@
 import type { Client, Clients } from "@mod/clients";
 import type { OAuthError } from "@mod/grants";
-import { type HttpRequest, type HttpResponse, noStore } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import { contract } from "@mod/kernel";
 import { challenged } from "./challenges.ts";
 
@@ -40,21 +40,15 @@ export function oauthError(
 	/** More members of the body, read by nobody here; a reserved name or a malformed `error_uri` is dropped. */
 	members?: Readonly<Record<string, unknown>>,
 ): HttpResponse {
-	return {
-		status,
-		headers: noStore,
-		body: {
-			json: {
-				...Object.fromEntries(
-					Object.entries(members ?? {}).filter(
-						([name, value]) => !reserved.has(name) && (name !== "error_uri" || isErrorUri(value)),
-					),
-				),
-				error,
-				...(description ? { error_description: printable(description) } : {}),
-			},
-		},
-	};
+	return jsonAnswer(status, {
+		...Object.fromEntries(
+			Object.entries(members ?? {}).filter(
+				([name, value]) => !reserved.has(name) && (name !== "error_uri" || isErrorUri(value)),
+			),
+		),
+		error,
+		...(description ? { error_description: printable(description) } : {}),
+	});
 }
 
 export async function authenticateClient(
