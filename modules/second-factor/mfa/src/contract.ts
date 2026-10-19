@@ -1,6 +1,5 @@
 import { contract, extensionPoint } from "@mod/kernel";
 import type { AskedFrom, RefusedReason } from "@mod/mfa-extensions";
-import type { AuthContext } from "@mod/session";
 
 /** A step where a user proves a factor at login; without one, a factor could never be proven. */
 export interface ProofStep {
@@ -9,6 +8,12 @@ export interface ProofStep {
 
 /** The steps that prove factors. mfa refuses to start without at least one. */
 export const proofSteps = extensionPoint<ProofStep>("mfa.proof-steps", { multiplicity: "some" });
+
+/** Where a subject's fence stood when read: compared, never computed with. */
+export type Fence = number & { readonly __fence: never };
+
+/** Where a subject's standing is asked, as an inconsistency with the witness is recorded. */
+export type Asked = "login" | "binding" | "credentials";
 
 /** A factor as the user sees it. */
 export interface Shown {
@@ -50,18 +55,20 @@ export type Challenged =
 export interface Factors {
 	/** The factors of kinds this deployment knows. */
 	held(subject: string): Promise<readonly Shown[]>;
-	/** Whether the subject holds a counting factor. */
-	countingHeld(subject: string): Promise<boolean>;
+	/**
+	 * Whether the subject holds a counting factor, judged against the witness where one is composed: a
+	 * subject it marks while holding none is unavailable,
+	 * recorded with where it was asked.
+	 */
+	countingHeld(subject: string, at: Asked): Promise<boolean>;
+	/** Whether every session needs a second factor to be used (`mode = required`). */
+	secondFactorRequired(): boolean;
 	/** What a login asks of the subject: nothing, a proof of a factor, or a first binding. */
 	asks(subject: string): Promise<"nothing" | "proof" | "binding">;
 	/** Whether guessing can beat this factor; nothing when the subject holds no such factor. */
 	guessable(subject: string, factor: string): Promise<boolean | undefined>;
 	/** Whether every factor of a guessable kind the subject holds was bound after `after` (epoch ms, kernel's clock); true when it holds none. */
 	guessableBoundAfter(subject: string, after: number): Promise<boolean>;
-	/** Whether a proof at `at` (epoch ms, kernel's clock) is still recent, by `session`'s one window. */
-	recent(at: number): boolean;
-	/** Whether the session proved a second factor recently, by `recent`; a recent sign-in never stands for one, whatever the subject holds. */
-	provenRecently(context: AuthContext): boolean;
 	/** Sends the factor's challenge, good at most until `until` (epoch ms on kernel's clock). */
 	challenge(subject: string, factor: string, until: number, from?: AskedFrom): Promise<Challenged>;
 	/** Judges a proof, given the sealed challenge kept; the next state is kept only over the state judged. */
@@ -123,21 +130,28 @@ export interface Factors {
 	>;
 	/** Moves the subject's fence, when asked: no binding begun before binds (`fenced`). */
 	fence(subject: string): Promise<void>;
+	/** Where the subject's fence stands, read before a change is allowed: given back, the change is `fenced` once it moved. */
+	fenceOf(subject: string): Promise<Fence>;
 	rename(
 		subject: string,
 		factor: string,
 		label: string,
 	): Promise<"renamed" | "unknown" | "malformed-label">;
-	/** Under required mode, the last counting factor is not removed. */
-	remove(subject: string, factor: string): Promise<"removed" | "unknown" | "last">;
+	/** Under required mode, the last counting factor is not removed; nothing is removed once the fence moved past `fence`. */
+	remove(
+		subject: string,
+		factor: string,
+		fence: Fence,
+	): Promise<"removed" | "unknown" | "last" | "fenced">;
 	/** Removes every factor of the subject, of any kind, and answers how many and of which kinds; nothing is recorded. */
 	clear(subject: string): Promise<{ readonly count: number; readonly kinds: readonly string[] }>;
-	/** Replaces the recovery codes, for a subject holding a counting factor. */
+	/** Replaces the recovery codes, for a subject holding a counting factor; nothing once the fence moved past `fence`. */
 	reissue(
 		subject: string,
+		fence: Fence,
 	): Promise<
 		| { readonly kind: "reissued"; readonly codes: unknown }
-		| { readonly kind: "no-qualifying-factor" | "unknown-kind" }
+		| { readonly kind: "no-qualifying-factor" | "unknown-kind" | "fenced" }
 	>;
 }
 

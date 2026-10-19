@@ -137,6 +137,30 @@ describe("a reset by an operator", () => {
 		expect(await s.app.get(factors).held("nia")).toEqual([]);
 	});
 
+	it("shows no recovery codes once a revocation completed after the factor was written, and takes them back", async () => {
+		const s = await serve();
+		await s.signIn("uma");
+		const begun = await s.call("POST", "/session/mfa/enrollment", { kind: "code" });
+		clock.shift += 1000;
+		during.code = async () => {
+			// After the proof is judged, the bind's write is the next: the revocation lands as it answers.
+			during.written = async () => {
+				await s.app.get(revocations).record("uma");
+				clock.shift += 1000;
+			};
+		};
+		const done = await s.call("POST", "/session/mfa/enrollment/complete", {
+			transaction_id: String(begun.body.transaction),
+			proof: `${begun.body.secret}:0`,
+		});
+		expect([done.status, done.body.error, done.body.recovery_codes]).toEqual([
+			401,
+			"login_required",
+			undefined,
+		]);
+		expect((await s.app.get(factors).held("uma")).map((f) => f.kind)).toEqual(["code"]);
+	});
+
 	it("records an unfinished reset and rejects as unavailable, and a second run finishes it", async () => {
 		const s = await serve();
 		await s.enrollCode("dee");

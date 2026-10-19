@@ -40,6 +40,7 @@ Each promise below holds across every module composed. Each names what keeps it 
    - Kept by: `subject-revocation`'s boundaries, which every holder of a subject's state compares against, and its followers. Among them, `mfa-revocation` moves `mfa`'s fence, so no second factor's enrollment begun before a revocation binds once the revocation is complete.
    - Does not hold for access tokens where `tokens.subject-check = none` is chosen: they live until they expire.
    - Does not hold for federation grants where `federation-grants.keep-on-subject-revocation` is set and a revocation asks to keep delegations: an established grant then answers only to the `delegations` boundary, which such a revocation leaves where it was.
+   - A session opened before a revocation removes no factor and reissues no codes once the revocation is complete: `mfa-management` reads the subject's fence before the session's last check, and `mfa` compares it in the write. Recovery codes go out only after a last check of the revocation, with nothing waited on after it; a request past that check is one a revocation cannot stop, as for any request already past its checks. This holds as far as each check reads the boundary as it now stands.
    - Bridges such as `mfa-revocation` come in every app composed through `combinations`; an app composed by hand must compose them itself, or an enrollment begun before a revocation may still bind. After an account is taken over, also reset the subject's second factors (`mfa-flows`' `mfaReset`): a revocation ends what was made before it, while a reset removes the factors themselves.
    - Scenes: code ("a subject the ledger revokes over HTTP"), federation ("federation grants: a subject the ledger revokes"), second factor ("a subject the ledger revokes").
    - No scene yet for a code not yet redeemed, a device code or a token exchange.
@@ -109,9 +110,11 @@ Each promise below holds across every module composed. Each names what keeps it 
   - Every request that changes state needs same-origin evidence or the double-submit token. Any cross-origin evidence refuses it with 403.
   - Every route declares whether it changes state, and one that does either uses a policy that keeps other sites' requests out and one that limits each source, or says why not; boot refuses a route that does neither. The [route reference](routes.md) lists each route's. A declaration is its owner's claim, not a proof.
   - Revoking a subject's sessions closes each of them.
+  - With second factors composed, `mfa-entry` holds sessions to them: under `mfa.mode = required` using a session needs one, and changing credentials needs one proven recently (or a recent sign-in while none is held). Every credentials entry first reads the subject's factors, judged against the witness, so a factor store that cannot answer makes every credentials route unavailable, witness or not.
 - **Left to you:**
   - Keeping other subdomains of your origin from being taken over: double submit relies on them being unable to set the cookie.
   - Ending sessions with revocation, not by waiting out their lifetime, when they must end now.
+  - In an app composed by hand, composing `mfa-entry` beside `mfa`: `combinations` always does. Without `mfa-management`, which needs it, an app with `mfa` and `mfa-flows` boots without it, and sessions then need no second factor to be used or to change credentials.
 
 ## Tokens
 

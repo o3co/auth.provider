@@ -284,6 +284,16 @@ export function enrollmentOver(p: EnrollmentParts) {
 			return t.purpose === "enroll-login" ? loginRequired : enrollmentConflict;
 		}
 		if (bound.kind !== "bound") return refusals[bound.kind] ?? unknownTransaction;
+		/** Takes back the codes no one will see; read just before, a reset or a revocation in between leaves them, unseen all the same. */
+		const takeBack = async () => {
+			const id = bound.recoveryCodesFactor;
+			if (id) await p.factors.remove(t.subject, id, await p.factors.fenceOf(t.subject));
+		};
+		// The fence guards the write, not the showing: a revocation complete by now leaves the codes unseen.
+		if (bound.recoveryCodesFactor !== undefined && (await revokedSince(p.revocation, t))) {
+			await takeBack().catch(() => undefined);
+			return loginRequired;
+		}
 		const codes = bound.recoveryCodes === undefined ? {} : { recovery_codes: bound.recoveryCodes };
 		const body = { factor: bound.factor, ...codes };
 		// A first factor bound on the password alone counts from the next sign-in: binding it during a
@@ -293,11 +303,16 @@ export function enrollmentOver(p: EnrollmentParts) {
 		// Either can fail after the codes were made: then they go, as no one would ever see them.
 		const shown = async (answer: () => Promise<HttpResponse>) => {
 			try {
-				return await answer();
+				const answered = await answer();
+				// The last wait before the codes go out is the revocation's: none may come after it.
+				if (bound.recoveryCodesFactor !== undefined && (await revokedSince(p.revocation, t))) {
+					await takeBack().catch(() => undefined);
+					return loginRequired;
+				}
+				return answered;
 			} catch (error) {
-				const codes = bound.recoveryCodesFactor;
 				// One that cannot go stays unseen, as before; the failure answered is the first.
-				if (codes) await p.factors.remove(t.subject, codes).catch(() => undefined);
+				await takeBack().catch(() => undefined);
 				throw error;
 			}
 		};

@@ -36,7 +36,7 @@ export async function handlersOver(c: BuildContext<Settings>, policy: LockoutPol
 	const permits = permitsOver({
 		store: await c.get(transactionStore),
 		clock: c.clock,
-		recent: shared.factors.recent,
+		recent: (at) => shared.sessions.recent(at),
 		keepMs: longestRecentMs,
 	});
 	const { challengeBinding, ...enrollment } = enrollmentOver({

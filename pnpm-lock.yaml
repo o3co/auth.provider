@@ -1888,6 +1888,9 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../../second-factor/mfa
+      '@mod/mfa-entry':
+        specifier: workspace:*
+        version: link:../../second-factor/mfa-entry
       '@mod/mfa-store':
         specifier: workspace:*
         version: link:../../templates/mfa-store
@@ -2029,9 +2032,6 @@ importers:
       '@mod/seal':
         specifier: workspace:*
         version: link:../../foundation/seal
-      '@mod/session':
-        specifier: workspace:*
-        version: link:../../identity/session
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -2042,6 +2042,9 @@ importers:
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -2136,6 +2139,31 @@ importers:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
 
+  modules/second-factor/mfa-entry:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mfa':
+        specifier: workspace:*
+        version: link:../mfa
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
+    devDependencies:
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
   modules/second-factor/mfa-extensions:
     dependencies:
       '@mod/kernel':
@@ -2224,6 +2252,9 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../mfa
+      '@mod/mfa-entry':
+        specifier: workspace:*
+        version: link:../mfa-entry
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -2246,6 +2277,9 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-revocation':
+        specifier: workspace:*
+        version: link:../mfa-revocation
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records

@@ -1,11 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import http from "@mod/http/module";
-import { httpConfig, testRequest } from "@mod/http/testing";
+import { httpConfig } from "@mod/http/testing";
 import {
 	assemble,
 	BootRefused,
-	contract,
 	defineModule,
 	isUnavailable,
 	kernelConfig,
@@ -27,13 +26,6 @@ import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { seal } from "@mod/seal";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
-import {
-	type AuthContext,
-	type EntryRequirement,
-	entryRequirements,
-	sessionRules,
-	sessions,
-} from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
@@ -48,8 +40,6 @@ import { memoryFactors } from "./stores.ts";
 let shift = 0;
 /** Where set, the clock stands at this time (before the shift), so a test can judge a window's very edge. */
 let stopped: number | undefined;
-/** `session`'s recent-authentication window, as its stand-in counts it. */
-const recentMs = sessionRules.credentialsSecondsDefault * 1000;
 const runtime = quietRuntime({ clock: { now: () => (stopped ?? Date.now()) + shift } });
 let stop = async () => {};
 afterEach(async () => {
@@ -232,10 +222,10 @@ async function serve(
 		modules: [
 			http,
 			audit.module,
-			sessionStandIn,
 			subjectRevocationStandIn,
 			place.module,
 			sealModule,
+			sessionStandIn,
 			gatesModule,
 			mfaModule,
 			...kinds,
@@ -279,16 +269,6 @@ async function serve(
 	/** The identifier of the subject's first factor of the kind. */
 	const idOf = async (subject: string, kind: string) =>
 		(await decided.held(subject)).find((f) => f.kind === kind)?.id ?? "";
-	/** A browser's request carrying a session for the subject, as the facts say it was proved. */
-	const signedIn = async (
-		subject: string,
-		amr: string[],
-		authenticatedAt: number | "unknown" = runtime.clock.now(),
-	) => {
-		const facts = { subject, amr, authenticatedAt };
-		const { cookies } = await app.get(sessions).complete(testRequest(), facts);
-		return withCookie(cookies[0] ?? "");
-	};
 	return {
 		app,
 		decided,
@@ -296,13 +276,10 @@ async function serve(
 		bindCode,
 		bindKind,
 		idOf,
-		signedIn,
 		events: audit.events,
 		place,
 	};
 }
-const withCookie = (set: string) =>
-	testRequest({ headers: new Map([["cookie", set.split(";")[0] ?? ""]]) });
 
 describe("decisions on the subject's factors", () => {
 	it("binds in three steps, refusing a kind that does not count, and unavailable on another subject's pending", async () => {
@@ -387,6 +364,21 @@ describe("decisions on the subject's factors", () => {
 		await decided.fence("ned");
 		expect(await decided.bind("ned", none.pending, none.state)).toEqual({ kind: "fenced" });
 		expect(await decided.held("ned")).toEqual([]);
+	});
+
+	it("removes or reissues nothing for a fence read before it moved", async () => {
+		const { decided, bindCode, idOf } = await serve();
+		await bindCode("rio");
+		const read = await decided.fenceOf("rio");
+		await decided.fence("rio");
+		const code = await idOf("rio", "code");
+		expect(await decided.remove("rio", code, read)).toBe("fenced");
+		expect(await decided.reissue("rio", read)).toEqual({ kind: "fenced" });
+		expect((await decided.held("rio")).map((f) => f.kind).sort()).toEqual(["backup", "code"]);
+		const now = await decided.fenceOf("rio");
+		expect((await decided.reissue("rio", now)).kind).toBe("reissued");
+		await bindCode("rio");
+		expect(await decided.remove("rio", code, now)).toBe("removed");
 	});
 
 	it("answers unavailable when it cannot move the fence", async () => {
@@ -476,7 +468,7 @@ describe("decisions on the subject's factors", () => {
 	it("keeps the last counting factor under required mode, and renames", async () => {
 		const { decided, bindCode } = await serve({ mode: "required" });
 		const bound = await bindCode("zed");
-		expect(await decided.remove("zed", bound.factor.id)).toBe("last");
+		expect(await decided.remove("zed", bound.factor.id, await decided.fenceOf("zed"))).toBe("last");
 		expect(await decided.rename("zed", bound.factor.id, "work")).toBe("renamed");
 		expect(await decided.rename("zed", "none", "work")).toBe("unknown");
 		expect((await decided.held("zed")).find((f) => f.id === bound.factor.id)?.label).toBe("work");
@@ -485,16 +477,22 @@ describe("decisions on the subject's factors", () => {
 	it("asks nothing of a subject without factors under optional mode, and replaces the recovery codes", async () => {
 		const { decided, bindCode, idOf } = await serve();
 		expect(await decided.asks("ann")).toBe("nothing");
-		expect((await decided.reissue("ann")).kind).toBe("no-qualifying-factor");
+		expect((await decided.reissue("ann", await decided.fenceOf("ann"))).kind).toBe(
+			"no-qualifying-factor",
+		);
 		const bound = await bindCode("ann");
 		expect(await decided.asks("ann")).toBe("proof");
 		expect(await decided.asks("amy")).toBe("nothing");
-		const reissued = await decided.reissue("ann");
+		const reissued = await decided.reissue("ann", await decided.fenceOf("ann"));
 		if (reissued.kind !== "reissued") throw new Error(reissued.kind);
 		expect((await decided.held("ann")).filter((f) => f.kind === "backup")).toHaveLength(1);
 		expect((await decided.prove("ann", await idOf("ann", "backup"), "b1")).kind).toBe("valid");
-		expect(await decided.remove("ann", bound.factor.id)).toBe("removed");
-		expect(await decided.remove("ann", bound.factor.id)).toBe("unknown");
+		expect(await decided.remove("ann", bound.factor.id, await decided.fenceOf("ann"))).toBe(
+			"removed",
+		);
+		expect(await decided.remove("ann", bound.factor.id, await decided.fenceOf("ann"))).toBe(
+			"unknown",
+		);
 	});
 
 	it("answers no proof valid while its state cannot be written, records nothing, and takes it once it can", async () => {
@@ -522,9 +520,13 @@ describe("decisions on the subject's factors", () => {
 		expect((await decided.prove("ida", backupId, "b1")).kind).toBe("valid");
 		expect((await decided.prove("ida", backupId, "b1")).kind).toBe("replayed");
 		expect((await decided.prove("ida", bound.factor.id, `${bound.secret}:1`)).kind).toBe("valid");
-		expect((await decided.reissue("ida")).kind).toBe("reissued");
-		expect(await decided.remove("ida", bound.factor.id)).toBe("removed");
-		expect(await decided.remove("ida", bound.factor.id)).toBe("unknown");
+		expect((await decided.reissue("ida", await decided.fenceOf("ida"))).kind).toBe("reissued");
+		expect(await decided.remove("ida", bound.factor.id, await decided.fenceOf("ida"))).toBe(
+			"removed",
+		);
+		expect(await decided.remove("ida", bound.factor.id, await decided.fenceOf("ida"))).toBe(
+			"unknown",
+		);
 		const of = (kind: string, attributes: Record<string, string>) => ({
 			kind,
 			subject: "ida",
@@ -547,18 +549,24 @@ describe("decisions on the subject's factors", () => {
 			mode: "required",
 			"max-factors": 3,
 		});
-		expect((await decided.reissue("jon")).kind).toBe("no-qualifying-factor");
+		expect((await decided.reissue("jon", await decided.fenceOf("jon"))).kind).toBe(
+			"no-qualifying-factor",
+		);
 		expect(events).toEqual([]);
 		const bound = await bindCode("jon");
 		const [one, two] = [await provedCode("jon"), await provedCode("jon")];
 		expect((await decided.bind("jon", one.pending, one.state)).kind).toBe("bound");
 		events.length = 0;
 		expect((await decided.bind("jon", two.pending, two.state)).kind).toBe("full");
-		expect(await decided.remove("jon", "none")).toBe("unknown");
+		expect(await decided.remove("jon", "none", await decided.fenceOf("jon"))).toBe("unknown");
 		expect(events).toEqual([]);
-		expect(await decided.remove("jon", bound.factor.id)).toBe("removed");
+		expect(await decided.remove("jon", bound.factor.id, await decided.fenceOf("jon"))).toBe(
+			"removed",
+		);
 		events.length = 0;
-		expect(await decided.remove("jon", await idOf("jon", "code"))).toBe("last");
+		expect(
+			await decided.remove("jon", await idOf("jon", "code"), await decided.fenceOf("jon")),
+		).toBe("last");
 		expect(events).toEqual([]);
 	});
 
@@ -566,9 +574,13 @@ describe("decisions on the subject's factors", () => {
 		const { decided, bindCode } = await serve();
 		const one = await bindCode("liv");
 		const two = await bindCode("liv");
-		expect(await decided.remove("liv", one.factor.id)).toBe("removed");
+		expect(await decided.remove("liv", one.factor.id, await decided.fenceOf("liv"))).toBe(
+			"removed",
+		);
 		expect((await decided.held("liv")).map((f) => f.kind).sort()).toEqual(["backup", "code"]);
-		expect(await decided.remove("liv", two.factor.id)).toBe("removed");
+		expect(await decided.remove("liv", two.factor.id, await decided.fenceOf("liv"))).toBe(
+			"removed",
+		);
 		expect(await decided.held("liv")).toEqual([]);
 		expect(await decided.asks("liv")).toBe("nothing");
 	});
@@ -579,7 +591,9 @@ describe("decisions on the subject's factors", () => {
 		events.length = 0;
 		// Another request removes every factor before the reissue writes.
 		place.raceNextChange((record) => ({ ...record, factors: [] }));
-		expect(await decided.reissue("max")).toEqual({ kind: "no-qualifying-factor" });
+		expect(await decided.reissue("max", await decided.fenceOf("max"))).toEqual({
+			kind: "no-qualifying-factor",
+		});
 		expect(await decided.held("max")).toEqual([]);
 		expect(await decided.asks("max")).toBe("nothing");
 		expect(events).toEqual([]);
@@ -588,7 +602,9 @@ describe("decisions on the subject's factors", () => {
 	it("counts the recovery codes a binding brings against the limit", async () => {
 		const { decided, provedCode, bindCode, idOf } = await serve({ "max-factors": 2 });
 		const first = await bindCode("kai");
-		expect(await decided.remove("kai", await idOf("kai", "backup"))).toBe("removed");
+		expect(
+			await decided.remove("kai", await idOf("kai", "backup"), await decided.fenceOf("kai")),
+		).toBe("removed");
 		const { pending, state } = await provedCode("kai");
 		expect(await decided.bind("kai", pending, state)).toEqual({ kind: "full" });
 		expect(await decided.held("kai")).toEqual([first.factor]);
@@ -645,97 +661,6 @@ describe("decisions on the subject's factors", () => {
 		const named = await decided.bind("eve", proved.pending, proved.state, "desk");
 		expect(named.kind === "bound" && named.factor.label).toBe("desk");
 	});
-});
-
-describe("the entry requirements mfa sets", () => {
-	it("says it judges using a session and changing credentials", async () => {
-		const seen = contract<readonly EntryRequirement[]>("seen");
-		const reader = defineModule({ name: "reader" }, (m) => [
-			m.provide(seen).by((c) => c.collect(entryRequirements)),
-		]);
-		const { app } = await serve({}, { extra: [reader] });
-		const mfa = app.get(seen).find((requirement) => requirement.name === "mfa");
-		expect(mfa?.judges).toEqual(["use", "credentials"]);
-	});
-
-	it("asks a recent second factor to change credentials, and a second factor to use the session under required mode", async () => {
-		const { app, bindCode, signedIn } = await serve({ mode: "required" });
-		const opened = app.get(sessions);
-		const bare = await signedIn("bea", ["pwd"]);
-		expect((await opened.enterFor(bare, "credentials")).kind).toBe("entered");
-		expect((await opened.enterFor(bare, "use")).kind).toBe("short");
-		await bindCode("bea");
-		expect((await opened.enterFor(bare, "credentials")).kind).toBe("short");
-		const proved = await signedIn("bea", ["pwd", "otp", "mfa"]);
-		expect((await opened.enterFor(proved, "use")).kind).toBe("entered");
-		expect((await opened.enterFor(proved, "credentials")).kind).toBe("entered");
-		shift += recentMs + 1000;
-		expect((await opened.enterFor(proved, "credentials")).kind).toBe("short");
-		const raised = await opened.raise(proved, ["otp", "mfa"]);
-		const after = withCookie(raised?.cookies[0] ?? "");
-		expect((await opened.enterFor(after, "credentials")).kind).toBe("entered");
-	});
-
-	it("never takes a sign-in at an unknown time as recent, a second factor it says it proved included", async () => {
-		const { app, signedIn } = await serve();
-		const opened = app.get(sessions);
-		// No counting factor: only a sign-in known to be recent opens credentials.
-		const unknown = await signedIn("dee", ["fed"], "unknown");
-		expect(await opened.enterFor(unknown, "credentials")).toMatchObject({ kind: "short" });
-		// An upstream that says it proved a second factor, at a time it does not give.
-		const mapped = await signedIn("dee", ["fed", "mfa"], "unknown");
-		expect(await opened.enterFor(mapped, "credentials")).toMatchObject({ kind: "short" });
-		// A raise that adds one is known to be now.
-		const raised = await opened.raise(mapped, ["otp", "mfa"]);
-		const after = withCookie(raised?.cookies[0] ?? "");
-		expect((await opened.enterFor(after, "credentials")).kind).toBe("entered");
-	});
-
-	it("takes only a raise that added a second factor as a recent second factor", async () => {
-		const { app, bindCode, signedIn } = await serve();
-		const opened = app.get(sessions);
-		await bindCode("cid");
-		const request = await signedIn("cid", ["pwd"]);
-		shift += recentMs + 1000;
-		const raised = await opened.raise(request, ["pwd"]);
-		const after = withCookie(raised?.cookies[0] ?? "");
-		expect((await opened.enterFor(after, "credentials")).kind).toBe("short");
-	});
-
-	it("counts a second factor recent by session's one window: a fresh sign-in over an older proof is short", async () => {
-		const { app, bindCode, signedIn } = await serve();
-		const opened = app.get(sessions);
-		await bindCode("eve");
-		const proved = await signedIn("eve", ["pwd", "otp", "mfa"]);
-		shift += recentMs + 1000;
-		// A raise without a second factor: the session's latest authentication is now, its proof is not.
-		const raised = await opened.raise(proved, ["pwd"]);
-		const fresh = withCookie(raised?.cookies[0] ?? "");
-		expect((await opened.enterFor(fresh, "credentials")).kind).toBe("short");
-		// The window's edge, judged on a clock that stands still between reading it and asking.
-		stopped = Date.now();
-		const now = runtime.clock.now();
-		expect(app.get(factors).recent(now - recentMs)).toBe(true);
-		expect(app.get(factors).recent(now - recentMs - 1)).toBe(false);
-	});
-});
-
-it("takes only a second factor proven recently as proven, never a recent sign-in alone", async () => {
-	const { app } = await serve();
-	const now = runtime.clock.now();
-	const proven = (context: Partial<AuthContext>) =>
-		app
-			.get(factors)
-			.provenRecently({ subject: "x", amr: ["pwd"], authenticatedAt: now, ...context });
-	expect(proven({ amr: ["pwd", "otp", "mfa"] })).toBe(true);
-	expect(proven({})).toBe(false);
-	expect(proven({ amr: ["pwd", "mfa"], authenticatedAt: now - recentMs - 1000 })).toBe(false);
-	expect(proven({ amr: ["pwd", "mfa"], authenticatedAtUnknown: true })).toBe(false);
-	const old = now - recentMs - 1000;
-	expect(proven({ authenticatedAt: old, raisedAt: now, raisedAmr: ["otp", "mfa"] })).toBe(true);
-	expect(
-		proven({ amr: ["pwd", "mfa"], authenticatedAt: old, raisedAt: now, raisedAmr: ["pwd"] }),
-	).toBe(false);
 });
 
 it("declares mfa and the amr of every kind contributed as what it can prove", async () => {
@@ -868,7 +793,9 @@ describe("values no two factors may hold", () => {
 		expect(await bindKind("ann", "card", "c1")).toEqual({ kind: "duplicate" });
 		expect([await decided.held("bob"), events]).toEqual([[], []]);
 		expect(await bindKind("bob", "card", "c2")).toMatchObject({ kind: "bound" });
-		expect(await decided.remove("ann", await idOf("ann", "card"))).toBe("removed");
+		expect(
+			await decided.remove("ann", await idOf("ann", "card"), await decided.fenceOf("ann")),
+		).toBe("removed");
 		expect(await bindKind("bob", "card", "c1")).toMatchObject({ kind: "bound" });
 	});
 
@@ -957,7 +884,9 @@ describe("values no two factors may hold", () => {
 		expect(events.filter((e) => e.kind === "mfa.factor.enrolled")).toHaveLength(1);
 		// Once the factor holding it goes, two new ones race for its stale claim.
 		const [gone] = (await decided.held(first)).filter((f) => f.kind === "card");
-		expect(await decided.remove(first, gone?.id ?? "")).toBe("removed");
+		expect(await decided.remove(first, gone?.id ?? "", await decided.fenceOf(first))).toBe(
+			"removed",
+		);
 		await race(["eli", "fay"]);
 	});
 });
@@ -980,7 +909,9 @@ describe("a binding begun", () => {
 		expect(await bindKind("ann", "told", "t1")).toMatchObject({ kind: "bound" });
 		expect(await decided.begin("bob", "told")).toEqual({ kind: "duplicate" });
 		expect(await decided.begin("ann", "told")).toEqual({ kind: "duplicate" });
-		expect(await decided.remove("ann", await idOf("ann", "told"))).toBe("removed");
+		expect(
+			await decided.remove("ann", await idOf("ann", "told"), await decided.fenceOf("ann")),
+		).toBe("removed");
 		expect((await decided.begin("bob", "told")).kind).toBe("begun");
 	});
 
@@ -992,7 +923,7 @@ describe("a binding begun", () => {
 	});
 });
 
-it("refuses to start under required when no composed kind both counts and adds the second factor", async () => {
+it("refuses to start under required when no composed kind counts", async () => {
 	const told = defineModule({ name: "kind-told" }, (m) => [
 		m.contribute(factorKinds).by(() => ({
 			kind: "told",
@@ -1004,10 +935,12 @@ it("refuses to start under required when no composed kind both counts and adds t
 			verify: async () => ({ kind: "valid" as const, state: null }),
 		})),
 	]);
-	const refused = await serve({ mode: "required" }, { kinds: [told, backup] }).catch((e) => e);
+	// A kind that counts but adds no second factor is mfa-entry's to refuse; one that counts at all is mfa's.
+	await expect(serve({ mode: "required" }, { kinds: [told, backup] })).resolves.toBeDefined();
+	const refused = await serve({ mode: "required" }, { kinds: [backup] }).catch((e) => e);
 	expect(refused).toBeInstanceOf(BootRefused);
 	expect((refused as BootRefused).refusals.map((r) => r.where)).toEqual(["mfa.mode"]);
-	await expect(serve({ mode: "optional" }, { kinds: [told, backup] })).resolves.toBeDefined();
+	await expect(serve({ mode: "optional" }, { kinds: [backup] })).resolves.toBeDefined();
 });
 
 it("refuses to start without a step that proves factors, naming what it lacks", async () => {
@@ -1066,9 +999,9 @@ describe("a gate contributed before a first counting factor", () => {
 			{ subject: "ann", kind: "code", transaction: undefined, passed: undefined, from: undefined },
 			{ subject: "ann", kind: "code", transaction: "t", passed: "ok", from: login },
 		]);
-		expect(await decided.countingHeld("ann")).toBe(false);
+		expect(await decided.countingHeld("ann", "binding")).toBe(false);
 		await bindCode("ann", undefined, "ok");
-		expect(await decided.countingHeld("ann")).toBe(true);
+		expect(await decided.countingHeld("ann", "binding")).toBe(true);
 		asked.length = 0;
 		expect((await decided.begin("ann", "code")).kind).toBe("begun");
 		expect(asked).toEqual([]);
@@ -1137,21 +1070,38 @@ describe("an enrollment witness", () => {
 	});
 
 	it("answers unavailable where a wiped store would read as never enrolled: login, a first binding, and credentials", async () => {
-		const { app, decided, bindCode, wipe, signedIn, events } = await witnessed();
+		const { decided, bindCode, wipe, events } = await witnessed();
 		await bindCode("bea");
 		await wipe("bea");
 		events.length = 0;
 		await expect(decided.asks("bea")).rejects.toSatisfy(isUnavailable);
 		await expect(decided.begin("bea", "code")).rejects.toSatisfy(isUnavailable);
-		const request = await signedIn("bea", ["pwd"]);
-		await expect(app.get(sessions).enterFor(request, "credentials")).rejects.toSatisfy(
-			isUnavailable,
-		);
+		await expect(decided.countingHeld("bea", "credentials")).rejects.toSatisfy(isUnavailable);
 		expect(events.map((e) => [e.kind, e.attributes])).toEqual([
 			["mfa.enrollment_inconsistent", { at: "login" }],
 			["mfa.enrollment_inconsistent", { at: "binding" }],
 			["mfa.enrollment_inconsistent", { at: "credentials" }],
 		]);
+	});
+
+	it("judges whether a counting factor is held against the witness, recording where it was asked", async () => {
+		const { decided, bindCode, wipe, events } = await witnessed();
+		await bindCode("dee");
+		expect(await decided.countingHeld("dee", "credentials")).toBe(true);
+		await wipe("dee");
+		events.length = 0;
+		await expect(decided.countingHeld("dee", "credentials")).rejects.toSatisfy(isUnavailable);
+		await expect(decided.countingHeld("dee", "binding")).rejects.toSatisfy(isUnavailable);
+		expect(events.map((e) => [e.kind, e.attributes])).toEqual([
+			["mfa.enrollment_inconsistent", { at: "credentials" }],
+			["mfa.enrollment_inconsistent", { at: "binding" }],
+		]);
+		expect(await decided.countingHeld("eli", "login")).toBe(false);
+	});
+
+	it("tells whether every session needs a second factor, as the mode says", async () => {
+		expect((await serve({ mode: "required" })).decided.secondFactorRequired()).toBe(true);
+		expect((await serve({ mode: "optional" })).decided.secondFactorRequired()).toBe(false);
 	});
 
 	it("refuses a first binding begun before the owner's, once the store is wiped, writing nothing", async () => {
@@ -1241,7 +1191,9 @@ describe("an enrollment witness", () => {
 	it("never removes the last counting factor under optional mode, as only a reset clears the mark", async () => {
 		const { decided, bindCode, idOf } = await witnessed();
 		await bindCode("ivy");
-		expect(await decided.remove("ivy", await idOf("ivy", "code"))).toBe("last");
+		expect(
+			await decided.remove("ivy", await idOf("ivy", "code"), await decided.fenceOf("ivy")),
+		).toBe("last");
 	});
 
 	it("clears the mark after a reset's removal, and answers unavailable while it cannot, the factors gone", async () => {
@@ -1257,33 +1209,15 @@ describe("an enrollment witness", () => {
 	});
 
 	it("answers unavailable, writing nothing, wherever the witness cannot be read", async () => {
-		const { app, decided, provedCode, witness, signedIn, counted } = await witnessed();
+		const { decided, provedCode, witness, counted } = await witnessed();
 		witness.failing.read = 3;
 		await expect(decided.asks("kim")).rejects.toSatisfy(isUnavailable);
 		await expect(decided.begin("kim", "code")).rejects.toSatisfy(isUnavailable);
-		const request = await signedIn("kim", ["pwd"]);
-		await expect(app.get(sessions).enterFor(request, "credentials")).rejects.toSatisfy(
-			isUnavailable,
-		);
+		await expect(decided.countingHeld("kim", "credentials")).rejects.toSatisfy(isUnavailable);
 		const begun = await provedCode("kim");
 		witness.failing.read = 1;
 		await expect(decided.bind("kim", begun.pending, begun.state)).rejects.toSatisfy(isUnavailable);
 		expect(await counted("kim")).toBe(1);
-	});
-
-	it("answers credentials unavailable even for a recent second factor, where the witness contradicts the store or cannot be read", async () => {
-		const { app, bindCode, wipe, signedIn, witness } = await witnessed();
-		await bindCode("ola");
-		await wipe("ola");
-		const proved = await signedIn("ola", ["pwd", "otp", "mfa"]);
-		await expect(app.get(sessions).enterFor(proved, "credentials")).rejects.toSatisfy(
-			isUnavailable,
-		);
-		witness.failing.read = 1;
-		const unread = await signedIn("pia", ["pwd", "otp", "mfa"]);
-		await expect(app.get(sessions).enterFor(unread, "credentials")).rejects.toSatisfy(
-			isUnavailable,
-		);
 	});
 
 	it("keeps today's behaviour without a witness: a wiped store reads as never enrolled", async () => {

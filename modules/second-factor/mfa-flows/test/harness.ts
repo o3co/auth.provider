@@ -48,8 +48,30 @@ export const during = {
 	backup: undefined as (() => Promise<void>) | undefined,
 	/** Runs once while the next code is judged, as another request would. */
 	code: undefined as (() => Promise<void>) | undefined,
+	/** Runs once after the factor store's next write, before it answers, as a slow store would. */
+	written: undefined as (() => Promise<void>) | undefined,
+	/** Runs once after the next session raised or opened, before it answers, as a slow store would. */
+	entered: undefined as (() => Promise<void>) | undefined,
 	/** How many of the next revocations move the boundary but answer that a close did not finish. */
 	unfinishedRecords: 0,
+};
+/** Sessions whose next raise or opening holds its answer while `during.entered` runs once. */
+const entering = {
+	...sessionsDown,
+	wrap: (kept: Sessions): Sessions => {
+		const held = async <T>(answer: Promise<T>) => {
+			const done = await answer;
+			const run = during.entered;
+			during.entered = undefined;
+			await run?.();
+			return done;
+		};
+		return sessionsDown.wrap({
+			...kept,
+			raise: (...args: Parameters<Sessions["raise"]>) => held(kept.raise(...args)),
+			complete: (...args: Parameters<Sessions["complete"]>) => held(kept.complete(...args)),
+		});
+	},
 };
 const recording = {
 	...revocationsDown,
@@ -137,15 +159,26 @@ const backup = defineModule({ name: "kind-backup" }, (m) => [
 	})),
 ]);
 
+/** A write's answer, held while `during.written` runs once. */
+const afterWrite = async <T>(write: Promise<T>) => {
+	const done = await write;
+	const run = during.written;
+	during.written = undefined;
+	await run?.();
+	return done;
+};
+
 /** mfa's factor lists on the records stand-in, kept without end. */
 const factorStand = () => {
 	const stand = memoryRecords<StoredFactors>(() => 0, { shards: 1, perShard: 1 });
 	return defineModule({ name: "factor-store" }, (m) => [
 		m.provide(factorStore).by(() =>
 			factorsDown.wrap({
-				save: (key: string, record: StoredFactors) => stand.records.create(key, record, "endless"),
+				save: (key: string, record: StoredFactors) =>
+					afterWrite(stand.records.create(key, record, "endless")),
 				read: stand.records.read,
-				update: stand.records.change,
+				update: (...args: Parameters<typeof stand.records.change>) =>
+					afterWrite(stand.records.change(...args)),
 				scan: stand.records.scan,
 			}),
 		),
@@ -182,7 +215,7 @@ export async function serve(settings: Settings = {}, extra: Module[] = []) {
 			audit.module,
 			csrfStandIn,
 			cookiesModule,
-			switchedModule(sessionStandIn, sessions, sessionsDown),
+			switchedModule(sessionStandIn, sessions, entering),
 			switchedModule(subjectRevocationStandIn, revocations, recording),
 			simulated.module,
 			factorStand(),
