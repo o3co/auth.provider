@@ -1,6 +1,6 @@
 import { type Audit, audit, declaredAudit } from "@mod/audit";
 import { type Client, type Clients, clients } from "@mod/clients";
-import { type HttpRequest, type HttpResponse, noStore } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer, noStore } from "@mod/http";
 import { type BuildContext, type Clock, isUnavailable, type Random } from "@mod/kernel";
 import { attemptLimit, type RateLimit } from "@mod/rate-limit";
 import { determinedSource } from "@mod/request-source";
@@ -54,25 +54,16 @@ export interface ApiParts {
 
 export const base = "/oauth/federation-grants";
 
-const answer = (
-	status: number,
-	json?: unknown,
-	headers: Record<string, string> = {},
-): HttpResponse => ({
-	status,
-	headers: { ...noStore, ...headers },
-	...(json === undefined ? {} : { body: { json } }),
-});
 const error = (
 	status: number,
 	code: string,
 	description?: string,
 	headers?: Record<string, string>,
 ) =>
-	answer(
+	jsonAnswer(
 		status,
 		{ error: code, ...(description ? { error_description: description } : {}) },
-		headers,
+		headers ? { headers } : {},
 	);
 /** One answer, byte for byte, for an unknown grant and another client's or subject's. */
 const notFound = () => error(404, "grant_not_found");
@@ -215,7 +206,7 @@ export function apiWith(p: ApiParts) {
 			intent: intent.id,
 		});
 		await p.steps.create(handle, step, settings["connect-lifetime"] * 1000);
-		return answer(201, {
+		return jsonAnswer(201, {
 			grant_id: grant.id,
 			status,
 			connect_uri: `${p.origin}/session/federation-grants/connect?request=${handle}`,
@@ -406,7 +397,7 @@ export function apiWith(p: ApiParts) {
 				{ client: client.id, connection: grant.connection, refreshed: String(current.refreshed) },
 				request,
 			);
-			return answer(200, {
+			return jsonAnswer(200, {
 				access_token: current.accessToken,
 				token_type: current.tokenType,
 				expires_in: current.expiresInSeconds,
@@ -449,7 +440,7 @@ export function apiWith(p: ApiParts) {
 		}
 		const end = p.judge.endOf(grant);
 		const over = grant.status !== "revoked" && end !== undefined && end <= p.clock.now();
-		return answer(200, {
+		return jsonAnswer(200, {
 			grant_id: grant.id,
 			status: over ? "expired" : grant.status,
 			...(grant.reason && !over ? { reason: grant.reason } : {}),
@@ -484,7 +475,7 @@ export function apiWith(p: ApiParts) {
 				request,
 			);
 		}
-		return answer(204);
+		return { status: 204, headers: noStore };
 	};
 
 	/** A route a grant answers by id: the names its body takes, and how it is answered once owned. */

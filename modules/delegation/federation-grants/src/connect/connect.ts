@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { type Audit, audit, declaredAudit } from "@mod/audit";
 import { type Clients, clients } from "@mod/clients";
-import { type HttpRequest, type HttpResponse, noStore } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer, noStore } from "@mod/http";
 import {
 	type BuildContext,
 	type Clock,
@@ -77,11 +77,8 @@ const plain = (status: number, text: string): HttpResponse => ({
 	},
 	body: text,
 });
-const json = (status: number, body: unknown): HttpResponse => ({
-	status,
-	headers: { ...noStore, "referrer-policy": "no-referrer" },
-	body: { json: body },
-});
+const json = (status: number, body: unknown): HttpResponse =>
+	jsonAnswer(status, body, { headers: { "referrer-policy": "no-referrer" } });
 const see = (location: string): HttpResponse => ({
 	status: 303,
 	headers: { ...noStore, location, "referrer-policy": "no-referrer" },

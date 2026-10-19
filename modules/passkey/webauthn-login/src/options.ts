@@ -1,4 +1,4 @@
-import { type HttpRequest, noStore, type Route, use } from "@mod/http";
+import { type HttpRequest, jsonAnswer, type Route, use } from "@mod/http";
 import { requestsPerSource, type Window } from "@mod/rate-limit";
 import type { Passkeys } from "@mod/webauthn";
 
@@ -21,13 +21,9 @@ export function optionsRoute(passkeys: Passkeys, window: Window): Route {
 		handle: async (request) => {
 			const requester = requesterOf(request);
 			if (requester === false) {
-				return { status: 400, headers: noStore, body: { json: { error: "invalid_request" } } };
+				return jsonAnswer(400, { error: "invalid_request" });
 			}
-			return {
-				status: 200,
-				headers: noStore,
-				body: { json: (await passkeys.challenge(requester)).options },
-			};
+			return jsonAnswer(200, (await passkeys.challenge(requester)).options);
 		},
 	};
 }
