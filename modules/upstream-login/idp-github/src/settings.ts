@@ -1,4 +1,4 @@
-import type { OutboundRefusals } from "@mod/outbound";
+import { destinationRefusal, type OutboundRefusals } from "@mod/outbound";
 import {
 	clientSetting,
 	endpointSetting as endpoint,
@@ -40,19 +40,13 @@ const section = clientSetting.extend({
 /** The section; boot is refused on a URL it sends to that outbound's destination policy refuses. */
 export const settingsOf = (refusals: OutboundRefusals) =>
 	section.superRefine(
-		urlsChecked(
-			(url, hosts) => {
-				const refused = refusals.explained(url, { hosts });
-				return refused && `outbound's destination policy refuses it: ${refused}`;
-			},
-			{
-				urls: (s) => [s["token-endpoint"], s.api],
-				sent: (s) => ({
-					"token-endpoint": { url: s["token-endpoint"], hosts: hostsOf(s) },
-					api: { url: userUrl(s.api), hosts: hostsOf(s) },
-				}),
-			},
-		),
+		urlsChecked((url, hosts) => destinationRefusal(refusals, url, { hosts }), {
+			urls: (s) => [s["token-endpoint"], s.api],
+			sent: (s) => ({
+				"token-endpoint": { url: s["token-endpoint"], hosts: hostsOf(s) },
+				api: { url: userUrl(s.api), hosts: hostsOf(s) },
+			}),
+		}),
 	);
 
 export type Settings = z.output<typeof section>;
