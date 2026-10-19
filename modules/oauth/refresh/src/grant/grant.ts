@@ -182,7 +182,7 @@ export function refreshGrant(
 					token_type: issued.tokenType,
 					expires_in: issued.expiresIn,
 					refresh_token: `${parsed.id}.${next}`,
-					...(scope.length > 0 ? { scope: scope.join(" ") } : {}),
+					scope: scope.join(" "),
 				},
 			};
 		},

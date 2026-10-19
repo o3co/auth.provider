@@ -108,7 +108,7 @@ export function grantWith(
 					access_token: issued.token,
 					token_type: issued.tokenType,
 					expires_in: issued.expiresIn,
-					...(before.scope.length > 0 ? { scope: before.scope.join(" ") } : {}),
+					scope: before.scope.join(" "),
 				},
 			};
 		},

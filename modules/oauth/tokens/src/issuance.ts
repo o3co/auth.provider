@@ -1,3 +1,4 @@
+import { deepFreeze } from "@mod/kernel";
 import type {
 	Admitted,
 	IssuancePolicy,
@@ -23,8 +24,10 @@ export function judging(policies: readonly IssuancePolicy[], now: () => number) 
 				description: "the authentication time is ahead of the clock",
 			};
 		}
+		// The policies read one frozen copy, so none can change what another or the issuing sees.
+		const asked = deepFreeze(structuredClone(request));
 		for (const { name, judge } of ordered) {
-			const verdict = await judge(request);
+			const verdict = await judge(asked);
 			if (verdict.kind === "allowed") continue;
 			// Anything but allowed refuses, so a policy's unreadable answer never issues.
 			return verdict.kind === "refused"

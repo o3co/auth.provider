@@ -87,7 +87,7 @@ export function sessionGrant(parts: Parts): Grant {
 					access_token: issued.token,
 					token_type: issued.tokenType,
 					expires_in: issued.expiresIn,
-					...(scope.length > 0 ? { scope: scope.join(" ") } : {}),
+					scope: scope.join(" "),
 				},
 			};
 		},

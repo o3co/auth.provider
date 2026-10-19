@@ -302,7 +302,7 @@ export function exchangeGrant(parts: Parts): Grant {
 					issued_token_type: accessTokenType,
 					token_type: issued.tokenType,
 					expires_in: issued.expiresIn,
-					...(target.scope.length > 0 ? { scope: target.scope.join(" ") } : {}),
+					scope: target.scope.join(" "),
 				},
 			};
 		},
