@@ -13,6 +13,7 @@ import {
 	keyedByImports,
 	packageOf,
 	randomReads,
+	valuesFrom,
 } from "./source.ts";
 import { type Surface, surfaceOf } from "./surface.ts";
 import { budgetsAsTest, type Scope, scopeOf } from "./units.ts";
@@ -219,6 +220,25 @@ function commonVocabulary(s: Scope, p: Pkg, surfaces: ReadonlyMap<string, Surfac
 	}
 }
 
+/** G28: a dependency named as helpers lends functions and types, never a contract or an extension point. */
+function helperRules(s: Scope, p: Pkg, surfaces: ReadonlyMap<string, Surface>) {
+	const helpers = Array.isArray(p.manifest.helpers) ? p.manifest.helpers : [];
+	for (const file of s.sources(p).filter((f) => !s.isTest(f))) {
+		for (const helper of helpers) {
+			const tokens = surfaces.get(helper)?.tokens ?? new Set<string>();
+			for (const name of valuesFrom(join(p.dir, file), helper)) {
+				if (tokens.has(name) || (name === "*" && tokens.size > 0)) {
+					s.report(
+						"G28 a helpers dependency lends no contract",
+						`${p.name}/${file}`,
+						`${name} (${helper})`,
+					);
+				}
+			}
+		}
+	}
+}
+
 /** G22, G24: which packages wire a feature's store interface, and how. */
 function wiringRules(s: Scope) {
 	const { kindOf, report } = s;
@@ -336,6 +356,7 @@ export function check(
 		sourceRules(s, p);
 		networkRules(s, p);
 		commonVocabulary(s, p, surfaces);
+		helperRules(s, p, surfaces);
 		budgetRules(s, p, surfaces, importedCards);
 	}
 	wiringRules(s);

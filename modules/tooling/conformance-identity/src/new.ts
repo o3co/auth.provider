@@ -29,7 +29,7 @@ function ledgerConfig(ledger: LedgerScene) {
 	};
 }
 
-const setUp = (part: IdentityPart, _: unknown, modules: readonly string[]): NewPart => ({
+const setUp = (part: IdentityPart): NewPart => ({
 	modules: [
 		"@mod/users",
 		"@mod/session-lifecycle",
@@ -53,8 +53,6 @@ const setUp = (part: IdentityPart, _: unknown, modules: readonly string[]): NewP
 				],
 			}
 		: {}),
-	// Mail, where users brings it along, sends nothing in a scene.
-	...(modules.includes("@mod/mail") ? { fallback: { mail: { "accept-unsent": true } } } : {}),
 	config: {
 		http: {
 			"trusted-proxies": ["127.0.0.1"],
@@ -104,11 +102,11 @@ const setUp = (part: IdentityPart, _: unknown, modules: readonly string[]): NewP
 /** On an app taking users from a ledger, which refuses them in the settings, a fake ledger holds them. */
 export function onPattern(
 	given: IdentityPart,
-	scene: unknown,
+	_: unknown,
 	modules: readonly string[],
 ): PatternPart {
 	const part = { ...given, users: statedWhereJudged(given.users, modules) };
-	const set = setUp(part, scene, modules);
+	const set = setUp(part);
 	// An app keeping mfa's witness at a ledger asks it at a login: the ledger keeps it, whoever holds the users.
 	const witness = modules.includes("@mod/mfa-witness-http");
 	const witnessed = witness ? { whole: [...(set.whole ?? []), "mfa-witness-http"] } : {};
