@@ -25,6 +25,7 @@ afterEach(async () => {
 const handlers = defineModule({ name: "handlers" }, (m) => [
 	m.contribute(routes).by(() => ({
 		method: "GET",
+		changesState: false,
 		path: "/slow",
 		handle: async () => {
 			now += 30;
@@ -33,11 +34,13 @@ const handlers = defineModule({ name: "handlers" }, (m) => [
 	})),
 	m.contribute(routes).by(() => ({
 		method: "GET",
+		changesState: false,
 		path: "/items/*",
 		handle: () => ({ status: 200 }),
 	})),
 	m.contribute(routes).by(() => ({
 		method: "GET",
+		changesState: false,
 		path: "/back",
 		handle: () => {
 			now -= 5000;
@@ -46,6 +49,7 @@ const handlers = defineModule({ name: "handlers" }, (m) => [
 	})),
 	m.contribute(routes).by(() => ({
 		method: "GET",
+		changesState: false,
 		path: "/hang",
 		handle: async () => {
 			hang.reached.resolve();
