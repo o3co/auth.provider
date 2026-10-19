@@ -264,6 +264,30 @@ describe("the logout a client starts", () => {
 		expect(await h.stillOpen(session.id)).toBe(true);
 	});
 
+	it("passes on an error of the close's that is not Unavailable, recording no failed close", async () => {
+		const broken = defineModule({ name: "session" }, (m) => [
+			m.provide(sessions).by(() =>
+				stubSessions({
+					complete: async (_request, facts) => ({
+						session: {
+							id: "s1",
+							context: { subject: facts.subject, amr: ["pwd"], authenticatedAt: 0 },
+						},
+						cookies: ["session=s1"],
+					}),
+					close: async () => {
+						throw new TypeError("a mistake in the close");
+					},
+				}),
+			),
+		]);
+		const h = await serve({ sessionsModule: broken });
+		const { session } = await h.login();
+		const hint = await h.hintFor(session.id);
+		await expect(h.call("POST", { id_token_hint: hint })).rejects.toThrow(TypeError);
+		expect(h.events).toEqual([]);
+	});
+
 	it("answers 503 and records the failed close when the session cannot be closed", async () => {
 		const down = unavailableSwitch<Sessions>("session");
 		const h = await serve({ sessionsModule: switchedModule(sessionStandIn, sessions, down) });

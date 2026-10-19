@@ -102,11 +102,12 @@ export function endingOver(p: EndingParts) {
 		Promise.resolve()
 			.then(() => p.upstream?.at(session, back))
 			.catch(() => undefined);
-	/** The close's outcome, or none when it threw. */
+	/** The close's outcome, or none when it was unavailable; any other error is passed on, a mistake and no outage. */
 	const closeOf = async (sid: string, request: HttpRequest) => {
 		try {
 			return await p.sessions.close(sid, request);
-		} catch {
+		} catch (error) {
+			if (!isUnavailable(error)) throw error;
 			return undefined;
 		}
 	};
