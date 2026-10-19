@@ -48,6 +48,7 @@ describe("G. second factor at password login", () => {
 			"judy",
 			"kate",
 			"lena",
+			"mona",
 		]),
 	);
 
@@ -236,6 +237,21 @@ describe("G. second factor at password login", () => {
 			proof: codes[0] ?? "",
 		});
 		expect(back.status).toBe(200);
+	});
+
+	it("lets in only one of two logins that use the same recovery code at once", async () => {
+		const { codes } = await s.enrol("mona");
+		const logins = await Promise.all([s.held("mona"), s.held("mona")]);
+		const answers = await Promise.all(
+			logins.map(({ b, transaction }) => letInByRecovery(b, transaction, codes[0] ?? "")),
+		);
+		const outcomes = answers
+			.map((a) => [a.status, a.body.error])
+			.sort(([a], [b]) => Number(a) - Number(b));
+		expect(outcomes).toEqual([
+			[200, undefined],
+			[401, "mfa_invalid"],
+		]);
 	});
 
 	it.runIf(!areaTarget().differs("mfa-login-loses-return-target"))(
