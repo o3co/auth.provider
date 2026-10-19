@@ -49,7 +49,7 @@ Every answer is never cached.
 | `403` with another body, and cookies | A step after the password holds the login, such as a second factor. The body and cookies are that step's; pass them on as it describes. |
 | `401 {"error": "invalid_credentials"}` | Say the sign-in failed. The answer never tells whether the user exists or what was wrong. |
 | `429 {"error": "too_many_attempts"}` | Wait as `Retry-After` says before trying again. Too many failures for one username make each next try wait; the password is not checked meanwhile. |
-| `403 {"error": "csrf"}` | Get a new token, then post again. |
+| `403 {"error": "csrf"}` | Get a new token, then post again. If it keeps failing, the page is not served from the public origin: a login from another origin is always refused. |
 | `400` `invalid_redirect` | The `redirect_to` is not one a login may return to. A login returns to the paths the composed modules let it, such as the authorization endpoint's, and to the URLs listed in `login-gates.return-targets`, matched exactly. |
 | `400` `invalid_request` or `repeated_parameter` | The request is malformed: fix the page. |
 | `503` `temporarily_unavailable` or `service_unavailable` | The provider cannot answer now; try again later. |

@@ -8,7 +8,7 @@
 
 auth-provider は、TypeScript で書かれた Node.js 向けのセルフホスト型 OAuth 2.0 認可サーバー兼 OpenID Connect（OIDC）プロバイダーです。必要な機能を選んでアプリを生成し、Node.js で実行するか、Docker イメージをビルドして利用します。
 
-選んだ機能が依存するモジュールは、ジェネレーターが追加します。アプリは起動時に設定を検証し、見つかった問題を設定名とともにすべて表示します。
+選んだ機能が依存するモジュールは、ジェネレーターが追加します。アプリは起動時に設定を検証し、見つかった問題を、設定名またはモジュール名とともにすべて表示します。
 
 0.18 は、パッケージ名を変更して 0.17 を書き直したバージョンで、まだプレリリース段階です。0.18.0 の正式リリースまでは、npm の `next` タグを指定してインストールしてください。タグを省略すると 0.17 がインストールされます。既存の 0.17 環境を移行する場合は、まず[移行ガイド](docs/migration.md)を読んでください。既存環境をそのままアップグレードすることはできません。設定の書き直しが必要で、保存済みの状態も移行されません。
 
@@ -51,7 +51,7 @@ auth-provider は、TypeScript で書かれた Node.js 向けのセルフホス�
 ## 動作要件
 
 - Node.js 24 以降。
-- 生成したプロジェクトの `packageManager` フィールドに指定されたバージョンの pnpm。`corepack enable` でそのバージョンをインストールできます。
+- 生成したプロジェクトの `packageManager` フィールドに指定されたバージョンの pnpm。`corepack enable` でそのバージョンをインストールできます。Node.js 25 以降には Corepack が同梱されていないため、先に `npm install -g corepack` を実行してください。
 - 状態の永続化や複数インスタンスでの運用に Redis アダプターを使う場合は、Redis 7.0 以降。[本番運用の前に](#本番運用の前に)を参照してください。
 - 生成したイメージをビルドして実行する場合は、Docker。
 
@@ -74,9 +74,10 @@ cp config/local.conf.example config/local.conf
 `.env` には次を設定します。
 
 - `ISSUER_URL` と `HTTP_PUBLIC_ORIGIN`：クライアントから見える URL（末尾のスラッシュなし）と、そのスキーム・ホスト・ポートです。両者のオリジンは一致させてください。
+  - デフォルトでは、公開オリジンは https でなければなりません。手元のマシンで平文の http を使って試すには、両方を `http://127.0.0.1:8080` に設定し、後で書く `config/local.conf` に `http.insecure-origin = true` を追加してください。
 - `KEYS_SIGNING_KID` と `KEYS_SIGNING_ALG`。サンプルでは Ed25519 鍵用に EdDSA を指定しています。
-- `AUTHORIZE_LOGIN_PAGE`：ログインページの URL です。`CONSENT_PAGE` は同意ページの URL です。すべてのクライアントがファーストパーティの場合は、未設定のままにしてください。
-- サンプルに従い、`KERNEL_DEPLOYMENT=single`、`STORE_ACCEPT_VOLATILE=true`、`MAIL_ACCEPT_UNSENT=true`、`TOKENS_REVOCATION=denylist` を設定します。これらは、単一インスタンスで動作し、状態をメモリーに保持し（再起動で失われます）、メールを送信しない構成であることを明示します。
+- `AUTHORIZE_LOGIN_PAGE`：ログインページの URL です。プロバイダーと同じオリジンに置きます。たとえば `http://127.0.0.1:8080/login` とし、ページを配信して残りをアプリに渡すプロキシの背後に置きます。アプリはこのページを配信しません。別のオリジンのページでもアプリは起動しますが、そこからのログインは必ず `403 csrf` で拒否されます。`CONSENT_PAGE` は同意ページの URL です。すべてのクライアントがファーストパーティの場合は、未設定のままにしてください。
+- サンプルに従い、`KERNEL_DEPLOYMENT=single`、`STORE_ACCEPT_VOLATILE=true`、`MAIL_ACCEPT_UNSENT=true`、`TOKENS_REVOCATION=denylist` を設定します。これらは、単一インスタンスで動作し、状態をメモリーに保持し（再起動で失われます）、メールを送信しない構成であることを明示します。`TOKENS_REVOCATION=denylist` は失効したアクセストークンを denylist に置いて拒否し、`unsupported` は失効の要求に unsupported と答えます。
 
 署名鍵を生成します。
 
@@ -123,19 +124,13 @@ clients.registered = [
 
 `client-allowance` に列挙するまで、クライアントにはグラントもスコープも許可されません。認可コードフローを使うクライアントには `redirect-uris` も必要です。`first-party = true` を設定すると、同意ページを省略します。コンフィデンシャルクライアントでは、`kind = "confidential"`、`client_secret_basic` などの `method`、`sections.client-secret.hash` にシークレットのハッシュを設定します。クライアントの全セクションは[設定リファレンス](docs/configuration.md#client-metadata-sections)にあります。
 
-デフォルトでは、公開オリジンは https でなければなりません。手元のマシンで平文の http を使って試すには、`ISSUER_URL` と `HTTP_PUBLIC_ORIGIN` を `http://127.0.0.1:8080` に設定し、`config/local.conf` に次の行を追加してください。
-
-```hocon
-http.insecure-origin = true
-```
-
 アプリを起動します。
 
 ```sh
 APP_CONFIG=config/local.conf,config/application.conf pnpm start
 ```
 
-設定に不足や誤りがあると、アプリは問題 1 件ごとに `refused <setting>: <reason>` という行を標準エラー出力に書き出し、終了ステータス 78 で終了します。設定を修正して、再度起動してください。
+設定に不足や誤りがあると、アプリは問題 1 件ごとに `refused <setting or module>: <reason>` という行を標準エラー出力に書き出し、終了ステータス 78 で終了します。設定を修正して、再度起動してください。修正すると、次の段階の拒否が表示されることがあります。
 
 デフォルトのポートと上記のローカル用 issuer を使う場合は、次のコマンドで起動を確認します。
 
@@ -144,7 +139,21 @@ curl http://127.0.0.1:8080/readyz
 curl http://127.0.0.1:8080/.well-known/openid-configuration
 ```
 
-ブラウザーでログインするには、ログインページも必要です。issuer の URL にパスが含まれる場合、ディスカバリードキュメントはそのパスの下に配置されます。
+issuer の URL にパスが含まれる場合、ディスカバリードキュメントはそのパスの下に配置されます。
+
+ブラウザーでログインするには、ログインページも必要です。ブラウザーなしでログインを確かめるには、ログインページとクライアントが行う手順を順に実行します。CSRF トークン、ログイン、PKCE 付きの認可リクエスト、トークンエンドポイントでのコードの引き換えです。上記のユーザーとクライアントでは次のとおりです。
+
+```sh
+V=$(node -e 'console.log(require("crypto").randomBytes(32).toString("base64url"))')
+C=$(node -e 'console.log(require("crypto").createHash("sha256").update(process.argv[1]).digest("base64url"))' "$V")
+AUTH="http://127.0.0.1:8080/oauth/authorize?response_type=code&client_id=my-web-app&redirect_uri=http%3A%2F%2F127.0.0.1%3A3000%2Fcallback&scope=openid&state=xyz&code_challenge=$C&code_challenge_method=S256"
+TOKEN=$(curl -s -c jar -b jar http://127.0.0.1:8080/session/csrf | node -pe 'JSON.parse(require("fs").readFileSync(0)).csrf_token')
+curl -s -c jar -b jar -H "X-CSRF-Token: $TOKEN" --data-urlencode username=alice --data-urlencode password=your-password --data-urlencode "redirect_to=$AUTH" http://127.0.0.1:8080/session/login
+curl -s -o /dev/null -w '%{redirect_url}\n' -b jar "$AUTH"
+curl -s http://127.0.0.1:8080/oauth/token -d grant_type=authorization_code -d client_id=my-web-app --data-urlencode redirect_uri=http://127.0.0.1:3000/callback -d code=<code> -d code_verifier="$V"
+```
+
+3 つ目のリクエストは、コード付きの `http://127.0.0.1:3000/callback` へのリダイレクトを出力します。そのコードを最後のリクエストの `<code>` に入れると、トークンが返ります。各リクエストと答えは[ログインページの手引き](docs/login-page.md)にあります。
 
 ## パターンの選択と機能の追加
 
