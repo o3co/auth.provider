@@ -22,6 +22,7 @@
 - Operator section: `requests` per source in each window (1–100000, default 60) and `window` (1s–1d, default `1m`, written with its unit).
 
 ## Invariants
+- An issued answer leaves `scope` out when a grant gives it empty, for every grant alike, the test caller too.
 - Requests are limited per source by `rate-limit`'s policy before any client is authenticated; over it, `429`.
 - Checking order: client authentication, repeated parameters, mistyped parameters, `grant_type`, the body the grant takes, the client's allowance, the binding, the client's binding requirement, the rule's `untargeted` for a grant without `targets`, the grant.
 - A repeated parameter is `invalid_request` unless the rule's `repeated` answers it, as is an OAuth parameter sent in JSON as neither a string nor `null` (as if left out); `assertion` is its grant's to define.

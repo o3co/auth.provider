@@ -6,6 +6,7 @@ import { type HttpRequest, type HttpResponse, noStore, type Route } from "@mod/h
 import { determinedSource } from "@mod/request-source";
 import type { Binding, ClientBindings, SenderBindings } from "@mod/sender-binding";
 import type { Tokens } from "@mod/tokens";
+import { answeredBody } from "./answer.ts";
 import { challenged } from "./challenges.ts";
 import { authenticateClient, oauthError } from "./contract.ts";
 import { issuanceFor, refusedAnswer } from "./issuance.ts";
@@ -200,7 +201,7 @@ export function tokenEndpoint(
 		return {
 			status: 200,
 			headers: noStore,
-			body: { json: outcome.body },
+			body: { json: answeredBody(outcome.body) },
 		};
 	};
 	return {

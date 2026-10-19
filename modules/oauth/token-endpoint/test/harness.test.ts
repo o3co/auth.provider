@@ -49,7 +49,11 @@ const recording = () => {
 				const issued = await input.issue(grant, { notAfter: 1_800_000_120_000, session: "sid" });
 				if (issued.kind === "refused") return issued;
 				const { expiresIn, tokenType } = issued.access;
-				return { kind: "issued", body: { expires_in: expiresIn, token_type: tokenType } };
+				// No scope granted: the endpoint answers it by leaving scope out, whatever the grant writes.
+				return {
+					kind: "issued",
+					body: { expires_in: expiresIn, token_type: tokenType, scope: "" },
+				};
 			},
 		})),
 	]);
@@ -121,6 +125,7 @@ it("hands a grant what the token endpoint hands it, for the same client, paramet
 	expect(real.seen).toEqual([{ client: "rec", x: "1", binding }]);
 	expect(outcome).toEqual({ kind: "issued", body: throughEndpoint });
 	expect(throughEndpoint).toEqual({ expires_in: 120, token_type: "ONE" });
+	expect(Object.keys(throughEndpoint as object)).not.toContain("scope");
 });
 
 it("hands a grant that takes JSON its members as the token endpoint does", async () => {
