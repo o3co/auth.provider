@@ -4,7 +4,7 @@ import { amrSources } from "@mod/login-gates";
 import { factorKinds, firstBindingGates, secondFactorAmr } from "@mod/mfa-extensions";
 import { enrollmentWitnesses } from "@mod/mfa-witness";
 import { resealers, seal } from "@mod/seal";
-import { factorStore, factors, proofSteps } from "./contract.ts";
+import { enforcers, factorStore, factors, proofSteps } from "./contract.ts";
 import { addsMfa, byKind, factorDecisions } from "./factors.ts";
 import { resealerOver } from "./records/resealer.ts";
 import { section } from "./section.ts";
@@ -20,6 +20,13 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 		const kinds = await c.collect(factorKinds);
 		if (c.section.mode === "required" && !kinds.some((k) => k.counts)) {
 			return c.refuse("mfa.mode", "required needs a factor kind that counts");
+		}
+		// Sessions are held to the factors elsewhere: without that module, using them would ask for none.
+		if ((await c.collect(enforcers)).length === 0) {
+			return c.refuse(
+				"mfa",
+				"mfa needs a module holding sessions to its factors; compose mfa-entry",
+			);
 		}
 		const [witness, ...more] = await c.collect(enrollmentWitnesses);
 		if (more.length > 0) return c.refuse("mfa", "more than one enrollment witness is contributed");

@@ -11,7 +11,7 @@ import {
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
-import { type Factors, factors } from "@mod/mfa";
+import { type Enforcer, enforcers, type Factors, factors } from "@mod/mfa";
 import { type FactorKind, factorKinds, secondFactorAmr } from "@mod/mfa-extensions";
 import { type EntryRequirement, entryRequirements, sessionRules, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
@@ -177,6 +177,15 @@ it("takes only a second factor proven recently as proven, never a recent sign-in
 	expect(at(["pwd", secondFactorAmr])).toBe(true);
 	expect(at(["pwd"], { raisedAmr: ["otp", secondFactorAmr], raisedAt: now })).toBe(true);
 	expect(at(["pwd", secondFactorAmr], { authenticatedAtUnknown: true })).toBe(false);
+});
+
+it("names itself among the modules holding sessions to the subject's factors", async () => {
+	const seen = contract<readonly Enforcer[]>("seen-enforcers");
+	const reader = defineModule({ name: "reader" }, (m) => [
+		m.provide(seen).by((c) => c.collect(enforcers)),
+	]);
+	const { app } = await serve(new Set(), {}, [reader]);
+	expect(app.get(seen).map((e) => e.name)).toEqual(["mfa-entry"]);
 });
 
 it("refuses to boot under required mode unless a composed kind both counts and adds a second factor", async () => {

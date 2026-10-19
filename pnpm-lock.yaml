@@ -2079,6 +2079,9 @@ importers:
       '@mod/login-gates':
         specifier: workspace:*
         version: link:../../identity/login-gates
+      '@mod/mfa-entry':
+        specifier: workspace:*
+        version: link:../mfa-entry
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -2225,6 +2228,9 @@ importers:
       '@mod/login-attributes':
         specifier: workspace:*
         version: link:../../identity/login-attributes
+      '@mod/mfa-entry':
+        specifier: workspace:*
+        version: link:../mfa-entry
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records

@@ -30,6 +30,7 @@
 	},
 	"devDependencies": {
 		"@mod/login-attributes": "workspace:*",
+		"@mod/mfa-entry": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/seal": "workspace:*",
 		"@mod/store": "workspace:*",

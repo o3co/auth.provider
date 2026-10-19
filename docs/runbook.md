@@ -141,7 +141,7 @@ When the outside user ledger suspends a user, its answers stop new logins and gr
 - Left until they expire: access tokens not bound to a session where `tokens.subject-check = none`, JWTs a resource server checks itself, and tokens already handed to an upstream. A request already past its checks when the revocation is recorded may finish.
 - Every subject revoked keeps its record with no end, so the records grow with the subjects you revoke. With `mfa-revocation`, each revocation also writes the subject's factor list in `mfa`'s store, empty for a subject who never enrolled, so that store grows with them too.
 - With second factors composed, `mfa-revocation` makes a revocation complete only once no enrollment begun before it can bind; an app composed by hand must compose it, as `combinations` does.
-- Likewise `mfa-entry` holds sessions to second factors; an app composed by hand with `mfa` and `mfa-flows` but not `mfa-management` boots without it, and sessions then need no second factor.
+- Likewise `mfa-entry` holds sessions to second factors; `mfa` refuses to boot without it, whatever the mode, so an app composed by hand must compose it.
 
 ## Keeping the second-factor witness at the ledger
 

@@ -13,6 +13,7 @@ import { type FactorStore, factorStore, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
 import { type MfaSettings, mfaConfig } from "@mod/mfa/testing";
 import bindingProofModule from "@mod/mfa-binding-proof/module";
+import mfaEntry from "@mod/mfa-entry/module";
 import { factorKinds } from "@mod/mfa-extensions";
 import { type Lockouts, lockouts } from "@mod/rate-limit";
 import rateLimitModule from "@mod/rate-limit/module";
@@ -224,6 +225,7 @@ export async function serve(settings: Settings = {}, extra: Module[] = []) {
 			switchedModule(rateLimitModule, lockouts, releasing),
 			sealModule,
 			mfaModule,
+			mfaEntry,
 			bindingProofModule,
 			flowsModule,
 			code,

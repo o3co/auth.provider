@@ -1,5 +1,5 @@
 import { defineModule } from "@mod/kernel";
-import { factors } from "@mod/mfa";
+import { enforcers, factors } from "@mod/mfa";
 import { factorKinds, secondFactorAmr } from "@mod/mfa-extensions";
 import { type AuthContext, entryRequirements, sessions } from "@mod/session";
 import { secondFactors } from "./contract.ts";
@@ -18,6 +18,7 @@ const secondFactorAt = (context: AuthContext) => {
 };
 
 export default defineModule({ name: "mfa-entry" }, (m) => [
+	m.contribute(enforcers).by(() => ({ name: "mfa-entry" })),
 	m.provide(secondFactors).by((c) => {
 		const open = c.late(sessions);
 		return {

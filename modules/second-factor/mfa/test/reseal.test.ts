@@ -11,7 +11,7 @@ import sealModule from "@mod/seal/module";
 import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, expect, it } from "vitest";
-import { factors, proofSteps } from "../src/contract.ts";
+import { enforcers, factors, proofSteps } from "../src/contract.ts";
 import mfaModule from "../src/module.ts";
 import type { StoredFactors } from "../src/store.ts";
 import { mfaConfig } from "../src/testing.ts";
@@ -55,6 +55,11 @@ const step = defineModule({ name: "step" }, (m) => [
 const sealOver = async (ring: Readonly<Record<string, unknown>>) =>
 	(await assemble({ modules: [sealModule], config: { ...kernelConfig(), seal: ring } })).get(seal);
 
+/** A module holding sessions to the factors, as `mfa-entry` does in an app. */
+const enforcer = defineModule({ name: "enforcer" }, (m) => [
+	m.contribute(enforcers).by(() => ({ name: "enforcer" })),
+]);
+
 /** mfa over a ring with `past` as a previous key; `aged` binds a code factor, its secret then sealed by `by`. */
 async function rotated() {
 	const place = memoryFactors();
@@ -68,6 +73,7 @@ async function rotated() {
 			sealModule,
 			gatesModule,
 			mfaModule,
+			enforcer,
 			code,
 			step,
 		],
