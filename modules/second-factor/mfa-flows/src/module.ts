@@ -63,7 +63,7 @@ export default defineModule({ name: "mfa-flows", section, replicaSafe: true }, (
 			const problem = lockoutProblem(policy);
 			if (problem) return c.refuse("mfa-flows", `lockout policy: ${problem}`);
 			const handle = withUnavailable((await handlersOver(c, policy))[name]);
-			if (method === "GET") return { method, path, handle };
+			if (method === "GET") return { method, path, changesState: false, handle };
 			const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 			return {
 				method,

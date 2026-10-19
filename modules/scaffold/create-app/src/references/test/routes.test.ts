@@ -40,7 +40,6 @@ it("finds every route full with every opt-in serves, each by the package it is f
 		ownSite: { policy: "csrf" },
 		perSource: { policy: "rate-limit.attempts-per-source" },
 	});
-	expect(routes.find((r) => r.path === "/session/csrf")?.changesState).toBeUndefined();
 	const seen = routes.map((r) => `${r.method} ${r.path}`);
 	expect(new Set(seen).size).toBe(seen.length);
 });

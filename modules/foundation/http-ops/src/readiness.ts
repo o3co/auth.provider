@@ -45,6 +45,7 @@ export function sharedReadiness(
 export function readyz(shared: SharedReadiness): Route {
 	return {
 		method: "GET",
+		changesState: false,
 		path: "/readyz",
 		takes: ["none"],
 		handle: async () => {

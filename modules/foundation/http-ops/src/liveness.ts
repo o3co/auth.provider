@@ -4,6 +4,7 @@ import { noStore, type Route } from "@mod/http";
 export function liveness(): Route {
 	return {
 		method: "GET",
+		changesState: false,
 		path: "/_healthcheck",
 		takes: ["none"],
 		handle: () => ({ status: 200, headers: { ...noStore }, body: { json: { status: "ok" } } }),
