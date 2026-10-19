@@ -12,7 +12,8 @@
 ## Offers
 - `routes`: a method, a path and a handler, with the policies used (and their options), the bodies taken and cross-origin use when declared; a GET route also answers HEAD, with the same headers and no body, unless it changes state.
 - A route's `unavailable`: its answer to Unavailable, and `noted`, called first, whose fields join http's one warning, `http.unavailable`, with what was unavailable and the route's declared path; a `noted` that throws is logged `http.failed` by kind and the answer stands.
-- Paths: an exact path comes first, then the longest `/*` above it; a handler reads the URL parser's path (dot segments resolved, percent-encoding kept as sent), and a `/*` handler checks the segments under it by its own rules.
+- Paths: a middle `*` segment takes exactly one non-empty segment, and a last `/*` everything under it; of the declared paths reaching a path, the one with a literal at the first segment they differ comes first, and a middle `*` before a last (so an exact path first).
+- A handler reads the URL parser's path (dot segments resolved, percent-encoding kept as sent, so an escaped `/` stays in its segment), and a `*` handler checks the segments it takes by its own rules.
 - Bodies: a route may take a form, JSON, none, or several, and any other body is `415`, refused only after the route's policies have seen the request.
 - A form and a JSON body share one size limit of 64 KiB: a larger form is read as empty, and a larger JSON body is `413`.
 - A JSON body is one object in well-formed UTF-8, frozen, naming no member twice in one object; anything else is `400`.
