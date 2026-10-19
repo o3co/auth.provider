@@ -18,17 +18,17 @@
 - Audit events, with the subject, once written (never for a refused or raced decision but a first binding another factor beat, nor a reset, never with a secret, proof or code): declared in `./audit-events`, listed in the audit event reference.
 - Contributions: `session` entry requirements, judging `use` and `credentials`; `login-gates` amr (each kind's, and `mfa` if one adds it).
 - Section: `mode` (`optional`, or `required` by default), `max-factors` (default 10).
+- How the lists and claims are kept and sealed again: internal module `records`.
 - Store interface `factorStore`: factor lists and claims on unique values, by keys mfa makes, contents opaque; save once, read, change from what it holds, kept without end. Needs: never evicted, survives a crash and a failover, reads only what is confirmed. `./testing`: its contract test, and a config builder.
 
 ## Invariants
 - A kind is guessable unless it says not, as in 0.17.
-- A factor list's record holds its subject, so its secrets can be sealed again; the store's key is the subject's hash.
 - A secret a `previous` key sealed is sealed again in the write a proof of its factor makes, and by the resealer `mfa` at `seal`'s `resealers`, which walks every list and writes only over the secret read; one no key opens, or a list whose subject is not its key's, is left.
 - A counting factor is one of a kind declared counting. "optional" stops only subjects holding a factor; "required" asks one with no counting factor for a first binding, and never removes the last (`last`).
 - "required" refuses to boot unless a composed kind both counts and adds `mfa`, since no session could then be used.
 - Removing the last counting factor removes the recovery codes in the same write. Recovery codes come with the first counting factor, are shown once, and count toward `max-factors`.
 - A factor's state is written only over the state judged, so one proof passes once; a factor gone meanwhile is raced. A store that cannot answer is unavailable, never a refusal.
-- A secret, and what a challenge kept, are sealed to the subject and the factor; a pending binding, to the subject. A sealed value given back comes only from mfa's records or `mfa-flows`' transactions, so one that will not open is unavailable.
+- A sealed value given back comes only from mfa's records or `mfa-flows`' transactions, so one that will not open is unavailable.
 - A binding whose unique value another factor holds, of any subject, is refused as duplicate and leaves nothing, even when two bind at once; `begin` refuses it already when the secret alone tells the value.
 - A way back that will not enrol fails a first binding as unavailable.
 - A binding begun while the subject held no counting factor binds only if none counts when it is written; else it writes nothing, answers `first-binding-closed`, and records `mfa.first_binding_conflict` (`kind`). Of two first bindings at once, one binds.

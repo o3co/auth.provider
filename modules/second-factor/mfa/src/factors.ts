@@ -12,7 +12,7 @@ import {
 	type Shown,
 	secondFactorAmr,
 } from "./contract.ts";
-import { type Factor, factorRecords, sealContext } from "./records.ts";
+import { type Factor, factorRecords, sealContext } from "./records/records.ts";
 import type { FactorStore } from "./store.ts";
 
 /** When the sign-in was, where it is known: a time the upstream did not give is never recent. */

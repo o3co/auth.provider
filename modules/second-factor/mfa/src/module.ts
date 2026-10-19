@@ -19,8 +19,8 @@ import {
 	secondFactorAt,
 	signedInAt,
 } from "./factors.ts";
-import { factorRecords } from "./records.ts";
-import { resealerOver } from "./resealer.ts";
+import { factorRecords } from "./records/records.ts";
+import { resealerOver } from "./records/resealer.ts";
 import { section } from "./section.ts";
 
 const admit = { kind: "admit" } as const;
