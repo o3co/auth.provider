@@ -2166,6 +2166,9 @@ importers:
       '@mod/mfa-binding-proof':
         specifier: workspace:*
         version: link:../mfa-binding-proof
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit

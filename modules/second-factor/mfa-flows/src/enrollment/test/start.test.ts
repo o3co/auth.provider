@@ -1,6 +1,6 @@
 import { defineModule } from "@mod/kernel";
-import { type AskedFrom, type Enrolled, factorKinds, type Sending } from "@mod/mfa";
 import { bindingProofs } from "@mod/mfa-binding-proof";
+import { type AskedFrom, type Enrolled, factorKinds, type Sending } from "@mod/mfa-extensions";
 import { afterEach, expect, it } from "vitest";
 import { serve } from "../../../test/harness.ts";
 

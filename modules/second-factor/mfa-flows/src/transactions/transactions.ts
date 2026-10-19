@@ -1,7 +1,7 @@
 import { type Cookies, cookies } from "@mod/cookies";
 import type { HttpRequest } from "@mod/http";
 import { type BuildContext, type Clock, isUnavailable, type Log, Unavailable } from "@mod/kernel";
-import type { AskedFrom } from "@mod/mfa";
+import type { AskedFrom } from "@mod/mfa-extensions";
 import { vouches } from "@mod/subject-attributes";
 import type { Settings } from "../section.ts";
 import {

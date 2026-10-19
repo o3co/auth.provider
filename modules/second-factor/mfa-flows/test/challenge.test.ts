@@ -1,5 +1,5 @@
 import { defineModule } from "@mod/kernel";
-import { factorKinds, type Sending } from "@mod/mfa";
+import { factorKinds, type Sending } from "@mod/mfa-extensions";
 import { expect, it } from "vitest";
 import { serve } from "./harness.ts";
 

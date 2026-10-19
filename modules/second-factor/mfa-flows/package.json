@@ -20,6 +20,7 @@
 		"@mod/login-gates": "workspace:*",
 		"@mod/mfa": "workspace:*",
 		"@mod/mfa-binding-proof": "workspace:*",
+		"@mod/mfa-extensions": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
 		"@mod/request-source": "workspace:*",
 		"@mod/session": "workspace:*",
