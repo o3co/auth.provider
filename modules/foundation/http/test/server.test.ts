@@ -27,6 +27,7 @@ import {
 } from "../src/contract.ts";
 import http from "../src/module.ts";
 import { testRequest } from "../src/testing.ts";
+import { declared } from "./declared.ts";
 
 const quiet = quietRuntime({
 	clock: { now: () => 0 },
@@ -85,7 +86,7 @@ async function serveWith(handlers: Module, settings = {}, runtime = quiet) {
 function handlers(list: readonly Route[], rules: readonly PolicyRule[] = []): Module {
 	return defineModule({ name: "handlers" }, (m) => [
 		...rules.map((rule) => m.contribute(policies).by(() => rule)),
-		...list.map((route) => m.contribute(routes).by(() => route)),
+		...list.map((route) => m.contribute(routes).by(() => declared(route))),
 	]);
 }
 
