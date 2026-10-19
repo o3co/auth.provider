@@ -25,6 +25,7 @@
 - A wiring names the feature it `wires`; it comes with the feature, whether given or brought in.
 - A bridge names the modules it `joins`, a non-empty list of names; it comes once every one of them is composed, whether given or brought in. An axis owner reached counts, with a module or not.
 - A `joins` that is not a non-empty list of names, or a `wires` that is not a name, is refused, naming each such package.
+- A dependency a manifest names in `helpers` (functions and types alone) or `optional` (contracts used only where something contributes, which brings it) is not needed to run; either, when not a non-empty list of its dependencies, is refused, naming each package.
 - Wirings of one feature, and bridges, come in code point order of name.
 - An axis is its owner's: an adapter `replaces` the owner (composed instead of its module) or `adapts` it (beside it). Its default is the one adapter declaring `default`, or its only one.
 - An axis's default comes only where its owner is composed (reached among what runs, with a module or not, as the kernel), and not where another adapter of that axis is already composed. A default declared to replace its owner comes wherever that owner would, whether the owner has a module or not, so the owner's module is never composed beside it.

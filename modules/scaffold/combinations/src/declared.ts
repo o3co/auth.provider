@@ -8,7 +8,7 @@ export interface Package {
 	readonly kind?: string;
 	/** Whether it can be composed: it exports `./module`. */
 	readonly module: boolean;
-	/** The packages it needs to run (`dependencies`, not `devDependencies`). */
+	/** The packages it needs to run: its `dependencies` (not `devDependencies`), but those it names `helpers` (functions and types alone) or `optional` (contracts used only where a contribution brings them). */
 	readonly needs: readonly string[];
 	readonly optIn: boolean;
 	/** The axis owner it replaces or adapts to, and whether it is that axis's default. */
@@ -30,6 +30,8 @@ interface Manifest {
 	readonly kind?: unknown;
 	readonly exports?: unknown;
 	readonly dependencies?: unknown;
+	readonly helpers?: unknown;
+	readonly optional?: unknown;
 	readonly optIn?: unknown;
 	readonly replaces?: unknown;
 	readonly adapts?: unknown;
@@ -38,14 +40,17 @@ interface Manifest {
 	readonly joins?: unknown;
 }
 
+const dependenciesOf = (m: Manifest) =>
+	typeof m.dependencies === "object" && m.dependencies !== null ? Object.keys(m.dependencies) : [];
+const marked = (value: unknown) => (isNames(value) ? value : []);
+
 const packageOf = (m: Manifest): Package => ({
 	name: m.name,
 	...(isName(m.kind) ? { kind: m.kind } : {}),
 	module: typeof m.exports === "object" && m.exports !== null && "./module" in m.exports,
-	needs:
-		typeof m.dependencies === "object" && m.dependencies !== null
-			? Object.keys(m.dependencies)
-			: [],
+	needs: dependenciesOf(m).filter(
+		(name) => !marked(m.helpers).includes(name) && !marked(m.optional).includes(name),
+	),
 	optIn: m.optIn === true,
 	...(isName(m.replaces) ? { replaces: m.replaces } : {}),
 	...(isName(m.adapts) ? { adapts: m.adapts } : {}),
@@ -55,6 +60,8 @@ const packageOf = (m: Manifest): Package => ({
 const isName = (value: unknown): value is string => typeof value === "string" && value !== "";
 const isNames = (value: unknown): value is string[] =>
 	Array.isArray(value) && value.length > 0 && value.every(isName);
+const ofDependencies = (value: unknown, m: Manifest) =>
+	isNames(value) && value.every((name) => dependenciesOf(m).includes(name));
 
 /**
  * What the packages of the workspace rooted at `root` declare in their package.json, as the
@@ -80,13 +87,20 @@ export function declaredInIndex(file: string): Declared {
 function declaredOf(manifests: readonly Manifest[]): Declared {
 	const packages = [...manifests].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 	// Refused, never left missing with no word why: a bridge joining nothing would come with all.
-	const misdeclared = (key: "joins" | "wires", ok: (value: unknown) => boolean, shape: string) => {
-		const names = packages.filter((m) => m[key] !== undefined && !ok(m[key])).map((m) => m.name);
+	const misdeclared = (
+		key: "joins" | "wires" | "helpers" | "optional",
+		ok: (value: unknown, m: Manifest) => boolean,
+		shape: string,
+	) => {
+		const names = packages.filter((m) => m[key] !== undefined && !ok(m[key], m)).map((m) => m.name);
 		return names.length > 0 ? [`${names.join(", ")}: ${key} is not ${shape}`] : [];
 	};
 	const refusals = [
 		...misdeclared("joins", isNames, "a non-empty list of module names"),
 		...misdeclared("wires", isName, "a module name"),
+		...(["helpers", "optional"] as const).flatMap((key) =>
+			misdeclared(key, ofDependencies, "a non-empty list of its dependencies"),
+		),
 	];
 	if (refusals.length > 0) throw new Error(refusals.join("; "));
 	const wirings = new Map<string, string[]>();
