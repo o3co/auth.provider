@@ -61,7 +61,7 @@ export default defineModule({ name: "mfa-binding-proof", section }, (m) => [
 		const mfa = await c.get(factors);
 		/** The proof asked of a subject that holds no counting factor yet. */
 		const asked = async (subject: string, from?: AskedFrom) =>
-			(await mfa.countingHeld(subject)) ? undefined : p.proofFor(subject, from);
+			(await mfa.countingHeld(subject, "binding")) ? undefined : p.proofFor(subject, from);
 		return {
 			asks: async (subject, from) => ((await asked(subject, from)) ? "proof" : "nothing"),
 			challenge: async (subject, until, from) => {
