@@ -34,6 +34,7 @@ What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc
 - **Breaking**: an upstream link in the settings names an upstream a composed module declares.
 - **Breaking**: under `required`, boot is refused unless a composed second factor counts and adds one.
 - **Breaking**: the routes that manage factors come from the `mfa-management` module.
+- **Breaking**, for a user ledger over HTTP: on the password call, a `403` reads as unavailable (the login answers `503`); only a `401` says no such user or a wrong password.
 - **Breaking**: audit and log names: `introspect.store_unavailable` is now `introspection.unavailable`, and the routes' own unavailable warnings are one, `http.unavailable`.
 - A 503 a route does not declare carries `{"error":"service_unavailable"}`.
 - A written link to an upstream identity lets in only a subject the users or the ledger know.
