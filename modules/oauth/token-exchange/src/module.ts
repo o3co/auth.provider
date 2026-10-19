@@ -35,8 +35,18 @@ const clientSection: Section<{
 }> = {
 	name: "token-exchange",
 	schema: z.strictObject({
-		"others-tokens": z.boolean().prefault(false),
-		"public-exchange": z.boolean().prefault(false),
+		"others-tokens": z
+			.boolean()
+			.prefault(false)
+			.describe(
+				"Whether the client may present subject and actor tokens that do not name it, by issued-to or audience.",
+			),
+		"public-exchange": z
+			.boolean()
+			.prefault(false)
+			.describe(
+				"Whether the client, when public, may exchange; a confidential client allowed the grant always may.",
+			),
 	}),
 };
 

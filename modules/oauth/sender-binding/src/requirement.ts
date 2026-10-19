@@ -10,8 +10,19 @@ export interface BindingRequirement {
 const requirementSection: Section<BindingRequirement> = {
 	name: "sender-binding",
 	schema: z.strictObject({
-		required: z.boolean().prefault(false),
-		kinds: z.array(z.string()).min(1).optional(),
+		required: z
+			.boolean()
+			.prefault(false)
+			.describe(
+				"Whether every token issued to the client is bound to its sender: a request that proves no binding is refused.",
+			),
+		kinds: z
+			.array(z.string())
+			.min(1)
+			.optional()
+			.describe(
+				"The binding kinds the client's tokens may be bound by, by the names they give operators (such as dpop), each one composed; unwritten, any.",
+			),
 	}),
 };
 

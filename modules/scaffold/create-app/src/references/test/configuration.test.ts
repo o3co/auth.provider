@@ -130,9 +130,6 @@ const clientsDescribedLater = [
 	"consent",
 	"federation-grants",
 	"federation-tokens",
-	"rp-logout",
-	"sender-binding",
-	"token-exchange",
 ];
 
 it("describes every key of every client metadata section, outside those listed as described later", async () => {

@@ -780,11 +780,11 @@ From `@mod/rp-logout`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.rp-logout.post-logout-redirect-uris` | list of string | `[]` |  |  |
-| `sections.rp-logout.frontchannel-logout-uri` | string |  |  |  |
-| `sections.rp-logout.frontchannel-logout-session-required` | boolean | `true` |  |  |
-| `sections.rp-logout.backchannel-logout-uri` | string |  |  |  |
-| `sections.rp-logout.backchannel-logout-session-required` | boolean | `true` |  |  |
+| `sections.rp-logout.post-logout-redirect-uris` | list of string | `[]` |  | Where a logout may send the browser back to, each a URI `authorize` lets a client register; a return asked for is used only when it matches one exactly. |
+| `sections.rp-logout.frontchannel-logout-uri` | string |  |  | The page framed after a logout (OpenID Connect Front-Channel Logout 1.0): an http or https URL without userinfo, a fragment, or iss or sid in its query, at one of the client's redirect URIs' origins. |
+| `sections.rp-logout.frontchannel-logout-session-required` | boolean | `true` |  | Whether the framed page's URL gets the session's sid beside iss. |
+| `sections.rp-logout.backchannel-logout-uri` | string |  |  | Where the logout token is posted after a logout (OpenID Connect Back-Channel Logout 1.0): an http or https URL without userinfo or a fragment. |
+| `sections.rp-logout.backchannel-logout-session-required` | boolean | `true` |  | Whether the logout token carries the session's sid. |
 
 ### sections.sender-binding
 
@@ -792,8 +792,8 @@ From `@mod/sender-binding`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.sender-binding.required` | boolean | `false` |  |  |
-| `sections.sender-binding.kinds` | list of string |  |  |  |
+| `sections.sender-binding.required` | boolean | `false` |  | Whether every token issued to the client is bound to its sender: a request that proves no binding is refused. |
+| `sections.sender-binding.kinds` | list of string |  |  | The binding kinds the client's tokens may be bound by, by the names they give operators (such as dpop), each one composed; unwritten, any. |
 
 ### sections.token-exchange
 
@@ -801,8 +801,8 @@ From `@mod/token-exchange`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.token-exchange.others-tokens` | boolean | `false` |  |  |
-| `sections.token-exchange.public-exchange` | boolean | `false` |  |  |
+| `sections.token-exchange.others-tokens` | boolean | `false` |  | Whether the client may present subject and actor tokens that do not name it, by issued-to or audience. |
+| `sections.token-exchange.public-exchange` | boolean | `false` |  | Whether the client, when public, may exchange; a confidential client allowed the grant always may. |
 
 ## IdP type settings
 
