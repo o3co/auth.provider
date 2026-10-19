@@ -13,7 +13,7 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | GET | `/.well-known/oauth-authorization-server/` | `@mod/discovery` | form |  | no |  |  | yes |
 | GET | `/.well-known/openid-configuration` | `@mod/discovery` | form |  | no |  |  | yes |
 | GET | `/.well-known/openid-configuration/` | `@mod/discovery` | form |  | no |  |  | yes |
-| GET | `/_healthcheck` | `@mod/http-ops` | none |  |  |  |  |  |
+| GET | `/_healthcheck` | `@mod/http-ops` | none |  | no |  |  |  |
 | POST | `/ledger/subject-revocations` | `@mod/subject-revocation-http` | json |  | yes | A server's call proved by its own credential; it reads no cookie. | It checks the source and the credential first, then counts failures and authenticated requests apart, per source, in the handler. |  |
 | GET | `/metrics` | `@mod/metrics-prometheus` | none |  |  |  |  |  |
 | GET | `/oauth/authorize` | `@mod/authorize` | form | `rate-limit.requests-per-source` | yes | An authorization request arrives as a navigation from the client's site by design; it only starts what the user's own login and consent complete. | `rate-limit.requests-per-source` |  |
@@ -35,7 +35,7 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | POST | `/oauth/webauthn/authentication/options` | `@mod/webauthn-login` | json, form, none | `rate-limit.requests-per-source` | yes | It reads no cookie and answers options the same for everyone, the challenge made for the client that asks. | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/webauthn/registration/options` | `@mod/passkey-registration` | json, none | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/webauthn/registration/verify` | `@mod/passkey-registration` | json, none | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
-| GET | `/readyz` | `@mod/http-ops` | none |  |  |  |  |  |
+| GET | `/readyz` | `@mod/http-ops` | none |  | no |  |  |  |
 | GET | `/session/csrf` | `@mod/csrf` | form |  |  |  |  |  |
 | GET | `/session/federation-grants/callback/*` | `@mod/federation-grants` | form | `rate-limit.requests-per-source` | yes | The upstream's redirect back, matched to the state of a connection this browser started. | `rate-limit.requests-per-source` |  |
 | GET | `/session/federation-grants/connect` | `@mod/federation-grants` | form | `rate-limit.requests-per-source` | yes | A navigation the client sends the user on, carrying a request only that client could make. | `rate-limit.requests-per-source` |  |
