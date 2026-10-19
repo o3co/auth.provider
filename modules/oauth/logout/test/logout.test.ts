@@ -6,8 +6,10 @@ import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
-import { participants, type Sessions, sessions } from "@mod/session";
+import { type Sessions, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import { participants } from "@mod/session-participants";
+import sessionParticipants from "@mod/session-participants/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, expect, it } from "vitest";
 import logoutModule from "../src/module.ts";
@@ -35,6 +37,7 @@ async function serve() {
 			audit.module,
 			http,
 			switchedModule(sessionStandIn, sessions, down),
+			sessionParticipants,
 			subjectRevocationStandIn,
 			logoutModule,
 			participant,
