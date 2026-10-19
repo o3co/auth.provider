@@ -38,4 +38,4 @@
 - A first counting factor begins only where every gate contributed admits it, given what the caller holds (`mfa-binding-proof`'s asks its proof); `begin` asks the kind for nothing before. With no gate, the first factor trusts whoever binds it.
 
 ## Depends on
-- `kernel`, `session`, `login-gates`, `seal`, `audit`
+- `kernel`, `session`, `login-gates`, `seal`, `audit`, `mfa-extensions` (the kinds and gates, offered again here for now)
