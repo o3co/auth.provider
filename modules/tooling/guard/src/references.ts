@@ -27,12 +27,30 @@ const inRepository = (dir: string, token: string) =>
 
 export const namesLine = (text: string) => lineReference.exec(text)?.[0];
 
+/** A fence opening or closing a code block, as Markdown writes one. */
+const fence = /^\s*(\x60{3,}|~{3,})/;
+/** The text outside fenced code blocks: a block's samples show another project's files, not this one's. */
+const outsideCode = (text: string) => {
+	let inside = false;
+	return text
+		.split("\n")
+		.filter((line) => {
+			if (fence.test(line)) {
+				inside = !inside;
+				return false;
+			}
+			return !inside;
+		})
+		.join("\n");
+};
+
 /**
  * References in a document to files outside its own directory, or to files that are not there: every link
- * target, and each inline path that names a file of the repository.
+ * target, and each inline path that names a file of the repository, outside fenced code blocks.
  */
-export function foreignFiles(path: string, text: string): string[] {
+export function foreignFiles(path: string, document: string): string[] {
 	const dir = dirname(path);
+	const text = outsideCode(document);
 	const refs = new Set([
 		...[...text.matchAll(linkTarget)]
 			.map((m) => m[1] ?? "")
