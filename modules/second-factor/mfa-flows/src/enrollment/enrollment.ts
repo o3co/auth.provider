@@ -273,8 +273,8 @@ export function enrollmentOver(p: EnrollmentParts) {
 			return jsonAnswer(401, { error: "mfa_invalid", attempts_remaining: left });
 		}
 		if (!(await p.transactions.take(txId))) return unknownTransaction;
-		// Checked again just before the write: a revocation while the proof was judged binds nothing. A
-		// reset's clear is fenced inside mfa's write; a revocation alone after this check is not.
+		// Checked again just before the write, to answer early: a reset since the binding began, or a
+		// revocation once complete, is fenced inside mfa's write in any case.
 		if (await revokedSince(p.revocation, t)) return loginRequired;
 		const bound = await p.factors.bind(t.subject, pending, proved.state, label, askedFrom(t));
 		// A reset or a revocation since the binding began, which ended its sessions too.
