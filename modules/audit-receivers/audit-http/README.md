@@ -19,7 +19,7 @@
 - The Authorization value is sent only when given, by `outbound` as its `credential`; it is printable ASCII on one line, no space at either end, and is never logged or told in a refusal.
 - An Authorization value beginning `REPLACE-`, the fragment's placeholder, refuses boot.
 - With an Authorization value, the URL must be one `outbound.credentials` sends a credential to: https, or a named plain-loopback pair; boot is refused otherwise (at `url`).
-- Boot is refused, saying why, when `outbound`'s destination policy refuses the URL.
+- Boot is refused, saying why and which of `outbound`'s keys to set (`outbound.refusals`), when its destination policy refuses the URL.
 - Events go to the configured URL alone; a redirect is a failure, never followed. The URL is named to `outbound` as the operator's own (`internal`), so a collector at a host in `internal-hosts` is reached at a private address.
 - Any answer other than 2xx, a refused destination, or no usable answer is this receiver failing; the event is not sent again.
 
