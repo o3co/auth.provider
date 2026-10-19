@@ -37,7 +37,7 @@ export interface NewPart {
 	readonly without?: readonly string[];
 	/** Sections by name; two parts naming one section have their settings merged. */
 	readonly config?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
-	/** Sections only where nothing decides them: a pattern's app takes its trial settings instead. */
+	/** Sections only where nothing decides them: a pattern's app takes its trial layer instead. */
 	readonly fallback?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 	/** Sections that hold only the scene's own keys: a pattern's app mixes no trial value into them. */
 	readonly whole?: readonly string[];

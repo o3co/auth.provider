@@ -30,7 +30,7 @@
 - So does a scene about the absence of a module another one needs, on the new system.
 
 ## Depends on
-- `create-app` (generates the new system's target), `combinations` (what modules need to run, the features that opt in). The system under test is touched only over HTTP
+- `create-app` (generates the new system's target), `trial` (the local layer it boots on), `combinations` (what modules need to run, the features that opt in). The system under test is touched only over HTTP
 
 ## Vocabulary
 - Scene: a neutral description of the target's features and configuration that a test requires. A collection of named area parts.

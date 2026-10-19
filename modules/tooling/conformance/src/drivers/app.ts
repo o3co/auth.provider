@@ -2,7 +2,8 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { generate, type Plan, trialSettings } from "@mod/create-app";
+import { generate, type Plan } from "@mod/create-app";
+import { trialLayer } from "@mod/trial";
 import type { AreaScene, NewPart, Party } from "../areas.ts";
 import { auditSink } from "../audit/audit.ts";
 import { baseEnv, launch, type Started, startRedis, untilPortHeld } from "../driver.ts";
@@ -55,8 +56,8 @@ const portAttempts = 3;
 
 /**
  * Starts the generated app at `dir` on the scene's sections, its audit sink and its store. With
- * `trial`, `create-app`'s trial settings fill the keys the scene leaves unset, except in the sections
- * it leaves: its environment, and its local layer between the scene and the generated configuration.
+ * `trial`, `trial`'s layer fills the keys the scene leaves unset, except in the sections it leaves:
+ * a local layer between the scene and the generated configuration.
  * With `trial.smtp`, a fake relay takes the app's mail.
  */
 export async function started(
@@ -125,26 +126,34 @@ export async function started(
 		const file = join(scratch, "scene.conf");
 		await writeFile(file, JSON.stringify(settings));
 		const layers = [file];
-		let env: Record<string, string> = {};
 		if (trial) {
+			const appended = (key: string, values: readonly unknown[]) =>
+				values.map((value) => `${key} += ${JSON.stringify(value)}`);
 			// No Redis in the scene leaves the trial's URL unread: the app composes no Redis store.
-			const given = await trialSettings(dir, {
+			const given = await trialLayer(dir, {
 				redisUrl: redis?.url ?? "redis://127.0.0.1:1",
-				port,
 				leave: trial.leave,
-				...(trialLists ? reach : {}),
-				...(trialClients && Array.isArray(registered) ? { clients: registered } : {}),
+				layer: [
+					...(trialLists
+						? [
+								...appended("outbound.allow", reach.allow),
+								...appended("outbound.plain-loopback", reach.plainLoopback),
+							]
+						: []),
+					...(trialClients && Array.isArray(registered)
+						? appended("clients.registered", registered)
+						: []),
+				].join("\n"),
 			});
 			const local = join(scratch, "local.conf");
-			await writeFile(local, given.local);
+			await writeFile(local, given);
 			layers.push(local);
-			env = given.env;
 		}
 		return launch({
 			command: process.execPath,
 			args: ["src/main.ts"],
 			cwd: dir,
-			env: { ...env, ...baseEnv(), APP_CONFIG: [...layers, "config/application.conf"].join(",") },
+			env: { ...baseEnv(), APP_CONFIG: [...layers, "config/application.conf"].join(",") },
 			port,
 		});
 	};
