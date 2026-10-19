@@ -101,7 +101,7 @@ export function passkeyGrant(p: LoginParts): Grant {
 					token_type: access.tokenType,
 					expires_in: access.expiresIn,
 					...(refreshToken ? { refresh_token: refreshToken } : {}),
-					...(scope.length > 0 ? { scope: scope.join(" ") } : {}),
+					scope: scope.join(" "),
 				},
 			};
 		},
