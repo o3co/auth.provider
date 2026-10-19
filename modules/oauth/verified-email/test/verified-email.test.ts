@@ -154,8 +154,13 @@ describe("over users and the session's login", () => {
 					// Sessions that reach tokens as they are built, as a composition's closing tokens does.
 					m.provide(sessions).by(async (c) => {
 						await c.get(tokens);
+						const login = parts.login;
 						return stubSessions({
-							openContext: async (handle) => (handle === "h1" ? parts.login : undefined),
+							entryOf: async (handle) =>
+								handle === "h1" && login !== undefined
+									? { kind: "entered", session: { id: handle, context: login }, endsAt: 1 }
+									: { kind: "absent" },
+							openContext: async (handle) => (handle === "h1" ? login : undefined),
 						});
 					}),
 				]),
