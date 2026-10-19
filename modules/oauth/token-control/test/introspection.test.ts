@@ -91,7 +91,7 @@ describe("introspection", () => {
 			},
 		]);
 		expect(s.warnings()).toEqual([
-			["token-control.unavailable", { what: "test", route: "introspect" }],
+			["http.unavailable", { what: "test", route: "/oauth/introspect" }],
 		]);
 	});
 });

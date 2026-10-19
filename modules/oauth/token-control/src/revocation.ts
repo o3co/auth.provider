@@ -1,9 +1,8 @@
 import { type Audit, declaredAudit } from "@mod/audit";
 import type { Clients } from "@mod/clients";
-import { type HttpRequest, type HttpResponse, noStore } from "@mod/http";
-import type { Log } from "@mod/kernel";
+import { type HttpRequest, type HttpResponse, noStore, type Route } from "@mod/http";
 import { determinedSource } from "@mod/request-source";
-import { answeringUnavailable, authenticateClient, oauthError } from "@mod/token-endpoint";
+import { authenticateClient, oauthError } from "@mod/token-endpoint";
 import type { Tokens } from "@mod/tokens";
 import events from "./audit-events.ts";
 import type { RevocableKind } from "./contract.ts";
@@ -34,8 +33,7 @@ export function revocation(
 	clients: Clients,
 	kinds: readonly RevocableKind[],
 	audit: Audit,
-	log: Log,
-) {
+): Pick<Route, "handle" | "unavailable"> {
 	const answer = async (request: HttpRequest): Promise<HttpResponse> => {
 		const authenticated = await authenticateClient(clients, request);
 		if (authenticated.kind === "refused") return authenticated.response;
@@ -74,7 +72,5 @@ export function revocation(
 		}
 		return answered;
 	};
-	return answeringUnavailable(answer, (_request, { what }) => {
-		log.warn("token-control.unavailable", { what, route: "revoke" });
-	});
+	return { handle: answer, unavailable: { response: oauthError(503, "temporarily_unavailable") } };
 }
