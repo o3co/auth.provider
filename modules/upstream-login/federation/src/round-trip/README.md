@@ -17,7 +17,7 @@ Internal module of `federation`: one round trip through an upstream IdP, a login
 - `federated` (the opened IdPs, the transaction store, `cookies`' contract, `login-gates`' return check, the login continuation, `kernel`'s runtime, the landing, the transaction lifetime) → a request under the federation path → its answer.
 - `recorderOf` (`audit`, kind prefix): records a federation event in federation's words: `idp`, then `source`, `userAgent` and `reason` when known.
 - `Continuation`: at the start, a refusal or what the transaction carries; after the take, exchange and freshness, the answer; a refusal in between, recorded its way. `loginWith` (`login-gates`' logins, `users`, `audit`, `handoff`, the landing) is the first; `loginIn` builds it from the build context.
-- `Completing`, `Carried`, `Recorded`, `Flow`, `answer`, `sent` and `secondOf`: what the continuations take, carry, record and answer with, and the whole second a time falls in.
+- `Completing`, `Carried`, `Recorded`, `Flow`, `sent` and `secondOf`: what the continuations take, carry, record and answer with, and the whole second a time falls in.
 - `Idp`: what an opened IdP gives the round trip. `base` and `callbackPath` (IdP name → its callback's path). `proves`: what every federation login proves.
 
 ## Invariants
@@ -40,4 +40,4 @@ Internal module of `federation`: one round trip through an upstream IdP, a login
 - Transaction record, by its cookie: format 1, the IdP, the state, nonce and PKCE verifier, the return target, `prompt` and max age, the start time on `kernel`'s clock, and whether it was taken. For a link, the session entered at its start and its subject. Checked on every read: another format or shape is none.
 
 ## Depends on
-- `http` (the site for the landing, the request and answer, no-store); `cookies`; `request-source` (the source); `kernel` (the runtime, unavailable); `login-attributes` (the source name); `login-gates` (logins); `users` (the lookup); `audit`; `handoff`; `upstreams` (the upstream, its login, its refusal); `federation`'s section and store interface
+- `http` (the site for the landing, the request and answer, no-store, the JSON answer); `cookies`; `request-source` (the source); `kernel` (the runtime, unavailable); `login-attributes` (the source name); `login-gates` (logins); `users` (the lookup); `audit`; `handoff`; `upstreams` (the upstream, its login, its refusal); `federation`'s section and store interface

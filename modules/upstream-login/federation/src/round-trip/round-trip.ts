@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { type Audit, declaredAudit } from "@mod/audit";
 import { type Cookies, cookies } from "@mod/cookies";
 import type { HttpRequest, HttpResponse, Site, Values } from "@mod/http";
-import { noStore, site } from "@mod/http";
+import { jsonAnswer, noStore, site } from "@mod/http";
 import {
 	type BuildContext,
 	type Clock,
@@ -107,16 +107,6 @@ export const recorderOf = (audit: Pick<Audit, "record">, prefix: string) => {
 		});
 };
 
-export const answer = (
-	status: number,
-	json: unknown,
-	cookies: readonly string[] = [],
-): HttpResponse => ({
-	status,
-	headers: noStore,
-	body: { json },
-	...(cookies.length > 0 ? { cookies } : {}),
-});
 export const sent = (location: string, cookies: readonly string[]): HttpResponse => ({
 	status: 302,
 	headers: { ...noStore, location },
@@ -167,22 +157,22 @@ export async function federated(flow: Flow, request: HttpRequest): Promise<HttpR
 	const [name = "", step, ...rest] = request.path.slice(base.length + 1).split("/");
 	const idp = flow.idps.get(name);
 	if (!idp || rest.length > 0 || (step !== undefined && step !== "callback")) {
-		return answer(404, { error: "not_found" });
+		return jsonAnswer(404, { error: "not_found" });
 	}
 	const method = step !== undefined && idp.formPost ? "POST" : "GET";
 	if (request.method !== method) {
-		const refused = answer(405, { error: "method_not_allowed" });
+		const refused = jsonAnswer(405, { error: "method_not_allowed" });
 		return { ...refused, headers: { ...refused.headers, allow: method } };
 	}
 	const params = method === "POST" ? request.form : request.query;
 	if (params.repeated().length > 0) {
-		return answer(400, { error: "repeated_parameter" });
+		return jsonAnswer(400, { error: "repeated_parameter" });
 	}
 	const at: At = { name, idp, request, params };
 	try {
 		return step === undefined ? await start(flow, at) : await callback(flow, at);
 	} catch (error) {
-		if (isUnavailable(error)) return answer(503, unavailable);
+		if (isUnavailable(error)) return jsonAnswer(503, unavailable);
 		throw error;
 	}
 }
@@ -198,11 +188,11 @@ async function start(flow: Flow, { name, idp, request, params }: At) {
 	const field = (key: string) => params.single(key);
 	const target = field("redirect_to");
 	if (target !== undefined && !flow.logins.returnAllowed(target)) {
-		return answer(400, { error: "invalid_redirect" });
+		return jsonAnswer(400, { error: "invalid_redirect" });
 	}
 	const maxAge = field("max_age");
 	if (maxAge !== undefined && !/^[0-9]{1,9}$/.test(maxAge)) {
-		return answer(400, { error: "invalid_request" });
+		return jsonAnswer(400, { error: "invalid_request" });
 	}
 	// Only a start asking for it links; any other value is a login.
 	const linking = ["1", "true"].includes(field("link") ?? "");
@@ -245,22 +235,21 @@ async function callback(flow: Flow, at: At) {
 	const kept = flow.cookies.lookup(request, cookieOf(name));
 	const id = kept.kind === "found" ? kept.value : undefined;
 	const state = params.single("state");
-	if (id === undefined || state === undefined) return answer(400, { error: "invalid_state" });
+	if (id === undefined || state === undefined) return jsonAnswer(400, { error: "invalid_state" });
 	const transaction = await tookNow(flow, at, id, state);
-	if (!transaction) return answer(400, { error: "invalid_state" });
+	if (!transaction) return jsonAnswer(400, { error: "invalid_state" });
 	// Spent from here on: its cookie goes with every answer. Before, a request from elsewhere
 	// that did not carry its state must leave the browser's login in progress whole.
 	const cleared = [writeCookie(flow, name, idp, "", 0)];
 	try {
 		return await finish(flow, at, transaction, cleared);
 	} catch (error) {
-		if (isUnavailable(error)) return answer(503, unavailable, cleared);
+		if (isUnavailable(error)) return jsonAnswer(503, unavailable, { cookies: cleared });
 		throw error;
 	}
 }
 
 async function tookNow(flow: Flow, { name }: At, id: string, state: string) {
-	// Taken only by a callback at the same IdP that carries its state, so a request from elsewhere cannot spend it.
 	const taking = await flow.transactions.update(id, (stored) => {
 		const current = fromStored(stored);
 		if (!current || current.idp !== name || !sameSecret(current.state, state)) return undefined;
@@ -287,7 +276,7 @@ async function finish(flow: Flow, at: At, transaction: Transaction, cleared: rea
 	// A round trip taken this far failed for the reason its answer names.
 	const refused = (status: number, reason: string) => {
 		continuation.failed({ name, reason, transaction, ...sender });
-		return answer(status, { error: reason }, cleared);
+		return jsonAnswer(status, { error: reason }, { cookies: cleared });
 	};
 	const code = field("code");
 	if (field("error") !== undefined || code === undefined) return refused(400, "upstream_refused");

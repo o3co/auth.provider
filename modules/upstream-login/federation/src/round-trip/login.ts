@@ -1,4 +1,5 @@
 import { type Audit, audit } from "@mod/audit";
+import { jsonAnswer } from "@mod/http";
 import type { BuildContext } from "@mod/kernel";
 import { loginSource } from "@mod/login-attributes";
 import { type Logins, logins } from "@mod/login-gates";
@@ -7,7 +8,6 @@ import { type Users, userAttribute, users } from "@mod/users";
 import { type Handoff, handoff } from "../handoff/handoff.ts";
 import type { Settings } from "../section.ts";
 import {
-	answer,
 	type Continuation,
 	type Idp,
 	landingIn,
@@ -45,7 +45,7 @@ export function loginWith(p: LoginParts): Continuation {
 			const found = await p.users.byUpstream(name, upstreamLogin.subject);
 			if (found.kind !== "user") {
 				record("failed", name, { reason: "unknown_user", source });
-				return answer(401, { error: "unknown_user" }, cleared);
+				return jsonAnswer(401, { error: "unknown_user" }, { cookies: cleared });
 			}
 			const mapped = upstreamLogin.amr.flatMap((value) => idp.upstreamAmr.get(value) ?? []);
 			const amr = [...new Set([...proves, ...mapped])];
@@ -61,7 +61,7 @@ export function loginWith(p: LoginParts): Continuation {
 			await handing?.after(outcome);
 			const cookies = [...cleared, ...outcome.cookies];
 			return held
-				? answer(403, outcome.answer, cookies)
+				? jsonAnswer(403, outcome.answer, { cookies })
 				: sent(transaction.redirectTo ?? p.landing, cookies);
 		},
 	};
