@@ -24,8 +24,8 @@ Body is what a route takes, a form where it names none; its policies apply in th
 | POST | `/oauth/federation-grants/*` | `@mod/federation-grants` | json, form | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/federation/*` | `@mod/federation-tokens` | form | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/introspect` | `@mod/token-control` | form | `rate-limit.requests-per-source` |  |
-| GET | `/oauth/logout` | `@mod/rp-logout` | form, none |  |  |
-| POST | `/oauth/logout` | `@mod/rp-logout` | form, none |  |  |
+| GET | `/oauth/logout` | `@mod/rp-logout` | form, none | `rate-limit.requests-per-source` |  |
+| POST | `/oauth/logout` | `@mod/rp-logout` | form, none | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/revoke` | `@mod/token-control` | form | `rate-limit.requests-per-source` | yes |
 | POST | `/oauth/token` | `@mod/token-endpoint` | form, json, none | `rate-limit.requests-per-source` | yes |
 | GET | `/oauth/userinfo` | `@mod/userinfo` | form, json, none |  | yes |
