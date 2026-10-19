@@ -9,14 +9,15 @@ import { Agent as TlsAgent, request as tlsRequest } from "node:https";
 import type { Socket } from "node:net";
 import { isIP, connect as plainConnect } from "node:net";
 import { connect as tlsConnect } from "node:tls";
+import { type Admitted, DestinationRefused, type Limits, type Policy } from "@mod/outbound-policy";
 import {
-	DestinationRefused,
 	type OutboundFailure,
 	type OutboundRequest,
 	type OutboundResponse,
 	OutboundUnavailable,
 } from "./contract.ts";
-import { type Admitted, admitAddresses, unbracketed } from "./policy.ts";
+
+const unbracketed = (host: string) => host.replace(/^\[(.*)\]$/, "$1");
 
 /** Every address a name resolves to, once. */
 export type Resolver = (host: string) => Promise<readonly string[]>;
@@ -34,11 +35,6 @@ export interface Route {
 /** The authorities a destination's certificate is checked against, for a test; the platform's otherwise. */
 export interface Trust {
 	readonly ca?: string;
-}
-
-export interface Limits {
-	readonly maxBytes: number;
-	readonly timeoutMs: number;
 }
 
 /** Headers outbound always sends as its own: the product's name, and a body as sent. */
@@ -138,11 +134,12 @@ interface Way {
 async function viaProxy(
 	route: Route,
 	admitted: Admitted,
+	policy: Pick<Policy, "admitAddresses">,
 	signal: AbortSignal,
 	trust: Trust,
 ): Promise<Way> {
 	const literal = isIP(admitted.host) !== 0;
-	if (literal) admitAddresses([admitted.host], admitted);
+	if (literal) policy.admitAddresses([admitted.host], admitted);
 	const socket = await tunnel(route, admitted, signal);
 	const agent = new TlsAgent({ keepAlive: false });
 	agent.createConnection = () =>
@@ -159,12 +156,12 @@ async function viaProxy(
 async function atCheckedAddress(
 	admitted: Admitted,
 	resolve: Resolver,
+	policy: Pick<Policy, "admitAddresses">,
 	signal: AbortSignal,
 	trust: Trust,
 ): Promise<Way> {
-	const addresses = await addressesOf(admitted, resolve, signal);
-	admitAddresses(addresses, admitted);
-	const [address = ""] = addresses;
+	const checked = policy.admitAddresses(await addressesOf(admitted, resolve, signal), admitted);
+	const [address = ""] = checked;
 	const at = { host: address, port: admitted.port };
 	if (admitted.plain) {
 		const agent = new PlainAgent({ keepAlive: false });
@@ -184,6 +181,7 @@ export async function send(
 	request: OutboundRequest,
 	limits: Limits,
 	resolve: Resolver,
+	policy: Pick<Policy, "admitAddresses">,
 	route?: Route,
 	trust: Trust = {},
 	deadlineOf: (ms: number) => AbortSignal = AbortSignal.timeout,
@@ -191,8 +189,8 @@ export async function send(
 	const signal = deadlineOf(limits.timeoutMs);
 	const proxied = route !== undefined && !admitted.plain && !route.direct(admitted.host);
 	const way = proxied
-		? await viaProxy(route, admitted, signal, trust)
-		: await atCheckedAddress(admitted, resolve, signal, trust);
+		? await viaProxy(route, admitted, policy, signal, trust)
+		: await atCheckedAddress(admitted, resolve, policy, signal, trust);
 	const answer = await new Promise<IncomingMessage>((answered, failed) => {
 		let outgoing: ClientRequest;
 		try {
