@@ -23,6 +23,7 @@
 - `./testing`: test configuration builders and the store contract test.
 
 ## Invariants
+- Boot is refused unless a module records its tokens to the session that approved them (`grants`' `sessionIssuances`), so that a logout ends them.
 - Device authorization is limited per source by `rate-limit`'s policy, before the client is authenticated.
 - The client must be explicitly allowed this grant. `token-endpoint`'s allowance decides the scope there, and nothing widens it later.
 - The device code is 32 random bytes. It is never kept; only its name is.

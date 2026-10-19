@@ -1,5 +1,5 @@
 import { csrfChecked } from "@mod/csrf";
-import { grants } from "@mod/grants";
+import { grants, sessionIssuances } from "@mod/grants";
 import { routes, site, use } from "@mod/http";
 import { metadata } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
@@ -40,5 +40,14 @@ export default defineModule({ name: "device-grant", section }, (m) => [
 			value: origin === undefined ? undefined : new URL(authorizationPath, origin).href,
 		};
 	}),
-	m.contribute(grants).by(grantOver),
+	m.contribute(grants).by(async (c) => {
+		// Its tokens are bound to the session that approved them: unrecorded, a logout could not end them.
+		if ((await c.collect(sessionIssuances)).length === 0) {
+			return c.refuse(
+				"device-grant",
+				"its tokens must be recorded to the session that approved them, so that a logout ends them",
+			);
+		}
+		return grantOver(c);
+	}),
 ]);
