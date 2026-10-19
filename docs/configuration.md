@@ -509,6 +509,8 @@ From `@mod/rp-logout`.
 | `rp-logout.remember-for` | string | `1d` |  |  |  | How long a session's clients are kept from a redemption, from 1m to 30d; at least as long as a session lives. |
 | `rp-logout.notify-within` | string | `1d` |  |  |  | How long an undelivered back-channel notice is tried again, from 1m to 7d. |
 | `rp-logout.sweep-interval` | string | `1m` |  |  |  | How often each host sweeps the kept notices, from 1s to 1h. |
+| `rp-logout.requests` | integer (1–100000) | `60` |  |  |  | Logout requests allowed per source in each window, a GET and a POST together, before any hint is checked. |
+| `rp-logout.window` | string | `1m` |  |  |  | The window `requests` is counted over, from `1s` to `1d` in whole seconds. |
 
 ## rp-logout-store
 

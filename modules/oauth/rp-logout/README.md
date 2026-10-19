@@ -16,7 +16,7 @@
 - `session`'s participant `notices`: answers once each notice is kept, then tries each once.
 - `issuer`'s metadata items: `end_session_endpoint` (on `http`'s public origin), and `frontchannel_logout_supported`, `frontchannel_logout_session_supported`, `backchannel_logout_supported` and `backchannel_logout_session_supported` (true).
 - Audit events with the subject and `sid`, and `source` and `userAgent` when known: `logout.success`, `logout.cascade_failed` (with `store` `session`, the module whose close failed); `logout.close_pending` with `sid` and `source` only, declared exactly as `logout` declares it. All declared in `./audit-events`.
-- Operator section: `remember-for` (1m–30d, default `1d`), `notify-within` (1m–7d, default `1d`), `sweep-interval` (1s–1h, default `1m`); times are written with their unit, a bare number refused.
+- Operator section: `remember-for` (1m–30d, default `1d`), `notify-within` (1m–7d, default `1d`), `sweep-interval` (1s–1h, default `1m`), `requests` (logout requests per source in each `window`, a GET and a POST together, before any hint is checked; 1–100000, default 60) and `window` (1s–1d, default `1m`); times are written with their unit, a bare number refused.
 - Store interfaces, which the assembly wires, each needing no eviction, a crash and a failover survived: the clients of each session (a keyed set with lifetimes, answering those pushed out); the notices not yet delivered (add, done, go through; one whose handling fails stays).
 - `./testing`: a configuration builder, and the contract tests of both store interfaces.
 
@@ -26,7 +26,8 @@
 - `sid` is taken from outside only in a hint the provider signed, and only to close that session.
 - The return is used only when it exactly matches one the hint's client registered; otherwise it is dropped and the logout goes on. `state` goes with it. A client record that cannot be read drops its return and frame, logged as `rp-logout.client_unavailable`.
 - The session closes through `session`'s `close`, which clears the cookie only when it opens the same session. A close that throws is `503` with `logout.cascade_failed`; a session no longer open (closed, ended or gone) is `200 {"logged_out":true}`, with no event, its cookie still cleared.
-- After a close, `logout.success` (and `logout.close_pending` first when pending), with the subject and `sid`. Then, in order: the front-channel page when the browser prefers HTML to JSON and a client can be framed; `303` to the upstream; `303` to the return; `200 {"logged_out":true}`.
+- A close left pending records `logout.close_pending` and answers `503 temporarily_unavailable`, clearing the cookie, as `logout` does: its tokens live until the close is swept, so it is no logout yet.
+- After a close, `logout.success`, with the subject and `sid`. Then, in order: the front-channel page when the browser prefers HTML to JSON and a client can be framed; `303` to the upstream; `303` to the return; `200 {"logged_out":true}`.
 - Every answer is `no-store` with `Pragma: no-cache`.
 - Each host sweeps the kept notices every `sweep-interval`, logging how many it keeps; a session's close never waits for a client.
 - A client the store pushes out of a session's set is logged.

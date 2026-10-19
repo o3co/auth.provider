@@ -254,7 +254,7 @@ describe("exchange-id-tokens", () => {
 		).toEqual(["issued"]);
 	});
 
-	it("refuses an upstream subject users links to no one, and an id_token from before the subject's revocation", async () => {
+	it("refuses an upstream subject users links to no one, and an id_token from before the subject's revocation, by the clock skew", async () => {
 		const s = await serve();
 		expect(
 			said(await s.exchange("ios-app", await apple.sign(appleClaims({ sub: "nobody" })))),
@@ -263,8 +263,12 @@ describe("exchange-id-tokens", () => {
 		try {
 			await s.app.get(revocations).record("acct-1");
 			expect(said(await s.exchange("ios-app", await apple.sign(appleClaims())))).toEqual(failed);
-			const after = await apple.sign(appleClaims({ iat: now / 1000 + 2 }));
+			// An issuer whose clock runs ahead within the skew may have issued this before the revocation.
+			const within = await apple.sign(appleClaims({ iat: now / 1000 + 2 }));
 			clock.at = now + 3000;
+			expect(said(await s.exchange("ios-app", within))).toEqual(failed);
+			const after = await apple.sign(appleClaims({ iat: now / 1000 + 32 }));
+			clock.at = now + 33_000;
 			expect(said(await s.exchange("ios-app", after))).toEqual(["issued"]);
 		} finally {
 			clock.at = now;

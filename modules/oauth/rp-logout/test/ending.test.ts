@@ -1,6 +1,8 @@
 import { clientSources } from "@mod/clients";
+import { use } from "@mod/http";
 import { defineModule } from "@mod/kernel";
 import { switchedModule, unavailableSwitch } from "@mod/kernel/testing";
+import { requestsPerSource } from "@mod/rate-limit";
 import { participants, type Sessions, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { describe, expect, it } from "vitest";
@@ -117,7 +119,7 @@ describe("the logout a client starts", () => {
 		}
 	});
 
-	it("records a close left pending by its sid and source alone, as logout declares it, then the logout", async () => {
+	it("answers a close left pending 503, clearing the cookie and recording it by its sid and source alone, never as a logout", async () => {
 		const unfinished = defineModule({ name: "unfinished" }, (m) => [
 			m.contribute(participants).by(() => ({
 				name: "unfinished",
@@ -129,10 +131,16 @@ describe("the logout a client starts", () => {
 		const h = await serve({ extra: [unfinished] });
 		const { session, cookie } = await h.login();
 		const hint = await h.hintFor(session.id);
-		await h.call("POST", { id_token_hint: hint }, { cookie, "user-agent": "ua/1" });
+		const answered = await h.call(
+			"POST",
+			{ id_token_hint: hint },
+			{ cookie, "user-agent": "ua/1" },
+		);
+		// The session is closing, but tokens it holds live until the close is swept: no success yet.
+		expect([answered.status, answered.json]).toEqual([503, { error: "temporarily_unavailable" }]);
+		expect(answered.cookies.length).toBeGreaterThan(0);
 		expect(h.events.map((e) => [e.kind, e.attributes])).toEqual([
 			["logout.close_pending", { sid: session.id, source: "127.0.0.1" }],
-			["logout.success", { sid: session.id, source: "127.0.0.1", userAgent: "ua/1" }],
 		]);
 	});
 
@@ -374,5 +382,21 @@ it("leaves out the frame of a client a source names whose front channel is at no
 	expect(out.loads?.frames).toEqual(["https://remote.example"]);
 	expect(h.logs().filter((l) => l.event === "rp-logout.frontchannel_off_redirects")).toEqual([
 		expect.objectContaining({ level: "warn", fields: { client: "https://remote.example/off" } }),
+	]);
+});
+
+it("limits its requests per source, a GET and a POST together, by the section's window", async () => {
+	const window = (h: Awaited<ReturnType<typeof serve>>, method: string) =>
+		h.routes.find((r) => r.path === "/oauth/logout" && r.method === method)?.uses;
+	const given = await serve({ settings: { requests: 5, window: "10s" } });
+	for (const method of ["GET", "POST"]) {
+		expect(window(given, method), method).toEqual([
+			use(requestsPerSource, { name: "rp-logout", window: { limit: 5, ms: 10_000 } }),
+		]);
+	}
+	await given.stop();
+	const byDefault = await serve();
+	expect(window(byDefault, "POST")).toEqual([
+		use(requestsPerSource, { name: "rp-logout", window: { limit: 60, ms: 60_000 } }),
 	]);
 });
