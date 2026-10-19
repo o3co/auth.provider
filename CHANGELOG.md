@@ -11,7 +11,7 @@ What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc
 ### Security
 
 - `mfa`: an enrollment begun at login could add a further factor after the account's first factor was registered; removing a factor or reissuing recovery codes could pass on what is allowed to an account with no factor while another request bound one; and two first enrollments at once could both bind.
-- `mfa-flows`: recovery codes that were never shown could stay usable.
+- `mfa-flows`: recovery codes that were never shown could stay usable; an enrollment could complete after a reset or a revocation that came while it was under way.
 - `federation-grants`: a refresh could hand out a token after the grant had ended or its subject had been revoked, a request that waited for the refresh lock included; a grant past its end is treated as ended everywhere.
 - `session-lifecycle`: an explicit close of a session past its lifetime did not revoke the session's tokens.
 - `code-grant`, `device-grant`: an access token could live past the end of the session it was issued in.
