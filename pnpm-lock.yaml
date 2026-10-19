@@ -3201,6 +3201,9 @@ importers:
       '@mod/create-app':
         specifier: workspace:*
         version: link:../../scaffold/create-app
+      '@mod/trial':
+        specifier: workspace:*
+        version: link:../../scaffold/trial
       typescript:
         specifier: 6.0.3
         version: 6.0.3

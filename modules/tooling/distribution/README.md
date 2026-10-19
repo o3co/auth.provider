@@ -30,7 +30,7 @@
 - A bundle depends on other bundles at its own version, and on an outside package at the one version its members state; two versions refuse it. Members' peers are optional, as only test builders read them.
 
 ## Depends on
-- `create-app` (its patterns and trial settings, for the release check); it asks pnpm for the workspace packages, reads their manifests, and compiles with TypeScript; the release check builds and runs images with Docker.
+- `create-app` (its patterns, for the release check), `trial` (the layer the release check boots each image on); it asks pnpm for the workspace packages, reads their manifests, and compiles with TypeScript; the release check builds and runs images with Docker.
 
 ## Vocabulary
 - bundle: the distribution unit of one concern directory.
