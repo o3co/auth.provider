@@ -1446,6 +1446,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/rate-limit':
+        specifier: workspace:*
+        version: link:../../foundation/rate-limit
       '@mod/request-source':
         specifier: workspace:*
         version: link:../../foundation/request-source

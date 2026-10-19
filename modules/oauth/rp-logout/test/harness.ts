@@ -17,6 +17,7 @@ import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
 import oidc from "@mod/oidc/module";
 import { type Outbound, type OutboundRequest, outbound } from "@mod/outbound";
+import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
@@ -124,6 +125,7 @@ export async function harness(
 			recorded.module,
 			stores.module,
 			outside,
+			rateLimitStandIn,
 			rpLogout,
 			reader,
 			...(options.extra ?? []),
@@ -200,6 +202,7 @@ export async function harness(
 		sent,
 		answering,
 		items: seen.items,
+		routes: seen.routes,
 		redeemed: seen.redeemed,
 		login,
 		hintFor,

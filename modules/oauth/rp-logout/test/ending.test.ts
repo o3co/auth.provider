@@ -1,6 +1,8 @@
 import { clientSources } from "@mod/clients";
+import { use } from "@mod/http";
 import { defineModule } from "@mod/kernel";
 import { switchedModule, unavailableSwitch } from "@mod/kernel/testing";
+import { requestsPerSource } from "@mod/rate-limit";
 import { participants, type Sessions, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { describe, expect, it } from "vitest";
@@ -380,5 +382,21 @@ it("leaves out the frame of a client a source names whose front channel is at no
 	expect(out.loads?.frames).toEqual(["https://remote.example"]);
 	expect(h.logs().filter((l) => l.event === "rp-logout.frontchannel_off_redirects")).toEqual([
 		expect.objectContaining({ level: "warn", fields: { client: "https://remote.example/off" } }),
+	]);
+});
+
+it("limits its requests per source, a GET and a POST together, by the section's window", async () => {
+	const window = (h: Awaited<ReturnType<typeof serve>>, method: string) =>
+		h.routes.find((r) => r.path === "/oauth/logout" && r.method === method)?.uses;
+	const given = await serve({ settings: { requests: 5, window: "10s" } });
+	for (const method of ["GET", "POST"]) {
+		expect(window(given, method), method).toEqual([
+			use(requestsPerSource, { name: "rp-logout", window: { limit: 5, ms: 10_000 } }),
+		]);
+	}
+	await given.stop();
+	const byDefault = await serve();
+	expect(window(byDefault, "POST")).toEqual([
+		use(requestsPerSource, { name: "rp-logout", window: { limit: 60, ms: 60_000 } }),
 	]);
 });

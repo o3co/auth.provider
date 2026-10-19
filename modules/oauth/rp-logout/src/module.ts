@@ -1,8 +1,9 @@
 import { metadataSections } from "@mod/clients";
 import { sessionRedemptions } from "@mod/code-grant";
-import { type HttpRequest, type HttpResponse, routes, site } from "@mod/http";
+import { type HttpRequest, type HttpResponse, routes, site, use } from "@mod/http";
 import { metadata } from "@mod/issuer";
 import { contract, defineModule } from "@mod/kernel";
+import { requestsPerSource } from "@mod/rate-limit";
 import { participants, sessions } from "@mod/session";
 import { upstreamEnds } from "./contract.ts";
 import { endingFrom } from "./ending/ending.ts";
@@ -75,6 +76,13 @@ export default defineModule({ name, section, replicaSafe: true }, (m) => [
 			path,
 			// OpenID Connect RP-Initiated Logout 1.0 §2: a POST is a form.
 			takes: ["form", "none"],
+			// Counted before any hint is checked, which reads keys and the store.
+			uses: [
+				use(requestsPerSource, {
+					name: "rp-logout",
+					window: { limit: c.section.requests, ms: c.section.window * 1000 },
+				}),
+			],
 			handle: await c.get(ending),
 		})),
 	),
