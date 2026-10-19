@@ -85,6 +85,17 @@ export interface OutboundPolicy {
 
 export const outboundPolicy = contract<OutboundPolicy>("outbound.policy");
 
+/** The destination policy's refusals, as an operator reads them at boot, apart from sending. */
+export interface OutboundRefusals {
+	/**
+	 * Why the policy refuses the URL and what to set, `<reason>: <what to set>`, naming keys alone and
+	 * never the URL's host, port or any other value; undefined when the policy lets it through.
+	 */
+	explained(url: string, narrower?: Narrower): string | undefined;
+}
+
+export const outboundRefusals = contract<OutboundRefusals>("outbound.refusals");
+
 /** Why a credential must not go to a set of URLs: more than one origin, or a URL neither https nor a named plain-loopback pair. */
 export type CredentialRefusal = "origins" | "scheme";
 
