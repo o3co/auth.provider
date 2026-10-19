@@ -45,9 +45,7 @@ What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc
 - `federation-tokens` answers a refresh the upstream refuses until the user acts there with `403 upstream_interaction_required`.
 - `audit-http` reaches a collector at a `plain-loopback` pair over plain http too.
 - A managed Redis that refuses `CONFIG` is declared in `redis.server-settings`.
-- A configuration file that does not parse is refused at its line and column.
-- A required key left unset is refused as `required, and not set`; a missing or empty `audit.receivers` is refused saying what to name; an empty or unparsable public or CORS origin, WebAuthn origin, or upstream identity provider's endpoint is refused at boot instead of stopping the app with an error.
-- A destination outbound refuses at boot says which of outbound's keys lets it through, naming no value; and a JWT bearer issuer refused at boot is named by its place in the settings, not by its value.
+- Boot refusals, in every module, name the setting by its place in the settings and never show its value. Each says what is wrong: a file that does not parse, at its line and column; a required key left unset, as `required, and not set`; a missing or empty `audit.receivers`, what to name; a destination outbound refuses, which of outbound's keys lets it through; and an empty or unparsable origin or endpoint is refused rather than stopping the app with an error.
 - The credentials routes read the subject's second factors whatever is composed, and answer unavailable when the factors' store cannot answer.
 - `mfa` refuses to boot without `mfa-entry`, whatever its mode.
 - The command that generates an app is `create-auth-provider`.
