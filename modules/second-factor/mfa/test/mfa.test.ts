@@ -30,7 +30,7 @@ import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import * as offered from "../src/contract.ts";
-import { factors, isLabel, proofSteps } from "../src/contract.ts";
+import { enforcers, factors, isLabel, proofSteps } from "../src/contract.ts";
 import mfaModule from "../src/module.ts";
 import { listKeyOf, storedList } from "../src/records/records.ts";
 import { section } from "../src/section.ts";
@@ -212,9 +212,14 @@ const stuck = defineModule({ name: "kind-stuck" }, (m) => [
 	})),
 ]);
 
+/** A module holding sessions to the factors, as `mfa-entry` does in an app. */
+const enforcer = defineModule({ name: "enforcer" }, (m) => [
+	m.contribute(enforcers).by(() => ({ name: "enforcer" })),
+]);
+
 async function serve(
 	settings: Partial<MfaSettings> = {},
-	{ steps = [step], kinds = [code, backup], extra = [] as Module[] } = {},
+	{ steps = [step], kinds = [code, backup], extra = [] as Module[], enforced = true } = {},
 ) {
 	const audit = auditStandIn();
 	const place = memoryFactors();
@@ -230,6 +235,7 @@ async function serve(
 			mfaModule,
 			...kinds,
 			...steps,
+			...(enforced ? [enforcer] : []),
 			...extra,
 		],
 		config: {
@@ -941,6 +947,19 @@ it("refuses to start under required when no composed kind counts", async () => {
 	expect(refused).toBeInstanceOf(BootRefused);
 	expect((refused as BootRefused).refusals.map((r) => r.where)).toEqual(["mfa.mode"]);
 	await expect(serve({ mode: "optional" }, { kinds: [backup] })).resolves.toBeDefined();
+});
+
+it("refuses to start without a module holding sessions to the factors, whatever the mode", async () => {
+	for (const mode of ["required", "optional"] as const) {
+		const refused = await serve({ mode }, { enforced: false }).catch((e) => e);
+		expect(refused, mode).toBeInstanceOf(BootRefused);
+		expect((refused as BootRefused).refusals).toEqual([
+			{
+				where: "mfa",
+				reason: "mfa needs a module holding sessions to its factors; compose mfa-entry",
+			},
+		]);
+	}
 });
 
 it("refuses to start without a step that proves factors, naming what it lacks", async () => {
