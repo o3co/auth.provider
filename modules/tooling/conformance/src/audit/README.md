@@ -7,7 +7,7 @@ Internal module of `conformance`: the events a running target sends, for the sce
 
 ## Offers
 - `auditEvents`: the need a scene states to read them (`need`), and a running target's trail (`of`).
-- `auditSink` (→ its URL and its `host:port`, a trail, and its stop), for the package's drivers.
+- `auditSink` (→ its URL and its `host:port`, a trail, and its stop), for the package's drivers; a test may give its wait for quiet, to order what arrives between waits rather than time it.
 
 ## Invariants
 - A request's trail is its result with the events that arrived from its start until none came for a short while.
