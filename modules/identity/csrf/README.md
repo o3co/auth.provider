@@ -11,6 +11,7 @@
 ## Offers
 - The CSRF policy for routes (`http`'s policies). A `GET` passes. Any other method passes only on the evidence below.
   - A refused request is answered `403` with `{"error":"csrf"}`, not cacheable.
+  - Its mark at `http`'s `marks`: `own-site`, for every method but `GET`. The stand-in contributes it too.
 - Origin evidence (`sameOrigin(request)`), for routes that take no token. It is true only when `Origin` is the public origin or `Sec-Fetch-Site` is `same-origin`.
   - A request with neither is false.
 - Route `GET /session/csrf`: the token and its cookie, not cacheable. A valid token the request already holds is reused.
