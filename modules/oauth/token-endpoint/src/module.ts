@@ -50,13 +50,24 @@ export default defineModule({ name: "token-endpoint", section }, (m) => [
 		};
 	}),
 	m.contribute(routes).by(async (c) => {
+		const composed = await c.collect(grants);
+		// The route has no own-site policy: it relies on each grant saying whether it reads a cookie.
+		const silent = composed.filter((g) => g.readsAmbient !== "none" && g.readsAmbient !== "cookie");
+		if (silent.length > 0) {
+			return c.refuseAll(
+				silent.map((g) => ({
+					where: `grants:${g.grantType}`,
+					reason: "declares neither readsAmbient none nor cookie",
+				})),
+			);
+		}
 		const endpoint = tokenEndpoint(
 			await c.get(clients),
 			await c.get(tokens),
 			await c.collect(sessionIssuances),
 			await c.get(senderBinding),
 			await c.get(clientBindings),
-			new Map((await c.collect(grants)).map((g) => [g.grantType, g])),
+			new Map(composed.map((g) => [g.grantType, g])),
 			await c.get(targets),
 			await c.get(audit),
 		);

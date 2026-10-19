@@ -89,9 +89,14 @@ it("leaves Unavailable before the redirect URI is trusted to http, which answers
 		modules: [
 			http,
 			defineModule({ name: "authorize-route" }, (m) => [
-				m
-					.contribute(routes)
-					.by(() => ({ method: "GET", path: "/oauth/authorize", ...before.declared })),
+				m.contribute(routes).by(() => ({
+					method: "GET",
+					path: "/oauth/authorize",
+					changesState: true,
+					crossSite: "a test route",
+					unlimited: "a test route",
+					...before.declared,
+				})),
 			]),
 		],
 		config: { ...kernelConfig(), ...httpConfig() },

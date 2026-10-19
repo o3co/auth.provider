@@ -100,6 +100,7 @@ Each promise below holds across every module composed. Each names what keeps it 
   - Each login gets a new session handle, so a session cannot be fixed in advance. The cookie holds an unguessable secret.
   - Where the public origin is https, cookies are `__Host-` and Secure. Cookies are always `Path=/`, `HttpOnly` and `SameSite=Lax`. Cookies on a plain-http request are not read.
   - Every request that changes state needs same-origin evidence or the double-submit token. Any cross-origin evidence refuses it with 403.
+  - Every route declares whether it changes state, and one that does either uses a policy that keeps other sites' requests out and one that limits each source, or says why not; boot refuses a route that does neither. The [route reference](routes.md) lists each route's. A declaration is its owner's claim, not a proof.
   - Revoking a subject's sessions closes each of them.
 - **Left to you:**
   - Keeping other subdomains of your origin from being taken over: double submit relies on them being unable to set the cookie.

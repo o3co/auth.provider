@@ -8,7 +8,7 @@ export interface Broken {
 
 const reasonFor = { "own-site": "crossSite", "per-source": "unlimited" } as const;
 
-/** The breaks of the routes that declare their guarantees; a route that declares none is not checked. */
+/** The breaks of the routes against what each declares, a route that declares nothing included. */
 export function brokenGuarantees(
 	routes: readonly Route[],
 	marks: readonly Mark[],
@@ -21,11 +21,7 @@ export function brokenGuarantees(
 				.filter((entry) => entry.methods.includes(method))
 				.map((entry) => entry.policy),
 		);
-	return routes
-		.filter(
-			(r) => r.changesState !== undefined || r.crossSite !== undefined || r.unlimited !== undefined,
-		)
-		.flatMap((route) => breaksOf(route, marked).map((reason) => ({ route, reason })));
+	return routes.flatMap((route) => breaksOf(route, marked).map((reason) => ({ route, reason })));
 }
 
 function breaksOf(

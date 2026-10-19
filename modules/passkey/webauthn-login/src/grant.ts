@@ -45,6 +45,7 @@ export interface LoginParts {
 export function passkeyGrant(p: LoginParts): Grant {
 	return {
 		grantType: webauthnGrantType,
+		readsAmbient: "none",
 		bodies: ["json"],
 		handle: async ({ client, param, value, binding, issue }) => {
 			// One answer for every refusal, so it never tells whether a credential is registered.
