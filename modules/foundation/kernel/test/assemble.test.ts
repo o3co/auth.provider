@@ -63,16 +63,25 @@ describe("assemble", () => {
 		]);
 	});
 
-	it("reports every section issue by path, never the value", async () => {
+	it("reports every section issue by path, never the value: a needed key not set as required, any other in the schema's words", async () => {
 		const m = defineModule({
 			name: "m",
-			section: z.strictObject({ secret: z.string().min(32), n: z.number() }),
+			section: z.strictObject({ secret: z.string().min(32), n: z.number(), e: z.enum(["a"]) }),
+		});
+		const refined = defineModule({
+			name: "r",
+			section: z.strictObject({ w: z.string({ error: "kept" }) }),
 		});
 		const refusals = await refusalsOf(
-			assemble({ modules: [m], config: { ...single, m: { secret: "short-value", extra: 1 } } }),
+			assemble({
+				modules: [m, refined],
+				config: { ...single, m: { secret: "short-value", extra: 1 } },
+			}),
 		);
-		expect(refusals.map((r) => r.where).sort()).toEqual(["m", "m.n", "m.secret"]);
+		expect(refusals.map((r) => r.where).sort()).toEqual(["m", "m.e", "m.n", "m.secret", "r.w"]);
 		expect(JSON.stringify(refusals)).not.toContain("short-value");
+		const notSet = refusals.filter((r) => r.reason === "required, and not set");
+		expect(notSet.map((r) => r.where)).toEqual(["m.n", "m.e"]);
 	});
 
 	it("takes a field set to undefined as absent, and refuses values configuration cannot hold", async () => {

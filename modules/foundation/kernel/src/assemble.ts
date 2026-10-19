@@ -50,7 +50,30 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return proto === null || proto === Object.prototype;
 }
 
-type Issue = { readonly message: string; readonly path?: readonly PropertyKey[] };
+type Issue = {
+	readonly message: string;
+	readonly path?: readonly PropertyKey[];
+	readonly code?: string;
+};
+
+/** The codes zod gives a value of the wrong type or option, which is also what it says of none at all. */
+const typeCodes = new Set(["invalid_type", "invalid_value", "invalid_union"]);
+const zodWords = z.locales.en().localeError;
+/** Whether the issue's message is zod's own words, not ones the schema's author wrote. */
+const inZodsWords = (issue: Issue) => {
+	const own = zodWords(issue as unknown as Parameters<typeof zodWords>[0]);
+	return issue.message === (typeof own === "string" ? own : own?.message);
+};
+
+/** Whether the configuration holds nothing at `path` under `raw`, reading own keys alone. */
+function absentAt(raw: unknown, path: readonly PropertyKey[]): boolean {
+	let at = raw;
+	for (const key of path) {
+		if (at === null || typeof at !== "object" || !Object.hasOwn(at, key)) return true;
+		at = (at as Record<PropertyKey, unknown>)[key];
+	}
+	return at === undefined;
+}
 
 /** Checks a section with the HOCON library's typed reading: a string converts as the schema asks. */
 function readSection<T>(
@@ -119,23 +142,42 @@ function readSections(
 			continue;
 		}
 		const result = readSection(module.section, raw ?? {});
-		if ("issues" in result) refuseIssues(module.name, result.issues, refusals);
+		if ("issues" in result) refuseIssues(module.name, result.issues, refusals, raw);
 		else sections.set(module, deepFreeze(result.value));
 	}
 	return { kernel, sections };
 }
 
-function refuseIssues(name: string, issues: readonly Issue[], refusals: Refusal[]): void {
+/**
+ * Each issue as a refusal by its key path. A key the configuration does not set, which the schema
+ * needs a value of, is said to be required, unless the schema's author wrote its own words for it;
+ * any other issue keeps the schema's words.
+ */
+function refuseIssues(
+	name: string,
+	issues: readonly Issue[],
+	refusals: Refusal[],
+	raw: unknown,
+): void {
 	for (const issue of issues) {
-		const path = (issue.path ?? []).map(String).join(".");
-		refusals.push({ where: path ? `${name}.${path}` : name, reason: issue.message });
+		const keys = issue.path ?? [];
+		const path = keys.map(String).join(".");
+		const notSet =
+			issue.code !== undefined &&
+			typeCodes.has(issue.code) &&
+			absentAt(raw, keys) &&
+			inZodsWords(issue);
+		refusals.push({
+			where: path ? `${name}.${path}` : name,
+			reason: notSet ? "required, and not set" : issue.message,
+		});
 	}
 }
 
 function readKernel(raw: unknown, refusals: Refusal[]): KernelSettings {
 	const result = readSection(kernelSection, raw ?? null);
 	if (!("issues" in result)) return result.value;
-	refuseIssues(KERNEL_SECTION, result.issues, refusals);
+	refuseIssues(KERNEL_SECTION, result.issues, refusals, raw);
 	return refusedKernel();
 }
 

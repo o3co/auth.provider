@@ -28,7 +28,7 @@
 
 ## Invariants
 - Contracts and points resolve by value identity, never by name. Cycles, gaps, two providers, an empty point needing one, duplicate keys and a bad `every` interval refuse boot.
-- Refusals of one stage are reported together, by key path (a value configuration cannot hold too; a file that does not parse or resolve, by its line and column, and why by kind), never by value. Every key a keyed point holds twice is refused, and a point is checked once however many modules collect it. `multi` refuses a module unsafe on multiple instances.
+- Refusals of one stage are reported together, by key path (a value configuration cannot hold too; a file that does not parse or resolve, by its line and column, and why by kind), never by value; a key the schema needs and the configuration does not set is `required, and not set`, unless the schema words it itself. Every key a keyed point holds twice is refused, and a point is checked once however many modules collect it. `multi` refuses a module unsafe on multiple instances.
 - Before assembly succeeds, a late reference throws and `readinessReport` rejects. `readinessReport` and `stop` reject with a TypeError a deadline other than whole ms from 1 to 2^31−1. A late contract no module provides refuses boot.
 - Sections are frozen to the leaves. Contributions are frozen one level, since library values they hold keep state.
 - A failed periodic run, probe or stop hook is one warn line naming it, with the error's type, never its text. A stop hook past the deadline is one too.
