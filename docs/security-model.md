@@ -27,6 +27,7 @@ Each promise below holds across every module composed. Each names what keeps it 
    - Scenes: code ("tokens and logout", "refresh: what a token may do", "session grant", "OpenID Connect userinfo"), exchange ("token exchange of a session's token"), federation ("federation tokens: refusals").
    - A close left pending is not done: the session stays closing until every participant has finished, each host going on with it every `session-lifecycle.sweep-interval`, and `logout` and RP-initiated logout answer it `503`, never as logged out.
    - No scene yet for a device approval. A session that ends by expiry alone calls no participant.
+   - Bridges such as `session-tokens` come in every app composed through `combinations`; an app composed by hand must compose them itself, or the promise does not hold for what they join.
 2. **`prompt=login` and `max_age` are met only by a fresh authentication.**
    - Kept by: `authorize`'s re-authentication record, taken once; `session` never counts an authentication time it does not know as fresh.
    - Scenes: federation ("federation logins meeting a client's demand for a fresh login", and the freshness scenes through Google and Apple).
@@ -36,10 +37,10 @@ Each promise below holds across every module composed. Each names what keeps it 
    - Scenes: each area's "the store failing" scenes (code, exchange, oauth, federation, second factor, passkey), identity ("password login: a user ledger over HTTP"), mtls (the CRL and OCSP outage scenes).
    - Declared exceptions, each the operator's choice: `rate-limit.fail-mode = open` and `mtls.revocation.on-unavailable = allow`.
 4. **A subject's revocation boundary refuses everything made before it.**
-   - Kept by: `subject-revocation`'s boundaries, which every holder of a subject's state compares against, and its followers.
+   - Kept by: `subject-revocation`'s boundaries, which every holder of a subject's state compares against, and its followers. Among them, `mfa-revocation` moves `mfa`'s fence, so no second factor's enrollment begun before a revocation binds once the revocation is complete.
    - Does not hold for access tokens where `tokens.subject-check = none` is chosen: they live until they expire.
    - Does not hold for federation grants where `federation-grants.keep-on-subject-revocation` is set and a revocation asks to keep delegations: an established grant then answers only to the `delegations` boundary, which such a revocation leaves where it was.
-   - A revocation alone does not stop a second factor's enrollment already past its last check. After an account is taken over, reset the subject's second factors (`mfa-flows`' `mfaReset`) rather than only revoking: a reset also stops an enrollment under way.
+   - Bridges such as `mfa-revocation` come in every app composed through `combinations`; an app composed by hand must compose them itself, or an enrollment begun before a revocation may still bind. After an account is taken over, also reset the subject's second factors (`mfa-flows`' `mfaReset`): a revocation ends what was made before it, while a reset removes the factors themselves.
    - Scenes: code ("a subject the ledger revokes over HTTP"), federation ("federation grants: a subject the ledger revokes"), second factor ("a subject the ledger revokes").
    - No scene yet for a code not yet redeemed, a device code or a token exchange.
 5. **What is used once is used once, on any number of instances.**
