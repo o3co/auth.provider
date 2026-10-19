@@ -801,3 +801,79 @@ From `@mod/token-exchange`.
 |---|---|---|---|---|
 | `sections.token-exchange.others-tokens` | boolean | `false` |  |  |
 | `sections.token-exchange.public-exchange` | boolean | `false` |  |  |
+
+## IdP type settings
+
+What one IdP under `federation`'s `idps.<name>` holds beside its `type`, by the module that adds the type, which reads them.
+Shown as the full template with every opt-in composes them on the trial's settings: the URLs each type takes follow the outbound policy, which can differ in another app.
+
+### federation.idps.<name> (type = apple)
+
+From `@mod/idp-apple`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `federation.idps.<name>.client-id` | string |  | yes |  |
+| `federation.idps.<name>.client-secret` | string |  |  |  |
+| `federation.idps.<name>.team-id` | string |  |  |  |
+| `federation.idps.<name>.key-id` | string |  |  |  |
+| `federation.idps.<name>.private-key` | string |  |  |  |
+| `federation.idps.<name>.secret-lifetime` | string | `5m` |  |  |
+| `federation.idps.<name>.scopes` | list of name \| email | `["email"]` |  |  |
+| `federation.idps.<name>.authorization-endpoint` | string | `https://appleid.apple.com/auth/authorize` |  |  |
+| `federation.idps.<name>.token-endpoint` | string | `https://appleid.apple.com/auth/token` |  |  |
+| `federation.idps.<name>.jwks-uri` | string | `https://appleid.apple.com/auth/keys` |  |  |
+| `federation.idps.<name>.clock-skew` | string | `30s` |  |  |
+| `federation.idps.<name>.end-session-endpoint` | string |  |  |  |
+
+### federation.idps.<name> (type = github)
+
+From `@mod/idp-github`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `federation.idps.<name>.client-id` | string |  | yes |  |
+| `federation.idps.<name>.client-secret` | string |  | yes |  |
+| `federation.idps.<name>.scopes` | list of string | `["read:user"]` |  |  |
+| `federation.idps.<name>.authorization-endpoint` | string | `https://github.com/login/oauth/authorize` |  |  |
+| `federation.idps.<name>.token-endpoint` | string | `https://github.com/login/oauth/access_token` |  |  |
+| `federation.idps.<name>.api` | string | `https://api.github.com` |  |  |
+| `federation.idps.<name>.issuer` | string | `https://github.com/login/oauth` |  |  |
+
+### federation.idps.<name> (type = google)
+
+From `@mod/idp-google`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `federation.idps.<name>.client-id` | string |  | yes |  |
+| `federation.idps.<name>.client-secret` | string |  | yes |  |
+| `federation.idps.<name>.access` | offline \| online | `offline` |  |  |
+| `federation.idps.<name>.require-iss` | boolean | `true` |  |  |
+| `federation.idps.<name>.authorization-endpoint` | string | `https://accounts.google.com/o/oauth2/v2/auth` |  |  |
+| `federation.idps.<name>.token-endpoint` | string | `https://oauth2.googleapis.com/token` |  |  |
+| `federation.idps.<name>.jwks-uri` | string | `https://www.googleapis.com/oauth2/v3/certs` |  |  |
+| `federation.idps.<name>.clock-skew` | string | `30s` |  |  |
+| `federation.idps.<name>.end-session-endpoint` | string |  |  |  |
+| `federation.idps.<name>.hosted-domains` | list of string |  |  |  |
+
+### federation.idps.<name> (type = oidc)
+
+From `@mod/idp-oidc`.
+
+| Key | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `federation.idps.<name>.client-id` | string |  | yes |  |
+| `federation.idps.<name>.client-secret` | string |  | yes |  |
+| `federation.idps.<name>.issuer` | string |  | yes |  |
+| `federation.idps.<name>.token-auth` | client_secret_basic \| client_secret_post | `client_secret_basic` |  |  |
+| `federation.idps.<name>.discovery` | boolean | `true` |  |  |
+| `federation.idps.<name>.authorization-endpoint` | string |  |  |  |
+| `federation.idps.<name>.token-endpoint` | string |  |  |  |
+| `federation.idps.<name>.jwks-uri` | string |  |  |  |
+| `federation.idps.<name>.end-session-endpoint` | string |  |  |  |
+| `federation.idps.<name>.scopes` | list of string | `["openid"]` |  |  |
+| `federation.idps.<name>.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256","PS256","ES256","EdDSA"]` |  |  |
+| `federation.idps.<name>.endpoint-hosts` | list of string | `[]` |  |  |
+| `federation.idps.<name>.require-iss` | boolean | `false` |  |  |
+| `federation.idps.<name>.clock-skew` | string | `30s` |  |  |

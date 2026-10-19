@@ -6,6 +6,7 @@ import { root } from "../../../test/full-app.ts";
 import {
 	type ClientSection,
 	clientSectionsOf,
+	idpTypesOf,
 	referenceConfFile,
 	referenceConfOf,
 	sectionsIn,
@@ -23,11 +24,10 @@ import {
 vi.setConfig({ testTimeout: 60_000 });
 
 const sections = sectionsIn(root);
-/** Each section held to the rules: the operator's, then those modules add to client records. */
-const checked = Promise.all([sections, clientSectionsOf(root)]).then(([own, clients]) => [
-	...own,
-	...clients,
-]);
+/** Each section held to the rules: the operator's, those modules add to client records, and the IdP types' settings. */
+const checked = Promise.all([sections, clientSectionsOf(root), idpTypesOf(root)]).then(
+	([own, clients, types]) => [...own, ...clients, ...types],
+);
 const nodes = (s: ClientSection) => nodesOf(s.schema as unknown as Node, [s.section]);
 
 it("writes a section's defaults as HOCON: each described, a unit value bare, a key without a default as a comment", () => {

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Fragment, fragmentsIn, settingsOf } from "../fragments.ts";
 import { kernel, workspacePackages } from "../project.ts";
-import { clientSectionsIn, type Schema } from "./assembled.ts";
+import { assembledIn, type Contributed, type Schema } from "./assembled.ts";
 
 /** The part of a JSON Schema the reference reads. */
 export interface JsonSchema {
@@ -173,15 +173,24 @@ export async function sectionsIn(root: string): Promise<Section[]> {
 /** A section modules add to client records: its name, its contributor, its schema and its rows under `sections`. */
 export type ClientSection = Omit<Section, "dir">;
 
-/** Every client metadata section the full template with every opt-in composes, by name. */
-export async function clientSectionsOf(root: string): Promise<ClientSection[]> {
-	return (await clientSectionsIn(root))
+/** Contributions as sections, by name: their keys under `path`. */
+const asSections = (found: readonly Contributed[], path: (name: string) => string[]) =>
+	found
 		.map(({ owner, name, schema }) => {
 			const read = schema["~standard"].jsonSchema?.input({ target: "draft-2020-12" });
-			const rows = read ? rowsOf(read as JsonSchema, ["sections", name], () => ({})) : [];
+			const rows = read ? rowsOf(read as JsonSchema, path(name), () => ({})) : [];
 			return { section: name, owner, schema, rows };
 		})
 		.sort((a, b) => (a.section < b.section ? -1 : 1));
+
+/** Every client metadata section the full template with every opt-in composes, by name. */
+export async function clientSectionsOf(root: string): Promise<ClientSection[]> {
+	return asSections((await assembledIn(root)).clientSections, (name) => ["sections", name]);
+}
+
+/** Every IdP type's settings the full template with every opt-in composes, by type, under one IdP of `federation`. */
+export async function idpTypesOf(root: string): Promise<ClientSection[]> {
+	return asSections((await assembledIn(root)).idpTypes, () => ["federation", "idps", "<name>"]);
 }
 
 const cell = (value: unknown) =>
@@ -191,10 +200,11 @@ const cell = (value: unknown) =>
 const text = (value: string | undefined) =>
 	(value ?? "").replaceAll("|", "\\|").replaceAll("\n", " ");
 
-/** The reference, generated: one table per section, then one per client metadata section. */
+/** The reference, generated: one table per section, then one per client metadata section and per IdP type. */
 export function referenceOf(
 	sections: readonly Omit<Section, "dir" | "schema">[],
 	clients: readonly Omit<ClientSection, "schema">[] = [],
+	types: readonly Omit<ClientSection, "schema">[] = [],
 ): string {
 	const blocks = sections.map(({ section, owner, rows }) => {
 		const lines = rows.map(
@@ -219,16 +229,20 @@ export function referenceOf(
 		"",
 		...blocks.flatMap((b) => [b, ""]),
 		...(clients.length > 0 ? [clientPartOf(clients), ""] : []),
+		...(types.length > 0 ? [typePartOf(types), ""] : []),
 	]
 		.join("\n")
 		.trimEnd()}\n`;
 }
 
-/** The client metadata sections: what a client record holds under `sections`, by the module that adds each. */
-function clientPartOf(clients: readonly Omit<ClientSection, "schema">[]): string {
-	const blocks = clients.map(({ section, owner, rows }) =>
+/** One table per contribution, under its heading, by the module that adds it. */
+const contributedBlocks = (
+	found: readonly Omit<ClientSection, "schema">[],
+	heading: (name: string) => string,
+) =>
+	found.map(({ section, owner, rows }) =>
 		[
-			`### sections.${section}`,
+			`### ${heading(section)}`,
 			"",
 			`From \`${owner}\`.`,
 			"",
@@ -240,11 +254,30 @@ function clientPartOf(clients: readonly Omit<ClientSection, "schema">[]): string
 			),
 		].join("\n"),
 	);
+
+/** The client metadata sections: what a client record holds under `sections`, by the module that adds each. */
+function clientPartOf(clients: readonly Omit<ClientSection, "schema">[]): string {
+	const blocks = contributedBlocks(clients, (name) => `sections.${name}`);
 	return [
 		"## Client metadata sections",
 		"",
 		"What a client record holds under `sections`, each added by the module named, which reads it.",
 		"Shown as the full template with every opt-in composes them on the trial's settings: a section whose shape follows the composition (`client-assertion` by the outbound policy, `sender-binding` by the bindings composed) can differ in another app.",
+		"",
+		...blocks.flatMap((b) => [b, ""]),
+	]
+		.join("\n")
+		.trimEnd();
+}
+
+/** The IdP types' settings: what one IdP under `federation`'s `idps` holds, by the module that adds its type. */
+function typePartOf(types: readonly Omit<ClientSection, "schema">[]): string {
+	const blocks = contributedBlocks(types, (name) => `federation.idps.<name> (type = ${name})`);
+	return [
+		"## IdP type settings",
+		"",
+		"What one IdP under `federation`'s `idps.<name>` holds beside its `type`, by the module that adds the type, which reads them.",
+		"Shown as the full template with every opt-in composes them on the trial's settings: the URLs each type takes follow the outbound policy, which can differ in another app.",
 		"",
 		...blocks.flatMap((b) => [b, ""]),
 	]
