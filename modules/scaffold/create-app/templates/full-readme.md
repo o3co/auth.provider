@@ -31,6 +31,12 @@ Docker reads one line per variable from an env file: write a value of several li
 The image runs as a user other than root and installs the locked production dependencies only. `tini` runs as process 1, so `docker stop` reaches the app and it stops cleanly.
 Its health check asks `/_healthcheck`, which answers while the process runs; `/readyz` answers readiness, for a load balancer.
 
+## The composed modules' cards
+
+Each module's card, as installed, is the truth about it: what it does, its routes, and what it asks of a deployment, a server's settings among them. `AGENTS.md` indexes them with each module's section defaults.
+
+{{cards}}
+{{askedOfDeployment}}
 ## Keys read from the environment
 
 `{{application}}` reads each of these from its variable and holds no value.

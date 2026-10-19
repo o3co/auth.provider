@@ -252,3 +252,24 @@ it("stops within the kernel's own deadline, and tells the operator to give the o
 		/grace period longer than `kernel\.stop-deadline`/,
 	);
 });
+
+it("indexes for agents each composed module's card and section defaults as installed, and the release's whole lists", async () => {
+	const target = await installed();
+	const index = await read(target, "AGENTS.md");
+	const pkg = JSON.parse(await read(target, "package.json"));
+	const composed = Object.keys(pkg.dependencies);
+	const rows = [...index.matchAll(/^\| `(@[^`]+)` \| `([^`]+)` \| (?:`([^`]+)`)? \|$/gm)];
+	expect(rows.map((r) => r[1])).toEqual(composed);
+	for (const [, name, card, references] of rows) {
+		expect(existsSync(join(target, String(card))), String(name)).toBe(true);
+		if (references) expect(existsSync(join(target, references)), String(name)).toBe(true);
+	}
+	expect(rows.some((r) => r[3] !== undefined)).toBe(true);
+	expect(index).toMatch(/is the truth about it/);
+	expect(index).toMatch(
+		/https:\/\/github\.com\/o3co\/auth\.provider\/blob\/v[^/]+\/docs\/configuration\.md/,
+	);
+	const readme = await read(target, "README.md");
+	for (const name of composed)
+		expect(readme).toContain(`- \`${name}\`: \`node_modules/${name}/README.md\``);
+});
