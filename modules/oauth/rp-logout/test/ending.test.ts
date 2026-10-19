@@ -287,7 +287,7 @@ describe("the upstream's end of session", () => {
 				return {
 					name: "upstream",
 					at: async (session, at) => {
-						seen.open = await kept().stillOpen(session);
+						seen.open = (await kept().entryOf(session)).kind === "entered";
 						const url = new URL("https://idp.example/logout");
 						for (const [k, v] of Object.entries(at)) url.searchParams.set(k, String(v));
 						return url.href;
