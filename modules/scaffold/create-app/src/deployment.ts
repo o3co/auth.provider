@@ -99,11 +99,16 @@ export async function writeDeployment(
 /** The guide's lists: the keys read from env as table rows, and those written in the local layer. */
 const guideLists = (settings: readonly Setting[], written: readonly Written[]) => ({
 	settings: settings
-		.map((s) => `| \`${s.key}\` | \`${s.env}\` | \`${s.placeholder}\` |`)
+		.map((s) => {
+			// On one line of its table: a placeholder of several lines as JSON writes it.
+			const shown = s.placeholder.includes("\n") ? JSON.stringify(s.placeholder) : s.placeholder;
+			return `| \`${s.key}\` | \`${s.env}\` | \`${shown}\` |`;
+		})
 		.join("\n"),
 	written: written
 		.map(
-			(w) => `- \`${w.key}\`${w.spansSections ? " (spans sections: written by the operator)" : ""}`,
+			(w) =>
+				`- \`${w.key}\`${w.spansSections ? " (spans sections: written by the operator)" : ""}${w.severalLines ? " (several lines: written here or set in the process environment, never in .env)" : ""}`,
 		)
 		.join("\n"),
 });
