@@ -734,8 +734,8 @@ From `@mod/client-assertion`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.client-assertion.keys` | list of map | `[]` |  |  |
-| `sections.client-assertion.jwks-uri` | string |  |  |  |
+| `sections.client-assertion.keys` | list of map | `[]` |  | The client's public keys for its assertions, as JWKs: RSA, EC or OKP, with no private member; never beside `jwks-uri`. |
+| `sections.client-assertion.jwks-uri` | string |  |  | Where the client publishes its key set, an https URL (http only where `outbound` allows plain http); never beside written `keys`. A registered client's one that `outbound` refuses refuses boot. |
 
 ### sections.client-secret
 
@@ -751,10 +751,10 @@ From `@mod/consent`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.consent.first-party` | boolean | `false` |  |  |
-| `sections.consent.name` | string |  |  |  |
-| `sections.consent.uri` | string |  |  |  |
-| `sections.consent.host` | string |  |  |  |
+| `sections.consent.first-party` | boolean | `false` |  | Whether the operator runs the client, so its users are never asked for consent; it counts only for a client the operator registered. |
+| `sections.consent.name` | string |  |  | The client's name the consent page shows, trimmed and cut to 200 characters. |
+| `sections.consent.uri` | string |  |  | The client's home page the consent page shows, an https URL. |
+| `sections.consent.host` | string |  |  | The host the client's source verified, shown only for a client the operator did not register. |
 
 ### sections.federation-grants
 

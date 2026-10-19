@@ -125,9 +125,7 @@ it("describes every key of every section", async () => {
 const clientsDescribedLater = [
 	"authorize",
 	"client-allowance",
-	"client-assertion",
 	"client-secret",
-	"consent",
 	"federation-grants",
 	"federation-tokens",
 ];

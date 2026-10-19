@@ -26,8 +26,15 @@ export const clientKeys: Section<ClientKeys> = {
 						.record(z.string(), z.unknown())
 						.refine(verifiesSignatures, "a public RSA, EC or OKP key for verifying signatures"),
 				)
-				.prefault([]),
-			"jwks-uri": urlSetting({ schemes: ["https", "http"] }).optional(),
+				.prefault([])
+				.describe(
+					"The client's public keys for its assertions, as JWKs: RSA, EC or OKP, with no private member; never beside `jwks-uri`.",
+				),
+			"jwks-uri": urlSetting({ schemes: ["https", "http"] })
+				.optional()
+				.describe(
+					"Where the client publishes its key set, an https URL (http only where `outbound` allows plain http); never beside written `keys`. A registered client's one that `outbound` refuses refuses boot.",
+				),
 		})
 		.refine((s) => s.keys.length === 0 || s["jwks-uri"] === undefined, {
 			message: "keys written in, or a jwks-uri, not both",

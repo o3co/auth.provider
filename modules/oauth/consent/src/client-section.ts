@@ -20,17 +20,28 @@ const name = z
 export const clientSection: Section<ClientShown> = {
 	name: "consent",
 	schema: z.strictObject({
-		"first-party": z.boolean().prefault(false),
-		name: name.optional(),
+		"first-party": z
+			.boolean()
+			.prefault(false)
+			.describe(
+				"Whether the operator runs the client, so its users are never asked for consent; it counts only for a client the operator registered.",
+			),
+		name: name
+			.optional()
+			.describe("The client's name the consent page shows, trimmed and cut to 200 characters."),
 		uri: z
 			.string()
 			.refine((text) => httpsUrl(text) !== undefined)
-			.optional(),
+			.optional()
+			.describe("The client's home page the consent page shows, an https URL."),
 		host: z
 			.string()
 			.min(1)
 			.refine((text) => !spaceOrControl.test(text))
-			.optional(),
+			.optional()
+			.describe(
+				"The host the client's source verified, shown only for a client the operator did not register.",
+			),
 	}),
 };
 
