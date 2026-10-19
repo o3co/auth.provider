@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { full, optIns } from "@mod/combinations";
 import { assemble, contract, defineModule, type ExtensionPoint, loadConfig } from "@mod/kernel";
+import { trialLayer } from "@mod/trial";
 import { generate } from "../generate.ts";
 import { workspacePackages } from "../project.ts";
-import { trialSettings } from "../trial.ts";
 
 /** A section's schema, as a module gives it: a Standard Schema that can describe itself. */
 export interface Schema {
@@ -186,13 +186,13 @@ async function trialConfig(root: string) {
 	const target = await mkdtemp(join(tmpdir(), "create-app-references-"));
 	try {
 		await generate({ target, template: "full", workspace: root, add: optIns() });
-		const { env, local } = await trialSettings(target, { redisUrl: "redis://127.0.0.1:1" });
+		const local = await trialLayer(target, { redisUrl: "redis://127.0.0.1:1" });
 		await writeFile(join(target, "local.conf"), local);
 		await writeFile(join(target, "memory.conf"), "store { accept-volatile = true }\n");
 		const files = ["memory.conf", "local.conf", join("config", "application.conf")];
 		const config = (await loadConfig({
 			files: files.map((file) => join(target, file)),
-			env,
+			env: {},
 		})) as Record<string, unknown>;
 		const { redis: _redis, ...kept } = config;
 		return kept;

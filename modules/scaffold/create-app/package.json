@@ -13,6 +13,7 @@
 	"dependencies": {
 		"@mod/combinations": "workspace:*",
 		"@mod/kernel": "workspace:*",
+		"@mod/trial": "workspace:*",
 		"@o3co/ts.hocon": "1.14.3"
 	},
 	"scripts": {
