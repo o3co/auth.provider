@@ -7,7 +7,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import {
 	type Narrower,
 	type Outbound,
-	type OutboundPolicy,
+	type OutboundRefusals,
 	type OutboundRequest,
 	type OutboundResponse,
 	outbound,
@@ -31,11 +31,13 @@ const runtime = quietRuntime({ clock, random: { bytes: (length) => new Uint8Arra
 
 /** What the destination policy was asked at boot. */
 const policyAsked: { url: string; narrower: Narrower | undefined }[] = [];
+/** How outbound explains a host its allow list leaves out. */
+const notAllowed = "not-allowed: name the host in outbound.allow, or set outbound.allow-any-public";
 /** A destination policy refusing the `refused` hosts as not allowed. */
-const policyRefusing = (refused: readonly string[] = []): OutboundPolicy => ({
-	refusalOf: (url, narrower) => {
+const policyRefusing = (refused: readonly string[] = []): OutboundRefusals => ({
+	explained: (url, narrower) => {
 		policyAsked.push({ url, narrower });
-		return refused.includes(new URL(url).hostname) ? "not-allowed" : undefined;
+		return refused.includes(new URL(url).hostname) ? notAllowed : undefined;
 	},
 });
 const settings = settingsOf(policyRefusing());
@@ -240,7 +242,7 @@ describe("idp-google", () => {
 				.error?.issues.map((i) => [i.path, i.message]);
 		const refused = (key: string) => [
 			[key],
-			"outbound's destination policy refuses it: not-allowed",
+			`outbound's destination policy refuses it: ${notAllowed}`,
 		];
 		policyAsked.length = 0;
 		const googles = ["oauth2.googleapis.com", "www.googleapis.com"];
