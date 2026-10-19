@@ -54,5 +54,5 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | POST | `/session/mfa/step-up` | `@mod/mfa-flows` | form, json | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | GET | `/session/mfa/transaction` | `@mod/mfa-flows` | form |  |  |  |  |  |
 | POST | `/session/mfa/verify` | `@mod/mfa-flows` | form, json | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
-| GET | `/session/oauth/federation/*` | `@mod/federation` | form | `rate-limit.requests-per-source` |  |  | `rate-limit.requests-per-source` |  |
-| POST | `/session/oauth/federation/*` | `@mod/federation` | form | `rate-limit.requests-per-source` | yes |  | `rate-limit.requests-per-source` |  |
+| GET | `/session/oauth/federation/*` | `@mod/federation` | form | `rate-limit.requests-per-source` | yes | Its start is the user's own navigation and its callback the IdP's redirect or form_post; the start's origin is checked before any transaction is made. | `rate-limit.requests-per-source` |  |
+| POST | `/session/oauth/federation/*` | `@mod/federation` | form | `rate-limit.requests-per-source` | yes | Its start is the user's own navigation and its callback the IdP's redirect or form_post; the start's origin is checked before any transaction is made. | `rate-limit.requests-per-source` |  |
