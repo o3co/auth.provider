@@ -25,7 +25,6 @@ import { sessionStandIn } from "@mod/session/testing";
 import { sessionTokens } from "@mod/session-tokens";
 import bridgeModule from "@mod/session-tokens/module";
 import { sessionTokensInMemory } from "@mod/session-tokens/testing";
-import { simulatedStore } from "@mod/store/testing";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { grantCaller, grantCalls, grantInput } from "@mod/token-endpoint/testing";
@@ -94,7 +93,7 @@ codeStoreContract("records stand-in", async () => {
 			now += ms;
 		},
 		raceNextUpdate: (_name, change) => stand.raceNextChange(change),
-		crowd: { limit: size.perShard, hashes: crowdingFor(size).jobs },
+		crowd: { limit: size.perShard, names: crowdingFor(size).jobs },
 	};
 });
 const verifier = "v".repeat(43);
@@ -140,7 +139,6 @@ async function serve(
 		codeGrant?: Parameters<typeof codeGrantConfig>[0];
 	} = {},
 ) {
-	const simulated = simulatedStore();
 	const stores = memoryStores();
 	const app = await assemble({
 		modules: [
@@ -153,7 +151,6 @@ async function serve(
 			clientAllowanceModule,
 			sessionStandIn,
 			subjectRevocationStandIn,
-			simulated.module,
 			stores.module,
 			bridgeModule,
 			sessionTokensInMemory().module,
@@ -222,7 +219,7 @@ async function serve(
 		const described = outcome.description ? { error_description: outcome.description } : {};
 		return { status: 400, body: { error: outcome.error, ...described } };
 	};
-	return { app, simulated, stores, issue, redeem, session, cookies, facts };
+	return { app, stores, issue, redeem, session, cookies, facts };
 }
 /** A request carrying the session cookies given. */
 const carrying = (setCookies: readonly string[]) =>
