@@ -15,7 +15,7 @@
 
 ## Invariants
 - Every request goes through `outbound`, narrowed to the hosts of the token endpoint and the API.
-- Boot is refused, at its key, where `outbound`'s destination policy refuses the token endpoint or the API's user URL with those hosts; GitHub's own defaults are asked too.
+- Boot is refused, at its key, where `outbound`'s destination policy refuses the token endpoint or the API's user URL with those hosts, saying which of its keys to set (`outbound.refusals`); GitHub's own defaults are asked too.
 - A callback whose `iss` is not the issuer is refused before its code is used.
 - A callback without `iss` is taken, since GitHub may send none.
 - The code goes to the token endpoint with its PKCE verifier and the client's secret in the form.
