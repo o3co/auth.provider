@@ -116,7 +116,9 @@ export interface Factors {
 					| "unknown"
 					| "malformed-label"
 					| "duplicate"
-					| "first-binding-closed";
+					| "first-binding-closed"
+					/** The subject's factors were cleared (a reset) since the binding began: nothing is written. */
+					| "cleared";
 		  }
 	>;
 	rename(

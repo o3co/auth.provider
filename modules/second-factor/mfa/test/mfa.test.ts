@@ -355,6 +355,26 @@ describe("decisions on the subject's factors", () => {
 		expect((await decided.prove("kim", bound.factor.id, `${bound.secret}:1`)).kind).toBe("raced");
 	});
 
+	it("binds nothing begun before the subject's factors were cleared, nor while a clear lands", async () => {
+		const { decided, bindCode, provedCode, place } = await serve();
+		await bindCode("ivy");
+		const before = await provedCode("ivy");
+		await decided.clear("ivy");
+		expect(await decided.bind("ivy", before.pending, before.state)).toEqual({ kind: "cleared" });
+		expect(await decided.held("ivy")).toEqual([]);
+		// Even a subject that held nothing: the clear is counted all the same.
+		const none = await provedCode("una");
+		await decided.clear("una");
+		expect(await decided.bind("una", none.pending, none.state)).toEqual({ kind: "cleared" });
+		expect(await decided.held("una")).toEqual([]);
+		// A clear that lands between the check and the write: the write sees it.
+		await bindCode("eve");
+		const racing = await provedCode("eve");
+		place.raceNextChange((record) => ({ ...record, factors: [], clears: 1 }));
+		expect(await decided.bind("eve", racing.pending, racing.state)).toEqual({ kind: "cleared" });
+		expect(await decided.held("eve")).toEqual([]);
+	});
+
 	it("answers whether a factor can be guessed", async () => {
 		const { decided, bindCode, idOf } = await serve();
 		const bound = await bindCode("zed");
@@ -1147,6 +1167,17 @@ describe("an enrollment witness", () => {
 		expect(events.map((e) => [e.kind, e.attributes])).toEqual([
 			["mfa.first_binding_conflict", { kind: "code", reason: "reset-cleared" }],
 		]);
+	});
+
+	it("takes its own mark back when a reset's clear lands while it binds a first factor", async () => {
+		const { decided, provedCode, witness, counted, place } = await witnessed();
+		await place.factors.save(listKeyOf("gil"), storedList("gil", []), "endless");
+		const begun = await provedCode("gil");
+		// The reset clears the factors and the mark; this binding marks again before it writes.
+		place.raceNextChange((record) => ({ ...record, factors: [], clears: 1 }));
+		expect(await decided.bind("gil", begun.pending, begun.state)).toEqual({ kind: "cleared" });
+		expect(await counted("gil")).toBe(0);
+		expect(witness.marks.has("gil")).toBe(false);
 	});
 
 	it("takes back its own factor once more when the store cannot answer the first time", async () => {

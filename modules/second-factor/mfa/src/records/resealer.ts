@@ -1,7 +1,7 @@
 import { isUnavailable } from "@mod/kernel";
 import type { Resealer, Seal } from "@mod/seal";
 import type { FactorStore } from "../store.ts";
-import { factorsOf, listKeyOf, sealContext, storedList, subjectOf } from "./records.ts";
+import { clearsOf, factorsOf, listKeyOf, sealContext, storedList, subjectOf } from "./records.ts";
 
 /** Walks every factor list, sealing again secrets a past key sealed; ones it cannot open are left. */
 export function resealerOver(store: FactorStore, seal: Seal): Resealer {
@@ -41,7 +41,7 @@ export function resealerOver(store: FactorStore, seal: Seal): Resealer {
 							const all = factorsOf(current);
 							if (all.find((f) => f.id === factor.id)?.secret !== factor.secret) return undefined;
 							const moved = all.map((f) => (f.id === factor.id ? { ...f, secret: next } : f));
-							return { value: storedList(subject, moved) };
+							return { value: storedList(subject, moved, clearsOf(current)) };
 						});
 						const after = changed && factorsOf(changed.after).find((f) => f.id === factor.id);
 						if (after?.secret === next) done++;
