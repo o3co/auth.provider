@@ -41,4 +41,4 @@
 - With a witness, the last counting factor is never removed; `clear` removes the factors, then the mark. Without one, a lost store reads as never enrolled.
 
 ## Depends on
-- `kernel`, `login-gates`, `seal`, `audit`, `mfa-extensions` (the kinds and gates), `mfa-witness` (the witness)
+- `kernel`, `login-gates`, `seal`, `audit`, `mfa-extensions` (the kinds and gates), `mfa-witness` (the witness), `labels` (the label's shape)
