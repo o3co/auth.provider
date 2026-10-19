@@ -1,7 +1,7 @@
 import { clientAllowance } from "@mod/client-allowance";
 import { type Clients, clients } from "@mod/clients";
 import { type TargetRule, targets } from "@mod/grants";
-import { type HttpRequest, type HttpResponse, noStore, type Route } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer, type Route } from "@mod/http";
 import { issuer } from "@mod/issuer";
 import { type BuildContext, type Runtime, Unavailable } from "@mod/kernel";
 import { authenticateClient, oauthError } from "@mod/token-endpoint";
@@ -74,22 +74,16 @@ export function authorizationWith(a: Authorizing): Pick<Route, "handle" | "unava
 		}
 		const userCode = await keepUserCode(name);
 		const page = a.settings["verification-uri"];
-		return {
-			status: 200,
-			headers: noStore,
-			body: {
-				json: {
-					device_code: deviceCode,
-					user_code: userCode,
-					verification_uri: page,
-					...(a.settings["complete-uri"]
-						? { verification_uri_complete: withUserCode(page, userCode) }
-						: {}),
-					expires_in: a.settings["code-lifetime"],
-					interval: a.settings.interval,
-				},
-			},
-		};
+		return jsonAnswer(200, {
+			device_code: deviceCode,
+			user_code: userCode,
+			verification_uri: page,
+			...(a.settings["complete-uri"]
+				? { verification_uri_complete: withUserCode(page, userCode) }
+				: {}),
+			expires_in: a.settings["code-lifetime"],
+			interval: a.settings.interval,
+		});
 	};
 	return { handle: answer, unavailable: { response: oauthError(503, "temporarily_unavailable") } };
 }
