@@ -1,3 +1,8 @@
 {
-	"private": false
+	"private": false,
+	"description": "Delegated upstream access for auth-provider, a self-hosted OAuth 2.0 authorization server and OpenID Connect provider for Node.js: a confidential client acts for a user at an upstream provider, with the provider holding and refreshing the upstream tokens.",
+	"keywords": [
+		"delegation",
+		"federation"
+	]
 }

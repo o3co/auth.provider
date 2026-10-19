@@ -1,5 +1,10 @@
 import { BlockList, isIP } from "node:net";
-import { DestinationRefused, type Narrower } from "./contract.ts";
+import {
+	type CredentialRefusal,
+	DestinationRefused,
+	type Narrower,
+	type RefusalReason,
+} from "./contract.ts";
 
 export interface Policy {
 	readonly allow: readonly string[];
@@ -237,4 +242,59 @@ export function admitAddresses(
 	if (addresses.length === 0 || addresses.some(refusing(reach))) {
 		throw new DestinationRefused("special-address");
 	}
+}
+
+/**
+ * What an operator sets, or writes otherwise, so the policy lets a URL it refused for `reason`
+ * through; it names keys alone, never the URL's host, port or any other value.
+ */
+export function remedyOf(
+	reason: RefusalReason,
+	raw: string,
+	policy: Pick<Policy, "allow" | "anyPublic">,
+	narrower: Narrower = {},
+): string {
+	const url = URL.parse(raw);
+	switch (reason) {
+		case "not-allowed": {
+			const host = url ? normalized(url.hostname) : undefined;
+			return !policy.anyPublic && !matches(host ?? "", policy.allow)
+				? "name the host in outbound.allow, or set outbound.allow-any-public"
+				: "the host is not one the setting may reach";
+		}
+		case "scheme":
+			return url?.protocol === "http:"
+				? "plain http reaches only a host:port that outbound.plain-loopback names; otherwise write the URL with https"
+				: "only https and http URLs are reached";
+		case "userinfo":
+			return "write the URL without a user or password";
+		case "port":
+			return "the URL's port is one outbound never reaches";
+		case "denied":
+			return "the host matches outbound.deny";
+		case "special-address":
+			return narrower.internal
+				? "the URL names a special-purpose address; a private one is reached only when outbound.internal-hosts names its host"
+				: "the URL names a special-purpose address, which outbound never reaches";
+		case "redirect":
+			return "a redirect is never followed";
+		case "credential":
+			return "a credential never goes with material fetched for its signature";
+	}
+}
+
+/** Why a credential must not go to these URLs: more than one origin, or one neither https nor a named plain-loopback pair. */
+export function credentialRefusal(
+	urls: readonly string[],
+	plainLoopback: readonly string[],
+): CredentialRefusal | undefined {
+	const parsed = urls.map((raw) => URL.parse(raw));
+	const named = (url: URL) => {
+		const port = url.port === "" ? 80 : Number(url.port);
+		return plainLoopback.some((pair) => pairOf(pair) === `${normalized(url.hostname)}:${port}`);
+	};
+	const sent = (url: URL | null) =>
+		url?.protocol === "https:" || (url?.protocol === "http:" && named(url));
+	if (!parsed.every(sent)) return "scheme";
+	return new Set(parsed.map((url) => url?.origin)).size > 1 ? "origins" : undefined;
 }

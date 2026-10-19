@@ -97,7 +97,8 @@ it("lets users refuse boot on a linked name another module declares for another 
 	]);
 	const refused = await boot(async () => ({ kind: "none" }), [devices], [other]).catch((e) => e);
 	expect(refused).toBeInstanceOf(BootRefused);
+	// users names the modules that declare the name, never the name or an issuer.
 	expect((refused as BootRefused).refusals.map((r) => r.reason).join("; ")).toContain(
-		"app.devices (by jwt-bearer-users)",
+		"jwt-bearer-users",
 	);
 });

@@ -18,6 +18,7 @@ Internal module of `mfa-flows`: binding a new factor, from a session or within a
 - Each call to `mfa` names whom it is for: the session by its handle, or the transaction's (`askedFrom`).
 - Only when the binding proof is asked and `mfa` waits for it, it asks `mfa-binding-proof` to send it, good until the transaction's deadline. None lets the binding begin.
 - A binding proof sent is held sealed in the transaction and answered `403 mfa_binding_proof_required` with what to show; limited is `429 rate_limited`, refused `403 mfa_binding_proof_unavailable`.
+- A first factor bound on a binding proof goes on at once: the login resumes, or the session is raised. Where that fails after the factor brought recovery codes, the codes are removed before the failure is answered, as no one would ever see them; the factor stays, and codes can be reissued.
 - A challenge in an enrollment's transaction sends the binding proof again, answered `200` with what to show, or with nothing while a pass is kept or none is asked.
 - A `proof` sent while a binding proof's challenge is held spends a transaction's attempt, never the subject's lockout. One that passes keeps `mfa-binding-proof`'s pass, sealed to this transaction and the kind asked; a wrong one is `401 mfa_invalid`.
 - Only a binding of that kind begun in that transaction hands the pass to `mfa`, and the write holding the binding ends it, so it begins one binding. A pass kept for another kind is left unused, and the proof is asked again. The last attempt ends the transaction, even one that passes (`400`): no attempt would be left to complete a binding.
@@ -29,6 +30,8 @@ Internal module of `mfa-flows`: binding a new factor, from a session or within a
 - A binding proof or a first proof `mfa` cannot judge (unavailable) gives its attempt back.
 - A first factor bound in a transaction where a binding proof passed counts at once, by the amr `mfa` answers for its first proof: a login goes on through the resume, answering `done` with the factor and recovery codes once it opens; a session is raised, and the factor and codes answered whatever the raise came to.
 - A first factor bound without one counts from the next sign-in: binding it answers the factor and recovery codes and ends the transaction, never the login.
+- Completing an enrollment checks for a revocation again after the proof, just before `mfa` writes, and a reset since it began, or a revocation once complete (`mfa-revocation` moves the fence), is stopped in that write (`fenced`); both answer `401 login_required` and bind nothing.
+- Recovery codes a first factor brought are shown only where no revocation came since the transaction started, checked after the factor is written, and again after the session is raised or the login goes on where either runs, the last check always being the last wait before they go out; else the answer is `401 login_required`, and taking the codes back is best effort: a failure, or a fence moved meanwhile, leaves them unseen.
 
 ## Depends on
 - `audit`; `http` (the request type); `mfa` (factor decisions, the label's shape); `mfa-binding-proof` (the binding proof); `session` (entry, raising); `subject-revocation`; `transactions`; `proof`'s resume, given by the package; the package's routing helpers; `recording`

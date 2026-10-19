@@ -220,7 +220,7 @@ From `@mod/http`.
 | `http.proxy-hops` | integer (1–10) | `1` |  |  |  | How many trusted proxies, at most, a request passes through. |
 | `http.public-origin` | string |  |  | `HTTP_PUBLIC_ORIGIN` | `https://login.example.invalid` | The scheme, host and port users reach this deployment at: an origin only, with no path. |
 | `http.cors-origins` | list of string | `[]` |  |  |  | The https origins whose pages may read cross-origin routes: exact, without a pattern. |
-| `http.insecure-origin` | boolean | `false` |  |  |  | Accepts a plain-http `public-origin`, knowing its cookies cannot be made secure: an http `public-origin` boots only with it. |
+| `http.insecure-origin` | boolean | `false` |  | `HTTP_INSECURE_ORIGIN` | `false` | Accepts a plain-http `public-origin`, knowing its cookies cannot be made secure: an http `public-origin` boots only with it. |
 | `http.client-certificate.dialect` | rfc9440 \| pem \| xfcc |  |  |  |  | The form a trusted proxy forwards the client's certificate in: `rfc9440` (byte sequences) with `header` and `chain-header`, `pem` (one PEM block, URL-encoded or not) with `header`, or `xfcc` (Envoy's form, the chain in the same header) with `header`. |
 | `http.client-certificate.header` | string | `client-cert` |  |  |  | The header holding the client's certificate: lower-case letters, digits and `-`; `pem` has no default header. |
 | `http.client-certificate.chain-header` | string | `client-cert-chain` |  |  |  | The header holding the chain behind the certificate, for `rfc9440`: lower-case letters, digits and `-`. |
@@ -272,7 +272,7 @@ From `@mod/keys`.
 |---|---|---|---|---|---|---|
 | `keys.signing.kid` | string |  | yes | `KEYS_SIGNING_KID` | `signing-1` | The key id tokens signed with this key carry, unique in the ring. |
 | `keys.signing.alg` | EdDSA \| ES256 \| RS256 \| HS256 |  | yes | `KEYS_SIGNING_ALG` | `EdDSA` | The algorithm the provider signs with. |
-| `keys.signing.private-key` | string |  |  | `KEYS_SIGNING_PRIVATE_KEY` | `REPLACE-PKCS8-PEM-PRIVATE-KEY` | The signing key, as a PKCS8 PEM. |
+| `keys.signing.private-key` | string |  |  | `KEYS_SIGNING_PRIVATE_KEY` | `"-----BEGIN PRIVATE KEY-----\nREPLACE-PKCS8-PEM-PRIVATE-KEY\n-----END PRIVATE KEY-----"` | The signing key, as a PKCS8 PEM. |
 | `keys.signing.secret` | string |  |  |  |  | The HMAC secret for HS256: at least 32 bytes, in hex or base64, of at least 8 byte values. |
 | `keys.next.kid` | string |  |  |  |  | The key id of the key that signs next, unique in the ring. |
 | `keys.next.alg` | EdDSA \| ES256 \| RS256 |  |  |  |  | The algorithm the next key will sign with. |
@@ -392,6 +392,19 @@ From `@mod/mfa-webauthn`.
 | `mfa-webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  | Whether the authenticator is asked to verify its user, as WebAuthn says it. |
 | `mfa-webauthn.display-name` | string | `Account` |  |  |  | The name an authenticator shows for an account with no name to show; it names no one. |
 
+## mfa-witness-http
+
+From `@mod/mfa-witness-http`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `mfa-witness-http.read-url` | string |  | yes | `MFA_WITNESS_HTTP_READ_URL` | `https://ledger.example.invalid/mfa-witness/read` | Where whether a subject carries the mark is read. At the same origin as the other two URLs. Plain http is reached only where outbound's policy names it. |
+| `mfa-witness-http.enroll-url` | string |  | yes | `MFA_WITNESS_HTTP_ENROLL_URL` | `https://ledger.example.invalid/mfa-witness/enroll` | Where the mark is set to a token unless one is set. At the same origin as the other two URLs. Plain http is reached only where outbound's policy names it. |
+| `mfa-witness-http.clear-url` | string |  | yes | `MFA_WITNESS_HTTP_CLEAR_URL` | `https://ledger.example.invalid/mfa-witness/clear` | Where the mark is removed. At the same origin as the other two URLs. Plain http is reached only where outbound's policy names it. |
+| `mfa-witness-http.credential` | string |  | yes | `MFA_WITNESS_HTTP_CREDENTIAL` | `REPLACE-RANDOM-BEARER-TOKEN-32-BYTES` | A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material, sent on every call. |
+| `mfa-witness-http.timeout` | string | `5s` |  |  |  | How long a call may take, from 1ms to 1m, narrowing outbound's cap; a write's deadline is its sending time plus this. |
+| `mfa-witness-http.max-response-size` | string |  |  |  |  | The largest answer read, from 1B to 16MiB, narrowing outbound's cap. |
+
 ## mtls
 
 From `@mod/mtls`.
@@ -509,6 +522,8 @@ From `@mod/rp-logout`.
 | `rp-logout.remember-for` | string | `1d` |  |  |  | How long a session's clients are kept from a redemption, from 1m to 30d; at least as long as a session lives. |
 | `rp-logout.notify-within` | string | `1d` |  |  |  | How long an undelivered back-channel notice is tried again, from 1m to 7d. |
 | `rp-logout.sweep-interval` | string | `1m` |  |  |  | How often each host sweeps the kept notices, from 1s to 1h. |
+| `rp-logout.requests` | integer (1–100000) | `60` |  |  |  | Logout requests allowed per source in each window, a GET and a POST together, before any hint is checked. |
+| `rp-logout.window` | string | `1m` |  |  |  | The window `requests` is counted over, from `1s` to `1d` in whole seconds. |
 
 ## rp-logout-store
 
@@ -713,7 +728,7 @@ From `@mod/authorize`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.authorize.redirect-uris` | list of string | `[]` |  |  |
+| `sections.authorize.redirect-uris` | list of string | `[]` |  | The redirect URIs the client may ask for, each matched as written: https, http to a loopback host, or a private-use reverse-domain scheme, with no fragment, userinfo or query parameter named like a response parameter. |
 
 ### sections.client-allowance
 
@@ -721,10 +736,10 @@ From `@mod/client-allowance`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.client-allowance.grants` | list of string | `[]` |  |  |
-| `sections.client-allowance.scopes` | list of string | `[]` |  |  |
-| `sections.client-allowance.default-scopes` | list of string |  |  |  |
-| `sections.client-allowance.audiences` | list of string | `[]` |  |  |
+| `sections.client-allowance.grants` | list of string | `[]` |  | The grant types the client may use; none allows no grant. |
+| `sections.client-allowance.scopes` | list of string | `[]` |  | The scopes the client may ask for; none allows no scope. |
+| `sections.client-allowance.default-scopes` | list of string |  |  | The scopes given when the client asks none; left out, a request without a scope is refused while scopes are allowed, and an empty list gives no scope. |
+| `sections.client-allowance.audiences` | list of string | `[]` |  | The audiences the client's tokens may name, the first given when none is asked; none means the issuer. |
 
 ### sections.client-assertion
 
@@ -732,8 +747,8 @@ From `@mod/client-assertion`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.client-assertion.keys` | list of map | `[]` |  |  |
-| `sections.client-assertion.jwks-uri` | string |  |  |  |
+| `sections.client-assertion.keys` | list of map | `[]` |  | The client's public keys for its assertions, as JWKs: RSA, EC or OKP, with no private member; never beside `jwks-uri`. |
+| `sections.client-assertion.jwks-uri` | string |  |  | Where the client publishes its key set, an https URL (http only where `outbound` allows plain http); never beside written `keys`. A registered client's one that `outbound` refuses refuses boot. |
 
 ### sections.client-secret
 
@@ -741,7 +756,7 @@ From `@mod/clients`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.client-secret.hash` | string |  |  |  |
+| `sections.client-secret.hash` | string |  |  | A bcrypt or scrypt hash of the client's secret, as `secret-hash` reads it; a plain-text secret, or a hash it cannot read, is refused at boot. |
 
 ### sections.consent
 
@@ -749,10 +764,10 @@ From `@mod/consent`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.consent.first-party` | boolean | `false` |  |  |
-| `sections.consent.name` | string |  |  |  |
-| `sections.consent.uri` | string |  |  |  |
-| `sections.consent.host` | string |  |  |  |
+| `sections.consent.first-party` | boolean | `false` |  | Whether the operator runs the client, so its users are never asked for consent; it counts only for a client the operator registered. |
+| `sections.consent.name` | string |  |  | The client's name the consent page shows, trimmed and cut to 200 characters. |
+| `sections.consent.uri` | string |  |  | The client's home page the consent page shows, an https URL. |
+| `sections.consent.host` | string |  |  | The host the client's source verified, shown only for a client the operator did not register. |
 
 ### sections.federation-grants
 
@@ -760,8 +775,8 @@ From `@mod/federation-grants`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.federation-grants.connections` | list of string | `[]` |  |  |
-| `sections.federation-grants.return-uris` | list of string | `[]` |  |  |
+| `sections.federation-grants.connections` | list of string | `[]` |  | The operator's connections, by name, that the client may ask for; only a registered confidential client asks for any. |
+| `sections.federation-grants.return-uris` | list of string | `[]` |  | Where the browser may be sent back after the user connects or declines, each matched exactly; none may hold `grant_id`, `state` or `error`. |
 
 ### sections.federation-tokens
 
@@ -769,8 +784,8 @@ From `@mod/federation-tokens`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.federation-tokens.receives` | boolean | `false` |  |  |
-| `sections.federation-tokens.post-logout-redirect-uris` | list of string | `[]` |  |  |
+| `sections.federation-tokens.receives` | boolean | `false` |  | Whether the client may be handed its sessions' upstream tokens; only a client the operator registers may. |
+| `sections.federation-tokens.post-logout-redirect-uris` | list of string | `[]` |  | Where an upstream logout this client asks may send the browser back, each matched exactly. |
 
 ### sections.rp-logout
 
@@ -778,11 +793,11 @@ From `@mod/rp-logout`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.rp-logout.post-logout-redirect-uris` | list of string | `[]` |  |  |
-| `sections.rp-logout.frontchannel-logout-uri` | string |  |  |  |
-| `sections.rp-logout.frontchannel-logout-session-required` | boolean | `true` |  |  |
-| `sections.rp-logout.backchannel-logout-uri` | string |  |  |  |
-| `sections.rp-logout.backchannel-logout-session-required` | boolean | `true` |  |  |
+| `sections.rp-logout.post-logout-redirect-uris` | list of string | `[]` |  | Where a logout may send the browser back to, each a URI `authorize` lets a client register; a return asked for is used only when it matches one exactly. |
+| `sections.rp-logout.frontchannel-logout-uri` | string |  |  | The page framed after a logout (OpenID Connect Front-Channel Logout 1.0): an http or https URL without userinfo, a fragment, or iss or sid in its query, at one of the client's redirect URIs' origins. |
+| `sections.rp-logout.frontchannel-logout-session-required` | boolean | `true` |  | Whether the framed page's URL gets the session's sid beside iss. |
+| `sections.rp-logout.backchannel-logout-uri` | string |  |  | Where the logout token is posted after a logout (OpenID Connect Back-Channel Logout 1.0): an http or https URL without userinfo or a fragment. |
+| `sections.rp-logout.backchannel-logout-session-required` | boolean | `true` |  | Whether the logout token carries the session's sid. |
 
 ### sections.sender-binding
 
@@ -790,8 +805,8 @@ From `@mod/sender-binding`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.sender-binding.required` | boolean | `false` |  |  |
-| `sections.sender-binding.kinds` | list of string |  |  |  |
+| `sections.sender-binding.required` | boolean | `false` |  | Whether every token issued to the client is bound to its sender: a request that proves no binding is refused. |
+| `sections.sender-binding.kinds` | list of string |  |  | The binding kinds the client's tokens may be bound by, by the names they give operators (such as dpop), each one composed; unwritten, any. |
 
 ### sections.token-exchange
 
@@ -799,8 +814,8 @@ From `@mod/token-exchange`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.token-exchange.others-tokens` | boolean | `false` |  |  |
-| `sections.token-exchange.public-exchange` | boolean | `false` |  |  |
+| `sections.token-exchange.others-tokens` | boolean | `false` |  | Whether the client may present subject and actor tokens that do not name it, by issued-to or audience. |
+| `sections.token-exchange.public-exchange` | boolean | `false` |  | Whether the client, when public, may exchange; a confidential client allowed the grant always may. |
 
 ## IdP type settings
 
@@ -813,18 +828,18 @@ From `@mod/idp-apple`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `federation.idps.<name>.client-id` | string |  | yes |  |
-| `federation.idps.<name>.client-secret` | string |  |  |  |
-| `federation.idps.<name>.team-id` | string |  |  |  |
-| `federation.idps.<name>.key-id` | string |  |  |  |
-| `federation.idps.<name>.private-key` | string |  |  |  |
-| `federation.idps.<name>.secret-lifetime` | string | `5m` |  |  |
-| `federation.idps.<name>.scopes` | list of name \| email | `["email"]` |  |  |
-| `federation.idps.<name>.authorization-endpoint` | string | `https://appleid.apple.com/auth/authorize` |  |  |
-| `federation.idps.<name>.token-endpoint` | string | `https://appleid.apple.com/auth/token` |  |  |
-| `federation.idps.<name>.jwks-uri` | string | `https://appleid.apple.com/auth/keys` |  |  |
-| `federation.idps.<name>.clock-skew` | string | `30s` |  |  |
-| `federation.idps.<name>.end-session-endpoint` | string |  |  |  |
+| `federation.idps.<name>.client-id` | string |  | yes | The client ID this provider is registered under at the IdP. |
+| `federation.idps.<name>.client-secret` | string |  |  | A fixed client secret, in place of the three that sign one. |
+| `federation.idps.<name>.team-id` | string |  |  | The Apple team that signs the client secret, with key-id and private-key. |
+| `federation.idps.<name>.key-id` | string |  |  | The ID of the team's key that signs the client secret, with team-id and private-key. |
+| `federation.idps.<name>.private-key` | string |  |  | The team's P-256 key, as PKCS8 PEM, that signs the client secret. |
+| `federation.idps.<name>.secret-lifetime` | string | `5m` |  | How long a signed client secret lives: 1m to 15777000s (about half a year). |
+| `federation.idps.<name>.scopes` | list of name \| email | `["email"]` |  | The scopes asked of Apple at a login: `name`, `email` or both. |
+| `federation.idps.<name>.authorization-endpoint` | string | `https://appleid.apple.com/auth/authorize` |  | Where the browser is sent to log in at Apple; Apple's own unless named. |
+| `federation.idps.<name>.token-endpoint` | string | `https://appleid.apple.com/auth/token` |  | Where a code is exchanged for tokens; Apple's own unless named. |
+| `federation.idps.<name>.jwks-uri` | string | `https://appleid.apple.com/auth/keys` |  | Where the keys that sign Apple's id_tokens are read; Apple's own unless named. |
+| `federation.idps.<name>.clock-skew` | string | `30s` |  | How far Apple's clock may be from ours, for its id_token's times: 0s to 5m. |
+| `federation.idps.<name>.end-session-endpoint` | string |  |  | Where to end the session at Apple, which has none of its own. |
 
 ### federation.idps.<name> (type = github)
 
@@ -832,13 +847,13 @@ From `@mod/idp-github`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `federation.idps.<name>.client-id` | string |  | yes |  |
-| `federation.idps.<name>.client-secret` | string |  | yes |  |
-| `federation.idps.<name>.scopes` | list of string | `["read:user"]` |  |  |
-| `federation.idps.<name>.authorization-endpoint` | string | `https://github.com/login/oauth/authorize` |  |  |
-| `federation.idps.<name>.token-endpoint` | string | `https://github.com/login/oauth/access_token` |  |  |
-| `federation.idps.<name>.api` | string | `https://api.github.com` |  |  |
-| `federation.idps.<name>.issuer` | string | `https://github.com/login/oauth` |  |  |
+| `federation.idps.<name>.client-id` | string |  | yes | The client ID this provider is registered under at the IdP. |
+| `federation.idps.<name>.client-secret` | string |  | yes | The client secret the IdP gave this provider, sent to its token endpoint. |
+| `federation.idps.<name>.scopes` | list of string | `["read:user"]` |  | The scopes asked of GitHub at a login. |
+| `federation.idps.<name>.authorization-endpoint` | string | `https://github.com/login/oauth/authorize` |  | Where the browser is sent to log in at GitHub; GitHub's own unless named (GitHub Enterprise). |
+| `federation.idps.<name>.token-endpoint` | string | `https://github.com/login/oauth/access_token` |  | Where a code is exchanged for a token; GitHub's own unless named (GitHub Enterprise). |
+| `federation.idps.<name>.api` | string | `https://api.github.com` |  | Where the user is read; GitHub's own unless named (GitHub Enterprise). |
+| `federation.idps.<name>.issuer` | string | `https://github.com/login/oauth` |  | The `iss` a callback carries, where it carries one (RFC 9207). |
 
 ### federation.idps.<name> (type = google)
 
@@ -846,16 +861,16 @@ From `@mod/idp-google`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `federation.idps.<name>.client-id` | string |  | yes |  |
-| `federation.idps.<name>.client-secret` | string |  | yes |  |
-| `federation.idps.<name>.access` | offline \| online | `offline` |  |  |
-| `federation.idps.<name>.require-iss` | boolean | `true` |  |  |
-| `federation.idps.<name>.authorization-endpoint` | string | `https://accounts.google.com/o/oauth2/v2/auth` |  |  |
-| `federation.idps.<name>.token-endpoint` | string | `https://oauth2.googleapis.com/token` |  |  |
-| `federation.idps.<name>.jwks-uri` | string | `https://www.googleapis.com/oauth2/v3/certs` |  |  |
-| `federation.idps.<name>.clock-skew` | string | `30s` |  |  |
-| `federation.idps.<name>.end-session-endpoint` | string |  |  |  |
-| `federation.idps.<name>.hosted-domains` | list of string |  |  |  |
+| `federation.idps.<name>.client-id` | string |  | yes | The client ID this provider is registered under at the IdP. |
+| `federation.idps.<name>.client-secret` | string |  | yes | The client secret the IdP gave this provider, sent to its token endpoint. |
+| `federation.idps.<name>.access` | offline \| online | `offline` |  | `offline` asks for a refresh token, so Google shows its consent screen at every login; `online` asks none. |
+| `federation.idps.<name>.require-iss` | boolean | `true` |  | Asks every callback for `iss`, which Google says it always sends. |
+| `federation.idps.<name>.authorization-endpoint` | string | `https://accounts.google.com/o/oauth2/v2/auth` |  | Where the browser is sent to log in at Google; Google's own unless named. |
+| `federation.idps.<name>.token-endpoint` | string | `https://oauth2.googleapis.com/token` |  | Where a code is exchanged for tokens; Google's own unless named. |
+| `federation.idps.<name>.jwks-uri` | string | `https://www.googleapis.com/oauth2/v3/certs` |  | Where the keys that sign Google's id_tokens are read; Google's own unless named. |
+| `federation.idps.<name>.clock-skew` | string | `30s` |  | How far Google's clock may be from ours, for its id_token's times: 0s to 5m. |
+| `federation.idps.<name>.end-session-endpoint` | string |  |  | Where to end the session at Google; without it, the browser goes back or to Google's logout page. |
+| `federation.idps.<name>.hosted-domains` | list of string |  |  | The Google Workspace domains a login must be from, by its id_token's `hd`; any account when not given. |
 
 ### federation.idps.<name> (type = oidc)
 
@@ -863,17 +878,17 @@ From `@mod/idp-oidc`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `federation.idps.<name>.client-id` | string |  | yes |  |
-| `federation.idps.<name>.client-secret` | string |  | yes |  |
-| `federation.idps.<name>.issuer` | string |  | yes |  |
-| `federation.idps.<name>.token-auth` | client_secret_basic \| client_secret_post | `client_secret_basic` |  |  |
-| `federation.idps.<name>.discovery` | boolean | `true` |  |  |
-| `federation.idps.<name>.authorization-endpoint` | string |  |  |  |
-| `federation.idps.<name>.token-endpoint` | string |  |  |  |
-| `federation.idps.<name>.jwks-uri` | string |  |  |  |
-| `federation.idps.<name>.end-session-endpoint` | string |  |  |  |
-| `federation.idps.<name>.scopes` | list of string | `["openid"]` |  |  |
-| `federation.idps.<name>.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256","PS256","ES256","EdDSA"]` |  |  |
-| `federation.idps.<name>.endpoint-hosts` | list of string | `[]` |  |  |
-| `federation.idps.<name>.require-iss` | boolean | `false` |  |  |
-| `federation.idps.<name>.clock-skew` | string | `30s` |  |  |
+| `federation.idps.<name>.client-id` | string |  | yes | The client ID this provider is registered under at the IdP. |
+| `federation.idps.<name>.client-secret` | string |  | yes | The client secret the IdP gave this provider, sent to its token endpoint. |
+| `federation.idps.<name>.issuer` | string |  | yes | The IdP's issuer, which its id_tokens name and its description sits under. |
+| `federation.idps.<name>.token-auth` | client_secret_basic \| client_secret_post | `client_secret_basic` |  | How the client authenticates at the token endpoint. |
+| `federation.idps.<name>.discovery` | boolean | `true` |  | Reads the endpoints from the issuer's own description, checking it names the issuer; without it, the three endpoints are given. |
+| `federation.idps.<name>.authorization-endpoint` | string |  |  | Where the browser is sent to log in, without discovery. |
+| `federation.idps.<name>.token-endpoint` | string |  |  | Where a code is exchanged for tokens, without discovery. |
+| `federation.idps.<name>.jwks-uri` | string |  |  | Where the keys that sign the IdP's id_tokens are read, without discovery. |
+| `federation.idps.<name>.end-session-endpoint` | string |  |  | Where a session at the IdP ends, without discovery; none when not given. |
+| `federation.idps.<name>.scopes` | list of string | `["openid"]` |  | The scopes asked of the IdP at a login, `openid` among them. |
+| `federation.idps.<name>.algorithms` | list of RS256 \| RS384 \| RS512 \| PS256 \| PS384 \| PS512 \| ES256 \| ES384 \| ES512 \| EdDSA | `["RS256","PS256","ES256","EdDSA"]` |  | The algorithms an id_token may be signed with: asymmetric ones only. |
+| `federation.idps.<name>.endpoint-hosts` | list of string | `[]` |  | Hosts besides the issuer's its endpoints may be on, as outbound reads a host list. |
+| `federation.idps.<name>.require-iss` | boolean | `false` |  | Asks every callback for `iss`, even where the issuer's description does not offer it. |
+| `federation.idps.<name>.clock-skew` | string | `30s` |  | How far the IdP's clock may be from ours, for its id_token's times: 0s to 5m. |

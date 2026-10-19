@@ -16,6 +16,7 @@ Internal module of `mfa-flows`: an operator's reset of a subject's second factor
 - Only the sessions boundary moves (`keepDelegations`); which delegated grants outlive it is for `federation-grants` to judge.
 - Pending transactions are not touched: the boundary refuses them.
 - A run that cannot move the first boundary, or whose revocation leaves a session open, stops there; a second revocation that leaves one open fails the run too. Otherwise a failed removal skips the release, the second boundary moves whatever failed, and the first failure is the one answered.
+- Under an enrollment witness, removing the factors (`mfa`'s `clear`) clears the witness's mark after them; a mark it cannot clear, or whose answer was lost, fails the run at `factors`, the subject left unable to log in, and the run must be made again. Only a reset clears the mark, and it may run only while the embedder keeps the subject isolated: no new login, session or enrollment, the running ones finished, and every earlier uncertain write to the witness settled.
 - `mfa.reset` is recorded once a run gets past its input, finished or not: `by` `operator`, `kinds` and `count` once the factors went, `sessions`, `sessionsAgain` once it ran, `complete`, and `requestedBy` when given. A finished run logs `mfa-flows.reset`, an unfinished one `mfa-flows.reset_incomplete` (`stoppedAt`: `sessions`, `factors` or `lock`; `error`: the error's type).
 
 ## Depends on

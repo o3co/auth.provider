@@ -20,7 +20,7 @@ import {
 import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
 import { crowdingFor, memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
-import { sessions } from "@mod/session";
+import { entryRequirements, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { sessionTokens } from "@mod/session-tokens";
 import bridgeModule from "@mod/session-tokens/module";
@@ -323,6 +323,19 @@ it("has the access token recorded to the code's session", async () => {
 	});
 });
 
+it("ends the access token no later than its session, when the session ends first", async () => {
+	const s = await serve();
+	const entry = await s.app.get(sessions).entryOf(s.session.id);
+	if (entry.kind !== "entered") throw new Error("not entered");
+	const { endsAt } = entry;
+	shift = 3_000_000;
+	const answer = await s.redeem(await s.issue());
+	const checked = await s.app.get(tokens).verifyAccess(String(answer.body.access_token));
+	if (checked.kind !== "valid") throw new Error("not valid");
+	expect(checked.expiresAt).toBeLessThanOrEqual(endsAt);
+	expect(Number(answer.body.expires_in)).toBeLessThanOrEqual(600);
+});
+
 it("refuses a code whose session authenticated far ahead of the clock, leaving it unused", async () => {
 	shift = 400_000;
 	const s = await serve();
@@ -514,6 +527,27 @@ it("issues nothing for a code whose session closed before the exchange", async (
 	await s.app.get(sessions).close(s.session.id, carrying(s.cookies));
 	expect((await s.redeem(code)).body).toEqual(refusedBody);
 	expect(keptOf(s, code)?.token).toBeUndefined();
+});
+
+/** A requirement a session falls short of at use while `short.now` is set. */
+const shortToUse = (short: { now: boolean }) =>
+	defineModule({ name: "short-to-use" }, (m) => [
+		m.contribute(entryRequirements).by(() => ({
+			name: "mfa",
+			judges: ["use"],
+			admits: async () =>
+				short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
+		})),
+	]);
+
+it("issues nothing for a code whose session falls short of a requirement to be used, as a closed one", async () => {
+	const short = { now: false };
+	const s = await serve({ extra: [shortToUse(short)] });
+	const code = await s.issue();
+	short.now = true;
+	expect((await s.redeem(code)).body).toEqual(refusedBody);
+	expect(keptOf(s, code)?.token).toBeUndefined();
+	await expect(s.app.get(codes).issue(s.facts), "a code for it").rejects.toThrow(TypeError);
 });
 
 it("keeps an unused code for code-lifetime, and no longer", async () => {
@@ -939,6 +973,21 @@ describe("tokens issued while the exchange goes wrong are revoked", () => {
 		expect(await revoked(s, token)).toBe(true);
 	});
 
+	it("when the session falls short of a requirement while the redemption is noted", async () => {
+		const short = { now: false };
+		const s = await serve({
+			extra: [
+				shortToUse(short),
+				noting([], async () => {
+					short.now = true;
+				}),
+			],
+		});
+		const { answer, token } = await redeemWith(s);
+		expect(answer).toEqual(refusedOutcome);
+		expect(await revoked(s, token)).toBe(true);
+	});
+
 	it("when an addition or the ID token fails, before or after it gives a promise", async () => {
 		const cases: Record<string, [Module, readonly string[] | undefined]> = {
 			"addition rejects": [
@@ -974,4 +1023,18 @@ describe("tokens issued while the exchange goes wrong are revoked", () => {
 			await stop();
 		}
 	});
+});
+
+it("offers the shape of an S256 challenge: 43 base64url characters, as RFC 7636 makes it", async () => {
+	const { challengeShape } = await import("../src/contract.ts");
+	expect(challengeShape.test("A".repeat(43))).toBe(true);
+	expect(challengeShape.test(`${"a".repeat(42)}_`)).toBe(true);
+	for (const refused of [
+		"A".repeat(42),
+		"A".repeat(44),
+		`${"A".repeat(42)}+`,
+		`${"A".repeat(42)}=`,
+	]) {
+		expect(challengeShape.test(refused), refused).toBe(false);
+	}
 });

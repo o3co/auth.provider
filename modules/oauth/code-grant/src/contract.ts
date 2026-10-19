@@ -26,6 +26,9 @@ export const codes = contract<Codes>("code-grant");
 /** The grant's type (RFC 6749 §4.1.3). */
 export const codeGrantType = "authorization_code";
 
+/** RFC 7636: an S256 challenge is 43 base64url characters; a code is issued only for one of this shape. */
+export const challengeShape = /^[A-Za-z0-9_-]{43}$/;
+
 export interface IdTokenRequest {
 	readonly subject: string;
 	readonly clientId: string;

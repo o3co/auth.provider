@@ -2,7 +2,7 @@ import { testRequest } from "@mod/http/testing";
 import { isUnavailable, Unavailable } from "@mod/kernel";
 import type { Claim } from "@mod/oidc";
 import type { Admission } from "@mod/sender-binding";
-import type { AuthContext } from "@mod/session";
+import type { AuthContext, Entry } from "@mod/session";
 import type { TokenSession } from "@mod/session-tokens";
 import type { AccessCheck, AccessGrant } from "@mod/tokens";
 import { describe, expect, it } from "vitest";
@@ -25,15 +25,20 @@ const valid = (
 	tokenType,
 });
 const open: AuthContext = { subject: "ann", amr: ["pwd"], authenticatedAt: 0 };
+const entered = (context: AuthContext): Entry => ({
+	kind: "entered",
+	session: { id: "h1", context },
+	endsAt: 1,
+});
 
 /** The handler over parts that answer as told, keeping the calls in order. */
 function over(
 	told: {
 		admission?: Admission<AccessCheck>;
 		session?: TokenSession;
-		context?: AuthContext | undefined;
+		entry?: Entry;
 		claims?: Record<string, Claim>;
-		failing?: "admitted" | "session" | "context" | "claims";
+		failing?: "admitted" | "session" | "entry" | "claims";
 	} = {},
 ) {
 	const calls: unknown[][] = [];
@@ -58,11 +63,10 @@ function over(
 			},
 		},
 		sessions: {
-			openContext: async (handle) => {
-				calls.push(["context", handle]);
-				fail("context");
-				// A context told as undefined is a session no longer open, apart from none told.
-				return "context" in told ? told.context : open;
+			entryOf: async (handle, level) => {
+				calls.push(level === undefined ? ["entry", handle] : ["entry", handle, level]);
+				fail("entry");
+				return told.entry ?? entered(open);
 			},
 		},
 		claims: {
@@ -90,7 +94,7 @@ describe("userinfo", () => {
 		expect(o.calls).toEqual([
 			["admitted"],
 			["session", "token-1"],
-			["context", "h1"],
+			["entry", "h1"],
 			["claims", "ann", ["openid", "profile"], "h1"],
 		]);
 	});
@@ -101,17 +105,24 @@ describe("userinfo", () => {
 		expect(o.calls.map((c) => c[0])).toEqual(["admitted", "session"]);
 	});
 
-	it("refuses a token whose session ended or is another subject's, in the token's scheme", async () => {
+	it("refuses a token whose session ended, is short of a requirement, or is another subject's, in the token's scheme", async () => {
 		const refused = {
 			status: 401,
 			headers: { ...noStore, "www-authenticate": 'DPoP error="invalid_token"' },
 			json: { error: "invalid_token" },
 		};
 		const dpop = { kind: "admitted", access: valid("DPoP") } as const;
-		const ended = over({ admission: dpop, context: undefined });
+		const ended = over({ admission: dpop, entry: { kind: "absent" } });
 		expect(await ended.run()).toEqual(refused);
 		expect(ended.calls.map((c) => c[0])).not.toContain("claims");
-		const other = over({ admission: dpop, context: { ...open, subject: "bob" } });
+		// Short at use: refused as an ended session is, never the requirement's own answer.
+		const short = over({
+			admission: dpop,
+			entry: { kind: "short", requirement: "mfa", answer: { error: "mfa_required" } },
+		});
+		expect(await short.run()).toEqual(refused);
+		expect(short.calls.map((c) => c[0])).not.toContain("claims");
+		const other = over({ admission: dpop, entry: entered({ ...open, subject: "bob" }) });
 		expect(await other.run()).toEqual(refused);
 	});
 
@@ -162,7 +173,7 @@ describe("userinfo", () => {
 	});
 
 	it("fails unavailable when a check or the claims cannot tell, answering no claim", async () => {
-		for (const failing of ["admitted", "session", "context", "claims"] as const) {
+		for (const failing of ["admitted", "session", "entry", "claims"] as const) {
 			await expect(over({ failing }).run(), failing).rejects.toSatisfy(isUnavailable);
 		}
 	});

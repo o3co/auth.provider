@@ -1,6 +1,12 @@
 import { cookies } from "@mod/cookies";
 import { defineModule } from "@mod/kernel";
-import { entryRequirements, participants, sessionRules, sessions } from "@mod/session";
+import {
+	type EntryLevel,
+	entryRequirements,
+	participants,
+	sessionRules,
+	sessions,
+} from "@mod/session";
 import { revocationFollowers, subjectRevocation } from "@mod/subject-revocation";
 import { lifecycleOver } from "./lifecycle/lifecycle.ts";
 import { raiseOver } from "./raise/raise.ts";
@@ -43,9 +49,7 @@ export default defineModule({ name: "session-lifecycle", section, replicaSafe: t
 				const handle = await lifecycle.handleIn(request);
 				return handle ? lifecycle.entryAt(handle, level) : { kind: "absent" };
 			},
-			stillOpen: async (handle) => (await enteredAt(handle)) !== undefined,
-			openContext: async (handle) => (await enteredAt(handle))?.session.context,
-			endsAt: async (handle) => (await enteredAt(handle))?.endsAt,
+			entryOf: (handle: string, level: EntryLevel = "use") => lifecycle.entryAt(handle, level),
 			complete: lifecycle.open,
 			raise: raiseOver({ lifecycle, kept, clock: c.clock, lifetimeMs }),
 			closeRequest: lifecycle.closeIn,

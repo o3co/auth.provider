@@ -37,10 +37,23 @@ export default defineModule({ name: "acr", section }, (m) => [
 		const table = await tableOf(c);
 		const unmet = Object.keys(table).length > 0 ? unmeetable(table, await c.get(logins)) : [];
 		if (unmet.length > 0) {
-			return c.refuse(
-				"acr",
-				`acr with no way of authenticating that can meet it: ${unmet.join(", ")}`,
-			);
+			// A configured acr is told by its key, never in the text; an offered one is a module's own name.
+			const configured = unmet.filter((name) => Object.hasOwn(c.section.values, name));
+			const offered = unmet.filter((name) => !Object.hasOwn(c.section.values, name));
+			return c.refuseAll([
+				...configured.map((name) => ({
+					where: `acr.values.${name}`,
+					reason: "no declared way of logging in can meet it",
+				})),
+				...(offered.length > 0
+					? [
+							{
+								where: "acr",
+								reason: `an acr a module offers has no declared way of logging in that can meet it: ${offered.join(", ")}`,
+							},
+						]
+					: []),
+			]);
 		}
 		return {
 			known: (asked) => asked.split(" ").filter((name) => Object.hasOwn(table, name)),

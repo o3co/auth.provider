@@ -13,7 +13,7 @@
 - Composition definition: the method, which names the asymmetric algorithms it takes.
 - The client metadata section `client-assertion`: `keys`, public RSA, EC or OKP keys as JWKs, default empty.
   - Each is read by `keys`' rules for outside keys: no private member, a `kid` that is a string, `use` `sig` and `key_ops` holding `verify` where given.
-  - Or `jwks-uri`: where the client publishes its key set, an https URL (http only where `outbound` allows plain http), as `url-setting` takes it; never beside written keys. A registered client's `jwks-uri` that `outbound`'s policy refuses refuses boot.
+  - Or `jwks-uri`: where the client publishes its key set, an https URL (http only where `outbound` allows plain http), as `url-setting` takes it; never beside written keys. A registered client's `jwks-uri` that `outbound`'s policy refuses refuses boot, with the keys to set (`outbound.refusals`).
   - Any other key is refused at boot.
 - Store interface for spent assertions: save a name for a lifetime, answering `created` or `exists`.
   - Requirements: no eviction, survives a crash, never rolled back by failover.

@@ -193,10 +193,11 @@ export async function idpTypesOf(root: string): Promise<ClientSection[]> {
 	return asSections((await assembledIn(root)).idpTypes, () => ["federation", "idps", "<name>"]);
 }
 
+/** A value in a table cell, on one line: a string of several lines as JSON writes it, `\n` and all. */
 const cell = (value: unknown) =>
 	value === undefined
 		? ""
-		: `\`${(typeof value === "string" ? value : JSON.stringify(value)).replaceAll("|", "\\|")}\``;
+		: `\`${(typeof value === "string" && !value.includes("\n") ? value : JSON.stringify(value)).replaceAll("|", "\\|")}\``;
 const text = (value: string | undefined) =>
 	(value ?? "").replaceAll("|", "\\|").replaceAll("\n", " ");
 

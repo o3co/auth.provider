@@ -9,11 +9,15 @@ import {
 	type Selection,
 } from "./composed.ts";
 import { type Declared, declaredIn, declaredInIndex } from "./declared.ts";
+import { type Published, publishedInIndex, publishedWith } from "./published.ts";
 
 export type { Selection } from "./composed.ts";
 export { type Kind, kinds } from "./kinds.ts";
+export type { Published } from "./published.ts";
 
 let workspace: Declared | undefined;
+/** The index at a bundle's root, where combinations is built into one. */
+const bundleIndex = join(import.meta.dirname, "..", "..", "index.json");
 
 /** The modules given (owners a declared default replaces swapped for it), then their wirings and bridges, each once, first named first. */
 export function completed(modules: readonly string[]): string[] {
@@ -22,9 +26,8 @@ export function completed(modules: readonly string[]): string[] {
 
 /** Read once: built into a bundle, the index at its root; in the workspace, the workspace itself. */
 const declared = () => {
-	const index = join(import.meta.dirname, "..", "..", "index.json");
-	workspace ??= existsSync(index)
-		? declaredInIndex(index)
+	workspace ??= existsSync(bundleIndex)
+		? declaredInIndex(bundleIndex)
 		: declaredIn(join(import.meta.dirname, "..", "..", "..", ".."));
 	return workspace;
 };
@@ -40,3 +43,15 @@ export const optIns = (): string[] => optInsOf(declared());
 
 /** The modules given, what they need to run, then `completed`, as `composed` reaches them but with no axis default. */
 export const needed = (modules: readonly string[]): string[] => neededWith(declared(), modules);
+
+let bundle: ReadonlyMap<string, Published> | undefined;
+
+/**
+ * The names given (as `composed`, `needed` and `full` give them) as published: each one's bundle and
+ * the path its entries import under, in the order given. Built into a bundle only: in the workspace,
+ * where nothing is published, it refuses; it refuses a name no bundle publishes, naming each.
+ */
+export function published(names: readonly string[]): Published[] {
+	if (existsSync(bundleIndex)) bundle ??= publishedInIndex(bundleIndex);
+	return publishedWith(bundle, names);
+}

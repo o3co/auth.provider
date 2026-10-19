@@ -3,7 +3,8 @@ import type { AddressInfo } from "node:net";
 import { certificateForwarding } from "@mod/client-certificate";
 import { defineModule } from "@mod/kernel";
 import { proxiesOf } from "@mod/request-source";
-import { listening, policies, requestEnds, routes, site } from "./contract.ts";
+import { listening, marks, policies, requestEnds, routes, site } from "./contract.ts";
+import { brokenGuarantees } from "./guarantees/guarantees.ts";
 import { withPolicies } from "./guards/guards.ts";
 import { drain, serve } from "./serving/server.ts";
 import { section } from "./settings/section.ts";
@@ -21,7 +22,8 @@ export default defineModule({ name: "http", section }, (m) => [
 		.provide(certificateForwarding)
 		.by((c) => Object.freeze({ configured: c.section["client-certificate"] !== undefined })),
 	m.provide(listening).by(async (c) => {
-		const applied = withPolicies(await c.collect(routes), await c.collect(policies));
+		const declared = await c.collect(routes);
+		const applied = withPolicies(declared, await c.collect(policies));
 		if (applied.kind === "twice") {
 			return c.refuse("http.policies", `more than one rule for a policy: ${applied.label}`);
 		}
@@ -30,6 +32,15 @@ export default defineModule({ name: "http", section }, (m) => [
 				applied.missing.map(({ route, label }) => ({
 					where: `http.routes:${route.method} ${route.path}`,
 					reason: `uses a policy no module applies: ${label}`,
+				})),
+			);
+		}
+		const broken = brokenGuarantees(declared, await c.collect(marks));
+		if (broken.length > 0) {
+			return c.refuseAll(
+				broken.map(({ route, reason }) => ({
+					where: `http.routes:${route.method} ${route.path}`,
+					reason,
 				})),
 			);
 		}

@@ -146,15 +146,21 @@ describe("signer-keys-http", () => {
 	});
 
 	it("hands over the public keys with the grant's algorithms where none are named, asking on every call", async () => {
-		const { keys } = await open();
+		const { keys, logged } = await open();
 		expect(await keys.keysOf({ subject: "dev-1" })).toEqual({
 			kind: "keys",
 			keys: [deviceJwk],
 			algorithms: ["EdDSA", "ES256", "RS256"],
 		});
+		// A key holding any member but its type's public ones and those describing it is never handed on.
+		const held = [
+			{ ...deviceJwk, d: "secret" },
+			{ ...deviceJwk, priv: "secret" },
+			{ ...deviceJwk, x: 5 },
+		];
 		script = () => ({
 			status: 200,
-			json: { keys: [{ ...deviceJwk, d: "secret" }, deviceJwk], algorithms: ["EdDSA"] },
+			json: { keys: [...held, deviceJwk], algorithms: ["EdDSA"] },
 		});
 		expect(await keys.keysOf({ subject: "dev-1" })).toEqual({
 			kind: "keys",
@@ -162,6 +168,10 @@ describe("signer-keys-http", () => {
 			algorithms: ["EdDSA"],
 		});
 		expect(received).toHaveLength(2);
+		// The keys left out are counted in one warning, telling nothing they held.
+		const lines = logged.lines().map((line) => [line.event, line.fields]);
+		expect(lines).toEqual([["signer-keys-http.keys_dropped", { count: 3 }]]);
+		expect(JSON.stringify(logged.lines())).not.toContain("secret");
 	});
 
 	it("answers none to a 404, a 410, or a 200 that names no key, unlogged", async () => {
@@ -217,6 +227,19 @@ describe("signer-keys-http", () => {
 			expect(JSON.stringify(refusals)).not.toContain(credential);
 		}
 	});
+});
+
+it("says which of outbound's keys lets a keys-url it refuses through, naming no value", async () => {
+	const error = await open(settings({ "keys-url": "https://ledger.example/keys" })).catch(
+		(e: unknown) => e,
+	);
+	expect((error as BootRefused).refusals).toEqual([
+		{
+			where: "signer-keys-http.keys-url",
+			reason:
+				"outbound's destination policy refuses it: not-allowed: name the host in outbound.allow, or set outbound.allow-any-public",
+		},
+	]);
 });
 
 describe("signer-keys-http under jwt-bearer", () => {

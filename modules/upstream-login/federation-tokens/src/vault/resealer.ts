@@ -15,16 +15,17 @@ export function resealerOver(store: UpstreamTokenStore, vault: Vault): Resealer 
 				const page = await store.scan(cursor);
 				for (const session of page.keys) {
 					for (const [idp, entry] of Object.entries(vault.entriesOf(await store.read(session)))) {
-						let next: ReturnType<Vault["resealed"]>;
+						let read: ReturnType<Vault["read"]>;
 						try {
-							next = vault.resealed(session, idp, entry);
+							read = vault.read(session, idp, entry);
 						} catch (error) {
 							// The seal is unavailable only for a key the ring no longer holds.
 							if (!isUnavailable(error)) throw error;
-							next = undefined;
+							read = undefined;
 						}
-						if (!next) left++;
-						if (!next || next === entry) continue;
+						if (!read) left++;
+						const next = read?.resealed;
+						if (!next) continue;
 						// Written only over the entry read, keeping the record's lifetime.
 						const changed = await store.update(session, (record) => {
 							const entries = vault.entriesOf(record);

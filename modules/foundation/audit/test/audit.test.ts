@@ -228,6 +228,23 @@ it("refuses to start without the statement, with an unknown name, or with a rece
 	await expect(boot(["log", "other"], { extra: [other] })).resolves.toBeDefined();
 });
 
+it("refuses a name no receiver has at its place in the list, never by the name", async () => {
+	const refused = await boot(["log", "missing"]).catch((error: unknown) => error);
+	expect((refused as BootRefused).refusals).toEqual([
+		{ where: "audit.receivers.1", reason: "names no receiver" },
+	]);
+});
+
+it("says what to name when no receiver is named: one at least, which there are, or none", async () => {
+	const told =
+		"name at least one receiver: `log`, one a composed module contributes (a generated app's README names them), or `none` to state that events go nowhere";
+	for (const receivers of [undefined, []]) {
+		const refused = await boot(receivers).catch((error: unknown) => error);
+		expect(refused, JSON.stringify(receivers)).toBeInstanceOf(BootRefused);
+		expect((refused as BootRefused).refusals).toEqual([{ where: "audit.receivers", reason: told }]);
+	}
+});
+
 /** An app naming `receivers`, kept whole so a test can stop it and read its metrics. */
 const app = (receivers: string[], extra: Module[]) =>
 	assemble({

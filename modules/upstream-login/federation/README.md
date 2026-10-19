@@ -17,7 +17,7 @@
 - The operator section (its keys in the settings list).
 - Store interface for transactions, its needs (survives failover) and contract test; test configuration builders and an IdP type for tests (`./testing`)
 - Audit events for a callback that took its transaction, with `idp` and the source `request-source` determined: `federation.login.succeeded`, or `federation.login.held` when a gate held it, with the local subject; `federation.login.failed` with `reason` (`upstream_refused`, `exchange_failed`, `login_required`, `unknown_user`)
-- For a link, `federation.identity.linked`, or `federation.identity.link_refused` with `reason` (`conflict` or one of the first three), for the subject it started for.
+- For a link, `federation.identity.linked`, or `federation.identity.link_refused` with `reason` (`conflict`, `session_short` or one of the first three), for the subject it started for.
 - No audit event comes before the take or records an unavailable answer, and none holds the upstream subject, tokens or text.
 - Answer codes: `not_found` (404), `repeated_parameter`, `invalid_redirect`, `invalid_request`, `invalid_state`, `upstream_refused` (400), `unknown_user`, `login_required` (401), a gate's or a session requirement's answer, `link_requires_trusted_origin` (403), `identity_conflict` (409), `method_not_allowed` (405, with `allow`), `exchange_failed` (502), `temporarily_unavailable` (503)
 - Success is a 302 to the return target or the landing; a held login is a 403 with the gate's answer and cookies.
@@ -29,9 +29,9 @@
 - The state is compared in constant time. No cookie, no state, or no transaction to take is `invalid_state`. From the take on, every answer clears the cookie, unavailable included.
 - An `error` or no code is `upstream_refused`, with no exchange.
 - A failed exchange is logged with the IdP and its kind only. An unavailable upstream is 503.
-- A login reports the upstream's login time as when the user authenticated, on our clock (a time within the type's clock allowance before the start's second counts as that second), or that it is unknown.
+- A login reports the upstream's login time as when the user authenticated, on our clock (a time before the start but within the type's clock allowance before the start's second counts as the start, to the millisecond), or that it is unknown.
 - After `prompt=login` or a max age, a login counts only when the upstream says when the user logged in.
-- Fresh enough: after `prompt=login`, the upstream's login time plus the type's clock allowance is not before the start's second; with a max age, it is within the max age of now.
+- Fresh enough: after `prompt=login`, the upstream's login time plus the type's clock allowance is not before the start's second (so an upstream that does not authenticate again passes a login up to that allowance before the start); with a max age, it is within the max age of now.
 - The local user is found only by the IdP's name and the upstream subject. An unknown identity is refused, and nothing is created.
 - Only a start that asks links, from this deployment's own page (`csrf`'s origin evidence), for a session entered at `credentials`.
 - Its callback links only while that session is open with the same subject and the browser is in no other session; never by email.

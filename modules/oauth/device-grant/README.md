@@ -13,7 +13,7 @@
 - Route `POST /oauth/device/verification`, for the deployment's page. It takes a JSON body as `http` reads it, and answers JSON.
   - Fields: `action` (`lookup`, `approve` or `deny`) and `user_code`. A member that is not a string counts as absent.
   - `lookup` answers `client_id`, `scope` and `expires_at`. `approve` and `deny` answer `status` and `client_id`.
-  - Errors: `invalid_request` (400), `login_required` (401), `step_up_required` (403), `access_denied` (403, a policy refusing the approval), `invalid_user_code` (404), `already_decided` (409), `expired_token` (410), `slow_down` (429, with `retry-after`), `temporarily_unavailable` (503, warned with what).
+  - Errors: `invalid_request` (400), `login_required` (401), `step_up_required` (403), `access_denied` (403, a policy refusing the approval), `invalid_user_code` (404), `already_decided` (409), `expired_token` (410), `slow_down` (429, with `retry-after`), `temporarily_unavailable` (503, the route's declared answer, warned by `http` as `http.unavailable` with what and the route).
   - `step_up_required` passes the requirement's name and answer on unread.
 - The `urn:ietf:params:oauth:grant-type:device_code` grant to `grants`: `authorization_pending`, `slow_down`, `access_denied`, `expired_token`, `invalid_grant`, or an access token.
 - Audit events to `audit`, from the verification interface, with the subject and the request's `source` when `request-source` determined it, never a user or device code: declared in `./audit-events`, listed in the audit event reference.
@@ -23,6 +23,7 @@
 - `./testing`: test configuration builders and the store contract test.
 
 ## Invariants
+- Boot is refused unless a module records its tokens to the session that approved them (`grants`' `sessionIssuances`), so that a logout ends them.
 - Device authorization is limited per source by `rate-limit`'s policy, before the client is authenticated.
 - The client must be explicitly allowed this grant. `token-endpoint`'s allowance decides the scope there, and nothing widens it later.
 - The device code is 32 random bytes. It is never kept; only its name is.
@@ -36,8 +37,8 @@
   - Another client's poll writes nothing and is `invalid_grant`.
   - A poll before the interval is over is `slow_down`, and widens the interval by 5 seconds.
   - An approval or a denial is answered once, and the record is taken.
-- A subject revoked since the approving session's authentication is `invalid_grant`, and so is an approving session closed, checked before the poll takes the code and again once the token is made, which is then never answered.
-- The token is an access token to the approving subject, with the scope and audience decided at device authorization.
+- A subject revoked since the approving session's authentication is `invalid_grant`, and so is an approving session that does not enter at use (closed, or short of a requirement), checked before the poll takes the code and again once the token is made, which is then never answered.
+- The token is an access token to the approving subject, with the scope and audience decided at device authorization, ending no later than the approving session.
 - A kept record is read only in the shape written here or the format before, with times a date can hold; any other, or one that throws, is no record.
 - Times are on `kernel`'s clock. A decision or a poll reads it in the rewrite of the record, so a code that ends meanwhile is `expired_token`.
 - A record is kept as long again past its end, so a late poll is told `expired_token`.

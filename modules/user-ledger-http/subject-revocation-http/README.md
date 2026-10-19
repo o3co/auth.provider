@@ -8,7 +8,7 @@
 - Which subject to revoke, and when: the ledger's. Throttling floods: the proxy in front.
 
 ## Offers
-- `POST /ledger/subject-revocations`, JSON `{ "subject", "delegations"? }`: `delegations` `end` (the default) or `keep`.
+- `POST /ledger/subject-revocations`, JSON `{ "subject", "delegations"? }`: `delegations` `end` (the default) or `keep`. Declared to take requests from other sites, its windows counted in the handler instead of a per-source policy.
 - Checked in order, all in the handler: `https` (else `403` `https_required`, the credential unread); the source in `sources` and the credential (`403` `forbidden_source` from outside, whatever the credential; `401` `unauthenticated` with `WWW-Authenticate: Bearer` from inside); the windows; the body (`400` `invalid_request`, also for a member it does not know, its values never echoed).
 - `200` `{ "complete": true }`: the boundary is written and every follower finished.
 - `503` `temporarily_unavailable` with `Retry-After: 5`: `state` `unknown` (the boundary's write was not confirmed), `incomplete` (written, so everything reading it refuses, but a follower did not finish), or no `state` where a window could not count.

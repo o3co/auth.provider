@@ -28,8 +28,8 @@
 - The audience is one the subject token holds and the client is allowed; left out, the only such one. A `resource` must be that audience. Otherwise `invalid_target`. It declares it takes its audience from the request, so no rule refuses its `resource` before it runs.
 - Bindings follow `sender-binding`'s answer. A token bound to a key is never exchanged for one without it, for the subject and the actor alike.
 - `act` is the actor's subject over the subject token's chain. Without an actor there is no `act`. A chain past `max-actor-depth` is refused. A `may_act` must name the actor, or the client when there is none; a client never matches an entry with an issuer.
-- A revoked or expired token, one of an ended family, or one of a closed session is refused, as subject or actor.
-- The issued token joins the subject token's family, and is issued from the subject token's session when it has one, so `token-endpoint` has it recorded there; a session closed after that revokes it, and the exchange is refused.
+- A revoked or expired token, one of an ended family, or one of a session that does not enter at use (closed, or short of a requirement, each told apart in the description) is refused, as subject or actor.
+- The issued token joins the subject token's family, and is issued from the subject token's session when it has one, so `token-endpoint` has it recorded there; a session closed or short after that revokes it, and the exchange is refused.
 - It never outlives the subject token or its family. Revoking the subject token alone does not end it.
 - Its lifetime is the `expires_in` asked, or `tokens`' lifetime when none is asked, cut to `max-lifetime`; without that cap, `tokens`' lifetime cuts an asked one too. `expires_in` in the answer is that lifetime.
 - `expires_in` left out or empty asks for nothing. Otherwise it is 1–10 ASCII digits above zero, or `invalid_request` before any token is checked.

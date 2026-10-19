@@ -8,7 +8,7 @@ export default auditEvents({
 	// logout's own kind, declared alike here: one kind, one meaning.
 	"logout.close_pending": {
 		attributes: ["sid", "source"],
-		when: "the session is closed but some of its close work is left for later",
+		when: "the session is closing, not yet closed: some of its close work is left for later",
 	},
 	"logout.cascade_failed": {
 		attributes: ["sid", "source", "userAgent", "store"],

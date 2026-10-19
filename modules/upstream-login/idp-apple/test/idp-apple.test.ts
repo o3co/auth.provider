@@ -14,11 +14,11 @@ import { quietRuntime } from "@mod/kernel/testing";
 import {
 	type Narrower,
 	type Outbound,
-	type OutboundPolicy,
+	type OutboundRefusals,
 	type OutboundRequest,
 	type OutboundResponse,
 	outbound,
-	outboundPolicy,
+	outboundRefusals,
 } from "@mod/outbound";
 import {
 	type AuthorizationStart,
@@ -41,11 +41,13 @@ const endpoints = {
 };
 /** What the destination policy was asked at boot. */
 const policyAsked: { url: string; narrower: Narrower | undefined }[] = [];
+/** How outbound explains a host its allow list leaves out. */
+const notAllowed = "not-allowed: name the host in outbound.allow, or set outbound.allow-any-public";
 /** A destination policy refusing the `refused` hosts as not allowed. */
-const policyRefusing = (refused: readonly string[] = []): OutboundPolicy => ({
-	refusalOf: (url, narrower) => {
+const policyRefusing = (refused: readonly string[] = []): OutboundRefusals => ({
+	explained: (url, narrower) => {
 		policyAsked.push({ url, narrower });
-		return refused.includes(new URL(url).hostname) ? "not-allowed" : undefined;
+		return refused.includes(new URL(url).hostname) ? notAllowed : undefined;
 	},
 });
 const settings = settingsOf(policyRefusing());
@@ -217,6 +219,22 @@ describe("idp-apple", () => {
 		}
 	});
 
+	it("refuses at boot an endpoint that is empty or no URL, never throwing on it", () => {
+		const fixed = { "client-id": "com.example.web", "client-secret": "x" };
+		for (const name of [
+			"authorization-endpoint",
+			"token-endpoint",
+			"jwks-uri",
+			"end-session-endpoint",
+		]) {
+			for (const value of ["", "not a url"]) {
+				const read = () => settings.safeParse({ ...fixed, [name]: value });
+				expect(read, `${name} ${value}`).not.toThrow();
+				expect(read().success, `${name} ${value}`).toBe(false);
+			}
+		}
+	});
+
 	it("takes exactly one of a fixed secret and the three that sign one", () => {
 		const parsed = (more: Record<string, unknown>) =>
 			settings.safeParse({ "client-id": "com.example.web", ...more });
@@ -311,7 +329,7 @@ describe("idp-apple", () => {
 				.error?.issues.map((i) => [i.path, i.message]);
 		const refused = (key: string) => [
 			[key],
-			"outbound's destination policy refuses it: not-allowed",
+			`outbound's destination policy refuses it: ${notAllowed}`,
 		];
 		policyAsked.length = 0;
 		expect(refusalsOf(["appleid.apple.com"])).toEqual([
@@ -524,7 +542,7 @@ describe("idp-apple", () => {
 			modules: [
 				defineModule({ name: "outbound" }, (m) => [
 					m.provide(outbound).by(() => unused),
-					m.provide(outboundPolicy).by(() => policyRefusing()),
+					m.provide(outboundRefusals).by(() => policyRefusing()),
 				]),
 				externalJwtModule,
 				idpApple,

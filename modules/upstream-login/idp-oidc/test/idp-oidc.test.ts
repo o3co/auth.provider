@@ -13,11 +13,11 @@ import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import {
 	type Narrower,
 	type Outbound,
-	type OutboundPolicy,
+	type OutboundRefusals,
 	type OutboundRequest,
 	type OutboundResponse,
 	outbound,
-	outboundPolicy,
+	outboundRefusals,
 	withinHosts,
 } from "@mod/outbound";
 import {
@@ -88,11 +88,13 @@ function stubOutbound(handlers: Record<string, Handler>) {
 
 /** What the destination policy was asked at boot. */
 const policyAsked: { url: string; narrower: Narrower | undefined }[] = [];
+/** How outbound explains a host its allow list leaves out. */
+const notAllowed = "not-allowed: name the host in outbound.allow, or set outbound.allow-any-public";
 /** A destination policy refusing the `refused` hosts as not allowed. */
-const policyRefusing = (refused: readonly string[] = []): OutboundPolicy => ({
-	refusalOf: (url, narrower) => {
+const policyRefusing = (refused: readonly string[] = []): OutboundRefusals => ({
+	explained: (url, narrower) => {
 		policyAsked.push({ url, narrower });
-		return refused.includes(new URL(url).hostname) ? "not-allowed" : undefined;
+		return refused.includes(new URL(url).hostname) ? notAllowed : undefined;
 	},
 });
 
@@ -172,8 +174,8 @@ async function open(world: World = {}) {
 		runtime,
 	});
 	const jwt = app.get(externalJwt);
-	const policy = policyRefusing(world.refused);
-	const settings = settingsOf(jwt.algorithms, policy);
+	const refusals = policyRefusing(world.refused);
+	const settings = settingsOf(jwt.algorithms, refusals);
 	const read = settings.parse({
 		issuer,
 		"client-id": "client",
@@ -181,7 +183,7 @@ async function open(world: World = {}) {
 		...world.settings,
 	});
 	const recorded = recordingLog();
-	const upstream = await opened(read, { outbound: stub.outbound, policy }, jwt, {
+	const upstream = await opened(read, { outbound: stub.outbound, refusals }, jwt, {
 		clock,
 		log: recorded.log,
 		idp: "corp",
@@ -374,7 +376,7 @@ describe("idp-oidc", () => {
 			settings.safeParse({ ...base, ...more }).error?.issues.map((i) => [i.path, i.message]);
 		const refused = (key: string) => [
 			[key],
-			"outbound's destination policy refuses it: not-allowed",
+			`outbound's destination policy refuses it: ${notAllowed}`,
 		];
 		policyAsked.length = 0;
 		expect(refusalsOf({ "endpoint-hosts": ["x.example"] })).toEqual([refused("issuer")]);
@@ -423,7 +425,7 @@ describe("idp-oidc", () => {
 			expect(thrown, name).toBeInstanceOf(UpstreamMismatch);
 			expect([thrown.at, thrown.message], name).toEqual([
 				["issuer"],
-				`outbound's destination policy refuses the description's ${name}: not-allowed`,
+				`outbound's destination policy refuses the description's ${name}: ${notAllowed}`,
 			]);
 			await expect(open({ description, settings: named }), name).resolves.toBeDefined();
 		}
@@ -472,6 +474,34 @@ describe("idp-oidc", () => {
 			}),
 		]);
 		expect(refused?.[0]?.message).not.toMatch(/HS256|none/);
+	});
+
+	it("refuses at boot an issuer or endpoint that is empty or no URL, never throwing on it", () => {
+		const settings = settingsOf(asymmetric, policyRefusing());
+		const client = { "client-id": "c", "client-secret": "s" };
+		const given = {
+			discovery: false,
+			"authorization-endpoint": `${issuer}/a`,
+			"token-endpoint": `${issuer}/t`,
+			"jwks-uri": `${issuer}/j`,
+		};
+		const cases: Record<string, unknown>[] = [];
+		for (const value of ["", "not a url"]) {
+			cases.push({ ...client, issuer: value });
+			for (const name of [
+				"authorization-endpoint",
+				"token-endpoint",
+				"jwks-uri",
+				"end-session-endpoint",
+			]) {
+				cases.push({ ...client, issuer, ...given, [name]: value });
+			}
+		}
+		for (const asked of cases) {
+			const read = () => settings.safeParse(asked);
+			expect(read, JSON.stringify(asked)).not.toThrow();
+			expect(read().success, JSON.stringify(asked)).toBe(false);
+		}
 	});
 
 	it("takes a clock skew of whole seconds from 0s to 5m, written with its unit", () => {
@@ -533,8 +563,11 @@ describe("idp-oidc", () => {
 		expect(sent?.request.headers).toEqual({
 			"content-type": "application/x-www-form-urlencoded",
 			accept: "application/json",
-			authorization: `Basic ${Buffer.from("client:s3cr%3Aet").toString("base64")}`,
 		});
+		// The client's secret is outbound's to send, as the request's credential.
+		expect(sent?.request.credential).toBe(
+			`Basic ${Buffer.from("client:s3cr%3Aet").toString("base64")}`,
+		);
 	});
 
 	it("reads the profile from the checked id_token, its email verified only by a boolean true", async () => {
@@ -591,7 +624,7 @@ describe("idp-oidc", () => {
 		const sent = asked.find((a) => a.url === `${issuer}/token`);
 		const form = new URLSearchParams(String(sent?.request.body));
 		expect([form.get("client_id"), form.get("client_secret")]).toEqual(["client", "s3cr:et"]);
-		expect(sent?.request.headers?.authorization).toBeUndefined();
+		expect(sent?.request.credential).toBeUndefined();
 	});
 
 	it("refuses an answer from another issuer before using its code, and one without iss where iss is asked", async () => {
@@ -789,7 +822,7 @@ describe("idp-oidc", () => {
 			refresh_token: "rt",
 			scope: "openid email",
 		});
-		expect(sent?.request.headers?.authorization).toMatch(/^Basic /);
+		expect(sent?.request.credential).toMatch(/^Basic /);
 		expect(sent?.hosts).toEqual(["idp.example"]);
 		await offered(upstream.refresh, "refresh")("rt", []);
 		const unscoped = asked.filter((a) => a.url === `${issuer}/token`).at(-1);
@@ -999,7 +1032,7 @@ describe("idp-oidc", () => {
 			modules: [
 				defineModule({ name: "outbound" }, (m) => [
 					m.provide(outbound).by(() => stub.outbound),
-					m.provide(outboundPolicy).by(() => policyRefusing()),
+					m.provide(outboundRefusals).by(() => policyRefusing()),
 				]),
 				externalJwtModule,
 				idpOidc,

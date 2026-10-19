@@ -30,7 +30,7 @@ export interface Parts {
 	readonly store: UpstreamTokenStore;
 	readonly locks: RefreshLocks;
 	readonly upstreams: Upstreams;
-	readonly sessions: Pick<Sessions, "endsAt">;
+	readonly sessions: Pick<Sessions, "entryOf">;
 	readonly vault: Vault;
 	readonly clock: Clock;
 	readonly random: Random;
@@ -98,10 +98,13 @@ export function renewalWith(parts: Parts) {
 	const failedKey = (session: string, idp: string, kept: Kept) =>
 		`${session}\n${idp}\n${createHash("sha256").update(kept.accessToken).digest("base64url")}`;
 
-	/** What is left of the session, so its record never outlives it; none once it lets nobody in. */
+	/**
+	 * What is left of the session, so its record never outlives it; none once it lets nobody in at
+	 * use: closed, ended, revoked, or short of a requirement.
+	 */
 	const lifetimeOf = async (session: string) => {
-		const ends = await parts.sessions.endsAt(session);
-		const left = ends === undefined ? 0 : ends - parts.clock.now();
+		const entry = await parts.sessions.entryOf(session);
+		const left = entry.kind === "entered" ? entry.endsAt - parts.clock.now() : 0;
 		return left > 0 ? left : undefined;
 	};
 
@@ -112,7 +115,7 @@ export function renewalWith(parts: Parts) {
 		next: Entry | undefined,
 		version?: string,
 	) => {
-		// A session that lets nobody in has its record removed by its closing.
+		// A session that lets nobody in gets no write; what it holds goes with its closing or its lifetime.
 		const lifetimeMs = await lifetimeOf(session);
 		if (lifetimeMs === undefined) return false;
 		const changed = await store.update(session, (record) => {
@@ -126,9 +129,9 @@ export function renewalWith(parts: Parts) {
 		return next ? after?.version === next.version : changed !== undefined && !after;
 	};
 
-	/** Removes one IdP's entry whatever the session's state; a session that lets nobody in keeps no record. */
-	const forget = async (session: string, idp: string) => {
-		if (await rewrite(session, idp, undefined)) return;
+	/** Removes one IdP's entry whatever the session's state, only at `version` when given; a session that lets nobody in keeps no record. */
+	const forget = async (session: string, idp: string, version?: string) => {
+		if (await rewrite(session, idp, undefined, version)) return;
 		if ((await lifetimeOf(session)) === undefined) await store.remove(session);
 	};
 
@@ -163,17 +166,16 @@ export function renewalWith(parts: Parts) {
 	const opened = async (session: string, idp: string) => {
 		const entry = await entryOf(session, idp);
 		if (!entry) return undefined;
-		const kept = vault.open(session, idp, entry);
-		if (kept) {
+		const read = vault.read(session, idp, entry);
+		if (read) {
 			// A past key's entry is sealed again in passing, over the version read: a write that cannot
 			// be made leaves the read whole, for a later read or the resealer.
-			const resealed = vault.resealed(session, idp, entry);
-			if (resealed && resealed !== entry) {
-				await rewrite(session, idp, resealed, entry.version).catch((error: unknown) => {
+			if (read.resealed) {
+				await rewrite(session, idp, read.resealed, entry.version).catch((error: unknown) => {
 					if (!isUnavailable(error)) throw error;
 				});
 			}
-			return { entry, kept };
+			return { entry, kept: read.kept };
 		}
 		parts.log.warn("federation-tokens.record_unreadable", { idp });
 		await rewrite(session, idp, undefined, entry.version);
@@ -299,8 +301,12 @@ export function renewalWith(parts: Parts) {
 				);
 			}
 		},
-		/** Keeps a login's tokens for the session; tokens without an access token are not kept. */
-		receive: async (session: string, idp: string, tokens: UpstreamTokens) => {
+		/** Keeps a login's tokens for the session, answering the entry's version; tokens without an access token are not kept. */
+		receive: async (
+			session: string,
+			idp: string,
+			tokens: UpstreamTokens,
+		): Promise<string | undefined> => {
 			const said = tokens as unknown as Partial<Record<keyof UpstreamTokens, unknown>>;
 			const accessToken = text(said.accessToken);
 			const granted = scopeOf(said.scope);
@@ -309,7 +315,7 @@ export function renewalWith(parts: Parts) {
 			if (!accessToken || !granted || unreadable("refreshToken") || unreadable("idToken")) {
 				parts.log.warn("federation-tokens.login_tokens_refused", { idp });
 				await rewrite(session, idp, undefined);
-				return;
+				return undefined;
 			}
 			const refreshToken = text(said.refreshToken);
 			const idToken = text(said.idToken);
@@ -329,10 +335,11 @@ export function renewalWith(parts: Parts) {
 			};
 			const entry = vault.seal(session, idp, kept, versionOf());
 			const written = await keep(session, idp, entry);
-			// A session that closed while they were written has run its closing: they go here.
-			if (written && (await lifetimeOf(session)) !== undefined) return;
-			if (written) await forget(session, idp);
+			// A session that closed, or fell short of a requirement, while they were written: they go here.
+			if (written && (await lifetimeOf(session)) !== undefined) return entry.version;
+			if (written) await forget(session, idp, entry.version);
 			parts.log.warn("federation-tokens.login_tokens_not_kept", { idp });
+			return undefined;
 		},
 		/** Removes one IdP's entry; answers its id_token, or not linked when it held none. */
 		disconnect: async (session: string, idp: string) => {
@@ -350,7 +357,10 @@ export function renewalWith(parts: Parts) {
 			if (idp === undefined || entry === undefined) return undefined;
 			return { idp, idToken: vault.open(session, idp, entry)?.idToken };
 		},
-		withdraw: forget,
+		/** Takes back what a login kept, by its receipt; without one, the login kept nothing. */
+		withdraw: async (session: string, idp: string, receipt: string | undefined) => {
+			if (receipt !== undefined) await forget(session, idp, receipt);
+		},
 		close: (session: string) => store.remove(session),
 	};
 }

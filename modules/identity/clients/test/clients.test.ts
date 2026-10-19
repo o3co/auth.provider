@@ -191,7 +191,7 @@ describe("clients", () => {
 			]);
 		const pub = { kind: "public", method: "none" };
 
-		it("refuses boot at the section's path, naming the client and the section", async () => {
+		it("refuses boot at the section's path, by the client's place and never its id", async () => {
 			const list = [
 				{ id: "ok", ...pub, sections: { checked: { allowed: ["fine"] } } },
 				{ id: "no", ...pub, sections: { checked: { allowed: ["bad"] } } },
@@ -201,11 +201,11 @@ describe("clients", () => {
 			expect(await refusalsOf(boot([checked([])], list))).toEqual([
 				{
 					where: "clients.registered.1.sections.checked",
-					reason: 'client "no" section "checked": names a bad value',
+					reason: "names a bad value",
 				},
 				{
 					where: "clients.registered.2.sections.checked",
-					reason: 'client "blank" section "checked": ',
+					reason: "",
 				},
 			]);
 		});

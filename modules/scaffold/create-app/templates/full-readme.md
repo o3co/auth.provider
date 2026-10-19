@@ -10,7 +10,7 @@ Each key not written keeps its module's default.
 ## Start
 
 1. `pnpm install`
-2. Copy `.env.example` to `.env`, uncomment each line and replace its placeholder.
+2. Copy `.env.example` to `.env`, uncomment each line you set and replace its placeholder; a value of several lines, such as a PEM key, goes in the local layer instead.
 3. Copy `{{localExample}}` to `{{local}}`, uncomment each key and replace its placeholders, and add the keys this guide names that neither file holds.
 4. `APP_CONFIG={{local}},{{application}} pnpm start`
 

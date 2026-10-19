@@ -2,6 +2,7 @@ import { csrfChecked } from "@mod/csrf";
 import { jsonAnswer, type Route, routes, use } from "@mod/http";
 import { defineModule, isUnavailable } from "@mod/kernel";
 import { factors } from "@mod/mfa";
+import { secondFactors } from "@mod/mfa-entry";
 import { requestsPerSource } from "@mod/rate-limit";
 import { sessions } from "@mod/session";
 import { handlersOver } from "./handlers.ts";
@@ -35,10 +36,11 @@ export default defineModule({ name: "mfa-management", section, replicaSafe: true
 		m.contribute(routes).by(async (c): Promise<Route> => {
 			const handlers = handlersOver({
 				factors: await c.get(factors),
+				secondFactors: await c.get(secondFactors),
 				sessions: await c.get(sessions),
 			});
 			const handle = withUnavailable(handlers[name]);
-			if (method === "GET") return { method, path, handle };
+			if (method === "GET") return { method, path, changesState: false, handle };
 			const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 			return {
 				method,

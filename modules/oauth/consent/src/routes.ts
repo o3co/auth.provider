@@ -12,10 +12,11 @@ import { shownOf } from "./client-section.ts";
 import { consents } from "./contract.ts";
 import { askStore } from "./store.ts";
 
-const challengeShape = /^[A-Za-z0-9_-]{43}$/;
+/** A consent challenge, consent's own handle on a pending request: 32 random bytes as base64url, no PKCE challenge. */
+const consentChallengeShape = /^[A-Za-z0-9_-]{43}$/;
 /** The challenge if it has the shape consent hands out. */
 const challengeIn = (value: string | undefined) =>
-	value !== undefined && challengeShape.test(value) ? value : undefined;
+	value !== undefined && consentChallengeShape.test(value) ? value : undefined;
 function guarded(handle: (request: HttpRequest) => Promise<HttpResponse>) {
 	return async (request: HttpRequest): Promise<HttpResponse> => {
 		try {
@@ -36,6 +37,7 @@ export async function showRoute(c: BuildContext<unknown>): Promise<Route> {
 	return {
 		method: "GET",
 		path: "/oauth/consent",
+		changesState: false,
 		handle: guarded(async (request) => {
 			const session = await opened.enter(request);
 			if (!session) return jsonAnswer(401, { error: "no_session" });
@@ -71,6 +73,8 @@ export async function answerRoute(c: BuildContext<unknown>): Promise<Route> {
 		method: "POST",
 		path: "/oauth/consent",
 		uses: [use(csrfChecked)],
+		unlimited:
+			"The user's session is authenticated; a per-source limit belongs to unauthenticated entries.",
 		takes: ["form", "json"],
 		handle: guarded(async (request) => {
 			if (request.fields.repeated().length > 0) {

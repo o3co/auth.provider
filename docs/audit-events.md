@@ -65,16 +65,17 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `logout.close_pending` | `sid`, `source` | the session is closed but some of its close work is left for later |
+| `logout.close_pending` | `sid`, `source` | the session is closing, not yet closed: some of its close work is left for later |
 | `logout.succeeded` | `sid`, `source` | a logout is answered done, with or without a session |
 
 ## @mod/mfa
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
+| `mfa.enrollment_inconsistent` | `at` | the witness marks a subject holding no counting factor, so its store may have lost them; `at` is the decision answered unavailable: `login`, `binding` or `credentials` |
 | `mfa.factor.enrolled` | `kind`, `factor` | a factor is bound |
 | `mfa.factor.removed` | `kind`, `factor` | a factor is removed |
-| `mfa.first_binding_conflict` | `kind` | a first binding is refused, at its start or as it is written, because another counting factor counts: bound since it began, or held already for a binding asked from a login; nothing is written |
+| `mfa.first_binding_conflict` | `kind`, `reason` | a first binding is refused, at its start or as it is written; nothing is kept. `reason` `competing`: another counting factor counts, bound since it began or held already for a binding asked from a login, or the witness holds another binding's mark; `reset-cleared`: a reset cleared the witness's mark as it was written |
 | `mfa.recovery_code.used` | `kind`, `factor`, `remaining` | a recovery code is used; `remaining` when the kind tells how many are left |
 | `mfa.recovery_codes.generated` | `kind`, `regenerated` | recovery codes come with a first counting factor, or are reissued (`regenerated`) |
 
@@ -102,7 +103,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | Kind | Attributes | Recorded when |
 |---|---|---|
 | `logout.cascade_failed` | `sid`, `source`, `userAgent`, `store` | a logout a client started could not close the session (`store`: the module whose close failed) |
-| `logout.close_pending` | `sid`, `source` | the session is closed but some of its close work is left for later |
+| `logout.close_pending` | `sid`, `source` | the session is closing, not yet closed: some of its close work is left for later |
 | `logout.success` | `sid`, `source`, `userAgent` | a logout a client started closed the session it names |
 
 ## @mod/subject-revocation-http

@@ -22,7 +22,7 @@ export type PermitState =
 export interface PermitParts {
 	readonly store: TransactionStore;
 	readonly clock: Clock;
-	/** Whether a proof at that time is still recent (`mfa`'s window). */
+	/** Whether a proof at that time is still recent (`session`'s window). */
 	readonly recent: (at: number) => boolean;
 	/** How long a session's record lives from its first permit: the longest recent window. */
 	readonly keepMs: number;

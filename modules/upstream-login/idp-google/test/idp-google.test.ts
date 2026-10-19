@@ -7,7 +7,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import {
 	type Narrower,
 	type Outbound,
-	type OutboundPolicy,
+	type OutboundRefusals,
 	type OutboundRequest,
 	type OutboundResponse,
 	outbound,
@@ -31,11 +31,13 @@ const runtime = quietRuntime({ clock, random: { bytes: (length) => new Uint8Arra
 
 /** What the destination policy was asked at boot. */
 const policyAsked: { url: string; narrower: Narrower | undefined }[] = [];
+/** How outbound explains a host its allow list leaves out. */
+const notAllowed = "not-allowed: name the host in outbound.allow, or set outbound.allow-any-public";
 /** A destination policy refusing the `refused` hosts as not allowed. */
-const policyRefusing = (refused: readonly string[] = []): OutboundPolicy => ({
-	refusalOf: (url, narrower) => {
+const policyRefusing = (refused: readonly string[] = []): OutboundRefusals => ({
+	explained: (url, narrower) => {
 		policyAsked.push({ url, narrower });
-		return refused.includes(new URL(url).hostname) ? "not-allowed" : undefined;
+		return refused.includes(new URL(url).hostname) ? notAllowed : undefined;
 	},
 });
 const settings = settingsOf(policyRefusing());
@@ -181,6 +183,22 @@ describe("idp-google", () => {
 		]);
 	});
 
+	it("refuses at boot an endpoint that is empty or no URL, never throwing on it", () => {
+		const both = { "client-id": "client", "client-secret": "s3cr:et" };
+		for (const name of [
+			"authorization-endpoint",
+			"token-endpoint",
+			"jwks-uri",
+			"end-session-endpoint",
+		]) {
+			for (const value of ["", "not a url"]) {
+				const read = () => settings.safeParse({ ...both, [name]: value });
+				expect(read, `${name} ${value}`).not.toThrow();
+				expect(read().success, `${name} ${value}`).toBe(false);
+			}
+		}
+	});
+
 	it("refuses at boot a client ID or secret that is empty or not well-formed text", () => {
 		const both = { "client-id": "client", "client-secret": "s3cr:et" };
 		expect(settings.safeParse(both).success).toBe(true);
@@ -224,7 +242,7 @@ describe("idp-google", () => {
 				.error?.issues.map((i) => [i.path, i.message]);
 		const refused = (key: string) => [
 			[key],
-			"outbound's destination policy refuses it: not-allowed",
+			`outbound's destination policy refuses it: ${notAllowed}`,
 		];
 		policyAsked.length = 0;
 		const googles = ["oauth2.googleapis.com", "www.googleapis.com"];
@@ -273,8 +291,11 @@ describe("idp-google", () => {
 		expect(sent?.request.headers).toEqual({
 			"content-type": "application/x-www-form-urlencoded",
 			accept: "application/json",
-			authorization: `Basic ${Buffer.from("client:s3cr%3Aet").toString("base64")}`,
 		});
+		// The client's secret is outbound's to send, as the request's credential.
+		expect(sent?.request.credential).toBe(
+			`Basic ${Buffer.from("client:s3cr%3Aet").toString("base64")}`,
+		);
 		expect(sent?.hosts).toEqual(["token.google.test"]);
 		// Every request, the keys' too, reaches only its own host.
 		for (const a of asked) expect(a.hosts, a.url).toEqual([new URL(a.url).hostname]);

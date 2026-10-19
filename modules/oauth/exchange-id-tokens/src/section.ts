@@ -74,7 +74,8 @@ export const section = z
 						ctx.addIssue({
 							code: "custom",
 							path: [kind, "clients", id],
-							message: `takes an (aud, azp) pair ${first} takes too; one app's id_token is one client's`,
+							// The other client by its key path, as the refusal names this one.
+							message: `takes an (aud, azp) pair that exchange-id-tokens.${kind}.clients.${first} takes too; one app's id_token is one client's`,
 						});
 						break;
 					}

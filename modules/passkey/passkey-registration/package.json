@@ -26,6 +26,7 @@
 		"@mod/cookies": "workspace:*",
 		"@mod/login-gates": "workspace:*",
 		"@mod/mfa": "workspace:*",
+		"@mod/mfa-entry": "workspace:*",
 		"@mod/mfa-store": "workspace:*",
 		"@mod/seal": "workspace:*",
 		"@mod/store": "workspace:*",

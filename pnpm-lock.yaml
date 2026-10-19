@@ -1446,6 +1446,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/rate-limit':
+        specifier: workspace:*
+        version: link:../../foundation/rate-limit
       '@mod/request-source':
         specifier: workspace:*
         version: link:../../foundation/request-source
@@ -1885,6 +1888,9 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../../second-factor/mfa
+      '@mod/mfa-entry':
+        specifier: workspace:*
+        version: link:../../second-factor/mfa-entry
       '@mod/mfa-store':
         specifier: workspace:*
         version: link:../../templates/mfa-store
@@ -2020,12 +2026,12 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-witness':
+        specifier: workspace:*
+        version: link:../mfa-witness
       '@mod/seal':
         specifier: workspace:*
         version: link:../../foundation/seal
-      '@mod/session':
-        specifier: workspace:*
-        version: link:../../identity/session
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -2036,6 +2042,9 @@ importers:
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -2070,6 +2079,9 @@ importers:
       '@mod/login-gates':
         specifier: workspace:*
         version: link:../../identity/login-gates
+      '@mod/mfa-entry':
+        specifier: workspace:*
+        version: link:../mfa-entry
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -2126,6 +2138,31 @@ importers:
         specifier: workspace:*
         version: link:../mfa-email
     devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
+  modules/second-factor/mfa-entry:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mfa':
+        specifier: workspace:*
+        version: link:../mfa
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
+    devDependencies:
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
@@ -2191,6 +2228,9 @@ importers:
       '@mod/login-attributes':
         specifier: workspace:*
         version: link:../../identity/login-attributes
+      '@mod/mfa-entry':
+        specifier: workspace:*
+        version: link:../mfa-entry
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -2218,6 +2258,9 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../mfa
+      '@mod/mfa-entry':
+        specifier: workspace:*
+        version: link:../mfa-entry
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -2240,6 +2283,9 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-revocation':
+        specifier: workspace:*
+        version: link:../mfa-revocation
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -2265,6 +2311,22 @@ importers:
         specifier: workspace:*
         version: link:../mfa-extensions
 
+  modules/second-factor/mfa-revocation:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mfa':
+        specifier: workspace:*
+        version: link:../mfa
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
   modules/second-factor/mfa-totp:
     dependencies:
       '@mod/http':
@@ -2279,6 +2341,16 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+
+  modules/second-factor/mfa-witness:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
 
   modules/smtp/mail-smtp:
     dependencies:
@@ -3055,6 +3127,37 @@ importers:
         specifier: 6.2.12
         version: 6.2.12
 
+  modules/tooling/conformance-recipes:
+    dependencies:
+      '@mod/conformance':
+        specifier: workspace:*
+        version: link:../conformance
+      '@mod/create-app':
+        specifier: workspace:*
+        version: link:../../scaffold/create-app
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+    devDependencies:
+      '@mod/conformance-code':
+        specifier: workspace:*
+        version: link:../conformance-code
+      '@mod/conformance-identity':
+        specifier: workspace:*
+        version: link:../conformance-identity
+      '@mod/conformance-keys':
+        specifier: workspace:*
+        version: link:../conformance-keys
+      '@mod/conformance-oauth':
+        specifier: workspace:*
+        version: link:../conformance-oauth
+      '@mod/conformance-second-factor':
+        specifier: workspace:*
+        version: link:../conformance-second-factor
+      '@mod/users-http':
+        specifier: workspace:*
+        version: link:../../user-ledger-http/users-http
+
   modules/tooling/conformance-second-factor:
     dependencies:
       '@mod/conformance':
@@ -3372,6 +3475,31 @@ importers:
       zod:
         specifier: 4.6.7
         version: 4.6.7
+
+  modules/user-ledger-http/mfa-witness-http:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/keys':
+        specifier: workspace:*
+        version: link:../../foundation/keys
+      '@mod/mfa-witness':
+        specifier: workspace:*
+        version: link:../../second-factor/mfa-witness
+      '@mod/outbound':
+        specifier: workspace:*
+        version: link:../../foundation/outbound
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../../foundation/url-setting
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
 
   modules/user-ledger-http/signer-keys-http:
     dependencies:

@@ -167,6 +167,13 @@ describe.each(named)("the pattern %s", (name) => {
 	);
 });
 
+it("tells, as the repository's guide does, that a value of several lines goes in the local layer, not in .env", async () => {
+	const target = await generatedPattern("simple-web");
+	const note = "a value of several lines, such as a PEM key, goes in the local layer instead";
+	expect(await read(target, "README.md")).toContain(note);
+	expect(await read(target, ".env.example")).toMatch(new RegExp(`^## .*${note}`));
+});
+
 it("lists each pattern with its use and areas, full among them", () => {
 	const listed = patterns();
 	expect(listed.map((p) => p.name)).toEqual([...named, "full"]);
@@ -175,6 +182,26 @@ it("lists each pattern with its use and areas, full among them", () => {
 		expect(Array.isArray(p.areas), p.name).toBe(true);
 	}
 	expect(named).toContain("simple-web");
+});
+
+/** The module whose scenes each conformance area holds, for the areas a pattern may lack the module of. */
+const areaModules: Readonly<Record<string, string>> = {
+	federation: "@mod/federation",
+	"second-factor": "@mod/mfa",
+	device: "@mod/device-grant",
+	mtls: "@mod/mtls",
+	passkey: "@mod/webauthn",
+	exchange: "@mod/token-exchange",
+};
+
+it("runs every area whose module a pattern composes against it, the full template too", () => {
+	const missing = patterns().flatMap(({ name, areas }) => {
+		const modules = name === "full" ? full() : modulesOf(name);
+		return Object.entries(areaModules)
+			.filter(([area, module]) => modules.includes(module) && !areas.includes(area))
+			.map(([area]) => `${name} composes ${areaModules[area]} but runs no ${area} area`);
+	});
+	expect(missing).toEqual([]);
 });
 
 it("lists what conformance adds to a pattern for its run, each composing with the pattern", () => {

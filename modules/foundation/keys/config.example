@@ -2,6 +2,8 @@ keys {
 	signing {
 		kid = signing-1
 		alg = EdDSA
-		private-key = "REPLACE-PKCS8-PEM-PRIVATE-KEY"
+		private-key = """-----BEGIN PRIVATE KEY-----
+REPLACE-PKCS8-PEM-PRIVATE-KEY
+-----END PRIVATE KEY-----"""
 	}
 }

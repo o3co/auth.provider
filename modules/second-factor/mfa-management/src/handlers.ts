@@ -1,9 +1,11 @@
 import { type HttpRequest, jsonAnswer, type Route } from "@mod/http";
 import type { Factors } from "@mod/mfa";
+import type { SecondFactors } from "@mod/mfa-entry";
 import { refusedEntry, type Sessions } from "@mod/session";
 
 export interface HandlerParts {
 	readonly factors: Factors;
+	readonly secondFactors: SecondFactors;
 	readonly sessions: Sessions;
 }
 
@@ -21,6 +23,8 @@ const managing = async (sessions: Sessions, request: HttpRequest) => {
 	const entry = await sessions.enterFor(request, "credentials");
 	return entry.kind === "entered" ? entry.session : refusedEntry(entry);
 };
+/** A reset or a revocation since the change was allowed: the session is gone too. */
+const loginRequired = refusedEntry({ kind: "absent" });
 /** As `session` words a step-up it asks for. */
 const stepUpRequired = jsonAnswer(403, { error: "step_up_required" });
 
@@ -47,25 +51,44 @@ export function handlersOver(p: HandlerParts) {
 	const proving = async (request: HttpRequest) => {
 		const session = await managing(p.sessions, request);
 		if ("status" in session) return session;
-		return p.factors.provenRecently(session.context) ? session : stepUpRequired;
+		return p.secondFactors.provenRecently(session.context) ? session : stepUpRequired;
+	};
+
+	/** As `proving`, with the subject's fence read in between: a revocation complete after that check fences the change. */
+	const fenced = async (request: HttpRequest) => {
+		const session = await proving(request);
+		if ("status" in session) return session;
+		const fence = await p.factors.fenceOf(session.context.subject);
+		// Entering again reads the factors once more; `session` offers no lighter check of the boundary.
+		const still = await proving(request);
+		return "status" in still ? still : { session: still, fence };
 	};
 
 	const remove: Handler = async (request) => {
-		const session = await proving(request);
-		if ("status" in session) return session;
+		const allowed = await fenced(request);
+		if ("status" in allowed) return allowed;
 		const removed = await p.factors.remove(
-			session.context.subject,
+			allowed.session.context.subject,
 			request.fields.single("factor_id") ?? "",
+			allowed.fence,
 		);
+		if (removed === "fenced") return loginRequired;
 		if (removed === "last") return jsonAnswer(409, { error: "mfa_last_factor" });
 		return removed === "removed" ? jsonAnswer(200, {}) : unknownFactor;
 	};
 
 	const regenerate: Handler = async (request) => {
-		const session = await proving(request);
-		if ("status" in session) return session;
-		const reissued = await p.factors.reissue(session.context.subject);
-		if (reissued.kind === "reissued") return jsonAnswer(200, { recovery_codes: reissued.codes });
+		const allowed = await fenced(request);
+		if ("status" in allowed) return allowed;
+		const reissued = await p.factors.reissue(allowed.session.context.subject, allowed.fence);
+		if (reissued.kind === "fenced") return loginRequired;
+		if (reissued.kind === "reissued") {
+			// The fence guards the write, not the handing: a revocation complete by the time the codes
+			// came back leaves them unseen, though they replaced the old ones.
+			const still = await proving(request);
+			if ("status" in still) return still;
+			return jsonAnswer(200, { recovery_codes: reissued.codes });
+		}
 		return reissued.kind === "no-qualifying-factor"
 			? jsonAnswer(409, { error: "mfa_no_qualifying_factor" })
 			: jsonAnswer(404, { error: "unknown_kind" });

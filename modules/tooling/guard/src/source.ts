@@ -294,3 +294,11 @@ export function branchesOf(path: string): string[] {
 	visit(parse(path));
 	return found;
 }
+
+/** The package a specifier names, and the subpath within it; none for a relative or a Node one. */
+export function packageOf(specifier: string): { name: string; subpath: string } | undefined {
+	if (specifier.startsWith(".") || specifier.startsWith("node:")) return undefined;
+	const parts = specifier.split("/");
+	const size = specifier.startsWith("@") ? 2 : 1;
+	return { name: parts.slice(0, size).join("/"), subpath: parts.slice(size).join("/") };
+}

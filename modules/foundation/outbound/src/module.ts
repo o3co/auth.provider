@@ -2,18 +2,30 @@ import { isIP } from "node:net";
 import { contract, defineModule, setting } from "@mod/kernel";
 import { z } from "zod";
 import {
+	type CredentialPolicy,
+	credentialPolicy,
 	DestinationRefused,
 	type Narrower,
 	type Outbound,
-	type OutboundPolicy,
+	type OutboundRefusals,
 	type OutboundRequest,
 	OutboundUnavailable,
 	outbound,
-	outboundPolicy,
+	outboundRefusals,
+	type RefusalReason,
 	type SignedOutbound,
 	signedOutbound,
 } from "./contract.ts";
-import { admitAddresses, admitUrl, isHostEntry, isListEntry, isPair, listed } from "./policy.ts";
+import {
+	admitAddresses,
+	admitUrl,
+	credentialRefusal,
+	isHostEntry,
+	isListEntry,
+	isPair,
+	listed,
+	remedyOf,
+} from "./policy.ts";
 import { type Resolver, type Route, send, systemResolver, type Trust } from "./transport.ts";
 
 const hostEntries = z.array(z.string().refine(isHostEntry, "not a host")).prefault([]);
@@ -145,7 +157,26 @@ function places(max: number) {
 interface Paths {
 	readonly fetch: Outbound["fetch"];
 	readonly fetchSigned: SignedOutbound["fetch"];
-	readonly refusalOf: OutboundPolicy["refusalOf"];
+	readonly explained: OutboundRefusals["explained"];
+	readonly credentialRefusalOf: CredentialPolicy["refusalOf"];
+}
+
+/** One header value: printable ASCII on one line, no space at either end. */
+const headerValue = /^[\x21-\x7e](?:[\x20-\x7e]*[\x21-\x7e])?$/;
+
+/** The request as sent: its credential as the Authorization header; none for signed material. Its value is never told. */
+function sentRequest(request: OutboundRequest, signed: boolean): OutboundRequest {
+	const { credential, ...rest } = request;
+	// An Authorization value goes only as a credential, under its rules: never one a caller writes.
+	if (Object.keys(rest.headers ?? {}).some((name) => name.toLowerCase() === "authorization")) {
+		throw new TypeError("outbound: an Authorization value goes as the request's credential");
+	}
+	if (credential === undefined) return rest;
+	if (signed) throw new DestinationRefused("credential");
+	if (!headerValue.test(credential)) {
+		throw new TypeError("outbound: a credential is one header value, printable ASCII on one line");
+	}
+	return { ...rest, headers: { ...rest.headers, authorization: credential } };
 }
 
 /** The outbound paths over a resolver; the module passes the system's, a test its own. */
@@ -187,22 +218,29 @@ export function outboundOver(
 			),
 			timeoutMs: Math.min(settings.timeout, narrowing(narrower.timeoutMs)),
 		};
+		const sent = sentRequest(request, signed);
 		const admitted = admitUrl(url, policy, narrower, signed);
-		return requestPlace(() => send(admitted, request, limits, bounded, route, trust, deadlineOf));
+		return requestPlace(() => send(admitted, sent, limits, bounded, route, trust, deadlineOf));
+	};
+	/** Why the policy refuses the URL, or undefined when it lets it through; no name is resolved. */
+	const refusalOf = (url: string, narrower: Narrower = {}): RefusalReason | undefined => {
+		try {
+			const admitted = admitUrl(url, policy, narrower, false);
+			// An address written in the URL is checked now; a name's, once resolved, when sent.
+			if (isIP(admitted.host) !== 0) admitAddresses([admitted.host], admitted);
+			return undefined;
+		} catch (error) {
+			if (error instanceof DestinationRefused) return error.reason;
+			throw error;
+		}
 	};
 	return {
 		fetch: (url, request = {}, narrower = {}) => go(url, request, narrower, false),
 		fetchSigned: (url, request, narrower) => go(url, request, narrower, true),
-		refusalOf: (url, narrower = {}) => {
-			try {
-				const admitted = admitUrl(url, policy, narrower, false);
-				// An address written in the URL is checked now; a name's, once resolved, when sent.
-				if (isIP(admitted.host) !== 0) admitAddresses([admitted.host], admitted);
-				return undefined;
-			} catch (error) {
-				if (error instanceof DestinationRefused) return error.reason;
-				throw error;
-			}
+		credentialRefusalOf: (urls) => credentialRefusal(urls, policy.plainLoopback),
+		explained: (url, narrower = {}) => {
+			const reason = refusalOf(url, narrower);
+			return reason && `${reason}: ${remedyOf(reason, url, policy, narrower)}`;
 		},
 	};
 }
@@ -231,5 +269,8 @@ export default defineModule({ name: "outbound", section, replicaSafe: true }, (m
 	// One set of counts for both paths.
 	m.provide(outbound).by(async (c) => ({ fetch: (await c.get(paths)).fetch })),
 	m.provide(signedOutbound).by(async (c) => ({ fetch: (await c.get(paths)).fetchSigned })),
-	m.provide(outboundPolicy).by(async (c) => ({ refusalOf: (await c.get(paths)).refusalOf })),
+	m.provide(outboundRefusals).by(async (c) => ({ explained: (await c.get(paths)).explained })),
+	m.provide(credentialPolicy).by(async (c) => ({
+		refusalOf: (await c.get(paths)).credentialRefusalOf,
+	})),
 ]);

@@ -3,7 +3,7 @@ import { clientAllowance } from "@mod/client-allowance";
 import { externalJwt } from "@mod/external-jwt";
 import { grants } from "@mod/grants";
 import { issuer } from "@mod/issuer";
-import { defineModule, setting } from "@mod/kernel";
+import { defineModule, type Refusal, setting } from "@mod/kernel";
 import { publicPem } from "@mod/keys";
 import { withinHosts } from "@mod/outbound";
 import { revocations } from "@mod/subject-revocation";
@@ -146,13 +146,18 @@ export default defineModule({ name: "jwt-bearer", section }, (m) => [
 			expect: { aud: [named, url] },
 		});
 		const trusted = new Map<string, Signers>();
-		const refused: string[] = [];
-		for (const i of c.section.issuers) {
-			if (trusted.has(i.issuer)) refused.push(`${i.issuer} is named more than once`);
+		// Named by its place in the settings, never by its value: a refusal tells no setting's value.
+		const refused: Refusal[] = [];
+		const firstAt = new Map<string, number>();
+		for (const [at, i] of c.section.issuers.entries()) {
+			const where = `jwt-bearer.issuers.${at}`;
+			const first = firstAt.get(i.issuer);
+			if (first === undefined) firstAt.set(i.issuer, at);
+			else refused.push({ where, reason: `names the same issuer as jwt-bearer.issuers.${first}` });
 			const keys = contributed.get(i.issuer);
 			const written = "keys" in i || "jwks-uri" in i;
-			if (written && keys) refused.push(`${i.issuer} has its keys written and contributed`);
-			if (!written && !keys) refused.push(`${i.issuer} has no keys written or contributed`);
+			if (written && keys) refused.push({ where, reason: "has its keys written and contributed" });
+			if (!written && !keys) refused.push({ where, reason: "has no keys written or contributed" });
 			const thumbprint = i["subject-is-key-thumbprint"];
 			trusted.set(
 				i.issuer,
@@ -172,11 +177,14 @@ export default defineModule({ name: "jwt-bearer", section }, (m) => [
 						: contributedSigners(jwt, keys as NonNullable<typeof keys>, policyOf(i), thumbprint),
 			);
 		}
-		for (const named of contributed.keys()) {
-			if (!trusted.has(named))
-				refused.push(`${named} has keys contributed but is not an issuer here`);
+		const unnamed = [...contributed.keys()].filter((named) => !trusted.has(named)).length;
+		if (unnamed > 0) {
+			refused.push({
+				where: "jwt-bearer.issuers",
+				reason: `keys are contributed for ${unnamed} issuer${unnamed === 1 ? "" : "s"} none of these names: name ${unnamed === 1 ? "it" : "them"} here, or leave out the module that contributes them`,
+			});
 		}
-		if (refused.length > 0) return c.refuse("jwt-bearer.issuers", refused.join("; "));
+		if (refused.length > 0) return c.refuseAll(refused);
 		const linked = linkedOf(c.section);
 		const resolvers = await c.collect(linkedSubjects);
 		if (linked.size > 0 && resolvers.length === 0) {
@@ -199,6 +207,7 @@ export default defineModule({ name: "jwt-bearer", section }, (m) => [
 		};
 		return {
 			grantType,
+			readsAmbient: "none",
 			targets: true,
 			handle: async ({ client, param, admits, issue, target }) => {
 				const assertion = param("assertion");
@@ -217,9 +226,10 @@ export default defineModule({ name: "jwt-bearer", section }, (m) => [
 					clientAllowance.allowsAudience(client, a, named),
 				);
 				if (asked.kind === "error") return asked;
-				// Made at its `iat`, never later than now; one that does not say is as old as can be.
+				// Made at its `iat`, never later than now; one that does not say is as old as can be. The
+				// boundary is widened by the skew allowed, as an issuer's clock may run that far ahead.
 				const madeAt = Math.min(checked.issuedAt ?? 0, c.clock.now());
-				if ((await boundaries.compare(checked.subject, madeAt, "sessions")) === "revoked") {
+				if ((await boundaries.compare(checked.subject, madeAt, "sessions", skewMs)) === "revoked") {
 					return { kind: "error", error: "invalid_grant", description: "assertion revoked" };
 				}
 				const { scope } = allowed;
@@ -241,7 +251,7 @@ export default defineModule({ name: "jwt-bearer", section }, (m) => [
 						access_token: token.token,
 						token_type: token.tokenType,
 						expires_in: token.expiresIn,
-						...(scope.length > 0 ? { scope: scope.join(" ") } : {}),
+						scope: scope.join(" "),
 					},
 				};
 			},

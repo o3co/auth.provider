@@ -64,15 +64,16 @@ const sessionOf = (approval: Approval) => (approval.session ? { session: approva
 export function grantWith(
 	devices: DeviceStore,
 	revocation: SubjectRevocation,
-	open: Pick<Sessions, "stillOpen">,
+	open: Pick<Sessions, "entryOf">,
 	runtime: Runtime,
 ): Grant {
 	const refused = (error: OAuthError | PollError): GrantOutcome => ({ kind: "error", error });
-	/** A token is answered only while the approving session is open, as a code redemption is. */
+	/** A token is answered only while the approving session enters at use, as a code redemption is. */
 	const stillOpen = async (approval: Approval) =>
-		approval.session === undefined || (await open.stillOpen(approval.session));
+		approval.session === undefined || (await open.entryOf(approval.session)).kind === "entered";
 	return {
 		grantType: deviceGrantType,
+		readsAmbient: "none",
 		handle: async ({ client, param, admits, issue }) => {
 			const code = param("device_code");
 			if (!code)
@@ -97,7 +98,13 @@ export function grantWith(
 			if ((await revocation.check(approval.subject, approval.authenticatedAt)) === "revoked") {
 				return refused("invalid_grant");
 			}
-			const judged = await issue(grantOf(before, approval), sessionOf(approval));
+			// The token ends no later than the approving session, as a code redemption's does.
+			const entry = approval.session ? await open.entryOf(approval.session) : undefined;
+			if (entry && entry.kind !== "entered") return refused("invalid_grant");
+			const judged = await issue(grantOf(before, approval), {
+				...sessionOf(approval),
+				...(entry ? { notAfter: entry.endsAt } : {}),
+			});
 			if (judged.kind === "refused") return judged;
 			// A logout that came while the token was being made: it is never answered, so reaches no one.
 			if (!(await stillOpen(approval))) return refused("invalid_grant");
@@ -108,7 +115,7 @@ export function grantWith(
 					access_token: issued.token,
 					token_type: issued.tokenType,
 					expires_in: issued.expiresIn,
-					...(before.scope.length > 0 ? { scope: before.scope.join(" ") } : {}),
+					scope: before.scope.join(" "),
 				},
 			};
 		},

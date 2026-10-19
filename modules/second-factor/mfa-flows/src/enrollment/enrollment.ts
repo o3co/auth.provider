@@ -273,22 +273,55 @@ export function enrollmentOver(p: EnrollmentParts) {
 			return jsonAnswer(401, { error: "mfa_invalid", attempts_remaining: left });
 		}
 		if (!(await p.transactions.take(txId))) return unknownTransaction;
+		// Checked again just before the write, to answer early: a reset since the binding began, or a
+		// revocation once complete, is fenced inside mfa's write in any case.
+		if (await revokedSince(p.revocation, t)) return loginRequired;
 		const bound = await p.factors.bind(t.subject, pending, proved.state, label, askedFrom(t));
+		// A reset or a revocation since the binding began, which ended its sessions too.
+		if (bound.kind === "fenced") return loginRequired;
 		// A first binding another factor beat: a login asks again, a session is told of the conflict.
 		if (bound.kind === "first-binding-closed") {
 			return t.purpose === "enroll-login" ? loginRequired : enrollmentConflict;
 		}
 		if (bound.kind !== "bound") return refusals[bound.kind] ?? unknownTransaction;
+		/** Takes back the codes no one will see; read just before, a reset or a revocation in between leaves them, unseen all the same. */
+		const takeBack = async () => {
+			const id = bound.recoveryCodesFactor;
+			if (id) await p.factors.remove(t.subject, id, await p.factors.fenceOf(t.subject));
+		};
+		// The fence guards the write, not the showing: a revocation complete by now leaves the codes unseen.
+		if (bound.recoveryCodesFactor !== undefined && (await revokedSince(p.revocation, t))) {
+			await takeBack().catch(() => undefined);
+			return loginRequired;
+		}
 		const codes = bound.recoveryCodes === undefined ? {} : { recovery_codes: bound.recoveryCodes };
 		const body = { factor: bound.factor, ...codes };
 		// A first factor bound on the password alone counts from the next sign-in: binding it during a
 		// login never finishes that login.
 		if (!t.proved) return jsonAnswer(200, body, { cookies: [p.transactions.cleared()] });
 		// Bound on a binding proof, it counts at once by its first proof: the login goes on, or the session is raised.
-		if (t.purpose === "enroll-login") return p.resume(request, t, proved.amr, body);
-		const raised = await p.sessions.raise(request, proved.amr);
-		const cookies = [...(raised?.cookies ?? []), p.transactions.cleared()];
-		return jsonAnswer(200, body, { cookies });
+		// Either can fail after the codes were made: then they go, as no one would ever see them.
+		const shown = async (answer: () => Promise<HttpResponse>) => {
+			try {
+				const answered = await answer();
+				// The last wait before the codes go out is the revocation's: none may come after it.
+				if (bound.recoveryCodesFactor !== undefined && (await revokedSince(p.revocation, t))) {
+					await takeBack().catch(() => undefined);
+					return loginRequired;
+				}
+				return answered;
+			} catch (error) {
+				// One that cannot go stays unseen, as before; the failure answered is the first.
+				await takeBack().catch(() => undefined);
+				throw error;
+			}
+		};
+		if (t.purpose === "enroll-login") return shown(() => p.resume(request, t, proved.amr, body));
+		return shown(async () => {
+			const raised = await p.sessions.raise(request, proved.amr);
+			const cookies = [...(raised?.cookies ?? []), p.transactions.cleared()];
+			return jsonAnswer(200, body, { cookies });
+		});
 	};
 
 	return { enroll, complete, challengeBinding };

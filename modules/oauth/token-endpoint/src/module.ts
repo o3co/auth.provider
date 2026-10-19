@@ -50,20 +50,39 @@ export default defineModule({ name: "token-endpoint", section }, (m) => [
 		};
 	}),
 	m.contribute(routes).by(async (c) => {
-		const handle = tokenEndpoint(
+		const composed = await c.collect(grants);
+		// The route has no own-site policy: it relies on each grant saying whether it reads a cookie.
+		const silent = composed.filter((g) => g.readsAmbient !== "none" && g.readsAmbient !== "cookie");
+		if (silent.length > 0) {
+			return c.refuseAll(
+				silent.map((g) => ({
+					where: `grants:${g.grantType}`,
+					reason: "declares neither readsAmbient none nor cookie",
+				})),
+			);
+		}
+		const endpoint = tokenEndpoint(
 			await c.get(clients),
 			await c.get(tokens),
 			await c.collect(sessionIssuances),
 			await c.get(senderBinding),
 			await c.get(clientBindings),
-			new Map((await c.collect(grants)).map((g) => [g.grantType, g])),
+			new Map(composed.map((g) => [g.grantType, g])),
 			await c.get(targets),
 			await c.get(audit),
-			c.log,
 		);
 		const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 		const uses = [use(requestsPerSource, { name: "token-endpoint", window })];
 		// Each grant names the bodies it takes; the endpoint refuses the others.
-		return { method: "POST", path: tokenPath, uses, takes: ["form", "json", "none"], cors, handle };
+		return {
+			method: "POST",
+			path: tokenPath,
+			uses,
+			crossSite:
+				"Authorization is per grant; a grant that reads a cookie declares it and checks the origin itself.",
+			takes: ["form", "json", "none"],
+			cors,
+			...endpoint,
+		};
 	}),
 ]);

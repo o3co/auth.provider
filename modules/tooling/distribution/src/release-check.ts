@@ -84,6 +84,52 @@ writeFileSync(
 );
 install(tool);
 
+/**
+ * An app assembled by hand from the tarballs, as one keeping its own composition root does:
+ * combinations' full names made published, each module imported, and assembled to the kernel's
+ * refusals, as no configuration is given.
+ */
+const hand = join(scratch, "hand");
+mkdirSync(hand);
+const scaffold = "@o3co/auth-provider-scaffold";
+const handOn = (dependencies: Record<string, string>) =>
+	writeFileSync(
+		join(hand, "package.json"),
+		JSON.stringify({ name: "release-check-hand", private: true, type: "module", dependencies }),
+	);
+try {
+	handOn({ [scaffold]: `file:${overrides[scaffold]}` });
+	install(hand);
+	const names = `import { full, published } from "${scaffold}/combinations";
+process.stdout.write(JSON.stringify(published([...full(), "@mod/kernel"])));`;
+	const entries = JSON.parse(
+		execFileSync("node", ["--input-type=module", "-e", names], { cwd: hand, encoding: "utf8" }),
+	) as { name: string; package: string; entry: string }[];
+	handOn(Object.fromEntries(entries.map((e) => [e.package, `file:${overrides[e.package]}`])));
+	install(hand);
+	const kernel = entries.find((e) => e.name === "@mod/kernel")?.entry;
+	const modules = entries.filter((e) => e.name !== "@mod/kernel").map((e) => `${e.entry}/module`);
+	writeFileSync(
+		join(hand, "main.js"),
+		`import { assemble, BootRefused } from ${JSON.stringify(kernel)};
+const modules = await Promise.all(${JSON.stringify(modules)}.map(async (m) => (await import(m)).default));
+try {
+	await assemble({ modules, config: {} });
+} catch (error) {
+	if (!(error instanceof BootRefused)) throw error;
+	process.stdout.write(\`\${modules.length} modules imported, refused at boot\`);
+	process.exit(0);
+}
+throw new Error("booted with no configuration");
+`,
+	);
+	say(`by hand: ${execFileSync("node", ["main.js"], { cwd: hand, encoding: "utf8" })}`);
+} catch (error) {
+	const told = error as { stdout?: Buffer; stderr?: Buffer; message: string };
+	problems.push(`by hand: ${told.stdout ?? ""}${told.stderr ?? ""}${told.message}`);
+	say("by hand: failed");
+}
+
 const run = images(`release-check-${process.pid}`, { dir: tarballs, byName: overrides }, scratch);
 
 const tsc = join(root, "node_modules", ".bin", "tsc");

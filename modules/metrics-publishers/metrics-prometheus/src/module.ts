@@ -24,6 +24,7 @@ export default defineModule({ name: "metrics-prometheus", section, replicaSafe: 
 		const scraped = c.late(scrape);
 		return {
 			method: "GET",
+			changesState: false,
 			path: c.section.path,
 			takes: ["none"],
 			handle: async () => ({

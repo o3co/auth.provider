@@ -14,7 +14,7 @@ import { sealConfig } from "@mod/seal/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { senderBindings } from "@mod/sender-binding";
 import senderBindingModule from "@mod/sender-binding/module";
-import { type Session, sessions } from "@mod/session";
+import { entryRequirements, type Session, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { sessionTokens } from "@mod/session-tokens";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
@@ -70,6 +70,8 @@ export async function harness(
 	const stores = memoryStores(() => now);
 	const recorded = auditStandIn();
 	const offered: Record<string, Offered> = { corp: options.offered ?? {}, other: {} };
+	/** Subjects whose sessions fall short of a requirement at use. */
+	const short = new Set<string>();
 	const stubs = defineModule({ name: "stubs" }, (m) => [
 		m.provide(issuer).by(() => ({ url: "https://issuer.example" })),
 		m.provide(sessionTokens).by(() => ({
@@ -84,6 +86,14 @@ export async function harness(
 			holds: async ({ id }) => (families.get(id) === "ended" ? "revoked" : "holds"),
 		})),
 		m.provide(upstreams).by(() => ({ of: (idp) => offered[idp] })),
+		m.contribute(entryRequirements).by(() => ({
+			name: "test-short",
+			judges: ["use"],
+			admits: async (context) =>
+				short.has(context.subject)
+					? { kind: "short", answer: { error: "test_short" } }
+					: { kind: "admit" },
+		})),
 		m.contribute(clientSources).by(() => ({
 			find: async (id) => {
 				if (id === unreadable) throw new Unavailable("clients");
@@ -172,10 +182,14 @@ export async function harness(
 		families.set(issued.id, more.family ?? "family");
 		return { token: issued.token, id: issued.id };
 	};
-	/** A login's upstream tokens, handed to the receivers as federation hands them. */
+	/** A login's upstream tokens, handed to the receivers as federation hands them; the last receipt answered. */
 	const receive = async (session: Session, given: Partial<UpstreamTokens> = {}, idp = "corp") => {
 		const tokensGiven = { accessToken: "up-1", tokenType: "Bearer", scope: ["read"], ...given };
-		for (const one of receivers) await one.received({ session, idp, tokens: tokensGiven });
+		let receipt: string | undefined;
+		for (const one of receivers) {
+			receipt = (await one.received({ session, idp, tokens: tokensGiven })) ?? undefined;
+		}
+		return receipt;
 	};
 	const call = async (
 		step: string,
@@ -230,5 +244,9 @@ export async function harness(
 		},
 		now: () => now,
 		close: (session: Session) => app.get(sessions).close(session.id),
+		/** Makes the subject's sessions fall short of a requirement at use, open as they are. */
+		shorten: (subject: string) => {
+			short.add(subject);
+		},
 	};
 }

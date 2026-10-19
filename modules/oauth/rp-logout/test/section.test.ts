@@ -18,11 +18,13 @@ it.each([
 	]);
 });
 
-it("remembers and notifies for a day and sweeps every minute, where nothing is set", () => {
+it("remembers and notifies for a day, sweeps every minute and takes 60 requests a minute per source, where nothing is set", () => {
 	expect(section.parse({})).toEqual({
 		"remember-for": 86_400,
 		"notify-within": 86_400,
 		"sweep-interval": 60,
+		requests: 60,
+		window: 60,
 	});
 });
 

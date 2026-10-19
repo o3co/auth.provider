@@ -36,6 +36,7 @@ const recording = () => {
 	const module = defineModule({ name: "recording" }, (m) => [
 		m.contribute(grants).by(() => ({
 			grantType: "urn:test:record",
+			readsAmbient: "none",
 			handle: async (input) => {
 				seen.push({ client: input.client.id, x: input.param("x"), binding: input.binding });
 				const grant = {
@@ -49,7 +50,11 @@ const recording = () => {
 				const issued = await input.issue(grant, { notAfter: 1_800_000_120_000, session: "sid" });
 				if (issued.kind === "refused") return issued;
 				const { expiresIn, tokenType } = issued.access;
-				return { kind: "issued", body: { expires_in: expiresIn, token_type: tokenType } };
+				// No scope granted: the endpoint answers it by leaving scope out, whatever the grant writes.
+				return {
+					kind: "issued",
+					body: { expires_in: expiresIn, token_type: tokenType, scope: "" },
+				};
 			},
 		})),
 	]);
@@ -121,6 +126,7 @@ it("hands a grant what the token endpoint hands it, for the same client, paramet
 	expect(real.seen).toEqual([{ client: "rec", x: "1", binding }]);
 	expect(outcome).toEqual({ kind: "issued", body: throughEndpoint });
 	expect(throughEndpoint).toEqual({ expires_in: 120, token_type: "ONE" });
+	expect(Object.keys(throughEndpoint as object)).not.toContain("scope");
 });
 
 it("hands a grant that takes JSON its members as the token endpoint does", async () => {
@@ -129,6 +135,7 @@ it("hands a grant that takes JSON its members as the token endpoint does", async
 		defineModule({ name: "json-grant" }, (m) => [
 			m.contribute(grants).by(() => ({
 				grantType: "urn:test:record",
+				readsAmbient: "none",
 				bodies: ["json"],
 				handle: async ({ param, value }) => {
 					seen.push({ scope: param("scope"), n: param("n"), assertion: value("assertion") });
@@ -182,6 +189,7 @@ it("refuses an OAuth parameter sent in JSON as neither a string nor null before 
 	const grant = defineModule({ name: "json-grant" }, (m) => [
 		m.contribute(grants).by(() => ({
 			grantType: "urn:test:record",
+			readsAmbient: "none",
 			bodies: ["json"],
 			handle: async () => {
 				ran++;
@@ -220,6 +228,7 @@ it("gives a test that calls a grant itself the input the harness hands the grant
 	const seen: unknown[] = [];
 	const grant: Grant = {
 		grantType: "urn:test:record",
+		readsAmbient: "none",
 		bodies: ["json"],
 		handle: async (input) => {
 			const { client, binding, request } = input;
@@ -367,6 +376,7 @@ it("refuses an audience asked of a grant that takes none before the grant runs, 
 	const twoGrants = defineModule({ name: "two-grants" }, (m) => [
 		m.contribute(grants).by(() => ({
 			grantType: "urn:test:record",
+			readsAmbient: "none",
 			handle: async () => {
 				handled.push("untargeted");
 				return { kind: "issued", body: {} };
@@ -374,6 +384,7 @@ it("refuses an audience asked of a grant that takes none before the grant runs, 
 		})),
 		m.contribute(grants).by(() => ({
 			grantType: "urn:test:targeted",
+			readsAmbient: "none",
 			targets: true,
 			handle: async () => {
 				handled.push("targeted");

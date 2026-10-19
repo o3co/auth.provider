@@ -10,6 +10,7 @@ import loginGates from "@mod/login-gates/module";
 import { proofSteps } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
 import { mfaConfig } from "@mod/mfa/testing";
+import mfaEntry from "@mod/mfa-entry/module";
 import mfaStore from "@mod/mfa-store/module";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import sealModule from "@mod/seal/module";
@@ -48,7 +49,7 @@ async function serve(
 ) {
 	const store = simulatedStore();
 	const mfa = withMfa
-		? [auditStandIn().module, sealModule, loginGates, mfaStore, mfaModule, step]
+		? [auditStandIn().module, sealModule, loginGates, mfaStore, mfaModule, mfaEntry, step]
 		: [];
 	const app = await assemble({
 		modules: [

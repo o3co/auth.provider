@@ -45,6 +45,7 @@ export interface LoginParts {
 export function passkeyGrant(p: LoginParts): Grant {
 	return {
 		grantType: webauthnGrantType,
+		readsAmbient: "none",
 		bodies: ["json"],
 		handle: async ({ client, param, value, binding, issue }) => {
 			// One answer for every refusal, so it never tells whether a credential is registered.
@@ -101,7 +102,7 @@ export function passkeyGrant(p: LoginParts): Grant {
 					token_type: access.tokenType,
 					expires_in: access.expiresIn,
 					...(refreshToken ? { refresh_token: refreshToken } : {}),
-					...(scope.length > 0 ? { scope: scope.join(" ") } : {}),
+					scope: scope.join(" "),
 				},
 			};
 		},

@@ -24,6 +24,7 @@ export default defineModule({ name: "keys", section }, (m) => [
 		const current = await c.get(ring);
 		return {
 			method: "GET",
+			changesState: false,
 			path: keySetPath,
 			// Public keys a page may read from any listed origin.
 			cors: {},

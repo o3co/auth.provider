@@ -11,13 +11,14 @@ const workspace = (manifest: object, readme?: string) => {
 	return root;
 };
 
-it("reads the release from the workspace: version, license, repository and the README's notice", () => {
+it("reads the release from the workspace: version, license, repository, keywords and the README's notice", () => {
 	const root = workspace(
 		{
 			version: "0.18.0",
 			license: "Apache-2.0",
 			engines: { node: ">=24" },
 			repository: { type: "git", url: "https://github.com/o3co/auth.provider" },
+			keywords: ["oauth2", "oidc"],
 		},
 		"# Title\n\nText.\n\nCopyright 2026 Example Ltd. Licensed under the Apache License, Version 2.0.\n",
 	);
@@ -27,6 +28,7 @@ it("reads the release from the workspace: version, license, repository and the R
 		engines: { node: ">=24" },
 		repository: "https://github.com/o3co/auth.provider",
 		notice: "Copyright 2026 Example Ltd. Licensed under the Apache License, Version 2.0.",
+		keywords: ["oauth2", "oidc"],
 	});
 });
 

@@ -21,9 +21,9 @@ async function linked(
 ) {
 	const h = await harness({ ...settings, offered: { refresh } });
 	const session = await h.login();
-	await h.receive(session, given as Partial<UpstreamTokens>);
+	const receipt = await h.receive(session, given as Partial<UpstreamTokens>);
 	const { token } = await h.issue(session);
-	return { ...h, session, token, get: () => h.ask(token) };
+	return { ...h, session, token, receipt, get: () => h.ask(token) };
 }
 
 describe("when a token ends", () => {
@@ -269,7 +269,9 @@ describe("a refresh racing other writers", () => {
 			await during();
 			return answer({});
 		});
-		during = () => h.receive(h.session, { accessToken: "up-new", expiresInSeconds: 600 });
+		during = async () => {
+			await h.receive(h.session, { accessToken: "up-new", expiresInSeconds: 600 });
+		};
 		expect((await h.get()).status).toBe(503);
 		during = async () => {};
 		expect((await h.get()).json).toMatchObject({ access_token: "up-new" });
@@ -350,9 +352,40 @@ describe("as a receiver and a participant", () => {
 	it("withdraws one IdP's tokens and keeps the others", async () => {
 		const h = await linked({});
 		await h.receive(h.session, { accessToken: "up-o" }, "other");
-		await h.receivers[0]?.withdrawn(h.session.id, "corp");
+		await h.receivers[0]?.withdrawn(h.session.id, "corp", h.receipt);
 		expect((await h.get()).status).toBe(404);
 		expect((await h.ask(h.token, "other")).json).toMatchObject({ access_token: "up-o" });
+	});
+
+	it("withdraws, given its receipt, only what that login kept, and nothing written since", async () => {
+		const h = await harness();
+		const session = await h.login();
+		const [keeper] = h.receivers;
+		const tokens = (accessToken: string) => ({ accessToken, tokenType: "Bearer", scope: ["read"] });
+		const first = await keeper?.received({ session, idp: "corp", tokens: tokens("up-1") });
+		// Another login of the same IdP writes its own tokens in the meantime.
+		const second = await keeper?.received({ session, idp: "corp", tokens: tokens("up-2") });
+		expect(typeof first).toBe("string");
+		expect(second).not.toBe(first);
+		const { token } = await h.issue(session);
+		await keeper?.withdrawn(session.id, "corp", first as string);
+		expect((await h.ask(token)).json).toMatchObject({ access_token: "up-2" });
+		await keeper?.withdrawn(session.id, "corp", second as string);
+		expect((await h.ask(token)).status).toBe(404);
+	});
+
+	it("keeps nothing it answers a receipt of, where the login's tokens were not kept", async () => {
+		const h = await harness();
+		const session = await h.login();
+		const [keeper] = h.receivers;
+		const refused = { accessToken: "", tokenType: "Bearer", scope: ["read"] };
+		expect(await keeper?.received({ session, idp: "corp", tokens: refused })).toBeUndefined();
+	});
+
+	it("withdraws nothing without a receipt, as its login kept nothing", async () => {
+		const h = await linked({});
+		await h.receivers[0]?.withdrawn(h.session.id, "corp", undefined);
+		expect((await h.get()).json).toMatchObject({ access_token: "up-1" });
 	});
 
 	it("withdraws a closed session's tokens, whatever is left of it, and again harmlessly", async () => {
@@ -360,9 +393,9 @@ describe("as a receiver and a participant", () => {
 		h.stores.down.failNext("remove");
 		expect((await h.close(h.session)).kind).toBe("pending");
 		expect(await h.stores.records.read(h.session.id)).toBeDefined();
-		await h.receivers[0]?.withdrawn(h.session.id, "corp");
+		await h.receivers[0]?.withdrawn(h.session.id, "corp", h.receipt);
 		expect(await h.stores.records.read(h.session.id)).toBeUndefined();
-		await h.receivers[0]?.withdrawn(h.session.id, "corp");
+		await h.receivers[0]?.withdrawn(h.session.id, "corp", h.receipt);
 		expect(await h.stores.records.read(h.session.id)).toBeUndefined();
 	});
 
@@ -416,6 +449,16 @@ describe("how long a session's record lives", () => {
 		await h.close(closed);
 		await h.receive(closed);
 		expect(await h.stores.records.read(closed.id)).toBeUndefined();
+	});
+
+	it("writes no tokens for a session short of a requirement, as for one that lets nobody in", async () => {
+		const h = await harness();
+		const session = await h.login();
+		h.shorten("alice");
+		await h.receive(session);
+		expect(h.stores.given).toEqual([]);
+		expect(await h.stores.records.read(session.id)).toBeUndefined();
+		expect(warned(h, "login_tokens_not_kept")).toEqual([{ idp: "corp" }]);
 	});
 
 	it("keeps no tokens for a session that closes while they are written", async () => {

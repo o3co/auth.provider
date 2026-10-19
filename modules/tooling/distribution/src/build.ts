@@ -12,6 +12,8 @@ import { basename, dirname, join, relative } from "node:path";
 import ts from "typescript";
 import type { Bundle } from "./contract.ts";
 import {
+	aboutFields,
+	aboutOf,
 	bundleManifest,
 	type MemberManifest,
 	publicNameOf,
@@ -86,10 +88,15 @@ function indexOf(manifests: Manifests, version: string): string {
 	return `${JSON.stringify({ version, packages }, null, "\t")}\n`;
 }
 
-/** An entrance a bundle declares: a package of its own name whose command calls a member's `run` with its arguments. */
+/**
+ * An entrance a bundle declares: a package of its own name whose command calls a member's `run`
+ * with its arguments, and what it says of itself.
+ */
 interface Entrance {
 	readonly bin: string;
 	readonly runs: string;
+	readonly description?: unknown;
+	readonly keywords?: unknown;
 }
 
 function entranceOf(
@@ -101,11 +108,14 @@ function entranceOf(
 	const { version } = release;
 	const found = placed(entrance.runs);
 	if (!found) return { problem: `${name}: runs ${entrance.runs}, of no shipped member` };
+	const described = aboutOf(name, entrance, release);
+	if ("problem" in described) return described;
 	const runs = JSON.stringify(`${publicNameOf(found.bundle)}/${found.dir}`);
 	return {
 		manifest: {
 			name,
 			version,
+			...aboutFields(described.about),
 			type: "module",
 			...(release.license ? { license: release.license } : {}),
 			...(release.repository ? { repository: { type: "git", url: release.repository } } : {}),
@@ -174,6 +184,12 @@ export function buildBundles(input: {
 		return found ? { bundle: found.bundle, dir: found.written.dir } : undefined;
 	};
 	for (const bundle of shipped) {
+		const declared = JSON.parse(readFileSync(join(bundle.dir, "package.json"), "utf8"));
+		const described = aboutOf(publicNameOf(bundle.dir), declared, input.release);
+		if ("problem" in described) {
+			problems.push(described.problem);
+			continue;
+		}
 		const dest = join(input.out, basename(bundle.dir));
 		const members = bundle.members.map(
 			(member) => manifests.get(member.name)?.written as MemberManifest,
@@ -197,7 +213,7 @@ export function buildBundles(input: {
 			}
 		}
 		const made = bundleManifest(
-			{ dir: bundle.dir, members },
+			{ dir: bundle.dir, members, about: described.about },
 			input.release,
 			(name) => manifests.get(name)?.bundle,
 		);
@@ -220,7 +236,6 @@ export function buildBundles(input: {
 				problems.push(`${publicNameOf(bundle.dir)}: ${target} is not built`);
 		}
 		built.push(publicNameOf(bundle.dir));
-		const declared = JSON.parse(readFileSync(join(bundle.dir, "package.json"), "utf8"));
 		if (typeof declared.index === "string") {
 			writeFileSync(join(dest, declared.index), indexOf(manifests, input.release.version));
 		}

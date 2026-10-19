@@ -2,7 +2,7 @@ import { isUnavailable, Unavailable } from "@mod/kernel";
 import type {
 	Narrower,
 	Outbound,
-	OutboundPolicy,
+	OutboundRefusals,
 	OutboundRequest,
 	OutboundResponse,
 } from "@mod/outbound";
@@ -20,11 +20,13 @@ const ok = (json: unknown, status = 200): OutboundResponse => ({
 
 /** What the destination policy was asked at boot. */
 const policyAsked: { url: string; narrower: Narrower | undefined }[] = [];
+/** How outbound explains a host its allow list leaves out. */
+const notAllowed = "not-allowed: name the host in outbound.allow, or set outbound.allow-any-public";
 /** A destination policy refusing the `refused` hosts as not allowed. */
-const policyRefusing = (refused: readonly string[] = []): OutboundPolicy => ({
-	refusalOf: (url, narrower) => {
+const policyRefusing = (refused: readonly string[] = []): OutboundRefusals => ({
+	explained: (url, narrower) => {
 		policyAsked.push({ url, narrower });
-		return refused.includes(new URL(url).hostname) ? "not-allowed" : undefined;
+		return refused.includes(new URL(url).hostname) ? notAllowed : undefined;
 	},
 });
 const settings = settingsOf(policyRefusing());
@@ -113,12 +115,13 @@ describe("idp-github", () => {
 			client_id: "cid",
 			client_secret: "sec",
 		});
-		// The User-Agent GitHub's API requires is outbound's own; this module sends none.
+		// The User-Agent GitHub's API requires is outbound's own; this module sends none. The token is
+		// outbound's to send, as the request's credential.
 		expect(user?.request.headers).toEqual({
-			authorization: "Bearer gho_x",
 			accept: "application/vnd.github+json",
 			"x-github-api-version": "2022-11-28",
 		});
+		expect(user?.request.credential).toBe("Bearer gho_x");
 	});
 
 	it("gives the user's public profile, its email never verified, as GitHub's user answer cannot say so", async () => {
@@ -161,7 +164,7 @@ describe("idp-github", () => {
 				.error?.issues.map((i) => [i.path, i.message]);
 		const refused = (key: string) => [
 			[key],
-			"outbound's destination policy refuses it: not-allowed",
+			`outbound's destination policy refuses it: ${notAllowed}`,
 		];
 		policyAsked.length = 0;
 		expect(refusalsOf(["github.com"])).toEqual([refused("token-endpoint")]);
@@ -256,6 +259,17 @@ describe("idp-github", () => {
 			subject: "583231",
 			amr: [],
 		});
+	});
+
+	it("refuses at boot an endpoint or API that is empty or no URL, never throwing on it", () => {
+		const both = { "client-id": "cid", "client-secret": "sec" };
+		for (const name of ["authorization-endpoint", "token-endpoint", "api"]) {
+			for (const value of ["", "not a url"]) {
+				const read = () => settings.safeParse({ ...both, [name]: value });
+				expect(read, `${name} ${value}`).not.toThrow();
+				expect(read().success, `${name} ${value}`).toBe(false);
+			}
+		}
 	});
 
 	it("refuses at boot an empty issuer", () => {

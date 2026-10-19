@@ -37,16 +37,17 @@ function namesRefused(declarations: readonly UpstreamNames[]): string[] {
 	const declared = declarations.flatMap((d) =>
 		d.names.map((n) => ({ ...n, declaredBy: d.declaredBy })),
 	);
-	const told = (n: (typeof declared)[number]) => `${n.issuer} (by ${n.declaredBy})`;
+	// Told by the modules that declare them alone: a name and an issuer are configured values.
 	const empty = declared.filter((n) => n.name === "" || n.issuer === "");
 	const byName = Map.groupBy(declared, (n) => n.name);
 	const shared = [...byName].filter(([, all]) => new Set(all.map((n) => n.issuer)).size > 1);
+	const asDeclared = (all: readonly (typeof declared)[number][]) => {
+		const by = [...new Set(all.map((n) => n.declaredBy))];
+		return `as ${by.join(", ")} ${by.length === 1 ? "declares" : "declare"} it`;
+	};
 	return [
-		...empty.map((n) => `an IdP name and its issuer cannot be empty: "${n.name}" ${told(n)}`),
-		...shared.map(
-			([name, all]) =>
-				`the IdP name ${name} stands for more than one issuer: ${all.map(told).join(", ")}`,
-		),
+		...empty.map((n) => `an IdP name or its issuer is empty, ${asDeclared([n])}`),
+		...shared.map(([, all]) => `an IdP name stands for more than one issuer, ${asDeclared(all)}`),
 	];
 }
 
@@ -63,7 +64,7 @@ function undeclaredLinks(
 				: [
 						{
 							where: `users.registered.${i}.upstream.${j}.idp`,
-							reason: `no module declares the IdP name ${link.idp}`,
+							reason: "no module declares this IdP name",
 						},
 					],
 		),

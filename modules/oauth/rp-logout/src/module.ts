@@ -1,8 +1,9 @@
 import { metadataSections } from "@mod/clients";
 import { sessionRedemptions } from "@mod/code-grant";
-import { type HttpRequest, type HttpResponse, routes, site } from "@mod/http";
+import { type HttpRequest, type HttpResponse, routes, site, use } from "@mod/http";
 import { metadata } from "@mod/issuer";
 import { contract, defineModule } from "@mod/kernel";
+import { requestsPerSource } from "@mod/rate-limit";
 import { participants, sessions } from "@mod/session";
 import { upstreamEnds } from "./contract.ts";
 import { endingFrom } from "./ending/ending.ts";
@@ -31,8 +32,8 @@ export default defineModule({ name, section, replicaSafe: true }, (m) => [
 			name,
 			redeemed: async (session, client) => {
 				// Kept until the session ends, so its close still tells the client.
-				const endsAt = await open().endsAt(session);
-				const untilEnd = endsAt === undefined ? 0 : endsAt - c.clock.now();
+				const entry = await open().entryOf(session);
+				const untilEnd = entry.kind === "entered" ? entry.endsAt - c.clock.now() : 0;
 				const { pushedOut } = await held.add(session, client, Math.max(rememberMs, untilEnd));
 				if (pushedOut.length > 0)
 					c.log.warn("rp-logout.clients_pushed_out", { count: pushedOut.length });
@@ -75,6 +76,17 @@ export default defineModule({ name, section, replicaSafe: true }, (m) => [
 			path,
 			// OpenID Connect RP-Initiated Logout 1.0 §2: a POST is a form.
 			takes: ["form", "none"],
+			// It closes the session even on a GET, so a HEAD is not answered as one.
+			...(method === "GET" ? { changesState: true } : {}),
+			crossSite:
+				"RP-initiated logout is a navigation from the RP's site by design; it closes only the session that a hint the provider signed names.",
+			// Counted before any hint is checked, which reads keys and the store.
+			uses: [
+				use(requestsPerSource, {
+					name: "rp-logout",
+					window: { limit: c.section.requests, ms: c.section.window * 1000 },
+				}),
+			],
 			handle: await c.get(ending),
 		})),
 	),

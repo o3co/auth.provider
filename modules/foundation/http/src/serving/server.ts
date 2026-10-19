@@ -8,13 +8,14 @@ import {
 } from "node:http";
 import type { Socket } from "node:net";
 import { ignoredCertificates } from "@mod/client-certificate";
-import { type Clock, isUnavailable, type Log } from "@mod/kernel";
+import { type Clock, isUnavailable, type Log, type Unavailable } from "@mod/kernel";
 import { ignoredForwarding, sourceOf, type TrustedProxies } from "@mod/request-source";
 import { bodyOf } from "../bodies/body.ts";
 import { paramsOf, readOnly } from "../bodies/values.ts";
 import {
 	type HttpRequest,
 	type HttpResponse,
+	jsonAnswer,
 	noStore,
 	type RequestEndObserver,
 } from "../contract.ts";
@@ -104,9 +105,12 @@ function reaching(routes: readonly GuardedRoute[], path: string): readonly Guard
 	return under.filter((r) => r.path.length === longest);
 }
 
+/** A GET that changes state is never reached by HEAD, which must change nothing. */
+const answersHead = (r: GuardedRoute) => r.method === "GET" && r.changesState !== true;
+
 function routeFor(reached: readonly GuardedRoute[], method: string): GuardedRoute | undefined {
 	const route = reached.find((r) => r.method === method);
-	return route ?? (method === "HEAD" ? reached.find((r) => r.method === "GET") : undefined);
+	return route ?? (method === "HEAD" ? reached.find(answersHead) : undefined);
 }
 
 async function answer(
@@ -125,7 +129,7 @@ async function answer(
 	const route = routeFor(reaches, head.method);
 	if (!route) {
 		if (reaches.length === 0) return bare(404);
-		const allowed = reaches.flatMap((r) => (r.method === "GET" ? ["GET", "HEAD"] : [r.method]));
+		const allowed = reaches.flatMap((r) => (answersHead(r) ? ["GET", "HEAD"] : [r.method]));
 		return { status: 405, headers: { ...noStore, allow: allowed.join(", ") } };
 	}
 	nameRoute(route.path);
@@ -147,13 +151,32 @@ async function handled(
 		if (refused) return bare(refused);
 		return await route.handle(request);
 	} catch (error) {
-		if (isUnavailable(error)) {
-			log.warn("http.unavailable", { what: error.what });
-			return bare(503);
-		}
-		log.error("http.failed", { kind: error instanceof Error ? error.name : typeof error });
+		if (isUnavailable(error)) return unavailable(route, request, error, log);
+		failed(error, log);
 		return bare(500);
 	}
+}
+
+/** A policy's or handler's failure, by its kind only. */
+function failed(error: unknown, log: Log): void {
+	log.error("http.failed", { kind: error instanceof Error ? error.name : typeof error });
+}
+
+/** The route's answer to Unavailable, or http's own, after one warning with what the route notes. */
+function unavailable(
+	route: GuardedRoute,
+	request: HttpRequest,
+	error: Unavailable,
+	log: Log,
+): HttpResponse {
+	let noted: Readonly<Record<string, string>> | undefined;
+	try {
+		noted = route.unavailable?.noted?.(request, error);
+	} catch (failure) {
+		failed(failure, log);
+	}
+	log.warn("http.unavailable", { ...noted, what: error.what, route: route.path });
+	return route.unavailable?.response ?? jsonAnswer(503, { error: "service_unavailable" });
 }
 
 /** Warns of the forwarded headers a request's peer sent and were ignored, in http's words. */

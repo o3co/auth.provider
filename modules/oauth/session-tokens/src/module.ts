@@ -92,7 +92,7 @@ const partsOf = async (c: BuildContext<z.output<typeof section>>): Promise<Parts
 	if (c.section["push-out-margin"] >= kept.size) {
 		c.refuse(
 			"session-tokens.push-out-margin",
-			`it must stay below the references the store keeps to a session (${kept.size})`,
+			"it must stay below the number of references the store keeps to a session",
 		);
 	}
 	return {

@@ -3,7 +3,7 @@ import type { Clock, Log } from "@mod/kernel";
 import {
 	jsonObjectOf,
 	type Outbound,
-	type OutboundPolicy,
+	type OutboundRefusals,
 	type OutboundResponse,
 	withinHosts,
 } from "@mod/outbound";
@@ -46,17 +46,17 @@ interface Endpoints {
 	readonly endSession?: string;
 }
 
-/** How it reaches the upstream: outbound, and outbound's destination policy at boot. */
+/** How it reaches the upstream: outbound, and outbound's refusals of a destination at boot. */
 interface Reach {
 	readonly outbound: Outbound;
-	readonly policy: OutboundPolicy;
+	readonly refusals: OutboundRefusals;
 }
 
 /** A description that does not hold, told under `issuer`: the key it was read from. */
 const mismatch = (reason: string) => new UpstreamMismatch(reason, ["issuer"]);
 
 /** The endpoints the issuer's description names; throws, refusing boot, where they do not hold. */
-async function discovered(s: Settings, { outbound, policy }: Reach, hosts: readonly string[]) {
+async function discovered(s: Settings, { outbound, refusals }: Reach, hosts: readonly string[]) {
 	const where = descriptionUrl(s.issuer);
 	// Refused as the upstream's answer, which at boot refuses boot.
 	const described = answerOf(jsonObjectOf(await outbound.fetch(where, {}, { hosts })), description);
@@ -80,9 +80,9 @@ async function discovered(s: Settings, { outbound, policy }: Reach, hosts: reado
 	// The two this server sends to; a refusal here would fail every login.
 	const sent = { token_endpoint: described.token_endpoint, jwks_uri: described.jwks_uri };
 	for (const [name, url] of Object.entries(sent)) {
-		const refusal = policy.refusalOf(url, { hosts });
-		if (refusal !== undefined) {
-			throw mismatch(`outbound's destination policy refuses the description's ${name}: ${refusal}`);
+		const refused = refusals.explained(url, { hosts });
+		if (refused !== undefined) {
+			throw mismatch(`outbound's destination policy refuses the description's ${name}: ${refused}`);
 		}
 	}
 	const endpoints: Endpoints = {
@@ -151,11 +151,11 @@ export async function opened(
 		const headers = {
 			"content-type": "application/x-www-form-urlencoded",
 			accept: "application/json",
-			...(post ? {} : { authorization: basicAuthorization(client, s["client-secret"]) }),
 		};
+		const sent = post ? {} : { credential: basicAuthorization(client, s["client-secret"]) };
 		return outbound.fetch(
 			endpoints.token,
-			{ method: "POST", headers, body: form.toString() },
+			{ method: "POST", headers, body: form.toString(), ...sent },
 			{ hosts },
 		);
 	};

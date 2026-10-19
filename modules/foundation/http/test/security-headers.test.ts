@@ -5,6 +5,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { type Loads, listening, type Route, routes } from "../src/contract.ts";
 import http from "../src/module.ts";
+import { declared } from "./declared.ts";
 
 const quiet = quietRuntime({
 	clock: { now: () => 0 },
@@ -39,7 +40,7 @@ afterEach(async () => {
 
 async function serveWith(list: readonly Route[]) {
 	const handlers = defineModule({ name: "handlers" }, (m) =>
-		list.map((route) => m.contribute(routes).by(() => route)),
+		list.map((route) => m.contribute(routes).by(() => declared(route))),
 	);
 	const app = await assemble({
 		modules: [http, handlers],

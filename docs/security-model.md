@@ -4,6 +4,7 @@ What auth-provider 0.18 guarantees, and what it leaves to the deployment. Each g
 
 ## Contents
 
+- [Promises across modules](#promises-across-modules)
 - [Boot](#boot)
 - [Secrets and logs](#secrets-and-logs)
 - [Requests and proxies](#requests-and-proxies)
@@ -16,6 +17,65 @@ What auth-provider 0.18 guarantees, and what it leaves to the deployment. Each g
 - [Storage](#storage)
 - [Audit](#audit)
 - [Keys](#keys)
+
+## Promises across modules
+
+Each promise below holds across every module composed. Each names what keeps it (a contract, a check at boot, a guard rule) and the conformance scenes that test it, by area and scene; where no scene tests a part yet, it says so. An exception is never silent: it is a declaration, in a package manifest or on a route, and the [route reference](routes.md) lists the routes' reasons.
+
+1. **Closing a session closes every path for the tokens issued from it.**
+   - Kept by: `session`'s participants, which `session-lifecycle` calls on every close; `session-tokens` and `refresh` take part, and `code-grant` voids a code whose session ended.
+   - Scenes: code ("tokens and logout", "refresh: what a token may do", "session grant", "OpenID Connect userinfo"), exchange ("token exchange of a session's token"), federation ("federation tokens: refusals").
+   - A close left pending is not done: the session stays closing until every participant has finished. Each host sweeps every `session-lifecycle.sweep-interval`, and takes a pending close up again once its retry time comes: after half its age so far, from the sweep interval up to an hour, and `logout` and RP-initiated logout answer it `503`, never as logged out.
+   - No scene yet for a device approval. A session that ends by expiry alone calls no participant.
+   - A session that ends by its lifetime leaves no token past it: each token issued from a session expires no later than the session's end, as the lifetime in force when it is issued sets it.
+   - One exception: shortening `session-lifecycle.lifetime` ends the sessions it now covers when they are next read, without their participants, and the tokens issued before then keep their earlier expiry.
+   - Bridges such as `session-tokens` come in every app composed through `combinations`; an app composed by hand must compose them itself, or the promise does not hold for what they join.
+2. **`prompt=login` and `max_age` are met only by a fresh authentication.**
+   - Kept by: `authorize`'s re-authentication record, taken once; `session` never counts an authentication time it does not know as fresh.
+   - Scenes: federation ("federation logins meeting a client's demand for a fresh login", and the freshness scenes through Google and Apple).
+   - No scene yet for a password login.
+3. **A dependency that cannot answer never grants anything.**
+   - It covers what an authorization decision waits on; a notice sent best effort, such as an audit event or a logout notice to a client, decides nothing.
+   - Kept by: `kernel`'s `Unavailable`, which `http` answers `503`, or as the route declares; the authorization endpoint, once it trusts the redirect URI, answers it to the client by a redirect with `error=temporarily_unavailable`.
+   - Scenes: each area's "the store failing" scenes (code, exchange, oauth, federation, second factor, passkey), identity ("password login: a user ledger over HTTP"), mtls (the CRL and OCSP outage scenes).
+   - Declared exceptions, each the operator's choice: `rate-limit.fail-mode = open` and `mtls.revocation.on-unavailable = allow`.
+   - While an issuer's key set cannot be fetched, the last one fetched is still used, up to `external-jwt.key-set-max-age` (`1d` by default) after its fetch.
+4. **A subject's revocation boundary refuses everything made before it.**
+   - Kept by: `subject-revocation`'s boundaries, which every holder of a subject's state compares against, and its followers. Among them, `mfa-revocation` moves `mfa`'s fence, so no second factor's enrollment begun before a revocation binds once the revocation is complete.
+   - Does not hold for access tokens where `tokens.subject-check = none` is chosen: they live until they expire.
+   - Does not hold for federation grants where `federation-grants.keep-on-subject-revocation` is set and a revocation asks to keep delegations: an established grant then answers only to the `delegations` boundary, which such a revocation leaves where it was.
+   - A session opened before a revocation removes no factor and reissues no codes once the revocation is complete: `mfa-management` reads the subject's fence before the session's last check, and `mfa` compares it in the write. Recovery codes go out only after a last check of the revocation, with nothing waited on after it; a request past that check is one a revocation cannot stop, as for any request already past its checks. This holds as far as each check reads the boundary as it now stands.
+   - Bridges such as `mfa-revocation` come in every app composed through `combinations`; an app composed by hand must compose them itself, or an enrollment begun before a revocation may still bind. After an account is taken over, also reset the subject's second factors (`mfa-flows`' `mfaReset`): a revocation ends what was made before it, while a reset removes the factors themselves.
+   - Scenes: code ("a subject the ledger revokes over HTTP"), federation ("federation grants: a subject the ledger revokes"), second factor ("a subject the ledger revokes").
+   - No scene yet for a code not yet redeemed, a device code or a token exchange.
+5. **What is used once is used once, on any number of instances.**
+   - Kept by: `store`'s take-once writes and each store interface's declared needs; `kernel.deployment = multi` refuses a module that declares itself unsafe on several instances: `store`, the store kept in memory, and `mail`, which only logs mail (a module that declares nothing is taken as safe).
+   - Does not hold where the operator accepts losing what was used: with a store that does not persist (`store.accept-volatile`), a restart forgets it; with `redis.durability = none`, a crash can lose the latest writes, spent assertion and proof ids and lockout records among them; with `redis.replication = none`, a failover would lose writes.
+   - Upgrading from rc.1 leaves a window in which JWT bearer assertions spent and id_tokens exchanged under rc.1 are not seen, as [From 0.18.0-rc.1](migration.md#from-0180-rc1) says.
+   - Scenes: code (a code redeemed once, a refresh token rotated once, two concurrent uses), oauth ("refuses a replayed assertion"), device ("decides a code once").
+   - No scene yet for an exchanged id_token or a recovery code used twice, and no scene runs several instances.
+6. **A token bound to a key or a certificate is never used as a bearer token.**
+   - Kept by: `sender-binding`, which refuses a bound token presented in another scheme.
+   - Scenes: code (userinfo with a DPoP-bound token and with an mTLS-bound one, "refresh: binding a public client's family"), exchange ("token exchange: a binding washed off").
+7. **Every request to another server goes through `outbound`.**
+   - Kept by: guard G26, which lets product code reach the network only through `outbound` or as its manifest's `network` declares. It reads how the code is written: network modules, clients and DNS resolvers imported, or loaded with `import()` or `require`; any use of `node:child_process`; a module loaded by a name known only at run time; and `fetch`, `WebSocket` and `EventSource` used directly or as a property of the global object, named by a dot or a string literal. What the code's form cannot show (`eval`, a worker, a native add-on, a function passed in from outside, the global object under another name, a property named at run time) is left to review.
+   - `outbound` is the gate itself, and declares `network` as `outbound`. Besides it, three packages declare their own reach: `http` serves, `mail-smtp` speaks SMTP and `redis` speaks to Redis, each by its manifest's `network`.
+   - No scene: the guard checks it.
+8. **Secrets appear neither in logs nor in answers, but for what the provider hands out on purpose.**
+   - What it hands out on purpose: tokens and codes to the one they are issued to, and a secret a registration shows once to its owner (a one-time password app's secret, recovery codes).
+   - Boot refusals name a setting by its key path, never its value.
+   - Log lines carry no secret, credential, token, request body or header value, but for header values from a fixed set (such as `Sec-Fetch-Site`). They may carry the identifiers an operator traces a problem by: a peer's or a proxy's address, a host name, a client's id (a metadata document's URL among them), a request's path, and a session's handle.
+   - Kept by: `kernel`'s refusals, by key path; `audit`, whose events carry no token or secret; `http`, which logs a failure by its kind only; and each module's own log lines.
+   - Scenes: keys ("refusals about keys"), ops (metrics, readiness, refusals about the operations routes), identity (a ledger's credential at boot), and the audit scenes of the authorization endpoint, client credentials and second factor.
+   - No scene reads a running server's log lines.
+9. **A browser route that changes state needs CSRF or origin evidence.**
+   - Kept by: `csrf`'s policy, marked `own-site` in `http.marks`; a route declares whether it changes state and, without such a policy, why it takes other sites' requests, and `http` checks the declarations at boot.
+   - Scenes: identity (login and logout without evidence), device (the verification interface), federation (the grant question, a link started from another site), code ("session grant: refusals").
+   - Declared exceptions: the route reference's "Other sites" reasons, among them RP-initiated logout, a navigation from the client's site that closes only the session a hint the provider signed names. No scene checks the boot check itself.
+10. **A `POST` taken before authentication is limited per source.**
+    - Kept by: `rate-limit`'s policies, marked `per-source`; a route without one declares why it counts no source.
+    - Scenes: oauth ("limits requests to the token endpoint per source"), identity (login attempts per sender), passkey ("passkey login: the options' limit"), ops (the operations routes and request counting).
+    - Declared exceptions: the route reference's "Per source" reasons; and, as promise 3 declares, `rate-limit.fail-mode = open`, which lets a request limit pass requests uncounted while the store cannot count (an attempt limit still refuses).
 
 ## Boot
 
@@ -44,7 +104,7 @@ What auth-provider 0.18 guarantees, and what it leaves to the deployment. Each g
   - Terminating TLS. The app speaks plain HTTP behind your proxy; an http public origin needs `http.insecure-origin = true`.
   - Setting `http.trusted-proxies` whenever a proxy is in front.
   - Making the proxy strip or overwrite `X-Forwarded-For`, the forwarded scheme and the client-certificate header that clients send.
-  - Bounding slow requests, upload rates and connections in front: the app takes Node's default timeouts.
+  - Bounding upload rates and connections per client in front. The app bounds a request's headers and the whole request (`http.headers-timeout`, `http.request-timeout`) and the connections it holds (`http.max-connections`), all clients together.
   - Synchronizing host clocks.
   - Accepting that RP-initiated logout by GET with a recent `id_token_hint` closes a session without asking.
   - The [runbook's list](runbook.md#before-you-deploy) of what the deployment must provide.
@@ -53,9 +113,11 @@ What auth-provider 0.18 guarantees, and what it leaves to the deployment. Each g
 
 - **Guaranteed:**
   - Each login gets a new session handle, so a session cannot be fixed in advance. The cookie holds an unguessable secret.
-  - Where the public origin is https, cookies are `__Host-` and Secure. Cookies are always `Path=/`, `HttpOnly` and `SameSite=Lax`. Cookies on a plain-http request are not read.
+  - Where the public origin is https, cookies are `__Host-` and Secure. Cookies are always `Path=/` and `HttpOnly`, and `SameSite=Lax` but for one: the transaction cookie of an upstream identity provider that answers in a posted form is `SameSite=None`, and so always `__Host-` and Secure. Cookies on a plain-http request are not read.
   - Every request that changes state needs same-origin evidence or the double-submit token. Any cross-origin evidence refuses it with 403.
+  - Every route declares whether it changes state, and one that does either uses a policy that keeps other sites' requests out and one that limits each source, or says why not; boot refuses a route that does neither. The [route reference](routes.md) lists each route's. A declaration is its owner's claim, not a proof.
   - Revoking a subject's sessions closes each of them.
+  - With second factors composed, `mfa-entry` holds sessions to them: under `mfa.mode = required` using a session needs one, and changing credentials needs one proven recently (or a recent sign-in while none is held). Every credentials entry first reads the subject's factors, judged against the witness, so a factor store that cannot answer makes every credentials route unavailable, witness or not. `mfa` refuses to boot without it, whatever the mode, so no app holds factors that sessions are not held to.
 - **Left to you:**
   - Keeping other subdomains of your origin from being taken over: double submit relies on them being unable to set the cookie.
   - Ending sessions with revocation, not by waiting out their lifetime, when they must end now.
@@ -105,9 +167,9 @@ What auth-provider 0.18 guarantees, and what it leaves to the deployment. Each g
 - **Guaranteed:**
   - No host is reached by name unless `outbound.allow` lists it or `outbound.allow-any-public` is set. `outbound.deny` is checked first.
   - A name is resolved once, every address it resolves to is checked, and the request connects only to a checked address.
-  - Loopback, link-local, the cloud metadata addresses and other special-purpose addresses are never reached.
+  - Loopback, link-local, the cloud metadata addresses and other special-purpose addresses are never reached, but for a `plain-loopback` pair the operator names.
   - Private addresses are reached only by URLs a module takes from your own configuration and names so (the audit-http collector, the users-http ledger), at hosts in `outbound.internal-hosts`.
-  - Redirects are refused, and only https is used, except plain http to a `plain-loopback` pair.
+  - Redirects are refused, and only https is used, except plain http to a named `plain-loopback` pair, and signed material (whose signature is checked), fetched from its caller's named hosts.
   - Proxy environment variables are never read.
 - **Left to you:**
   - With `outbound.proxy` set, the proxy resolves names and checks where they lead (boot warns so).
@@ -116,8 +178,8 @@ What auth-provider 0.18 guarantees, and what it leaves to the deployment. Each g
 ## Storage
 
 - **Guaranteed:**
-  - Data that must never be lost is kept only where Redis is checked to keep it: no eviction, an append-only file written on every command, and, with replicas, every replica holding it before it counts.
-  - An outage or an unknown outcome is unavailable, answered 503, and never read as "absent" or "allowed".
+  - Data that must never be lost is kept only where Redis is checked to keep it: no eviction, an append-only file written on every command, and, with replicas, every replica holding it before it counts. This does not hold where the operator states `redis.durability = none` or `redis.replication = none`, accepting that a crash or a failover can lose the latest writes.
+  - An outage or an unknown outcome is unavailable, answered 503, and never read as "absent" or "allowed". A record a store answers as missing is read as truly missing (a subject never revoked, for one), because a failing store throws rather than answering, and the spaces kept without end are never evicted.
 - **Left to you:**
   - Keeping a lagging replica from being promoted.
   - The replicas' own persistence.
@@ -140,4 +202,4 @@ What auth-provider 0.18 guarantees, and what it leaves to the deployment. Each g
   - Stored secrets (TOTP secrets, upstream tokens, delegated credentials) are sealed with AES-256-GCM.
 - **Left to you:**
   - Rotating keys as the [runbook](runbook.md#rotating-the-signing-key) describes.
-  - Retiring a sealing key is not supported in 0.18: values sealed with it become unavailable once it is removed.
+  - Retiring a sealing key only after a `reseal` run that exited 0, as the [runbook](runbook.md#rotating-the-sealing-key) describes. A value a removed key still sealed becomes unavailable until the key is put back.

@@ -8,7 +8,7 @@
 - The decisions up to issuing a code (`authorize`). The token format and how tokens are revoked (`tokens`). What the ID token holds (the maker).
 
 ## Offers
-- Code issuance, for `authorize` only: client, redirect URI, PKCE challenge, nonce, scope, audience, session handle, subject, optional acr met → code. It checks again the session is open with that subject, the client may use the grant with that scope and audience, and the challenge's shape; the authentication context comes from the session.
+- Code issuance, for `authorize` only: client, redirect URI, PKCE challenge, nonce, scope, audience, session handle, subject, optional acr met → code. It checks again the session enters at use with that subject, the client may use the grant with that scope and audience, and the challenge's shape (`challengeShape`, offered for a request to be checked by); the authentication context comes from the session.
 - The `authorization_code` grant (`codeGrantType`, taking its audience from the request) to `grants`' grant extension point, and the scope that asks for an ID token (the maker's, or none).
 - Extension point: the ID token maker, declaring its scope (two or more refuse boot). It is told the subject, client, nonce, authentication time (and whether the session knew it), amr, the code's acr if any, its scope and the session's handle.
 - Extension point: session redemptions, told the session's handle and the client of each code redeemed in a session.
@@ -19,9 +19,9 @@
 
 ## Invariants
 - A code is used up before it is checked, by a version-compared rewrite, so two uses at once count as reuse. A wrong verifier, client or redirect URI uses it up; a malformed request does not. The verifier is compared in constant time.
-- Every refused code is `invalid_grant` with the same description. A closed session is refused, and checked again after issuing: closed meanwhile, the code is voided.
+- Every refused code is `invalid_grant` with the same description. A session that does not enter at use (closed, or short of a requirement) is refused, and checked again after issuing: so meanwhile, the code is voided.
 - A redemption is told to the session redemptions after issuing, which has the token recorded to the code's session, and before that second check.
-- The audience asked (`grants`' `target`, within the code's), then the issuance policies, are asked before the code is used up, only for its client, redirect URI and verifier (a refusal leaves it unused), and again when issuing (a refusal then leaves it used up, giving nothing). The access token and the additions carry the code's amr, authentication time (or that it is not known) and acr, from the code's session.
+- The audience asked (`grants`' `target`, within the code's), then the issuance policies, are asked before the code is used up, only for its client, redirect URI and verifier (a refusal leaves it unused), and again when issuing (a refusal then leaves it used up, giving nothing). The access token and the additions carry the code's amr, authentication time (or that it is not known) and acr, from the code's session; the access token ends no later than that session.
 - A code that comes again is listed first, whatever it holds, then marked void. A listed code's token is revoked, then the additions' revocations run, then it leaves the list; each host retries every `sweep-interval`. One that gave nothing leaves once its record ends; one with no record is logged and removed.
 - A record that vanished during a redemption is refused and never written back (the code would be unused again). A record of a format or shape not known is a code that cannot be used: refused (not unavailable), or logged and removed from the list.
 - The code is voided when a session redemption, the ID token or an addition fails, however it fails. Issuing that fails leaves it used up, giving nothing.

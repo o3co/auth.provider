@@ -13,6 +13,7 @@
 - Operator section `mfa-binding-proof`: `mode` (`never`, `when-available` by default, or `always`); its keys are in the configuration reference.
 
 ## Invariants
+- Whether a counting factor is held is `mfa`'s `countingHeld`, judged against the witness: a subject it marks while holding none is unavailable at `asks`, before `begin`.
 - A proof is asked only of a subject holding no counting factor: the first available, or under `always` the first contributed; `always` with none composed refuses to boot. Under `never`, none is asked.
 - A challenge is sealed to the subject, and keeps the proof's name, what it kept and its end; a pass is sealed to the subject, with its end, the transaction and the kind.
 - A pass begins only the binding of the transaction and kind it names, before the challenge's end.

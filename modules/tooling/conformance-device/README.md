@@ -13,6 +13,8 @@
 
 ## Invariants
 - The legacy set-up, and the needs the legacy system cannot provide, live only in `src/legacy.ts`.
+- On the new target, the device grant is composed with `session-tokens`, which records its tokens to the session that approved them, as `device-grant` asks to start.
+- On the new target, its tokens can be revoked (`tokens.revocation = denylist`, as the device pattern sets it), as `session-tokens` asks to start.
 - Touches only the HTTP interface.
 
 ## Depends on

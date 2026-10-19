@@ -1,0 +1,58 @@
+# Releasing
+
+How a maintainer cuts a release. The release workflow (`release.yml`) does the building and publishing once a tag is pushed; this guide covers what comes before the tag and after it.
+
+## Contents
+
+- [What a release publishes](#what-a-release-publishes)
+- [Before the tag](#before-the-tag)
+- [Tagging](#tagging)
+- [What the workflow does](#what-the-workflow-does)
+- [A package name never published before](#a-package-name-never-published-before)
+- [When a publish stops partway](#when-a-publish-stops-partway)
+- [After the release](#after-the-release)
+
+## What a release publishes
+
+One package per concern, `@o3co/auth-provider-<concern>`, and the entrance `@o3co/create-auth-provider`, all at the version the root `package.json` states. A version with a prerelease part (`0.18.0-rc.2`) is published under the npm `next` tag and marked a prerelease on GitHub; any other under `latest`.
+
+## Before the tag
+
+1. **The changelog.** The version's section in `CHANGELOG.md` is complete, and its `Unreleased` becomes the date.
+2. **The migration guide.** Every change an operator must act on has its line in [the migration guide](migration.md).
+3. **Pull request titles.** The release notes are generated from the titles of the pull requests merged since the last tag. Read them: a security fix's title names the kind of hole it closes and the module, never how to reach it. Retitle one on GitHub before tagging; the notes read the titles when the release is made.
+4. **The version.** One commit changes the root `package.json` version, by itself, and reaches `main` with the rest.
+5. **To `main`.** A pull request from `develop` to `main`, merged with a merge commit. CI on `main` runs the conformance scenes and `pnpm release:check`; wait for both.
+
+## Tagging
+
+Tag the merge commit on `main` as `v<version>` and push the tag. The workflow refuses a tag that does not name the root `package.json` version, before it builds anything.
+
+## What the workflow does
+
+1. Checks that npm can publish through trusted publishing (11.5.1 or later).
+2. Runs `pnpm check` and `pnpm release:check`: every pattern generated from the packed tarballs alone, type-checked and booted.
+3. Packs every package, and refuses any tarball without the root `LICENSE` word for word.
+4. Creates a draft GitHub release with generated notes.
+5. Publishes each tarball with provenance, the entrance last since it depends on the others. Each is authenticated by the run's own token, through the package's trusted publisher; no npm token is stored.
+6. Publishes the draft release.
+
+## A package name never published before
+
+Trusted publishing is set in a package's settings on npm, so the name must exist first. Before the first release that adds a concern:
+
+1. From a maintainer's account, publish a placeholder `0.0.0` of the new name under the dist-tag `bootstrap`. npm also points `latest` at a name's first version, so the placeholder is `latest` until the name's first final release.
+2. In the package's settings on npm, add this repository's release workflow as its trusted publisher.
+
+A release whose new name is missing either stops at that package; see the next section.
+
+## When a publish stops partway
+
+Fix the cause and run the workflow again for the same tag. A package already on npm at that version is passed over, so the rerun publishes only what is missing, and the release is published once every package is.
+
+## After the release
+
+- Install the entrance from npm (`npx @o3co/create-auth-provider@<version>`), generate a pattern and boot it.
+- For a final release, check that `latest` names the version for every package, the placeholders' included.
+- The cross-component tests in the umbrella repository run by hand (`umbrella-e2e.yml`); its header says against which revisions.
+- At the first final 0.18 release: deprecate the 0.17 packages with `npm deprecate`, each by version range (`<0.18.0`), so a name 0.18 reuses keeps its new versions undeprecated, and mark the 0.17 API site on GitHub Pages as 0.17's. The [migration guide](migration.md#packages) says which 0.17 package went where.

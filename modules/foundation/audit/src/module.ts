@@ -74,9 +74,10 @@ export default defineModule({ name: "audit", section, replicaSafe: true }, (m) =
 			}
 			known.set(receiver.name, receiver);
 		}
-		for (const name of named) {
+		// A name written in the list is a configured value: it is told by its place alone.
+		for (const [at, name] of named.entries()) {
 			if (!known.has(name))
-				refusals.push({ where: "audit.receivers", reason: `${name} is no receiver` });
+				refusals.push({ where: `audit.receivers.${at}`, reason: "names no receiver" });
 		}
 		if (refusals.length > 0) c.refuseAll(refusals);
 		const max = c.section["max-pending"];

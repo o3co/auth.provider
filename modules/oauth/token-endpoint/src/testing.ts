@@ -13,6 +13,7 @@ import type { HttpRequest } from "@mod/http";
 import { contract, deepFreeze, defineModule } from "@mod/kernel";
 import type { Binding } from "@mod/sender-binding";
 import { type Tokens, tokens } from "@mod/tokens";
+import { answeredBody } from "./answer.ts";
 import { grantInputOf, mistypedRefusal, tokenPath } from "./endpoint.ts";
 import { refusedAnswer } from "./issuance.ts";
 import { composedRule, unread } from "./targets.ts";
@@ -129,7 +130,10 @@ export const grantCaller = defineModule({ name: "token-endpoint" }, (m) => [
 				const untargeted = grant.targets ? undefined : rule.untargeted?.({ param: input.param });
 				if (untargeted) return untargeted;
 				const outcome = await grant.handle(input);
-				return outcome.kind === "refused" ? refusedAnswer(outcome) : outcome;
+				if (outcome.kind === "refused") return refusedAnswer(outcome);
+				return outcome.kind === "issued"
+					? { ...outcome, body: answeredBody(outcome.body) }
+					: outcome;
 			},
 		};
 	}),

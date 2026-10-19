@@ -66,11 +66,8 @@ export function opened(s: Settings, outbound: Outbound): Upstream {
 				// GitHub answers a refused code with 200 and an error, so the token itself is required.
 				const { access_token } = answerOf(jsonObjectOf(granted), tokenAnswer);
 				const userRequest: OutboundRequest = {
-					headers: {
-						authorization: `Bearer ${access_token}`,
-						accept: "application/vnd.github+json",
-						"x-github-api-version": "2022-11-28",
-					},
+					headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
+					credential: `Bearer ${access_token}`,
 				};
 				const found = await outbound.fetch(userUrl(s.api), userRequest, { hosts });
 				const read = answerOf(jsonObjectOf(found), user);

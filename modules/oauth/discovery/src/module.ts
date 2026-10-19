@@ -28,6 +28,7 @@ export default defineModule({ name: "discovery" }, (m) =>
 			};
 			return {
 				method: "GET",
+				changesState: false,
 				path: pathsOf(issuer)[place] as string,
 				// Public metadata a page may read from any listed origin.
 				cors: {},

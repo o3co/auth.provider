@@ -22,6 +22,7 @@
 		"@mod/keys": "workspace:*",
 		"@mod/oidc": "workspace:*",
 		"@mod/outbound": "workspace:*",
+		"@mod/rate-limit": "workspace:*",
 		"@mod/request-source": "workspace:*",
 		"@mod/session": "workspace:*",
 		"zod": "4.6.7"

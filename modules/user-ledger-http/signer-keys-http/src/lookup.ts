@@ -1,5 +1,6 @@
 import { algorithms, type SignerKeys } from "@mod/jwt-bearer";
 import { deepFreeze, type LogFields, Unavailable } from "@mod/kernel";
+import { publicMembers } from "@mod/keys";
 import {
 	DestinationRefused,
 	jsonObjectOf,
@@ -17,9 +18,6 @@ export interface LookupParts {
 	readonly narrower: Narrower;
 	readonly warn: (event: string, fields: LogFields) => void;
 }
-
-/** A JWK's members that hold private key material: a key carrying any is never handed on. */
-const privateMembers = ["d", "p", "q", "dp", "dq", "qi", "oth", "k"];
 
 const answerShape = z.object({
 	keys: z.array(z.record(z.string(), z.unknown())),
@@ -41,18 +39,15 @@ export function keysAt(parts: LookupParts): SignerKeys {
 		warn("signer-keys-http.ledger_failed", why);
 		return new Unavailable("signer-keys-http");
 	};
-	const headers = deepFreeze({
-		accept: "application/json",
-		"content-type": "application/json",
-		...(credential === undefined ? {} : { authorization: `Bearer ${credential}` }),
-	});
+	const headers = deepFreeze({ accept: "application/json", "content-type": "application/json" });
+	const sent = credential === undefined ? {} : { credential: `Bearer ${credential}` };
 	return {
 		issuer,
 		async keysOf({ subject, kid }) {
 			// A kid the assertion does not name is left out, as JSON writes no undefined member.
 			const body = JSON.stringify({ issuer, subject, kid });
 			const answer = await out
-				.fetch(url, { method: "POST", headers, body }, narrower)
+				.fetch(url, { method: "POST", headers, body, ...sent }, narrower)
 				.catch((error: unknown) => {
 					throw failed({ reason: kindOf(error) });
 				});
@@ -64,9 +59,13 @@ export function keysAt(parts: LookupParts): SignerKeys {
 			// The ledger says the signer holds no key now.
 			if (parsed?.success && parsed.data.keys.length === 0) return { kind: "none" };
 			const keys = parsed?.success
-				? parsed.data.keys.filter((jwk) => !privateMembers.some((m) => Object.hasOwn(jwk, m)))
+				? // Only a key keys reads as public alone, its own members and those describing it, is handed on.
+					parsed.data.keys.filter((jwk) => publicMembers(jwk) !== undefined)
 				: [];
 			if (!parsed?.success || keys.length === 0) throw failed({ reason: "malformed" });
+			// Some keys left out of an answer that still names one: told by their count alone.
+			const dropped = parsed.data.keys.length - keys.length;
+			if (dropped > 0) warn("signer-keys-http.keys_dropped", { count: dropped });
 			return deepFreeze({
 				kind: "keys",
 				keys,

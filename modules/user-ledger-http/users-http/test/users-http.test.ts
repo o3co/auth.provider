@@ -10,7 +10,7 @@ import {
 	kernelConfig,
 	type Runtime,
 } from "@mod/kernel";
-import { type Narrower, outbound, outboundPolicy } from "@mod/outbound";
+import { credentialPolicy, type Narrower, outbound, outboundRefusals } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Ledger, ledgers, userAttribute, users } from "@mod/users";
@@ -40,7 +40,7 @@ interface Answer {
 
 /**
  * The ledger in the request shape: alice at `/ledger/authenticate`, behind the credential. It refuses
- * an unknown identifier with 401 and a wrong password with 403, both without a Bearer challenge. At
+ * an unknown identifier and a wrong password with 401, without a Bearer challenge. At
  * `/ledger/subject` it finds alice, refuses the suspended `s-gone` with 410, and knows no one else.
  * At `/ledger/upstream` it ties Apple's `apple-alice` to alice and refuses `apple-gone` with 410.
  */
@@ -51,7 +51,7 @@ function aliceLedger(asked: Asked): Answer {
 	if (asked.method === "POST" && asked.path === "/ledger/authenticate") {
 		const { email, password } = JSON.parse(asked.body);
 		if (email !== "alice") return { status: 401 };
-		return password === "correct horse" ? { status: 200, json: alice } : { status: 403 };
+		return password === "correct horse" ? { status: 200, json: alice } : { status: 401 };
 	}
 	if (asked.method === "POST" && asked.path === "/ledger/subject") {
 		const { subject } = JSON.parse(asked.body);
@@ -263,13 +263,13 @@ describe("users-http", () => {
 		expect(received[1]?.path).toBe("/ledger/authenticate?realm=a");
 	});
 
-	it("sends no credential when none is set, and then reads a challenged 401 or 403 as none", async () => {
+	it("sends no credential when none is set, and then reads a challenged 401 as none, and a 403 as unavailable", async () => {
 		const app = await boot({ "verify-url": `http://${pair}/ledger/authenticate` });
 		const [ledger] = app.get(collected);
 		script = () => ({ status: 401, headers: { "www-authenticate": "Bearer" } });
 		expect(await ledger?.verify("alice", "x")).toEqual({ kind: "none" });
 		script = () => ({ status: 403, headers: { "www-authenticate": "Bearer" } });
-		expect(await ledger?.verify("alice", "x")).toEqual({ kind: "none" });
+		await expect(ledger?.verify("alice", "x")).rejects.toSatisfy(isUnavailable);
 		expect(received.map((r) => r.headers.authorization)).toEqual([undefined, undefined]);
 	});
 
@@ -282,10 +282,13 @@ describe("users-http", () => {
 		expect(received).toEqual([]);
 	});
 
-	it("answers none to a 401 or 403", async () => {
+	it("answers none to a 401 alone: a 403, which a proxy before the ledger may send while it fails, is unavailable", async () => {
 		const { ledger } = await open();
 		expect(await ledger.verify("nobody", "x")).toEqual({ kind: "none" });
 		expect(await ledger.verify("alice", "x")).toEqual({ kind: "none" });
+		// Unavailable, login-password answers 503 and counts no attempt: no account waits for a proxy's fault.
+		script = () => ({ status: 403 });
+		await expect(ledger.verify("alice", "x")).rejects.toSatisfy(isUnavailable);
 		const challenges = [
 			'Basic realm="x, Bearer y"',
 			"Basic realm=x, bearer=1",
@@ -599,12 +602,13 @@ describe("users-http", () => {
 					};
 				},
 			})),
-			m.provide(outboundPolicy).by(() => ({
-				refusalOf: (_url, narrower) => {
+			m.provide(outboundRefusals).by(() => ({
+				explained: (_url, narrower) => {
 					checked.push(narrower);
 					return undefined;
 				},
 			})),
+			m.provide(credentialPolicy).by(() => ({ refusalOf: () => undefined })),
 		]);
 		const app = await assemble({
 			modules: [
@@ -623,17 +627,30 @@ describe("users-http", () => {
 		expect(sent).toMatchObject([{ internal: true }]);
 	});
 
-	it("refuses to start on a verify-url outbound's policy refuses, saying why", async () => {
+	it("refuses to start on a verify-url outbound's policy refuses, saying which of its keys to set", async () => {
 		const refused = [
-			[["ledger.example"], `http://${pair}/ledger/authenticate`, "not-allowed"],
-			[["127.0.0.1"], "http://127.0.0.1:8/ledger/authenticate", "scheme"],
+			[
+				["ledger.example"],
+				`http://${pair}/ledger/authenticate`,
+				"not-allowed: name the host in outbound.allow, or set outbound.allow-any-public",
+			],
+			[
+				["127.0.0.1"],
+				"http://127.0.0.1:8/ledger/authenticate",
+				"scheme: plain http reaches only a host:port that outbound.plain-loopback names; otherwise write the URL with https",
+			],
 		] as const;
 		for (const [allow, url, reason] of refused) {
 			await expect(
 				boot(settings({ "verify-url": url }), [], [...allow]),
 				url,
 			).rejects.toMatchObject({
-				refusals: [{ where: "users-http.verify-url", reason: expect.stringContaining(reason) }],
+				refusals: [
+					{
+						where: "users-http.verify-url",
+						reason: `outbound's destination policy refuses it: ${reason}`,
+					},
+				],
 			});
 		}
 	});

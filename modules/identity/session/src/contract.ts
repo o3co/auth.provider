@@ -57,9 +57,8 @@ export const refusedEntry = (entry: Exclude<Entry, { kind: "entered" }>): HttpRe
 export interface Sessions {
 	enter(request: HttpRequest): Promise<Session | undefined>;
 	enterFor(request: HttpRequest, level: EntryLevel): Promise<Entry>;
-	stillOpen(handle: string): Promise<boolean>;
-	openContext(handle: string): Promise<AuthContext | undefined>;
-	endsAt(handle: string): Promise<number | undefined>;
+	/** The entry a request carrying this session's cookie would get at `level` (`use` unless said): entered with its end, short of a requirement, or absent once closed, ended or revoked. */
+	entryOf(handle: string, level?: EntryLevel): Promise<Entry>;
 	complete(
 		request: HttpRequest,
 		facts: LoginFacts,
@@ -95,6 +94,11 @@ export interface CloseOutcome {
 	readonly cookies: readonly string[];
 	/** The session the close moved, by its handle and subject; none when no record was left to read. */
 	readonly session?: { readonly id: string; readonly subject: string };
+	/**
+	 * The state the close found the record in, before it moved it: `open` (even one its lifetime has
+	 * ended), `closing` (a close left pending), or `closed`; none when no record was left to read.
+	 */
+	readonly from?: "open" | "closing" | "closed";
 }
 
 export interface Participant {

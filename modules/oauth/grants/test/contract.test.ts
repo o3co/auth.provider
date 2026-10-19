@@ -6,6 +6,7 @@ const echo = (name: string, grantType = "urn:test:echo") =>
 	defineModule({ name }, (m) => [
 		m.contribute(grants).by(() => ({
 			grantType,
+			readsAmbient: "none",
 			handle: async () => ({ kind: "error", error: "invalid_grant" }),
 		})),
 	]);

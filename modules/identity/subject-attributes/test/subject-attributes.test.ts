@@ -2,7 +2,7 @@ import { assemble, defineModule, isUnavailable, kernelConfig, type Module } from
 import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import { loginSource } from "@mod/login-attributes";
 import secretHashModule from "@mod/secret-hash/module";
-import { type AuthContext, type Sessions, sessions } from "@mod/session";
+import { type AuthContext, type Entry, type Sessions, sessions } from "@mod/session";
 import { stubSessions } from "@mod/session/testing";
 import { ledgers, type Users, userAttribute, users } from "@mod/users";
 import usersModule from "@mod/users/module";
@@ -20,14 +20,20 @@ const context = (subject: string, source?: string): AuthContext => ({
 	...(source ? { attributes: { source, values: login } } : {}),
 });
 
-/** Sessions by handle; `asked` lists each handle read. */
-const sessionsOf = (byHandle: Record<string, AuthContext>, asked: string[] = []) =>
+/** A session short of a requirement at use. */
+const short: Entry = { kind: "short", requirement: "mfa", answer: { error: "mfa_required" } };
+
+/** Sessions by handle, entered with their context or as the entry given; `asked` lists each read. */
+const sessionsOf = (byHandle: Record<string, AuthContext | Entry>, asked: string[] = []) =>
 	defineModule({ name: "sessions" }, (m) => [
 		m.provide(sessions).by(() =>
 			stubSessions({
-				openContext: async (handle) => {
-					asked.push(handle);
-					return byHandle[handle];
+				entryOf: async (handle, level) => {
+					asked.push(level === undefined ? handle : `${handle}@${level}`);
+					const found = byHandle[handle];
+					if (found === undefined) return { kind: "absent" };
+					if ("kind" in found) return found;
+					return { kind: "entered", session: { id: handle, context: found }, endsAt: 1 };
 				},
 			}),
 		),
@@ -93,7 +99,7 @@ describe("when users answers for the subject", () => {
 });
 
 describe("when users cannot look the subject up", () => {
-	const unanswerable = (byHandle: Record<string, AuthContext>, asked: string[] = []) =>
+	const unanswerable = (byHandle: Record<string, AuthContext | Entry>, asked: string[] = []) =>
 		boot({
 			users: [usersModule, unanswering],
 			sessions: sessionsOf(byHandle, asked),
@@ -123,13 +129,21 @@ describe("when users cannot look the subject up", () => {
 		}
 	});
 
-	it("is unknown without a handle, for a session not open, another subject's, or one with no attributes", async () => {
+	it("reads the session at use", async () => {
+		const asked: string[] = [];
+		const app = await unanswerable({ u: context("s-alice", "users") }, asked);
+		await app.get(subjectAttributes).of("s-alice", "u");
+		expect(asked).toEqual(["u"]);
+	});
+
+	it("is unknown without a handle, for a session not entered (absent or short of a requirement), another subject's, or one with no attributes", async () => {
 		const app = await unanswerable({
+			short,
 			other: context("s-bob", "users"),
 			bare: context("s-alice"),
 		});
 		const read = app.get(subjectAttributes);
-		for (const handle of [undefined, "closed", "other", "bare"]) {
+		for (const handle of [undefined, "closed", "short", "other", "bare"]) {
 			expect(await read.of("s-alice", handle), String(handle)).toEqual({ kind: "unknown" });
 		}
 	});
@@ -160,7 +174,7 @@ describe("failures", () => {
 			sessions: switchedModule(sessionsOf({}), sessions, down),
 			registered: false,
 		});
-		down.unavailable("openContext");
+		down.unavailable("entryOf");
 		await expect(app.get(subjectAttributes).of("s-alice", "h")).rejects.toSatisfy(isUnavailable);
 	});
 });

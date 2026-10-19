@@ -124,8 +124,11 @@ export function codeGrant(parts: {
 	readonly redemptions: readonly SessionRedemption[];
 }): Grant {
 	const { store, sessions, settle, now, idToken, additions, redemptions } = parts;
+	/** Whether the code's session enters at use: not closed, ended or short of a requirement. */
+	const enters = async (session: string) => (await sessions.entryOf(session)).kind === "entered";
 	return {
 		grantType: codeGrantType,
+		readsAmbient: "none",
 		targets: true,
 		handle: async ({ client, param, admits, issue, binding, target }) => {
 			const code = param("code");
@@ -161,11 +164,16 @@ export function codeGrant(parts: {
 				return refused;
 			}
 			if (!presented(record)) return refused;
-			if (!(await sessions.stillOpen(record.session))) return refused;
+			const entry = await sessions.entryOf(record.session);
+			if (entry.kind !== "entered") return refused;
 			// Asked again on what was used up: a look before use that missed the code asked nothing.
 			const again = target(record.audience, (audience) => record.audience.includes(audience));
 			if (again.kind === "error") return again;
-			const allowed = await issue(accessOf(record, client.id), { session: record.session });
+			// The token ends no later than its session, as a refreshed one ends with its family.
+			const allowed = await issue(accessOf(record, client.id), {
+				session: record.session,
+				notAfter: entry.endsAt,
+			});
 			if (allowed.kind === "refused") return allowed;
 			const issued = allowed.access;
 			// Read once, outside the change: it may run again on a race.
@@ -191,7 +199,7 @@ export function codeGrant(parts: {
 				await voidIfFails(() => redemption.redeemed(record.session, client.id));
 			}
 			// A reuse or a logout that came while the token was being made voids it.
-			if (after.void || !(await sessions.stillOpen(record.session))) {
+			if (after.void || !(await enters(record.session))) {
 				await settle(name);
 				return refused;
 			}
@@ -225,7 +233,7 @@ export function codeGrant(parts: {
 					access_token: issued.token,
 					token_type: issued.tokenType,
 					expires_in: issued.expiresIn,
-					...(record.scope.length > 0 ? { scope: record.scope.join(" ") } : {}),
+					scope: record.scope.join(" "),
 				},
 			};
 		},

@@ -2,13 +2,13 @@ import type { Audit } from "@mod/audit";
 import { clientAllowance } from "@mod/client-allowance";
 import type { Client, Clients } from "@mod/clients";
 import type { Grant, GrantInput, SessionIssuance, TargetRule } from "@mod/grants";
-import { type HttpRequest, type HttpResponse, noStore } from "@mod/http";
-import type { Log } from "@mod/kernel";
+import { type HttpRequest, type HttpResponse, noStore, type Route } from "@mod/http";
 import { determinedSource } from "@mod/request-source";
 import type { Binding, ClientBindings, SenderBindings } from "@mod/sender-binding";
 import type { Tokens } from "@mod/tokens";
+import { answeredBody } from "./answer.ts";
 import { challenged } from "./challenges.ts";
-import { answeringUnavailable, authenticateClient, oauthError } from "./contract.ts";
+import { authenticateClient, oauthError } from "./contract.ts";
 import { issuanceFor, refusedAnswer } from "./issuance.ts";
 
 export const tokenPath = "/oauth/token";
@@ -64,6 +64,7 @@ export function grantInputOf(parts: {
 	};
 }
 
+/** The endpoint's handler and its answer to Unavailable. */
 export function tokenEndpoint(
 	clients: Clients,
 	tokens: Tokens,
@@ -73,8 +74,7 @@ export function tokenEndpoint(
 	grants: ReadonlyMap<string, Grant>,
 	targets: TargetRule,
 	audit: Audit,
-	log: Log,
-) {
+): Pick<Route, "handle" | "unavailable"> {
 	const answer = async (request: HttpRequest): Promise<HttpResponse> => {
 		const authenticated = await authenticateClient(clients, request);
 		if (authenticated.kind === "refused") return authenticated.response;
@@ -201,13 +201,20 @@ export function tokenEndpoint(
 		return {
 			status: 200,
 			headers: noStore,
-			body: { json: outcome.body },
+			body: { json: answeredBody(outcome.body) },
 		};
 	};
-	// Only a grant type it dispatches to is named, so a client's input never reaches the log.
-	return answeringUnavailable(answer, (request, { what }) => {
-		const grantType = request.fields.single("grant_type");
-		const named = grantType !== undefined && grants.has(grantType);
-		log.warn("token-endpoint.unavailable", { what, ...(named ? { grant_type: grantType } : {}) });
-	});
+	return {
+		handle: answer,
+		unavailable: {
+			response: oauthError(503, "temporarily_unavailable"),
+			// Only a grant type it dispatches to is named, so a client's input never reaches the log.
+			noted: (request) => {
+				const grantType = request.fields.single("grant_type");
+				return grantType !== undefined && grants.has(grantType)
+					? { grant_type: grantType }
+					: undefined;
+			},
+		},
+	};
 }

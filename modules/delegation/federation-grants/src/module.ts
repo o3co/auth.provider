@@ -40,25 +40,47 @@ export default defineModule({ name, section }, (m) => [
 			method: "POST" as const,
 			path,
 			uses: [use(requestsPerSource, { name, window: windowOf(c.section) })],
+			crossSite:
+				"A confidential client's own call, authenticated as that client; it reads no cookie.",
 			takes: ["json", "form"] as const,
 			handle: await apiOver(c),
 		})),
 	),
 	...(
 		[
-			["GET", "connect", "connect"],
-			["GET", "consent", "question"],
-			["POST", "consent", "decide"],
-			["GET", "callback/*", "callback"],
+			[
+				"GET",
+				"connect",
+				"connect",
+				{
+					changesState: true,
+					crossSite:
+						"A navigation the client sends the user on, carrying a request only that client could make.",
+				},
+			],
+			["GET", "consent", "question", { changesState: false }],
+			["POST", "consent", "decide", {}],
+			[
+				"GET",
+				"callback/*",
+				"callback",
+				{
+					changesState: true,
+					crossSite:
+						"The upstream's redirect back, matched to the state of a connection this browser started.",
+				},
+			],
 		] as const
-	).map(([method, path, step]) =>
+	).map(([method, path, step, declared]) =>
 		m.contribute(routes).by(async (c) => {
 			const window = windowOf(c.section);
 			const limited = use(requestsPerSource, { name: `${name}.browser`, window });
 			return {
 				method,
 				path: `${browserBase}/${path}`,
-				uses: method === "POST" ? [limited, use(csrfChecked)] : [limited],
+				// Another site's post is refused before it is counted, so it spends no source's count.
+				uses: method === "POST" ? [use(csrfChecked), limited] : [limited],
+				...declared,
 				handle: (await c.get(browser))[step],
 			};
 		}),

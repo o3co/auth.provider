@@ -70,14 +70,11 @@ export function calls(parts: CallParts): Calls {
 		warn("users-http.ledger_failed", why);
 		return new Unavailable("users-http");
 	};
-	const headers = deepFreeze({
-		accept: "application/json",
-		"content-type": "application/json",
-		...(credential === undefined ? {} : { authorization: `Bearer ${credential}` }),
-	});
+	const headers = deepFreeze({ accept: "application/json", "content-type": "application/json" });
+	const sent = credential === undefined ? {} : { credential: `Bearer ${credential}` };
 	const post = (url: string, body: unknown) =>
 		out
-			.fetch(url, { method: "POST", headers, body: JSON.stringify(body) }, narrowerOf(url))
+			.fetch(url, { method: "POST", headers, body: JSON.stringify(body), ...sent }, narrowerOf(url))
 			.catch((error: unknown) => {
 				throw failed({ reason: kindOf(error) });
 			});
@@ -93,7 +90,9 @@ export function calls(parts: CallParts): Calls {
 		async verify(url, identifier, password) {
 			// The identifier under the name the ledger's password call reads.
 			const answer = await post(url, { email: identifier, password });
-			if (answer.status === 401 || answer.status === 403) {
+			// A 401 alone refuses the user: a 403 may come from a proxy before the ledger while it fails, and
+			// read as a wrong password it would hold the account's logins back.
+			if (answer.status === 401) {
 				// A challenge refuses the credential; with none sent, it can only refuse the user.
 				const challenged = challengesBearer(answer.headers.get("www-authenticate"));
 				if (credential === undefined || !challenged) return none;

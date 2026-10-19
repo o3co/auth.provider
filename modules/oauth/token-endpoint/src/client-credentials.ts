@@ -5,6 +5,7 @@ import { clientCredentialsGrantType } from "./contract.ts";
 export function clientCredentials(issuer: string): Grant {
 	return {
 		grantType: clientCredentialsGrantType,
+		readsAmbient: "none",
 		targets: true,
 		handle: async ({ client, param, issue, target }) => {
 			if (client.kind !== "confidential") return { kind: "error", error: "unauthorized_client" };
@@ -26,7 +27,7 @@ export function clientCredentials(issuer: string): Grant {
 					access_token: token,
 					token_type: tokenType,
 					expires_in: expiresIn,
-					...(scope.length > 0 ? { scope: scope.join(" ") } : {}),
+					scope: scope.join(" "),
 				},
 			};
 		},

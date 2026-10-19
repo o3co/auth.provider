@@ -19,6 +19,7 @@
 		"@mod/audit": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/login-gates": "workspace:*",
+		"@mod/mfa-entry": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",

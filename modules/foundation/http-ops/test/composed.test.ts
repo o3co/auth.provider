@@ -21,9 +21,12 @@ afterEach(async () => {
 
 /** A route that takes anything under its path, as a route naming a user or a client may. */
 const items = defineModule({ name: "items" }, (m) => [
-	m
-		.contribute(routes)
-		.by(() => ({ method: "GET", path: "/items/*", handle: () => ({ status: 204 }) })),
+	m.contribute(routes).by(() => ({
+		method: "GET",
+		path: "/items/*",
+		changesState: false,
+		handle: () => ({ status: 204 }),
+	})),
 ]);
 
 /** http, metrics and http-ops served together, as a composition has them. */

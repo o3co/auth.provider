@@ -19,7 +19,10 @@ const manifest = (name: string, more: object = {}) =>
 /** Two shipped bundles and an unshipped one, written as a workspace places them. */
 beforeAll(() => {
 	root = mkdtempSync(join(tmpdir(), "distribution-"));
-	write("modules/base/package.json", JSON.stringify({ private: false }));
+	write(
+		"modules/base/package.json",
+		JSON.stringify({ private: false, description: "The base.", keywords: ["kernel"] }),
+	);
 	write(
 		"modules/base/kernel/package.json",
 		manifest("@mod/kernel", {
@@ -40,8 +43,16 @@ beforeAll(() => {
 		"modules/feature/package.json",
 		JSON.stringify({
 			private: false,
+			description: "The feature.",
 			index: "index.json",
-			entrances: { "@o3co/create-feature": { bin: "create-feature", runs: "@mod/app" } },
+			entrances: {
+				"@o3co/create-feature": {
+					description: "Make a feature app.",
+					keywords: ["create-app"],
+					bin: "create-feature",
+					runs: "@mod/app",
+				},
+			},
 		}),
 	);
 	write(
@@ -142,6 +153,8 @@ it("builds an entrance a bundle declares: a package of its own name whose comman
 	expect(entrance).toEqual({
 		name: "@o3co/create-feature",
 		version: "0.18.0",
+		description: "Make a feature app.",
+		keywords: ["create-app"],
 		type: "module",
 		bin: { "create-feature": "./main.js" },
 		dependencies: { "@o3co/auth-provider-feature": "0.18.0" },
@@ -157,6 +170,56 @@ it("gives an entrance the workspace's license and engines, as a bundle has them"
 	buildBundles({ bundles: bundles(), release, out });
 	const entrance = JSON.parse(readFileSync(join(out, "create-feature/package.json"), "utf8"));
 	expect(entrance).toMatchObject({ license: "Apache-2.0", engines: { node: ">=24" } });
+});
+
+it("gives each bundle and entrance its own description, and the workspace's keywords then its own", () => {
+	const out = join(root, "dist-about");
+	const release = { version: "0.18.0", keywords: ["oauth2", "kernel"] };
+	buildBundles({ bundles: bundles(), release, out });
+	const read = (dir: string) => JSON.parse(readFileSync(join(out, dir, "package.json"), "utf8"));
+	expect(read("base")).toMatchObject({ description: "The base.", keywords: ["oauth2", "kernel"] });
+	expect(read("feature")).toMatchObject({
+		description: "The feature.",
+		keywords: ["oauth2", "kernel"],
+	});
+	expect(read("create-feature")).toMatchObject({
+		description: "Make a feature app.",
+		keywords: ["oauth2", "kernel", "create-app"],
+	});
+});
+
+it("refuses a shipped bundle, or an entrance, that states no description", () => {
+	const declared = join(root, "modules/feature/package.json");
+	const before = readFileSync(declared, "utf8");
+	const { description: _, ...rest } = JSON.parse(before);
+	const entrance = rest.entrances["@o3co/create-feature"];
+	writeFileSync(declared, JSON.stringify(rest));
+	try {
+		const { built, problems } = buildBundles({
+			bundles: bundles(),
+			release: { version: "0.18.0" },
+			out: join(root, "dist-undescribed"),
+		});
+		expect(problems).toEqual(["@o3co/auth-provider-feature: states no description"]);
+		expect(built).toEqual(["@o3co/auth-provider-base"]);
+		const { description: __, ...bare } = entrance;
+		writeFileSync(
+			declared,
+			JSON.stringify({
+				...rest,
+				description: "The feature.",
+				entrances: { "@o3co/create-feature": bare },
+			}),
+		);
+		const again = buildBundles({
+			bundles: bundles(),
+			release: { version: "0.18.0" },
+			out: join(root, "dist-undescribed-entrance"),
+		});
+		expect(again.problems).toEqual(["@o3co/create-feature: states no description"]);
+	} finally {
+		writeFileSync(declared, before);
+	}
 });
 
 it("puts the workspace's license file in each bundle and entrance, so any packer ships it", () => {

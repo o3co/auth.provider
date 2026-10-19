@@ -78,7 +78,7 @@ describe.runIf(areaTarget().can(httpLedger))(
 				}
 				const { email, password } = JSON.parse(asked.body);
 				if (email !== right.username) return { status: 401 };
-				return password === right.password ? { json: alice } : { status: 403 };
+				return password === right.password ? { json: alice } : { status: 401 };
 			});
 			running = await areaTarget().start(
 				codeScene({

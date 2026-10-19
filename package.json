@@ -1,8 +1,18 @@
 {
 	"name": "auth-provider-workspace",
-	"version": "0.18.0-rc.1",
+	"version": "0.18.0-rc.2",
 	"private": true,
 	"license": "Apache-2.0",
+	"keywords": [
+		"oauth2",
+		"openid-connect",
+		"oidc",
+		"authorization-server",
+		"identity-provider",
+		"self-hosted",
+		"nodejs",
+		"typescript"
+	],
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/o3co/auth.provider"

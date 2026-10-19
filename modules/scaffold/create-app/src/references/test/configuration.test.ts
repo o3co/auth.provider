@@ -46,6 +46,15 @@ it("describes each key by its schema: type and bounds, default, whether required
 	).toContain("| `s.mode` | a \\| b | `a` |  |  |  |  |");
 });
 
+it("writes an example of several lines on one line of its table, as JSON writes it", () => {
+	const at = () => ({ example: "-----BEGIN KEY-----\nREPLACE-KEY\n-----END KEY-----" });
+	const rows = rowsOf({ type: "object", properties: { pem: { type: "string" } } }, ["s"], at);
+	const line = referenceOf([{ section: "s", owner: "@mod/s", rows }])
+		.split("\n")
+		.find((l) => l.startsWith("| `s.pem`"));
+	expect(line).toContain('`"-----BEGIN KEY-----\\nREPLACE-KEY\\n-----END KEY-----"`');
+});
+
 it("requires a key inside an object only when the object is required too", () => {
 	const key = { type: "object", required: ["id"], properties: { id: { type: "string" } } };
 	const schema = { type: "object", required: ["current"], properties: { current: key, next: key } };
@@ -121,43 +130,16 @@ it("describes every key of every section", async () => {
 	expect(lacking).toEqual([]);
 });
 
-/** Client metadata sections whose keys their owners describe later: one leaves once described, and the list only shrinks. */
-const clientsDescribedLater = [
-	"authorize",
-	"client-allowance",
-	"client-assertion",
-	"client-secret",
-	"consent",
-	"federation-grants",
-	"federation-tokens",
-	"rp-logout",
-	"sender-binding",
-	"token-exchange",
-];
-
-it("describes every key of every client metadata section, outside those listed as described later", async () => {
-	const clients = await clientSectionsOf(root);
-	const lacking = clients
-		.filter((s) => !clientsDescribedLater.includes(s.section))
-		.flatMap(({ rows }) => rows.filter((r) => !r.description).map((r) => r.key));
+it("describes every key of every client metadata section", async () => {
+	const lacking = (await clientSectionsOf(root)).flatMap(({ rows }) =>
+		rows.filter((r) => !r.description).map((r) => r.key),
+	);
 	expect(lacking).toEqual([]);
-	const described = clients
-		.filter((s) => clientsDescribedLater.includes(s.section) && s.rows.every((r) => r.description))
-		.map((s) => `${s.section}: describes every key, so it leaves the list`);
-	expect(described).toEqual([]);
 });
 
-/** IdP types whose settings their owners describe later: one leaves once described, and the list only shrinks. */
-const typesDescribedLater = ["apple", "github", "google", "oidc"];
-
-it("describes every key of every IdP type's settings, outside the types listed as described later", async () => {
-	const types = await idpTypesOf(root);
-	const lacking = types
-		.filter((t) => !typesDescribedLater.includes(t.section))
-		.flatMap(({ rows }) => rows.filter((r) => !r.description).map((r) => r.key));
+it("describes every key of every IdP type's settings", async () => {
+	const lacking = (await idpTypesOf(root)).flatMap(({ rows }) =>
+		rows.filter((r) => !r.description).map((r) => r.key),
+	);
 	expect(lacking).toEqual([]);
-	const described = types
-		.filter((t) => typesDescribedLater.includes(t.section) && t.rows.every((r) => r.description))
-		.map((t) => `${t.section}: describes every key, so it leaves the list`);
-	expect(described).toEqual([]);
 });

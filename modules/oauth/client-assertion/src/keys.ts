@@ -1,7 +1,7 @@
 import type { Section } from "@mod/clients";
 import type { KeySource } from "@mod/external-jwt";
 import { publicJwk, verifiesUnder } from "@mod/keys";
-import type { OutboundPolicy } from "@mod/outbound";
+import type { OutboundRefusals } from "@mod/outbound";
 import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
 
@@ -26,8 +26,15 @@ export const clientKeys: Section<ClientKeys> = {
 						.record(z.string(), z.unknown())
 						.refine(verifiesSignatures, "a public RSA, EC or OKP key for verifying signatures"),
 				)
-				.prefault([]),
-			"jwks-uri": urlSetting({ schemes: ["https", "http"] }).optional(),
+				.prefault([])
+				.describe(
+					"The client's public keys for its assertions, as JWKs: RSA, EC or OKP, with no private member; never beside `jwks-uri`.",
+				),
+			"jwks-uri": urlSetting({ schemes: ["https", "http"] })
+				.optional()
+				.describe(
+					"Where the client publishes its key set, an https URL (http only where `outbound` allows plain http); never beside written `keys`. A registered client's one that `outbound` refuses refuses boot.",
+				),
 		})
 		.refine((s) => s.keys.length === 0 || s["jwks-uri"] === undefined, {
 			message: "keys written in, or a jwks-uri, not both",
@@ -44,14 +51,14 @@ export function keysOf(section: ClientKeys): KeySource {
 }
 
 /** The section with a check at boot that `outbound`'s policy lets a registered client's jwks-uri through. */
-export function clientKeysUnder(policy: OutboundPolicy): Section<ClientKeys> {
+export function clientKeysUnder(refusals: OutboundRefusals): Section<ClientKeys> {
 	return {
 		...clientKeys,
 		checkAtBoot: (section) => {
 			const source = keysOf(section);
 			if (!("jwks" in source)) return undefined;
-			const refused = policy.refusalOf(source.jwks.url, { hosts: source.jwks.hosts });
-			return refused && `outbound refuses the jwks-uri (${refused})`;
+			const refused = refusals.explained(source.jwks.url, { hosts: source.jwks.hosts });
+			return refused && `outbound's destination policy refuses the jwks-uri: ${refused}`;
 		},
 	};
 }

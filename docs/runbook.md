@@ -1,6 +1,6 @@
 # Operations runbook
 
-How to run auth-provider 0.18: Redis, rotating keys, and upgrading. The settings named here are listed in the [configuration reference](configuration.md).
+How to run auth-provider 0.18: Redis, rotating keys, upgrading, and what to watch. The settings named here are listed in the [configuration reference](configuration.md).
 
 ## Contents
 
@@ -10,6 +10,8 @@ How to run auth-provider 0.18: Redis, rotating keys, and upgrading. The settings
 - [Rotating the sealing key](#rotating-the-sealing-key)
 - [Upgrading](#upgrading)
 - [Revoking a user from the ledger](#revoking-a-user-from-the-ledger)
+- [Keeping the second-factor witness at the ledger](#keeping-the-second-factor-witness-at-the-ledger)
+- [Probes and alerts](#probes-and-alerts)
 - [Stopping](#stopping)
 
 ## Before you deploy
@@ -108,7 +110,7 @@ Only a value a `previous` key sealed is sealed again; one `next` sealed is newer
 
 - Stored records keep their names within a version. A new version that changes a record's shape reads the old one for the record's lifetime.
 - Changing `redis.prefix` starts from empty state: every key, sessions, refresh tokens, the denylist, lockouts and MFA factors included, lives under the prefix.
-- `create-app` never writes into a non-empty directory. To add a feature to an existing app, generate again (`create-app <target> --add <feature>`) and carry your configuration over.
+- `create-auth-provider` never writes into a non-empty directory. To add a feature to an existing app, generate again (`create-auth-provider <target> --add <feature>`) and carry your configuration over.
 - A boot that refuses exits with status 78 and prints each refusal on stderr, by setting path and never by value. Fix every refusal it lists; they are reported together.
 
 ## Revoking a user from the ledger
@@ -137,7 +139,53 @@ When the outside user ledger suspends a user, its answers stop new logins and gr
 
 - Stopped: the subject's open sessions (and with them the session's refresh tokens, its access tokens, and the local copy of its upstream tokens; relying parties are sent logout notices), and from then on every refresh, device poll, JWT bearer grant, exchange, passkey login and second-factor step; access tokens too where `subject-tokens` is composed. With `delegations: "end"`, federation grants end.
 - Left until they expire: access tokens not bound to a session where `tokens.subject-check = none`, JWTs a resource server checks itself, and tokens already handed to an upstream. A request already past its checks when the revocation is recorded may finish.
-- Every subject revoked keeps its record with no end, so the records grow with the subjects you revoke.
+- Every subject revoked keeps its record with no end, so the records grow with the subjects you revoke. With `mfa-revocation`, each revocation also writes the subject's factor list in `mfa`'s store, empty for a subject who never enrolled, so that store grows with them too.
+- With second factors composed, `mfa-revocation` makes a revocation complete only once no enrollment begun before it can bind; an app composed by hand must compose it, as `combinations` does.
+- Likewise `mfa-entry` holds sessions to second factors; `mfa` refuses to boot without it, whatever the mode, so an app composed by hand must compose it.
+
+## Keeping the second-factor witness at the ledger
+
+Compose `mfa-witness-http` to have the outside user ledger remember which subjects hold a second factor, apart from the provider's own records: losing those records then never reads as a subject that never enrolled one. The provider asks the ledger whenever a subject holding no counting factor logs in, starts a first enrollment or changes their credentials, so the ledger's answers gate those steps for those subjects.
+
+**Setting it up.**
+
+- Serve `read-url`, `enroll-url` and `clear-url` on one origin, over https (or a plain-http `host:port` at loopback named in `outbound.plain-loopback`). Boot is refused on URLs at two origins. Allow the host in `outbound.allow`, and in `outbound.internal-hosts` when it has a private address.
+- Make the credential random, at least 32 bytes (for example `openssl rand -base64 32`), and set it as `mfa-witness-http.credential`. The provider sends it as `Authorization: Bearer` on every call.
+
+**What the ledger must do.** The provider cannot check any of this; it is yours to keep.
+
+- `POST read-url` with `{"subject"}`: answer `200 {"enrolled": true|false}`, whether the subject carries the mark.
+- `POST enroll-url` with `{"subject", "token", "deadline"}`: set the subject's mark to `token` unless one is set, as one atomic step, and answer `200 {"owner": true|false}`, whether the mark is that token's. The same token sent again answers alike.
+- `POST clear-url` with `{"subject", "deadline"}`: remove the mark and answer `204`. The provider asks it only when an operator resets a subject's second factors.
+- Per subject, the three calls take effect one at a time, in the order they are answered. An answered write survives a crash or a failover, and no read answers older than the last answered write: no lagging replica or cache answers a read.
+- Never carry out an enroll or a clear received after its `deadline` (epoch milliseconds on the provider's clock): the provider stopped waiting for it then. Keep the ledger's clock synchronized with the provider's hosts.
+- Any other answer, `404` included, makes the call unavailable (`503`), never "not enrolled".
+
+**The deadline.** It is the time a write is sent plus `mfa-witness-http.timeout` (default `5s`, as `outbound.timeout`'s). Keep `outbound.timeout` no shorter: the provider gives up at the shorter of the two, and a deadline past that leaves the ledger time to carry out a write the provider no longer waits for.
+
+**Composing it where subjects already hold a factor.** The provider marks a subject only when it binds that subject's first counting factor with the witness composed. A subject who enrolled before carries no mark, and the provider never adds one later: if its factor records are then lost, the subject reads as one who never enrolled, and under `mfa.mode = optional` logs in without a second factor. Before composing the witness, mark at the ledger every subject that already holds a counting factor (any token will do; the provider only reads whether a mark is there), and keep marking newly enrolled subjects that way until the witness is composed on every instance.
+
+**A mark left with no factor.** A binding stopped by a reset or a revocation after it marked the subject leaves the mark with no factor: that subject is refused as inconsistent until an operator resets its second factors, which clears the mark.
+
+**While the ledger cannot answer.** Subjects holding no counting factor get `503` at login, when they start their first enrollment and when they change their credentials, until it answers; subjects holding one are let through without asking it.
+
+## Probes and alerts
+
+### Probes
+
+- **Liveness**: `GET /_healthcheck` answers `200` while the process serves requests, and checks no dependency. Restart an instance on it alone; the generated image checks it.
+- **Readiness**: `GET /readyz` answers `200` when every probe the composed modules contribute (Redis's, for one) passed within `http-ops.readiness-deadline`, and `503` otherwise, never naming what failed. Take an instance out of the load balancer on `503`, and do not restart it for that: it is ready again once the dependency is.
+
+### What to alert on
+
+`metrics-prometheus` publishes the counts at `metrics-prometheus.path` (default `/metrics`); limit who may scrape it at the proxy.
+
+- **`auth_dependency_up` is 0** for a probe: that dependency is down, and `/readyz` answers `503`. The probe's name says which.
+- **`auth_rate_limit_uncounted_total` rises**, by `limit` (`requests` or `attempts`): a rate limit could not count, usually because the store is down. Attempt limits then refuse with `503`; request limits refuse too, or let requests through uncounted where `rate-limit.fail-mode = open`.
+- **`auth_audit_events_lost_total` rises**, by `receiver`: a receiver is not taking events, so the audit trail has a gap. The warning `audit receiver losing events` says why.
+- **`http_request_duration_seconds`**: the rate of `5xx` answers and the latency, by method and route. A `499` is a client that closed before the answer.
+- **The process**: the Node defaults, prefixed `auth_provider_` (event loop lag, memory, handles).
+- **Warnings in the log**: a failed periodic run, probe or stop hook is one warn line naming it.
 
 ## Stopping
 

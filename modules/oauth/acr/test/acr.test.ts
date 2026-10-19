@@ -104,18 +104,25 @@ it("lists the operator's acr in written order, then the offered ones, and nothin
 	expect(await (await serve({}, [])).listed()).toBeUndefined();
 });
 
-it("refuses to start with an acr no declared way of logging in can meet", async () => {
-	const reasons = (run: Promise<unknown>) =>
+it("refuses to start with an acr no declared way of logging in can meet: a configured one at its key, an offered one by its name", async () => {
+	const refusals = (run: Promise<unknown>) =>
 		run.then(
-			() => "",
-			(error) => (error instanceof BootRefused ? error.refusals.map((r) => r.reason).join() : ""),
+			() => [],
+			(error) => (error instanceof BootRefused ? error.refusals : []),
 		);
-	expect(await reasons(serve({ "urn:t:hard": [["hwk"]] }, [proving(["pwd"])]))).toMatch(
-		/urn:t:hard/,
-	);
+	expect(await refusals(serve({ "urn:t:hard": [["hwk"]] }, [proving(["pwd"])]))).toEqual([
+		{ where: "acr.values.urn:t:hard", reason: "no declared way of logging in can meet it" },
+	]);
+	// A module's own acr is no configured value: it is told by its name.
 	expect(
-		await reasons(serve({}, [proving(["pwd"]), offering("urn:t:offered", [["hwk"]])])),
-	).toMatch(/urn:t:offered/);
+		await refusals(serve({}, [proving(["pwd"]), offering("urn:t:offered", [["hwk"]])])),
+	).toEqual([
+		{
+			where: "acr",
+			reason:
+				"an acr a module offers has no declared way of logging in that can meet it: urn:t:offered",
+		},
+	]);
 });
 
 it("refuses to start with an offered entry whose sets are not each a non-empty set, in a non-empty list", async () => {

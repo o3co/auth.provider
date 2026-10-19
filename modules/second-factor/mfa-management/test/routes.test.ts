@@ -1,5 +1,14 @@
+import { factors } from "@mod/mfa";
+import { revocations } from "@mod/subject-revocation";
 import { describe, expect, it } from "vitest";
-import { beforeNextChange, clock, factorsDown, serve } from "./harness.ts";
+import {
+	afterNextChange,
+	beforeNextChange,
+	clock,
+	factorsDown,
+	onNextRead,
+	serve,
+} from "./harness.ts";
 
 const posts = [
 	"/session/mfa/factors/rename",
@@ -140,6 +149,74 @@ describe("a session's own factors", () => {
 			"step_up_required",
 			undefined,
 		]);
+	});
+});
+
+describe("a revocation while factors are managed", () => {
+	const revokedMeanwhile = async (subject: string, path: string, body = {}) => {
+		const s = await serve();
+		const id = await s.bindCode(subject);
+		await s.signIn(subject, { proved: true });
+		clock.shift += 1000;
+		// The revocation completes between the change's checks and its write.
+		beforeNextChange.run = async () => {
+			await s.app.get(revocations).record(subject);
+			clock.shift += 1000;
+		};
+		const answer = await s.call("POST", `/session/mfa/${path}`, { factor_id: id, ...body });
+		return { answer, held: await s.app.get(factors).held(subject) };
+	};
+
+	it("reissues no codes once the subject was revoked while they were written", async () => {
+		const { answer } = await revokedMeanwhile("kit", "recovery-codes");
+		expect([answer.status, answer.body.error, answer.body.recovery_codes]).toEqual([
+			401,
+			"login_required",
+			undefined,
+		]);
+	});
+
+	it("hands no codes once a revocation completed after they were written, before the store answered", async () => {
+		const s = await serve();
+		await s.bindCode("mo");
+		await s.signIn("mo", { proved: true });
+		clock.shift += 1000;
+		afterNextChange.run = async () => {
+			await s.app.get(revocations).record("mo");
+			clock.shift += 1000;
+		};
+		const slow = await s.call("POST", "/session/mfa/recovery-codes");
+		expect([slow.status, slow.body.error, slow.body.recovery_codes]).toEqual([
+			401,
+			"login_required",
+			undefined,
+		]);
+	});
+
+	it("hands no codes once a revocation completed while the last entry waited on its requirement", async () => {
+		const s = await serve();
+		await s.bindCode("nia");
+		await s.signIn("nia", { proved: true });
+		clock.shift += 1000;
+		// Once the codes are written, the next read is the requirement's, in the last entry before they go out.
+		afterNextChange.run = async () => {
+			onNextRead.run = async () => {
+				await s.app.get(revocations).record("nia");
+				clock.shift += 1000;
+			};
+		};
+		const answer = await s.call("POST", "/session/mfa/recovery-codes");
+		expect([answer.status, answer.body.error, answer.body.recovery_codes]).toEqual([
+			401,
+			"login_required",
+			undefined,
+		]);
+	});
+
+	it("removes no factor once the subject was revoked while it was removed", async () => {
+		const { answer, held } = await revokedMeanwhile("lou", "factors/remove");
+		expect([answer.status, answer.body.error]).toEqual([401, "login_required"]);
+		expect(held.map((f) => f.kind).sort()).toEqual(["backup", "code"]);
 	});
 });
 

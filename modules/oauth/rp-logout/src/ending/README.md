@@ -13,6 +13,7 @@ Internal module of `rp-logout`: the logout a client starts (OpenID Connect RP-In
 
 ## Invariants
 - The session's clients and the upstream's end of session are read before the close, which forgets the upstream tokens.
+- Nothing reads the session itself before its close: a read can end one past its lifetime without its participants. Whether it is the logout comes from what the close found.
 
 ## Depends on
 - `audit`, `clients`, `http`, `issuer`, `oidc` (hints), `request-source` (the source), `session` (close); the package's contract, store interfaces, `page` and `registration`

@@ -10,7 +10,7 @@ Internal module of `federation-tokens`: keeping each session's upstream tokens a
 - Accepting the caller and what the routes answer (the package). Sealing and the record's shape (`vault`). The refresh request itself (the IdP type, through `federation`).
 
 ## Offers
-- `renewalWith` (store, locks, `upstreams`, `session`'s ends, vault, `kernel`'s runtime, settings): `current` (session, IdP → handed / an outcome the routes answer), `receive`, `disconnect` (→ the id_token, or not linked), `withdraw`, `close`
+- `renewalWith` (store, locks, `upstreams`, `session`'s entries by handle, vault, `kernel`'s runtime, settings): `current` (session, IdP → handed / an outcome the routes answer), `receive`, `disconnect` (→ the id_token, or not linked), `withdraw`, `close`
 
 ## Invariants
 - When a token ends is judged here only, on `kernel`'s clock, capped at the longest lifetime. At login, an end not a positive number is due now, and none stays none unless a refresh token can renew it. At a refresh, none is the cap and one not a positive number refuses the answer.
@@ -22,8 +22,8 @@ Internal module of `federation-tokens`: keeping each session's upstream tokens a
 - An entry that does not open is removed.
 - A refresh asks for the granted scope.
 - A refresh answer narrower than the grant is kept; one with no scope means the grant; a wider or unreadable one changes nothing.
-- A record is written for what is left of its session, and not at all once the session lets nobody in.
-- A login's tokens are checked against their session once written; when it closed meanwhile, they are withdrawn.
+- A record is written for what is left of its session, and not at all once the session lets nobody in at `use`: closed, ended, revoked, or short of a requirement.
+- A login's tokens are checked against their session once written; when it closed or fell short of a requirement meanwhile, they are withdrawn.
 
 ## Depends on
 - `federation`, `kernel`, `session`; the package's store interface and `vault`

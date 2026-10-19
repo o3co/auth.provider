@@ -40,7 +40,7 @@ export function sessionGrant(parts: Parts): Grant {
 	const keep = async (session: string, issued: IssuedAccess) => {
 		let open: boolean;
 		try {
-			open = await parts.sessions.stillOpen(session);
+			open = (await parts.sessions.entryOf(session)).kind === "entered";
 		} catch (error) {
 			// The session's failure is what the caller is told, whatever the revocation does.
 			try {
@@ -55,6 +55,7 @@ export function sessionGrant(parts: Parts): Grant {
 
 	return {
 		grantType: "session",
+		readsAmbient: "cookie",
 		handle: async ({ request, client, param, issue }) => {
 			// The cookie rides on requests from other sites too, so it alone proves nothing.
 			if (!parts.evidence.sameOrigin(request)) return unauthorized;
@@ -87,7 +88,7 @@ export function sessionGrant(parts: Parts): Grant {
 					access_token: issued.token,
 					token_type: issued.tokenType,
 					expires_in: issued.expiresIn,
-					...(scope.length > 0 ? { scope: scope.join(" ") } : {}),
+					scope: scope.join(" "),
 				},
 			};
 		},

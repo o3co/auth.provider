@@ -1,6 +1,6 @@
 import { deepFreeze, defineModule, setting } from "@mod/kernel";
 import { bearerToken } from "@mod/keys";
-import { outbound, outboundPolicy } from "@mod/outbound";
+import { credentialPolicy, outbound, outboundRefusals } from "@mod/outbound";
 import { urlSetting } from "@mod/url-setting";
 import { type Ledger, ledgers } from "@mod/users";
 import { z } from "zod";
@@ -41,18 +41,16 @@ const section = z
 		if (urls.length === 0) {
 			ctx.addIssue({ code: "custom", message: `needs one of ${urlKeys.join(", ")}` });
 		}
-		// The credential goes to one party alone.
-		if (s.credential !== undefined && new Set(urls.map((url) => new URL(url).origin)).size > 1) {
-			ctx.addIssue({
-				code: "custom",
-				path: ["credential"],
-				message: "is sent to one origin alone, but the URLs name more than one",
-			});
-		}
 	});
 
 const unanswerable = deepFreeze({ kind: "unanswerable" } as const);
 const none = deepFreeze({ kind: "none" } as const);
+
+/** outbound's reasons a credential may not go, in this section's words. */
+const credentialRefusals = {
+	origins: "is sent to one origin alone, but the URLs name more than one",
+	scheme: "goes over https alone, or to a named plain-loopback pair",
+} as const;
 
 export default defineModule({ name: "users-http", section, replicaSafe: true }, (m) => [
 	m.contribute(ledgers).by(async (c): Promise<Ledger> => {
@@ -64,17 +62,25 @@ export default defineModule({ name: "users-http", section, replicaSafe: true }, 
 			...(maxBytes === undefined ? {} : { maxBytes }),
 			...(timeoutMs === undefined ? {} : { timeoutMs }),
 		});
-		const policy = await c.get(outboundPolicy);
+		const urls = urlKeys.flatMap((key) => c.section[key] ?? []);
+		const refused =
+			c.section.credential === undefined
+				? undefined
+				: (await c.get(credentialPolicy)).refusalOf(urls);
+		// More than one origin first, as the section reads; a URL's own refusal is more precise than its scheme.
+		if (refused === "origins") return c.refuse("users-http.credential", credentialRefusals.origins);
+		const refusals = await c.get(outboundRefusals);
 		for (const key of urlKeys) {
 			const url = c.section[key];
-			const refusal = url === undefined ? undefined : policy.refusalOf(url, narrowerOf(url));
-			if (refusal !== undefined) {
+			const explained = url === undefined ? undefined : refusals.explained(url, narrowerOf(url));
+			if (explained !== undefined) {
 				return c.refuse(
 					`users-http.${key}`,
-					`outbound's destination policy refuses it: ${refusal}`,
+					`outbound's destination policy refuses it: ${explained}`,
 				);
 			}
 		}
+		if (refused === "scheme") return c.refuse("users-http.credential", credentialRefusals.scheme);
 		const ask = calls({
 			out: await c.get(outbound),
 			credential: c.section.credential,

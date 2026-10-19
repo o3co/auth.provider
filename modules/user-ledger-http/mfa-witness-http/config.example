@@ -1,0 +1,6 @@
+mfa-witness-http {
+	read-url = "https://ledger.example.invalid/mfa-witness/read"
+	enroll-url = "https://ledger.example.invalid/mfa-witness/enroll"
+	clear-url = "https://ledger.example.invalid/mfa-witness/clear"
+	credential = "REPLACE-RANDOM-BEARER-TOKEN-32-BYTES"
+}

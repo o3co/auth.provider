@@ -1,8 +1,15 @@
 import { auditStandIn } from "@mod/audit/testing";
-import { listening, routes, use } from "@mod/http";
+import { listening, type PolicyUse, routes, use } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
-import { type Assembly, assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
+import {
+	type Assembly,
+	assemble,
+	BootRefused,
+	defineModule,
+	kernelConfig,
+	type Module,
+} from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { simulatedStore } from "@mod/store/testing";
 import { expect, it } from "vitest";
@@ -115,12 +122,14 @@ it("offers both per-source policies, answering as the real ones do, with no stor
 		m.contribute(routes).by(() => ({
 			method: "GET",
 			path: "/requests",
+			changesState: false,
 			uses: [use(requestsPerSource, { name: "test", window })],
 			handle: () => ({ status: 204 }),
 		})),
 		m.contribute(routes).by(() => ({
 			method: "GET",
 			path: "/attempts",
+			changesState: false,
 			uses: [use(attemptsPerSource, { name: "test", window })],
 			handle: () => ({ status: 204 }),
 		})),
@@ -151,5 +160,42 @@ it("offers both per-source policies, answering as the real ones do, with no stor
 		expect(await from("/requests")).toEqual([503, null, { error: "service_unavailable" }]);
 	} finally {
 		await app.stop(1000);
+	}
+});
+
+it("marks both per-source policies for every method, as the real module does", async () => {
+	const window = { limit: 1, ms: 60_000 };
+	const declared = (uses: readonly PolicyUse[]) =>
+		defineModule({ name: "declared" }, (m) =>
+			(["GET", "POST", "PUT", "DELETE"] as const).map((method) =>
+				m.contribute(routes).by(() => ({
+					method,
+					path: "/declared",
+					changesState: true,
+					uses,
+					crossSite: "a test route",
+					handle: () => ({ status: 204 }),
+				})),
+			),
+		);
+	const compositions: Module[][] = [
+		[rateLimitModule, simulatedStore().module, auditStandIn().module],
+		[rateLimitStandIn],
+	];
+	for (const modules of compositions) {
+		for (const policy of [requestsPerSource, attemptsPerSource]) {
+			const app = await assemble({
+				modules: [http, ...modules, declared([use(policy, { name: "test", window })])],
+				config: { ...kernelConfig(), ...httpConfig() },
+				runtime,
+			});
+			expect(app.get(listening), policy.label).toBeDefined();
+		}
+		const unlimited = assemble({
+			modules: [http, ...modules, declared([])],
+			config: { ...kernelConfig(), ...httpConfig() },
+			runtime,
+		});
+		await expect(unlimited).rejects.toThrow(BootRefused);
 	}
 });

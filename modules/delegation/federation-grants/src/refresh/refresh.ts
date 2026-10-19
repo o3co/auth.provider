@@ -258,9 +258,10 @@ export function refreshWith(parts: Parts) {
 			if (!(await locked(grant.id, mark)))
 				return heldOr(grant.id, held, asked, { kind: "lock_timeout" });
 			try {
-				// Read again under the lock: another request may have refreshed, ended or revoked it.
+				// Read again under the lock: another request may have refreshed, ended or revoked it, or the
+				// subject's revocation or the grant's end may have come while it waited.
 				const now = records.grantOf(await grants.read(grant.id));
-				if (!now || !inUse(now)) return { kind: "gone" };
+				if (!now || !(await serves(now))) return { kind: "gone" };
 				const again = records.open(now);
 				if (!again) return { kind: "reauthorize", reason: "credentials_unreadable" };
 				if (!due(again, asked))

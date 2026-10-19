@@ -36,12 +36,12 @@ export default defineModule({ name: "token-control", section }, (m) => [
 		method: "POST",
 		path: introspectPath,
 		uses: limited(c, "introspect"),
-		handle: introspection(
+		crossSite: "A resource server's call, authenticated as a client; it reads no cookie.",
+		...introspection(
 			await c.get(clients),
 			await c.get(tokens),
 			(await c.get(issuer)).url,
 			await c.get(audit),
-			c.log,
 		),
 	})),
 	m.contribute(routes).by(async (c) => {
@@ -53,12 +53,13 @@ export default defineModule({ name: "token-control", section }, (m) => [
 			method: "POST",
 			path: revokePath,
 			uses: limited(c, "revoke"),
+			crossSite:
+				"It reads no cookie: revoking needs the token itself, which a public client may revoke for itself (RFC 7009).",
 			cors: revokeCors,
-			handle: revocation(
+			...revocation(
 				await c.get(clients),
 				[accessKind(await c.get(tokens)), ...contributed],
 				await c.get(audit),
-				c.log,
 			),
 		};
 	}),

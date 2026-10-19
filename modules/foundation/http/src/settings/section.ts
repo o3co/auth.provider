@@ -16,7 +16,7 @@ export const section = z
 		...sourceSettings.shape,
 		"public-origin": z
 			.url({ protocol: /^https?$/ })
-			.refine((s) => new URL(s).origin === s, "origin only (no path)")
+			.refine((s) => URL.canParse(s) && new URL(s).origin === s, "origin only (no path)")
 			.optional()
 			.describe(
 				"The scheme, host and port users reach this deployment at: an origin only, with no path.",
@@ -25,7 +25,10 @@ export const section = z
 			.array(
 				z
 					.url({ protocol: /^https$/ })
-					.refine((s) => !s.includes("*") && new URL(s).origin === s, "an https origin"),
+					.refine(
+						(s) => !s.includes("*") && URL.canParse(s) && new URL(s).origin === s,
+						"an https origin",
+					),
 			)
 			.prefault([])
 			.describe(

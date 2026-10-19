@@ -24,6 +24,7 @@ function trialValues(redisUrl: string): [section: string, key: string, value: st
 		["mail-smtp", "host", "smtp.example.invalid"],
 		["mail-smtp", "from", "auth@example.invalid"],
 		["subject-revocation-http", "credential", randomBytes(32).toString("base64url")],
+		["mfa-witness-http", "credential", randomBytes(32).toString("base64url")],
 	];
 }
 
@@ -43,7 +44,9 @@ function trialBlocks(
 ) {
 	const has = (name: string) => modules.includes(name);
 	const hosts = [
-		...(has("users-http") || has("signer-keys-http") ? ["ledger.example.invalid"] : []),
+		...(has("users-http") || has("signer-keys-http") || has("mfa-witness-http")
+			? ["ledger.example.invalid"]
+			: []),
 		...(has("audit-http") ? ["audit.example.invalid"] : []),
 		...added.allow,
 	];
@@ -70,6 +73,11 @@ function trialBlocks(
 			has("signer-keys-http"),
 			"signer-keys-http",
 			`signer-keys-http { issuer = "https://devices.example.invalid", keys-url = "https://ledger.example.invalid/signer-keys" }`,
+		],
+		[
+			has("mfa-witness-http"),
+			"mfa-witness-http",
+			`mfa-witness-http { read-url = "https://ledger.example.invalid/mfa-witness/read", enroll-url = "https://ledger.example.invalid/mfa-witness/enroll", clear-url = "https://ledger.example.invalid/mfa-witness/clear" }`,
 		],
 		// jwt-bearer refuses keys contributed for an issuer it does not name; signer-keys-http contributes these.
 		[

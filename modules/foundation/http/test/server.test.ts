@@ -27,6 +27,7 @@ import {
 } from "../src/contract.ts";
 import http from "../src/module.ts";
 import { testRequest } from "../src/testing.ts";
+import { declared } from "./declared.ts";
 
 const quiet = quietRuntime({
 	clock: { now: () => 0 },
@@ -85,7 +86,7 @@ async function serveWith(handlers: Module, settings = {}, runtime = quiet) {
 function handlers(list: readonly Route[], rules: readonly PolicyRule[] = []): Module {
 	return defineModule({ name: "handlers" }, (m) => [
 		...rules.map((rule) => m.contribute(policies).by(() => rule)),
-		...list.map((route) => m.contribute(routes).by(() => route)),
+		...list.map((route) => m.contribute(routes).by(() => declared(route))),
 	]);
 }
 
@@ -327,11 +328,12 @@ describe("http", () => {
 	});
 
 	it("answers Unavailable with a retryable 503 and other failures without detail", async () => {
+		const recorded = recordingLog();
 		const base = await serveWith(
 			handlers([
 				{
 					method: "GET",
-					path: "/down",
+					path: "/down/*",
 					handle: () => {
 						throw new Unavailable("store");
 					},
@@ -344,17 +346,110 @@ describe("http", () => {
 					},
 				},
 			]),
+			{},
+			quietRuntime({ ...quiet, log: recorded.log }),
 		);
-		const down = await fetch(`${base}/down`);
+		const down = await fetch(`${base}/down/sent`);
 		expect(down.status).toBe(503);
 		expect([down.headers.get("cache-control"), down.headers.get("pragma")]).toEqual([
 			"no-store",
 			"no-cache",
 		]);
-		expect(await down.text()).toBe("");
+		expect(await down.json()).toEqual({ error: "service_unavailable" });
+		expect(recorded.lines().filter((line) => line.level === "warn")).toEqual([
+			{ level: "warn", event: "http.unavailable", fields: { what: "store", route: "/down/*" } },
+		]);
 		const boom = await fetch(`${base}/boom`);
 		expect(boom.status).toBe(500);
 		expect(await boom.text()).not.toContain("xyz");
+	});
+});
+
+describe("a route's unavailable answer", () => {
+	const failing = policy("test.failing");
+	const rule = applying(failing, async () => {
+		throw new Unavailable("policy store");
+	});
+	const declared: HttpResponse = {
+		status: 503,
+		headers: { "cache-control": "no-store", "retry-after": "5" },
+		body: { json: { error: "temporarily_unavailable" } },
+	};
+
+	/** Serves a handler and a policy throwing Unavailable, both declaring `noted`; the base URL and the lines past info. */
+	async function serveDown(noted: (request: HttpRequest) => Record<string, string> | undefined) {
+		const recorded = recordingLog();
+		const unavailable = { response: declared, noted };
+		const throwing = () => {
+			throw new Unavailable("store");
+		};
+		const base = await serveWith(
+			handlers(
+				[
+					{ method: "POST", path: "/handled", unavailable, handle: throwing },
+					{
+						method: "GET",
+						path: "/guarded",
+						uses: [use(failing)],
+						unavailable,
+						handle: () => ({ status: 204 }),
+					},
+				],
+				[rule],
+			),
+			{},
+			quietRuntime({ ...quiet, log: recorded.log }),
+		);
+		return { base, lines: () => recorded.lines().filter((line) => line.level !== "info") };
+	}
+
+	it("answers what the route declares when its handler or its policy throws Unavailable", async () => {
+		const { base } = await serveDown(() => undefined);
+		for (const res of [
+			await fetch(`${base}/handled`, { method: "POST" }),
+			await fetch(`${base}/guarded`),
+		]) {
+			expect([res.status, res.headers.get("retry-after"), await res.json()]).toEqual([
+				503,
+				"5",
+				{ error: "temporarily_unavailable" },
+			]);
+		}
+	});
+
+	it("warns once, with what was unavailable, the declared route, and the fields the route notes", async () => {
+		const seen: string[] = [];
+		const { base, lines } = await serveDown((request) => {
+			seen.push(request.method);
+			return { grant_type: "test" };
+		});
+		await fetch(`${base}/handled`, { method: "POST" });
+		await fetch(`${base}/guarded`);
+		expect(seen).toEqual(["POST", "GET"]);
+		expect(lines()).toEqual([
+			{
+				level: "warn",
+				event: "http.unavailable",
+				fields: { what: "store", route: "/handled", grant_type: "test" },
+			},
+			{
+				level: "warn",
+				event: "http.unavailable",
+				fields: { what: "policy store", route: "/guarded", grant_type: "test" },
+			},
+		]);
+	});
+
+	it("still answers what the route declares when noting throws, logging the failure by kind only", async () => {
+		const { base, lines } = await serveDown(() => {
+			throw new TypeError("secret=xyz");
+		});
+		const res = await fetch(`${base}/handled`, { method: "POST" });
+		expect([res.status, await res.json()]).toEqual([503, { error: "temporarily_unavailable" }]);
+		expect(lines()).toEqual([
+			{ level: "error", event: "http.failed", fields: { kind: "TypeError" } },
+			{ level: "warn", event: "http.unavailable", fields: { what: "store", route: "/handled" } },
+		]);
 	});
 });
 
@@ -519,6 +614,15 @@ it("states the public origin it was given, and refuses one with a path", async (
 	expect(Object.isFrozen(app.get(site))).toBe(true);
 	for (const origin of ["https://as.example/x", "ws://as.example", "ftp://as.example"]) {
 		await expect(boot({ "public-origin": origin }), origin).rejects.toThrow(BootRefused);
+	}
+});
+
+it("refuses an empty or unparsable public origin or CORS origin at boot, never throwing on it", async () => {
+	for (const origin of ["", "not a url", "https://"]) {
+		await expect(boot({ "public-origin": origin }), `public ${origin}`).rejects.toThrow(
+			BootRefused,
+		);
+		await expect(boot({ "cors-origins": [origin] }), `cors ${origin}`).rejects.toThrow(BootRefused);
 	}
 });
 

@@ -13,7 +13,7 @@
 
 ## Invariants
 - When `users` answers for the subject, the answer is its attributes, and the session is not read; a subject with no user has none.
-- Only when `users` cannot look the subject up, the answer is the login attributes of the session the handle names, if it is open and the subject's.
+- Only when `users` cannot look the subject up, the answer is the login attributes of the session the handle names, if it enters at `use` (one short of a requirement does not) and is the subject's.
 - Vouched only when `users` states the attributes: its own answer (a subject with no user too), or a login kept under `login-attributes`' source name for users (`loginSource.users`). An upstream's login never is.
 - Sources are never mixed; with no such session or no attributes in it, the answer is unknown, never empty.
 - A `users` or `session` failure is unavailable.

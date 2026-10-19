@@ -1,3 +1,9 @@
 {
-	"private": false
+	"private": false,
+	"description": "Login through upstream identity providers (Google, GitHub, Apple and any OpenID Connect provider) for auth-provider, a self-hosted OAuth 2.0 authorization server and OpenID Connect provider for Node.js.",
+	"keywords": [
+		"social-login",
+		"federation",
+		"sso"
+	]
 }

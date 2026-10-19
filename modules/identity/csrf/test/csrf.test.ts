@@ -3,7 +3,14 @@ import cookiesModule from "@mod/cookies/module";
 import { listening, routes, site, use } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
-import { type Assembly, assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
+import {
+	type Assembly,
+	assemble,
+	BootRefused,
+	defineModule,
+	kernelConfig,
+	type Module,
+} from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { describe, expect, it } from "vitest";
 import { carried, checking } from "../src/check.ts";
@@ -170,6 +177,7 @@ const guarded = defineModule({ name: "guarded" }, (m) =>
 			method,
 			path: "/guarded",
 			uses: [use(csrfChecked)],
+			...(method === "GET" ? { changesState: false } : { unlimited: "a test route" }),
 			handle: () => ({ status: 204 }),
 		})),
 	),
@@ -252,6 +260,27 @@ describe.each([
 		} finally {
 			await app.stop(1000);
 		}
+	});
+
+	it("marks the policy own-site for every method but GET", async () => {
+		const declared = (method: "GET" | "POST" | "PUT" | "DELETE") =>
+			defineModule({ name: "declared" }, (m) => [
+				m.contribute(routes).by(() => ({
+					method,
+					path: "/declared",
+					changesState: true,
+					uses: [use(csrfChecked)],
+					unlimited: "a test route",
+					handle: () => ({ status: 204 }),
+				})),
+			]);
+		for (const method of ["POST", "PUT", "DELETE"] as const) {
+			const app = await boot("https://as.example", [module, declared(method)]);
+			expect(app.get(listening), method).toBeDefined();
+		}
+		await expect(boot("https://as.example", [module, declared("GET")])).rejects.toThrow(
+			BootRefused,
+		);
 	});
 
 	it("answers same origin only on positive evidence: Origin is ours, or Sec-Fetch-Site says same-origin", async () => {

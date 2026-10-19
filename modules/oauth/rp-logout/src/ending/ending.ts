@@ -5,7 +5,7 @@ import { issuer } from "@mod/issuer";
 import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
 import { type IdTokenHints, idTokenHints } from "@mod/oidc";
 import { determinedSource } from "@mod/request-source";
-import { type CloseOutcome, sessions } from "@mod/session";
+import { type CloseOutcome, type Entry, sessions } from "@mod/session";
 import events from "../audit-events.ts";
 import type { LogoutReturn, UpstreamEnd } from "../contract.ts";
 import { type Frame, frontChannelPage } from "../page/page.ts";
@@ -17,7 +17,7 @@ export interface EndingParts {
 	readonly hints: IdTokenHints;
 	readonly clients: { find(id: string): Promise<Client | undefined> };
 	readonly sessions: {
-		stillOpen(id: string): Promise<boolean>;
+		entryOf(id: string): Promise<Entry>;
 		close(id: string, request: HttpRequest): Promise<CloseOutcome>;
 	};
 	readonly sessionClients: Pick<SessionClients, "members">;
@@ -102,11 +102,12 @@ export function endingOver(p: EndingParts) {
 		Promise.resolve()
 			.then(() => p.upstream?.at(session, back))
 			.catch(() => undefined);
-	/** The close's outcome, or none when it threw. */
+	/** The close's outcome, or none when it was unavailable; any other error is passed on, a mistake and no outage. */
 	const closeOf = async (sid: string, request: HttpRequest) => {
 		try {
 			return await p.sessions.close(sid, request);
-		} catch {
+		} catch (error) {
+			if (!isUnavailable(error)) throw error;
 			return undefined;
 		}
 	};
@@ -171,21 +172,26 @@ export function endingOver(p: EndingParts) {
 					...more,
 				},
 			});
-		// A session already ended still has its close asked, for the cookie, but is no logout of its own.
-		const open = await p.sessions.stillOpen(sid);
+		// Nothing reads the session before its close: a read can end one past its lifetime, and the close
+		// would then call no participants. What the close found tells whether this is the logout.
 		const closed = await closeOf(sid, request);
 		if (!closed) {
 			record("logout.cascade_failed", checked.subject, { store: "session" });
 			return unavailable;
 		}
 		const { cookies, session } = closed;
-		if (!open || !session) return loggedOut(cookies);
+		// Closing, but the tokens it holds live until the close is swept: not logged out yet, as logout
+		// answers it. Asked before any answer of done, so a close sent again while pending is never one.
 		if (closed.kind === "pending") {
 			declaredAudit(p.audit, events).record("logout.close_pending", {
-				subject: session.subject,
+				subject: session?.subject ?? checked.subject,
 				attributes: { sid, ...(source ? { source } : {}) },
 			});
+			return jsonAnswer(503, { error: "temporarily_unavailable" }, { cookies });
 		}
+		// One closed before, or gone, still has its close asked, for the cookie, but is no logout of its own.
+		if (!session || (closed.from !== "open" && closed.from !== "closing"))
+			return loggedOut(cookies);
 		record("logout.success", session.subject);
 		return answer(request, { sid, held, cookies }, upstream ?? (back && withState(back, state)));
 	};

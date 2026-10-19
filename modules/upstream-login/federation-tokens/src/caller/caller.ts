@@ -5,7 +5,7 @@ import { type Sessions, sessions } from "@mod/session";
 import { type SessionTokens, sessionTokens } from "@mod/session-tokens";
 import { type Tokens, tokens } from "@mod/tokens";
 
-/** The client that presented its access token, and the open session that token was issued in. */
+/** The client that presented its access token, and the entered session it was issued in. */
 export type Caller =
 	| {
 			readonly kind: "accepted";
@@ -30,10 +30,16 @@ export interface Parts {
 /**
  * Accepts the access token a request presents: admitted by `sender-binding` (through `tokens`,
  * every access condition holding, its family's among them), its audience naming the client it was
- * issued to, and issued in a session still open for the same subject. Every refusal past admission is the same `invalid_token`. Throws Unavailable when
- * a check cannot tell.
+ * issued to, and issued in a session that enters at use for the same subject. Every refusal past
+ * admission is the same `invalid_token`, a session short of a requirement's too. Throws Unavailable
+ * when a check cannot tell.
  */
 export function callerWith(parts: Parts) {
+	/** Whether the session enters at use for the subject; absent or short, it does not. */
+	const enters = async (session: string, subject: string) => {
+		const entry = await parts.sessions.entryOf(session);
+		return entry.kind === "entered" && entry.session.context.subject === subject;
+	};
 	const accepted = async (request: HttpRequest): Promise<Caller> => {
 		const admission = await parts.senderBinding.admitted(request, parts.tokens);
 		if (admission.kind === "refused") return admission;
@@ -47,8 +53,7 @@ export function callerWith(parts: Parts) {
 		if (!grant.audience.includes(grant.issuedTo)) return refused;
 		const bound = await parts.sessionTokens.sessionOf(id);
 		if (bound.kind !== "bound") return refused;
-		const open = await parts.sessions.openContext(bound.handle);
-		if (open?.subject !== grant.subject) return refused;
+		if (!(await enters(bound.handle, grant.subject))) return refused;
 		return {
 			kind: "accepted",
 			client: grant.issuedTo,
@@ -58,9 +63,9 @@ export function callerWith(parts: Parts) {
 	};
 	return {
 		accepted,
-		/** Whether the session is still open for the subject, checked again just before answering. */
-		stillOpen: async (caller: Extract<Caller, { kind: "accepted" }>) =>
-			(await parts.sessions.openContext(caller.session))?.subject === caller.subject,
+		/** Whether the session still enters at use for the subject, checked again before answering. */
+		stillEnters: (caller: Extract<Caller, { kind: "accepted" }>) =>
+			enters(caller.session, caller.subject),
 	};
 }
 

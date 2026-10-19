@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { branchingImports, check, dependencyCards } from "../src/contract.ts";
@@ -327,7 +328,7 @@ describe("guard", () => {
 		).toEqual(["@t/split/src/inner dependencies 2 > 1"]);
 	});
 
-	it("counts no test table as test lines: fixtures and vectors", () => {
+	it("counts fixtures as test lines, but no other test table such as vectors", () => {
 		const line = "export const n = 1;\n";
 		const p = pkg("@t/tables", {
 			"src/contract.ts": line,
@@ -335,10 +336,23 @@ describe("guard", () => {
 			"test/fixtures/big.ts": line.repeat(10),
 			"test/cases.vectors.ts": line.repeat(10),
 		});
-		expect(check([p], { ...budget, testLines: 2 })).toEqual([]);
-		expect(check([p], { ...budget, testLines: 1 }).map((v) => v.detail)).toEqual([
-			"test lines 2 > 1",
+		expect(check([p], { ...budget, testLines: 12 })).toEqual([]);
+		expect(check([p], { ...budget, testLines: 11 }).map((v) => v.detail)).toEqual([
+			"test lines 12 > 11",
 		]);
+	});
+
+	it("holds every card item, nested ones too, to its bytes, naming its opening", () => {
+		const line = "export const n = 1;\n";
+		const p = pkg("@t/items", {
+			"src/contract.ts": line,
+			"src/inner/README.md": `# inner\n  - ${"y".repeat(40)}\n`,
+			"src/inner/x.ts": line,
+		});
+		expect(check([p], { ...budget, cardItemBytes: 44 })).toEqual([]);
+		expect(
+			check([p], { ...budget, cardItemBytes: 40 }).map((v) => `${v.where} ${v.detail}`),
+		).toEqual(["@t/items/src/inner card item bytes 44 > 40 (yyyyyyyyyyyy…)"]);
 	});
 
 	it("counts comment lines from the syntax tree, ignoring // inside strings, against a share or a floor", () => {
@@ -779,6 +793,7 @@ describe("guard", () => {
 			`G11 a.ts:${12}`,
 		]);
 		const dir = p.dir;
+		mkdirSync(join(dir, "modules"));
 		const doc = (text: string) => check([], budget, [{ path: join(dir, "README.md"), text }]);
 		const found = (text: string) => doc(text).map((v) => `${v.rule.split(" ")[0]} ${v.detail}`);
 		expect(
@@ -792,5 +807,71 @@ describe("guard", () => {
 			"G12 ../other/README.md",
 			"G12 modules/x/y.ts",
 		]);
+	});
+
+	it("G12 reads an inline path rooted at / as a location, and still reads a link target in full", () => {
+		const p = pkg("@t/routes", { "README.md": "x\n" });
+		mkdirSync(join(p.dir, "some"));
+		const doc = (text: string) => check([], budget, [{ path: join(p.dir, "README.md"), text }]);
+		const found = (text: string) => doc(text).map((v) => `${v.rule.split(" ")[0]} ${v.detail}`);
+		expect(
+			found("| `GET /.well-known/jwks.json` | `POST /oauth/token` | `/etc/app/config.json` |"),
+		).toEqual([]);
+		// Read from any later position, each tail would name a missing file and be refused.
+		expect(
+			found("`/modules/x/README.md`, (/a/b.ts), '/c/d.json', \"/e/../f.md\" and /g/h.yaml"),
+		).toEqual([]);
+		expect(found("[card](/modules/x/README.md)")).toEqual(["G12 /modules/x/README.md"]);
+		expect(found("`../other/file.md` and `some/dir/missing.md`")).toEqual([
+			"G12 ../other/file.md",
+			"G12 some/dir/missing.md",
+		]);
+	});
+
+	it("G12 reads no fenced code block, whose samples show another project's files; G11 and G21 still do", () => {
+		const p = pkg("@t/samples", { "README.md": "x\n" });
+		mkdirSync(join(p.dir, "some"));
+		const doc = (text: string) => check([], budget, [{ path: join(p.dir, "README.md"), text }]);
+		const found = (text: string) => doc(text).map((v) => `${v.rule.split(" ")[0]} ${v.detail}`);
+		const fence = "\x60\x60\x60";
+		const sample = `${fence}json\n{ "exports": { "./module": { "types": "./module.d.ts", "default": "./module.js" } } }\n[up](../other/README.md)\n${fence}`;
+		expect(found(`${sample}\n`)).toEqual([]);
+		expect(found(`${sample}\nsee \x60some/dir/missing.md\x60\n`)).toEqual([
+			"G12 some/dir/missing.md",
+		]);
+		expect(found(`${fence}\nat line ${12}\n${fence}\n`)).toEqual([`G11 line ${12}`]);
+	});
+
+	it("G12 tells a refused path whole, its extension too, and reads no file whose extension it does not know", () => {
+		const p = pkg("@t/whole", { "README.md": "x\n" });
+		mkdirSync(join(p.dir, "some"));
+		mkdirSync(join(p.dir, "other"));
+		const doc = (text: string) => check([], budget, [{ path: join(p.dir, "README.md"), text }]);
+		const found = (text: string) => doc(text).map((v) => `${v.rule.split(" ")[0]} ${v.detail}`);
+		expect(found("`some/dir/package.json` and `other/dir/notes.yaml`")).toEqual([
+			"G12 some/dir/package.json",
+			"G12 other/dir/notes.yaml",
+		]);
+		expect(found("`some/dir/view.tsx` and `some/dir/data.jsonl`")).toEqual([]);
+	});
+
+	it("G12 reads an inline path as the repository's only where its first part is beside the document", () => {
+		const p = pkg("@t/generated", { "README.md": "x\n", "docs/guide.md": "x\n" });
+		const doc = (text: string) => check([], budget, [{ path: join(p.dir, "README.md"), text }]);
+		const found = (text: string) => doc(text).map((v) => `${v.rule.split(" ")[0]} ${v.detail}`);
+		// No config/ or src/ beside the document: these name files of a generated app, fenced or not.
+		expect(
+			found(
+				"Edit `config/local.conf` and `config/application.conf`, then `src/main.ts`.\n\n```sh\ncp config/local.conf.example config/local.conf\n```\n",
+			),
+		).toEqual([]);
+		// docs/ is beside the document, so a missing file in it is still refused; a code block is not read.
+		expect(found("`docs/guide.md`, `docs/missing.md`\n\n```\nsee docs/migraton.md\n```\n")).toEqual(
+			["G12 docs/missing.md"],
+		);
+		// An explicitly relative path is read whatever its first part; a link target is read in full.
+		expect(found("`./config/local.conf`, `../other/file.md` and [cfg](config/local.conf)")).toEqual(
+			["G12 config/local.conf", "G12 ./config/local.conf", "G12 ../other/file.md"],
+		);
 	});
 });

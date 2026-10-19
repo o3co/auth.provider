@@ -32,7 +32,7 @@ import {
 import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import secretHashModule from "@mod/secret-hash/module";
-import { sessions } from "@mod/session";
+import { entryRequirements, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { sessionTokens } from "@mod/session-tokens";
 import sessionTokensModule from "@mod/session-tokens/module";
@@ -105,6 +105,8 @@ async function serve(
 	options: {
 		revocation?: "denylist" | "unsupported";
 		lifetime?: number;
+		/** An access token's own lifetime, in seconds, when not tokens' default. */
+		accessLifetime?: number;
 		/** Whether a confidential client's families are bound too. */
 		bindConfidential?: boolean;
 		extra?: Module[];
@@ -119,7 +121,10 @@ async function serve(
 		modules: [
 			http,
 			switchedModule(
-				tokensStandIn({ revocable: (options.revocation ?? "denylist") === "denylist" }),
+				tokensStandIn({
+					revocable: (options.revocation ?? "denylist") === "denylist",
+					...(options.accessLifetime ? { lifetimeSeconds: options.accessLifetime } : {}),
+				}),
 				tokens,
 				down.tokens,
 			),
@@ -389,6 +394,18 @@ describe("refresh tokens", () => {
 		expect(Math.min(...kept)).toBeGreaterThan(Number(answer.body.expires_in) * 1000 + 110_000);
 	});
 
+	it("never issues an access token past the family's session, when the session ends first", async () => {
+		const s = await serve();
+		const entry = await s.app.get(sessions).entryOf(s.session.id);
+		if (entry.kind !== "entered") throw new Error("not entered");
+		// A minute before the session ends, the family (an hour from now) outlives it.
+		shift = entry.endsAt - Date.now() - 60_000;
+		const { refresh_token: token = "" } = await s.redeem();
+		const answer = await s.refresh(token);
+		expect(answer.status).toBe(200);
+		expect(Number(answer.body.expires_in)).toBeLessThanOrEqual(60);
+	});
+
 	it("asks the client's present allowance on every refresh", async () => {
 		const s = await serve();
 		const { refresh_token: token = "" } = await s.redeem();
@@ -469,6 +486,22 @@ describe("refresh tokens", () => {
 		await s.app.get(sessions).close(s.session.id);
 		expect((await s.refresh(refreshed.body.refresh_token)).body.error).toBe("invalid_grant");
 		expect(await s.active(refreshed.body.access_token)).toBe(false);
+	});
+
+	it("stop working while the session falls short of a requirement to be used, as a closed one does", async () => {
+		const short = { now: false };
+		const requirement = defineModule({ name: "short-to-use" }, (m) => [
+			m.contribute(entryRequirements).by(() => ({
+				name: "mfa",
+				judges: ["use"],
+				admits: async () =>
+					short.now ? { kind: "short", answer: { error: "mfa_required" } } : { kind: "admit" },
+			})),
+		]);
+		const s = await serve({ extra: [requirement] });
+		const first = await s.redeem();
+		short.now = true;
+		expect((await s.refresh(first.refresh_token)).body.error).toBe("invalid_grant");
 	});
 
 	it("stop working once the session has ended, before the family does", async () => {
@@ -727,8 +760,12 @@ describe("refresh tokens", () => {
 	});
 
 	it("revoke an access token its family's full list would drop, and fail rather than lose it", async () => {
-		// A family that outlives its tokens, so each token ends a second after the one before.
-		const s = await serve({ lifetime: 86_400, caps: { sessionFamilies: 1000, issuedAccess: 2 } });
+		// A family and a session that outlive its tokens, so each token ends a second after the one before.
+		const s = await serve({
+			lifetime: 86_400,
+			accessLifetime: 600,
+			caps: { sessionFamilies: 1000, issuedAccess: 2 },
+		});
 		const first = await s.redeem();
 		shift += 1000;
 		const second = await s.refresh(first.refresh_token);

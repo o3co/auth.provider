@@ -1,3 +1,11 @@
 {
-	"private": false
+	"private": false,
+	"description": "OAuth 2.0 and OpenID Connect protocol modules for auth-provider, a self-hosted OAuth 2.0 authorization server and OpenID Connect provider for Node.js: authorization code with PKCE, refresh tokens, device flow, token exchange, JWT bearer, DPoP, discovery, userinfo and logout.",
+	"keywords": [
+		"pkce",
+		"dpop",
+		"device-flow",
+		"token-exchange",
+		"jwt"
+	]
 }

@@ -10,6 +10,7 @@ import type { LoginFrom, LoginOutcome } from "@mod/login-gates";
 import { type Seal, seal } from "@mod/seal";
 import type { Session } from "@mod/session";
 import {
+	type Receipt,
 	type UpstreamLoginReceiver,
 	type UpstreamTokens,
 	upstreamLoginReceivers,
@@ -19,6 +20,13 @@ import type { Settings } from "../section.ts";
 import { type StoredTransaction, type TransactionStore, transactionStore } from "../store.ts";
 
 export const caller = "federation";
+
+declare const joinedMark: unique symbol;
+/** What a join gave each receiver, read by the handoff alone; its caller holds it for `withdrawn`. */
+export type Joined = { readonly [joinedMark]: true };
+
+/** A receiver given a join's tokens, and the receipt it answered. */
+type Given = { readonly receiver: UpstreamLoginReceiver; readonly receipt: Receipt | undefined };
 
 /** Hands a login's upstream tokens to the receivers once its session opens. */
 export interface Handoff {
@@ -31,9 +39,9 @@ export interface Handoff {
 	/** login-gates' news that a held login opened. */
 	opened(session: Session, carry: string): Promise<void>;
 	/** A link's tokens, handed now to the receivers of the open session it joined; one failing undoes the others and is unavailable. */
-	joined(session: Session, idp: string, tokens: UpstreamTokens): Promise<void>;
-	/** A link's tokens for the session and IdP taken back from every receiver, any held before included, when its session closed, changed hands or could not tell after the join. */
-	withdrawn(sessionId: string, idp: string): Promise<void>;
+	joined(session: Session, idp: string, tokens: UpstreamTokens): Promise<Joined>;
+	/** What a join gave taken back from each receiver it gave it to, and nothing written since, when its session closed, changed hands or could not tell after the join. */
+	withdrawn(sessionId: string, idp: string, joined: Joined): Promise<void>;
 }
 
 export const handoff = contract<Handoff>("federation.handoff");
@@ -41,7 +49,7 @@ export const handoff = contract<Handoff>("federation.handoff");
 export const noHandoff: Handoff = {
 	of: () => undefined,
 	opened: async () => {},
-	joined: async () => {},
+	joined: async () => [] as unknown as Joined,
 	withdrawn: async () => {},
 };
 
@@ -118,17 +126,13 @@ export function handoffWith(parts: Parts): Handoff {
 			}
 		}
 	};
-	/** Takes the tokens back from each receiver named, going on past one that fails. */
-	const withdraw = async (
-		given: readonly UpstreamLoginReceiver[],
-		sessionId: string,
-		idp: string,
-	) => {
-		for (const done of given) {
+	/** Takes the tokens back from each receiver given them, with its receipt, going on past one that fails. */
+	const withdraw = async (given: readonly Given[], sessionId: string, idp: string) => {
+		for (const { receiver, receipt } of given) {
 			try {
-				await done.withdrawn(sessionId, idp);
+				await receiver.withdrawn(sessionId, idp, receipt);
 			} catch {
-				parts.log.warn("federation.link_join_undo_failed", { receiver: done.name });
+				parts.log.warn("federation.link_join_undo_failed", { receiver: receiver.name });
 			}
 		}
 	};
@@ -182,11 +186,11 @@ export function handoffWith(parts: Parts): Handoff {
 			}
 		},
 		joined: async (session, idp, tokens) => {
-			const given: UpstreamLoginReceiver[] = [];
+			const given: Given[] = [];
 			for (const receiver of parts.receivers) {
 				try {
-					await receiver.received({ session, idp, tokens });
-					given.push(receiver);
+					const receipt = (await receiver.received({ session, idp, tokens })) ?? undefined;
+					given.push({ receiver, receipt });
 				} catch (error) {
 					const kind = error instanceof Error ? error.name : typeof error;
 					parts.log.error("federation.link_join_failed", { receiver: receiver.name, kind });
@@ -194,7 +198,9 @@ export function handoffWith(parts: Parts): Handoff {
 					throw new Unavailable("federation");
 				}
 			}
+			return given as unknown as Joined;
 		},
-		withdrawn: (sessionId, idp) => withdraw(parts.receivers, sessionId, idp),
+		withdrawn: (sessionId, idp, joined) =>
+			withdraw(joined as unknown as readonly Given[], sessionId, idp),
 	};
 }

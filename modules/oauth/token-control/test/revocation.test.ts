@@ -168,7 +168,7 @@ describe("revocation", () => {
 		const answer = await s.post("/oauth/revoke", "app", { token });
 		expect([answer.status, answer.error]).toEqual([503, "temporarily_unavailable"]);
 		expect(s.warnings()).toEqual([
-			["token-control.unavailable", { what: "tokens", route: "revoke" }],
+			["http.unavailable", { what: "tokens", route: "/oauth/revoke" }],
 		]);
 		s.down.restore();
 		expect(await s.active(token)).toBe(true);

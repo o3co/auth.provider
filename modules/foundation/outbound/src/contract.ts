@@ -8,7 +8,9 @@ export type RefusalReason =
 	| "denied"
 	| "not-allowed"
 	| "special-address"
-	| "redirect";
+	| "redirect"
+	/** A credential where none may go: material fetched for its signature. */
+	| "credential";
 
 export class DestinationRefused extends Error {
 	readonly reason: RefusalReason;
@@ -41,6 +43,8 @@ export interface OutboundRequest {
 	readonly method?: "GET" | "POST";
 	readonly headers?: Readonly<Record<string, string>>;
 	readonly body?: string | Uint8Array;
+	/** The Authorization value, sent as that header; a secret never told. The only way to send one: headers may not name it. */
+	readonly credential?: string;
 }
 
 /** What a caller narrows for its own calls; it never widens the operator's policy. */
@@ -73,13 +77,27 @@ export interface Outbound {
 
 export const outbound = contract<Outbound>("outbound");
 
-/** The destination policy answered at boot, apart from sending: no name is resolved. */
-export interface OutboundPolicy {
-	/** Why the policy refuses the URL, or undefined when it lets it through. */
-	refusalOf(url: string, narrower?: Narrower): RefusalReason | undefined;
+/** The destination policy's refusals, as an operator reads them at boot, apart from sending: no name is resolved. */
+export interface OutboundRefusals {
+	/**
+	 * Why the policy refuses the URL and what to set, `<reason>: <what to set>`, naming keys alone and
+	 * never the URL's host, port or any other value; undefined when the policy lets it through.
+	 */
+	explained(url: string, narrower?: Narrower): string | undefined;
 }
 
-export const outboundPolicy = contract<OutboundPolicy>("outbound.policy");
+export const outboundRefusals = contract<OutboundRefusals>("outbound.refusals");
+
+/** Why a credential must not go to a set of URLs: more than one origin, or a URL neither https nor a named plain-loopback pair. */
+export type CredentialRefusal = "origins" | "scheme";
+
+/** Where a caller's credential may go, answered at boot, apart from sending. */
+export interface CredentialPolicy {
+	/** Why a credential must not be sent to these URLs, or undefined when it may go to every one. */
+	refusalOf(urls: readonly string[]): CredentialRefusal | undefined;
+}
+
+export const credentialPolicy = contract<CredentialPolicy>("outbound.credentials");
 
 /** An answer read as JSON: one object from the status asked for (`200` unless named), frozen, or any other answer with its status. */
 export type JsonAnswer =
@@ -115,7 +133,11 @@ export interface SignedNarrower extends Narrower {
  * none refuses every destination.
  */
 export interface SignedOutbound {
-	fetch(url: string, request: OutboundRequest, narrower: SignedNarrower): Promise<OutboundResponse>;
+	fetch(
+		url: string,
+		request: Omit<OutboundRequest, "credential">,
+		narrower: SignedNarrower,
+	): Promise<OutboundResponse>;
 }
 
 export const signedOutbound = contract<SignedOutbound>("outbound.signed");
