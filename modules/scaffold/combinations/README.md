@@ -16,7 +16,7 @@
 - `completed`: the modules given, each owner whose declared default replaces it swapped for that default and each adapter's owner counted for bridges, then the wirings and bridges they come with, including those of what is brought in, each once, in the order first named.
 - `composed` (features in named groups, an adapter or the owner by axis owner, modules added): the selection, what it needs to run (a foundation or feature among its dependencies, in turn), each composed axis's chosen adapter or default, then `completed`.
 - `composed` refuses, naming each: a name the workspace lacks, a group value that is not a feature, an addition that is not a feature or adapter with a module, an axis key that owns no axis, an axis value that is neither its adapter nor its owner, and an owner chosen for its own axis that has no module.
-- `needed` (modules): the modules given, what they need to run, then `completed`, as `composed` reaches them but with no axis default other than one declared to replace its owner; owners a reached adapter replaces are left out.
+- `needed` (modules): the modules given, what they need to run, then `completed`, as `composed` reaches them but with no axis default other than one declared to replace its owner; owners a reached adapter replaces are left out. It refuses, naming each, a name the workspace lacks, as `composed` does.
 - `full` (modules added): every foundation and feature with a module that does not opt in, composed alike. `optIns`: the features that opt in.
 - `kinds`: the kinds a package's manifest may name, the one place their words are written.
 

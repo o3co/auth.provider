@@ -28,18 +28,21 @@ function axesIn(declared: Declared) {
 	return { adapters, defaultOf, replacingOf };
 }
 
+/** Each name the workspace lacks, once, first named first. */
+const absentFrom = (declared: Declared, names: readonly string[]) =>
+	names
+		.filter((n, i, all) => all.indexOf(n) === i && !declared.packages.has(n))
+		.map((n) => `${n}: not in the workspace`);
+
 /** Why each name cannot be selected, or none. */
 function refusals(declared: Declared, selection: Selection): string[] {
 	const { adapters } = axesIn(declared);
 	const known = (name: string) => declared.packages.get(name);
-	const absent = (name: string) => (known(name) ? [] : [`${name}: not in the workspace`]);
 	const grouped = Object.values(selection.features).flat();
 	const added = selection.add ?? [];
 	const axes = Object.entries(selection.axes ?? {});
 	return [
-		...[...grouped, ...added, ...axes.flat()]
-			.filter((n, i, all) => all.indexOf(n) === i)
-			.flatMap(absent),
+		...absentFrom(declared, [...grouped, ...added, ...axes.flat()]),
 		...grouped
 			.filter((n) => known(n) && known(n)?.kind !== kinds.feature)
 			.map((n) => `${n}: not a feature`),
@@ -77,9 +80,12 @@ export function composedWith(declared: Declared, selection: Selection): string[]
 	);
 }
 
-/** The modules given and what they need to run, in turn, then wirings and bridges; owners a reached adapter replaces left out; of axis defaults, only one declared to replace its owner. */
-export const neededWith = (declared: Declared, modules: readonly string[]): string[] =>
-	composing(declared, modules, {}, { defaults: false });
+/** The modules given and what they need to run, in turn, then wirings and bridges; owners a reached adapter replaces left out; of axis defaults, only one declared to replace its owner. Refuses, naming each, a name the workspace lacks. */
+export function neededWith(declared: Declared, modules: readonly string[]): string[] {
+	const absent = absentFrom(declared, modules);
+	if (absent.length > 0) throw new Error(absent.join("; "));
+	return composing(declared, modules, {}, { defaults: false });
+}
 
 function composing(
 	declared: Declared,
