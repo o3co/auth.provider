@@ -663,6 +663,7 @@ export const sessionStandIn = defineModule({ name: "session" }, (m) => [
 			const found = await liveAt(handle);
 			if (!found || handle === undefined) return { kind: "absent" };
 			const short = await shortOf(found.context, level);
+			if (!(await liveAt(handle))) return { kind: "absent" };
 			if (short) return { kind: "short", ...short };
 			const endsAt = found.openedAt + lifetimeMs;
 			return { kind: "entered", session: sessionOf(handle, found), endsAt };
