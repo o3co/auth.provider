@@ -71,11 +71,12 @@ Each module reads its own section of HOCON configuration, and refuses boot on an
 
 ## Operating
 
-- [Operations runbook](docs/runbook.md): what the deployment must provide, Redis, rotating keys, upgrading, revoking a user, stopping.
+- [Operations runbook](docs/runbook.md): what the deployment must provide, Redis, rotating keys, upgrading, revoking a user, probes and alerts, stopping.
 - [Security model](docs/security-model.md): what the provider guarantees, and what it leaves to the deployment.
 - [Audit events](docs/audit-events.md): every event and its attributes.
 - [Configuration reference](docs/configuration.md).
 - [Migrating from 0.17](docs/migration.md).
+- [Releasing](docs/releasing.md): for maintainers.
 
 ## Versions
 
