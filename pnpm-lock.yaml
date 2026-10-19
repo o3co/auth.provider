@@ -32,6 +32,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../../foundation/url-setting
@@ -70,6 +73,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../../oauth/sender-binding
@@ -289,6 +295,22 @@ importers:
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
 
   modules/foundation/outbound:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../outbound-policy
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
+  modules/foundation/outbound-policy:
     dependencies:
       '@mod/kernel':
         specifier: workspace:*
@@ -804,6 +826,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/token-endpoint':
         specifier: workspace:*
         version: link:../token-endpoint
@@ -853,6 +878,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/redirect-uris':
         specifier: workspace:*
         version: link:../redirect-uris
@@ -1215,6 +1243,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -3406,6 +3437,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/upstream-client':
         specifier: workspace:*
         version: link:../upstream-client
@@ -3434,6 +3468,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/upstream-client':
         specifier: workspace:*
         version: link:../upstream-client
@@ -3462,6 +3499,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/upstream-client':
         specifier: workspace:*
         version: link:../upstream-client
@@ -3490,6 +3530,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/upstream-client':
         specifier: workspace:*
         version: link:../upstream-client
@@ -3577,6 +3620,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../../foundation/url-setting
@@ -3602,6 +3648,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../../foundation/url-setting
@@ -3691,6 +3740,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../../foundation/url-setting

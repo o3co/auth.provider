@@ -1,7 +1,7 @@
 import type { Section } from "@mod/clients";
 import type { KeySource } from "@mod/external-jwt";
 import { publicJwk, verifiesUnder } from "@mod/keys";
-import { destinationRefusal, type OutboundRefusals } from "@mod/outbound";
+import { destinationRefusal, type OutboundRefusals } from "@mod/outbound-policy";
 import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
 

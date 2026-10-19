@@ -3,14 +3,13 @@ import auditModule from "@mod/audit/module";
 import { assemble, BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import {
-	credentialPolicy,
 	DestinationRefused,
 	type Narrower,
 	type OutboundRequest,
 	type OutboundResponse,
 	outbound,
-	outboundRefusals,
 } from "@mod/outbound";
+import { credentialPolicy, outboundRefusals } from "@mod/outbound-policy";
 import { beforeEach, expect, it } from "vitest";
 import auditHttp from "../src/module.ts";
 import { auditHttpConfig } from "../src/testing.ts";

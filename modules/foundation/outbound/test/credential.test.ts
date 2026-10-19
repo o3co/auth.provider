@@ -1,8 +1,9 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { assemble, kernelConfig } from "@mod/kernel";
+import { credentialPolicy } from "@mod/outbound-policy";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { credentialPolicy, DestinationRefused } from "../src/contract.ts";
+import { DestinationRefused } from "../src/contract.ts";
 import outboundModule, { outboundOver, section } from "../src/module.ts";
 import type { Resolver } from "../src/transport.ts";
 

@@ -449,12 +449,12 @@ From `@mod/outbound`.
 | `outbound.max-response-size` | string | `64KiB` |  |  |  | The largest response body a request takes, from 1B to 16MiB. |
 | `outbound.signed-max-response-size` | string | `1MiB` |  |  |  | The largest response body a request for signed material takes, from 1B to 16MiB. |
 | `outbound.timeout` | string | `5s` |  |  |  | The one deadline covering a request's resolving, connecting, headers and body, from 1ms to 1m. |
+| `outbound.internal-hosts` | list of string | `[]` |  |  |  | The hosts a URL from the operator's own configuration may reach at a private address (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7); `.name` covers the name and the names under it. |
 | `outbound.max-concurrent` | integer (1–1024) | `16` |  |  |  | Requests under way at once; one more is unavailable at once. |
 | `outbound.direct-despite-proxy` | boolean | `false` |  |  |  | Whether to boot while a proxy variable is set and no proxy is configured; the variables are never read. |
 | `outbound.proxy` | string |  |  |  |  | The proxy every https request goes through by CONNECT, but to direct hosts; it resolves names and checks their addresses. |
 | `outbound.proxy-authorization` | string |  |  |  |  | The Proxy-Authorization value the proxy asks for, such as `Basic …`: printable ASCII on one line. |
 | `outbound.direct-hosts` | list of string | `[]` |  |  |  | The hosts reached directly while a proxy is set; `.name` covers the name and the names under it. |
-| `outbound.internal-hosts` | list of string | `[]` |  |  |  | The hosts a URL from the operator's own configuration may reach at a private address (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7); `.name` covers the name and the names under it. |
 
 ## passkey-registration
 

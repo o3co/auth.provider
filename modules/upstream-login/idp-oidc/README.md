@@ -56,4 +56,4 @@
 - Without an end of session endpoint, the upstream offers no end of session.
 
 ## Depends on
-- `kernel`, `upstreams`, `upstream-client`, `outbound`, `external-jwt`
+- `kernel`, `upstreams`, `upstream-client`, `outbound`, `outbound-policy`, `external-jwt`

@@ -1,5 +1,6 @@
 import { defineModule } from "@mod/kernel";
-import { outbound, outboundRefusals } from "@mod/outbound";
+import { outbound } from "@mod/outbound";
+import { outboundRefusals } from "@mod/outbound-policy";
 import { idpType, idpTypes } from "@mod/upstreams";
 import { settingsOf } from "./settings.ts";
 import { opened } from "./upstream.ts";

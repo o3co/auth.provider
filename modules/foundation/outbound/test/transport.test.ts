@@ -11,10 +11,14 @@ import {
 	setDefaultAutoSelectFamily,
 } from "node:net";
 import { isUnavailable } from "@mod/kernel";
+import { policyOf, policySettings } from "@mod/outbound-policy";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DestinationRefused, type OutboundUnavailable } from "../src/contract.ts";
 import { outboundOver, section } from "../src/module.ts";
 import { type Resolver, send } from "../src/transport.ts";
+
+/** The operator's policy at its plainest, checking the addresses a test's admitted URL reaches. */
+const anyPublic = policyOf(policySettings.parse({ "allow-any-public": true }));
 
 let server: Server;
 let port = 0;
@@ -485,8 +489,10 @@ describe("outbound", () => {
 		const atOnce: Resolver = () => {
 			throw new Error("resolver");
 		};
-		expect(await failure(send(admitted, {}, limits, atOnce))).toBe("unavailable: unreachable");
-		expect(await failure(send(admitted, {}, limits, async () => atOnce("")))).toBe(
+		expect(await failure(send(admitted, {}, limits, atOnce, anyPublic))).toBe(
+			"unavailable: unreachable",
+		);
+		expect(await failure(send(admitted, {}, limits, async () => atOnce(""), anyPublic))).toBe(
 			"unavailable: unreachable",
 		);
 	});
@@ -518,7 +524,7 @@ describe("outbound", () => {
 			internal: false,
 		};
 		const limits = { maxBytes: 1000, timeoutMs: 1000 };
-		const answer = send(admitted, {}, limits, async () => ["127.0.0.1"]);
+		const answer = send(admitted, {}, limits, async () => ["127.0.0.1"], anyPublic);
 		expect(await failure(answer)).toBe("unavailable: unreachable");
 		raw.close();
 		// A TLS handshake record, naming the host, never plain text.

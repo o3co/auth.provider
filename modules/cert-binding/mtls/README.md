@@ -35,4 +35,4 @@
 - Revocation caches in the process, held by `pki`'s internal module `revocation`; nothing is stored.
 
 ## Depends on
-- `kernel`, `client-certificate`, `issuer`, `sender-binding`, `outbound`
+- `kernel`, `client-certificate`, `issuer`, `sender-binding`, `outbound`, `outbound-policy`

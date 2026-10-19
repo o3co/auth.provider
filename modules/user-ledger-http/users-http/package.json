@@ -13,6 +13,7 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/keys": "workspace:*",
 		"@mod/outbound": "workspace:*",
+		"@mod/outbound-policy": "workspace:*",
 		"@mod/url-setting": "workspace:*",
 		"@mod/users": "workspace:*",
 		"zod": "4.6.7"

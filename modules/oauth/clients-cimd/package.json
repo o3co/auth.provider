@@ -17,6 +17,7 @@
 		"@mod/issuer": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/outbound": "workspace:*",
+		"@mod/outbound-policy": "workspace:*",
 		"@mod/redirect-uris": "workspace:*",
 		"@mod/refresh": "workspace:*",
 		"zod": "4.6.7"

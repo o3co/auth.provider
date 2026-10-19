@@ -7,11 +7,11 @@ import { quietRuntime } from "@mod/kernel/testing";
 import {
 	type Narrower,
 	type Outbound,
-	type OutboundRefusals,
 	type OutboundRequest,
 	type OutboundResponse,
 	outbound,
 } from "@mod/outbound";
+import type { OutboundRefusals } from "@mod/outbound-policy";
 import { type AuthorizationStart, type CodeExchange, UpstreamRefused } from "@mod/upstreams";
 import { beforeAll, describe, expect, it } from "vitest";
 import { settingsOf } from "../src/settings.ts";

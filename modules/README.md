@@ -42,8 +42,10 @@ What each module contains is described by that module's contract card (each modu
 | What a module's check of a URL says, such as an outbound refusal | vocabulary | the module that checks |
 | Received values: a name's single value, and the names repeated | vocabulary | http |
 | Signing, verification, publishing public keys | contract | keys |
-| Outbound HTTP requests and the destination policy | contract / setting | outbound |
-| Fetching signed material (plain http from named hosts, its size cap) | contract / setting | outbound |
+| Sending outbound HTTP requests, and the operator's section `outbound` | contract / setting | outbound |
+| Where outbound requests may go: the destination policy, its boot questions and host lists | contract / setting | outbound-policy |
+| Fetching signed material | contract | outbound |
+| Which signed material is admitted (plain http from the named hosts) and its size cap | contract / setting | outbound-policy |
 | Which destinations a feature reaches | setting | the module that sends the request |
 | Rate limiting, lockout | contract | rate-limit |
 | Limiting attempts per source on a route | policy | rate-limit |

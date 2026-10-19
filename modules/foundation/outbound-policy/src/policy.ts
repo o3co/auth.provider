@@ -1,12 +1,17 @@
 import { BlockList, isIP } from "node:net";
 import {
+	type Admitted,
 	type CredentialRefusal,
 	DestinationRefused,
+	type Limits,
 	type Narrower,
+	type Policy,
 	type RefusalReason,
 } from "./contract.ts";
+import type { PolicySettings } from "./settings.ts";
 
-export interface Policy {
+/** The operator's rules, as read from the settings. */
+export interface Rules {
 	readonly allow: readonly string[];
 	/** Any public address is reached, whatever `allow` names. */
 	readonly anyPublic: boolean;
@@ -14,17 +19,6 @@ export interface Policy {
 	readonly plainLoopback: readonly string[];
 	/** The hosts an operator's own URL may reach at a private address. */
 	readonly internal: readonly string[];
-}
-
-export interface Admitted {
-	readonly url: URL;
-	readonly host: string;
-	readonly port: number;
-	readonly plain: boolean;
-	/** Reached at loopback addresses alone, as a named plain pair. */
-	readonly loopback: boolean;
-	/** The caller's URL is the operator's and `internal` lists its host: private addresses are reached. */
-	readonly internal: boolean;
 }
 
 /** Ports the Fetch standard calls bad, and port 0. */
@@ -102,7 +96,7 @@ function carried(address: string): string | undefined {
 	return [high >> 8, high & 255, low >> 8, low & 255].join(".");
 }
 
-export const unbracketed = (host: string) => host.replace(/^\[(.*)\]$/, "$1");
+const unbracketed = (host: string) => host.replace(/^\[(.*)\]$/, "$1");
 
 /**
  * One spelling for a host, so allow, deny and a caller's hosts compare alike: lowercase, punycode,
@@ -192,7 +186,7 @@ export function withinHosts(raw: string, hosts: readonly string[]): boolean {
 /** Checks a URL before any name is resolved; `signed` material takes plain http at the caller's hosts. */
 export function admitUrl(
 	raw: string,
-	policy: Policy,
+	policy: Rules,
 	narrower: Narrower = {},
 	signed = false,
 ): Admitted {
@@ -238,10 +232,11 @@ function refusing(reach: Pick<Admitted, "loopback" | "internal">): (address: str
 export function admitAddresses(
 	addresses: readonly string[],
 	reach: Pick<Admitted, "loopback" | "internal">,
-): void {
+): readonly string[] {
 	if (addresses.length === 0 || addresses.some(refusing(reach))) {
 		throw new DestinationRefused("special-address");
 	}
+	return addresses;
 }
 
 /**
@@ -251,7 +246,7 @@ export function admitAddresses(
 export function remedyOf(
 	reason: RefusalReason,
 	raw: string,
-	policy: Pick<Policy, "allow" | "anyPublic">,
+	policy: Pick<Rules, "allow" | "anyPublic">,
 	narrower: Narrower = {},
 ): string {
 	const url = URL.parse(raw);
@@ -297,4 +292,52 @@ export function credentialRefusal(
 		url?.protocol === "https:" || (url?.protocol === "http:" && named(url));
 	if (!parsed.every(sent)) return "scheme";
 	return new Set(parsed.map((url) => url?.origin)).size > 1 ? "origins" : undefined;
+}
+
+/** A narrower's number, which only a caller's mistake makes other than positive and finite. */
+const narrowing = (value: number | undefined): number => {
+	if (value === undefined) return Number.POSITIVE_INFINITY;
+	if (value > 0 && Number.isFinite(value)) return value;
+	throw new RangeError("outbound: a narrower's numbers are positive and finite");
+};
+
+/** The operator's destination policy and caps, as the settings give them, for sending and for boot alike. */
+export function policyOf(settings: PolicySettings): Policy {
+	const rules: Rules = {
+		allow: settings.allow,
+		anyPublic: settings["allow-any-public"],
+		deny: settings.deny,
+		plainLoopback: settings["plain-loopback"],
+		internal: settings["internal-hosts"],
+	};
+	const limitsOf = (narrower: Narrower = {}, signed = false): Limits => ({
+		maxBytes: Math.min(
+			settings[signed ? "signed-max-response-size" : "max-response-size"],
+			narrowing(narrower.maxBytes),
+		),
+		timeoutMs: Math.min(settings.timeout, narrowing(narrower.timeoutMs)),
+	});
+	/** Why the policy refuses the URL, or undefined when it lets it through; no name is resolved. */
+	const refusalOf = (url: string, narrower: Narrower): RefusalReason | undefined => {
+		try {
+			const admitted = admitUrl(url, rules, narrower, false);
+			// An address written in the URL is checked now; a name's, once resolved, when sent.
+			if (isIP(admitted.host) !== 0) admitAddresses([admitted.host], admitted);
+			return undefined;
+		} catch (error) {
+			if (error instanceof DestinationRefused) return error.reason;
+			throw error;
+		}
+	};
+	return {
+		admit: (url, narrower = {}, signed = false) => admitUrl(url, rules, narrower, signed),
+		admitAddresses,
+		explain: (url, narrower = {}) => {
+			const reason = refusalOf(url, narrower);
+			return reason && `${reason}: ${remedyOf(reason, url, rules, narrower)}`;
+		},
+		credentialRefusal: (urls) => credentialRefusal(urls, rules.plainLoopback),
+		listed,
+		limitsOf,
+	};
 }

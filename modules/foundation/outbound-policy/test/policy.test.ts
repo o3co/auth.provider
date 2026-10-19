@@ -7,10 +7,10 @@ import {
 	isListEntry,
 	listed,
 	normalized,
-	type Policy,
+	type Rules,
 } from "../src/policy.ts";
 
-const open: Policy = { allow: [], anyPublic: true, deny: [], plainLoopback: [], internal: [] };
+const open: Rules = { allow: [], anyPublic: true, deny: [], plainLoopback: [], internal: [] };
 const reasonOf = (run: () => unknown): RefusalReason | "admitted" => {
 	try {
 		run();
@@ -21,12 +21,8 @@ const reasonOf = (run: () => unknown): RefusalReason | "admitted" => {
 	}
 };
 /** How a URL is admitted under `open` changed as given, narrowed to `hosts` where named. */
-const url = (
-	raw: string,
-	policy: Partial<Policy> = {},
-	hosts?: readonly string[],
-	signed = false,
-) => reasonOf(() => admitUrl(raw, { ...open, ...policy }, hosts ? { hosts } : {}, signed));
+const url = (raw: string, policy: Partial<Rules> = {}, hosts?: readonly string[], signed = false) =>
+	reasonOf(() => admitUrl(raw, { ...open, ...policy }, hosts ? { hosts } : {}, signed));
 
 describe("admitUrl", () => {
 	it("admits https to any host when any public address is allowed, at its port", () => {
@@ -135,7 +131,7 @@ describe("admitUrl", () => {
 });
 
 describe("admitUrl for signed material", () => {
-	const signed = (raw: string, policy: Partial<Policy>, hosts: readonly string[] | undefined) =>
+	const signed = (raw: string, policy: Partial<Rules>, hosts: readonly string[] | undefined) =>
 		url(raw, policy, hosts, true);
 
 	it("reaches plain http at the caller's hosts alone, at public addresses", () => {

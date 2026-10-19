@@ -2,7 +2,7 @@ import type { ClientSource } from "@mod/clients";
 import { codeGrantType } from "@mod/code-grant";
 import { composedGrants } from "@mod/grants";
 import type { BuildContext } from "@mod/kernel";
-import { withinHosts } from "@mod/outbound";
+import { withinHosts } from "@mod/outbound-policy";
 import { documentUrl } from "./document/document.ts";
 import { readingOver } from "./document/reading.ts";
 import { fetchingOver } from "./fetching/fetching.ts";

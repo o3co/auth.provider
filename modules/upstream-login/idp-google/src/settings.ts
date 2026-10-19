@@ -1,5 +1,5 @@
 import { setting } from "@mod/kernel";
-import { destinationRefusal, type OutboundRefusals } from "@mod/outbound";
+import { destinationRefusal, type OutboundRefusals } from "@mod/outbound-policy";
 import { clientSetting, endpointSetting as endpoint } from "@mod/upstream-client";
 import { urlsChecked } from "@mod/url-setting";
 import { z } from "zod";

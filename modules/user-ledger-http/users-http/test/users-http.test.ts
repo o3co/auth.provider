@@ -10,8 +10,9 @@ import {
 	kernelConfig,
 	type Runtime,
 } from "@mod/kernel";
-import { credentialPolicy, type Narrower, outbound, outboundRefusals } from "@mod/outbound";
+import { type Narrower, outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
+import { credentialPolicy, outboundRefusals } from "@mod/outbound-policy";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Ledger, ledgers, userAttribute, users } from "@mod/users";
 import usersModule from "@mod/users/module";

@@ -1,37 +1,26 @@
 import { isIP } from "node:net";
-import { contract, defineModule, setting } from "@mod/kernel";
-import { z } from "zod";
+import { contract, defineModule } from "@mod/kernel";
 import {
 	type CredentialPolicy,
 	credentialPolicy,
 	DestinationRefused,
+	hostList,
 	type Narrower,
-	type Outbound,
 	type OutboundRefusals,
+	outboundRefusals,
+	policyOf,
+	policySettings,
+} from "@mod/outbound-policy";
+import { z } from "zod";
+import {
+	type Outbound,
 	type OutboundRequest,
 	OutboundUnavailable,
 	outbound,
-	outboundRefusals,
-	type RefusalReason,
 	type SignedOutbound,
 	signedOutbound,
 } from "./contract.ts";
-import {
-	admitAddresses,
-	admitUrl,
-	credentialRefusal,
-	isHostEntry,
-	isListEntry,
-	isPair,
-	listed,
-	remedyOf,
-} from "./policy.ts";
 import { type Resolver, type Route, send, systemResolver, type Trust } from "./transport.ts";
-
-const hostEntries = z.array(z.string().refine(isHostEntry, "not a host")).prefault([]);
-const listEntries = z
-	.array(z.string().refine(isListEntry, "not a host, or a name led by a dot"))
-	.prefault([]);
 
 /** An http origin, as written and as read alike: no credentials, path, query or stray character. */
 const isProxyOrigin = (value: string) => {
@@ -47,41 +36,8 @@ const isProxyOrigin = (value: string) => {
 };
 const isLoopbackHost = (host: string) =>
 	host === "localhost" || host === "[::1]" || (isIP(host) === 4 && host.startsWith("127."));
-export const section = z
-	.strictObject({
-		allow: hostEntries.describe(
-			"The hosts requests may reach by name; `.name` covers the name and the names under it.",
-		),
-		"allow-any-public": z
-			.boolean()
-			.prefault(false)
-			.describe(
-				"Whether requests may reach any host at a public address, instead of naming hosts in `allow`.",
-			),
-		deny: hostEntries.describe(
-			"The hosts requests never reach, checked before `allow`; `.name` covers the name and the names under it.",
-		),
-		"plain-loopback": z
-			.array(z.string().refine(isPair, "not a host:port pair"))
-			.prefault([])
-			.describe("The `host:port` pairs plain http may reach at loopback addresses."),
-		"max-response-size": setting
-			.size()
-			.pipe(z.number().int().min(1).max(16_777_216))
-			.prefault("64KiB")
-			.describe("The largest response body a request takes, from 1B to 16MiB."),
-		"signed-max-response-size": setting
-			.size()
-			.pipe(z.number().int().min(1).max(16_777_216))
-			.prefault("1MiB")
-			.describe("The largest response body a request for signed material takes, from 1B to 16MiB."),
-		timeout: setting
-			.duration("ms")
-			.pipe(z.number().int().min(1).max(60_000))
-			.prefault("5s")
-			.describe(
-				"The one deadline covering a request's resolving, connecting, headers and body, from 1ms to 1m.",
-			),
+export const section = policySettings
+	.safeExtend({
 		"max-concurrent": z
 			.number()
 			.int()
@@ -113,15 +69,9 @@ export const section = z
 			.describe(
 				"The Proxy-Authorization value the proxy asks for, such as `Basic …`: printable ASCII on one line.",
 			),
-		"direct-hosts": listEntries.describe(
+		"direct-hosts": hostList.describe(
 			"The hosts reached directly while a proxy is set; `.name` covers the name and the names under it.",
 		),
-		"internal-hosts": listEntries.describe(
-			"The hosts a URL from the operator's own configuration may reach at a private address (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7); `.name` covers the name and the names under it.",
-		),
-	})
-	.refine((s) => !(s["allow-any-public"] && s.allow.length > 0), {
-		message: "allow-any-public reaches any public address; name hosts in allow or set it, not both",
 	})
 	.refine((s) => s["proxy-authorization"] === undefined || s.proxy !== undefined, {
 		message: "proxy-authorization is for a proxy: set proxy too",
@@ -132,13 +82,6 @@ const proxyVariables = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"].flatMap((name)
 	name,
 	name.toLowerCase(),
 ]);
-
-/** A narrower's number, which only a caller's mistake makes other than positive and finite. */
-const narrowing = (value: number | undefined): number => {
-	if (value === undefined) return Number.POSITIVE_INFINITY;
-	if (value > 0 && Number.isFinite(value)) return value;
-	throw new RangeError("outbound: a narrower's numbers are positive and finite");
-};
 
 /** Runs at most `max` at once; one more is unavailable at once, and a place is given back however a run ends. */
 function places(max: number) {
@@ -187,13 +130,7 @@ export function outboundOver(
 	trust: Trust = {},
 	deadlineOf: (ms: number) => AbortSignal = AbortSignal.timeout,
 ): Paths {
-	const policy = {
-		allow: settings.allow,
-		anyPublic: settings["allow-any-public"],
-		deny: settings.deny,
-		plainLoopback: settings["plain-loopback"],
-		internal: settings["internal-hosts"],
-	};
+	const policy = policyOf(settings);
 	const direct = settings["direct-hosts"];
 	const route: Route | undefined =
 		settings.proxy === undefined
@@ -203,7 +140,7 @@ export function outboundOver(
 					...(settings["proxy-authorization"]
 						? { authorization: settings["proxy-authorization"] }
 						: {}),
-					direct: (host) => listed(host, direct),
+					direct: (host) => policy.listed(host, direct),
 				};
 	const requestPlace = places(settings["max-concurrent"]);
 	const lookupPlace = places(settings["max-concurrent"]);
@@ -211,37 +148,18 @@ export function outboundOver(
 	// own, never a request's place, and no more run at once than requests may.
 	const bounded: Resolver = (host) => lookupPlace(() => resolve(host));
 	const go = async (url: string, request: OutboundRequest, narrower: Narrower, signed: boolean) => {
-		const limits = {
-			maxBytes: Math.min(
-				settings[signed ? "signed-max-response-size" : "max-response-size"],
-				narrowing(narrower.maxBytes),
-			),
-			timeoutMs: Math.min(settings.timeout, narrowing(narrower.timeoutMs)),
-		};
+		const limits = policy.limitsOf(narrower, signed);
 		const sent = sentRequest(request, signed);
-		const admitted = admitUrl(url, policy, narrower, signed);
-		return requestPlace(() => send(admitted, sent, limits, bounded, route, trust, deadlineOf));
-	};
-	/** Why the policy refuses the URL, or undefined when it lets it through; no name is resolved. */
-	const refusalOf = (url: string, narrower: Narrower = {}): RefusalReason | undefined => {
-		try {
-			const admitted = admitUrl(url, policy, narrower, false);
-			// An address written in the URL is checked now; a name's, once resolved, when sent.
-			if (isIP(admitted.host) !== 0) admitAddresses([admitted.host], admitted);
-			return undefined;
-		} catch (error) {
-			if (error instanceof DestinationRefused) return error.reason;
-			throw error;
-		}
+		const admitted = policy.admit(url, narrower, signed);
+		return requestPlace(() =>
+			send(admitted, sent, limits, bounded, policy, route, trust, deadlineOf),
+		);
 	};
 	return {
 		fetch: (url, request = {}, narrower = {}) => go(url, request, narrower, false),
 		fetchSigned: (url, request, narrower) => go(url, request, narrower, true),
-		credentialRefusalOf: (urls) => credentialRefusal(urls, policy.plainLoopback),
-		explained: (url, narrower = {}) => {
-			const reason = refusalOf(url, narrower);
-			return reason && `${reason}: ${remedyOf(reason, url, policy, narrower)}`;
-		},
+		credentialRefusalOf: policy.credentialRefusal,
+		explained: policy.explain,
 	};
 }
 

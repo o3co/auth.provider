@@ -27,4 +27,4 @@
 - None, so it is safe on many instances.
 
 ## Depends on
-- `kernel`, `audit`, `url-setting`, `outbound`
+- `kernel`, `audit`, `url-setting`, `outbound`, `outbound-policy`

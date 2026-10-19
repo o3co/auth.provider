@@ -1,6 +1,7 @@
 import { signerKeys } from "@mod/jwt-bearer";
 import { defineModule } from "@mod/kernel";
-import { credentialPolicy, destinationRefusal, outbound, outboundRefusals } from "@mod/outbound";
+import { outbound } from "@mod/outbound";
+import { credentialPolicy, destinationRefusal, outboundRefusals } from "@mod/outbound-policy";
 import { keysAt } from "./lookup.ts";
 import { section } from "./section.ts";
 

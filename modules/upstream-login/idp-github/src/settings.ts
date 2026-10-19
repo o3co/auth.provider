@@ -1,4 +1,4 @@
-import { destinationRefusal, type OutboundRefusals } from "@mod/outbound";
+import { destinationRefusal, type OutboundRefusals } from "@mod/outbound-policy";
 import {
 	clientSetting,
 	endpointSetting as endpoint,

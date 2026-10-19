@@ -2,7 +2,7 @@ import { authMethods, metadataSections } from "@mod/clients";
 import { externalJwt } from "@mod/external-jwt";
 import { issuer } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
-import { outboundRefusals } from "@mod/outbound";
+import { outboundRefusals } from "@mod/outbound-policy";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { clientKeysUnder } from "./keys.ts";
 import { assertionMethod } from "./method.ts";

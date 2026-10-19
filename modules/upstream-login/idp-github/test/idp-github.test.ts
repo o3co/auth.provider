@@ -1,11 +1,6 @@
 import { isUnavailable, Unavailable } from "@mod/kernel";
-import type {
-	Narrower,
-	Outbound,
-	OutboundRefusals,
-	OutboundRequest,
-	OutboundResponse,
-} from "@mod/outbound";
+import type { Narrower, Outbound, OutboundRequest, OutboundResponse } from "@mod/outbound";
+import type { OutboundRefusals } from "@mod/outbound-policy";
 import { type AuthorizationStart, type CodeExchange, UpstreamRefused } from "@mod/upstreams";
 import { describe, expect, it } from "vitest";
 import { settingsOf } from "../src/settings.ts";

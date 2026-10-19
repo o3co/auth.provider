@@ -1,6 +1,7 @@
 import { auditReceivers } from "@mod/audit";
 import { defineModule } from "@mod/kernel";
-import { credentialPolicy, destinationRefusal, outbound, outboundRefusals } from "@mod/outbound";
+import { outbound } from "@mod/outbound";
+import { credentialPolicy, destinationRefusal, outboundRefusals } from "@mod/outbound-policy";
 import { section } from "./section.ts";
 
 /** The URL is the operator's own, so a collector at a host in `internal-hosts` is reached at a private address. */
