@@ -23,7 +23,7 @@ import usersModule from "@mod/users/module";
 import { memoryUsersStores, usersConfig } from "@mod/users/testing";
 import oidc from "../src/module.ts";
 
-/** Sessions known by handle, entered as given, asked by the entry or the context alike. */
+/** Sessions known by handle, entered as given. */
 export const sessionsOf = (byHandle: Record<string, AuthContext> = {}) =>
 	defineModule({ name: "sessions" }, (m) => [
 		m.provide(sessions).by(() =>
@@ -34,7 +34,6 @@ export const sessionsOf = (byHandle: Record<string, AuthContext> = {}) =>
 						? { kind: "absent" }
 						: { kind: "entered", session: { id: handle, context }, endsAt: 1 };
 				},
-				openContext: async (handle) => byHandle[handle],
 			}),
 		),
 	]);
