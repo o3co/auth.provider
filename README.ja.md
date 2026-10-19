@@ -153,7 +153,7 @@ curl -s -o /dev/null -w '%{redirect_url}\n' -b jar "$AUTH"
 curl -s http://127.0.0.1:8080/oauth/token -d grant_type=authorization_code -d client_id=my-web-app --data-urlencode redirect_uri=http://127.0.0.1:3000/callback -d code=<code> -d code_verifier="$V"
 ```
 
-3 つ目のリクエストは、コード付きの `http://127.0.0.1:3000/callback` へのリダイレクトを出力します。そのコードを最後のリクエストの `<code>` に入れると、トークンが返ります。各リクエストと答えは[ログインページの手引き](docs/login-page.md)にあります。
+3 つ目のリクエストは、コード付きの `http://127.0.0.1:3000/callback` へのリダイレクトを出力します。そのコードを最後のリクエストの `<code>` に入れると、トークンが返ります。各リクエストと答えは[ログインページの手引き](docs/login-page.md)にあります。第 2 要素 (TOTP) までの続きは[レシピ](docs/recipe-mfa-page.md)にあり、各リクエストと答えは動いているアプリから記録しています。
 
 ## パターンの選択と機能の追加
 

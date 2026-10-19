@@ -1,0 +1,26 @@
+{
+	"name": "@mod/conformance-recipes",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "verification",
+	"exports": {
+		".": "./src/main.ts"
+	},
+	"scripts": {
+		"examples": "RECIPES_WRITE=1 vitest run --root ../../.. --config vitest.integration.config.ts modules/tooling/conformance-recipes"
+	},
+	"dependencies": {
+		"@mod/conformance": "workspace:*",
+		"@mod/create-app": "workspace:*",
+		"vitest": "5.0.4"
+	},
+	"devDependencies": {
+		"@mod/conformance-code": "workspace:*",
+		"@mod/conformance-identity": "workspace:*",
+		"@mod/conformance-keys": "workspace:*",
+		"@mod/conformance-oauth": "workspace:*",
+		"@mod/conformance-second-factor": "workspace:*",
+		"@mod/users-http": "workspace:*"
+	}
+}
