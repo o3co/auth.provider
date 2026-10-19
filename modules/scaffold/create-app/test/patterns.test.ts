@@ -121,6 +121,9 @@ describe.each(named)("the pattern %s", (name) => {
 			/`http\.public-origin` to `http:\/\/localhost:8080` and `http\.insecure-origin` to `true`/,
 		);
 		expect(readme).toContain("`create-auth-provider --list`");
+		expect(readme).toMatch(
+			/A first login, step by step: https:\/\/github\.com\/o3co\/auth\.provider\/blob\/v[^/]+\/docs\/recipe-first-login\.md/,
+		);
 	});
 
 	it("points its README at the Deployment section of each composed module whose card has one", async () => {
