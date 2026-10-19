@@ -1,7 +1,14 @@
 import { factors } from "@mod/mfa";
 import { revocations } from "@mod/subject-revocation";
 import { describe, expect, it } from "vitest";
-import { afterNextChange, beforeNextChange, clock, factorsDown, serve } from "./harness.ts";
+import {
+	afterNextChange,
+	beforeNextChange,
+	clock,
+	factorsDown,
+	onNextRead,
+	serve,
+} from "./harness.ts";
 
 const posts = [
 	"/session/mfa/factors/rename",
@@ -180,6 +187,26 @@ describe("a revocation while factors are managed", () => {
 		};
 		const slow = await s.call("POST", "/session/mfa/recovery-codes");
 		expect([slow.status, slow.body.error, slow.body.recovery_codes]).toEqual([
+			401,
+			"login_required",
+			undefined,
+		]);
+	});
+
+	it("hands no codes once a revocation completed while the last entry waited on its requirement", async () => {
+		const s = await serve();
+		await s.bindCode("nia");
+		await s.signIn("nia", { proved: true });
+		clock.shift += 1000;
+		// Once the codes are written, the next read is the requirement's, in the last entry before they go out.
+		afterNextChange.run = async () => {
+			onNextRead.run = async () => {
+				await s.app.get(revocations).record("nia");
+				clock.shift += 1000;
+			};
+		};
+		const answer = await s.call("POST", "/session/mfa/recovery-codes");
+		expect([answer.status, answer.body.error, answer.body.recovery_codes]).toEqual([
 			401,
 			"login_required",
 			undefined,
