@@ -106,6 +106,39 @@ describe("entry requirements", () => {
 		);
 		expect(asked).toEqual(["a", "b"]);
 	});
+
+	it("let nobody in whose subject is revoked while they are asked, by the stand-in", async () => {
+		const gate: { open?: () => void; reached?: () => void } = {};
+		const reached = new Promise<void>((resolve) => {
+			gate.reached = resolve;
+		});
+		const opened = new Promise<void>((resolve) => {
+			gate.open = resolve;
+		});
+		const waiting = defineModule({ name: "waiting" }, (m) => [
+			m.contribute(entryRequirements).by(() => ({
+				name: "waiting",
+				judges: ["use"],
+				admits: async () => {
+					gate.reached?.();
+					await opened;
+					return { kind: "admit" };
+				},
+			})),
+		]);
+		const place = await placeOver([waiting]);
+		const done = await place.sessions.complete(place.request(), {
+			subject: "alice",
+			amr: ["pwd"],
+			authenticatedAt: place.now(),
+		});
+		place.advance(60_000);
+		const entering = place.sessions.enterFor(place.request(done.cookies), "use");
+		await reached;
+		await place.revokeSubject("alice");
+		gate.open?.();
+		expect(await entering).toEqual({ kind: "absent" });
+	});
 });
 
 describe("participants", () => {

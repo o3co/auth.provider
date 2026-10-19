@@ -18,6 +18,7 @@ Internal module of `session-lifecycle`: a session's record, its cookie, and its 
 - `lifecycleOver`: the stores, subject revocation, participants, requirements, cookies, clock, randomness, log, lifetime, sweep interval and credentials window → the steps below.
 - The handle a well-formed session cookie opens, and the cookie's secret.
 - The record of a live session: open, within the lifetime in force, and after the subject's revocation boundary.
+- An entry asks again whether the session is live once its requirements have answered, last before it answers, so a close or a revocation that came meanwhile holds.
 - Entry at a level.
 - A read that finds an open record ended by the lifetime in force closes it there, calling no participants; a close that finds one calls them, as any close does.
 - `open` (as `complete`), `close` (as `close`) and `closeIn` (as `closeRequest`).

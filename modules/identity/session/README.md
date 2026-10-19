@@ -13,7 +13,7 @@
 ## Offers
 - `enter`: request → session or none, throwing when unavailable; `entryOf` answers by handle the entry its cookie would get, at `use` unless another level is asked.
 - `complete`: login fact → session and cookie at `kernel`'s time; the carried session is closed first, and the login is unavailable when that close cannot be added to the closings, or the new session cannot be listed under its subject.
-- `enterFor`: request and level (use / none / credentials) → entered (with its end: the opening plus the lifetime in force), absent, or short with the requirement's name and its answer, passed on unread.
+- `enterFor`: request and level (use / none / credentials) → entered (with its end: the opening plus the lifetime in force), absent, or short with the requirement's name and its answer, passed on unread; a session closed or revoked while the requirements are asked is absent.
 - Extension point `entryRequirements`: context and level → admit or short, with the levels it `judges`; asked in name order, and with "use" by `enter` and the checks by handle. Where none judges `credentials`, it needs a sign-in at a known time within 300 s by default, else short `session` `{"error":"step_up_required"}`.
 - `refusedEntry`: an entry that did not enter → its answer, absent `401` `{"error":"login_required"}`, short `403` with the requirement's answer, both kept out of caches.
 - `raise`: request and amr → the raised session and a new cookie, or none; it adds the amr and keeps the raise time (`kernel`'s clock).
