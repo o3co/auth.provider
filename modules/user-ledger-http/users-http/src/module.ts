@@ -1,6 +1,6 @@
 import { deepFreeze, defineModule, setting } from "@mod/kernel";
 import { bearerToken } from "@mod/keys";
-import { credentialPolicy, outbound, outboundPolicy } from "@mod/outbound";
+import { credentialPolicy, outbound, outboundRefusals } from "@mod/outbound";
 import { urlSetting } from "@mod/url-setting";
 import { type Ledger, ledgers } from "@mod/users";
 import { z } from "zod";
@@ -69,14 +69,14 @@ export default defineModule({ name: "users-http", section, replicaSafe: true }, 
 				: (await c.get(credentialPolicy)).refusalOf(urls);
 		// More than one origin first, as the section reads; a URL's own refusal is more precise than its scheme.
 		if (refused === "origins") return c.refuse("users-http.credential", credentialRefusals.origins);
-		const policy = await c.get(outboundPolicy);
+		const refusals = await c.get(outboundRefusals);
 		for (const key of urlKeys) {
 			const url = c.section[key];
-			const refusal = url === undefined ? undefined : policy.refusalOf(url, narrowerOf(url));
-			if (refusal !== undefined) {
+			const explained = url === undefined ? undefined : refusals.explained(url, narrowerOf(url));
+			if (explained !== undefined) {
 				return c.refuse(
 					`users-http.${key}`,
-					`outbound's destination policy refuses it: ${refusal}`,
+					`outbound's destination policy refuses it: ${explained}`,
 				);
 			}
 		}
