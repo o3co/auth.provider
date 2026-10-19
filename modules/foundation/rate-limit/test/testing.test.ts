@@ -122,12 +122,14 @@ it("offers both per-source policies, answering as the real ones do, with no stor
 		m.contribute(routes).by(() => ({
 			method: "GET",
 			path: "/requests",
+			changesState: false,
 			uses: [use(requestsPerSource, { name: "test", window })],
 			handle: () => ({ status: 204 }),
 		})),
 		m.contribute(routes).by(() => ({
 			method: "GET",
 			path: "/attempts",
+			changesState: false,
 			uses: [use(attemptsPerSource, { name: "test", window })],
 			handle: () => ({ status: 204 }),
 		})),
