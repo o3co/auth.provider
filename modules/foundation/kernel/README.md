@@ -18,7 +18,12 @@
 - `every(intervalMs, task)`: runs `task(signal)` from start at a whole interval of ms from 1 to 2^31−1, never two at once; a failed run is logged and the next follows; stop aborts a running one and waits for it.
 - `Unavailable`: a dependency gave no answer, as distinct from a negative answer. `deepFreeze` freezes a value from outside once, to the leaves. `sameSecret` compares two secrets (strings as UTF-8, or bytes) in constant time when their byte lengths match, and answers false otherwise.
 - Runtime contracts: clock, randomness, and a log with one method per level (trace to fatal). Sinks come from `logSinks` (any number).
-- Section `kernel`: `deployment` (`single` or `multi`, no default), `logging.level` (a level or `silent`, default `info`) and `stop-deadline` (`1s` to `1h` in whole seconds, default `30s`; an orchestrator's grace period must be longer). `kernelSection` is its schema, with a description of each key for operators; the kernel reads the section through it as a module's is read. `kernelConfig` builds it, single unless told otherwise. `loadConfig` layers HOCON files, earlier ones first; `${...}` reaches environment variables and the same file only. A section is read as the HOCON library's typed getters read it: a string converts to the number or boolean its schema asks for, and one that does not, or a value configuration cannot hold, refuses boot. Keys of time and size are read through `setting`: written with their unit, read as a number of it.
+- Section `kernel`: `deployment` (`single` or `multi`, no default), `logging.level` (a level or `silent`, default `info`) and `stop-deadline` (`1s` to `1h` in whole seconds, default `30s`; an orchestrator's grace period must be longer).
+  - `kernelSection` is its schema, with a description of each key for operators; the kernel reads the section through it as a module's is read.
+  - `kernelConfig` builds it, single unless told otherwise.
+- `loadConfig` layers HOCON files, earlier ones first; `${...}` reaches environment variables and the same file only.
+  - A section is read as the HOCON library's typed getters read it: a string converts to the number or boolean its schema asks for, and one that does not, or a value configuration cannot hold, refuses boot.
+  - Keys of time and size are read through `setting`: written with their unit, read as a number of it.
 - `./testing`: a switch making an implementation's async calls unavailable (the next call, or named methods until restored), a module whose provision goes through one, a quiet runtime and a recording log.
 
 ## Invariants
