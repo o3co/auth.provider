@@ -1,16 +1,12 @@
 import { type Audit, declaredAudit } from "@mod/audit";
-import { applying, type HttpRequest, type HttpResponse, type Mark, noStore } from "@mod/http";
+import { applying, type HttpRequest, type HttpResponse, jsonAnswer, type Mark } from "@mod/http";
 import { isUnavailable, type Log } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
 import events from "./audit-events.ts";
 import { attemptsPerSource, type RateLimit, requestsPerSource, type Window } from "./contract.ts";
 import { sourceKey } from "./source.ts";
 
-const unavailable: HttpResponse = {
-	status: 503,
-	headers: noStore,
-	body: { json: { error: "service_unavailable" } },
-};
+const unavailable: HttpResponse = jsonAnswer(503, { error: "service_unavailable" });
 
 interface Told {
 	readonly log: Log;
@@ -53,11 +49,7 @@ function perSource(
 		}
 		if (hit.kind === "allowed") return "pass" as const;
 		const seconds = String(Math.ceil(hit.retryAfterMs / 1000));
-		return {
-			status: 429,
-			headers: { ...noStore, "retry-after": seconds },
-			body: { json: { error } },
-		};
+		return jsonAnswer(429, { error }, { headers: { "retry-after": seconds } });
 	};
 }
 

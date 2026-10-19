@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { type HttpRequest, type HttpResponse, noStore } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import { expired, type Ring } from "./ring.ts";
 
 const cacheControl = "public, max-age=300";
@@ -11,7 +11,7 @@ function etagMatches(header: string | undefined, etag: string): boolean {
 export function jwksResponse(ring: Ring, now: number, request: HttpRequest): HttpResponse {
 	const published = ring.publicKeys.filter((k) => !expired(k, () => now));
 	if (published.length === 0) {
-		return { status: 404, headers: noStore, body: { json: { error: "jwks_not_published" } } };
+		return jsonAnswer(404, { error: "jwks_not_published" });
 	}
 	const body = JSON.stringify({
 		keys: published.map((k) => ({

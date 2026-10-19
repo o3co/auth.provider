@@ -1,42 +1,30 @@
 import { type Audit, declaredAudit } from "@mod/audit";
 import { clientAllowance } from "@mod/client-allowance";
 import type { Clients } from "@mod/clients";
-import { type HttpRequest, type HttpResponse, noStore, type Route } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer, type Route } from "@mod/http";
 import { determinedSource } from "@mod/request-source";
 import { authenticateClient, oauthError } from "@mod/token-endpoint";
 import type { AccessCheck, Tokens } from "@mod/tokens";
 import events from "./audit-events.ts";
 
-const inactive: HttpResponse = {
-	status: 200,
-	headers: noStore,
-	body: { json: { active: false } },
-};
+const inactive: HttpResponse = jsonAnswer(200, { active: false });
 
 type Valid = Extract<AccessCheck, { kind: "valid" }>;
 
 /** RFC 7662 §2.2 members for an active token; `cnf` only for a bound one. */
 function activeAnswer(issuer: string, checked: Valid): HttpResponse {
 	const { grant } = checked;
-	return {
-		status: 200,
-		headers: noStore,
-		body: {
-			json: {
-				active: true,
-				iss: issuer,
-				sub: grant.subject,
-				client_id: grant.issuedTo,
-				aud: grant.audience.length === 1 ? grant.audience[0] : grant.audience,
-				...(grant.scope.length > 0 ? { scope: grant.scope.join(" ") } : {}),
-				exp: Math.floor(checked.expiresAt / 1000),
-				token_type: checked.tokenType,
-				...(checked.binding
-					? { cnf: { [checked.binding.member]: checked.binding.confirmation } }
-					: {}),
-			},
-		},
-	};
+	return jsonAnswer(200, {
+		active: true,
+		iss: issuer,
+		sub: grant.subject,
+		client_id: grant.issuedTo,
+		aud: grant.audience.length === 1 ? grant.audience[0] : grant.audience,
+		...(grant.scope.length > 0 ? { scope: grant.scope.join(" ") } : {}),
+		exp: Math.floor(checked.expiresAt / 1000),
+		token_type: checked.tokenType,
+		...(checked.binding ? { cnf: { [checked.binding.member]: checked.binding.confirmation } } : {}),
+	});
 }
 
 /** The introspection route's handler and its answer to Unavailable, which records it. */

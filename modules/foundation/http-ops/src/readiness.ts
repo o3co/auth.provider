@@ -1,4 +1,4 @@
-import { noStore, type Route } from "@mod/http";
+import { jsonAnswer, type Route } from "@mod/http";
 import type { Clock, ReadinessReport } from "@mod/kernel";
 import { type Gauge, gauge } from "@mod/metrics";
 
@@ -50,11 +50,7 @@ export function readyz(shared: SharedReadiness): Route {
 		takes: ["none"],
 		handle: async () => {
 			const { answer } = await shared();
-			return {
-				status: answer === "ready" ? 200 : 503,
-				headers: noStore,
-				body: { json: { status: answer } },
-			};
+			return jsonAnswer(answer === "ready" ? 200 : 503, { status: answer });
 		},
 	};
 }
