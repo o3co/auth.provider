@@ -1,10 +1,9 @@
 import { clientAllowance } from "@mod/client-allowance";
 import type { Client } from "@mod/clients";
-import { codeGrantType } from "@mod/code-grant";
+import { challengeShape, codeGrantType } from "@mod/code-grant";
 import { targets } from "@mod/grants";
 import type { BuildContext } from "@mod/kernel";
 import { type Decision, recorded, refusal } from "../decision.ts";
-import { challengeShape } from "./codes.ts";
 
 const prompts = new Set(["none", "login", "consent", "select_account"]);
 
