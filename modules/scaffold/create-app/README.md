@@ -12,6 +12,7 @@
 ## Not here
 - What each module's configuration means, and its fragment (`config.example` beside its package.json): each module's.
 - What the full template and a selection compose: `combinations`.
+- The local layer that boots a generated app for a test or a conformance run: `trial`.
 
 ## Offers
 - `generate`, and the `create-app` command around it (also `run`, the command on given arguments, answering its exit status, for a package that runs it): packages listed make their app; none makes a pattern's, `--pattern` naming it (default `full`), `--add` naming features to add, `--axis <owner>=<module>` an axis's choice and `--<group>` a group's features, comma-separated (not for full).
@@ -19,13 +20,6 @@
 - The configuration reference and each package's `reference.conf` (its section's defaults as HOCON, for reading only), from each section's schema and fragment, written by `pnpm --filter @mod/create-app run configuration`; their tests check each key's description and default, how time and size are written, and that no `.default()` is left (internal module `references`).
 - The audit event reference beside it: each module's events as its `./audit-events` declares them through `audit`, written by the same command and held to the committed file the same way.
 - A kind two modules declare must be declared alike in the audit event reference.
-- `trialSettings(target, { redisUrl, port?, deployment?, leave?, allow?, plainLoopback?, clients? })`: for a generated app, by the modules its manifest depends on, an environment and a local layer that boot it for a test or a conformance run.
-  - Its hosts are under `.invalid` and its keys made fresh, never a deployment's values.
-  - The sections in `leave` get neither a variable nor a block.
-  - The lists given (`allow`, `plainLoopback`, `clients`) join the trial's one block for each.
-  - `mfa` is optional where composed.
-  - `webauthn`'s relying party is the trial's public origin.
-  - Where `subject-revocation-http` is composed, `http` trusts one proxy no request comes through: the module boots, and every source stays as sent.
 - For full and a pattern: the project's manifest and app, the configuration file, the local layer's and the environment's examples, a Dockerfile, a `.dockerignore` and a README; a pattern's README opens with its use and carries its card.
 
 ## Invariants
@@ -48,7 +42,7 @@
 - Writes the target only; reads the workspace's package list, and the fragments of the modules the full template composes.
 
 ## Depends on
-- `kernel`, `combinations` (the modules it assembles become dependencies of the output); the HOCON library, to read the fragments.
+- `kernel`, `combinations` (the modules it assembles become dependencies of the output), `trial` (the references assemble on its layer); the HOCON library, to read the fragments.
 
 ## Vocabulary
 - output: a project created from the template.

@@ -12,8 +12,8 @@ Internal module of `conformance`: the new system's driver, composed from a scene
 - Does not rely on logs to tell that start-up is done.
 - The driver picks the port and waits until it is reachable over HTTP.
 - Composes `audit` with `audit-http` (through `outbound`) into every scene, sending each event to the `audit` sink, named in outbound's `allow` and as a plain-http loopback destination.
-- A pattern's app boots on `create-app`'s trial settings for the keys each scene leaves unset, but none in a section a set-up marks `whole`.
-- A scene's `fallback` sections give way to the trial settings.
+- A pattern's app boots on `trial`'s layer for the keys each scene leaves unset, but none in a section a set-up marks `whole`.
+- A scene's `fallback` sections give way to the trial layer.
 - Outbound's host lists join the trial's.
 - The scene's registered clients join the trial's one clients list.
 - A scene that sets the public origin sets the issuer there too.
@@ -26,4 +26,4 @@ Internal module of `conformance`: the new system's driver, composed from a scene
 - On a pattern's app, each scene left out or failed is a line in the file `CONFORMANCE_NOT_IN_PATTERN_FILE` names, when set, which `patterns` reads.
 
 ## Depends on
-- The package's area contract and `launch`, the `audit` sink, the `patterns` names, and the fake relay; `create-app`, `combinations`.
+- The package's area contract and `launch`, the `audit` sink, the `patterns` names, and the fake relay; `create-app`, `trial`, `combinations`.

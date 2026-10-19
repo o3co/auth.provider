@@ -22,9 +22,12 @@ import {
 	readmeOf,
 } from "./publish.ts";
 
-/** A file the build leaves out: tests, test tools, and the TypeScript it compiles instead. */
+/** A file the build leaves out: tests, test tools (a trial file among them), and the TypeScript it compiles instead. */
 const leftOut = (path: string) =>
-	/(^|\/)(node_modules|test)(\/|$)/.test(path) || path === "package.json" || path.endsWith(".ts");
+	/(^|\/)(node_modules|test)(\/|$)/.test(path) ||
+	path === "package.json" ||
+	path === "trial.conf" ||
+	path.endsWith(".ts");
 
 /** How the members compile: as the workspace checks them, emitting JS and declarations. */
 const compiling = (

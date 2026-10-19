@@ -3,4 +3,3 @@ export { type FullPlan, generate, type ModulesPlan, type Plan } from "./generate
 export type { PatternPlan } from "./pattern.ts";
 export type { Choice } from "./patterns/pattern.ts";
 export { type PatternSummary, patterns } from "./patterns/patterns.ts";
-export { trialSettings } from "./trial.ts";

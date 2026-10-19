@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { baseEnv, freePort, launch } from "@mod/conformance";
-import { trialSettings } from "@mod/create-app";
+import { trialLayer } from "@mod/trial";
 import { afterAll, describe, expect, it } from "vitest";
 import { transcript, withBlocks } from "../src/main.ts";
 
@@ -144,13 +144,12 @@ describe("the recipe for a grant of your own, outside the repository", () => {
 			},
 		};
 		const port = await freePort();
-		const settings = await trialSettings(app, {
+		const local = await trialLayer(app, {
 			redisUrl: "redis://unused.invalid",
-			port,
 			leave: ["redis"],
-			clients: [client],
+			layer: `http.port = ${port}\nclients.registered += ${JSON.stringify(client)}`,
 		});
-		writeFileSync(join(app, "config", "local.conf"), settings.local);
+		writeFileSync(join(app, "config", "local.conf"), local);
 		const started = await launch({
 			command: process.execPath,
 			args: ["src/main.ts"],
@@ -158,7 +157,6 @@ describe("the recipe for a grant of your own, outside the repository", () => {
 			port,
 			env: {
 				...baseEnv(),
-				...settings.env,
 				APP_CONFIG: "config/local.conf,config/application.conf",
 			},
 		});

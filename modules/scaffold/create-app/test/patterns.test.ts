@@ -68,10 +68,10 @@ async function freePort(): Promise<number> {
 }
 
 /** Runs the app until it says it listens, then stops it by SIGTERM: its exit code and output. */
-async function startsAndStops(target: string, env: Record<string, string>) {
+async function startsAndStops(target: string) {
 	const child = spawn(process.execPath, ["src/main.ts"], {
 		cwd: target,
-		env: { ...env, APP_CONFIG: "config/local.conf,config/application.conf" },
+		env: { APP_CONFIG: "config/local.conf,config/application.conf" },
 	});
 	let output = "";
 	const exited = new Promise<number | null>((resolve) => child.once("exit", resolve));
@@ -145,11 +145,8 @@ describe.each(named)("the pattern %s", (name) => {
 		async () => {
 			const target = await linked(await generatedPattern(name));
 			// Nothing listens on port 1.
-			const env = await configured(target, {
-				deployment: "multi",
-				redisUrl: "redis://127.0.0.1:1",
-			});
-			const run = boot(target, "config/local.conf,config/application.conf", env);
+			await configured(target, { deployment: "multi", redisUrl: "redis://127.0.0.1:1" });
+			const run = boot(target, "config/local.conf,config/application.conf");
 			expect(run.refused, run.stderr).toEqual(["redis.url"]);
 		},
 	);
@@ -159,8 +156,8 @@ describe.each(named)("the pattern %s", (name) => {
 		async () => {
 			const target = await linked(await generatedPattern(name));
 			const port = await freePort();
-			const env = await configured(target, { deployment: "single", redisUrl: "", port });
-			const run = await startsAndStops(target, env);
+			await configured(target, { deployment: "single", redisUrl: "", port });
+			const run = await startsAndStops(target);
 			expect(run.output).toContain('"event":"http.listening"');
 			expect(run.code, run.output).toBe(0);
 		},

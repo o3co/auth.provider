@@ -1,7 +1,8 @@
 import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generate, type PatternPlan, trialSettings } from "../src/contract.ts";
+import { trialLayer } from "@mod/trial";
+import { generate, type PatternPlan } from "../src/contract.ts";
 import { workspacePackages } from "../src/project.ts";
 
 /** The workspace these tests generate from, and its package directories by name. */
@@ -58,12 +59,15 @@ export async function linked(target: string): Promise<string> {
 /** The full template, linked. */
 export const installed = async () => linked(await generated());
 
-/** Writes the trial local layer into the app and returns the trial environment, for this Redis and http port. */
+/** Writes trial's local layer into the app, for this deployment, Redis and http port. */
 export async function configured(
 	target: string,
 	settings: { deployment: "single" | "multi"; redisUrl: string; port?: number },
-): Promise<Record<string, string>> {
-	const { env, local } = await trialSettings(target, settings);
+): Promise<void> {
+	const layer = [
+		`kernel.deployment = ${settings.deployment}`,
+		...(settings.port ? [`http.port = ${settings.port}`] : []),
+	].join("\n");
+	const local = await trialLayer(target, { redisUrl: settings.redisUrl, layer });
 	await writeFile(join(target, "config", "local.conf"), local);
-	return env;
 }

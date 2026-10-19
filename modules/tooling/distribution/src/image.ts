@@ -3,7 +3,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { basename, join } from "node:path";
-import { trialSettings } from "@mod/create-app";
+import { trialLayer } from "@mod/trial";
 import { refusalsIn } from "./refused.ts";
 
 const docker = (args: readonly string[]) =>
@@ -93,29 +93,23 @@ export function images(
 		if (exposed.length !== 1 || !listens)
 			throw new Error(`${image} exposes ${exposed.length} ports, not one`);
 		const port = await freePort();
-		const { env, local } = await trialSettings(app, { redisUrl: "redis://127.0.0.1:1" });
+		const local = await trialLayer(app, { redisUrl: "redis://127.0.0.1:1" });
 		const conf = join(app, "config", "local.conf");
 		writeFileSync(conf, local);
 		const container = image.replace(":", "-");
-		// `-e NAME` takes the value from docker's own environment, where a multi-line key survives.
-		const child = spawn(
-			"docker",
-			[
-				"run",
-				"--rm",
-				"--name",
-				container,
-				"-p",
-				`127.0.0.1:${port}:${listens}`,
-				"-v",
-				`${conf}:/app/config/local.conf:ro`,
-				"-e",
-				"APP_CONFIG=config/local.conf,config/application.conf",
-				...Object.keys(env).flatMap((name) => ["-e", name]),
-				image,
-			],
-			{ env: { ...process.env, ...env } },
-		);
+		const child = spawn("docker", [
+			"run",
+			"--rm",
+			"--name",
+			container,
+			"-p",
+			`127.0.0.1:${port}:${listens}`,
+			"-v",
+			`${conf}:/app/config/local.conf:ro`,
+			"-e",
+			"APP_CONFIG=config/local.conf,config/application.conf",
+			image,
+		]);
 		let output = "";
 		child.stdout.on("data", (chunk) => {
 			output += chunk;
