@@ -6,7 +6,9 @@ import {
 	DestinationRefused,
 	hostList,
 	type Narrower,
+	type OutboundLimits,
 	type OutboundRefusals,
+	outboundLimits,
 	outboundRefusals,
 	policyOf,
 	policySettings,
@@ -102,6 +104,7 @@ interface Paths {
 	readonly fetchSigned: SignedOutbound["fetch"];
 	readonly explained: OutboundRefusals["explained"];
 	readonly credentialRefusalOf: CredentialPolicy["refusalOf"];
+	readonly limitsOf: OutboundLimits["of"];
 }
 
 /** One header value: printable ASCII on one line, no space at either end. */
@@ -160,6 +163,8 @@ export function outboundOver(
 		fetchSigned: (url, request, narrower) => go(url, request, narrower, true),
 		credentialRefusalOf: policy.credentialRefusal,
 		explained: policy.explain,
+		// The call `go` cuts a request by, for a plain request.
+		limitsOf: (narrower) => policy.limitsOf(narrower, false),
 	};
 }
 
@@ -191,4 +196,5 @@ export default defineModule({ name: "outbound", section, replicaSafe: true }, (m
 	m.provide(credentialPolicy).by(async (c) => ({
 		refusalOf: (await c.get(paths)).credentialRefusalOf,
 	})),
+	m.provide(outboundLimits).by(async (c) => ({ of: (await c.get(paths)).limitsOf })),
 ]);

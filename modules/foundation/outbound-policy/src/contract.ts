@@ -78,6 +78,14 @@ export interface Limits {
 	readonly timeoutMs: number;
 }
 
+/** Where a caller's request is cut, answered at boot, apart from sending: the limits the sender cuts it at. */
+export interface OutboundLimits {
+	/** The operator's caps narrowed, never widened; throws RangeError on a narrowing that is not positive and finite. */
+	of(narrower?: Narrower): Limits;
+}
+
+export const outboundLimits = contract<OutboundLimits>("outbound.limits");
+
 /** A URL the policy lets through, as the sender reaches it. */
 export interface Admitted {
 	readonly url: URL;

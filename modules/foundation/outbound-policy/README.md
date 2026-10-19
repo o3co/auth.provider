@@ -12,6 +12,7 @@
   - It resolves no name and sends nothing, so a caller sending credentials can refuse boot on a destination it could never reach; a name passes on its name, an address in the URL is checked at once. A host the caller's own narrowing leaves out is told as no key to set.
 - `destinationRefusal` (the refusals, a URL, a narrowing, what is refused, `it` unless given) → the boot refusal every module gives for it, `outbound's destination policy refuses <what>: <reason>: <what to set>`, or nothing; the words are this package's alone.
 - `outbound.credentials`: at boot, why a caller's credential must not go to its URLs (`origins`: more than one; `scheme`: one neither https nor a named `plain-loopback` pair), or nothing.
+- `outbound.limits`: at boot, where a request under a narrowing is cut (`timeoutMs`, `maxBytes`): the operator's caps narrowed, never widened, the same limits the sender cuts it at.
 - `policySettings`: the keys a section takes for the policy (`allow`, `allow-any-public`, `deny`, `plain-loopback`, `internal-hosts`, the size caps and `timeout`); `hostList`: a list of hosts, or `.name` for the name and the names under it.
 - `policyOf` (the settings) → the policy: admitting a URL, admitting the addresses it resolved to and answering those checked, explaining a refusal, the credential rule, whether a host is listed, and the limits a request is cut at.
 - `hostEntryOf`: an operator's host list entry, as an entry or a narrower's host; `withinHosts`: whether a URL's host is among hosts.
