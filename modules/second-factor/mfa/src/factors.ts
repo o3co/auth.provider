@@ -339,7 +339,7 @@ export function factorDecisions(p: FactorParts): Factors {
 			return {
 				kind: "bound",
 				factor: shown(factor),
-				...(brought ? { recoveryCodes: brought.show } : {}),
+				...(brought ? { recoveryCodes: brought.show, recoveryCodesFactor: brought.factor.id } : {}),
 			};
 		},
 		rename: async (subject, target, label) => {

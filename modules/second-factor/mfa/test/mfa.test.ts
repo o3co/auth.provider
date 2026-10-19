@@ -325,6 +325,9 @@ describe("decisions on the subject's factors", () => {
 		// What the binding adds is its first proof's amr, answered by `provePending`.
 		expect("amr" in bound).toBe(false);
 		expect(bound.recoveryCodes).toBeDefined();
+		// Named, so a caller that cannot show them can take them back.
+		const codes = (await decided.held("zed")).find((f) => f.id === bound.recoveryCodesFactor);
+		expect(codes?.kind).toBe("backup");
 		expect(await decided.asks("zed")).toBe("proof");
 	});
 
