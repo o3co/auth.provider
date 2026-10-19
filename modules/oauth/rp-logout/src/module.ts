@@ -32,8 +32,8 @@ export default defineModule({ name, section, replicaSafe: true }, (m) => [
 			name,
 			redeemed: async (session, client) => {
 				// Kept until the session ends, so its close still tells the client.
-				const endsAt = await open().endsAt(session);
-				const untilEnd = endsAt === undefined ? 0 : endsAt - c.clock.now();
+				const entry = await open().entryOf(session);
+				const untilEnd = entry.kind === "entered" ? entry.endsAt - c.clock.now() : 0;
 				const { pushedOut } = await held.add(session, client, Math.max(rememberMs, untilEnd));
 				if (pushedOut.length > 0)
 					c.log.warn("rp-logout.clients_pushed_out", { count: pushedOut.length });
