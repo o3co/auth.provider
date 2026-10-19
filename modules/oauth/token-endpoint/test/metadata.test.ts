@@ -16,6 +16,7 @@ const quiet = quietRuntime({
 const echo = defineModule({ name: "echo-grant" }, (m) => [
 	m.contribute(grants).by(() => ({
 		grantType: "urn:test:echo",
+		readsAmbient: "none",
 		handle: async () => ({ kind: "issued", body: {} }),
 	})),
 ]);
