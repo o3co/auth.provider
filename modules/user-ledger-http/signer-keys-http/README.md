@@ -27,4 +27,4 @@
 - Holds no state, so it is safe on multiple instances.
 
 ## Depends on
-- `kernel`, `jwt-bearer`, `outbound`, `url-setting`, `keys` (the credential's rule)
+- `kernel`, `jwt-bearer`, `outbound`, `outbound-policy`, `url-setting`, `keys` (the credential's rule)
