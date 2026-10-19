@@ -6,6 +6,8 @@ export const setUp = (part: DevicePart): NewPart => ({
 	modules: ["@mod/device-grant", "@mod/session-tokens"],
 	store: "volatile",
 	config: {
+		// session-tokens ends a closed session's tokens by revoking them, as the device pattern sets.
+		tokens: { revocation: "denylist" },
 		"device-grant": {
 			"verification-uri": part.verificationUri,
 			...(part.attempts ? { attempts: part.attempts } : {}),
