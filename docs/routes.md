@@ -9,10 +9,10 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | Method | Path | From | Body | Policies | Changes state | Other sites | Per source | CORS |
 |---|---|---|---|---|---|---|---|---|
 | GET | `/.well-known/jwks.json` | `@mod/keys` | form |  | no |  |  | yes |
-| GET | `/.well-known/oauth-authorization-server` | `@mod/discovery` | form |  |  |  |  | yes |
-| GET | `/.well-known/oauth-authorization-server/` | `@mod/discovery` | form |  |  |  |  | yes |
-| GET | `/.well-known/openid-configuration` | `@mod/discovery` | form |  |  |  |  | yes |
-| GET | `/.well-known/openid-configuration/` | `@mod/discovery` | form |  |  |  |  | yes |
+| GET | `/.well-known/oauth-authorization-server` | `@mod/discovery` | form |  | no |  |  | yes |
+| GET | `/.well-known/oauth-authorization-server/` | `@mod/discovery` | form |  | no |  |  | yes |
+| GET | `/.well-known/openid-configuration` | `@mod/discovery` | form |  | no |  |  | yes |
+| GET | `/.well-known/openid-configuration/` | `@mod/discovery` | form |  | no |  |  | yes |
 | GET | `/_healthcheck` | `@mod/http-ops` | none |  |  |  |  |  |
 | POST | `/ledger/subject-revocations` | `@mod/subject-revocation-http` | json |  | yes | A server's call proved by its own credential; it reads no cookie. | It checks the source and the credential first, then counts failures and authenticated requests apart, per source, in the handler. |  |
 | GET | `/metrics` | `@mod/metrics-prometheus` | none |  |  |  |  |  |
