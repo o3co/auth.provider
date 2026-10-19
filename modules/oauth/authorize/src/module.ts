@@ -8,6 +8,10 @@ import { redirects } from "./contract.ts";
 import { endpointOver, path, routeOver } from "./route/route.ts";
 import { section } from "./section.ts";
 
+/** Why the endpoint takes other sites' requests. */
+const navigation =
+	"An authorization request arrives as a navigation from the client's site by design; it only starts what the user's own login and consent complete.";
+
 export default defineModule({ name: "authorize", section }, (m) => [
 	m.contribute(metadataSections).by(() => redirects),
 	m.contribute(returnPaths).by(() => ({ path })),
@@ -21,6 +25,7 @@ export default defineModule({ name: "authorize", section }, (m) => [
 	// Answers only in the query, and takes no request object by reference (discovery's default is true).
 	m.contribute(metadata).by(() => ({ name: "response_modes_supported", value: ["query"] })),
 	m.contribute(metadata).by(() => ({ name: "request_uri_parameter_supported", value: false })),
+	// The POST is a 303 to the GET with the same parameters, so both take other sites' requests alike.
 	...(["GET", "POST"] as const).map((method) =>
 		m.contribute(routes).by(async (c) => {
 			const window = { limit: c.section.requests, ms: c.section.window * 1000 };
@@ -28,6 +33,8 @@ export default defineModule({ name: "authorize", section }, (m) => [
 				method,
 				path,
 				uses: [use(requestsPerSource, { name: "authorize", window })],
+				...(method === "GET" ? { changesState: true } : {}),
+				crossSite: navigation,
 				...(await routeOver(c)),
 			};
 		}),

@@ -31,6 +31,7 @@ export default defineModule({ name: "logout" }, (m) => [
 			path: "/session/logout",
 			takes: ["form", "json", "none"],
 			uses: [use(csrfChecked)],
+			unlimited: "It closes only the requester's own session; there is nothing to guess or spend.",
 			handle: async (request) => {
 				try {
 					return await logout(request);
