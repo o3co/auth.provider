@@ -462,6 +462,16 @@ describe("idp-oidc", () => {
 			expect(settings.safeParse({ ...base, algorithms: [alg] }).success, alg).toBe(false);
 		}
 		expect(settings.safeParse({ ...base, algorithms: [] }).success).toBe(false);
+		// The refusal names the algorithms taken, never the one refused.
+		const refused = settings.safeParse({ ...base, algorithms: ["ES256", "HS256"] }).error?.issues;
+		expect(refused).toEqual([
+			expect.objectContaining({
+				code: "invalid_value",
+				path: ["algorithms", 1],
+				values: expect.arrayContaining([...asymmetric]),
+			}),
+		]);
+		expect(refused?.[0]?.message).not.toMatch(/HS256|none/);
 	});
 
 	it("takes a clock skew of whole seconds from 0s to 5m, written with its unit", () => {
