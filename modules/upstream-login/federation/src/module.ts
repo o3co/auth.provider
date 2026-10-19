@@ -36,7 +36,7 @@ export default defineModule({ name: "federation", section }, (m) => [
 			path: `${base}/*`,
 			...(method === "GET" ? { changesState: true } : {}),
 			crossSite:
-				"Its start is the user's own navigation and its callback the IdP's redirect or form_post; the start's origin is checked before any transaction is made.",
+				"Its start is the user's own navigation and its callback the IdP's redirect or form_post. A link's start checks its origin before any transaction is made; a login's start takes a navigation from another site, its state bound to its cookie and taken once.",
 			...(await c.get(federationRoute)),
 		})),
 	),
