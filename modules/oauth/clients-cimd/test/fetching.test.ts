@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Fetched, fetchingOver, type Limits } from "../src/fetching/fetching.ts";
+import { type Fetched, fetchingWith, type Limits } from "../src/fetching/fetching.ts";
 
 const limits: Limits = { cacheMs: 600_000, entries: 256, refusedMs: 60_000, concurrent: 8 };
 
@@ -7,7 +7,7 @@ const limits: Limits = { cacheMs: 600_000, entries: 256, refusedMs: 60_000, conc
 function harness(script: (id: string) => Fetched<string> | Promise<Fetched<string>>, set = limits) {
 	let now = 1_000_000;
 	const calls: string[] = [];
-	const fetching = fetchingOver(
+	const fetching = fetchingWith(
 		async (id) => {
 			calls.push(id);
 			return script(id);
