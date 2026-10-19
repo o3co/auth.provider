@@ -31,7 +31,7 @@ Each promise below holds across every module composed. Each names what keeps it 
    - One exception: shortening `session-lifecycle.lifetime` ends the sessions it now covers when they are next read, without their participants, and the tokens issued before then keep their earlier expiry.
    - Bridges such as `session-tokens` come in every app composed through `combinations`; an app composed by hand must compose them itself, or the promise does not hold for what they join.
 2. **`prompt=login` and `max_age` are met only by a fresh authentication.**
-   - Kept by: `authorize`'s re-authentication record, taken once; `session` never counts an authentication time it does not know as fresh.
+   - Kept by: `reauth`'s re-authentication record, which `authorize` makes for the request and takes once; `session` never counts an authentication time it does not know as fresh.
    - Scenes: federation ("federation logins meeting a client's demand for a fresh login", and the freshness scenes through Google and Apple).
    - No scene yet for a password login.
 3. **A dependency that cannot answer never grants anything.**
