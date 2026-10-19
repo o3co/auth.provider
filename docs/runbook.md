@@ -1,6 +1,6 @@
 # Operations runbook
 
-How to run auth-provider 0.18: Redis, rotating keys, and upgrading. The settings named here are listed in the [configuration reference](configuration.md).
+How to run auth-provider 0.18: Redis, rotating keys, upgrading, and what to watch. The settings named here are listed in the [configuration reference](configuration.md).
 
 ## Contents
 
@@ -10,6 +10,7 @@ How to run auth-provider 0.18: Redis, rotating keys, and upgrading. The settings
 - [Rotating the sealing key](#rotating-the-sealing-key)
 - [Upgrading](#upgrading)
 - [Revoking a user from the ledger](#revoking-a-user-from-the-ledger)
+- [Probes and alerts](#probes-and-alerts)
 - [Stopping](#stopping)
 
 ## Before you deploy
@@ -138,6 +139,24 @@ When the outside user ledger suspends a user, its answers stop new logins and gr
 - Stopped: the subject's open sessions (and with them the session's refresh tokens, its access tokens, and the local copy of its upstream tokens; relying parties are sent logout notices), and from then on every refresh, device poll, JWT bearer grant, exchange, passkey login and second-factor step; access tokens too where `subject-tokens` is composed. With `delegations: "end"`, federation grants end.
 - Left until they expire: access tokens not bound to a session where `tokens.subject-check = none`, JWTs a resource server checks itself, and tokens already handed to an upstream. A request already past its checks when the revocation is recorded may finish.
 - Every subject revoked keeps its record with no end, so the records grow with the subjects you revoke.
+
+## Probes and alerts
+
+### Probes
+
+- **Liveness**: `GET /_healthcheck` answers `200` while the process serves requests, and checks no dependency. Restart an instance on it alone; the generated image checks it.
+- **Readiness**: `GET /readyz` answers `200` when every probe the composed modules contribute (Redis's, for one) passed within `http-ops.readiness-deadline`, and `503` otherwise, never naming what failed. Take an instance out of the load balancer on `503`, and do not restart it for that: it is ready again once the dependency is.
+
+### What to alert on
+
+`metrics-prometheus` publishes the counts at `metrics-prometheus.path` (default `/metrics`); limit who may scrape it at the proxy.
+
+- **`auth_dependency_up` is 0** for a probe: that dependency is down, and `/readyz` answers `503`. The probe's name says which.
+- **`auth_rate_limit_uncounted_total` rises**, by `limit` (`requests` or `attempts`): a rate limit could not count, usually because the store is down. Attempt limits then refuse with `503`; request limits refuse too, or let requests through uncounted where `rate-limit.fail-mode = open`.
+- **`auth_audit_events_lost_total` rises**, by `receiver`: a receiver is not taking events, so the audit trail has a gap. The warning `audit receiver losing events` says why.
+- **`http_request_duration_seconds`**: the rate of `5xx` answers and the latency, by method and route. A `499` is a client that closed before the answer.
+- **The process**: the Node defaults, prefixed `auth_provider_` (event loop lag, memory, handles).
+- **Warnings in the log**: a failed periodic run, probe or stop hook is one warn line naming it.
 
 ## Stopping
 
