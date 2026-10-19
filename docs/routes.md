@@ -46,7 +46,7 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | POST | `/session/mfa/challenge` | `@mod/mfa-flows` | form, json | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | POST | `/session/mfa/enrollment` | `@mod/mfa-flows` | form, json | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | POST | `/session/mfa/enrollment/complete` | `@mod/mfa-flows` | form, json | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
-| GET | `/session/mfa/factors` | `@mod/mfa-management` | form |  |  |  |  |  |
+| GET | `/session/mfa/factors` | `@mod/mfa-management` | form |  | no |  |  |  |
 | POST | `/session/mfa/factors/remove` | `@mod/mfa-management` | form, json | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | POST | `/session/mfa/factors/rename` | `@mod/mfa-management` | form, json | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | POST | `/session/mfa/lock/release` | `@mod/mfa-flows` | form, json | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |

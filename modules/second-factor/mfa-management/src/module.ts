@@ -38,7 +38,7 @@ export default defineModule({ name: "mfa-management", section, replicaSafe: true
 				sessions: await c.get(sessions),
 			});
 			const handle = withUnavailable(handlers[name]);
-			if (method === "GET") return { method, path, handle };
+			if (method === "GET") return { method, path, changesState: false, handle };
 			const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 			return {
 				method,
