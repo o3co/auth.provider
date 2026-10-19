@@ -171,9 +171,9 @@ export function endingOver(p: EndingParts) {
 					...more,
 				},
 			});
-		// A session that does not enter at use (ended, or short of a requirement) still has its close
-		// asked, for the cookie, but is no logout of its own.
-		const open = (await p.sessions.entryOf(sid)).kind === "entered";
+		// A session already ended still has its close asked, for the cookie, but is no logout of its own;
+		// one short of a requirement is live, so closing it is a logout.
+		const open = (await p.sessions.entryOf(sid)).kind !== "absent";
 		const closed = await closeOf(sid, request);
 		if (!closed) {
 			record("logout.cascade_failed", checked.subject, { store: "session" });
