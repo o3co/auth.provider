@@ -37,6 +37,7 @@ Each promise below holds across every module composed. Each names what keeps it 
 4. **A subject's revocation boundary refuses everything made before it.**
    - Kept by: `subject-revocation`'s boundaries, which every holder of a subject's state compares against, and its followers.
    - Does not hold for access tokens where `tokens.subject-check = none` is chosen: they live until they expire.
+   - A revocation alone does not stop a second factor's enrollment already past its last check. After an account is taken over, reset the subject's second factors (`mfa-flows`' `mfaReset`) rather than only revoking: a reset also stops an enrollment under way.
    - Scenes: code ("a subject the ledger revokes over HTTP"), federation ("federation grants: a subject the ledger revokes"), second factor ("a subject the ledger revokes").
    - No scene yet for a code not yet redeemed, a device code or a token exchange.
 5. **What is used once is used once, on any number of instances.**
