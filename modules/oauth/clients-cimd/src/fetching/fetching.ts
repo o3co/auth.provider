@@ -28,7 +28,7 @@ function remember<V>(map: Map<string, V>, id: string, value: V, entries: number)
 	map.set(id, value);
 }
 
-export function fetchingOver<T>(
+export function fetchingWith<T>(
 	load: (id: string) => Promise<Fetched<T>>,
 	limits: Limits,
 	clock: Clock,

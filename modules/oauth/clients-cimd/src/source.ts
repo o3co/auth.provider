@@ -5,7 +5,7 @@ import type { BuildContext } from "@mod/kernel";
 import { outboundLimits, withinHosts } from "@mod/outbound-policy";
 import { documentUrl } from "./document/document.ts";
 import { readingOver } from "./document/reading.ts";
-import { fetchingOver } from "./fetching/fetching.ts";
+import { fetchingWith } from "./fetching/fetching.ts";
 import type { Settings } from "./section.ts";
 
 /** Whether document clients are taken: only with the code grant composed. */
@@ -31,7 +31,7 @@ export async function sourceOver(c: BuildContext<Settings>): Promise<ClientSourc
 	await withinOutbound(c);
 	const s = c.section;
 	const composed = c.late(composedGrants);
-	const fetching = fetchingOver(
+	const fetching = fetchingWith(
 		await readingOver(c),
 		{
 			cacheMs: s["cache-lifetime"] * 1000,
