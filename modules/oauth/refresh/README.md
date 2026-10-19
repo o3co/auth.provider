@@ -20,7 +20,7 @@
 ## Invariants
 - Only a family's current token is usable, and each use swaps it for a new one. Any other token of the family is reuse and revokes the family; so is the loser of two concurrent uses.
 - A token with anything after it, another client's token, and one without the family's binding are refused without spending it.
-- A family's end is fixed when it starts; no access token from it outlives it. Each one carries the amr, authentication time and acr the family started with; a time not known when it started is stated by none.
+- A family's end is fixed when it starts; no access token from it outlives it, nor the family's session, where it has one. Each one carries the amr, authentication time and acr the family started with; a time not known when it started is stated by none.
 - Scope narrows only within the original grant, for that round's access token, each value once; omitted or empty is all of it. The audience asked narrows that round alone, within the family's and the client's.
 - Before rotating: the family's session, if any, enters at use (not closed, ended, or short of a requirement); the subject's authentication is past the revocation boundary; the client's allowance covers this round; `tokens`' issuance policies allow it, told the issuance continues a grant (`continuing`). A refusal leaves the token usable.
 - A binding is attached to a public client's family, and to a confidential one's where set, only when it starts. Every refusal is the same `invalid_grant`; a store failure is unavailable, never a negative verdict.
