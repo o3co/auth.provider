@@ -252,6 +252,14 @@ SIGTERM と SIGINT を受け取ると、アプリは `kernel.stop-deadline`（�
 
 このリポジトリ内のモジュールについては、[combinations の README](modules/scaffold/combinations/README.md) で、アダプターや他のモジュールとの接続に必要なモジュールをマニフェストで宣言する方法を説明しています。
 
+**ジェネレーターを使わずに組み立てる。** 生成したプロジェクトの代わりに自分のコンポジションルートを持つ場合:
+
+1. `@o3co/auth-provider-scaffold` をインストールし、`@o3co/auth-provider-scaffold/combinations` からモジュール名を得ます。選択には `composed`、自分で並べたモジュールには `needed` を使います。どちらも知らない名前を拒否します。
+2. その名前を `published` に渡します。それぞれについて、依存するパッケージと、モジュールを import するパス (`<entry>/module`) が返ります。
+3. それらのパッケージを、scaffold のバンドルと同じバージョン (1 つのリリースのバンドルはすべて同じバージョン) で `package.json` に追加します。`assemble` のために、`@mod/kernel` を含むパッケージ (`published(["@mod/kernel"])`) も追加します。
+4. 名前にログの出力先が含まれていなければ、`@mod/log-stdout` などを追加します。ないとログはどこにも出ません。
+5. 起動します。あなたにしか決められない設定で起動が拒否されたら (たとえば、subject を確かめるモジュールがないときの `tokens.subject-check = none`)、その設定を書きます。
+
 ## バージョンとサポート
 
 アプリに必要なパッケージはジェネレーターが選びます。公開パッケージの名前は `@o3co/auth-provider-<concern>` で、すべて同じバージョンを使い、各モジュールをサブパスとして公開しています。[移行ガイド](docs/migration.md#packages)に、0.17 のパッケージと 0.18 での置き換え先を記載しています。

@@ -122,6 +122,12 @@ it("gives the modules named with what they need to run, wirings and bridges, and
 	]);
 });
 
+it("refuses, naming each, a module needed that the workspace lacks, as composing does", () => {
+	expect(() => neededWith(declared, ["@c/app", "@c/nope", "@c/gone"])).toThrow(
+		"@c/nope: not in the workspace; @c/gone: not in the workspace",
+	);
+});
+
 it("gives, for an owner with no module of its own, the default declared to replace it, needed or completed", () => {
 	const needs = neededWith(owned, ["@o/app"]);
 	expect(needs).toContain("@o/session-lifecycle");
