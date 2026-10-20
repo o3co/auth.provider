@@ -10,23 +10,14 @@ What to change from rc.3 is in [From 0.18.0-rc.3](docs/migration.md#from-0180-rc
 
 ### Security
 
-<!-- rc.4 #1982, once merged:
-- `authorize` tells the login page the `prompt=login` and `max_age` a request asked, beside `redirect_to`, so a login started at an upstream is fresh too; a request back from its login still not new enough, or carrying a re-authentication record that is not its own, is refused with `login_required`.
--->
+- `authorize`: the re-authentication a request asked for with `prompt=login` or `max_age` could be skipped by a login through an upstream, or loop there. The login page is now told of both beside `redirect_to`, and a request back from its login still not new enough, or carrying a re-authentication record that is not its own, is refused with `login_required`.
 
 ### Changed
 
 - Boot tells an upstream it could not reach from one that does not match its settings: an IdP whose opening is unavailable refuses boot as an upstream that could not be reached, under its key; a discovery document outbound refuses to fetch refuses boot at `issuer`, naming outbound's reason.
 - An app `create-auth-provider` makes from listed packages is told to add the modules and settings they need before it starts, no longer to start as made.
-<!-- rc.4 #1982, once merged:
 - A login page that offers an upstream hands the `prompt` and `max_age` it is given to the upstream's start (`/session/oauth/federation/<idp>`).
--->
-
-### Added
-
-<!-- rc.4 #1982, once merged:
 - The issuer's metadata says `authorization_response_iss_parameter_supported: true`; every redirect answer already carried `iss`.
--->
 
 ### Fixed
 
