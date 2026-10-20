@@ -14,6 +14,7 @@ import {
 	type Clients,
 	clientSources,
 	clients,
+	type DocumentSource,
 	metadataSections,
 	type Section,
 } from "../src/contract.ts";
@@ -526,6 +527,34 @@ describe("clients", () => {
 		await expect(
 			c.checkRecord({ ...good, sections: { grants: unreadable } } as ClientRecord),
 		).rejects.toThrow("unreadable");
+	});
+
+	it("takes a section's copy from a client's metadata document, and the fields it reads, as optional parts", async () => {
+		const named: Section<{ name: string }> = {
+			name: "named",
+			schema: z.strictObject({ name: z.string().default("") }),
+			reads: ["client_name"],
+			fromDocument: (document, from) =>
+				typeof document.client_name === "string"
+					? { value: { name: `${document.client_name} at ${from.host}` } }
+					: { refused: "client_name" },
+		};
+		const from: DocumentSource = { id: "https://app.example/c", host: "app.example" };
+		expect(named.fromDocument?.({ client_name: "App" }, from)).toEqual({
+			value: { name: "App at app.example" },
+		});
+		expect(named.fromDocument?.({}, from)).toEqual({ refused: "client_name" });
+		const owner = defineModule({ name: "named-owner" }, (m) => [
+			m.contribute(metadataSections).by(() => named),
+		]);
+		const c = await boot([owner]);
+		const record = {
+			id: "x",
+			kind: "public",
+			method: "none",
+			sections: { named: { name: "App" } },
+		};
+		expect(await c.checkRecord(record as ClientRecord)).toBeUndefined();
 	});
 
 	it("answers an authenticated client with its method's challenge, or every method's when it has none", async () => {
