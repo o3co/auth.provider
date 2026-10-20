@@ -33,7 +33,7 @@ describe("a binding a reset or a revocation comes into", () => {
 		expect([revoked.status, revoked.body]).toEqual([401, { error: "login_required" }]);
 		expect(await s.app.get(factors).held("nia")).toEqual([]);
 	});
-	it("shows no recovery codes once a revocation completed after the factor was written, and takes them back", async () => {
+	it("writes no recovery codes once a revocation completed after the factor was written", async () => {
 		const s = await serve();
 		await s.signIn("uma");
 		const begun = await s.call("POST", "/session/mfa/enrollment", { kind: "code" });
@@ -55,5 +55,6 @@ describe("a binding a reset or a revocation comes into", () => {
 			undefined,
 		]);
 		expect((await s.app.get(factors).held("uma")).map((f) => f.kind)).toEqual(["code"]);
+		expect(s.events.some((e) => e.kind === "mfa.recovery_codes.generated")).toBe(false);
 	});
 });

@@ -6,7 +6,7 @@ import { factorKinds, type Sending } from "@mod/mfa-extensions";
 import { sessions } from "@mod/session";
 import { revocations } from "@mod/subject-revocation";
 import { afterEach, describe, expect, it } from "vitest";
-import { clock, during, serve, sessionsDown } from "./harness.ts";
+import { clock, during, factorsDown, serve, sessionsDown } from "./harness.ts";
 
 /** How the binding proof answers its next send, and whether it can read what it checks; each sent one keeps its own code. */
 const contact = { sent: 0, answer: undefined as Sending | undefined, unreadable: false };
@@ -60,6 +60,11 @@ afterEach(() => {
 });
 
 type Served = Awaited<ReturnType<typeof serve>>;
+/** Whether recovery codes were ever written, or a factor taken back, for the subject. */
+const codesTouched = (s: Served, subject: string) =>
+	s.events
+		.filter((e) => e.subject === subject)
+		.some((e) => e.kind === "mfa.recovery_codes.generated" || e.kind === "mfa.factor.removed");
 /** The amr of the browser's session. */
 const amrOf = async (s: Served) => {
 	const cookie = `__Host-session=${s.jar().get("__Host-session")}`;
@@ -157,7 +162,7 @@ describe("a binding proof before a first factor", () => {
 		expect(await s.app.get(factors).rename("ora", factor, "a")).toBe("renamed");
 	});
 
-	it("takes back the recovery codes a first factor brought when the session cannot be raised to show them", async () => {
+	it("writes no recovery codes when the session cannot be raised to show them", async () => {
 		const s = await serve({}, [contactProof]);
 		await s.signIn("rae");
 		const asked = await s.call("POST", "/session/mfa/enrollment", { kind: "code" });
@@ -166,9 +171,24 @@ describe("a binding proof before a first factor", () => {
 		expect([done.status, done.body.recovery_codes]).toEqual([503, undefined]);
 		const held = await s.app.get(factors).held("rae");
 		expect(held.map((f) => f.kind)).toEqual(["code"]);
+		expect(codesTouched(s, "rae")).toBe(false);
 	});
 
-	it("takes back the recovery codes a login's first factor brought when the login cannot go on to show them", async () => {
+	it("answers 503 with the raised session's cookie when the codes cannot be written once it is raised", async () => {
+		const s = await serve({}, [contactProof]);
+		await s.signIn("rex");
+		const old = s.jar().get("__Host-session");
+		const asked = await s.call("POST", "/session/mfa/enrollment", { kind: "code" });
+		during.entered = async () => factorsDown.failNext("update");
+		const done = await boundOnProof(s, String(asked.body.transaction));
+		expect([done.status, done.body.error]).toEqual([503, "temporarily_unavailable"]);
+		// The raise retired the old cookie: the new one goes out with the failure.
+		expect(s.jar().get("__Host-session")).not.toBe(old);
+		expect(await amrOf(s)).toEqual(["pwd", "otp", "mfa"]);
+		expect((await s.app.get(factors).held("rex")).map((f) => f.kind)).toEqual(["code"]);
+	});
+
+	it("writes no recovery codes when a login's first factor cannot go on to show them", async () => {
 		const s = await serve({ mode: "required" }, [contactProof]);
 		const { tx } = await s.heldLogin("sam");
 		await s.call("POST", "/session/mfa/enrollment", { kind: "code", transaction_id: tx });
@@ -177,9 +197,21 @@ describe("a binding proof before a first factor", () => {
 		expect([done.status, done.body.recovery_codes]).toEqual([503, undefined]);
 		const held = await s.app.get(factors).held("sam");
 		expect(held.map((f) => f.kind)).toEqual(["code"]);
+		expect(codesTouched(s, "sam")).toBe(false);
 	});
 
-	it("shows no recovery codes when a revocation completes while the session is raised, or the login goes on, taking them back", async () => {
+	it("closes the opened login and answers 503 when the codes cannot be written once it opened", async () => {
+		const s = await serve({ mode: "required" }, [contactProof]);
+		const { tx } = await s.heldLogin("sid");
+		await s.call("POST", "/session/mfa/enrollment", { kind: "code", transaction_id: tx });
+		during.entered = async () => factorsDown.failNext("update");
+		const done = await boundOnProof(s, tx);
+		expect([done.status, done.body.recovery_codes]).toEqual([503, undefined]);
+		expect(s.jar().get("__Host-session")).toBeUndefined();
+		expect((await s.app.get(factors).held("sid")).map((f) => f.kind)).toEqual(["code"]);
+	});
+
+	it("writes no recovery codes when a revocation completes while the session is raised, or the login goes on", async () => {
 		const s = await serve({ mode: "required" }, [contactProof]);
 		const revokedAsItEnters = (subject: string) => {
 			clock.shift += 1000;
@@ -208,6 +240,7 @@ describe("a binding proof before a first factor", () => {
 			undefined,
 		]);
 		expect((await s.app.get(factors).held("val")).map((f) => f.kind)).toEqual(["code"]);
+		expect([codesTouched(s, "uli"), codesTouched(s, "val")]).toEqual([false, false]);
 	});
 
 	it("asks it before a session's first factor begins, counts a wrong one as an attempt, and begins once it passes", async () => {
