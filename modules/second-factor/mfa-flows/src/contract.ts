@@ -2,7 +2,7 @@ import { contract, extensionPoint } from "@mod/kernel";
 import type { EnrollmentFlow, FlowParts } from "./seams/seams.ts";
 
 export type { Handler } from "./routing.ts";
-export type { EnrollmentFlow, FlowParts, FlowTransactions } from "./seams/seams.ts";
+export type { EnrollmentFlow, FlowParts, FlowTransactions, ResumeMade } from "./seams/seams.ts";
 export type {
 	ByPurpose,
 	Challenge,

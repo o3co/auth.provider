@@ -45,6 +45,7 @@ it("offers its parts for the module binding factors: transactions, resume, recor
 		"record",
 		"requests",
 		"resume",
+		"resumeWith",
 		"transactions",
 	]);
 	expect(got.answers.loginRequired.status).toBe(401);

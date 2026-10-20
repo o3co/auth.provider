@@ -41,17 +41,29 @@ export interface FlowTransactions {
 	cleared(): string;
 }
 
+/**
+ * What a resumed login's maker makes once it opens: `answer`, answered instead, the opened session
+ * closed first; or `adds`, added to the `done` its transaction held.
+ */
+export type ResumeMade = { readonly answer: HttpResponse } | { readonly adds: object };
+
 /** What the module binding factors takes of this package; each user narrows it with `Pick`. */
 export interface FlowParts {
 	readonly transactions: FlowTransactions;
 	/** Whom `mfa`'s kinds are asked for, by the transaction's purpose. */
 	askedFrom(t: ByPurpose): AskedFrom;
-	/** Goes on with a held login, adding what was proved to its amr and what `carried` makes to its answer, made once it opens; a response it makes closes the session. A body `carried` makes never holds `status`, which marks a response. */
+	/** Goes on with a held login, adding what was proved to its amr. */
 	resume(
 		request: HttpRequest,
 		t: Transaction & { readonly purpose: "login" | "enroll-login" },
 		proved: readonly string[],
-		carried?: () => Promise<object | HttpResponse>,
+	): Promise<HttpResponse>;
+	/** Goes on with a held login, adding what was proved to its amr; what `made` makes is made once it opens: its answer closes the session and is answered, and what it adds goes to the answer. */
+	resumeWith(
+		request: HttpRequest,
+		t: Transaction & { readonly purpose: "login" | "enroll-login" },
+		proved: readonly string[],
+		made: () => Promise<ResumeMade>,
 	): Promise<HttpResponse>;
 	/** Records `mfa.<kind>` through this package's declaration, with the request's source. */
 	record(
@@ -84,7 +96,8 @@ export const flowPartsOf = (parts: {
 }): FlowParts => ({
 	transactions: parts.transactions,
 	askedFrom,
-	resume: parts.resume,
+	resume: (request, t, proved) => parts.resume(request, t, proved),
+	resumeWith: (request, t, proved, made) => parts.resume(request, t, proved, made),
 	record: auditedBy(parts.audit),
 	answers: {
 		unknownTransaction: routing.unknownTransaction,

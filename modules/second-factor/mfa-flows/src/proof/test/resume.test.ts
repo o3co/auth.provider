@@ -57,7 +57,7 @@ it("makes what it carries only once the login opened and no revocation came, add
 	const s = standIn();
 	const carried = async () => {
 		s.calls.push("made");
-		return { factor: "f" };
+		return { adds: { factor: "f" } };
 	};
 	const opened = await s.resume(carried);
 	expect([opened.status, opened.body, opened.cookies]).toEqual([
@@ -75,7 +75,9 @@ it("makes what it carries only once the login opened and no revocation came, add
 
 it("closes the opened session and answers what carried answered when it is a response; the session's cookie never goes out", async () => {
 	const s = standIn();
-	const refused = await s.resume(async () => jsonAnswer(401, { error: "login_required" }));
+	const refused = await s.resume(async () => ({
+		answer: jsonAnswer(401, { error: "login_required" }),
+	}));
 	expect([refused.status, refused.body, refused.cookies]).toEqual([
 		401,
 		{ json: { error: "login_required" } },
@@ -115,13 +117,22 @@ it("answers 503 clearing the transaction when the session cannot be closed after
 	s.set.closing = async () => {
 		throw new Unavailable("session");
 	};
-	const failed = await s.resume(async () => jsonAnswer(409, { error: "mfa_factor_limit" }));
+	const failed = await s.resume(async () => ({
+		answer: jsonAnswer(409, { error: "mfa_factor_limit" }),
+	}));
 	expect([failed.status, failed.cookies]).toEqual([503, ["mfa="]]);
 	s.set.closing = async () => {
 		throw new TypeError("session");
 	};
 	await expect(
-		s.resume(async () => jsonAnswer(409, { error: "mfa_factor_limit" })),
+		s.resume(async () => ({ answer: jsonAnswer(409, { error: "mfa_factor_limit" }) })),
 	).rejects.toThrow(TypeError);
 	expect(s.calls).toEqual(["close h1", "close h1"]);
+});
+
+it("adds a body whatever its keys, one holding status included: only the mark tells an answer", async () => {
+	const s = standIn();
+	const added = await s.resume(async () => ({ adds: { status: "pending" } }));
+	expect([added.status, added.body]).toEqual([200, { json: { next: "/home", status: "pending" } }]);
+	expect(s.calls).toEqual([]);
 });

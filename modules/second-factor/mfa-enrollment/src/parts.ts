@@ -12,6 +12,6 @@ export interface EnrollmentParts {
 	readonly revocation: SubjectRevocation;
 	readonly flow: Pick<
 		FlowParts,
-		"transactions" | "askedFrom" | "resume" | "record" | "answers" | "requests"
+		"transactions" | "askedFrom" | "resumeWith" | "record" | "answers" | "requests"
 	>;
 }

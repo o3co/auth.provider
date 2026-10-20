@@ -27,6 +27,8 @@ const refusals: Readonly<Partial<Record<Refusal, HttpResponse>>> = {
 	"binding-proof-required": jsonAnswer(403, { error: "mfa_binding_proof_required" }),
 };
 const enrollmentConflict = jsonAnswer(409, { error: "mfa_enrollment_conflict" });
+/** What showing the codes makes: the answer instead, `full` where another factor took their place, or what it adds. */
+type Shown = { readonly answer: HttpResponse; readonly full?: true } | { readonly adds: object };
 const invalidLabel = jsonAnswer(400, {
 	error: "invalid_request",
 	error_description: "invalid label",
@@ -40,7 +42,7 @@ export function completionOver(
 ) {
 	const { transactions, askedFrom } = p.flow;
 	const { unknownTransaction, loginRequired, unavailable } = p.flow.answers;
-	const { resume } = p.flow;
+	const { resumeWith } = p.flow;
 	const { field, postedTransaction, proofOf, revokedSince } = p.flow.requests;
 	const { enrolling, outsideSession, keep } = place;
 	const { bindingProof } = proofs;
@@ -112,42 +114,42 @@ export function completionOver(
 		}
 		if (bound.kind !== "bound") return refusals[bound.kind] ?? unknownTransaction;
 		const factor = { factor: bound.factor };
+		const refused = (answer: HttpResponse) => ({ answer });
 		/** The answer, with the recovery codes where they are due: written only now, just before they go out. */
-		const shown = async (): Promise<object | HttpResponse> => {
-			if (!bound.codesDue) return factor;
+		const shown = async (): Promise<Shown> => {
+			if (!bound.codesDue) return { adds: factor };
 			// Checked before the write too, as the fence may not stop it: an app composed by hand may lack
 			// `mfa-revocation`, which moves it, and even with it a revocation's record moves its boundary
 			// before its followers move the fence.
-			if (await revokedSince(p.revocation, t)) return loginRequired;
+			if (await revokedSince(p.revocation, t)) return refused(loginRequired);
 			const reissued = await p.factors.reissue(t.subject, bound.fence);
 			// A reset or a revocation since the binding began, or the factor gone meanwhile: no one sees codes.
 			if (reissued.kind === "fenced" || reissued.kind === "no-qualifying-factor")
-				return loginRequired;
+				return refused(loginRequired);
 			// Another factor took the place the binding kept: the factor stands, and codes can be reissued.
-			if (reissued.kind === "full") return factorLimit;
+			if (reissued.kind === "full") return { answer: factorLimit, full: true };
 			// Left is `unknown-kind`, which cannot come: codes are due only where a way back is composed.
-			if (reissued.kind !== "reissued") return factor;
+			if (reissued.kind !== "reissued") return { adds: factor };
 			// The last wait before the codes go out is the revocation's: none may come after it.
-			if (await revokedSince(p.revocation, t)) return loginRequired;
-			return { ...factor, recovery_codes: reissued.codes };
+			if (await revokedSince(p.revocation, t)) return refused(loginRequired);
+			return { adds: { ...factor, recovery_codes: reissued.codes } };
 		};
-		const isAnswer = (made: object): made is HttpResponse => "status" in made;
 		// A first factor bound on the password alone counts from the next sign-in: binding it during a
 		// login never finishes that login.
 		if (!heldOf(t).proved) {
 			const made = await shown();
-			if (made === factorLimit) return { ...factorLimit, cookies: [transactions.cleared()] };
-			if (isAnswer(made)) return made;
-			return jsonAnswer(200, made, { cookies: [transactions.cleared()] });
+			const cleared = [transactions.cleared()];
+			if ("adds" in made) return jsonAnswer(200, made.adds, { cookies: cleared });
+			return made.full ? { ...made.answer, cookies: cleared } : made.answer;
 		}
 		// Bound on a binding proof, it counts at once by its first proof: the login goes on, its codes
 		// made once it opened, or the session is raised, and its codes made once it is.
-		if (t.purpose === "enroll-login") return resume(request, t, proved.amr, shown);
+		if (t.purpose === "enroll-login") return resumeWith(request, t, proved.amr, shown);
 		const raised = await p.sessions.raise(request, proved.amr);
 		const cookies = [...(raised?.cookies ?? []), transactions.cleared()];
 		// A raise not written leaves the factor to count from the next sign-in: no codes for it now.
 		if (!raised?.raised) return jsonAnswer(200, factor, { cookies });
-		let made: object | HttpResponse;
+		let made: Shown;
 		try {
 			made = await shown();
 		} catch (error) {
@@ -155,9 +157,8 @@ export function completionOver(
 			if (isUnavailable(error)) return { ...unavailable, cookies };
 			throw error;
 		}
-		if (made === factorLimit) return { ...factorLimit, cookies };
-		if (isAnswer(made)) return made;
-		return jsonAnswer(200, made, { cookies });
+		if ("adds" in made) return jsonAnswer(200, made.adds, { cookies });
+		return made.full ? { ...made.answer, cookies } : made.answer;
 	};
 
 	return { enroll, complete };
