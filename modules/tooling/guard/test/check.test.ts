@@ -528,6 +528,51 @@ describe("guard", () => {
 		expect(g16([capability, reaching])).toEqual(["@t/reaching"]);
 	});
 
+	it("G16 refuses a feature depending on what declares forWiring, as on a capability, save its tests using the stand-in", () => {
+		const files = {
+			"src/contract.ts": "export const s = 1;\n",
+			"src/testing.ts": "export const t = 1;\n",
+		};
+		const exports = { ".": "./src/contract.ts", "./testing": "./src/testing.ts" };
+		const storage = pkg("@w/store", files, { exports, forWiring: true }, "foundation");
+		const on = (name: string, kind: string, file: string, text: string, deps: object) =>
+			pkg(name, { [file]: text }, { exports: { ".": "./src/contract.ts" }, ...deps }, kind);
+		const runtime = on(
+			"@w/feat",
+			"feature",
+			"src/contract.ts",
+			`import { s } from "@w/store";\nexport const f = s;\n`,
+			{ dependencies: { "@w/store": "*" } },
+		);
+		const standIn = on(
+			"@w/tested",
+			"feature",
+			"test/a.test.ts",
+			`import { t } from "@w/store/testing";\nexport const x = t;\n`,
+			{ devDependencies: { "@w/store": "*" } },
+		);
+		const whole = on(
+			"@w/whole",
+			"feature",
+			"test/a.test.ts",
+			`import { s } from "@w/store";\nexport const x = s;\n`,
+			{ devDependencies: { "@w/store": "*" } },
+		);
+		const wiring = on(
+			"@w/feat-store",
+			"wiring",
+			"src/module.ts",
+			`import { s } from "@w/store";\nexport const w = s;\n`,
+			{ dependencies: { "@w/store": "*" } },
+		);
+		const loose = pkg("@w/loose", files, { exports, forWiring: "yes" }, "foundation");
+		expect(
+			check([storage, runtime, standIn, whole, wiring, loose], budget)
+				.filter((v) => v.rule.startsWith("G16"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual(["@w/feat @w/store", "@w/whole @w/store", "@w/loose forWiring is true only"]);
+	});
+
 	it("G10 lets only tests reach up to a wiring module, and no other higher kind", () => {
 		const { capability, feature, wired, tested, shipped, testedUp, tool } = kinds();
 		const g10 = (packages: Pkg[]) =>
