@@ -6,7 +6,7 @@ Changes up to 0.17.0 are in [the 0.17.0 changelog](https://github.com/o3co/auth.
 
 ## [0.18.0-rc.3] - unreleased
 
-What to change from rc.2 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc1), which lists every change since rc.1.
+What to change from rc.2 is in [From 0.18.0-rc.2](docs/migration.md#from-0180-rc2); coming from rc.1, read [From 0.18.0-rc.1](docs/migration.md#from-0180-rc1) first.
 
 ### Security
 
