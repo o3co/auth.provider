@@ -46,10 +46,8 @@ What to change from rc.2 is in [From 0.18.0-rc.2](docs/migration.md#from-0180-rc
 - `federation-grants` audits a route the store cannot answer: the token and revoke routes as their refusal with the reason `unavailable`, the browser routes as `federation.grant.authorization_failed` with the outcome `unavailable`.
 - `mfa-witness-http`: a write's deadline fell after outbound gave the call up, where outbound's timeout was the shorter; it now ends when outbound gives up.
 <!-- rc.3 #1955: a federation login a gate held left the browser unable to go on. -->
-<!-- rc.3 #1958, once merged:
 - A refused client authentication at the token, introspection, revocation and device authorization endpoints is recorded as `client.authentication.failure`, with `clients`' `reason` and `source`, never the client id claimed. `authenticateClient` takes the audit as its third argument.
 - `passkey-registration` records `passkey.registered`, with the subject and `source`, once a passkey is kept; it needs `audit` composed.
--->
 
 ### Removed
 
