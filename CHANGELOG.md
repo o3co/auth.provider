@@ -4,6 +4,58 @@ Notable changes, newest first, in the form of [Keep a Changelog](https://keepach
 
 Changes up to 0.17.0 are in [the 0.17.0 changelog](https://github.com/o3co/auth.provider/blob/v0.17.0/CHANGELOG.md).
 
+## [0.18.0-rc.3] - 2026-10-20
+
+What to change from rc.2 is in [From 0.18.0-rc.2](docs/migration.md#from-0180-rc2); coming from rc.1, read [From 0.18.0-rc.1](docs/migration.md#from-0180-rc1) first.
+
+### Security
+
+- `request-source`: a `http.trusted-proxies` entry covering every address of a family, any `/0` or every IPv4 address mapped into IPv6 (`::ffff:0:0/96`, `::/1`), made every client a proxy, so no source could be told; it now refuses boot at that entry.
+- `session-tokens`: a token an add pushed out of a session near its cap could miss the sweep's retry, where a sweep took the session off its list at that moment; the session is now listed again after every such add.
+- `mfa-enrollment`: a first factor's recovery codes could stay usable though never shown, where its login or its session's raise failed and taking them back failed too; they are now written only as they go out.
+- `mfa-email`: a code by mail counted as a second factor though `mfa-email.adds-second-factor` was not set; by default it is now a way back only. An app generated from the `mfa-web` pattern does not set it: set it to keep a code by mail counting.
+- `session-lifecycle`: an entry by a cookie a raise retired could, for one request racing the raise, be judged on the raised session; an entry now checks again that its cookie still names the session.
+- `federation-grants`: under `identity-check: required`, an upstream account held by a local user whose subject read like the no-owner placeholder was taken for unheld, letting another subject's grant through; the ledger's answer is now judged as given.
+
+### Changed
+
+- **Breaking**: a federation login's or link's round trip, and a federation grant's connection, are kept by the new `upstream-round-trip`, and a held login's upstream tokens by the new `upstream-handoff`, each in a new space the store must replicate (`upstream-round-trip-store.round-trips`, `upstream-handoff-store.held-logins`). `federation-store` is gone, and `federation` refuses to boot without the round trips: an app generated with an earlier release candidate that composes `federation` is generated again, or adds the four modules and removes `federation-store`. Round trips under way at the upgrade start again.
+- **Breaking**: a federation grant's connection sets a cookie of its own for its round trip, and its callback is taken only in the browser that began it.
+- **Breaking**: published bundles take `zod` as a required peer (`^4.6.0`), and an app depends on `zod` itself; a generated app depends on it at the packages' version.
+- **Breaking**: `outbound.proxy` takes an origin alone: no path, not even a trailing `/`, and no default port.
+- **Breaking**, for an app composed by hand: `session`'s entry requirements and closing participants are kept by the bridges `session-requirements` and `session-participants`, and `session-lifecycle` refuses to boot without them; `authorize`'s redirect-URI rules and re-authentication records are the packages `redirect-uris` and `reauth`, and the `authorize-store` template wires `reauth`'s store; `mfa-flows`' enrollment and operator reset are the bridges `mfa-enrollment` and `mfa-reset`. `combinations` composes each with its host; routes and answers are unchanged, and the client metadata section keeps its name `authorize`.
+- **Breaking**: `clients-cimd` builds a document client's sections from each owner's copy, and no longer depends on `authorize` and `consent`; it refuses to boot where no composed section copies `redirect_uris` or `client_name`. With the `a2a` pattern, add `@mod/authorize` beside `--add @mod/clients-cimd`.
+- **Breaking**: passkey nicknames follow a second factor's label rule: 1 to 64 code points, well formed, no control or bidirectional characters.
+- `clients-cimd` refuses a document whose record a section's schema refuses before keeping it, logging where the record fails and remembering it for `refused-lifetime`; a `client_uri` that is not a string is refused that way too. It refuses to boot where `max-size` or `timeout` is above outbound's cap.
+- `records` refuses, when the composition builds, a space opened both for records and for records under a secret.
+- Composing `users` no longer brings `mail`, nor `federation` `seal`, which it uses only where a module receives upstream tokens.
+- A first factor's recovery codes are written only as they go out, once its login opened or its session's raise was written; where neither is, `POST /session/mfa/recovery-codes` issues them later, answering `409 mfa_factor_limit` to a first set past `max-factors`.
+- A generated app's image copies a `pnpm-workspace.yaml` the operator writes, and its README names the audit receivers composed.
+- For modules of your own: `Narrower.internal` takes the URL a module read through `url-setting`, in place of `true`, and allows a private address in `outbound.internal-hosts` only to that URL's origin; `token-exchange` reads a token's family and session through `grants`' `tokenTies`, so composing it no longer brings `refresh`, `session-tokens` and `session`; `factors.bind` answers the `fence` and `codesDue`, and `factors.reissue(subject, fence)` writes the first set of codes once it can be shown; a token-exchange verifier answers its `kind`; a code store names its void list's crowd `crowd.names`; a declared route's `*` within a path matches exactly one segment; and a session entry requirement or closing participant contributes to `session-requirements`' or `session-participants`' point.
+
+### Added
+
+- Modules: `upstream-round-trip` and `upstream-handoff`, with their store wirings `upstream-round-trip-store` and `upstream-handoff-store`; `outbound-policy` (outbound's destination policy, with `outboundLimits`); `redirect-uris` and `reauth`; `session-requirements` and `session-participants`; `mfa-enrollment` and `mfa-reset`.
+- The audit event `refresh.family_revoked`, with the subject and the client, when a reused refresh token revokes its family; `authorize` and `token-endpoint` declare their audit events, so the audit event reference lists them.
+- `federation.held-page`: the page on the public origin a browser goes to when a second factor holds its login through an upstream, to go on there; set it wherever a second factor is composed beside `federation`. The [login page guide](docs/login-page.md#a-login-through-an-upstream-that-a-second-factor-holds) says what the page does.
+- For modules of your own: `keys`' `thumbprint` (RFC 7638), the same whatever form the key was written in; `clients`' `checkRecord`, and a metadata section's `fromDocument` and `reads`, to copy its value from a client's metadata document.
+- The cards of packages that talk to a server the deployment provides (`redis`, `mail-smtp`) say what it must be, under Deployment.
+- A [recipe for a first login](docs/recipe-first-login.md), from generation to a token.
+
+### Fixed
+
+- `federation-grants` audits a route the store cannot answer: the token and revoke routes as their refusal with the reason `unavailable`, the browser routes as `federation.grant.authorization_failed` with the outcome `unavailable`.
+- `federation-grants` audits an authorization right after the grant is activated, so a failure tidying up afterwards no longer leaves it audited only as a failure; activation refuses an intent that lapsed during the upstream exchange.
+- `mfa-witness-http`: a write's deadline fell after outbound gave the call up, where outbound's timeout was the shorter; it now ends when outbound gives up.
+- A login through an upstream that a second factor held answered the upstream's callback with JSON a browser cannot act on; with `federation.held-page` set, the browser goes there to go on.
+- A refused client authentication at the token, introspection, revocation and device authorization endpoints is recorded as `client.authentication.failure`, with `clients`' `reason` and `source`, never the client id claimed. `authenticateClient` takes the audit as its third argument.
+- `passkey-registration` records `passkey.registered`, with the subject and `source`, once a passkey is kept; it needs `audit` composed.
+
+### Removed
+
+- `federation-store`.
+- For modules of your own: `refresh`'s `lineage.of` and `lineage.adopt` (`start` remains); `consent`'s `displayed`, a client source writing consent's section itself or taking it from `clientSection.fromDocument`; `factors.bind`'s `recoveryCodes` and `recoveryCodesFactor`; and `mfaReset` from `mfa-flows`, imported from `mfa-reset` now.
+
 ## [0.18.0-rc.2] - 2026-10-20
 
 What to change from rc.1 is in [From 0.18.0-rc.1](docs/migration.md#from-0180-rc1).
