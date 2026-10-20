@@ -4,7 +4,7 @@ import { addressesOf, addressList, proxiesOf, sourceSettings } from "../src/cont
 const takes = (entry: string) => sourceSettings.safeParse({ "trusted-proxies": [entry] }).success;
 
 it("takes trusted proxies as IP addresses or CIDR blocks", () => {
-	for (const entry of ["10.0.0.1", "10.0.0.0/8", "0.0.0.0/0", "2001:db8::/32", "::1/128"]) {
+	for (const entry of ["10.0.0.1", "10.0.0.0/8", "0.0.0.0/1", "2001:db8::/32", "::1/128"]) {
 		expect(takes(entry), entry).toBe(true);
 	}
 	const { trusted } = proxiesOf(
@@ -15,6 +15,19 @@ it("takes trusted proxies as IP addresses or CIDR blocks", () => {
 		false,
 	]);
 	expect(trusted.check("2001:db8::1", "ipv6")).toBe(true);
+});
+
+it("refuses a trusted proxy covering every address, however written, as no source could be told", () => {
+	for (const entry of ["0.0.0.0/0", "10.1.2.3/0", "::/0", "2001:db8::/0", "::ffff:0:0/0"]) {
+		const issues = sourceSettings.safeParse({ "trusted-proxies": [entry] }).error?.issues ?? [];
+		expect(
+			issues.map((issue) => issue.path.join(".")),
+			entry,
+		).toEqual(["trusted-proxies.0"]);
+		expect(issues[0]?.message, entry).toContain("every source would be undetermined");
+	}
+	// An address list elsewhere may still hold every address.
+	expect(addressList().safeParse(["0.0.0.0/0", "::/0"]).success).toBe(true);
 });
 
 it("refuses an entry not of that shape", () => {
