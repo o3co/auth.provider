@@ -252,6 +252,7 @@ importers:
       '@o3co/ts.hocon':
         specifier: 1.14.3
         version: 1.14.3(zod@4.6.7)
+    devDependencies:
       zod:
         specifier: 4.6.7
         version: 4.6.7
