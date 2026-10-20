@@ -33,7 +33,7 @@ Internal module of `mfa-flows`: holding a login or a session until a factor is p
 - A login transaction held without an authentication time goes on with it `"unknown"`, never the opening time.
 - A resume that opens nothing and holds nothing (one past its caller's deadline) is answered `403 login_required` and logged `mfa-flows.login_expired`.
 - A login that opens after a revocation since its transaction started (one landing between the proof and the opening) has its session closed and answers `401 login_required`; its cookie never goes out.
-- What a resume carries is made only once the login opened past that check. A response it makes instead closes the session and is answered, the session's cookie never going out; a throw closes it as best it can and goes on, with no cookie either.
+- What a resume carries is made only once the login opened past that check. A response it makes instead closes the session and is answered, the session's cookie never going out; a throw closes it as best it can and goes on, with no cookie either. A part unavailable there, the close included, is answered `503`, clearing the transaction's cookie.
 
 ## Depends on
 - `audit`; `http` (the request and response types); `kernel` (the log); `login-gates` (the gate type, going on with a login); `mfa` (factor decisions); `rate-limit` (lockouts); `session` (entering, raising); `subject-revocation`; `transactions`; the package's routing helpers; `recording`

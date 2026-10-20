@@ -1,5 +1,6 @@
 import { jsonAnswer } from "@mod/http";
 import { testRequest } from "@mod/http/testing";
+import { Unavailable } from "@mod/kernel";
 import { recordingLog } from "@mod/kernel/testing";
 import type { LoginOutcome } from "@mod/login-gates";
 import type { Session } from "@mod/session";
@@ -94,4 +95,33 @@ it("closes the opened session as best it can when carried throws, throwing what 
 		}),
 	).rejects.toThrow("carried");
 	expect(s.calls).toEqual(["close h1"]);
+});
+
+it("answers 503 clearing the transaction, never the session's cookie, when carried is unavailable", async () => {
+	const s = standIn();
+	const failed = await s.resume(async () => {
+		throw new Unavailable("mfa");
+	});
+	expect([failed.status, failed.body, failed.cookies]).toEqual([
+		503,
+		{ json: { error: "temporarily_unavailable" } },
+		["mfa="],
+	]);
+	expect(s.calls).toEqual(["close h1"]);
+});
+
+it("answers 503 clearing the transaction when the session cannot be closed after a response carried made, its cookie never going out", async () => {
+	const s = standIn();
+	s.set.closing = async () => {
+		throw new Unavailable("session");
+	};
+	const failed = await s.resume(async () => jsonAnswer(409, { error: "mfa_factor_limit" }));
+	expect([failed.status, failed.cookies]).toEqual([503, ["mfa="]]);
+	s.set.closing = async () => {
+		throw new TypeError("session");
+	};
+	await expect(
+		s.resume(async () => jsonAnswer(409, { error: "mfa_factor_limit" })),
+	).rejects.toThrow(TypeError);
+	expect(s.calls).toEqual(["close h1", "close h1"]);
 });
