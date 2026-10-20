@@ -105,6 +105,7 @@ interface Paths {
 	readonly explained: OutboundRefusals["explained"];
 	readonly credentialRefusalOf: CredentialPolicy["refusalOf"];
 	readonly limitsOf: OutboundLimits["of"];
+	readonly lookupsOf: NonNullable<OutboundLimits["lookupsOf"]>;
 }
 
 /** One header value: printable ASCII on one line, no space at either end. */
@@ -150,8 +151,9 @@ export function outboundOver(
 	// A name lookup cannot be stopped at a deadline: one still running past it holds a lookup of its
 	// own, never a request's place, and no more run at once than half the threadpool. Names an outside
 	// party chose take half of those at most, so slow ones of theirs never hold every lookup.
-	const outsidePlace = places(Math.floor(lookups / 2));
-	const ownPlace = places(lookups - Math.floor(lookups / 2));
+	const outsideLookups = Math.floor(lookups / 2);
+	const outsidePlace = places(outsideLookups);
+	const ownPlace = places(lookups - outsideLookups);
 	// A name already resolving is answered by that lookup, which takes one place for all who ask.
 	const resolving = new Map<string, Promise<readonly string[]>>();
 	const boundedBy =
@@ -181,6 +183,7 @@ export function outboundOver(
 		explained: policy.explain,
 		// The call `go` cuts a request by, for a plain request.
 		limitsOf: (narrower) => policy.limitsOf(narrower, false),
+		lookupsOf: (narrower) => (narrower?.outsideChosen ? outsideLookups : lookups - outsideLookups),
 	};
 }
 
@@ -212,5 +215,8 @@ export default defineModule({ name: "outbound", section, replicaSafe: true }, (m
 	m.provide(credentialPolicy).by(async (c) => ({
 		refusalOf: (await c.get(paths)).credentialRefusalOf,
 	})),
-	m.provide(outboundLimits).by(async (c) => ({ of: (await c.get(paths)).limitsOf })),
+	m.provide(outboundLimits).by(async (c) => {
+		const { limitsOf, lookupsOf } = await c.get(paths);
+		return { of: limitsOf, lookupsOf };
+	}),
 ]);

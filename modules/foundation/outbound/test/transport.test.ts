@@ -441,6 +441,18 @@ describe("outbound", () => {
 		await resolving;
 	});
 
+	it("answers how many names a caller may resolve at once, the outside party's share apart", () => {
+		const shares = (lookups: number) => {
+			const out = over(table({}).resolve, { "max-concurrent": 16 }, undefined, lookups);
+			return [out.lookupsOf({ outsideChosen: true }), out.lookupsOf({}), out.lookupsOf()];
+		};
+		expect([shares(1), shares(2), shares(5)]).toEqual([
+			[0, 1, 1],
+			[1, 1, 1],
+			[2, 3, 3],
+		]);
+	});
+
 	it("resolves a name once for the requests asking it at once, taking one place", async () => {
 		const calls: string[] = [];
 		let settle: (addresses: readonly string[]) => void = () => {};
