@@ -32,3 +32,5 @@ export const section = z.strictObject({
 		.prefault("1m")
 		.describe("The window `requests` counts in, from 1s to 1h."),
 });
+
+export type Settings = z.output<typeof section>;
