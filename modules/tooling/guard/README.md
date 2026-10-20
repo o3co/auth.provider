@@ -16,7 +16,7 @@
   - G13, G23: the clock and randomness come from `kernel`, in the kinds the configuration lists.
   - G14: a verification base depends on no product module.
   - G15: wiring neither branches nor loops; `&&`, `||`, `??` and calls that walk a collection with a function, such as `map` or `filter`, count too.
-  - G16: a feature depends on no capability; its tests may use the capability's `./testing` stand-in.
+  - G16: a feature depends on no capability, nor on a package declaring `forWiring` (a feature's storage is its wiring's to build on it); its tests may use their `./testing` stand-in. `forWiring` is `true` only.
   - G17: a card holds only the current contract; plans, moves and removals in progress, by their phrases as written, go to the plan list outside the repo.
   - G21: no document copies a list of the configuration.
   - G22: only a wiring-kind package wires (`wires` in its manifest), and a feature that declares `storeWiring` has one.

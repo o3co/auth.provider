@@ -133,18 +133,22 @@ function dependencyRules(s: Scope, p: Pkg) {
 			}
 		}
 	}
-	// G16: a feature never depends on a capability; its tests may use a capability's stand-in.
+	// G16: a feature never depends on a capability, nor on what declares forWiring; its tests may use the stand-in.
+	const g16 = "G16 a feature depends on no capability, nor on what declares forWiring";
+	if (p.manifest.forWiring !== undefined && p.manifest.forWiring !== true) {
+		report(g16, p.name, "forWiring is true only");
+	}
 	if (budget.capabilityBlind.includes(kindOf(p))) {
 		for (const dep of workspaceDeps(p, true)) {
-			if (kindOf(byName.get(dep) as Pkg) !== budget.capabilityKind) continue;
+			const target = byName.get(dep) as Pkg;
+			if (kindOf(target) !== budget.capabilityKind && target.manifest.forWiring !== true) continue;
 			const beyondStandIn = s.sources(p).some((file) =>
 				importsOf(join(p.dir, file)).some((use) => {
 					const target = packageOf(use.specifier);
 					return target?.name === dep && target.subpath !== "testing";
 				}),
 			);
-			if (runtime.has(dep) || beyondStandIn)
-				report("G16 a feature depends on no capability", p.name, dep);
+			if (runtime.has(dep) || beyondStandIn) report(g16, p.name, dep);
 		}
 	}
 }
