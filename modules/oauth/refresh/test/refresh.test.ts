@@ -46,6 +46,7 @@ import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { revocableKinds } from "@mod/token-control";
 import tokenControl from "@mod/token-control/module";
 import { grantCaller, grantCalls, grantInput } from "@mod/token-endpoint/testing";
+import tokenExchange from "@mod/token-exchange/module";
 import {
 	type AccessGrant,
 	type IssueLimits,
@@ -85,6 +86,7 @@ afterEach(async () => {
 });
 const verifier = "v".repeat(43);
 const challenge = createHash("sha256").update(verifier).digest("base64url");
+const exchangeType = "urn:ietf:params:oauth:grant-type:token-exchange";
 const allowed = (grants: string[]) =>
 	allowancesFor({ grants, scopes: ["read", "write"], audiences: ["https://api"] });
 /** What modules contribute to `point`, read back after assembly. */
@@ -163,6 +165,7 @@ async function serve(
 				confidentialClient({ id: "other", sections: allowed(both) }),
 				confidentialClient({ id: "coded", sections: allowed(["authorization_code"]) }),
 				publicClient({ id: "pub", sections: allowed(both) }),
+				confidentialClient({ id: "exchanger", sections: allowed([...both, exchangeType]) }),
 			]),
 			...codeGrantConfig(),
 			...refreshConfig({
@@ -249,7 +252,18 @@ async function serve(
 		grant("refresh_token", as, { refresh_token: token ?? "", ...extra });
 	const active = async (token: string | undefined) =>
 		(await app.get(tokens).verifyAccess(token ?? "")).kind === "valid";
-	return { app, stores, down, session, post, redeem, refresh, active, audited: audited.events };
+	return {
+		app,
+		stores,
+		down,
+		session,
+		post,
+		grant,
+		redeem,
+		refresh,
+		active,
+		audited: audited.events,
+	};
 }
 
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
@@ -991,6 +1005,24 @@ describe("lineage", () => {
 		const late = await issue(s, found.expiresAt);
 		expect(await held.join(late)).toBe(false);
 		expect(await s.active(late.token)).toBe(false);
+	});
+
+	it("has a token token-exchange issues from a family's access token end with the family", async () => {
+		const s = await serve({ extra: [tokenExchange] });
+		const first = await s.redeem("exchanger");
+		const exchange = () =>
+			s.grant(exchangeType, "exchanger", {
+				subject_token: first.access_token ?? "",
+				subject_token_type: "urn:ietf:params:oauth:token-type:access_token",
+			});
+		const exchanged = await exchange();
+		expect(exchanged.status).toBe(200);
+		expect(await s.active(exchanged.body.access_token)).toBe(true);
+		await s.refresh(first.refresh_token, "exchanger");
+		await s.refresh(first.refresh_token, "exchanger");
+		expect(await s.active(exchanged.body.access_token)).toBe(false);
+		// The family's end revoked the subject token too, so it no longer validates.
+		expect((await exchange()).body).toMatchObject({ error: "invalid_request" });
 	});
 
 	it("revokes the token and answers ended for a family that has ended", async () => {
