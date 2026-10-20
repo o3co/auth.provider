@@ -160,8 +160,8 @@ const issued = await input.issue({
 });
 ```
 
-- Names are 1 to 255 characters with no space or control character; a collision-resistant name, a URI you control, is safest. A reserved name (what `tokens` writes, the names a specification gives a meaning, such as `nbf`, `roles` or `email`, and `__proto__`, `constructor`, `prototype` at any depth) is refused.
-- Values are plain JSON: strings, finite numbers, booleans, null, arrays and plain objects, at most 8 deep and 4 KiB in all. Anything else is refused.
+- Names are 1 to 255 code points, well formed, with no space or control character; a collision-resistant name, a URI you control, is safest. A reserved name (what `tokens` writes, the names a specification gives a meaning, such as `nbf`, `roles` or `email`, and `__proto__`, `constructor`, `prototype` and `toJSON` at any depth) is refused.
+- Values are plain JSON: strings, finite numbers, booleans, null, arrays and plain objects, at most 8 deep and 4 KiB in all. Anything else is refused. The `added-claims` module's card states every rule and limit.
 - A refusal is a `TypeError`: the grant's mistake, answered as an error, not audited as a refused issuance.
 - The token's issuance policies see the claims, and `verifyAccess` reads them back (`grant.claims`). The audit's `token.issued` names them, never their values.
 - A refresh or an exchange issues no added claim. Do not use one for a restriction that must hold on such a token.
