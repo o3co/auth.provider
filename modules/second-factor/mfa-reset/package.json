@@ -1,0 +1,26 @@
+{
+	"name": "@mod/mfa-reset",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"joins": [
+		"@mod/mfa-flows"
+	],
+	"exports": {
+		".": "./src/contract.ts",
+		"./module": "./src/module.ts",
+		"./audit-events": "./src/audit-events.ts"
+	},
+	"dependencies": {
+		"@mod/audit": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/mfa": "workspace:*",
+		"@mod/mfa-flows": "workspace:*",
+		"@mod/rate-limit": "workspace:*",
+		"@mod/subject-revocation": "workspace:*"
+	},
+	"devDependencies": {
+		"vitest": "5.0.4"
+	}
+}

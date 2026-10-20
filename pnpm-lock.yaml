@@ -2494,6 +2494,31 @@ importers:
         specifier: workspace:*
         version: link:../mfa-extensions
 
+  modules/second-factor/mfa-reset:
+    dependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mfa':
+        specifier: workspace:*
+        version: link:../mfa
+      '@mod/mfa-flows':
+        specifier: workspace:*
+        version: link:../mfa-flows
+      '@mod/rate-limit':
+        specifier: workspace:*
+        version: link:../../foundation/rate-limit
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
   modules/second-factor/mfa-revocation:
     dependencies:
       '@mod/kernel':
