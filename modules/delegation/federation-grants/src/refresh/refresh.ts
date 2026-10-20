@@ -179,7 +179,36 @@ export function refreshWith(parts: Parts) {
 		return false;
 	};
 
-	const renew = async (grant: Grant, held: Credentials, asked: Asked): Promise<Current> => {
+	/** The lock kept for its life again every half of it, only under `mark`; `ours` keeps it once more, answering whether it is still held. */
+	const keeping = (id: string, mark: string) => {
+		const keep = async () =>
+			(
+				await parts.locks.update(id, (holds) =>
+					holds === mark ? { value: holds, lifetimeMs: lockMs } : undefined,
+				)
+			)?.before === mark;
+		let lost = false;
+		const timer = setInterval(() => {
+			keep().then(
+				(ours) => {
+					if (!ours) {
+						lost = true;
+						clearInterval(timer);
+					}
+				},
+				() => clearInterval(timer),
+			);
+		}, lockMs / 2);
+		timer.unref?.();
+		return { ours: async () => !lost && (await keep()), stop: () => clearInterval(timer) };
+	};
+
+	const renew = async (
+		grant: Grant,
+		held: Credentials,
+		asked: Asked,
+		ours: () => Promise<boolean>,
+	): Promise<Current> => {
 		const spent = await spend(grant);
 		if (spent.kind === "gone") return { kind: "gone" };
 		if (spent.kind === "wait") {
@@ -203,6 +232,8 @@ export function refreshWith(parts: Parts) {
 		// A grant ended, or its subject revoked, while the upstream was asked gets nothing, written or
 		// handed: a grant its listing missed is not ended by the follower, only by the boundary.
 		if (ended(counted) || (await parts.revoked(counted))) return { kind: "gone" };
+		// A lock run out is another holder's refresh now: nothing answered here is written.
+		if (!(await ours())) return heldOr(grant.id, held, asked, { kind: "unavailable" });
 		if (refreshed.kind === "limited") {
 			const { retryAfterSeconds } = refreshed;
 			const limited = retryAfterSeconds === undefined ? {} : { retryAfterSeconds };
@@ -267,6 +298,7 @@ export function refreshWith(parts: Parts) {
 			const mark = Buffer.from(parts.random.bytes(16)).toString("base64url");
 			if (!(await locked(grant.id, mark)))
 				return heldOr(grant.id, held, asked, { kind: "lock_timeout" });
+			const kept = keeping(grant.id, mark);
 			try {
 				// Read again under the lock: another request may have refreshed, ended or revoked it, or the
 				// subject's revocation or the grant's end may have come while it waited.
@@ -276,8 +308,9 @@ export function refreshWith(parts: Parts) {
 				if (!again) return { kind: "reauthorize", reason: "credentials_unreadable" };
 				if (!due(again, asked))
 					return carries(again, asked) ? handed(again, asked, false) : { kind: "scope" };
-				return await renew(now, again, asked);
+				return await renew(now, again, asked, kept.ours);
 			} finally {
+				kept.stop();
 				// Only while it still holds its own mark: one that ran out may be another host's now.
 				await parts.locks.update(grant.id, (holds) =>
 					holds === mark ? { value: holds, lifetimeMs: 1 } : undefined,

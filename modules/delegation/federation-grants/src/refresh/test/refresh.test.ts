@@ -539,7 +539,7 @@ describe("refreshing alongside other writers", () => {
 		expect(await r.stores.lockStore.hold("g", "another", 60_000)).toBe("created");
 	});
 
-	it("lets go of its lock only while it still holds it, never one another holder took after it ran out", async () => {
+	it("writes nothing once its lock ran out, and lets go only of its own, never one another holder took", async () => {
 		const r = await refresher(4);
 		r.advance(2100);
 		r.upstream.push(async () => {
@@ -549,9 +549,33 @@ describe("refreshing alongside other writers", () => {
 			expect(await r.stores.lockStore.hold("g", "another", 60_000)).toBe("created");
 			return { kind: "refreshed", tokens: upstreamTokens({ accessToken: "up-2" }) as never };
 		});
-		expect(said(await r.call())).toBe("handed up-2");
+		// The other holder refreshes now: an answer written here would race it.
+		expect(said(await r.call())).toBe("unavailable");
+		expect(r.records.open((await r.stored()) as Grant)?.accessToken).toBe("up-1");
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		expect(await r.stores.lockStore.hold("g", "third", 60_000)).toBe("exists");
+	});
+
+	it("keeps its lock while the upstream answers, and keeps it no longer once it lets go", async () => {
+		vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+		try {
+			const r = await refresher(4);
+			r.advance(2100);
+			r.upstream.push(async () => {
+				// Past half the lock's life, kept again; past its first life, still held.
+				r.advance(6000);
+				await vi.advanceTimersByTimeAsync(5000);
+				r.advance(6000);
+				expect(await r.stores.lockStore.hold("g", "another", 60_000)).toBe("exists");
+				return { kind: "refreshed", tokens: upstreamTokens({ accessToken: "up-2" }) as never };
+			});
+			expect(said(await r.call())).toBe("handed up-2");
+			await vi.advanceTimersByTimeAsync(5000);
+			await new Promise((resolve) => setTimeout(resolve, 5));
+			expect(await r.stores.lockStore.hold("g", "third", 60_000)).toBe("created");
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("reads the grant again under the lock: refreshed, revoked or unreadable meanwhile", async () => {
