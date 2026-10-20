@@ -2588,9 +2588,60 @@ importers:
         specifier: workspace:*
         version: link:../../identity/subject-revocation
     devDependencies:
+      '@mod/cookies':
+        specifier: workspace:*
+        version: link:../../foundation/cookies
+      '@mod/csrf':
+        specifier: workspace:*
+        version: link:../../identity/csrf
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/login-attributes':
+        specifier: workspace:*
+        version: link:../../identity/login-attributes
+      '@mod/login-gates':
+        specifier: workspace:*
+        version: link:../../identity/login-gates
+      '@mod/mfa-binding-proof':
+        specifier: workspace:*
+        version: link:../mfa-binding-proof
+      '@mod/mfa-enrollment':
+        specifier: workspace:*
+        version: link:../mfa-enrollment
+      '@mod/mfa-entry':
+        specifier: workspace:*
+        version: link:../mfa-entry
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      '@mod/request-source':
+        specifier: workspace:*
+        version: link:../../foundation/request-source
+      '@mod/seal':
+        specifier: workspace:*
+        version: link:../../foundation/seal
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+      '@mod/subject-attributes':
+        specifier: workspace:*
+        version: link:../../identity/subject-attributes
       vitest:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
   modules/second-factor/mfa-revocation:
     dependencies:

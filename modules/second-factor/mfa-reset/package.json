@@ -21,6 +21,23 @@
 		"@mod/subject-revocation": "workspace:*"
 	},
 	"devDependencies": {
-		"vitest": "5.0.4"
+		"@mod/cookies": "workspace:*",
+		"@mod/csrf": "workspace:*",
+		"@mod/http": "workspace:*",
+		"@mod/login-attributes": "workspace:*",
+		"@mod/login-gates": "workspace:*",
+		"@mod/mfa-binding-proof": "workspace:*",
+		"@mod/mfa-enrollment": "workspace:*",
+		"@mod/mfa-entry": "workspace:*",
+		"@mod/mfa-extensions": "workspace:*",
+		"@mod/records": "workspace:*",
+		"@mod/request-source": "workspace:*",
+		"@mod/seal": "workspace:*",
+		"@mod/session": "workspace:*",
+		"@mod/session-requirements": "workspace:*",
+		"@mod/store": "workspace:*",
+		"@mod/subject-attributes": "workspace:*",
+		"vitest": "5.0.4",
+		"zod": "4.6.7"
 	}
 }
