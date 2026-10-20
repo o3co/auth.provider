@@ -43,6 +43,7 @@
 - The password goes in the request body alone, never in a URL, a log line or an error.
 - A destination refused when sending, or no answer in time or size, is unavailable. A wrong `verify-url` makes verification unavailable, never "no such user", unless what answers there is a `401` without a Bearer challenge, which reads as none.
 - Boot reports never show the credential.
+- A lookup's `404` is none whatever answered it, logged nowhere: the operator's ledger refuses a caller it does not accept with `401` or `403`, never `404`, and a gateway before it that answers an unknown route `404` reads as no such user.
 - The operator's ledger must do the same work for an unknown identifier as for a known one; this module sends the same one request either way.
 - Holds no state, so it is safe on multiple instances.
 

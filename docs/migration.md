@@ -100,10 +100,11 @@ MFA factors and upstream tokens are sealed, so dumping them needs 0.17's sealing
 
 1. Generate the app with `create-auth-provider`, naming the modules you use (for example `@mod/authorize`, `@mod/code-grant`, `@mod/refresh`, `@mod/oidc`). Their default wirings and bridges are added for you, and one log sink (`log-stdout`) unless you name another.
 2. Write the app's `application.conf`, in its `config` directory, from your 0.17 settings, section by section, with the [mapping](#configuration-mapping) below. Start from the file `create-auth-provider` writes.
-3. Move `clients.yaml` entries into `clients.registered` and `users.yaml` entries into `users.registered`, keeping client secrets as their bcrypt hashes.
-4. Point the app at an empty Redis (or a new `redis.prefix`) that meets the [requirements](#redis).
-5. Start the app. A refused boot exits with status 78 and prints one `refused <where>: <reason>` line per problem on standard error; fix them and start again. Refusals name the setting, never its value.
-6. Run your clients against it, paying attention to the [behavior changes](#behavior-changes).
+3. Remove 0.17's environment variables. 0.18 reads a variable only where your HOCON writes `${?VAR}`, so a 0.17 variable left in the environment is ignored without a word, and the setting it controlled takes its 0.18 default: `OAUTH_ACCESS_TOKEN_EXPIRES_IN` left set, say, changes no access token's lifetime. Before you upgrade, delete every 0.17 variable from the environment, the orchestrator's manifests and the secret store, and write each value you keep into `application.conf`, or bind it there with `${?VAR}` under a name of your own. Boot does not tell you of one left set.
+4. Move `clients.yaml` entries into `clients.registered` and `users.yaml` entries into `users.registered`, keeping client secrets as their bcrypt hashes.
+5. Point the app at an empty Redis (or a new `redis.prefix`) that meets the [requirements](#redis).
+6. Start the app. A refused boot exits with status 78 and prints one `refused <where>: <reason>` line per problem on standard error; fix them and start again. Refusals name the setting, never its value.
+7. Run your clients against it, paying attention to the [behavior changes](#behavior-changes).
 
 ## How configuration works now
 
@@ -587,7 +588,7 @@ Upstream links and MFA enrollment are no longer kept by the ledger. An upstream 
 
 A ledger that suspends a user stops new logins and grants by its answers. To end the user's open sessions and issued tokens as well, compose `subject-revocation-http` and have the ledger post the subject to `/ledger/subject-revocations`; see [Revoking a user from the ledger](runbook.md#revoking-a-user-from-the-ledger).
 
-A ledger can also be asked for a user by subject, so a user who signs in upstream has the ledger's attributes, such as the address `mfa-email` mails: set `users-http.subject-url`. It is posted `{"subject"}` the same way; a `200` with an `id` is the user (no `username` asked), `404` and `410` are no such user, and anything else, `401` and `403` included, is unavailable. Likewise `users-http.upstream-url` is posted `{"idp", "subject"}` to look a user up by upstream identity, read the same way; with it, the ledger's answer is the last word, and links users keeps are not read. With a `credential`, every URL must be at one origin. Reading the password call's `401` as no such user is kept for 0.17's ledgers, and is to go in a later release, after which it reads as a lookup's does; a `403` is already unavailable.
+A ledger can also be asked for a user by subject, so a user who signs in upstream has the ledger's attributes, such as the address `mfa-email` mails: set `users-http.subject-url`. It is posted `{"subject"}` the same way; a `200` with an `id` is the user (no `username` asked), `404` and `410` are no such user, and anything else, `401` and `403` included, is unavailable. Likewise `users-http.upstream-url` is posted `{"idp", "subject"}` to look a user up by upstream identity, read the same way; with it, the ledger's answer is the last word, and links users keeps are not read. A lookup's `404` reads as no such user whatever sent it, and nothing is logged: the ledger must refuse a caller it does not accept with `401` or `403`, never `404`, and a gateway in front of it that answers an unknown route `404` (a mistyped `subject-url` or `upstream-url`, a route not deployed) makes every user unknown, so a federated login answers `unknown_user` and a subject's attributes drop out of its tokens. With a `credential`, every URL must be at one origin. Reading the password call's `401` as no such user is kept for 0.17's ledgers, and is to go in a later release, after which it reads as a lookup's does; a `403` is already unavailable.
 
 ### MFA and federation
 
@@ -630,6 +631,33 @@ A ledger can also be asked for a user by subject, so a user who signs in upstrea
 
 - `/_healthcheck` still answers `200 {"status":"ok"}`, now with `Content-Type: application/json` (no charset) and `Cache-Control: no-store`. Probes that match the exact content type need updating.
 - `/readyz` answers `{"status":"ready"}` or `{"status":"unready"}` only; the `checks` list is gone.
+
+### Log and audit lines
+
+Both streams are still one JSON object per line on standard output, but neither line keeps 0.17's shape. A log pipeline that routes or alerts on 0.17's fields stops matching without an error: a filter on `name == "audit"` no longer separates the audit trail, a numeric `level` threshold matches nothing, and `msg` and the `audit.*` fields are gone. Change those filters before you upgrade.
+
+| | 0.17 | 0.18 |
+|---|---|---|
+| Log line (`log-stdout`) | pino's: `level` a number (`30`, `40`, …), `time`, `name: "provider"`, `msg` | `level` (a string: `trace`, `debug`, `info`, `warn`, `error` or `fatal`), `at` (epoch ms) and `event` first, then the line's fields; no `name`, `time` or `msg` |
+| Audit line (`audit-stdout`) | pino's, with `name: "audit"`, the event type as `msg` and the event under `audit` | `kind`, `at` (epoch ms), and `subject` and `attributes` where given; no `level`, `name` or `msg` |
+| Telling them apart | `name` (`provider` or `audit`) | A line with `level` is a log line; a line with `kind` and no `level` is an audit event |
+
+```json
+{"level":"info","at":1792502666577,"event":"http.listening","port":18080}
+{"kind":"token.issued","attributes":{"client":"svc-client","source":"127.0.0.1","grant_type":"client_credentials"},"at":1792502671322}
+```
+
+A threshold on pino's numbers becomes a set of names: `level >= 40` is `level` in `warn`, `error` or `fatal`. An alert on `msg` matches `event` on a log line and `kind` on an audit line. An audit event's fields map as below; each event's attributes are in the [audit event reference](audit-events.md).
+
+| 0.17 (`audit.*`) | 0.18 |
+|---|---|
+| `type` | `kind` |
+| `timestamp` (an ISO time) | `at` (epoch ms) |
+| `subject` | `subject` |
+| `clientId` | `attributes.client` |
+| `ip` | `attributes.source` |
+| `userAgent` | `attributes.userAgent`, on the events that carry it |
+| `details.*` | `attributes.*` |
 
 ## From 0.18.0-rc.1
 
@@ -683,6 +711,9 @@ Coming from rc.1, read this section, then [From 0.18.0-rc.2](#from-0180-rc2).
 
 What changed since rc.2. Coming from rc.1, read [From 0.18.0-rc.1](#from-0180-rc1) first.
 
+- **0.17's environment variables** are not read, and nothing warns of one left set: if the environment or secret store you carried from 0.17 still holds them, remove them as [Migration steps](#migration-steps) says, writing the values you keep into the configuration.
+- **A user ledger's lookups** read a `404` as no such user, whatever sent it: refuse a caller the ledger does not accept with `401` or `403`, never `404`, and check that each URL reaches the route itself, as [User ledger over HTTP](#user-ledger-over-http) says.
+- **Log and audit lines** have the shape they had in rc.2, but no earlier guide described it, nor how 0.17's filters stop matching: see [Log and audit lines](#log-and-audit-lines).
 - **Trusted proxies**: a `http.trusted-proxies` entry covering every address of a family (any `/0`, or every IPv4 address mapped into IPv6, as `::ffff:0:0/96` or `::/1`) now refuses boot at that entry, as it would make every client a proxy; list the proxies' own addresses.
 - **zod**: the packages take `zod` as a required peer (`^4.6.0`); an app depends on `zod` itself, at the version the packages take.
 - **Sessions in an app composed by hand, and an entry requirement or closing participant of your own**: `session`'s points for entry requirements and closing participants are gone; they are the bridges `session-requirements` and `session-participants`, which `combinations` composes with `session`, and `session-lifecycle` refuses to boot without them. Contribute to their points, importing the types from them.
