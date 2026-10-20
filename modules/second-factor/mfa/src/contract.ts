@@ -98,14 +98,14 @@ export interface Factors {
 		| { readonly kind: "valid"; readonly state: unknown; readonly amr: readonly string[] }
 		| { readonly kind: "invalid" | "unknown" }
 	>;
-	/** Binds a proved binding; recovery codes come with the first counting factor, once. One begun as the first counting factor, or asked from a login, binds only while no other counts by then (`first-binding-closed`). The caller passes `from` as it passed it to `begin`. */
+	/** Binds a proved binding, writing no recovery codes: `reissue` writes them. One begun as the first counting factor, or asked from a login, binds only while no other counts by then (`first-binding-closed`). The caller passes `from` as it passed it to `begin`. */
 	bind(
 		subject: string,
 		pending: string,
 		state: unknown,
 		label?: string,
 		from?: AskedFrom,
-		/** `later`: the binding writes no codes, and the caller asks `reissue` for them once it can show them. */
+		/** Read no more: no binding writes codes. Kept until callers stop passing it. */
 		codes?: "later",
 	): Promise<
 		| {
@@ -115,9 +115,6 @@ export interface Factors {
 				readonly fence: Fence;
 				/** True when the subject held no recovery codes once written, and a way back is composed. */
 				readonly codesDue: boolean;
-				readonly recoveryCodes?: unknown;
-				/** The codes' own factor, so a caller that cannot show them can take them back with `remove`. */
-				readonly recoveryCodesFactor?: string;
 		  }
 		| {
 				readonly kind:

@@ -262,6 +262,8 @@ async function serve(
 		const { pending, state, secret } = await provedCode(subject, passed);
 		const bound = await decided.bind(subject, pending, state, label);
 		if (bound.kind !== "bound") throw new Error(bound.kind);
+		// The codes are the reissue's to write, as an enrollment asks it.
+		if (bound.codesDue) await decided.reissue(subject, bound.fence);
 		return { ...bound, secret };
 	};
 	/** Binds a factor of the kind, its first proof being `proof`. */
@@ -270,7 +272,9 @@ async function serve(
 		if (begun.kind !== "begun") throw new Error(begun.kind);
 		const proved = await decided.provePending(subject, begun.pending, proof);
 		if (proved.kind !== "valid") throw new Error(proved.kind);
-		return decided.bind(subject, begun.pending, proved.state);
+		const bound = await decided.bind(subject, begun.pending, proved.state);
+		if (bound.kind === "bound" && bound.codesDue) await decided.reissue(subject, bound.fence);
+		return bound;
 	};
 	/** The identifier of the subject's first factor of the kind. */
 	const idOf = async (subject: string, kind: string) =>
@@ -307,10 +311,10 @@ describe("decisions on the subject's factors", () => {
 		if (bound.kind !== "bound") throw new Error(bound.kind);
 		// What the binding adds is its first proof's amr, answered by `provePending`.
 		expect("amr" in bound).toBe(false);
-		expect(bound.recoveryCodes).toBeDefined();
-		// Named, so a caller that cannot show them can take them back.
-		const codes = (await decided.held("zed")).find((f) => f.id === bound.recoveryCodesFactor);
-		expect(codes?.kind).toBe("backup");
+		// The binding writes no codes: they are due, for the reissue to write.
+		expect([bound.codesDue, "recoveryCodes" in bound]).toEqual([true, false]);
+		expect((await decided.held("zed")).map((f) => f.kind)).toEqual(["code"]);
+		expect((await decided.reissue("zed", bound.fence)).kind).toBe("reissued");
 		expect(await decided.asks("zed")).toBe("proof");
 	});
 
@@ -947,13 +951,9 @@ describe("values no two factors may hold", () => {
 			const binds = await Promise.all(subjects.map(proved));
 			const bound = await Promise.all(binds.map((bind) => bind()));
 			expect(bound.map((b) => b.kind).sort()).toEqual(["bound", "duplicate"]);
+			// The duplicate leaves nothing; the binding writes no codes beside the one bound.
 			const held = await Promise.all(subjects.map((subject) => decided.held(subject)));
-			expect(
-				held
-					.flat()
-					.map((f) => f.kind)
-					.sort(),
-			).toEqual(["backup", "card"]);
+			expect(held.flat().map((f) => f.kind)).toEqual(["card"]);
 			return subjects[bound.findIndex((b) => b.kind === "bound")] ?? "";
 		};
 		const first = await race(["cat", "dan"]);
@@ -991,11 +991,13 @@ describe("a binding begun", () => {
 		expect((await decided.begin("bob", "told")).kind).toBe("begun");
 	});
 
-	it("binds nothing when the way back will not enrol, as when the store cannot answer", async () => {
+	it("writes no codes when the way back will not enrol, as when the store cannot answer, the factor standing", async () => {
 		const { decided, provedCode } = await serve({}, { kinds: [code, stuck] });
 		const { pending, state } = await provedCode("cal");
-		await expect(decided.bind("cal", pending, state)).rejects.toThrow(Unavailable);
-		expect(await decided.held("cal")).toEqual([]);
+		const bound = await decided.bind("cal", pending, state);
+		if (bound.kind !== "bound") throw new Error(bound.kind);
+		await expect(decided.reissue("cal", bound.fence)).rejects.toThrow(Unavailable);
+		expect((await decided.held("cal")).map((f) => f.kind)).toEqual(["code"]);
 	});
 });
 

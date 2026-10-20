@@ -115,7 +115,7 @@ export function factorDecisions(p: FactorParts): Factors {
 			subject,
 			heldOf(subject, await records.list(subject), kind.kind),
 		);
-		// Without its way back a first binding cannot finish, so it fails as an unanswering store does.
+		// Codes that will not enrol fail as an unanswering store does.
 		if (!("secret" in enrolled)) throw new Unavailable("mfa");
 		const fid = id();
 		const factor: Factor = {
@@ -269,7 +269,7 @@ export function factorDecisions(p: FactorParts): Factors {
 			if (result.kind !== "valid") return { kind: "invalid" };
 			return { kind: "valid", state: result.state, amr: amrOf(found.kind, result.amr) };
 		},
-		bind: async (subject, pending, state, label, from, codes) => {
+		bind: async (subject, pending, state, label, from) => {
 			if (label !== undefined && !isLabel(label)) return { kind: "malformed-label" };
 			const found = pendingOf(subject, pending);
 			if (!found) return { kind: "unknown" };
@@ -292,29 +292,26 @@ export function factorDecisions(p: FactorParts): Factors {
 				state,
 				boundAt: p.now(),
 			};
-			// Made before the write, which must be pure; dropped when the subject already holds codes.
-			const made = codes === "later" ? undefined : await recovery(subject);
 			const backed = [...p.kinds.values()].some(isWayBack);
-			// Decided on the factors as written: of two first bindings at once, one brings the codes.
-			const written = await records.decide<
-				"full" | "closed" | "fenced" | { brought: typeof made; due: boolean }
-			>(subject, (all, fences) => {
-				if (fences !== found.fences) return { verdict: "fenced" };
-				// A first binding another counting factor beat to the subject binds nothing: it was let begin as the first.
-				if (asFirst && counting(all, p.kinds).length > 0) return { verdict: "closed" };
-				// A subject holding no codes keeps them a place, whether they come now or later.
-				const due = backed && !all.some(wayBack);
-				if (all.length + 1 + (due ? 1 : 0) > p.maxFactors) return { verdict: "full" };
-				const brought = due ? made : undefined;
-				const next = [...all, factor, ...(brought ? [brought.factor] : [])];
-				return { next, verdict: { brought, due: due && !brought } };
-			});
+			// Decided on the factors as written: of two first bindings at once, one binds.
+			const written = await records.decide<"full" | "closed" | "fenced" | { due: boolean }>(
+				subject,
+				(all, fences) => {
+					if (fences !== found.fences) return { verdict: "fenced" };
+					// A first binding another counting factor beat to the subject binds nothing: it was let begin as the first.
+					if (asFirst && counting(all, p.kinds).length > 0) return { verdict: "closed" };
+					// A subject holding no codes keeps them a place, for the reissue to write them in.
+					const due = backed && !all.some(wayBack);
+					if (all.length + 1 + (due ? 1 : 0) > p.maxFactors) return { verdict: "full" };
+					return { next: [...all, factor], verdict: { due } };
+				},
+			);
 			// Any mark is left: only a reset clears one, as the mark may be a newer binding's by now.
 			if (written === "fenced") return { kind: "fenced" };
 			if (written === "full") return { kind: "full" };
 			if (written === "closed") return closed(subject, factor.kind, "competing");
-			const { brought, due } = written;
-			const ours = new Set([fid, ...(brought ? [brought.factor.id] : [])]);
+			const { due } = written;
+			const ours = new Set([fid]);
 			// A reset that cleared the mark meanwhile cleared this subject: what was written goes too.
 			if (witness && !(await witness.read(subject))) {
 				await dropped(subject, ours);
@@ -322,7 +319,7 @@ export function factorDecisions(p: FactorParts): Factors {
 			}
 			const unique = found.kind.uniqueSecret?.({ secret: found.secret, state });
 			if (unique !== undefined && !(await records.claim(subject, factor.kind, unique, fid))) {
-				// Another factor holds the value: this one goes again, with the codes it brought.
+				// Another factor holds the value: this one goes again.
 				await records.decide(subject, (all) => ({
 					next: all.filter((f) => !ours.has(f.id)),
 					verdict: undefined,
@@ -330,19 +327,7 @@ export function factorDecisions(p: FactorParts): Factors {
 				return { kind: "duplicate" };
 			}
 			recorded("factor.enrolled", subject, { kind: factor.kind, factor: fid });
-			if (brought) {
-				recorded("recovery_codes.generated", subject, {
-					kind: brought.factor.kind,
-					regenerated: "false",
-				});
-			}
-			return {
-				kind: "bound",
-				factor: shown(factor),
-				fence: found.fences as Fence,
-				codesDue: due,
-				...(brought ? { recoveryCodes: brought.show, recoveryCodesFactor: brought.factor.id } : {}),
-			};
+			return { kind: "bound", factor: shown(factor), fence: found.fences as Fence, codesDue: due };
 		},
 		fence: (subject) => records.fence(subject),
 		fenceOf: async (subject) => (await records.fences(subject)) as Fence,
