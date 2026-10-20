@@ -109,6 +109,8 @@ interface Setup {
 	readonly receivers?: Module[];
 	/** Leaves csrf out, which a link needs for its origin evidence. */
 	readonly withoutCsrf?: true;
+	/** Gives alice no upstream identity, as a deployment with no IdP has none to name. */
+	readonly unlinked?: true;
 	/** What the test type's upstreams offer besides a login. */
 	readonly more?: Pick<Upstream, "refresh" | "endSession" | "delegation">;
 }
@@ -170,7 +172,9 @@ async function serve(setup: Setup = {}) {
 				...(setup.origin?.startsWith("http:") ? { "insecure-origin": true } : {}),
 			}),
 			...usersConfig([
-				testUser("alice", "pw", { upstream: [{ idp: "corp", subject: "u-alice" }] }),
+				testUser("alice", "pw", {
+					upstream: setup.unlinked ? [] : [{ idp: "corp", subject: "u-alice" }],
+				}),
 			]),
 			...federationConfig({
 				idps: { corp: { type: "test", issuer: "https://idp.example" } },
@@ -985,6 +989,17 @@ describe("federation", () => {
 				"http://as.example",
 			),
 		).toEqual(["federation.idps.a"]);
+	});
+});
+
+describe("a deployment with no IdP", () => {
+	it("warns at every boot that composes none, as every login then answers not found", async () => {
+		await serve({ federation: { idps: {} }, unlinked: true });
+		expect(logged()).toContain("federation.no_idps {}");
+		await stop();
+		logStart = recorded.lines().length;
+		await serve();
+		expect(logged().filter((line) => line.startsWith("federation.no_idps"))).toEqual([]);
 	});
 });
 
