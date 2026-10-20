@@ -683,7 +683,7 @@ Coming from rc.1, read this section, then [From 0.18.0-rc.2](#from-0180-rc2).
 
 What changed since rc.2. Coming from rc.1, read [From 0.18.0-rc.1](#from-0180-rc1) first.
 
-- **Trusted proxies**: a `http.trusted-proxies` entry covering every address of a family (any `/0`) now refuses boot at that entry, as it would make every client a proxy; list the proxies' own addresses.
+- **Trusted proxies**: a `http.trusted-proxies` entry covering every address of a family (any `/0`, or every IPv4 address mapped into IPv6, as `::ffff:0:0/96` or `::/1`) now refuses boot at that entry, as it would make every client a proxy; list the proxies' own addresses.
 - **zod**: the packages take `zod` as a required peer (`^4.6.0`); an app depends on `zod` itself, at the version the packages take.
 - **Sessions in an app composed by hand, and an entry requirement or closing participant of your own**: `session`'s points for entry requirements and closing participants are gone; they are the bridges `session-requirements` and `session-participants`, which `combinations` composes with `session`, and `session-lifecycle` refuses to boot without them. Contribute to their points, importing the types from them.
 - **`authorize` in an app composed by hand**: its redirect-URI rules and its re-authentication records are the packages `redirect-uris` and `reauth`, which `combinations` composes with it. `authorize` no longer re-exports `redirects`, `registrable` and `redirectsAt`, nor its store interface: import them from `redirect-uris` and `reauth`. The `authorize-store` template wires `reauth`'s store in the same space, so records written before carry over. The client metadata section keeps its name `authorize`.

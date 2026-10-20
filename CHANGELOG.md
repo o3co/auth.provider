@@ -10,8 +10,8 @@ What to change from rc.2 is in [From 0.18.0-rc.2](docs/migration.md#from-0180-rc
 
 ### Security
 
-- `request-source`: a `http.trusted-proxies` entry covering every address, any `/0`, made every client a proxy, so no source could be told; it now refuses boot at that entry.
-<!-- rc.3 #1956: widen the request-source line to every IPv4 address mapped into IPv6 (`::ffff:0:0/96`, `::/1`), and add: `session-tokens`: a token an add pushed out of a session near its cap could miss the sweep's retry where a sweep took the session off its list at that moment; the session is now listed again after every such add. -->
+- `request-source`: a `http.trusted-proxies` entry covering every address of a family, any `/0` or every IPv4 address mapped into IPv6 (`::ffff:0:0/96`, `::/1`), made every client a proxy, so no source could be told; it now refuses boot at that entry.
+- `session-tokens`: a token an add pushed out of a session near its cap could miss the sweep's retry, where a sweep took the session off its list at that moment; the session is now listed again after every such add.
 - `mfa-enrollment`: a first factor's recovery codes could stay usable though never shown, where its login or its session's raise failed and taking them back failed too; they are now written only as they go out.
 - `mfa-email`: a code by mail counted as a second factor though `mfa-email.adds-second-factor` was not set; by default it is now a way back only. An app generated from the `mfa-web` pattern does not set it: set it to keep a code by mail counting.
 <!-- rc.3 #1957, once merged:
