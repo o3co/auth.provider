@@ -160,3 +160,17 @@ it("answers unavailable, writing nothing, wherever the witness cannot be read", 
 	await expect(decided.bind("kim", begun.pending, begun.state)).rejects.toSatisfy(isUnavailable);
 	expect(await counted("kim")).toBe(0);
 });
+
+it("judges whether a counting factor is held against the witness, recording where it was asked", async () => {
+	const { decided, bindCode, wipe, events } = await witnessed();
+	await bindCode("dee");
+	expect(await decided.countingHeld("dee", "credentials")).toBe(true);
+	wipe();
+	events.length = 0;
+	await expect(decided.countingHeld("dee", "credentials")).rejects.toSatisfy(isUnavailable);
+	await expect(decided.countingHeld("dee", "binding")).rejects.toSatisfy(isUnavailable);
+	expect(events.map((e) => [e.kind, e.attributes])).toEqual([
+		["mfa.enrollment_inconsistent", { at: "credentials" }],
+		["mfa.enrollment_inconsistent", { at: "binding" }],
+	]);
+});

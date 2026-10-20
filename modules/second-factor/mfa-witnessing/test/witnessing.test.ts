@@ -67,7 +67,9 @@ it("contributes mfa's witnessing over the witness: a mark beside nothing countin
 	expect(await told.standing("ann", true, "login")).toBe("held");
 	expect(await told.standing("ann", false, "login")).toBe("none");
 	witness.marks.set("bob", "t");
-	await expect(told.standing("bob", false, "credentials")).rejects.toSatisfy(isUnavailable);
+	await expect(told.standing("bob", false, "credentials")).rejects.toSatisfy(
+		(error) => isUnavailable(error) && (error as { what: string }).what === "mfa",
+	);
 	expect(events.map((e) => [e.kind, e.subject, e.attributes])).toEqual([
 		["mfa.enrollment_inconsistent", "bob", { at: "credentials" }],
 	]);
@@ -90,4 +92,45 @@ it("fills a missing mark beside a counting factor, and never clears one beside n
 	expect(witness.marks.get("dee")).toBe("lost");
 	witness.failing.read = 1;
 	await expect(backfill.settle("cid")).rejects.toSatisfy(isUnavailable);
+});
+
+it("leaves no mark when a reset takes the factors while it fills one, and clears only the mark it set", async () => {
+	const held: Record<string, string[]> = { ann: ["code"] };
+	const { app, witness } = await boot(held);
+	if (!witness) throw new Error("no witness");
+	// A reset lands between reading the factors and marking: the factors and the mark go.
+	witness.next.beforeEnroll = () => {
+		held.ann = [];
+		witness.marks.delete("ann");
+	};
+	expect(await app.get(witnessBackfill).settle("ann")).toBe("none");
+	expect(witness.marks.has("ann")).toBe(false);
+});
+
+it("answers held, not marked, where another marked the subject while it filled", async () => {
+	const { app, witness } = await boot({ bob: ["code"] });
+	if (!witness) throw new Error("no witness");
+	// A binding marks first, under its own token.
+	witness.next.beforeEnroll = () => witness.marks.set("bob", "binding");
+	expect(await app.get(witnessBackfill).settle("bob")).toBe("held");
+	expect(witness.marks.get("bob")).toBe("binding");
+});
+
+it("answers marked to one of two backfills at once, and held to the other", async () => {
+	const { app } = await boot({ cid: ["code"] });
+	const backfill = app.get(witnessBackfill);
+	const answers = await Promise.all([backfill.settle("cid"), backfill.settle("cid")]);
+	expect(answers.sort()).toEqual(["held", "marked"]);
+});
+
+it("reports a mark beside nothing counting it did not set, after a binding's mark and a reset's removal", async () => {
+	const held: Record<string, string[]> = { dee: ["code"] };
+	const { app, witness } = await boot(held);
+	if (!witness) throw new Error("no witness");
+	witness.next.beforeEnroll = () => {
+		witness.marks.set("dee", "binding");
+		held.dee = [];
+	};
+	expect(await app.get(witnessBackfill).settle("dee")).toBe("inconsistent");
+	expect(witness.marks.get("dee")).toBe("binding");
 });
