@@ -210,6 +210,42 @@ export function tokensContract(
 			expect(seen).toEqual([true, undefined]);
 		});
 
+		it("signs the grant and limits the policies judged, though the caller changes its own while they judge", async () => {
+			let release: () => void = () => {};
+			const asked = new Promise<void>((done) => {
+				release = done;
+			});
+			let judging: () => void = () => {};
+			const judged = new Promise<void>((done) => {
+				judging = done;
+			});
+			const slow: IssuancePolicy = {
+				name: "slow",
+				judge: async () => {
+					judging();
+					await asked;
+					return { kind: "allowed" };
+				},
+			};
+			const place = await open({ revocable: true, policies: [slow] });
+			const own = { ...grant, audience: [...grant.audience], scope: [...grant.scope] };
+			const limits = { lifetimeSeconds: 60 };
+			const issuing = place.tokens.issue({ grant: own, grantType: "test" }, limits);
+			await judged;
+			// The caller's own objects, changed after the policies were asked and before the signing.
+			Object.assign(own, { subject: "mallory" });
+			own.scope.push("admin");
+			Object.assign(limits, { lifetimeSeconds: 86_400 });
+			release();
+			const issued = await issuing;
+			if (issued.kind !== "issued") throw new Error(issued.policy);
+			expect(issued.access.expiresIn).toBe(60);
+			expect(await place.tokens.verifyAccess(issued.access.token)).toMatchObject({
+				kind: "valid",
+				grant: { subject: "s", scope: ["read"] },
+			});
+		});
+
 		it("refuses an authentication time beyond its allowance ahead of the clock", async () => {
 			const place = await open({ revocable: true });
 			const at = (authenticatedAt: number) => ({

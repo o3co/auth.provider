@@ -445,7 +445,7 @@ From `@mod/outbound`.
 |---|---|---|---|---|---|---|
 | `outbound.allow` | list of string | `[]` |  |  | `["destination.example.invalid"]` | The hosts requests may reach by name; `.name` covers the name and the names under it. |
 | `outbound.allow-any-public` | boolean | `false` |  |  |  | Whether requests may reach any host at a public address, instead of naming hosts in `allow`. |
-| `outbound.deny` | list of string | `[]` |  |  |  | The hosts requests never reach, checked before `allow`; `.name` covers the name and the names under it. |
+| `outbound.deny` | list of string | `[]` |  |  |  | The hosts requests never reach, checked before `allow`; `.name` covers the name and the names under it. An address listed is refused also where a name resolves to it. |
 | `outbound.plain-loopback` | list of string | `[]` |  |  |  | The `host:port` pairs plain http may reach at loopback addresses. |
 | `outbound.max-response-size` | string | `64KiB` |  |  |  | The largest response body a request takes, from 1B to 16MiB. |
 | `outbound.signed-max-response-size` | string | `1MiB` |  |  |  | The largest response body a request for signed material takes, from 1B to 16MiB. |
