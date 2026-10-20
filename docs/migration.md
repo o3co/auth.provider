@@ -348,7 +348,7 @@ A proxy in front of the session grant passes `Origin` and `Sec-Fetch-Site` throu
 | 0.17 | 0.18 | Notes |
 |---|---|---|
 | `oauth-session.enabled` | compose `session-grant` + `session-tokens` | |
-| `allowedGrantTypes` holding `session` | `sections.token-endpoint.grants` holding `session` | Always enforced; public clients may use it too |
+| `allowedGrantTypes` holding `session` | `sections.client-allowance.grants` holding `session` | Always enforced; public clients may use it too |
 | `oauth.requireEmailVerified` (for the session grant) | compose `verified-email` | One policy for every grant but `refresh_token` and `client_credentials`; refused as before (`invalid_grant`) |
 
 ### Client ID Metadata Documents
