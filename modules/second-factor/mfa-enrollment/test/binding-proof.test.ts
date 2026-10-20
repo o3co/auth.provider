@@ -6,7 +6,7 @@ import { factorKinds, type Sending } from "@mod/mfa-extensions";
 import { sessions } from "@mod/session";
 import { revocations } from "@mod/subject-revocation";
 import { afterEach, describe, expect, it } from "vitest";
-import { clock, during, serve, sessionsDown } from "../../../test/harness.ts";
+import { clock, during, serve, sessionsDown } from "./harness.ts";
 
 /** How the binding proof answers its next send, and whether it can read what it checks; each sent one keeps its own code. */
 const contact = { sent: 0, answer: undefined as Sending | undefined, unreadable: false };
@@ -86,6 +86,41 @@ describe("a binding proof before a first factor", () => {
 			"code",
 			expect.any(Array),
 		]);
+		expect(await amrOf(s)).toEqual(["pwd", "otp", "mfa"]);
+	});
+
+	it("goes on with a binding whose transaction a host writing format 1 kept: its challenge, proof and completion", async () => {
+		const s = await serve({ mode: "required" }, [contactProof]);
+		/** Writes the transaction as format 1 did: the binding's fields at the top, no format. */
+		const asFormatOne = (tx: string) =>
+			s.kept.transactions.update(tx, (record) => {
+				const {
+					format: _,
+					held,
+					...rest
+				} = record as unknown as {
+					format?: number;
+					held?: object;
+				};
+				return { value: { ...rest, ...held } as never };
+			});
+		const { tx } = await s.heldLogin("ola");
+		await s.call("POST", "/session/mfa/enrollment", { kind: "code", transaction_id: tx });
+		await asFormatOne(tx);
+		const again = await s.call("POST", "/session/mfa/challenge", { transaction_id: tx });
+		expect(again.status).toBe(200);
+		const begun = await s.call("POST", "/session/mfa/enrollment", {
+			kind: "code",
+			transaction_id: tx,
+			proof: `c-${contact.sent}`,
+		});
+		expect(begun.status).toBe(200);
+		await asFormatOne(tx);
+		const done = await s.call("POST", "/session/mfa/enrollment/complete", {
+			transaction_id: tx,
+			proof: `${begun.body.secret}:0`,
+		});
+		expect([done.status, done.body.redirect_to]).toEqual([200, "https://app.example/back"]);
 		expect(await amrOf(s)).toEqual(["pwd", "otp", "mfa"]);
 	});
 
@@ -227,12 +262,17 @@ describe("a binding proof before a first factor", () => {
 		const challenged = await s.call("POST", "/session/mfa/challenge", { transaction_id: first });
 		expect([challenged.status, challenged.body]).toEqual([200, {}]);
 		expect(await enroll(first, "code")).toMatchObject(refused);
-		const kept = (await s.kept.transactions.read(first)) as unknown as { bindingPassed: unknown };
+		const kept = (await s.kept.transactions.read(first)) as unknown as {
+			held: { bindingPassed: unknown };
+		};
 		// Carried into another transaction, it begins nothing there.
 		const second = await start();
-		await s.kept.transactions.update(second, (record) => ({
-			value: { ...record, bindingPassed: kept.bindingPassed } as never,
-		}));
+		await s.kept.transactions.update(second, (record) => {
+			const { held } = record as unknown as { held: object };
+			return {
+				value: { ...record, held: { ...held, bindingPassed: kept.held.bindingPassed } } as never,
+			};
+		});
 		expect(await enroll(second, "told")).toEqual(refused);
 		// Proved there, it begins once: the binding begun takes it.
 		expect((await enroll(second, "code", `c-${contact.sent}`)).status).toBe(200);

@@ -95,9 +95,14 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | `mfa.lock.recovered` | `operation`, `generation`, `week`, `run`, `hard`, `source` | a user's release of their lockout clears something |
 | `mfa.locked` | `factor`, `purpose`, `hold`, `source` | a proof is refused while the subject is locked out (`hold`) |
 | `mfa.locked.first` | `factor`, `purpose`, `hold`, `source` | a wrong guess starts a hold (`hold`) |
-| `mfa.reset` | `by`, `kinds`, `count`, `sessions`, `sessionsAgain`, `complete`, `requestedBy` | an operator's reset gets past its input, finished or not (`complete`) |
 | `mfa.verified` | `kind`, `factor`, `purpose`, `source` | a factor (`factor`) or a binding proof (`kind`) is proved, once the transaction is taken |
 | `mfa.verify.failure` | `kind`, `factor`, `purpose`, `reason`, `source` | a factor (`factor`) or a binding proof (`kind`) is not proved, with why (`reason`) |
+
+## @mod/mfa-reset
+
+| Kind | Attributes | Recorded when |
+|---|---|---|
+| `mfa.reset` | `by`, `kinds`, `count`, `sessions`, `sessionsAgain`, `complete`, `requestedBy` | an operator's reset gets past its input, finished or not (`complete`) |
 
 ## @mod/rate-limit
 

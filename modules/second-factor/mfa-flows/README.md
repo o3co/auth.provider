@@ -1,18 +1,15 @@
 # mfa-flows
 
 ## Responsibilities
-- Owns transactions (short records waiting for a second factor) and drives the login gate, step-up, and enrollment.
+- Owns transactions (short records waiting for a second factor) and drives the login gate and step-up, and the routes of enrollment.
 - Owns the numbers of the lockout policy (the mechanism is `rate-limit`).
-- Owns an operator's reset of a subject's second factors, and a user's own release of their lockout.
+- Owns a user's own release of their lockout.
 
 ## Not here
-- Factor records and decisions about them (`mfa`). Verifying each factor (the side contributing the kind). Session records and raise (`session`). The login flow (`login-gates`). Managing a session's own factors (`mfa-management`).
+- Factor records and decisions about them (`mfa`). Verifying each factor (the side contributing the kind). Session records and raise (`session`). The login flow (`login-gates`). Managing a session's own factors (`mfa-management`). Binding a new factor (`mfa-enrollment`, through `enrollmentFlow`). An operator's reset of a subject's factors (`mfa-reset`, which takes the lockout through `flowParts`).
 
 ## Offers
 - Contributions: the `login-gates` gate `mfa`, and the step `mfa-flows` that proves a factor to `mfa`.
-- `mfaReset.reset(subject, { requestedBy? })`, for an embedder that has verified who asks: ends the subject's sessions, removes every factor, releases the lockout, and answers how many factors went.
-- `mfaReset` is there whenever mfa-flows is composed, so the one template can use it as is; checking who asks stays the embedder's.
-- A reset that cannot do a step rejects as unavailable; running it again finishes it. It records `mfa.reset` and logs a line (see `reset`'s card).
 - Routes under `/session/mfa/`, whose URLs outside users rely on: `GET transaction`, `POST challenge`, `POST verify`, `POST step-up`, `POST enrollment`, `POST enrollment/complete`, `POST lock/release`.
 - Audit events carry the subject, the transaction's `purpose` and the `source` where determined; never a proof, a challenge or a transaction id.
 - `mfa.challenge.sent` (`kind`): a factor's or a binding proof's challenge sent; a login held or a step-up begun records nothing.
@@ -22,7 +19,9 @@
 - `lockout` in the section holds the lockout numbers (`budget` 10 by default, `budget-window` `7d`); `rate-limit` judges their shape, refusing boot when it does not fit.
 - Store interface for transactions by their unguessable identifier, never kept in clear: save for a lifetime, read, change from what it holds (the lifetime stays). Contents are not shown to it. Its needs: never evicted, survives a crash, never back after a failover.
 - Store interface for each holder's live transactions (a session's handle, or a held login's subject), each by a digest of its identifier for its lifetime: add (answering those pushed out past 5, a constant), members, remove. Its needs: never evicted, survives a crash and a failover, confirmed reads.
-- `./testing`: test configuration builders, and the store interfaces' contract tests for every implementation (see `transactions`' card).
+- Extension point `enrollmentFlow` (exactly one, boot refused otherwise): the handlers of `POST enrollment` and `POST enrollment/complete`, and the answer to a challenge in an enrollment's transaction; the routes stay declared here. `mfa-enrollment` contributes it, coming wherever this package is composed.
+- Contract `flowParts`, for the module binding factors: the transactions, the resume of a held login, recording through this package's declaration, the common answers, the request helpers, and the lockout's name and policy (`seams`' card).
+- `./testing`: test configuration builders and the section's keys (`flowKeys`), and the store interfaces' contract tests for every implementation (see `transactions`' card).
 
 ## Invariants
 - Internal modules, and what each is given: `wiring`'s card. The package's module declares the routes.
@@ -35,16 +34,12 @@
 - If the subject was revoked after the transaction started, every route naming it answers `401 login_required`, and a POST ends it; a login opening meanwhile is closed. If the store cannot answer, `503`, never a negative verdict.
 - A transaction counts only while its holder's listing still holds it, read once each time it is used (`503` when the listing cannot tell). A holder keeps 5 at most, a constant: one more pushes out the one ending first, so a sixth device's held login can push out the first's. A taken one, or one out of attempts, leaves the listing; a removal that fails is logged and passed.
 - A step-up raises only the session that started it, under a new cookie.
-- A first factor bound after a binding proof passed counts at once: its login goes on, or its session is raised. Bound without one, it counts from the next sign-in.
-- A first binding another factor beat while it was under way binds nothing (`mfa` decides): a login gets `401 login_required`, a session `409 mfa_enrollment_conflict`.
-- A login's transaction binds only the subject's first factor (`mfa` decides, told the login it came from): begun or completed once a factor counts, it gets `401 login_required` and binds nothing.
-- Enrollment from a session enters the session at the credential-changing level (`mfa` contributes the requirement).
 
 ## Data
 - Transactions: one per identifier (256 random bits), kept for `transaction-lifetime`. Its needs say what the place must keep it through (a taken one coming back could finish a login twice); the wiring side meets them.
 
 ## Depends on
-- `kernel`, `http`, `cookies`, `request-source`, `csrf`, `session`, `login-gates`, `subject-revocation`, `rate-limit`, `audit`, `mfa` (the factor decision interface, the label's shape), `mfa-binding-proof` (the binding proof)
+- `kernel`, `http`, `cookies`, `request-source`, `csrf`, `session`, `login-gates`, `subject-revocation`, `rate-limit`, `audit`, `mfa` (the factor decision interface)
 
 ## Vocabulary
 - Transaction: a short-lived record waiting for second-factor confirmation. Its purpose is login, login with a first enrollment, step-up, or enrollment.

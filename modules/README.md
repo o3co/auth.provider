@@ -200,8 +200,9 @@ What each module contains is described by that module's contract card (each modu
 | Second factor kinds, with the types they take and give, and the amr a second factor's proof adds | extension point kind / vocabulary | mfa-extensions |
 | Steps that prove a factor at login | extension point kind | mfa |
 | A user's factor records, and judgments about them | contract / data | mfa |
-| Second factor transactions, contributions to the login completion gate and to step-up, enrollment routes, lockout numbers | contract / setting / data | mfa-flows |
-| An operator's reset of a subject's second factors | contract | mfa-flows |
+| Second factor transactions, contributions to the login completion gate and to step-up, the enrollment routes and their seam, lockout numbers | contract / setting / data | mfa-flows |
+| Binding a new second factor: enrollment, its binding proof, the recovery codes shown | contribution | mfa-enrollment |
+| An operator's reset of a subject's second factors | contract | mfa-reset |
 | A subject's own release of their second-factor lockout, after a proof guessing cannot beat | route | mfa-flows |
 | A session's management of its own factors (listing, naming and removing them, reissuing recovery codes), and its request budget | route / setting | mfa-management |
 | Each second factor kind | contribution | the module that contributes that kind |

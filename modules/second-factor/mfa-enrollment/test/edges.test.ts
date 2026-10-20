@@ -4,7 +4,7 @@ import { bindingProofs } from "@mod/mfa-binding-proof";
 import { factorKinds } from "@mod/mfa-extensions";
 import { sessions } from "@mod/session";
 import { afterEach, expect, it } from "vitest";
-import { clock, serve } from "../../../test/harness.ts";
+import { clock, serve } from "./harness.ts";
 
 /** Whether the binding proof is available at each next ask, then always; each code it sends is kept as sent. */
 const contact = { available: [] as boolean[], sent: 0 };
@@ -175,7 +175,7 @@ it("answers 503 to a completion whose binding mfa cannot open", async () => {
 	const begun = await s.call("POST", "/session/mfa/enrollment", { kind: "code" });
 	const tx = String(begun.body.transaction);
 	await s.kept.transactions.update(tx, (record) => ({
-		value: { ...record, pending: "not-sealed" } as never,
+		value: { ...record, held: { pending: "not-sealed" } } as never,
 	}));
 	expect(
 		await s.call("POST", "/session/mfa/enrollment/complete", { transaction_id: tx, proof: "x:0" }),

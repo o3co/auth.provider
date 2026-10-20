@@ -29,8 +29,4 @@ export default auditEvents({
 		attributes: ["operation", "generation", "week", "run", "hard", "source"],
 		when: "a user's release of their lockout clears something",
 	},
-	"mfa.reset": {
-		attributes: ["by", "kinds", "count", "sessions", "sessionsAgain", "complete", "requestedBy"],
-		when: "an operator's reset gets past its input, finished or not (`complete`)",
-	},
 });

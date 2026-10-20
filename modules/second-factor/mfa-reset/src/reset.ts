@@ -3,15 +3,15 @@ import { type Log, Unavailable } from "@mod/kernel";
 import type { Factors } from "@mod/mfa";
 import type { LockoutPolicy, Lockouts } from "@mod/rate-limit";
 import type { Revocations } from "@mod/subject-revocation";
-import events from "../audit-events.ts";
-import type { MfaReset } from "../contract.ts";
-import { lockoutName } from "../section.ts";
+import events from "./audit-events.ts";
+import type { MfaReset } from "./contract.ts";
 
 export interface ResetParts {
 	readonly factors: Pick<Factors, "clear">;
 	readonly revocations: Pick<Revocations, "record">;
 	readonly lockouts: Pick<Lockouts, "releaseUnder">;
-	readonly policy: LockoutPolicy;
+	/** `mfa-flows`' lockout: its name and policy. */
+	readonly lockout: { readonly name: string; readonly policy: LockoutPolicy };
 	readonly audit: Audit;
 	readonly log: Log;
 }
@@ -52,7 +52,7 @@ export function resetOver(p: ResetParts): MfaReset {
 			const cleared = sessions ? await step("factors", () => p.factors.clear(subject)) : undefined;
 			if (cleared) {
 				await step("lock", () =>
-					p.lockouts.releaseUnder(lockoutName, subject, p.policy, { kind: "whole" }),
+					p.lockouts.releaseUnder(p.lockout.name, subject, p.lockout.policy, { kind: "whole" }),
 				);
 			}
 			// Runs whatever happened above: a login proved with a factor between the first boundary and the removal ends here.
