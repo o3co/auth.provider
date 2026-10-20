@@ -12,6 +12,7 @@
 	"dependencies": {
 		"@mod/kernel": "workspace:*",
 		"@mod/outbound-policy": "workspace:*",
+		"@mod/url-setting": "workspace:*",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {

@@ -42,7 +42,7 @@ function refusal(value: string, rules: UrlRules): string | undefined {
 	if (rules.query === false && value.includes("?")) return "a URL: no query";
 	const path = rest.slice(authority.length).split("?", 1)[0] ?? "";
 	if (rules.origin && (path !== "" || value.includes("?"))) {
-		return "a URL: an origin alone, with no path or query";
+		return "a URL: an origin alone, with no path (not even a trailing `/`) and no query";
 	}
 	if (rules.trailingSlash === "refused" && path.endsWith("/")) return "a URL: no trailing /";
 	const url = new URL(value);

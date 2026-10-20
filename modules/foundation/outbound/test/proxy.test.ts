@@ -247,8 +247,18 @@ it("takes a proxy only as an http origin, its credentials apart, and refuses a s
 		" http://proxy.example.test:3128",
 		"http://proxy.example.test:3128\n",
 		"socks5://proxy.example.test:1080",
+		// Written only as the URL parser writes an origin: no trailing `/`, default port or upper case.
+		"http://proxy.example.test:3128/",
+		"http://proxy.example.test:80",
+		"http://PROXY.example.test:3128",
 	]) {
 		expect(refused({ proxy: url }), url).toBe(true);
+		const issues = section.safeParse({ proxy: url }).error?.issues ?? [];
+		expect(
+			issues.map((issue) => issue.path.join(".")),
+			url,
+		).toEqual(["proxy"]);
+		expect(JSON.stringify(issues), url).not.toContain("proxy.example.test");
 	}
 	expect(refused({ proxy: "http://proxy.example.test:3128" })).toBe(false);
 	for (const broken of ["Basic a\r\nb", "Basic a\nb", " Basic dGVzdA==", "Basic dGVzdA== "]) {
