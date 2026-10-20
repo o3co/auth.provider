@@ -3860,6 +3860,31 @@ importers:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
 
+  modules/upstream-login/upstream-handoff:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/login-gates':
+        specifier: workspace:*
+        version: link:../../identity/login-gates
+      '@mod/seal':
+        specifier: workspace:*
+        version: link:../../foundation/seal
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
+      '@mod/upstreams':
+        specifier: workspace:*
+        version: link:../upstreams
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
   modules/upstream-login/upstream-round-trip:
     dependencies:
       '@mod/cookies':
