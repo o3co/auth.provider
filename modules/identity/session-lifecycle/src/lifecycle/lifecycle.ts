@@ -55,6 +55,7 @@ export interface Lifecycle {
 	/** The record, while it is open and after the subject's revocation boundary. */
 	liveAt(handle: string): Promise<OpenRecord | undefined>;
 	entryAt(handle: string, level: EntryLevel): Promise<Entry>;
+	entryIn(request: HttpRequest, level: EntryLevel): Promise<Entry>;
 	/** As `complete`: a new session over the request's earlier one. */
 	open: Sessions["complete"];
 	close: Sessions["close"];
@@ -260,6 +261,14 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		if (short) return { kind: "short", ...short };
 		return { kind: "entered", session, endsAt: found.openedAt + lifetimeMs };
 	};
+	const entryIn = async (request: HttpRequest, level: EntryLevel): Promise<Entry> => {
+		const secret = secretIn(request);
+		const handle = secret ? await index.read(secret) : undefined;
+		if (!secret || !handle) return { kind: "absent" };
+		const entry = await entryAt(handle, level);
+		if (entry.kind === "absent") return entry;
+		return (await index.read(secret)) === handle ? entry : { kind: "absent" };
+	};
 	const issueSecret = async (handle: string, forMs: number) => {
 		const secret = random();
 		await created(index.save(secret, handle, forMs));
@@ -292,6 +301,7 @@ export function lifecycleOver(parts: LifecycleParts): Lifecycle {
 		secretIn,
 		liveAt,
 		entryAt,
+		entryIn,
 		open,
 		close,
 		closeIn,

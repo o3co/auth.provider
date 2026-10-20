@@ -86,6 +86,9 @@ async function placeOver(
 		},
 		listingCap: stores.listingCap,
 		failNextListing: () => stores.down.listed.failNext("add"),
+		betweenCookieAndSession: (meanwhile) => {
+			stores.afterIndexRead.next = meanwhile;
+		},
 	};
 }
 

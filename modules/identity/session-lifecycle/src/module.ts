@@ -49,19 +49,12 @@ export default defineModule({ name: "session-lifecycle", section, replicaSafe: t
 			recent,
 		});
 		c.every(sweepMs, lifecycle.sweep);
-		const enteredAt = async (handle: string) => {
-			const entry = await lifecycle.entryAt(handle, "use");
-			return entry.kind === "entered" ? entry : undefined;
-		};
 		return {
 			enter: async (request) => {
-				const handle = await lifecycle.handleIn(request);
-				return handle ? (await enteredAt(handle))?.session : undefined;
+				const entry = await lifecycle.entryIn(request, "use");
+				return entry.kind === "entered" ? entry.session : undefined;
 			},
-			enterFor: async (request, level) => {
-				const handle = await lifecycle.handleIn(request);
-				return handle ? lifecycle.entryAt(handle, level) : { kind: "absent" };
-			},
+			enterFor: lifecycle.entryIn,
 			entryOf: (handle: string, level: EntryLevel = "use") => lifecycle.entryAt(handle, level),
 			complete: lifecycle.open,
 			raise: raiseOver({ lifecycle, kept, clock: c.clock, lifetimeMs }),
