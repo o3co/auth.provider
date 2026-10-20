@@ -34,7 +34,8 @@ it("records the mismatch only for a kind's refusal saying the factor's contact c
 	mail.answer = { kind: "refused" };
 	expect((await challenge()).status).toBe(403);
 	mail.answer = { kind: "refused", reason: "contact-changed" };
-	expect(await challenge()).toEqual({ status: 403, body: { error: "mfa_factor_refused" } });
+	const refused = await challenge();
+	expect([refused.status, refused.body]).toEqual([403, { error: "mfa_factor_refused" }]);
 	expect(s.events.map((e) => [e.kind, e.subject, e.attributes])).toEqual([
 		[
 			"mfa.email_address_mismatch",

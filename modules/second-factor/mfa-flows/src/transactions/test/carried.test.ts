@@ -67,3 +67,21 @@ it("reads a cookie with an empty part or more than one dot as no cookie, without
 it("names nothing for a request without the cookie", () => {
 	expect(transactions().carried(testRequest())).toBeUndefined();
 });
+
+it("refuses one transaction's identifier beside another's secret, and the two swapped", async () => {
+	const t = transactions();
+	const a = await t.start({ subject: "sue", purpose: "login" });
+	const b = await t.start({ subject: "sue", purpose: "login" });
+	const secretOf = (started: typeof a) => written(started.cookies[0]).slice(started.id.length + 1);
+	const mixed = withCookie(`${a.id}.${secretOf(b)}`);
+	expect(await t.find(mixed, a.id)).toBeUndefined();
+	expect(await t.find(mixed, b.id)).toBeUndefined();
+	const swapped = withCookie(`${secretOf(a)}.${a.id}`);
+	expect(await t.find(swapped, a.id)).toBeUndefined();
+});
+
+it("finds nothing for a request naming no transaction, whatever its cookie names", async () => {
+	const t = transactions();
+	const { cookies } = await t.start({ subject: "sue", purpose: "login" });
+	expect(await t.find(withCookie(written(cookies[0])), undefined)).toBeUndefined();
+});

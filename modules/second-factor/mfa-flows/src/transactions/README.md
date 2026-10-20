@@ -24,7 +24,7 @@ Internal module of `mfa-flows`: transactions over the package's store interface,
 ## Invariants
 - The store interface's contract test (`./testing`) checks every implementation: kept whole and once, changed only from what it holds, ended at exactly its lifetime; restarts, memory pressure, lost answers and failovers where the place has them.
 - A transaction's identifier and its browser's secret are 256 random bits each; the record keeps only a hash of the secret, and `find` answers only the browser holding it.
-- The cookie holds the identifier and the secret (`<identifier>.<secret>`) for the transaction's lifetime (30 minutes at most), so it alone names the transaction. One of the earlier form, the secret alone, names none, and is read for its secret until it ends; one with an empty part or another dot is no cookie.
+- The cookie holds the identifier and the secret (`<identifier>.<secret>`) for the transaction's lifetime (30 minutes at most), so it alone names the transaction, and `find` answers it for no other. One of the earlier form, the secret alone, names none, and is read for its secret until it ends; one with an empty part or another dot is no cookie.
 - The cookie has one name, so a browser holds one transaction at a time: starting another leaves the earlier one out of its reach.
 - A transaction's start and deadline are on `kernel`'s clock, read once outside the store's change; past its deadline it is gone, whatever the store still keeps.
 - Every change starts from what the store holds and leaves a taken or past one as it is. Spend and take say whether this call made the change, so of two racing calls only one wins.

@@ -138,8 +138,10 @@ export function transactionsOver(parts: TransactionParts) {
 		nextDeadline: () => clock.now() + ttlMs,
 		/** The transaction, only for the browser that started it, while it is in use. */
 		find: async (request: HttpRequest, id: string | undefined) => {
-			const browser = cookieOf(request)?.browser;
-			if (!id || !browser) return undefined;
+			const cookie = cookieOf(request);
+			// A cookie naming its transaction answers for that one alone.
+			if (!id || !cookie || (cookie.id !== undefined && cookie.id !== id)) return undefined;
+			const browser = cookie.browser;
 			const found = transactionOf(await store.read(id));
 			const now = clock.now();
 			if (!found || !live(found, now) || found.browser !== hashOf(browser)) return undefined;
