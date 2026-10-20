@@ -960,6 +960,9 @@ importers:
       '@mod/refresh':
         specifier: workspace:*
         version: link:../refresh
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../../foundation/url-setting
       zod:
         specifier: 4.6.7
         version: 4.6.7

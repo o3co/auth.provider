@@ -3,13 +3,14 @@ import { type AllowanceLists, clientAllowance } from "@mod/client-allowance";
 import type { ClientRecord, Section } from "@mod/clients";
 import { codeGrantType } from "@mod/code-grant";
 import { refreshGrantType } from "@mod/refresh";
+import { isLoopbackName } from "@mod/url-setting";
 
 /** The grants a document client may hold: the code, and refresh when its document names it. */
 const documentGrants = [codeGrantType, refreshGrantType];
 
 /**
  * The id as a document URL: https, a path other than `/`, no query, fragment, user information,
- * IP literal or localhost, written exactly as the URL parser writes it (so no trailing dot, default
+ * IP literal or loopback host (url-setting's `isLoopbackName`), written exactly as the URL parser writes it (so no trailing dot, default
  * port, upper case or other encoding).
  */
 export function documentUrl(id: string): URL | undefined {
@@ -19,7 +20,7 @@ export function documentUrl(id: string): URL | undefined {
 	if (url.username !== "" || url.password !== "") return undefined;
 	const host = url.hostname;
 	if (host.startsWith("[") || isIP(host) !== 0 || host.endsWith(".")) return undefined;
-	return host === "localhost" || host.endsWith(".localhost") ? undefined : url;
+	return isLoopbackName(host) ? undefined : url;
 }
 
 /** A document refused, and why, in words of this module alone. */
