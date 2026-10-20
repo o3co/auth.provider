@@ -8,7 +8,6 @@ import { enforcers, factorStore, factors, proofSteps, witnessing } from "./contr
 import { addsMfa, byKind, factorDecisions } from "./factors.ts";
 import { resealerOver } from "./records/resealer.ts";
 import { section } from "./section.ts";
-import { witnessingOver } from "./witness/witness.ts";
 
 export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => [
 	m.contribute(amrSources).by(async (c) => {
@@ -29,12 +28,12 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 				"mfa needs a module holding sessions to its factors; compose mfa-entry",
 			);
 		}
-		const [witness, ...more] = await c.collect(enrollmentWitnesses);
-		if (more.length > 0) return c.refuse("mfa", "more than one enrollment witness is contributed");
 		const [contributed, ...others] = await c.collect(witnessing);
 		if (others.length > 0) return c.refuse("mfa", "more than one witnessing is contributed");
-		const audited = await c.get(audit);
-		const token = () => Buffer.from(c.random.bytes(16)).toString("base64url");
+		// A witness nothing asks would leave a lost store to read as never enrolled: never silently.
+		if (!contributed && (await c.collect(enrollmentWitnesses)).length > 0) {
+			return c.refuse("mfa", "an enrollment witness is composed without mfa-witnessing");
+		}
 		return factorDecisions({
 			stored: await c.get(factorStore),
 			kinds: byKind(kinds),
@@ -44,9 +43,8 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 			gates: await c.collect(firstBindingGates),
 			random: c.random.bytes,
 			now: c.clock.now,
-			audit: audited,
-			// The witnessing contributed, else this package's own over the witness composed beside it.
-			witnessing: contributed ?? witnessingOver({ witness, audit: audited, log: c.log, token }),
+			audit: await c.get(audit),
+			witnessing: contributed,
 			log: c.log,
 		});
 	}),

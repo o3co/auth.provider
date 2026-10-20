@@ -17,6 +17,7 @@
   - Binding: `begin`, given what the caller holds for the gates (begun with what to show / unknown kind / full / limited / refused / duplicate / binding proof required / first binding closed); `provePending` (valid with the proof's own amr / invalid / unknown); `bind` (bound, with the fence it began under and whether codes are due / full / unknown / malformed label / duplicate / fenced); `fence` (no binding begun before binds).
   - Managing: `rename`; `remove`; `clear` (every factor of the subject, of any kind → how many, and their kinds sorted once each); `reissue` (the first set too; `full` past `max-factors`). `remove` and `reissue`, given a fence read before (`fenceOf`'s, or a binding's), change nothing (`fenced`) once it moved past it. The fence stops `bind`, `remove` and `reissue` only: `rename` and `prove` do not read it.
 - `fenceFollower`: the name what moves the fence on a revocation goes by among its followers.
+- Extension point `witnessing` (at most one, two refusing boot): who tells, beside the store, that a subject enrolled; `mfa-witnessing` contributes it over the witness composed (its card holds the rules).
 - Extension point `enforcers`: the modules holding sessions to the factors (`mfa-entry`); without one, whatever the mode, boot is refused.
 - Audit events, with the subject, once written (never for a refused or raced decision but a first binding another factor beat, nor a reset, never with a secret, proof or code): declared in `./audit-events`, listed in the audit event reference.
 - Contributions: `login-gates` amr (each kind's, and `mfa` if one adds it); `seal`'s `resealers`, a resealer sealing again what a `previous` key sealed (internal module `records`).
@@ -36,9 +37,8 @@
 - A binding asked from a login holds the password alone: it begins and binds only as the subject's first counting factor, whenever it began; once one counts, `begin` and `bind` answer `first-binding-closed` and record the conflict.
 - A proof adds its own amr kept to its kind's (else its kind's), and `mfa` when its kind adds it. A label not of its shape is refused before anything is read.
 - A first counting factor begins only where every gate contributed admits it, given what the caller holds (`mfa-binding-proof`'s asks its proof); `begin` asks the kind for nothing before. With no gate, the first factor trusts whoever binds it.
-- With a witness (`mfa-witness`, at most one, two refusing boot), a subject it marks while holding no counting factor is unavailable to login, a first binding and credentials, recorded as `mfa.enrollment_inconsistent`; a witness that cannot be read is unavailable alike.
-- Each binding settles the witness after its write: a counting factor with no mark is marked, so a failed write leaves none, and a factor stands unwitnessed only until then. A first binding finds a subject marked with nothing counting unavailable, and one whose factor a reset took `first-binding-closed`.
-- With a witness, the last counting factor is never removed; `clear` removes the factors, then the mark. Without one, a lost store reads as never enrolled.
+- With a witnessing, its standing judges login, a first binding and credentials (a subject marked with nothing counting is unavailable), each binding settles it after its write, a first binding whose factor a reset took is `first-binding-closed`, the last counting factor is never removed, and `clear` removes the factors, then has the mark go. Without one, a lost store reads as never enrolled.
+- A witness composed (`mfa-witness`) with no witnessing refuses boot, so it is never left unasked.
 
 ## Depends on
-- `kernel`, `login-gates`, `seal`, `audit`, `mfa-extensions` (the kinds and gates), `mfa-witness` (the witness), `labels` (the label's shape)
+- `kernel`, `login-gates`, `seal`, `audit`, `mfa-extensions` (the kinds and gates), `mfa-witness` (only to refuse a witness left unasked), `labels` (the label's shape)
