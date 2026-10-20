@@ -1,6 +1,6 @@
 import { clientAllowance } from "@mod/client-allowance";
 import type { Grant } from "@mod/grants";
-import { clientCredentialsGrantType } from "./contract.ts";
+import { clientCredentialsGrantType } from "../contract.ts";
 
 export function clientCredentials(issuer: string): Grant {
 	return {

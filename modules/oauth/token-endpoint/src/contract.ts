@@ -2,7 +2,7 @@ import type { Client, Clients } from "@mod/clients";
 import type { OAuthError } from "@mod/grants";
 import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import { contract } from "@mod/kernel";
-import { challenged } from "./challenges.ts";
+import { challenged } from "./route/challenges.ts";
 
 /** The built-in grant's type (RFC 6749 §4.4). */
 export const clientCredentialsGrantType = "client_credentials";
