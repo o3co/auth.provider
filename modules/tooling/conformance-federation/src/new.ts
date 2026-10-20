@@ -76,7 +76,8 @@ const setUp = (part: FederationPart, _: unknown, modules: readonly string[]): Ne
 	config: {
 		federation: {
 			idps: Object.fromEntries(part.idps.map((idp) => [idp.name, settingsOf(idp)])),
-			landing: part.landing,
+			...(part.landing ? { landing: part.landing } : {}),
+			...(part.heldPage ? { "held-page": part.heldPage } : {}),
 		},
 		// Sealing, where what is composed brings it (kept tokens, grants), takes a key of the scene's own.
 		...(modules.includes("@mod/seal")

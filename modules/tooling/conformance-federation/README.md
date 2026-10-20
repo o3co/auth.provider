@@ -4,8 +4,9 @@
 - Owns the conformance scenes of the federation area: logging a browser in through an upstream OpenID Connect IdP, Google, Apple, or GitHub's OAuth, the audit events of those logins, and a start while the store fails.
 - Owns the scenes of a federation login meeting a client's `prompt=login` or max age only as the upstream says when the user logged in.
 - Owns the scenes of handing a login's upstream tokens to receiving clients (only once a login a gate holds opens), refreshing them, and logging out of an upstream.
+- Owns the scenes of a federation login a gate holds: going on at the held page, or answered with the gate's answer where none is set.
 - Owns the scenes of federation grants, from a client's intent through the user's connection to the upstream token, its refresh and its end.
-- Sets up the federation area's part (the IdPs, the landing, the return targets, federation grants' page, connections and lodging limit) on each of the legacy and new targets.
+- Sets up the federation area's part (the IdPs, the landing, the held page, the return targets, federation grants' page, connections and lodging limit) on each of the legacy and new targets.
 - The legacy build turns federation grants on only when enabled.
 - The legacy set-up enables federation grants.
 - The legacy set-up keeps federation grants in Redis.
