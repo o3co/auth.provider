@@ -1,4 +1,4 @@
-import { type SessionIssuance, sessionIssuances } from "@mod/grants";
+import { type SessionIssuance, sessionIssuances, type TokenTie, tokenTies } from "@mod/grants";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import {
@@ -12,7 +12,7 @@ import {
 	type Module,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
-import { sessions } from "@mod/session";
+import { entryJudge, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import sessionParticipants from "@mod/session-participants/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
@@ -72,6 +72,7 @@ async function boot(
 		size?: number;
 		margin?: number;
 		tokens?: Module;
+		extra?: Module[];
 	} = {},
 ) {
 	const issued = issuedInMemory(options.size);
@@ -91,6 +92,7 @@ async function boot(
 			issued.module,
 			sessionTokensModule,
 			telling,
+			...(options.extra ?? []),
 		],
 		config: {
 			...kernelConfig(),
@@ -352,6 +354,43 @@ it("answers the session a recorded token was issued for, and unbound for any oth
 	const bound = s.app.get(sessionTokens);
 	expect(await bound.sessionOf(a.id)).toEqual({ kind: "bound", handle: s.session.id });
 	expect(await bound.sessionOf(other.id)).toEqual({ kind: "unbound" });
+});
+
+it("ties a token to its session as `session` while the session lets it in, and joins one issued from it only then, recording nothing", async () => {
+	let short = false;
+	const judge = defineModule({ name: "judge" }, (m) => [
+		m.contribute(entryJudge).by(() => ({
+			judge: async () =>
+				short
+					? { kind: "short" as const, requirement: "test", answer: { error: "short" } }
+					: { kind: "admit" as const, judged: true },
+		})),
+	]);
+	const tied = contract<readonly TokenTie[]>("ties");
+	const reader = defineModule({ name: "tie-reader" }, (m) => [
+		m.provide(tied).by((c) => c.collect(tokenTies)),
+	]);
+	const s = await boot({ extra: [judge, reader] });
+	expect(s.app.get(tied).map((t) => t.name)).toEqual(["session"]);
+	const [tie] = s.app.get(tied) as [TokenTie];
+	const a = await s.issue();
+	expect(await tie.tieOf((await issuedAccess(s.t)).id)).toEqual({ kind: "none" });
+	const held = await tie.tieOf(a.id);
+	if (held.kind !== "held") throw new Error(`not held: ${held.kind}`);
+	expect([held.session, held.ends]).toEqual([s.session.id, undefined]);
+	const from = await issuedAccess(s.t);
+	expect(await held.join(from)).toBe(true);
+	expect(await s.app.get(sessionTokens).sessionOf(from.id)).toEqual({ kind: "unbound" });
+	short = true;
+	expect(await tie.tieOf(a.id)).toEqual({
+		kind: "ended",
+		reason: "session is short of a requirement",
+	});
+	expect(await held.join(from)).toBe(false);
+	short = false;
+	expect((await s.opened.close(s.session.id)).kind).toBe("closed");
+	expect(await tie.tieOf(a.id)).toEqual({ kind: "ended", reason: "session has ended" });
+	expect(await held.join(from)).toBe(false);
 });
 
 it("keeps a token bound to its session after the session closes", async () => {
