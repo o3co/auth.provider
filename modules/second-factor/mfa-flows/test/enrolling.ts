@@ -21,7 +21,7 @@ export const testEnrollment = defineModule({ name: "test-enrollment" }, (m) => [
 				const kind = requests.field(request, "kind") ?? "";
 				if (txId) {
 					const t = (await transactions.find(request, txId))?.transaction;
-					if (!t || t.purpose !== "enroll-login") return answers.unknownTransaction;
+					if (t?.purpose !== "enroll-login") return answers.unknownTransaction;
 					const begun = await decided.begin(t.subject, kind, undefined, txId, askedFrom(t));
 					if (begun.kind !== "begun") return jsonAnswer(400, { error: begun.kind });
 					await transactions.keep(txId, () => ({ pending: begun.pending }));
