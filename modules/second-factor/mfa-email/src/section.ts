@@ -6,7 +6,7 @@ export const section = z.strictObject({
 		.boolean()
 		.prefault(false)
 		.describe(
-			"Whether a code by mail adds `mfa`; by default it is a second factor of its own amr only.",
+			"Whether a code by mail adds `mfa` and so meets a required second factor; by default it is a way back of its own amr only.",
 		),
 	"code-lifetime": setting
 		.duration("s")

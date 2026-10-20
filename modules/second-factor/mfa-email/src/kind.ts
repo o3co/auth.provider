@@ -89,7 +89,8 @@ export function emailFactor(p: EmailParts) {
 		amr: ["email"],
 		addsSecondFactor: p.addsSecondFactor,
 		guessable: true,
-		counts: true,
+		// A proof that does not add `mfa` cannot meet a required second factor, so only then does it count.
+		counts: p.addsSecondFactor,
 		enroll: async (subject, held: readonly Opened[], from) => {
 			const address = await addressNow(subject, from);
 			if (!address) return { kind: "refused" };
