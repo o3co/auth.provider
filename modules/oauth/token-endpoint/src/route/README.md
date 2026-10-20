@@ -10,8 +10,9 @@ Internal module of `token-endpoint`: the handler of `POST /oauth/token`, from th
 - The built-in grant and the composed rule for the audience (`built-in`). The route's declaration, its limit and the metadata items (the package's module).
 
 ## Offers
+- `endpointIn` (the build context, the grants composed) → the handler, taking the contracts below from the assembly.
 - `tokenEndpoint` (clients, tokens, session issuances, binding readers, required bindings, grants by type, the audience rule, audit) → the handler and its answer to Unavailable; `tokenPath`.
-- `grantInputOf` (what a grant is handed: its parameters' reader, the audience rule, `admits` and `issue`), `readerOf` and `mistypedRefusal`, which the package's `./testing` uses too.
+- `grantInputOf` (what a grant is handed: its parameters' reader, the audience rule, `admits` and `issue`), `readerOf` and `mistypedRefusal`, which the internal module `caller` uses too.
 - `issuanceFor` (tokens, grant type, binding, session issuances) → a grant's `admits` and `issue`; `refusedAnswer`, the one answer to a refused issuance.
 - `answeredBody` (a grant's issued body as answered); `challenged` (a response with `WWW-Authenticate` challenges, which `authenticateClient` uses too).
 
@@ -19,4 +20,4 @@ Internal module of `token-endpoint`: the handler of `POST /oauth/token`, from th
 - Records each answer but an unavailable one through the package's declared audit events, once the client is authenticated.
 
 ## Depends on
-- `audit`, `client-allowance`, `clients`, `grants`, `http`, `request-source`, `sender-binding`, `tokens`; the package's contract and audit events.
+- `audit`, `client-allowance`, `clients`, `grants`, `http`, `kernel` (the build context), `request-source`, `sender-binding`, `tokens`; the package's contract and audit events.

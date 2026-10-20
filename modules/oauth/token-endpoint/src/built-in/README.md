@@ -10,8 +10,8 @@ Internal module of `token-endpoint`: what the package contributes of its own, th
 - Handling the request and what a grant issues through (`route`).
 
 ## Offers
-- `clientCredentials` (issuer) → the `client_credentials` grant.
+- `clientCredentialsIn` (the build context) → the `client_credentials` grant at the issuer the assembly gives; `clientCredentials` (issuer) → the same, given directly.
 - `composedRule` (the build context) → the one rule contributed to `targetRules`, or `unread` (the default audience, the request unread) when none is; two refuse boot.
 
 ## Depends on
-- `client-allowance`, `grants`, `kernel`; the package's contract.
+- `client-allowance`, `grants`, `issuer` (its URL), `kernel`; the package's contract.

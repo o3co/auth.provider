@@ -1,16 +1,13 @@
-import { audit } from "@mod/audit";
 import { clients } from "@mod/clients";
-import { composedGrants, grants, sessionIssuances, targets } from "@mod/grants";
+import { composedGrants, grants, targets } from "@mod/grants";
 import { routes, site, use } from "@mod/http";
-import { issuer, metadata } from "@mod/issuer";
+import { metadata } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
 import { requestsPerSource } from "@mod/rate-limit";
-import { clientBindings, senderBinding } from "@mod/sender-binding";
-import { tokens } from "@mod/tokens";
-import { clientCredentials } from "./built-in/client-credentials.ts";
+import { clientCredentialsIn } from "./built-in/client-credentials.ts";
 import { composedRule } from "./built-in/targets.ts";
 import { tokenEndpointLocation } from "./contract.ts";
-import { tokenEndpoint, tokenPath } from "./route/endpoint.ts";
+import { endpointIn, tokenPath } from "./route/endpoint.ts";
 import { section } from "./section.ts";
 
 /** A browser's public client may send a body's type and its DPoP proof, and read the nonce, the challenge and the wait. */
@@ -20,7 +17,7 @@ const cors = {
 };
 
 export default defineModule({ name: "token-endpoint", section }, (m) => [
-	m.contribute(grants).by(async (c) => clientCredentials((await c.get(issuer)).url)),
+	m.contribute(grants).by(clientCredentialsIn),
 	m.provide(targets).by(composedRule),
 	m
 		.provide(composedGrants)
@@ -61,16 +58,7 @@ export default defineModule({ name: "token-endpoint", section }, (m) => [
 				})),
 			);
 		}
-		const endpoint = tokenEndpoint(
-			await c.get(clients),
-			await c.get(tokens),
-			await c.collect(sessionIssuances),
-			await c.get(senderBinding),
-			await c.get(clientBindings),
-			new Map(composed.map((g) => [g.grantType, g])),
-			await c.get(targets),
-			await c.get(audit),
-		);
+		const endpoint = await endpointIn(c, composed);
 		const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 		const uses = [use(requestsPerSource, { name: "token-endpoint", window })];
 		// Each grant names the bodies it takes; the endpoint refuses the others.
