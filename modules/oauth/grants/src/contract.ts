@@ -119,3 +119,31 @@ export interface SessionIssuance {
 export const sessionIssuances = extensionPoint<SessionIssuance>("grants.session-issuances", {
 	multiplicity: "many",
 });
+
+/** What a token is tied to by one tie; `reason` is read after the token's name ("family has ended"). */
+export type TokenTieAnswer =
+	| { readonly kind: "none" }
+	| { readonly kind: "ended"; readonly reason: string }
+	| {
+			readonly kind: "held";
+			/** When the tie ends, in epoch ms: a token issued from it ends by then. */
+			readonly ends?: number;
+			/** The session a token issued from it is issued from. */
+			readonly session?: string;
+			/** Adds a token issued from it: false when the tie ended meanwhile. */
+			join(issued: Pick<IssuedAccess, "id" | "expiresAt">): Promise<boolean>;
+	  };
+
+/**
+ * One thing a token this provider issued is tied to, kept by its owner: its family, its session.
+ * Asked only of a token this provider issued and has verified; throws Unavailable when it cannot tell.
+ */
+export interface TokenTie {
+	readonly name: string;
+	tieOf(tokenId: string): Promise<TokenTieAnswer>;
+}
+
+export const tokenTies = extensionPoint<TokenTie>("grants.token-ties", {
+	multiplicity: "keyed",
+	keyOf: (tie) => tie.name,
+});
