@@ -770,7 +770,7 @@ What changed since rc.4. Coming from an earlier release candidate, read the sect
 - **A grant of your own that needs claims of its own in the access token**: put them in `AccessGrant.claims` and issue through `issue`.
 - **Access tokens not issued by `tokens`**: an `at+jwt` carrying a name reserved for what `tokens` never writes (`nbf`, `roles`, `email` and the like) is refused by `verifyAccess`, which retires such tokens on purpose.
 - **Added claims and restrictions**: a refreshed or exchanged token carries no added claim; never use one for a restriction that must hold on.
-- **Audit**: `token.issued` may carry `claims`, the names of the claims a grant added.
+- **Audit**: `token.issued` may carry `claims`, the names of the claims a grant added, and `claims_left`, how many names did not fit.
 
 ## Operational notes
 

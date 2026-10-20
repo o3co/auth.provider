@@ -505,31 +505,43 @@ describe("token endpoint", () => {
 		expect(events.at(-1)?.attributes).not.toHaveProperty("claims");
 	});
 
-	it("cuts the names of added claims short past 2048 characters", async () => {
-		const many = Object.fromEntries(
-			Array.from({ length: 12 }, (_, i) => [`${String(i).padStart(2, "0")}${"n".repeat(198)}`, 0]),
-		);
-		const once = defineModule({ name: "many" }, (m) => [
-			m.contribute(grants).by(() => ({
-				grantType: "urn:test:echo",
-				readsAmbient: "none",
-				handle: async (input) => {
-					const base = { subject: "sue", issuedTo: input.client.id, audience: [], scope: [] };
-					const issued = await input.issue({ ...base, claims: many });
-					return issued.kind === "issued"
-						? { kind: "issued", body: {} }
-						: { kind: "refused", refusal: issued.refusal };
-				},
-			})),
+	it("names every added claim while they fit in 2048 characters, else as many as fit and how many it left out", async () => {
+		const named = (length: number, count: number) =>
+			Object.fromEntries(
+				Array.from({ length: count }, (_, i) => [
+					`${String(i).padStart(2, "0")}${"n".repeat(length - 2)}`,
+					0,
+				]),
+			);
+		const issuing = (claims: Record<string, number>) =>
+			defineModule({ name: "many" }, (m) => [
+				m.contribute(grants).by(() => ({
+					grantType: "urn:test:echo",
+					readsAmbient: "none",
+					handle: async (input) => {
+						const base = { subject: "sue", issuedTo: input.client.id, audience: [], scope: [] };
+						const issued = await input.issue({ ...base, claims });
+						return issued.kind === "issued"
+							? { kind: "issued", body: {} }
+							: { kind: "refused", refusal: issued.refusal };
+					},
+				})),
+			]);
+		// Eight names of 255 characters fill 2047, one space apart: all are named.
+		const fits = await serve([issuing(named(255, 8))]);
+		expect((await fits({ grant_type: "urn:test:echo" }, "echo")).status).toBe(200);
+		const all = events.at(-1)?.attributes;
+		expect([String(all?.claims).split(" ").length, all?.claims_left]).toEqual([8, undefined]);
+		await stop();
+		// Twelve of 200: ten fit, and two are left out.
+		const over = await serve([issuing(named(200, 12))]);
+		expect((await over({ grant_type: "urn:test:echo" }, "echo")).status).toBe(200);
+		const cut = events.at(-1)?.attributes;
+		expect([String(cut?.claims).length <= 2048, String(cut?.claims).split(" ").length]).toEqual([
+			true,
+			10,
 		]);
-		const post = await serve([once]);
-		expect((await post({ grant_type: "urn:test:echo" }, "echo")).status).toBe(200);
-		const named = String(events.at(-1)?.attributes?.claims);
-		expect([named.length <= 2048, named.endsWith(" …"), named.startsWith("00n")]).toEqual([
-			true,
-			true,
-			true,
-		]);
+		expect(cut?.claims_left).toBe("2");
 	});
 
 	it("records each issuance and each refusal it decides, with the client and the source, never a token or secret", async () => {

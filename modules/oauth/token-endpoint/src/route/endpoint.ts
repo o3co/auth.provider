@@ -97,16 +97,21 @@ export const endpointIn = async (c: BuildContext<unknown>, composed: readonly Gr
 /** The longest list of added claims' names an audit event holds. */
 const namesLimit = 2048;
 
-/** Names in their order, one space apart, cut short with `…` past the limit; none when there are none. */
+/**
+ * The names in their order, one space apart, every one while they fit the limit; past it, as many as
+ * fit and how many were left out. Nothing when there are none.
+ */
 const namesOf = (names: ReadonlySet<string>) => {
-	if (names.size === 0) return undefined;
+	if (names.size === 0) return {};
+	const sorted = [...names].sort();
 	let written = "";
-	for (const name of [...names].sort()) {
+	for (const [i, name] of sorted.entries()) {
 		const next = written === "" ? name : `${written} ${name}`;
-		if (next.length > namesLimit - 2) return `${written} …`;
+		if (next.length > namesLimit)
+			return { claims: written, claims_left: String(sorted.length - i) };
 		written = next;
 	}
-	return written;
+	return { claims: written };
 };
 
 /** The endpoint's handler and its answer to Unavailable. */
@@ -141,10 +146,7 @@ export function tokenEndpoint(
 			if (failure)
 				recorded.record("token.issued.failure", { attributes: { ...attributes, ...failure } });
 			else {
-				const claims = namesOf(addedNames);
-				recorded.record("token.issued", {
-					attributes: { ...attributes, ...(claims === undefined ? {} : { claims }) },
-				});
+				recorded.record("token.issued", { attributes: { ...attributes, ...namesOf(addedNames) } });
 			}
 		};
 		const refuse = (failure: {
