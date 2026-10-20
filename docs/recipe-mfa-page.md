@@ -130,7 +130,7 @@ content-type: application/json
 ```
 <!-- end generated -->
 
-The factor is bound, but this login opens no session: a factor bound on the password alone counts from the next sign-in (the `mfa-flows` card). Send the user back to log in.
+The factor is bound, but this login opens no session: a factor bound on the password alone counts from the next sign-in (the `mfa-enrollment` card). Send the user back to log in.
 
 ## 3. The next login asks for the factor
 
