@@ -120,8 +120,25 @@ function expiryOf(lifetimeMs: number | "endless" | undefined): Expiry {
 	return { kind: "after", ms: Math.max(1, lifetimeMs) };
 }
 
+/** The kind each space was opened for, by store: a space's scan lists every record's key, so it holds one kind. */
+const openedFor = new WeakMap<Store, Map<string, "records" | "secret records">>();
+function claim(place: Place, kind: "records" | "secret records") {
+	const kinds = openedFor.get(place.store) ?? new Map<string, "records" | "secret records">();
+	openedFor.set(place.store, kinds);
+	const held = kinds.get(place.space.name);
+	if (held !== undefined && held !== kind) {
+		throw new Error(`a space holds records or secret records, not both: ${place.space.name}`);
+	}
+	kinds.set(place.space.name, kind);
+}
+
 /** Records of one shape by key, each changed atomically from what it holds. */
 export function recordsIn<T extends Json>(place: Place) {
+	claim(place, "records");
+	return recordsOf<T>(place);
+}
+
+function recordsOf<T extends Json>(place: Place) {
 	const keyOf = (key: string) => ({ space: place.space, partition: key, name: "record" });
 	return {
 		scan: async (
@@ -194,7 +211,8 @@ export type Records<T extends Json> = ReturnType<typeof recordsIn<T>>;
 
 /** Records under a name made per space from an unguessable secret; the store never receives it. */
 export function secretRecordsIn<T extends Json>(place: Place) {
-	const named = recordsIn<T>(place);
+	claim(place, "secret records");
+	const named = recordsOf<T>(place);
 	const nameOf = (secret: string) =>
 		`1.${createHash("sha256").update(`${place.space.name}\n${secret}`).digest("base64url")}`;
 	return {
