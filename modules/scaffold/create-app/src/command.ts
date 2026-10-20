@@ -103,7 +103,7 @@ export async function run(
 	}
 	io.out(
 		listed
-			? `created ${target}\nnext: cd ${target} && pnpm install && pnpm start\n`
+			? `created ${target}\nnext: add the modules and settings the listed modules need, then cd ${target} && pnpm install && pnpm start\n`
 			: `created ${target}\nnext: cd ${target} and follow its README.md\n`,
 	);
 	return 0;
