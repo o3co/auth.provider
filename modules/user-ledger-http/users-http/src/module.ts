@@ -1,7 +1,12 @@
 import { deepFreeze, defineModule, setting } from "@mod/kernel";
 import { bearerToken } from "@mod/keys";
 import { outbound } from "@mod/outbound";
-import { credentialPolicy, destinationRefusal, outboundRefusals } from "@mod/outbound-policy";
+import {
+	credentialPolicy,
+	credentialRefusalText,
+	destinationRefusal,
+	outboundRefusals,
+} from "@mod/outbound-policy";
 import { type ConfiguredUrl, urlSetting } from "@mod/url-setting";
 import { type Ledger, ledgers } from "@mod/users";
 import { z } from "zod";
@@ -47,12 +52,6 @@ const section = z
 const unanswerable = deepFreeze({ kind: "unanswerable" } as const);
 const none = deepFreeze({ kind: "none" } as const);
 
-/** outbound's reasons a credential may not go, in this section's words. */
-const credentialRefusals = {
-	origins: "is sent to one origin alone, but the URLs name more than one",
-	scheme: "goes over https alone, or to a named plain-loopback pair",
-} as const;
-
 export default defineModule({ name: "users-http", section, replicaSafe: true }, (m) => [
 	m.contribute(ledgers).by(async (c): Promise<Ledger> => {
 		const { "max-response-size": maxBytes, timeout: timeoutMs } = c.section;
@@ -69,7 +68,8 @@ export default defineModule({ name: "users-http", section, replicaSafe: true }, 
 				? undefined
 				: (await c.get(credentialPolicy)).refusalOf(urls);
 		// More than one origin first, as the section reads; a URL's own refusal is more precise than its scheme.
-		if (refused === "origins") return c.refuse("users-http.credential", credentialRefusals.origins);
+		if (refused === "origins")
+			return c.refuse("users-http.credential", credentialRefusalText(refused));
 		const refusals = await c.get(outboundRefusals);
 		for (const key of urlKeys) {
 			const url = c.section[key];
@@ -77,7 +77,8 @@ export default defineModule({ name: "users-http", section, replicaSafe: true }, 
 				url === undefined ? undefined : destinationRefusal(refusals, url, narrowerOf(url));
 			if (refused !== undefined) return c.refuse(`users-http.${key}`, refused);
 		}
-		if (refused === "scheme") return c.refuse("users-http.credential", credentialRefusals.scheme);
+		if (refused === "scheme")
+			return c.refuse("users-http.credential", credentialRefusalText(refused));
 		const ask = calls({
 			out: await c.get(outbound),
 			credential: c.section.credential,
