@@ -31,7 +31,7 @@ import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import * as offered from "../src/contract.ts";
-import { enforcers, factors, proofSteps } from "../src/contract.ts";
+import { enforcers, factors, proofSteps, type Witnessing, witnessing } from "../src/contract.ts";
 import mfaModule from "../src/module.ts";
 import { listKeyOf, storedList } from "../src/records/records.ts";
 import { section } from "../src/section.ts";
@@ -1167,6 +1167,31 @@ describe("an enrollment witness", () => {
 			(await served.decided.held(subject)).filter((f) => f.kind === "code").length;
 		return { ...served, witness, wipe, counted };
 	};
+
+	it("asks a contributed witnessing in place of its own, and refuses to start with two", async () => {
+		const asked: string[] = [];
+		const told: Witnessing = {
+			standing: async (subject, counts) => {
+				asked.push(`standing ${subject}`);
+				return counts ? "held" : "none";
+			},
+			settle: async (subject) => {
+				asked.push(`settle ${subject}`);
+			},
+			cleared: async (subject) => {
+				asked.push(`cleared ${subject}`);
+			},
+		};
+		const contributing = (name: string) =>
+			defineModule({ name }, (m) => [m.contribute(witnessing).by(() => told)]);
+		const { decided, bindCode } = await serve({}, { extra: [contributing("told")] });
+		await bindCode("ola");
+		await decided.clear("ola");
+		expect(asked).toEqual(expect.arrayContaining(["standing ola", "settle ola", "cleared ola"]));
+		await expect(
+			serve({}, { extra: [contributing("one"), contributing("two")] }),
+		).rejects.toBeInstanceOf(BootRefused);
+	});
 
 	it("refuses to start with two witnesses", async () => {
 		const [one, two] = [witnessStandIn("witness-one"), witnessStandIn("witness-two")];

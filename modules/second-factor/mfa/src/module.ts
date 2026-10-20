@@ -4,10 +4,11 @@ import { amrSources } from "@mod/login-gates";
 import { factorKinds, firstBindingGates, secondFactorAmr } from "@mod/mfa-extensions";
 import { enrollmentWitnesses } from "@mod/mfa-witness";
 import { resealers, seal } from "@mod/seal";
-import { enforcers, factorStore, factors, proofSteps } from "./contract.ts";
+import { enforcers, factorStore, factors, proofSteps, witnessing } from "./contract.ts";
 import { addsMfa, byKind, factorDecisions } from "./factors.ts";
 import { resealerOver } from "./records/resealer.ts";
 import { section } from "./section.ts";
+import { witnessingOver } from "./witness/witness.ts";
 
 export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => [
 	m.contribute(amrSources).by(async (c) => {
@@ -30,6 +31,10 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 		}
 		const [witness, ...more] = await c.collect(enrollmentWitnesses);
 		if (more.length > 0) return c.refuse("mfa", "more than one enrollment witness is contributed");
+		const [contributed, ...others] = await c.collect(witnessing);
+		if (others.length > 0) return c.refuse("mfa", "more than one witnessing is contributed");
+		const audited = await c.get(audit);
+		const token = () => Buffer.from(c.random.bytes(16)).toString("base64url");
 		return factorDecisions({
 			stored: await c.get(factorStore),
 			kinds: byKind(kinds),
@@ -39,8 +44,9 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 			gates: await c.collect(firstBindingGates),
 			random: c.random.bytes,
 			now: c.clock.now,
-			audit: await c.get(audit),
-			witness,
+			audit: audited,
+			// The witnessing contributed, else this package's own over the witness composed beside it.
+			witnessing: contributed ?? witnessingOver({ witness, audit: audited, log: c.log, token }),
 			log: c.log,
 		});
 	}),
