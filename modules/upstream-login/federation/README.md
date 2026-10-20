@@ -15,7 +15,7 @@
 - Provides `upstreams`, as its default adapter.
 - Declares to `users` (`upstreamNames`) each IdP's name with the issuer its upstream says.
 - The operator section (its keys in the settings list).
-- Store interface for transactions, its needs (survives failover) and contract test; test configuration builders and an IdP type for tests (`./testing`)
+- Test configuration builders and an IdP type for tests (`./testing`)
 - Audit events for a callback that took its round trip, with `idp` and the source `request-source` determined: `federation.login.succeeded`, or `federation.login.held` when a gate held it, with the local subject; `federation.login.failed` with `reason` (`upstream_refused`, `exchange_failed`, `login_required`, `unknown_user`)
 - For a link, `federation.identity.linked`, or `federation.identity.link_refused` with `reason` (`conflict`, `session_short` or one of the first three), for the subject it started for.
 - No audit event comes before the take or records an unavailable answer, and none holds the upstream subject, tokens or text.

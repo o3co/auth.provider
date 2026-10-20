@@ -46,7 +46,6 @@ import { afterEach, beforeEach, describe, expect, expectTypeOf, it } from "vites
 import { z } from "zod";
 import federationModule from "../src/module.ts";
 import { section } from "../src/section.ts";
-import { type StoredTransaction, transactionStore } from "../src/store.ts";
 import { federationConfig, testIdpType } from "../src/testing.ts";
 
 /** The time every test starts at; a test that moves the clock moves it only for itself. */
@@ -101,7 +100,6 @@ interface Setup {
 	readonly federation?: Record<string, unknown>;
 	readonly extra?: Module[];
 	readonly answers?: Map<string, Answer>;
-	readonly store?: Module;
 	/** In place of the held logins' store. */
 	readonly held?: Module;
 	/** In place of the round trips' store. */
@@ -117,7 +115,6 @@ interface Setup {
 
 async function serve(setup: Setup = {}) {
 	const idp = testIdpType(setup.answers ?? answering(["good", alice]), setup.more);
-	const kept = memoryRecords<StoredTransaction>(() => now, { shards: 1, perShard: 1 });
 	const saved: string[] = [];
 	const keptHeld = memoryRecords<StoredHeldLogin>(() => now, { shards: 1, perShard: 1 });
 	const held = defineModule({ name: "held" }, (m) => [
@@ -140,16 +137,6 @@ async function serve(setup: Setup = {}) {
 			update: keptTrips.records.change,
 		})),
 	]);
-	const store = defineModule({ name: "transactions" }, (m) => [
-		m.provide(transactionStore).by(() => ({
-			save: async (key, value, lifetimeMs) => {
-				saved.push(JSON.stringify(value));
-				return kept.records.create(key, value, lifetimeMs);
-			},
-			update: kept.records.change,
-			remove: kept.records.remove,
-		})),
-	]);
 	const receiving = setup.receivers ?? [];
 	const audit = auditStandIn();
 	const app = await assemble({
@@ -167,7 +154,6 @@ async function serve(setup: Setup = {}) {
 			simulatedStore().module,
 			federationModule,
 			idp.module,
-			setup.store ?? store,
 			handoffModule,
 			setup.held ?? held,
 			roundTripModule,

@@ -7,7 +7,6 @@
 	"replaces": "@mod/upstreams",
 	"default": true,
 	"exports": {
-		".": "./src/contract.ts",
 		"./module": "./src/module.ts",
 		"./testing": "./src/testing.ts",
 		"./audit-events": "./src/audit-events.ts"
@@ -28,9 +27,6 @@
 		"@mod/url-setting": "workspace:*",
 		"@mod/users": "workspace:*",
 		"zod": "4.6.7"
-	},
-	"peerDependencies": {
-		"vitest": "5.0.4"
 	},
 	"devDependencies": {
 		"@mod/cookies": "workspace:*",
