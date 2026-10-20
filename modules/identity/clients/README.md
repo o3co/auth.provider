@@ -33,7 +33,7 @@
 - A section that widens what a client may do (first-party, keys, a binding, public exchange) takes from a document only what a document may say, or gives no `fromDocument`.
 - A `checkAtBoot` reason refuses boot at `clients.registered.<i>.sections.<name>`, which names the client by its place and the section; the reason is the check's own, unchanged, so it never holds a configuration value, the client's id included.
 - A secret is checked through `secret-hash`, within its assembly's `max-concurrent`, with decoys of the registered hashes' work; boot refuses a registered `hash` it cannot read (plain text included) or a secret method's client with none, and a source's such secret matches nothing.
-- A client's existence is not secret, since its id shows outside: an unknown client, an invalid record and another method's client are refused at once, with no secret check.
+- An unknown client, an invalid record and another method's client are refused only after the work the claimed method's credentials would cost (`decoy`; a secret's is the checker's decoys), so the time tells no client id apart.
 
 ## Depends on
 - `kernel`, `http`, `secret-hash`

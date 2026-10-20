@@ -71,6 +71,8 @@ export interface AuthMethod {
 	/** Whether the request carries this method's credentials only in part, or in a form it does not take. */
 	malformed?(request: HttpRequest): boolean;
 	verify(request: HttpRequest, client: Client): Promise<boolean>;
+	/** The work a verify would cost, done for a request refused before it (no such client, say), so the time tells nothing. */
+	decoy?(request: HttpRequest): Promise<void>;
 }
 
 export type Authentication =

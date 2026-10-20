@@ -137,7 +137,7 @@ it("refuses a source's client whose secret is no hash, or that holds none, match
 	expect(await c.authenticate(post("bare", "x"))).toMatchObject(refused("bad_credentials"));
 });
 
-it("computes one scrypt per work in use for a known client, and none for an unknown client, an invalid record, another method's client or another client_id", async () => {
+it("computes one scrypt per work in use for a known client, an unknown client, an invalid record and another method's client alike, and none for another client_id", async () => {
 	const invalid = { id: "invalid", kind: "confidential", method: "no-such-method" } as ClientRecord;
 	const source = defineModule({ name: "source" }, (m) => [
 		m.contribute(clientSources).by(() => ({
@@ -160,10 +160,11 @@ it("computes one scrypt per work in use for a known client, and none for an unkn
 		[basicRequest("s10", "p"), as("s10"), 2],
 		[basicRequest("s10", "wrong"), refused("bad_credentials"), 2],
 		[post("s11", "p"), as("s11"), 2],
-		[basicRequest("nobody", "p"), refused("unknown_client"), 0],
-		[post("nobody", "p"), refused("unknown_client"), 0],
-		[post("invalid", "p"), refused("invalid_record"), 0],
-		[basicRequest("s11", "p"), refused("wrong_method"), 0],
+		// Refused only after the same work as a known client's, so the time tells no client id apart.
+		[basicRequest("nobody", "p"), refused("unknown_client"), 2],
+		[post("nobody", "p"), refused("unknown_client"), 2],
+		[post("invalid", "p"), refused("invalid_record"), 2],
+		[basicRequest("s11", "p"), refused("wrong_method"), 2],
 		[besideOther, refused("bad_credentials"), 0],
 	];
 	for (const [request, answer, scryptRuns] of cases) {
