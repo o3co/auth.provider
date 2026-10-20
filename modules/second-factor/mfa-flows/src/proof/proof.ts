@@ -59,13 +59,34 @@ export interface ResumeParts {
 	readonly log: Pick<Log, "warn">;
 }
 
-/** Goes on with a held login after the gate `mfa`, adding `proved` to its amr; answers what it held, with `carried` once it opens. */
+/**
+ * Goes on with a held login after the gate `mfa`, adding `proved` to its amr; answers what it held,
+ * with `carried` once it opens. One made by a function is made only then: a response it makes
+ * instead closes the session and is answered, and a throw closes it as best it can and goes on.
+ */
+/** What a resumed login adds to its answer once it opens, or what makes it then. */
+type Carried = object | (() => Promise<object | HttpResponse>);
+const isMaker = (c: Carried): c is () => Promise<object | HttpResponse> => typeof c === "function";
+const isResponse = (made: object): made is HttpResponse => "status" in made;
+
 export function resumeOver(p: ResumeParts) {
+	/** What carried makes once the session opened; a response it makes closes the session. */
+	const madeIn = async (handle: string, carried: () => Promise<object | HttpResponse>) => {
+		let made: object | HttpResponse;
+		try {
+			made = await carried();
+		} catch (error) {
+			await p.sessions.close(handle).catch(() => undefined);
+			throw error;
+		}
+		if (isResponse(made)) await p.sessions.close(handle);
+		return made;
+	};
 	return async (
 		request: HttpRequest,
 		t: Transaction & { readonly purpose: "login" | "enroll-login" },
 		proved: readonly string[],
-		carried?: object,
+		carried?: Carried,
 		opened?: (handle: string) => Promise<void>,
 	) => {
 		const facts = t.facts ?? { subject: t.subject, amr: [] };
@@ -87,8 +108,16 @@ export function resumeOver(p: ResumeParts) {
 			return { ...loginRequired, cookies: [p.transactions.cleared()] };
 		}
 		await opened?.(resumed.session.id);
+		const made =
+			carried !== undefined && isMaker(carried)
+				? await madeIn(resumed.session.id, carried)
+				: carried;
+		// Its cookie never goes out: the session closed, or failing to, is no one's.
+		if (made !== undefined && isResponse(made)) {
+			return { ...made, cookies: [...(made.cookies ?? []), p.transactions.cleared()] };
+		}
 		const cookies = [...resumed.cookies, p.transactions.cleared()];
-		const done = carried ? { ...(t.done as object | undefined), ...carried } : (t.done ?? {});
+		const done = made ? { ...(t.done as object | undefined), ...made } : (t.done ?? {});
 		return jsonAnswer(200, done, { cookies });
 	};
 }
