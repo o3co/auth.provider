@@ -1,7 +1,8 @@
 import { assemble, BootRefused, defineModule, kernelConfig } from "@mod/kernel";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
-import { urlSetting, urlsChecked } from "../src/contract.ts";
+import { type ConfiguredUrl, urlSetting, urlsChecked } from "../src/contract.ts";
+import { configuredUrl } from "../src/testing.ts";
 
 const https = urlSetting({ schemes: ["https"] });
 const takes = (schema: typeof https, value: string) => schema.safeParse(value).success;
@@ -344,4 +345,15 @@ describe("URLs a section checks once they all parse", () => {
 		refused({ a: "no url" }, { addIssue: (i: unknown) => issued.push(i) } as never);
 		expect(issued).toEqual([]);
 	});
+});
+
+it("reads a URL as a ConfiguredUrl, the type only url-setting makes, and keeps it as written", () => {
+	const read = urlSetting({ schemes: ["https"] }).parse("https://ledger.example/verify");
+	expectTypeOf(read).toEqualTypeOf<ConfiguredUrl>();
+	expect(read).toBe("https://ledger.example/verify");
+	// A test makes one through ./testing, never by a cast.
+	const made = configuredUrl("https://ledger.example/verify");
+	expectTypeOf(made).toEqualTypeOf<ConfiguredUrl>();
+	expect(made).toBe(read);
+	expect(() => configuredUrl("not a url")).toThrow();
 });

@@ -117,8 +117,12 @@ function percentEncoded(value: string, written: string): boolean {
  * A configured URL: one of the schemes, a host, no userinfo, no fragment, no whitespace or control
  * characters, in the form the URL parser writes it; kept exactly as written.
  */
-export function urlSetting(rules: UrlRules): z.ZodType<string> {
-	return z.string().superRefine((value, context) => {
+const configured = z.string().brand<"ConfiguredUrl">();
+/** A URL url-setting read from an operator's configuration; nothing else makes one, so a caller holding one holds the operator's URL. */
+export type ConfiguredUrl = z.output<typeof configured>;
+
+export function urlSetting(rules: UrlRules) {
+	return configured.superRefine((value, context) => {
 		const reason = refusal(value, rules);
 		if (reason) context.addIssue({ code: "custom", message: reason });
 	});
