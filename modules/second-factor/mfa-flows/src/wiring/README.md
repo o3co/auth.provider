@@ -14,7 +14,7 @@ Internal module of `mfa-flows`: what each of the package's internal modules is g
 - `partsIn` (the build context) → the parts the module binding factors takes (`seams`).
 
 ## Invariants
-- Internal modules: `transactions` keeps transactions; `proof` holds a login (the gate) or a session (step-up) until a factor is proved; `enrollment` binds a new factor; `reset` is the operator's reset; `release` the user's, by `permits`; `recording` records a request's audit events; `seams` shapes what the module binding factors gives and takes. `transactions` takes its own contracts; `wiring` gives the others only what they use.
+- Internal modules: `transactions` keeps transactions; `proof` holds a login (the gate) or a session (step-up) until a factor is proved; `enrollment` binds a new factor; `release` the user's, by `permits`; `recording` records a request's audit events; `seams` shapes what the module binding factors gives and takes. `transactions` takes its own contracts; `wiring` gives the others only what they use.
 - The enrollment routes and an enrollment's challenge go to the flow contributed to `enrollmentFlow`, else to `enrollment`.
 
 ## Depends on

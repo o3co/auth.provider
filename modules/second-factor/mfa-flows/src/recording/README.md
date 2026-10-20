@@ -6,7 +6,7 @@ Internal module of `mfa-flows`: the audit events a request records, with where i
 - Records `mfa.<kind>` through the package's declaration of its audit events, adding the request's source.
 
 ## Not here
-- Which event a flow records, and when (`proof`, `enrollment`, `release`). The reset's event, which has no request (`reset`). Deciding a request's source (`request-source`).
+- Which event a flow records, and when (`proof`, `enrollment`, `release`). The reset's event, which has no request (`mfa-reset`). Deciding a request's source (`request-source`).
 
 ## Offers
 - `auditedBy` (`audit`'s record) → a recorder taking the kind without `mfa.`, the subject, the request and the other attributes.
