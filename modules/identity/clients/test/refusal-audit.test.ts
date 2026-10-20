@@ -57,5 +57,11 @@ describe("recordRefusedAuthentication", () => {
 		const event = declared["client.authentication.failure"];
 		expect(event.attributes).toEqual(["source", "reason"]);
 		for (const reason of reasons) expect(event.when).toContain(`\`${reason}\``);
+		// So an operator knows every place it comes from.
+		for (const place of [
+			"token, introspection, revocation and device authorization",
+			"federation-grants",
+		])
+			expect(event.when).toContain(place);
 	});
 });
