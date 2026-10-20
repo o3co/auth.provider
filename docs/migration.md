@@ -767,6 +767,10 @@ What changed since rc.4. Coming from an earlier release candidate, read the sect
 - **An HS256 secret**: `keys.signing.secret-encoding` names how `secret` is read (`hex`, `base64`, or `utf8`, the text's own bytes); unset, it is read as before, and a value not of the reading named refuses boot. To keep 0.17's key, or to share the secret with policy-verifier, which takes the text's own bytes, set `utf8`.
 - **An app made from listed modules** (`create-auth-provider <target> <module>…`) now holds what those modules need to run, and is written as a pattern's app is: its configuration file reads each key from the environment and holds no value, beside `.env.example`, `config/local.conf.example`, a Dockerfile, a README and `AGENTS.md`. Generate it again and carry your settings into `.env` or the local layer: boot refuses until `kernel.deployment` and the keys its README names are set.
 - **A Redis store on a managed service**: boot sends the commands the store needs once and is refused, naming the command, where the service refuses one (`WAIT`, `ROLE`, `INFO`, `EVAL`, or a command a script calls); rc.4 booted and answered 503 to every replicated write. Allow the commands the [runbook](runbook.md#managed-redisvalkey-with-replicas) lists.
+- **A grant of your own that needs claims of its own in the access token**: put them in `AccessGrant.claims` and issue through `issue`.
+- **Access tokens not issued by `tokens`**: an `at+jwt` carrying a name reserved for what `tokens` never writes (`nbf`, `roles`, `email` and the like) is refused by `verifyAccess`, which retires such tokens on purpose.
+- **Added claims and restrictions**: a refreshed or exchanged token carries no added claim; never use one for a restriction that must hold on.
+- **Audit**: `token.issued` may carry `claims`, the names of the claims a grant added.
 
 ## Operational notes
 
