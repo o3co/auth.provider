@@ -544,6 +544,41 @@ describe("token endpoint", () => {
 		expect(cut?.claims_left).toBe("2");
 	});
 
+	it("names all at exactly 2048 characters, and leaves one out at 2049", async () => {
+		/** Eight names of 227 characters and one of `last`, sorted by their first two digits. */
+		const names = (last: number) =>
+			Object.fromEntries(
+				Array.from({ length: 9 }, (_, i) => {
+					const length = i === 8 ? last : 227;
+					return [`${String(i).padStart(2, "0")}${"n".repeat(length - 2)}`, 0];
+				}),
+			);
+		const issuing = (claims: Record<string, number>) =>
+			defineModule({ name: "edge" }, (m) => [
+				m.contribute(grants).by(() => ({
+					grantType: "urn:test:echo",
+					readsAmbient: "none",
+					handle: async (input) => {
+						const base = { subject: "sue", issuedTo: input.client.id, audience: [], scope: [] };
+						const issued = await input.issue({ ...base, claims });
+						return issued.kind === "issued"
+							? { kind: "issued", body: {} }
+							: { kind: "refused", refusal: issued.refusal };
+					},
+				})),
+			]);
+		// 8 × 227 + 8 spaces + 224 = 2048.
+		const exact = await serve([issuing(names(224))]);
+		expect((await exact({ grant_type: "urn:test:echo" }, "echo")).status).toBe(200);
+		const all = events.at(-1)?.attributes;
+		expect([String(all?.claims).length, all?.claims_left]).toEqual([2048, undefined]);
+		await stop();
+		const over = await serve([issuing(names(225))]);
+		expect((await over({ grant_type: "urn:test:echo" }, "echo")).status).toBe(200);
+		const cut = events.at(-1)?.attributes;
+		expect([String(cut?.claims).split(" ").length, cut?.claims_left]).toEqual([8, "1"]);
+	});
+
 	it("records each issuance and each refusal it decides, with the client and the source, never a token or secret", async () => {
 		const polled = defineModule({ name: "polled" }, (m) => [
 			m.contribute(grants).by(() => ({
