@@ -17,6 +17,8 @@ export async function idpsIn(c: BuildContext<Settings>) {
 		site: await c.get(site),
 	});
 	if (refusals.length > 0) c.refuseAll(refusals);
+	// Composed with none, every login answers not found; a deployment still configuring may mean it.
+	if (idps.size === 0) c.log.warn("federation.no_idps");
 	return idps;
 }
 

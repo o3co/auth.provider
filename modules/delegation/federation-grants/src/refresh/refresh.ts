@@ -125,6 +125,30 @@ export function refreshWith(parts: Parts) {
 			: undefined;
 	};
 
+	/**
+	 * Grants, by id and version, whose end an upstream asked could not be written: refused as the
+	 * upstream answered until the held token ends, when a request is due and asks again.
+	 */
+	const unwritten = new Map<string, { readonly until: number; readonly reason: string }>();
+	const keyOf = (grant: Grant) => `${grant.id}\n${grant.version}`;
+	/** Ends the grant as the upstream asked; an end the store cannot write is remembered, then thrown on. */
+	const end = async (counted: Grant, held: Credentials, reason: string): Promise<Current> => {
+		try {
+			const ended = await rewrite(counted, (g) => ({
+				...withoutCredentials(g),
+				version: versionOf(),
+				status: "reauthorization_required",
+				reason,
+			}));
+			return ended ? { kind: "reauthorize", reason } : { kind: "gone" };
+		} catch (error) {
+			const now = parts.clock.now();
+			for (const [key, kept] of unwritten) if (kept.until <= now) unwritten.delete(key);
+			unwritten.set(keyOf(counted), { until: held.expiresAt, reason });
+			throw error;
+		}
+	};
+
 	/** Spends one rotation of the window: the grant written with it, how long until the window lets one, or gone. */
 	const spend = async (
 		grant: Grant,
@@ -184,27 +208,10 @@ export function refreshWith(parts: Parts) {
 			const limited = retryAfterSeconds === undefined ? {} : { retryAfterSeconds };
 			return heldOr(grant.id, held, asked, { kind: "limited", ...limited });
 		}
-		if (refreshed.kind === "invalid_grant") {
-			const ended = await rewrite(counted, (g) => ({
-				...withoutCredentials(g),
-				version: versionOf(),
-				status: "reauthorization_required",
-				reason: "upstream_invalid_grant",
-			}));
-			return ended ? { kind: "reauthorize", reason: "upstream_invalid_grant" } : { kind: "gone" };
-		}
+		if (refreshed.kind === "invalid_grant") return end(counted, held, "upstream_invalid_grant");
 		// The grant stands upstream, but the user must act there: the client asks for it anew.
-		if (refreshed.kind === "interaction_required") {
-			const ended = await rewrite(counted, (g) => ({
-				...withoutCredentials(g),
-				version: versionOf(),
-				status: "reauthorization_required",
-				reason: "upstream_interaction_required",
-			}));
-			return ended
-				? { kind: "reauthorize", reason: "upstream_interaction_required" }
-				: { kind: "gone" };
-		}
+		if (refreshed.kind === "interaction_required")
+			return end(counted, held, "upstream_interaction_required");
 		// Only a refresh that handed tokens is read on; an answer of another kind is refused.
 		const answered = refreshed.kind === "refreshed" ? refreshed : undefined;
 		if (!answered) return heldOr(grant.id, held, asked, { kind: "refused" });
@@ -250,6 +257,9 @@ export function refreshWith(parts: Parts) {
 	return {
 		/** The grant's token as `asked`, from the grant read by the caller (active, owned, not ended). */
 		current: async (grant: Grant, asked: Asked): Promise<Current> => {
+			const unended = unwritten.get(keyOf(grant));
+			if (unended && unended.until > parts.clock.now())
+				return { kind: "reauthorize", reason: unended.reason };
 			const held = records.open(grant);
 			if (!held) return { kind: "reauthorize", reason: "credentials_unreadable" };
 			if (!due(held, asked))

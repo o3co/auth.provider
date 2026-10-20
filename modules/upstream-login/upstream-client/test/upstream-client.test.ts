@@ -68,15 +68,17 @@ describe("upstream-client", () => {
 		}
 	});
 
-	it("checks the client's ID and secret an IdP's settings name, as well-formed text", () => {
+	it("checks the client's ID and secret an IdP's settings name, as well-formed text that is not blank", () => {
 		const both = { "client-id": "cid", "client-secret": "s3cr:et" };
 		expect(clientSetting.parse(both)).toEqual(both);
 		// Half a surrogate pair cannot be sent form-urlencoded: boot refuses it, not every exchange.
-		for (const name of ["client-id", "client-secret"]) {
-			for (const value of ["", "a\uD800", "\uDE00a", undefined]) {
+		for (const name of ["client-id", "client-secret"] as const) {
+			for (const value of ["", " ", "\t\n", "\u00a0", "a\uD800", "\uDE00a", undefined]) {
 				expect(clientSetting.safeParse({ ...both, [name]: value }).success, value).toBe(false);
 			}
 			expect(clientSetting.safeParse({ ...both, [name]: "a\uD83D\uDE00" }).success).toBe(true);
+			// Only one that is blank throughout is refused; any other is taken as written.
+			expect(clientSetting.parse({ ...both, [name]: " a b " })[name]).toBe(" a b ");
 		}
 	});
 

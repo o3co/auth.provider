@@ -27,7 +27,7 @@
   - `connect-lifetime` (`10m`)
   - `refresh-before` (`30s`)
   - `rotations` per `rotation-window` (24 per `1h`)
-  - `lodges` per `lodge-window` (60 per `1m`)
+  - `lodges` per `lodge-window` (60 per `1m`), lodgings and renewals together
   - `keep-on-subject-revocation` (false)
   - `revocation-skew` (`1s`)
   - `sweep-interval` (`1h`): how often each host walks every grant kept, erasing the credentials of one ended or revoked that no request reads

@@ -156,7 +156,7 @@ From `@mod/federation`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `federation.idps` | map | `{}` |  |  |  | Each IdP by name (1 to 32 lowercase letters, digits and `-`, not starting with `-`): its `type`, `upstream-amr` (the upstream's amr values mapped to ours; none by default; mapping one to `mfa`, say, trusts the upstream's claim for that amr and any acr it satisfies, such as `urn:o3co:acr:mfa`) and the type's own settings. |
+| `federation.idps` | map | `{}` |  |  |  | Each IdP by name (1 to 32 lowercase letters, digits and `-`, not starting with `-`): its `type`, `upstream-amr` (the upstream's amr values mapped to ours; none by default; mapping one to `mfa`, say, trusts the upstream's claim for that amr and any acr it satisfies, such as `urn:o3co:acr:mfa`) and the type's own settings. With none, every login answers not found, and each boot warns `federation.no_idps`. |
 | `federation.landing` | string |  |  |  |  | The https URL a login lands on when it named no return target; the public origin's root by default. |
 | `federation.held-page` | string |  |  |  |  | The page a browser goes to when a gate holds its login, to go on there: on the public origin, as it reads the held login with this deployment's cookies; https, or http on a loopback host. Without it, a held login is answered 403 with the gate's answer. |
 | `federation.transaction-lifetime` | string | `10m` |  |  |  | How long a round trip, or a held login's tokens, may wait, from 1m to 1h. |
@@ -179,8 +179,8 @@ From `@mod/federation-grants`.
 | `federation-grants.refresh-before` | string | `30s` |  |  |  | A token this close to its end is refreshed, once half its life is spent: a duration with a unit, from 0s to 1h, e.g. 30s. |
 | `federation-grants.rotations` | integer (1–1000) | `24` |  |  |  | Upstream refreshes a grant may take in each rotation-window, from 1 to 1000. |
 | `federation-grants.rotation-window` | string | `1h` |  |  |  | The window a grant's upstream refreshes are counted in: a duration with a unit, from 1s to 1d, e.g. 1h. |
-| `federation-grants.lodges` | integer (1–100000) | `60` |  |  |  | Intents a client may lodge in each lodge-window, whatever subject it names, from 1 to 100000. |
-| `federation-grants.lodge-window` | string | `1m` |  |  |  | The window a client's lodged intents are counted in: a duration with a unit, from 1s to 1d, e.g. 1m. |
+| `federation-grants.lodges` | integer (1–100000) | `60` |  |  |  | Intents a client may lodge or renew in each lodge-window, together, whatever subject it names, from 1 to 100000. |
+| `federation-grants.lodge-window` | string | `1m` |  |  |  | The window a client's lodged and renewed intents are counted in: a duration with a unit, from 1s to 1d, e.g. 1m. |
 | `federation-grants.revocation-skew` | string | `1s` |  |  |  | How far apart hosts' clocks may be: a grant made this soon after its subject's revocation counts as revoked. A duration with a unit, from 0s to 5m, e.g. 1s. |
 | `federation-grants.sweep-interval` | string | `1h` |  |  |  | How often each host walks every grant kept, erasing the credentials of one past its end or ended by its subject's revocation though no request reads it: a duration with a unit, from 1m to 1d, e.g. 1h. |
 | `federation-grants.keep-on-subject-revocation` | boolean | `false` |  |  |  | Whether a subject's revocation may be asked to leave its established grants. |

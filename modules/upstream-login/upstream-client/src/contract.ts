@@ -20,7 +20,7 @@ export const scopeSetting = z.string().regex(/^[\x21\x23-\x5b\x5d-\x7e]+$/);
 /** A credential an IdP's settings name, sent form-urlencoded, which half a surrogate pair cannot be. */
 export const credentialSetting = z
 	.string()
-	.min(1)
+	.refine((value) => value.trim() !== "", "not blank")
 	.refine((value) => value.isWellFormed(), "well-formed text");
 
 /** The client's ID and secret an IdP's settings name; a type adds its own settings by `extend`. */
