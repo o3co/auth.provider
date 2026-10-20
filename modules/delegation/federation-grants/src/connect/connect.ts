@@ -20,7 +20,6 @@ import {
 	type Upstreams,
 	upstreams,
 } from "@mod/upstreams";
-import { type Users, users } from "@mod/users";
 import { z } from "zod";
 import events from "../audit-events.ts";
 import {
@@ -47,11 +46,15 @@ import {
 	type StepStore,
 	stepStore,
 } from "../store.ts";
+import {
+	type UpstreamAccounts,
+	upstreamAccountOver,
+} from "../upstream-account/upstream-account.ts";
 
 export interface ConnectParts {
 	readonly sessions: Sessions;
 	readonly clients: Clients;
-	readonly users: Users;
+	readonly upstreamAccount: UpstreamAccounts;
 	readonly upstreams: Upstreams;
 	readonly grants: GrantStore;
 	readonly steps: StepStore;
@@ -464,22 +467,8 @@ export function connectWith(p: ConnectParts) {
 		if (exchanged.kind === "failed") return fail(request, grant, intent, exchanged.error);
 		const { login } = exchanged;
 		const upstream = { issuer: String(login.issuer), subject: String(login.subject) };
-		const known = grant.upstream;
-		if (known && (known.issuer !== upstream.issuer || known.subject !== upstream.subject)) {
-			return fail(request, grant, intent, "account_mismatch");
-		}
-		if (intent.expectedUpstream !== undefined && intent.expectedUpstream !== upstream.subject) {
-			return fail(request, grant, intent, "account_mismatch");
-		}
-		if (settings["identity-check"] === "required") {
-			const holder = await p.users.byUpstream(connection.idp, upstream.subject).then(
-				(found) => (found.kind === "none" ? "nobody" : found.user.subject),
-				() => undefined,
-			);
-			if (holder === undefined) return fail(request, grant, intent, "identity_unverifiable");
-			if (holder !== "nobody" && holder !== grant.subject)
-				return fail(request, grant, intent, "identity_conflict");
-		}
+		const account = await p.upstreamAccount.refusal(grant, intent, connection.idp, upstream);
+		if (account) return fail(request, grant, intent, account);
 		const now = p.clock.now();
 		const read = credentialsFrom(login.tokens, {
 			now,
@@ -533,7 +522,7 @@ export function connectWith(p: ConnectParts) {
 			attributes: {
 				client: grant.client,
 				connection: grant.connection,
-				outcome: settings["identity-check"],
+				outcome: p.upstreamAccount.check,
 				...(from ? { source: from } : {}),
 			},
 		});
@@ -586,7 +575,7 @@ export const connectOver = async (c: BuildContext<Settings>) =>
 		...(await c.get(shared)),
 		sessions: await c.get(sessions),
 		clients: await c.get(clients),
-		users: await c.get(users),
+		upstreamAccount: await upstreamAccountOver(c),
 		upstreams: await c.get(upstreams),
 		grants: await c.get(grantStore),
 		steps: await c.get(stepStore),
