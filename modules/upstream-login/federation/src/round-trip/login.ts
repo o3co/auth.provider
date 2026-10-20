@@ -1,5 +1,5 @@
 import { type Audit, audit } from "@mod/audit";
-import { jsonAnswer } from "@mod/http";
+import { jsonAnswer, noStore, site } from "@mod/http";
 import type { BuildContext } from "@mod/kernel";
 import { loginSource } from "@mod/login-attributes";
 import { type Logins, logins } from "@mod/login-gates";
@@ -24,12 +24,17 @@ export interface LoginParts {
 	readonly handoff: Pick<Handoff, "of">;
 	readonly landing: string;
 	readonly heldLoginLifetimeMs: number;
+	readonly heldPage?: string | undefined;
 }
 
 /** The name login-gates tells when a login federation asked for opens after a hold. */
 export const loginCaller = "federation";
 
 export async function loginIn(c: BuildContext<Settings>): Promise<Continuation> {
+	const heldPage = c.section["held-page"];
+	if (heldPage !== undefined && new URL(heldPage).origin !== (await c.get(site)).origin) {
+		c.refuse("federation.held-page", "not on the public origin");
+	}
 	return loginWith({
 		logins: await c.get(logins),
 		users: await c.get(users),
@@ -37,6 +42,7 @@ export async function loginIn(c: BuildContext<Settings>): Promise<Continuation> 
 		handoff: await c.get(handoff),
 		landing: await landingIn(c),
 		heldLoginLifetimeMs: c.section["transaction-lifetime"] * 1000,
+		heldPage,
 	});
 }
 
@@ -54,7 +60,8 @@ export function loginWith(p: LoginParts): Continuation {
 			}
 			const mapped = upstreamLogin.amr.flatMap((value) => idp.upstreamAmr.get(value) ?? []);
 			const amr = [...new Set([...proves, ...mapped])];
-			const done = trip.redirectTo === undefined ? {} : { redirect_to: trip.redirectTo };
+			const lands = trip.redirectTo ?? p.landing;
+			const done = { redirect_to: lands };
 			const subject = found.user.subject;
 			const handing = p.handoff.of(name, subject, upstreamLogin.tokens, p.heldLoginLifetimeMs);
 			const from = handing && {
@@ -69,9 +76,10 @@ export function loginWith(p: LoginParts): Continuation {
 			record(held ? "held" : "succeeded", name, { subject, source });
 			await handing?.after(outcome);
 			const cookies = [...cleared, ...outcome.cookies];
-			return held
+			if (!held) return sent(lands, cookies);
+			return p.heldPage === undefined
 				? jsonAnswer(403, outcome.answer, { cookies })
-				: sent(trip.redirectTo ?? p.landing, cookies);
+				: { status: 303, headers: { ...noStore, location: p.heldPage }, cookies };
 		},
 	};
 }

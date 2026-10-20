@@ -20,7 +20,9 @@
 - For a link, `federation.identity.linked`, or `federation.identity.link_refused` with `reason` (`conflict`, `session_short` or one of the first three), for the subject it started for.
 - No audit event comes before the take or records an unavailable answer, and none holds the upstream subject, tokens or text.
 - Answer codes: `not_found` (404), `repeated_parameter`, `invalid_redirect`, `invalid_request`, `invalid_state`, `upstream_refused` (400), `unknown_user`, `login_required` (401), a gate's or a session requirement's answer, `link_requires_trusted_origin` (403), `identity_conflict` (409), `method_not_allowed` (405, with `allow`), `exchange_failed` (502), `temporarily_unavailable` (503)
-- Success is a 302 to the return target or the landing; a held login is a 403 with the gate's answer and cookies.
+- Success is a 302 to the return target or the landing.
+- A held login carries that same return to its gates.
+- A held login is a 303 to `held-page`, with no query, and the cookies; without one, a 403 with the gate's answer and cookies.
 
 ## Invariants
 - Each start begins an `upstream-round-trip` round trip named `federation.<idp>`, kept for `transaction-lifetime`, cross-site for an IdP that answers in a posted form; its callback takes it before the code is exchanged.
@@ -50,7 +52,7 @@
 - Groups and other claims never reach the session.
 - A login's upstream tokens go to their receivers through `upstream-handoff`, which keeps a held login's for `transaction-lifetime`, its resume's deadline; if they cannot be kept, the callback is unavailable.
 - An IdP's redirect URI is the public origin plus its callback path.
-- Boot is refused for an unknown type, settings the type refuses, an upstream that does not match its settings (under the key and with the reason the type gives, where it gives them), or no public origin, one reason per issue, all at once.
+- Boot is refused for an unknown type, settings the type refuses, an upstream that does not match its settings (under the key and with the reason the type gives, where it gives them), no public origin, or a `held-page` off it (the page reads the held login with this deployment's cookies), one reason per issue, all at once.
 - An IdP that answers in a posted form refuses boot where cookies cannot be secure, as its round trip's cookie is cross-site.
 
 ## Depends on

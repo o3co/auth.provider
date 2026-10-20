@@ -712,6 +712,61 @@ describe("federation", () => {
 		]);
 	});
 
+	it("sends a browser whose login a gate holds to the held page, by 303 with no query, and its cookies", async () => {
+		const gate = defineModule({ name: "gate" }, (m) => [
+			m.contribute(loginGates).by(() => ({
+				name: "second",
+				hold: async () => ({
+					kind: "held" as const,
+					answer: { step: "next" },
+					cookies: ["step=1; Path=/"],
+				}),
+			})),
+		]);
+		const page = `${origin}/continue`;
+		for (const mode of [undefined, "form_post"] as const) {
+			const corp = { type: "test", issuer: "https://idp.example", ...(mode ? { mode } : {}) };
+			const s = await serve({
+				extra: [gate],
+				federation: { "held-page": page, idps: { corp } },
+			});
+			const started = await s.begin();
+			const query = `code=good&state=${started.state}`;
+			const held = mode
+				? await s.post(`${base}/corp/callback`, query, started.cookie)
+				: await s.callback(query, started.cookie);
+			expect([held.status, held.location], mode).toEqual([303, page]);
+			expect(held.cookies, mode).toContain("step=1");
+			expect(held.cookies, mode).toContain(clearedOf(started.cookie));
+			await stop();
+		}
+	});
+
+	it("carries where a held login lands, as asked, else the landing, else the public origin's root", async () => {
+		const target = `${origin}/oauth/authorize?client_id=app`;
+		for (const [federation, query, lands] of [
+			[{}, `?redirect_to=${encodeURIComponent(target)}`, target],
+			[{ landing: "https://app.example/home" }, "", "https://app.example/home"],
+			[{}, "", `${origin}/`],
+		] as const) {
+			const gate = holdingGate();
+			const s = await serve({ extra: [gate.module, returnTo("/oauth/authorize")], federation });
+			await s.roundTrip("code=good", query);
+			expect(gate.held.map((h) => h.done)).toEqual([{ redirect_to: lands }]);
+			await stop();
+		}
+	});
+
+	it("refuses to boot on a held page off the public origin, naming its key", async () => {
+		await expect(
+			serve({ federation: { "held-page": "https://app.example/continue" } }),
+		).rejects.toSatisfy(
+			(error: unknown) =>
+				error instanceof BootRefused &&
+				error.refusals.some((r) => r.where === "federation.held-page"),
+		);
+	});
+
 	it("takes an answer in form_post only by POST, behind a cross-site cookie, and one in a query only by GET", async () => {
 		const s = await serve({
 			federation: {
