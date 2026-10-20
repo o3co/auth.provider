@@ -44,6 +44,9 @@ onLegacy(codeArea, {
 		"store-fault:session-grant",
 	],
 	differs: [
+		// A fresh login a client asks for: max_age=0 asks a new one, and a return that dropped its demand is refused.
+		"max-age-zero-asks-a-new-login",
+		"return-keeps-its-demand",
 		// An acr no way of logging in can meet is dropped at boot, and answered as one not known.
 		"unmeetable-acr-entry",
 		// Ours issues a session grant only to a request with same-origin evidence for its own origin.
