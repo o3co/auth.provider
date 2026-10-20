@@ -1,11 +1,13 @@
-import { type Audit, declaredAudit } from "@mod/audit";
+import { type Audit, audit, declaredAudit } from "@mod/audit";
 import { clientAllowance } from "@mod/client-allowance";
-import type { Clients } from "@mod/clients";
+import { type Clients, clients } from "@mod/clients";
 import { type HttpRequest, type HttpResponse, jsonAnswer, type Route } from "@mod/http";
+import { issuer } from "@mod/issuer";
+import type { BuildContext } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
 import { authenticateClient, oauthError } from "@mod/token-endpoint";
-import type { AccessCheck, Tokens } from "@mod/tokens";
-import events from "./audit-events.ts";
+import { type AccessCheck, type Tokens, tokens } from "@mod/tokens";
+import events from "../audit-events.ts";
 
 const inactive: HttpResponse = jsonAnswer(200, { active: false });
 
@@ -28,6 +30,15 @@ function activeAnswer(issuer: string, checked: Valid): HttpResponse {
 }
 
 /** The introspection route's handler and its answer to Unavailable, which records it. */
+/** The introspection handler over the contracts the assembly gives. */
+export const introspectionIn = async (c: BuildContext<unknown>) =>
+	introspection(
+		await c.get(clients),
+		await c.get(tokens),
+		(await c.get(issuer)).url,
+		await c.get(audit),
+	);
+
 export function introspection(
 	clients: Clients,
 	tokens: Tokens,
