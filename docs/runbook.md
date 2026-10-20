@@ -166,7 +166,7 @@ When the outside user ledger suspends a user, its answers stop new logins and gr
 
 ## Keeping the second-factor witness at the ledger
 
-Compose `mfa-witness-http` to have the outside user ledger remember which subjects hold a second factor, apart from the provider's own records: losing those records then never reads as a subject that never enrolled one. The provider asks the ledger whenever a subject holding no counting factor logs in, starts a first enrollment or changes their credentials, so the ledger's answers gate those steps for those subjects.
+Compose `mfa-witness-http` to have the outside user ledger remember which subjects hold a second factor, apart from the provider's own records: losing those records then never reads as a subject that never enrolled one. The provider asks the ledger whenever a subject holding no counting factor logs in, starts a first enrollment or changes their credentials, so the ledger's answers gate those steps for those subjects. `mfa-witnessing` keeps the marks in line with the factors; `combinations` composes it with the two, and an app composed by hand must compose it too.
 
 **Setting it up.**
 
@@ -177,16 +177,18 @@ Compose `mfa-witness-http` to have the outside user ledger remember which subjec
 
 - `POST read-url` with `{"subject"}`: answer `200 {"enrolled": true|false}`, whether the subject carries the mark.
 - `POST enroll-url` with `{"subject", "token", "deadline"}`: set the subject's mark to `token` unless one is set, as one atomic step, and answer `200 {"owner": true|false}`, whether the mark is that token's. The same token sent again answers alike.
-- `POST clear-url` with `{"subject", "deadline"}`: remove the mark and answer `204`. The provider asks it only when an operator resets a subject's second factors.
+- `POST clear-url` with `{"subject", "deadline"}`: remove the mark and answer `204`. The provider asks it when an operator resets a subject's second factors, and where a mark it set itself stands beside no counting factor (a reset took the factor while it marked).
 - Per subject, the three calls take effect one at a time, in the order they are answered. An answered write survives a crash or a failover, and no read answers older than the last answered write: no lagging replica or cache answers a read.
 - Never carry out an enroll or a clear received after its `deadline` (epoch milliseconds on the provider's clock): the provider stopped waiting for it then. Keep the ledger's clock synchronized with the provider's hosts.
 - Any other answer, `404` included, makes the call unavailable (`503`), never "not enrolled".
 
 **The deadline.** It is the time a write is sent plus `mfa-witness-http.timeout` (default `5s`, as `outbound.timeout`'s). Keep `outbound.timeout` no shorter: the provider gives up at the shorter of the two, and a deadline past that leaves the ledger time to carry out a write the provider no longer waits for.
 
-**Composing it where subjects already hold a factor.** The provider marks a subject only when it binds that subject's first counting factor with the witness composed. A subject who enrolled before carries no mark, and the provider never adds one later: if its factor records are then lost, the subject reads as one who never enrolled, and under `mfa.mode = optional` logs in without a second factor. Before composing the witness, mark at the ledger every subject that already holds a counting factor (any token will do; the provider only reads whether a mark is there), and keep marking newly enrolled subjects that way until the witness is composed on every instance.
+**When the provider marks.** Once a binding has written a counting factor, the provider marks the subject where no mark is there, under a new token; between that write and the mark the factor stands unwitnessed. It then reads the factors again: where a reset took them meanwhile it clears the mark it set, and where that clear took the mark of a binding just after, it marks anew. A mark it did not set it never clears; only a reset does. Where the mark and the factors still differ after two marks, the binding answers unavailable though its factor is written, and the next binding fills the mark.
 
-**A mark left with no factor.** A binding stopped by a reset or a revocation after it marked the subject, or whose write then failed (the factor store unavailable), leaves the mark with no factor: that subject is refused as inconsistent until an operator resets its second factors, which clears the mark.
+**Composing it where subjects already hold a factor.** A subject who enrolled before the witness was composed, and has bound nothing since, carries no mark: if its factor records are then lost, the subject reads as one who never enrolled, and under `mfa.mode = optional` logs in without a second factor. Before composing the witness, mark at the ledger every subject that already holds a counting factor (any token will do; the provider only reads whether a mark is there), and keep marking newly enrolled subjects that way until the witness is composed on every instance.
+
+**A mark left with no factor.** A reset that cleared the subject's factors but stopped before the ledger cleared the mark (the ledger unavailable), or factor records the provider lost, leaves the mark with no factor: that subject is refused as inconsistent until an operator resets its second factors, which clears the mark.
 
 **While the ledger cannot answer.** Subjects holding no counting factor get `503` at login, when they start their first enrollment and when they change their credentials, until it answers; subjects holding one are let through without asking it.
 
