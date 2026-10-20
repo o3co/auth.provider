@@ -113,6 +113,24 @@ describe("an upstream round trip", () => {
 		expect(await trips.take(request, "fed.corp", begun.state)).toEqual({ kind: "none" });
 	});
 
+	it("is read through a change that writes nothing", async () => {
+		const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
+		const written: unknown[] = [];
+		const spying: RoundTripStore = {
+			save: kept.records.create,
+			update: (cookie, change) =>
+				kept.records.change(cookie, (record) => {
+					const changed = change(record);
+					written.push(changed);
+					return changed;
+				}),
+		};
+		const { trips, back } = place(spying);
+		const begun = await trips.begin({ name: "a", carried: null, lifetimeMs: 60_000 });
+		expect(await trips.current(back(begun.cookie), "a")).toBeDefined();
+		expect(written).toEqual([undefined]);
+	});
+
 	it("is read as none once taken, or kept in a shape it does not know", async () => {
 		const { trips, back } = place();
 		const begun = await trips.begin({ name: "a", carried: null, lifetimeMs: 60_000 });
