@@ -22,6 +22,6 @@
 	"devDependencies": {
 		"@mod/http": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
-		"vitest": "5.0.4"
+		"vitest": "5.0.5"
 	}
 }

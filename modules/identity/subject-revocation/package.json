@@ -14,7 +14,7 @@
 		"@mod/kernel": "workspace:*"
 	},
 	"peerDependencies": {
-		"vitest": "5.0.4"
+		"vitest": "5.0.5"
 	},
 	"peerDependenciesMeta": {
 		"vitest": {
@@ -23,6 +23,6 @@
 	},
 	"devDependencies": {
 		"@mod/records": "workspace:*",
-		"vitest": "5.0.4"
+		"vitest": "5.0.5"
 	}
 }

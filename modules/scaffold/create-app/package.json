@@ -21,6 +21,6 @@
 		"configuration": "node src/references/write-configuration.ts"
 	},
 	"devDependencies": {
-		"vitest": "5.0.4"
+		"vitest": "5.0.5"
 	}
 }

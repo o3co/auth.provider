@@ -12,10 +12,10 @@
 	"dependencies": {
 		"@mod/kernel": "workspace:*",
 		"@mod/mail": "workspace:*",
-		"nodemailer": "10.1.1",
+		"nodemailer": "10.1.2",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
-		"vitest": "5.0.4"
+		"vitest": "5.0.5"
 	}
 }

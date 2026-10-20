@@ -22,7 +22,7 @@
 		"@mod/seal"
 	],
 	"peerDependencies": {
-		"vitest": "5.0.4"
+		"vitest": "5.0.5"
 	},
 	"peerDependenciesMeta": {
 		"vitest": {
@@ -30,7 +30,7 @@
 		}
 	},
 	"devDependencies": {
-		"vitest": "5.0.4",
+		"vitest": "5.0.5",
 		"@mod/seal": "workspace:*"
 	}
 }
