@@ -106,9 +106,13 @@ Tokens name the key that signed them (`kid`). An instance verifies a token by th
 
 An HS256 secret is not published and has no `previous` or `next` form: changing it refuses every token signed with the old secret at once.
 
+None of these steps needs a new image. Keep the ring in a HOCON file of its own, outside the image (a mounted secret, say), and name it first in `APP_CONFIG`, which lists files comma-separated with the first winning: `APP_CONFIG=/run/secrets/keys.conf,config/application.conf`. An array is replaced from one file to the next, never added to, so that file holds the whole `keys.previous` list, and `seal.previous` too where it holds the sealing ring. A single value can also come from the environment where the file writes `${VAR}`, as `public-key = ${NEXT_PUBLIC_KEY}`; a PEM spans several lines, so its variable must carry them, which an env file read one line per variable does not.
+
 ## Rotating the sealing key
 
 `seal` encrypts stored secrets with AES-256-GCM under a key ring: `seal.current` seals new values; `seal.next` opens but never seals; `seal.previous` keys only open. Each sealed value names the key that sealed it.
+
+The ring can be kept in a file of its own outside the image, as [the signing key's](#rotating-the-signing-key) can.
 
 1. **Add the new key as `next`** and restart every instance.
 2. **Make sure every instance runs with it** before going on: each now opens values the new key seals, before any instance seals with it.
