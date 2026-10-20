@@ -12,7 +12,7 @@
 - Route `/oauth/authorize` (GET; a POST is a `303` to the GET with the same parameters, which reads the session)
 - Both methods take other sites' requests, with the reason declared: a request arrives as the client's navigation and only starts what the user's own login and consent complete.
 - Contribution of the return path `/oauth/authorize` to `login-gates`
-- Contribution to `issuer`'s metadata items: `authorization_endpoint` (on `http`'s public origin), `response_types_supported` (`code`), `code_challenge_methods_supported` (`S256`), `response_modes_supported` (`query`), `request_uri_parameter_supported` (`false`)
+- Contribution to `issuer`'s metadata items: `authorization_endpoint` (on `http`'s public origin), `response_types_supported` (`code`), `code_challenge_methods_supported` (`S256`), `response_modes_supported` (`query`), `request_uri_parameter_supported` (`false`), `authorization_response_iss_parameter_supported` (`true`)
 - Contribution of `redirect-uris`' client metadata section (`authorize`) to `clients`
 - Operator section: `login-page` (the login page. The return URL is added as `redirect_to`), `step-up-page` (the page that raises authentication. Optional); both https URLs (http only on a loopback host) by `url-setting`'s part for configured URLs, `oidc-mode` (`oidc-required` or `dual`), `requests` (requests per source in each window, over both methods), `window`
 - Audit events (to `audit`, declared in `./audit-events`):

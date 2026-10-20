@@ -1308,7 +1308,7 @@ it("offers a contributed acr unless the operator's table names the same acr", as
 	expect(met.at?.searchParams.has("code")).toBe(true);
 });
 
-it("names among the issuer's metadata where it is, that it answers with a code in the query, PKCE by S256 alone, and no request_uri", async () => {
+it("names among the issuer's metadata where it is, that it answers with a code in the query, PKCE by S256 alone, no request_uri, and `iss` on every redirect answer", async () => {
 	const published = contract<readonly MetadataItem[]>("published");
 	const reader = defineModule({ name: "reader" }, (m) => [
 		m.provide(published).by((c) => c.collect(metadata)),
@@ -1323,6 +1323,11 @@ it("names among the issuer's metadata where it is, that it answers with a code i
 	expect(items).toContainEqual({ name: "code_challenge_methods_supported", value: ["S256"] });
 	expect(items).toContainEqual({ name: "response_modes_supported", value: ["query"] });
 	expect(items).toContainEqual({ name: "request_uri_parameter_supported", value: false });
+	// Every redirect answer carries `iss` (RFC 9207).
+	expect(items).toContainEqual({
+		name: "authorization_response_iss_parameter_supported",
+		value: true,
+	});
 });
 
 it("takes its pages only as https URLs (http only on a loopback host) kept as written: no userinfo, no fragment", () => {
