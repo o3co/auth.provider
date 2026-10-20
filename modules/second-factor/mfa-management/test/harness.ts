@@ -218,8 +218,17 @@ export async function serve(settings: Settings = {}) {
 		const secret = String((begun.show as { secret: string }).secret);
 		const proved = await decided.provePending(subject, begun.pending, `${secret}:0`);
 		if (proved.kind !== "valid") throw new Error(proved.kind);
-		const bound = await decided.bind(subject, begun.pending, proved.state);
+		const bound = await decided.bind(
+			subject,
+			begun.pending,
+			proved.state,
+			undefined,
+			undefined,
+			"later",
+		);
 		if (bound.kind !== "bound") throw new Error(bound.kind);
+		// The codes are written by the reissue, as an enrollment writes them.
+		if (bound.codesDue) await decided.reissue(subject, bound.fence);
 		return bound.factor.id;
 	};
 	return { app, call, signIn, bindCode, jar: () => jar, port: () => app.get(listening).port() };
