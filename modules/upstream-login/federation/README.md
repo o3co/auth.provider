@@ -17,7 +17,7 @@
 - The operator section (its keys in the settings list).
 - Test configuration builders and an IdP type for tests (`./testing`)
 - Audit events for a callback that took its round trip, with `idp` and the source `request-source` determined: `federation.login.succeeded`, or `federation.login.held` when a gate held it, with the local subject; `federation.login.failed` with `reason` (`upstream_refused`, `exchange_failed`, `login_required`, `unknown_user`)
-- For a link, `federation.identity.linked`, or `federation.identity.link_refused` with `reason` (`conflict`, `session_short` or one of the first three), for the subject it started for.
+- For a link, `federation.identity.linked`, or `federation.identity.link_refused` with `reason` (`conflict`, `session_short`, `session_closed_during_link` or one of the first three), for the subject it started for.
 - No audit event comes before the take or records an unavailable answer, and none holds the upstream subject, tokens or text.
 - Answer codes: `not_found` (404), `repeated_parameter`, `invalid_redirect`, `invalid_request`, `invalid_state`, `upstream_refused` (400), `unknown_user`, `login_required` (401), a gate's or a session requirement's answer, `link_requires_trusted_origin` (403), `identity_conflict` (409), `method_not_allowed` (405, with `allow`), `exchange_failed` (502), `temporarily_unavailable` (503)
 - Success is a 302 to the return target or the landing.
@@ -41,10 +41,10 @@
 - The local user is found only by the IdP's name and the upstream subject.
 - An unknown identity is refused, and nothing is created.
 - Only a start that asks links, from this deployment's own page (`csrf`'s origin evidence), for a session entered at `credentials`.
-- Its callback links only while that session is open with the same subject and the browser is in no other session; never by email.
+- Its callback links only while that session enters at `credentials` with the same subject, and the browser is in no other session; never by email.
 - A link creates no session and changes no session cookie.
-- Without `mfa`, an open session of any age may link.
-- A link whose tokens cannot be handed over is `503`, and one whose session closed or changed hands meanwhile `401`, the link kept.
+- Without `mfa`, `credentials` asks a sign-in within 300 s, at the start and at the callback.
+- A link whose tokens cannot be handed over is `503`, the link kept; one whose session closed or changed hands meanwhile `401`, what it wrote undone.
 - The login proves `fed` plus only the upstream amr values the operator maps (declared as provable).
 - An upstream's text and tokens never reach the browser or the logs.
 - Of what an upstream says of the user, only its profile's email, name and picture reach the session, as strings, under the IdP's source name (`loginSource.upstream`).

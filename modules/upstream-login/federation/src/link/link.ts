@@ -3,7 +3,7 @@ import { type OriginEvidence, originEvidence } from "@mod/csrf";
 import { jsonAnswer } from "@mod/http";
 import type { BuildContext, Log } from "@mod/kernel";
 import { type Sessions, sessions } from "@mod/session";
-import { type Handoff, handoff } from "@mod/upstream-handoff";
+import { type Handoff, handoff, type Joined } from "@mod/upstream-handoff";
 import { type Users, users } from "@mod/users";
 import {
 	type Continuation,
@@ -100,27 +100,57 @@ export function linkWith(p: LinkParts): Continuation {
 			const linked = await p.users.link(link.subject, upstream);
 			if (linked === "conflict") return refused(409, "conflict", "identity_conflict");
 			if (linked === "linked") record("linked", name, { subject: link.subject, source, userAgent });
-			const joined = upstreamLogin.tokens
-				? await p.handoff.joined({ id: link.session, context }, name, upstreamLogin.tokens)
-				: undefined;
-			// A best-effort amends for a session closed meanwhile: what this request wrote is undone.
-			const undo = async () => {
-				if (joined !== undefined) await p.handoff.withdrawn(link.session, name, joined);
-				if (linked !== "linked") return;
-				if ((await p.users.unlink(link.subject, upstream)) === "fixed")
-					p.log.warn("federation.link_kept_fixed", { idp: name });
+			/** Whether the session still enters at the start's level, as the subject the link is for. */
+			const stillHeld = async () => {
+				const again = await p.sessions.entryOf(link.session, "credentials");
+				return again.kind === "entered" && again.session.context.subject === link.subject;
 			};
-			let again: Awaited<ReturnType<typeof p.sessions.entryOf>>;
-			try {
-				again = await p.sessions.entryOf(link.session, "credentials");
-			} catch (error) {
-				await undo();
-				throw error;
-			}
-			if (again.kind !== "entered" || again.session.context.subject !== link.subject) {
-				await undo();
+			// A best-effort amends for a session closed meanwhile: what this request wrote is undone,
+			// each step tried whatever the other does, and the first failure thrown after.
+			const undo = async (joined?: Joined) => {
+				const steps = await Promise.allSettled([
+					linked === "linked"
+						? p.users.unlink(link.subject, upstream).then((answer) => {
+								if (answer === "fixed") p.log.warn("federation.link_kept_fixed", { idp: name });
+							})
+						: undefined,
+					joined === undefined ? undefined : p.handoff.withdrawn(link.session, name, joined),
+				]);
+				const failed = steps.find((step) => step.status === "rejected");
+				if (failed) throw failed.reason;
+			};
+			/** Undoes what was written and refuses where the session no longer holds; throws, undone, where it cannot tell. */
+			const closedSince = async (joined?: Joined) => {
+				let held: boolean;
+				try {
+					held = await stillHeld();
+				} catch (error) {
+					await undo(joined);
+					throw error;
+				}
+				if (held) return undefined;
+				await undo(joined);
 				return refused(401, "session_closed_during_link", "login_required");
+			};
+			// Checked right after the link, so a session closed by then is handed no tokens.
+			const closed = await closedSince();
+			if (closed) return closed;
+			let joined: Joined | undefined;
+			if (upstreamLogin.tokens) {
+				try {
+					joined = await p.handoff.joined(
+						{ id: link.session, context },
+						name,
+						upstreamLogin.tokens,
+					);
+				} catch (error) {
+					// A join that fails as the session closes leaves no link behind; one that fails otherwise keeps it.
+					if (!(await stillHeld().catch(() => false))) await undo();
+					throw error;
+				}
 			}
+			const closedAfter = await closedSince(joined);
+			if (closedAfter) return closedAfter;
 			return sent(trip.redirectTo ?? p.landing, cleared);
 		},
 	};

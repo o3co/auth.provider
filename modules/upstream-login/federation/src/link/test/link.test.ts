@@ -35,6 +35,10 @@ function standIn() {
 		/** What changes while the identity is linked. */
 		onLink: undefined as (() => void) | undefined,
 		unlinked: "unlinked" as "unlinked" | "none" | "fixed",
+		/** The join throws, after what changes while it runs. */
+		joinThrows: false,
+		/** Taking the tokens back throws. */
+		withdrawThrows: false,
 		down: undefined as "users" | "entering" | "session" | "handoff" | undefined,
 	};
 	const levels: unknown[] = [];
@@ -79,11 +83,15 @@ function standIn() {
 		handoff: {
 			joined: async (session, idp, tokens) => {
 				if (set.down === "handoff") throw new Unavailable("federation");
-				joined.push([session.id, idp, tokens.accessToken]);
 				set.onJoin?.();
+				if (set.joinThrows) throw new Unavailable("federation");
+				joined.push([session.id, idp, tokens.accessToken]);
 				return `joined ${session.id} ${idp}` as unknown as Joined;
 			},
-			withdrawn: async (session, idp, given) => void withdrawn.push([session, idp, given]),
+			withdrawn: async (session, idp, given) => {
+				if (set.withdrawThrows) throw new Unavailable("federation");
+				withdrawn.push([session, idp, given]);
+			},
 		},
 		log: logged.log,
 		landing,
@@ -170,8 +178,9 @@ it("links the identity to the session's subject, hands the tokens to that sessio
 	]);
 	expect(s.links).toEqual([["alice", { idp: "corp", subject: "u-1" }]]);
 	expect(s.joined).toEqual([["s1", "corp", "up-1"]]);
-	// The recorded session, at credentials as its start was, before the link and once after it and the join.
+	// The recorded session, at credentials as its start was: before the link, after it, and after the join.
 	expect(s.asked).toEqual([
+		["s1", "credentials"],
 		["s1", "credentials"],
 		["s1", "credentials"],
 	]);
@@ -315,10 +324,10 @@ it("undoes a link it wrote, and takes the tokens back, when the session closed, 
 				{ error: "login_required" },
 				["federation.corp=; Max-Age=0"],
 			]);
-			expect([s.unlinks, s.withdrawn], change).toEqual([
-				[["alice", upstream]],
-				[["s1", "corp", "joined s1 corp"]],
-			]);
+			// Checked right after the link, the tokens are never handed to a session closed by then.
+			const handed = during === "onJoin" ? [["s1", "corp", "joined s1 corp"]] : [];
+			expect([s.unlinks, s.withdrawn], change).toEqual([[["alice", upstream]], handed]);
+			expect(s.joined.length, change).toBe(handed.length);
 			expect(
 				s.events.map((e) => [e.kind, e.attributes?.reason]),
 				change,
@@ -343,6 +352,36 @@ it("undoes no link the account held already, and no tokens it was not given, whe
 	]);
 	expect([s.unlinks, s.withdrawn]).toEqual([[], []]);
 	expect(s.events.map((e) => e.attributes?.reason)).toEqual(["session_closed_during_link"]);
+});
+
+it("undoes the link when the join fails while the session is closed or cannot be read, and keeps it while it is open", async () => {
+	const closings: Record<string, (set: Settings) => void> = {
+		closed: (set) => {
+			set.byHandle = { kind: "absent" };
+		},
+		unreadable: (set) => {
+			set.down = "session";
+		},
+		open: () => {},
+	};
+	for (const [closing, apply] of Object.entries(closings)) {
+		const s = standIn();
+		s.set.joinThrows = true;
+		s.set.onJoin = () => apply(s.set);
+		await expect(s.link.complete(s.completing()), closing).rejects.toSatisfy(isUnavailable);
+		expect(s.unlinks, closing).toEqual(closing === "open" ? [] : [["alice", upstream]]);
+		expect(s.withdrawn, closing).toEqual([]);
+	}
+});
+
+it("unlinks even where taking the tokens back fails, then fails with that", async () => {
+	const s = standIn();
+	s.set.withdrawThrows = true;
+	s.set.onJoin = () => {
+		s.set.byHandle = { kind: "absent" };
+	};
+	await expect(s.link.complete(s.completing())).rejects.toSatisfy(isUnavailable);
+	expect(s.unlinks).toEqual([["alice", upstream]]);
 });
 
 it("logs a link it cannot undo, as one the configuration fixes", async () => {
