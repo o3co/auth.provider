@@ -1,7 +1,7 @@
 import { assemble, BootRefused, defineModule, kernelConfig } from "@mod/kernel";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
-import { type ConfiguredUrl, urlSetting, urlsChecked } from "../src/contract.ts";
+import { type ConfiguredUrl, isLoopbackName, urlSetting, urlsChecked } from "../src/contract.ts";
 import { configuredUrl } from "../src/testing.ts";
 
 const https = urlSetting({ schemes: ["https"] });
@@ -201,6 +201,68 @@ it("refuses to boot with a configured URL it does not take", async () => {
 		assemble({ modules: [using], config: { ...kernelConfig(), using: { page } } });
 	await expect(boot("https://u@a.example")).rejects.toThrow(BootRefused);
 	await expect(boot("https://a.example")).resolves.toBeDefined();
+});
+
+describe("isLoopbackName", () => {
+	it("takes localhost and the names under it, with or without a trailing dot, in any case", () => {
+		for (const host of [
+			"localhost",
+			"LOCALHOST",
+			"localhost.",
+			"a.localhost",
+			"a.b.Localhost.",
+			"a_b.localhost",
+			"xn--bcher-kva.localhost",
+		]) {
+			expect(isLoopbackName(host), host).toBe(true);
+		}
+	});
+
+	it("takes 127/8 as the parser writes it, ::1 and 127/8 mapped into IPv6, bracketed or not", () => {
+		for (const host of [
+			"127.0.0.1",
+			"127.255.0.1",
+			"::1",
+			"[::1]",
+			"[0:0:0:0:0:0:0:1]",
+			"::ffff:127.0.0.1",
+			"[::ffff:7f00:1]",
+			"[::FFFF:7F01:203]",
+		]) {
+			expect(isLoopbackName(host), host).toBe(true);
+		}
+	});
+
+	it("refuses every other host, never resolving a name", () => {
+		for (const host of [
+			"",
+			"localhost..",
+			".localhost",
+			"localhost.localdomain",
+			"localhostx",
+			"127.0.0.1.nip.io",
+			"a.example",
+			"0.0.0.0",
+			"126.255.255.255",
+			"128.0.0.1",
+			"10.0.0.1",
+			// Not as the parser writes an IPv4 address.
+			"127.1",
+			"0177.0.0.1",
+			"2130706433",
+			"127.0.0.1.",
+			"[127.0.0.1]",
+			// Every address, and 127/8 carried in IPv6 unmapped, which no connection takes to loopback.
+			"::",
+			"[::]",
+			"::7f00:1",
+			"::ffff:0:7f00:1",
+			"[::ffff:a00:1]",
+			"[::1",
+		]) {
+			expect(isLoopbackName(host), host).toBe(false);
+		}
+	});
 });
 
 it("takes plain http beside the schemes only on a loopback host, where the rules allow it", () => {
