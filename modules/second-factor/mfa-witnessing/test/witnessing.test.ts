@@ -136,6 +136,29 @@ it("marks anew when its clear takes the mark a new binding set after a reset", a
 	expect(stand.marks.has("ann")).toBe(true);
 });
 
+it("checks the last mark it may make, and clears it where a reset took the factors meanwhile", async () => {
+	const held: Record<string, string[]> = { ann: ["code"] };
+	const stand = witnessStandIn();
+	// Each late read that sees a reset is followed by a binding; each read after its clear, by a reset.
+	const { app } = await boot(held, [stand], (n) => {
+		if (n < 2 || n > 7) return;
+		if (n % 2 === 0) {
+			held.ann = ["code"];
+			if (!stand.marks.has("ann")) stand.marks.set("ann", "binding");
+		} else {
+			held.ann = [];
+			stand.marks.delete("ann");
+		}
+	});
+	stand.next.afterEnroll = () => {
+		held.ann = [];
+		stand.marks.delete("ann");
+	};
+	expect(await app.get(witnessBackfill).settle("ann")).toBe("none");
+	expect(stand.marks.has("ann")).toBe(false);
+	expect(held.ann).toEqual([]);
+});
+
 it("answers held, not marked, where another marked the subject while it filled", async () => {
 	const { app, witness } = await boot({ bob: ["code"] });
 	if (!witness) throw new Error("no witness");

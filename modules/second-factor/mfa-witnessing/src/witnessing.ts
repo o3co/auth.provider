@@ -50,34 +50,35 @@ export interface SettlingParts {
 	readonly token: () => string;
 }
 
+/** A settle marks this often at most, then is unavailable. */
+const settleMarks = 2;
+
 /**
  * Brings the witness's mark in line with the subject's counting factors after a write: a factor
  * with no mark is marked; a mark with nothing counting goes only where this call set it (a reset
  * took the factor meanwhile), as any other may be a store that lost its factors. After such a
  * clear it reads the factors again and marks anew where one counts, as the clear may have taken a
- * binding's mark. Read again after each change, it settles twice at most, then is unavailable
- * while they still differ.
+ * binding's mark. Every mark is followed by that check, its own mark going where nothing counts;
+ * it marks twice at most, then is unavailable while they still differ.
  */
 export function settlingOf(p: SettlingParts) {
 	return async (subject: string) => {
 		const witness = p.witness;
 		if (witness === undefined) return;
 		let set = false;
-		for (let round = 0; round < 3; round++) {
+		for (let marks = 0; ; marks++) {
 			const counts = await p.counting();
 			const marked = await witness.read(subject);
 			if (counts === marked) return;
-			if (round === 2) break;
-			if (counts) {
-				set = (await markedBy(witness, subject, p.token())) || set;
-			} else if (set) {
+			if (!counts) {
+				if (!set) return;
 				await witness.clear(subject);
-				if (await p.counting()) set = (await markedBy(witness, subject, p.token())) || set;
-			} else {
-				return;
+				// A binding may have written a factor and marked it before the clear took that mark.
+				if (!(await p.counting())) return;
 			}
+			if (marks === settleMarks) throw new Unavailable("mfa");
+			set = (await markedBy(witness, subject, p.token())) || set;
 		}
-		throw new Unavailable("mfa");
 	};
 }
 
@@ -98,13 +99,14 @@ export function witnessingWith(p: WitnessingParts): Witnessing {
 }
 
 /** A backfill marks anew after its own clear this often at most, then is unavailable. */
-const backfillRounds = 3;
+const backfillRemarks = 3;
 
 /**
  * Fills a missing mark beside a counting factor, and reads the factors again after: a mark it set
  * beside nothing counting (a reset took the factors meanwhile) goes; one it did not set is never
  * cleared, as it may be a store that lost its factors. After its own clear it reads again and marks
- * anew where a factor counts, as the clear may have taken a binding's mark.
+ * anew where a factor counts, as the clear may have taken a binding's mark. Every mark is followed
+ * by that check, so the last one it may make never stays beside nothing counting.
  */
 export function backfillWith(p: {
 	readonly witness: EnrollmentWitness;
@@ -117,7 +119,7 @@ export function backfillWith(p: {
 		if (counts && marked) return "held" as const;
 		if (!counts) return marked ? ("inconsistent" as const) : ("none" as const);
 		let ours = await markedBy(p.witness, subject, p.token());
-		for (let round = 0; round < backfillRounds; round++) {
+		for (let remarks = 0; ; remarks++) {
 			// Read again: a reset may have taken the factors, and another may have marked, meanwhile.
 			if (await p.counting(subject)) {
 				if (!(await p.witness.read(subject))) throw new Unavailable("mfa");
@@ -129,8 +131,8 @@ export function backfillWith(p: {
 			await p.witness.clear(subject);
 			// A binding may have written a factor and marked it before the clear took that mark.
 			if (!(await p.counting(subject))) return "none" as const;
+			if (remarks === backfillRemarks) throw new Unavailable("mfa");
 			ours = await markedBy(p.witness, subject, p.token());
 		}
-		throw new Unavailable("mfa");
 	};
 }
