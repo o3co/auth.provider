@@ -26,6 +26,8 @@ import { type LoginFacts, type Session, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
+import { heldLoginStore, type StoredHeldLogin } from "@mod/upstream-handoff";
+import handoffModule from "@mod/upstream-handoff/module";
 import {
 	type Delegation,
 	idpType,
@@ -98,6 +100,8 @@ interface Setup {
 	readonly extra?: Module[];
 	readonly answers?: Map<string, Answer>;
 	readonly store?: Module;
+	/** In place of the held logins' store. */
+	readonly held?: Module;
 	readonly origin?: string | null;
 	/** Modules that receive upstream tokens; seal comes with them. */
 	readonly receivers?: Module[];
@@ -111,6 +115,17 @@ async function serve(setup: Setup = {}) {
 	const idp = testIdpType(setup.answers ?? answering(["good", alice]), setup.more);
 	const kept = memoryRecords<StoredTransaction>(() => now, { shards: 1, perShard: 1 });
 	const saved: string[] = [];
+	const keptHeld = memoryRecords<StoredHeldLogin>(() => now, { shards: 1, perShard: 1 });
+	const held = defineModule({ name: "held" }, (m) => [
+		m.provide(heldLoginStore).by(() => ({
+			save: async (key, value, lifetimeMs) => {
+				saved.push(JSON.stringify(value));
+				return keptHeld.records.create(key, value, lifetimeMs);
+			},
+			update: keptHeld.records.change,
+			remove: keptHeld.records.remove,
+		})),
+	]);
 	const store = defineModule({ name: "transactions" }, (m) => [
 		m.provide(transactionStore).by(() => ({
 			save: async (key, value, lifetimeMs) => {
@@ -139,6 +154,8 @@ async function serve(setup: Setup = {}) {
 			federationModule,
 			idp.module,
 			setup.store ?? store,
+			handoffModule,
+			setup.held ?? held,
 			...(setup.extra ?? []),
 			...(receiving.length > 0 ? [sealModule, ...receiving] : []),
 		],
@@ -1019,7 +1036,9 @@ describe("upstream tokens", () => {
 		const s = await serve({ answers, receivers: told.modules });
 		expect((await s.roundTrip("code=tokens")).status).toBe(302);
 		expect(told.told.map((t) => t.receiver)).toEqual(["a", "b"]);
-		expect(logged()).toContain('federation.receiver_failed {"receiver":"a","kind":"RangeError"}');
+		expect(logged()).toContain(
+			'upstream-handoff.receiver_failed {"receiver":"a","kind":"RangeError"}',
+		);
 		expect(logged().join()).not.toContain("secret");
 	});
 
@@ -1034,19 +1053,15 @@ describe("upstream tokens", () => {
 
 	it("is unavailable when it cannot keep the tokens of a held login", async () => {
 		const gate = holdingGate();
-		const kept = memoryRecords<StoredTransaction>(() => now, { shards: 1, perShard: 1 });
-		const full = defineModule({ name: "transactions" }, (m) => [
-			m.provide(transactionStore).by(() => ({
-				save: async (key, value, lifetimeMs) =>
-					JSON.stringify(value).includes("sealed")
-						? "exists"
-						: kept.records.create(key, value, lifetimeMs),
-				update: kept.records.change,
-				remove: kept.records.remove,
+		const full = defineModule({ name: "held" }, (m) => [
+			m.provide(heldLoginStore).by(() => ({
+				save: async () => "exists" as const,
+				update: async () => undefined,
+				remove: async () => {},
 			})),
 		]);
 		const told = receivers(["a"]);
-		const s = await serve({ answers, extra: [gate.module], receivers: told.modules, store: full });
+		const s = await serve({ answers, extra: [gate.module], receivers: told.modules, held: full });
 		const res = await s.roundTrip("code=tokens");
 		expect([res.status, res.body]).toEqual([503, { error: "temporarily_unavailable" }]);
 		expect(res.cookies).toContain(clearedOf(res.started.cookie));

@@ -3609,12 +3609,12 @@ importers:
       '@mod/request-source':
         specifier: workspace:*
         version: link:../../foundation/request-source
-      '@mod/seal':
-        specifier: workspace:*
-        version: link:../../foundation/seal
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/upstream-handoff':
+        specifier: workspace:*
+        version: link:../upstream-handoff
       '@mod/upstreams':
         specifier: workspace:*
         version: link:../upstreams
@@ -3631,6 +3631,9 @@ importers:
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
+      '@mod/seal':
+        specifier: workspace:*
+        version: link:../../foundation/seal
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash

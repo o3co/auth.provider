@@ -2,12 +2,12 @@ import { type Route, routes, use } from "@mod/http";
 import { contract, defineModule } from "@mod/kernel";
 import { amrSources, openedAfterHold } from "@mod/login-gates";
 import { requestsPerSource } from "@mod/rate-limit";
+import { handoff } from "@mod/upstream-handoff";
 import { upstreams } from "@mod/upstreams";
 import { upstreamNames } from "@mod/users";
-import { handoff, handoffIn, openedIn } from "./handoff/handoff.ts";
 import { amrSourceIn, idpsIn, upstreamNamesIn, upstreamsIn } from "./idps/idps.ts";
 import { linkIn } from "./link/link.ts";
-import { loginIn } from "./round-trip/login.ts";
+import { loginCaller, loginIn } from "./round-trip/login.ts";
 import { base, federationIdps, roundTripIn } from "./round-trip/round-trip.ts";
 import { section } from "./section.ts";
 
@@ -19,8 +19,11 @@ export default defineModule({ name: "federation", section }, (m) => [
 	m.provide(federationIdps).by(idpsIn),
 	m.provide(upstreams).by(upstreamsIn),
 	m.contribute(upstreamNames).by(upstreamNamesIn),
-	m.provide(handoff).by(handoffIn),
-	m.contribute(openedAfterHold).by(openedIn),
+	// login-gates tells federation of a held login that opened; upstream-handoff keeps its tokens.
+	m.contribute(openedAfterHold).by(async (c) => ({
+		caller: loginCaller,
+		opened: (await c.get(handoff)).opened,
+	})),
 	m.provide(federationRoute).by(async (c) => {
 		const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 		const login = await loginIn(c);

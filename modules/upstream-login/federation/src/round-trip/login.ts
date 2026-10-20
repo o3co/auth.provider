@@ -3,9 +3,9 @@ import { jsonAnswer } from "@mod/http";
 import type { BuildContext } from "@mod/kernel";
 import { loginSource } from "@mod/login-attributes";
 import { type Logins, logins } from "@mod/login-gates";
+import { type Handoff, handoff } from "@mod/upstream-handoff";
 import type { UpstreamLogin } from "@mod/upstreams";
 import { type Users, userAttribute, users } from "@mod/users";
-import { type Handoff, handoff } from "../handoff/handoff.ts";
 import type { Settings } from "../section.ts";
 import {
 	type Continuation,
@@ -23,7 +23,11 @@ export interface LoginParts {
 	readonly audit: Pick<Audit, "record">;
 	readonly handoff: Pick<Handoff, "of">;
 	readonly landing: string;
+	readonly heldLoginLifetimeMs: number;
 }
+
+/** The name login-gates tells when a login federation asked for opens after a hold. */
+export const loginCaller = "federation";
 
 export async function loginIn(c: BuildContext<Settings>): Promise<Continuation> {
 	return loginWith({
@@ -32,6 +36,7 @@ export async function loginIn(c: BuildContext<Settings>): Promise<Continuation> 
 		audit: await c.get(audit),
 		handoff: await c.get(handoff),
 		landing: await landingIn(c),
+		heldLoginLifetimeMs: c.section["transaction-lifetime"] * 1000,
 	});
 }
 
@@ -52,10 +57,15 @@ export function loginWith(p: LoginParts): Continuation {
 			const done =
 				transaction.redirectTo === undefined ? {} : { redirect_to: transaction.redirectTo };
 			const subject = found.user.subject;
-			const handing = p.handoff.of(name, subject, upstreamLogin.tokens);
+			const handing = p.handoff.of(name, subject, upstreamLogin.tokens, p.heldLoginLifetimeMs);
+			const from = handing && {
+				caller: loginCaller,
+				carry: handing.carry,
+				deadline: handing.deadline,
+			};
 			const authenticatedAt = onOurClock(upstreamLogin.authenticatedAt, transaction.startedAt, idp);
 			const facts = { subject, amr, authenticatedAt, ...attributesOf(name, upstreamLogin.profile) };
-			const outcome = await p.logins.login(request, facts, done, handing?.from);
+			const outcome = await p.logins.login(request, facts, done, from);
 			const held = outcome.kind === "held";
 			record(held ? "held" : "succeeded", name, { subject, source });
 			await handing?.after(outcome);

@@ -30,6 +30,7 @@ function loginOf(upstreamAmr: ReadonlyMap<string, string> = new Map()) {
 		audit: { record: () => {} },
 		handoff: { of: () => undefined },
 		landing: "https://app.example/",
+		heldLoginLifetimeMs: 600_000,
 	});
 	const completing = (upstreamLogin: UpstreamLogin): Completing => ({
 		request: testRequest(),

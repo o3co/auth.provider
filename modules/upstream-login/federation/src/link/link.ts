@@ -3,8 +3,8 @@ import { type OriginEvidence, originEvidence } from "@mod/csrf";
 import { jsonAnswer } from "@mod/http";
 import type { BuildContext, Log } from "@mod/kernel";
 import { type Sessions, sessions } from "@mod/session";
+import { type Handoff, handoff } from "@mod/upstream-handoff";
 import { type Users, users } from "@mod/users";
-import { type Handoff, handoff } from "../handoff/handoff.ts";
 import {
 	type Continuation,
 	landingIn,
