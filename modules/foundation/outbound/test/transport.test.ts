@@ -441,6 +441,50 @@ describe("outbound", () => {
 		await resolving;
 	});
 
+	it("sends plain http to a plain-internal pair only where every address is private, checked on each request", async () => {
+		let answer: readonly string[] = [];
+		const resolve: Resolver = async () => answer;
+		const deadlines: AbortController[] = [];
+		const deadlineOf = () => {
+			const deadline = new AbortController();
+			deadlines.push(deadline);
+			return deadline.signal;
+		};
+		const pair = "ledger.internal:9092";
+		const outbound = over(resolve, { "plain-internal": [pair] }, deadlineOf);
+		const ledger = `http://${pair}/verify`;
+		const own = { internal: configuredUrl(ledger) };
+		for (const [addresses, reason] of [
+			[["93.184.216.34"], "plain-public"],
+			[["10.1.2.3", "93.184.216.34"], "plain-public"],
+			[["93.184.216.34", "10.1.2.3"], "plain-public"],
+			[[], "special-address"],
+			[["127.0.0.1"], "special-address"],
+			[["169.254.169.254"], "special-address"],
+			[["::ffff:100.100.100.200"], "special-address"],
+			[["fd00:ec2::254"], "special-address"],
+			[["fe80::1"], "special-address"],
+			[["64:ff9b::a01:203"], "special-address"],
+		] as const) {
+			answer = addresses;
+			expect(await failure(outbound.fetch(ledger, {}, own)), addresses.join()).toBe(reason);
+		}
+		// Private alone: the request goes out to the checked address, held here until its deadline.
+		answer = ["10.255.255.1"];
+		const sent = failure(outbound.fetch(ledger, {}, own));
+		await until(() => deadlines.length > 0);
+		deadlines.at(-1)?.abort();
+		expect(await sent).toMatch(/^unavailable: /);
+		// The next request asks again, and a name turned public is refused.
+		answer = ["93.184.216.34"];
+		expect(await failure(outbound.fetch(ledger, {}, own))).toBe("plain-public");
+		// Without the caller's own URL, or for an outside party's choice, plain http is not taken at all.
+		expect(await failure(outbound.fetch(ledger))).toBe("scheme");
+		expect(await failure(outbound.fetch(ledger, {}, { ...own, outsideChosen: true }))).toBe(
+			"scheme",
+		);
+	});
+
 	it("answers how many names a caller may resolve at once, the outside party's share apart", () => {
 		const shares = (lookups: number) => {
 			const out = over(table({}).resolve, { "max-concurrent": 16 }, undefined, lookups);

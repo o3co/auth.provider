@@ -184,6 +184,23 @@ it("boots with a proxy configured whatever the variables say, and warns what it 
 	expect(JSON.stringify(recorded.lines())).not.toContain("dGVzdA==");
 });
 
+it("warns at each boot that names plain-internal pairs, telling their count alone", async () => {
+	const recorded = recordingLog();
+	const booted = (outboundSettings: Record<string, unknown>) =>
+		assemble({
+			modules: [outboundModule],
+			config: { ...kernelConfig(), outbound: outboundSettings },
+			runtime: quietRuntime({ log: recorded.log }),
+		});
+	await booted({});
+	expect(recorded.lines()).toEqual([]);
+	await booted({ "plain-internal": ["ledger.internal:9092", "keys.internal:8080"] });
+	expect(recorded.lines().map((line) => [line.level, line.event, line.fields])).toEqual([
+		["warn", "outbound.plain_internal", { count: 2 }],
+	]);
+	expect(JSON.stringify(recorded.lines())).not.toContain("internal:");
+});
+
 it("boots on many instances, holding nothing they would need to share", async () => {
 	const config = { ...kernelConfig({ deployment: "multi" }), outbound: {} };
 	await expect(assemble({ modules: [outboundModule], config })).resolves.toBeDefined();

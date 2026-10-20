@@ -2,6 +2,7 @@ import { createServer as createPlainServer, type IncomingMessage, type Server } 
 import { createServer as createTlsServer } from "node:https";
 import { type AddressInfo, connect, type Socket } from "node:net";
 import { isUnavailable } from "@mod/kernel";
+import { configuredUrl } from "@mod/url-setting/testing";
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import type { OutboundUnavailable } from "../src/contract.ts";
 import { outboundOver, section } from "../src/module.ts";
@@ -144,6 +145,22 @@ it("connects directly to a host listed as direct, resolving it as without a prox
 	await expect(direct.fetch(at("/jwks"))).rejects.toMatchObject({ reason: "special-address" });
 	expect(asked).toEqual([]);
 	expect(resolved).toEqual(["idp.example.test"]);
+});
+
+it("sends plain http to a plain-internal pair directly, resolving it itself, never through the proxy", async () => {
+	resolved.length = 0;
+	const pair = "ledger.internal:9092";
+	const out = paths({
+		proxy: `http://127.0.0.1:${proxyPort}`,
+		allow: ["ledger.internal"],
+		"plain-internal": [pair],
+	});
+	const url = `http://${pair}/verify`;
+	// The name resolves to the loopback, which a plain-internal pair never reaches: resolved here, not by the proxy.
+	await expect(out.fetch(url, {}, { internal: configuredUrl(url) })).rejects.toMatchObject({
+		reason: "special-address",
+	});
+	expect(resolved).toEqual(["ledger.internal"]);
 });
 
 it("connects directly to a dotted entry's name and the names under it, and to no other", async () => {
