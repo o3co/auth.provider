@@ -211,8 +211,7 @@ export function admitUrl(
 	if (plain && !loopback && !signed) throw new DestinationRefused("scheme");
 	// Named by its configured URL, the operator's own reach ends at that URL's origin.
 	const own =
-		narrower.internal === true ||
-		(narrower.internal !== undefined && URL.parse(narrower.internal)?.origin === url.origin);
+		narrower.internal !== undefined && URL.parse(narrower.internal)?.origin === url.origin;
 	const internal = own && listed(host, policy.internal);
 	return { url, host, port, plain, loopback, internal };
 }

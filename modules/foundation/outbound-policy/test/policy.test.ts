@@ -120,8 +120,8 @@ describe("admitUrl", () => {
 
 	it("takes a host as internal only when the caller's URL is the operator's and internal-hosts lists it", () => {
 		const policy = { ...open, internal: ["ALB.corp", ".svc.corp", "10.0.0.5"] };
-		const internal = (raw: string, narrower = { internal: true as const }) =>
-			admitUrl(raw, policy, narrower).internal;
+		const internal = (raw: string) =>
+			admitUrl(raw, policy, { internal: configuredUrl(raw) }).internal;
 		expect(internal("https://alb.corp/")).toBe(true);
 		expect(internal("https://a.b.svc.corp/")).toBe(true);
 		expect(internal("https://10.0.0.5/")).toBe(true);

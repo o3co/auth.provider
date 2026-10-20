@@ -31,10 +31,9 @@ export interface Narrower {
 	readonly timeoutMs?: number;
 	/**
 	 * The operator's URL, as url-setting read it from their configuration: a request at its origin
-	 * may reach a private address when `internal-hosts` lists the host. `true` says the same of the
-	 * URL being sent, without naming it.
+	 * may reach a private address when `internal-hosts` lists the host.
 	 */
-	readonly internal?: true | ConfiguredUrl;
+	readonly internal?: ConfiguredUrl;
 }
 
 /** The destination policy's refusals, as an operator reads them at boot, apart from sending: no name is resolved. */
