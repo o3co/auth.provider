@@ -20,6 +20,7 @@
 ## Invariants
 - Each reference is held to the committed file; a file that differs fails, naming the command.
 - A key with no description fails.
+- A fragment's key read from env must be a fixed key of its section: one under a map whose names are the operator's (a record) fails, naming the fragment, as its variable would carry the example's name.
 - Every `.prefault` value reads through its key's own schema.
 - In every section, a time or size key is read by `kernel`'s `setting.duration` or `setting.size` (a bare number refused) under a name with no unit (`-seconds`, `-ms`, `-bytes`), and a default is a `.prefault`, never a `.default()`.
 - A failure of the time, size and prefault rules names the key and the rule it breaks.
@@ -28,4 +29,4 @@
 - The full template is assembled with the memory store in place of Redis, which is asked at assembly, and never started.
 
 ## Depends on
-- `create-app`'s workspace's package list, fragments, generation and trial settings; `combinations` (the full template and its opt-ins); `kernel`, to assemble it; `clients`' metadata sections, `upstreams`' IdP types and `http`'s routes and marks, read from their contracts; the HOCON library, to read a written `reference.conf` back; `kernel`'s `setting`, the form its tests hold time and size keys to.
+- `create-app`'s workspace's package list, fragments and generation; `trial`'s layer; `combinations` (the full template and its opt-ins); `kernel`, to assemble it; `clients`' metadata sections, `upstreams`' IdP types and `http`'s routes and marks, read from their contracts; the HOCON library, to read a written `reference.conf` back; `kernel`'s `setting`, the form its tests hold time and size keys to.
