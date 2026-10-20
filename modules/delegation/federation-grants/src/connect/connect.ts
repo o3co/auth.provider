@@ -485,6 +485,7 @@ export function connectWith(p: ConnectParts) {
 				!was?.intent ||
 				was.intent.id !== intent.id ||
 				was.intent.ended ||
+				was.intent.endsAt <= now ||
 				was.status === "revoked"
 			)
 				return undefined;
@@ -511,9 +512,6 @@ export function connectWith(p: ConnectParts) {
 		) {
 			return fail(request, grant, intent, "grant_not_authorizable");
 		}
-		if (intent.kind === "initial")
-			await p.pending.remove(`${grant.client}\n${grant.subject}`, grant.id);
-		await p.listed(grant, intent.lifetimeMs + retentionMs);
 		const from = determinedSource(request);
 		const kind =
 			intent.kind === "initial" ? "federation.grant.authorized" : "federation.grant.reauthorized";
@@ -526,6 +524,16 @@ export function connectWith(p: ConnectParts) {
 				...(from ? { source: from } : {}),
 			},
 		});
+		// The grant is active: what is left only tidies, and does not undo it.
+		if (intent.kind === "initial") {
+			try {
+				await p.pending.remove(`${grant.client}\n${grant.subject}`, grant.id);
+			} catch (error) {
+				const failure = error instanceof Error ? error.name : typeof error;
+				p.log.warn("federation-grants.pending_remove_failed", { kind: failure });
+			}
+		}
+		await p.listed(grant, intent.lifetimeMs + retentionMs);
 		if (!returnsTo(await p.clients.find(grant.client), intent.returnUri)) return stale();
 		return back(intent, grant);
 	};

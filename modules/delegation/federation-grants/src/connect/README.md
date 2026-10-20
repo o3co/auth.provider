@@ -22,6 +22,8 @@ Internal module of `federation-grants`: the browser half of a connection.
 - Two round trips of one connection begun in one browser leave only the later one's callback.
 - The upstream start is built before the question is spent: a throw is `503` and keeps it; a refusal ends the intent as `grant_not_authorizable`.
 - A failure after the round trip is taken ends the intent, is audited, and returns to the client only while it lists the URI.
+- An activation writes only over its own intent, unended and within its time as read after the exchange.
+- An activation is audited once written; dropping the pending first-time intent after it only tidies: a failure is logged and passed, and the browser goes back.
 
 ## Depends on
 - `http`, `request-source`, `session`, `clients`, `upstream-account`, `upstreams` (the delegation), `upstream-round-trip` (round trips), `audit`, `kernel`; `grant`, the package's store interfaces
