@@ -147,7 +147,7 @@ describe("clients-cimd: a document client", () => {
 			{
 				url: id,
 				request: { headers: { accept: "application/json" } },
-				narrower: { maxBytes: 5120, timeoutMs: 5000 },
+				narrower: { maxBytes: 5120, timeoutMs: 5000, outsideChosen: true },
 			},
 		]);
 	});
@@ -503,9 +503,9 @@ describe("clients-cimd: the operator's section", () => {
 		expect(await first).toBeDefined();
 	});
 
-	it("narrows outbound by its own size and time", async () => {
+	it("narrows outbound by its own size and time, its destinations marked an outside party's choice", async () => {
 		await (await boot({ "max-size": "100B", timeout: "50ms" })).find();
-		expect(sent[0]?.narrower).toEqual({ maxBytes: 100, timeoutMs: 50 });
+		expect(sent[0]?.narrower).toEqual({ maxBytes: 100, timeoutMs: 50, outsideChosen: true });
 	});
 });
 
