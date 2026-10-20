@@ -3,6 +3,7 @@ import { enrollmentWitnesses } from "@mod/mfa-witness";
 import { outbound } from "@mod/outbound";
 import {
 	credentialPolicy,
+	credentialRefusalText,
 	destinationRefusal,
 	outboundLimits,
 	outboundRefusals,
@@ -10,11 +11,8 @@ import {
 import { section } from "./section.ts";
 import { witnessAt } from "./witness.ts";
 
-/** Why the credential may not go to the three URLs, as the operator reads it. */
-const credentialRefused = {
-	origins: "goes to one origin alone: read-url, enroll-url and clear-url must share it",
-	scheme: "goes over https alone, or to a named plain-loopback pair",
-} as const;
+/** Why the credential may not go to URLs at more than one origin, naming the three keys. */
+const originsRefused = "goes to one origin alone: read-url, enroll-url and clear-url must share it";
 
 export default defineModule({ name: "mfa-witness-http", section, replicaSafe: true }, (m) => [
 	m.contribute(enrollmentWitnesses).by(async (c) => {
@@ -39,7 +37,8 @@ export default defineModule({ name: "mfa-witness-http", section, replicaSafe: tr
 		}
 		const refused = (await c.get(credentialPolicy)).refusalOf(Object.values(urls));
 		if (refused !== undefined) {
-			return c.refuse("mfa-witness-http.credential", credentialRefused[refused]);
+			const reason = refused === "origins" ? originsRefused : credentialRefusalText(refused);
+			return c.refuse("mfa-witness-http.credential", reason);
 		}
 		return witnessAt({
 			urls,
