@@ -14,6 +14,7 @@
 - `handoff.opened` (session, carry): the gates' news that a held login opened.
 - `handoff.joined` (session, IdP, tokens): a link's tokens, handed at once to the open session it joined, answering what it gave each receiver; `handoff.withdrawn` (session id, IdP, that answer) takes them back.
 - `noHandoff`, where no module receives upstream tokens.
+- Composition definition (`./module`): provides `handoff` over the receivers in name order, taking `seal` and the held login store only where some module receives upstream tokens.
 - Store interface for held logins, its needs (survives failover, names from the secret) and contract test (`./testing`).
 
 ## Invariants
