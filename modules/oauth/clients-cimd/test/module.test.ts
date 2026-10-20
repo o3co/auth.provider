@@ -61,7 +61,7 @@ function json(body: unknown, headers: Record<string, string> = {}, status = 200)
 const wideCaps: Limits = { maxBytes: 65_536, timeoutMs: 5_000 };
 
 /** Outbound as a test stand-in: it records each request and answers from the script, under the caps given. */
-const outboundStandIn = (caps: Limits = wideCaps) =>
+const outboundStandIn = (caps: Limits = wideCaps, lookups?: number) =>
 	defineModule({ name: "outbound" }, (m) => [
 		m.provide(outbound).by(() => ({
 			fetch: async (url, request, narrower) => {
@@ -69,7 +69,10 @@ const outboundStandIn = (caps: Limits = wideCaps) =>
 				return answer(url);
 			},
 		})),
-		m.provide(outboundLimits).by(() => ({ of: () => caps })),
+		m.provide(outboundLimits).by(() => ({
+			of: () => caps,
+			...(lookups === undefined ? {} : { lookupsOf: () => lookups }),
+		})),
 	]);
 
 /** The sections a document record carries, as their owners contribute them; client-allowance's taken as written. */
@@ -99,6 +102,8 @@ async function boot(
 		code?: boolean;
 		registered?: unknown[];
 		caps?: Limits;
+		/** How many names outbound lets the document's requests resolve at once; unanswered unless set. */
+		lookups?: number;
 		extra?: Module[];
 		owners?: Module;
 	} = {},
@@ -106,7 +111,7 @@ async function boot(
 	const recording = recordingLog();
 	const app = await assemble({
 		modules: [
-			outboundStandIn(options.caps),
+			outboundStandIn(options.caps, options.lookups),
 			clientsModule,
 			secretHashModule,
 			options.owners ?? owners,
@@ -468,6 +473,19 @@ describe("clients-cimd: the operator's section", () => {
 			"is above outbound's cap: lower it, or raise outbound.timeout",
 		]);
 		expect(JSON.stringify(refusals)).not.toMatch(/4096|5120|1000|2000/);
+	});
+
+	it("refuses boot where outbound gives a metadata document's names no lookup, naming the threadpool", async () => {
+		const error = await boot({}, { lookups: 0 }).catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(BootRefused);
+		expect((error as BootRefused).refusals).toEqual([
+			{
+				where: "clients-cimd",
+				reason:
+					"outbound resolves no name a metadata document chooses: run with UV_THREADPOOL_SIZE of 4 or more",
+			},
+		]);
+		await expect(boot({}, { lookups: 1 })).resolves.toBeDefined();
 	});
 
 	it("boots with the size and the timeout at outbound's cap or below it", async () => {

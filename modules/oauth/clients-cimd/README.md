@@ -17,8 +17,8 @@
 - Whether the code grant is composed is `grants`' `composedGrants`. Without it composed, nothing is fetched and the metadata item is left out; boot is not refused.
 - An id is fetched only when it is https, has a path other than `/`, has no query, fragment, user information, IP literal or localhost, and is written exactly as the URL parser writes it.
 - Its host is checked before the fetch, spelled as `outbound` spells hosts: `deny` first, then a non-empty `allow`. An `allow` list also narrows `outbound`'s hosts.
-- The fetch goes only through `outbound`, asks for JSON, and narrows its size and time; it marks its destination `outsideChosen`, so its name lookups take outbound's share apart (none with a threadpool of 2 or less: run it with 4 or more). Only a `200` with a JSON media type and one object is a document.
-- Boot is refused where `max-size` or `timeout` is above `outbound`'s cap, as its `outboundLimits` answers it, naming the key and no value.
+- The fetch goes only through `outbound`, asks for JSON, and narrows its size and time; it marks its destination `outsideChosen`, as an outside party chooses it, for outbound to keep its name lookups to their share. Only a `200` with a JSON media type and one object is a document.
+- Boot is refused where `max-size` or `timeout` is above `outbound`'s cap, as its `outboundLimits` answers it, naming the key and no value, and where outbound gives the document's names no lookup (`lookupsOf`).
 - Boot is refused where no composed section copies `redirect_uris` or `client_name` (its `reads`), and where a section it computes (`client-allowance`) is copied from a document too.
 - The document's `client_id` equals the id. It has no `client_secret` or `client_secret_expires_at`, and its `token_endpoint_auth_method` is `none` or absent.
 - `redirect_uris` is a non-empty list of strings, CIMD's rule for a client with the code flow alone: its section takes an empty list, and checks each URI's form. `grant_types` (default the code) holds the code; `response_types`, if present, holds `code`.
