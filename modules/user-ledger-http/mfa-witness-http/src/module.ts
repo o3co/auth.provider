@@ -11,9 +11,6 @@ import {
 import { section } from "./section.ts";
 import { witnessAt } from "./witness.ts";
 
-/** Why the credential may not go to URLs at more than one origin, naming the three keys. */
-const originsRefused = "goes to one origin alone: read-url, enroll-url and clear-url must share it";
-
 export default defineModule({ name: "mfa-witness-http", section, replicaSafe: true }, (m) => [
 	m.contribute(enrollmentWitnesses).by(async (c) => {
 		const { "max-response-size": maxBytes, timeout: timeoutMs } = c.section;
@@ -37,8 +34,7 @@ export default defineModule({ name: "mfa-witness-http", section, replicaSafe: tr
 		}
 		const refused = (await c.get(credentialPolicy)).refusalOf(Object.values(urls));
 		if (refused !== undefined) {
-			const reason = refused === "origins" ? originsRefused : credentialRefusalText(refused);
-			return c.refuse("mfa-witness-http.credential", reason);
+			return c.refuse("mfa-witness-http.credential", credentialRefusalText(refused));
 		}
 		return witnessAt({
 			urls,
