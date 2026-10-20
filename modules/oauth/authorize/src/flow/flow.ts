@@ -87,6 +87,10 @@ export function flowWith(parts: FlowParts): Flow {
 			}
 			const login = new URL(loginPage);
 			login.searchParams.set("redirect_to", urlWith(resume));
+			// The page hands these to a login it starts elsewhere, an upstream's, so that one is new too.
+			if (need.login) login.searchParams.set("prompt", "login");
+			if (need.maxAgeMs !== undefined)
+				login.searchParams.set("max_age", String(need.maxAgeMs / 1000));
 			return { kind: "send", to: login.href };
 		};
 		const taken = await reauths.take(one("reauth"), params);
@@ -94,8 +98,8 @@ export function flowWith(parts: FlowParts): Flow {
 		const session = await entered.enter(request);
 		if (!session) return toLogin();
 		if (!reauths.fresh(need, session.context, taken)) {
-			// Back from its login with the time still unknown: another trip would bring the same.
-			if (taken && session.context.authenticatedAtUnknown) return refusal("login_required");
+			// Back from its login with a session still not new enough: another trip would bring the same.
+			if (taken) return refusal("login_required");
 			return toLogin();
 		}
 		const raised = await stepUp.met({

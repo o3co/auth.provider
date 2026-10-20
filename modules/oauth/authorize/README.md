@@ -36,7 +36,8 @@
 - A first-party client (by `consent`) is never asked for consent. Any other is asked when `consent`'s records do not cover the scope, or with `prompt=consent`; a denial comes back as `access_denied`.
 - Until the client and redirect URI are confirmed, errors are JSON with no redirect (unavailable: the routes' declared `503` `temporarily_unavailable`). After that every answer, errors and unavailable included, is a redirect to the redirect URI carrying `state` (when given once and not too long) and `iss`.
 - A fresh login that `prompt=login` or `max_age` demands counts only through a `reauth` record, made for the whole request when the browser is sent to log in and taken by that request. A session whose authentication time `session` answers as unknown meets neither, nor an essential `auth_time`, so a login is asked again.
-- Back from its login (its record taken) with the authentication time still unknown, a request is refused with `login_required`.
+- Back from its login (its record taken) with a session still not new enough, its authentication time unknown or known, a request is refused with `login_required`, never sent to log in again.
+- The login page is told the `prompt=login` and `max_age` a request asked, beside `redirect_to`, to hand to a login it starts elsewhere (an upstream's), so that login is new too.
 
 ## Depends on
 - `kernel`, `http`, `request-source`, `url-setting`, `clients`, `redirect-uris`, `reauth`, `session`, `consent`, `code-grant`, `issuer`, `grants` (the audience rule), `token-endpoint` (error answers), `client-allowance`, `tokens`, `login-gates`, `acr`, `rate-limit`, `audit`

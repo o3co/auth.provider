@@ -418,7 +418,10 @@ describe("authorize: session and consent", () => {
 		expect(asked.at?.pathname).toBe("/login");
 		const resume = new URL(asked.at?.searchParams.get("redirect_to") ?? "");
 		expect(resume.searchParams.get("prompt")).toBe("login");
-		expect((await authorize(resume.search.slice(1), old)).at?.pathname).toBe("/login");
+		// Back from its login with a session no newer: refused, never sent round again.
+		expect((await authorize(resume.search.slice(1), old)).at?.searchParams.get("error")).toBe(
+			"login_required",
+		);
 		const again = await authorize(request({ prompt: "login" }), old);
 		const resumed = new URL(again.at?.searchParams.get("redirect_to") ?? "");
 		now += 1000;
@@ -450,7 +453,7 @@ it("counts a login from the moment the re-authentication was asked, to the milli
 	};
 	const sameSecond = await resumeOf();
 	const early = await login("alice", ["pwd"], now - 500);
-	expect((await authorize(sameSecond, early)).at?.pathname).toBe("/login");
+	expect((await authorize(sameSecond, early)).at?.searchParams.get("error")).toBe("login_required");
 	const atTheMoment = await resumeOf();
 	const then = await login("alice", ["pwd"], now);
 	expect((await authorize(atTheMoment, then)).at?.searchParams.has("code")).toBe(true);
@@ -1044,6 +1047,46 @@ it("writes nothing for a plain request without a session, even when writes would
 	down.reauths.failNext("save");
 	const res = await authorize(request());
 	expect(res.at?.pathname).toBe("/login");
+});
+
+it("tells the login page the prompt=login and max_age the request asked, beside redirect_to, and nothing it did not ask", async () => {
+	const { authorize, login } = await serve();
+	const old = await login();
+	now += 120_000;
+	const both = await authorize(request({ prompt: "login", max_age: "60" }), old);
+	expect([
+		both.at?.pathname,
+		both.at?.searchParams.get("prompt"),
+		both.at?.searchParams.get("max_age"),
+	]).toEqual(["/login", "login", "60"]);
+	const aged = await authorize(request({ max_age: "60" }), old);
+	expect([aged.at?.searchParams.get("prompt"), aged.at?.searchParams.get("max_age")]).toEqual([
+		null,
+		"60",
+	]);
+	const plain = await authorize(request());
+	expect([plain.at?.searchParams.has("prompt"), plain.at?.searchParams.has("max_age")]).toEqual([
+		false,
+		false,
+	]);
+});
+
+it("refuses a request back from its login whose session is still not new enough, the time known, rather than sending it round again", async () => {
+	const { authorize, login } = await serve();
+	const old = await login();
+	now += 10_000;
+	const asked = await authorize(request({ prompt: "login" }), old);
+	const resume = new URL(asked.at?.searchParams.get("redirect_to") ?? "");
+	now += 1000;
+	// A login whose authentication time stays before the asking, as an upstream's within its clock allowance may.
+	const stale = await login("alice", ["pwd"], now - 5000);
+	const back = await authorize(resume.search.slice(1), stale);
+	expect(back.at?.searchParams.get("error")).toBe("login_required");
+	const aged = await authorize(request({ max_age: "1" }), stale);
+	const resumed = new URL(aged.at?.searchParams.get("redirect_to") ?? "");
+	expect((await authorize(resumed.search.slice(1), stale)).at?.searchParams.get("error")).toBe(
+		"login_required",
+	);
 });
 
 it("never counts a login whose authentication time is unknown as the newer one prompt=login asks, and refuses it back from the login", async () => {
