@@ -10,7 +10,7 @@ import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
 import senderBindingModule from "@mod/sender-binding/module";
 import { describe, expect, it } from "vitest";
-import { addedClaimsOf, limits } from "../src/added-claims/added-claims.ts";
+import { addedClaimsOf } from "../src/added-claims/added-claims.ts";
 import {
 	type AccessGrant,
 	type IssuancePolicy,
@@ -89,6 +89,46 @@ describe("claims a grant adds to its access token", () => {
 		expect("addedClaims" in issued.access).toBe(false);
 		const checked = await t.verifyAccess(issued.access.token);
 		expect(checked.kind === "valid" && "claims" in checked.grant).toBe(false);
+	});
+
+	it("signs the payload it signed before where a grant adds none or an empty set", async () => {
+		const { t } = await boot();
+		const membersOf = async (claims?: AccessGrant["claims"]) => {
+			const issued = await t.issue({
+				grant: claims ? { ...grant, claims } : grant,
+				grantType: "t",
+			});
+			if (issued.kind !== "issued") throw new Error(issued.policy);
+			return Object.keys(payloadOf(issued.access.token)).sort();
+		};
+		const before = ["aud", "client_id", "exp", "iat", "iss", "jti", "sub"];
+		expect(await membersOf()).toEqual(before);
+		expect(await membersOf({})).toEqual(before);
+		expect(await membersOf({ a: 1 })).toEqual([...before, "a"].sort());
+	});
+
+	it("shows the policies the claims as copied, frozen, at admits as at issue", async () => {
+		const seen: IssuanceRequest[] = [];
+		const watching: IssuancePolicy = {
+			name: "watching",
+			judge: async (request) => {
+				seen.push(request);
+				return { kind: "allowed" };
+			},
+		};
+		const policies = defineModule({ name: "policies" }, (m) => [
+			m.contribute(issuancePolicies).by(() => watching),
+		]);
+		const { t } = await boot([policies]);
+		const claims = { a: [1] };
+		expect(await t.admits({ grant: { ...grant, claims }, grantType: "test" })).toEqual({
+			kind: "allowed",
+		});
+		expect(seen[0]?.grant.claims).toEqual(claims);
+		expect(seen[0]?.grant.claims).not.toBe(claims);
+		expect(Object.isFrozen(seen[0]?.grant.claims?.a)).toBe(true);
+		const empty = await t.admits({ grant: { ...grant, claims: {} }, grantType: "test" });
+		expect([empty.kind, "claims" in (seen[1]?.grant ?? {})]).toEqual(["allowed", false]);
 	});
 
 	it("refuses a reserved name, at issue and at admits, as the grant's maker's mistake", async () => {
@@ -217,32 +257,32 @@ describe("the added claims' copier", () => {
 	});
 
 	it("takes names of 1 to 255 code points, well formed, with no control character or space", () => {
-		expect(addedClaimsOf({ ["é".repeat(limits.nameCodePoints)]: 1 })).toBeDefined();
-		refuses({ ["é".repeat(limits.nameCodePoints + 1)]: 1 });
+		expect(addedClaimsOf({ ["é".repeat(255)]: 1 })).toBeDefined();
+		refuses({ ["é".repeat(256)]: 1 });
 		refuses({ "": 1 });
 		for (const name of ["a b", "a\tb", "a\u0000", "a\uD800", "a b"]) refuses({ [name]: 1 });
 	});
 
 	it("stops at each limit: a string's code points, members, depth, values and bytes", () => {
-		expect(addedClaimsOf({ a: "x".repeat(limits.stringCodePoints) })).toBeDefined();
+		expect(addedClaimsOf({ a: "x".repeat(2048) })).toBeDefined();
 		// Counted in code points: an astral character is one.
 		expect(addedClaimsOf({ a: "😀".repeat(1000) })).toBeDefined();
-		refuses({ a: "x".repeat(limits.stringCodePoints + 1) });
+		refuses({ a: "x".repeat(2049) });
 		refuses({ a: "a\uDC00" });
-		expect(addedClaimsOf({ a: Array(limits.members).fill(0) })).toBeDefined();
-		refuses({ a: Array(limits.members + 1).fill(0) });
+		expect(addedClaimsOf({ a: Array(256).fill(0) })).toBeDefined();
+		refuses({ a: Array(257).fill(0) });
 		const nested = (depth: number): unknown => (depth === 1 ? 1 : [nested(depth - 1)]);
-		expect(addedClaimsOf({ a: nested(limits.depth) })).toBeDefined();
-		refuses({ a: nested(limits.depth + 1) });
+		expect(addedClaimsOf({ a: nested(8) })).toBeDefined();
+		refuses({ a: nested(9) });
 		refuses({
 			a: Array(200).fill([0, 0, 0, 0, 0, 0]),
 		});
 		// {"a":"…","b":"…"} is 15 bytes beside its two strings.
 		const bytes = (n: number) => ({
-			a: "x".repeat(limits.stringCodePoints),
-			b: "x".repeat(n - limits.stringCodePoints - 15),
+			a: "x".repeat(2048),
+			b: "x".repeat(n - 2048 - 15),
 		});
-		expect(addedClaimsOf(bytes(limits.bytes))).toBeDefined();
-		refuses(bytes(limits.bytes + 1));
+		expect(addedClaimsOf(bytes(4096))).toBeDefined();
+		refuses(bytes(4097));
 	});
 });

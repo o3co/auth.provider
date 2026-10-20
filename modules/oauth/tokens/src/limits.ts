@@ -17,6 +17,18 @@ export function expiryOf(nowMs: number, lifetimeSeconds: number, notAfter?: numb
 	return { iat, exp: Math.max(iat, Math.min(iat + lifetimeSeconds, cap)) };
 }
 
+/** How deep an actor chain may go: past token-exchange's deepest (10), so every one issued is read. */
+const actorDepth = 16;
+
+/** Whether a chain, each link to the next by `next`, is within the actor depth, counted before it is read recursively. */
+export function chainWithin(start: unknown, next: (link: object) => unknown): boolean {
+	let depth = 0;
+	for (let at = start; at !== undefined; at = next(at as object)) {
+		if (at === null || typeof at !== "object" || ++depth > actorDepth) return false;
+	}
+	return true;
+}
+
 /** A token's id: 16 random bytes in base64url. */
 export const tokenId = (random: Random) => Buffer.from(random.bytes(16)).toString("base64url");
 

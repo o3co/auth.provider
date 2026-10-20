@@ -8,6 +8,7 @@ import type {
 	IssueLimits,
 	Tokens,
 } from "./contract.ts";
+import { chainWithin } from "./limits.ts";
 
 /** How far ahead of the clock an authentication time may be, as 0.17 allowed. */
 export const authenticatedAheadMs = 300_000;
@@ -71,9 +72,13 @@ export type IssueAccess = (
 
 /**
  * The request with the claims its grant adds checked and copied, before anything else reads them;
- * an empty set is none. Throws TypeError, the grant's maker's mistake, on claims outside the rules.
+ * an empty set is none. Throws TypeError, the grant's maker's mistake, on claims outside the rules
+ * or an actor chain deeper than tokens reads, counted before anything copies it.
  */
 function checkedRequest(request: IssuanceRequest): IssuanceRequest {
+	if (!chainWithin(request.grant.actor, (link) => (link as { actor?: unknown }).actor)) {
+		throw new TypeError("tokens: an actor chain is over 16 deep, or holds what is no actor");
+	}
 	const { claims: given, ...grant } = request.grant;
 	const claims = addedClaimsOf(given);
 	return { ...request, grant: claims ? { ...grant, claims } : grant };

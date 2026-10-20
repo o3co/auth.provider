@@ -15,13 +15,11 @@ Internal module of `tokens`: the rules of the claims a grant adds to its access 
 - `reserved`, `unwritten`, `limits`.
 
 ## Invariants
-- Reserved at the top: every name `tokens` writes (`iss`, `sub`, `aud`, `client_id`, `scope`, `act`, `amr`, `auth_time`, `acr`, `iat`, `exp`, `jti`, `cnf`).
-- Reserved at the top too: names a specification gives a meaning `tokens` never writes (`nbf`, `roles`, `groups`, `entitlements`, `scp`, `may_act`, `authorization_details`, `htm`, `htu`, `ath`, `nonce`, `azp`, `at_hash`, `c_hash`, `sid`, `name`, `picture`, `profile`, `email`, `email_verified`, `active`, `token_type`, `username`). A read-back token holding one of the latter is none of `tokens`'.
-- `__proto__`, `constructor` and `prototype` are refused as a key at any depth.
-- Only JSON is taken: plain objects (the object prototype or none) and arrays with no hole or other property, strings, finite numbers, booleans and null; their own enumerable data properties alone are read.
-- Refused without calling anything given: an accessor, a proxy, a cycle, a prototype of its own, a function, a symbol as a key or a value, a bigint, undefined, a number not finite.
-- A name is 1 to 255 code points, well formed, with no control character or space; a string is at most 2048 code points, well formed.
-- At most 256 members to an object or values to an array, 1024 values in all, 8 deep (a claim's value is depth 1), and 4 KiB as JSON in UTF-8. Each limit is counted while walking, so a large set stops at the first one it passes.
+- The rules themselves, the reserved names and the limits, are the package card's and `AddedClaims`'; here, how one walker holds to them.
+- One walker checks and copies, at `issue`, at `admits` and when a verified payload is read back, so the three never differ.
+- Nothing given is called: an object's own keys are counted before any property is read, and each property is read by its descriptor, so an accessor, a proxy or a `toJSON` is refused unread.
+- A string or a name is measured by its length first: one past twice the limit is refused before it is walked, and the code points are counted only up to the limit.
+- Each count, values and bytes, is checked as it grows, before the walk goes on, so a large set stops at the first limit it passes. An object met twice on one path is refused as a cycle.
 
 ## Depends on
 - Node's `util` (to tell a proxy).

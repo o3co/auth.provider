@@ -17,7 +17,7 @@ import {
 } from "./contract.ts";
 import { denylistAllowanceMs, denylistOver } from "./denylist/denylist.ts";
 import { type IssueAccess, issuing, judging } from "./issuance.ts";
-import { expiryOf, keptGrant, lifetimeOf, tokenId } from "./limits.ts";
+import { chainWithin, expiryOf, keptGrant, lifetimeOf, tokenId } from "./limits.ts";
 import { namedBy } from "./reference.ts";
 import { section } from "./section.ts";
 import { revokedTokens } from "./store.ts";
@@ -57,17 +57,8 @@ type Claims = z.infer<typeof claimsShape>;
 
 /** The longest compact access token tokens issues or reads, so it always takes what it issued. */
 const compactLimit = 16_384;
-/** How deep an actor chain may go: past token-exchange's deepest (10), so every one issued is read. */
-const actorDepth = 16;
-
-/** Whether a payload's actor chain is within the depth, counted before it is read recursively. */
-const actorsWithin = (act: unknown): boolean => {
-	let depth = 0;
-	for (let at = act; at !== undefined; at = (at as { act?: unknown }).act) {
-		if (at === null || typeof at !== "object" || ++depth > actorDepth) return false;
-	}
-	return true;
-};
+/** Whether a payload's actor chain is within the depth tokens issues. */
+const actorsWithin = (act: unknown) => chainWithin(act, (link) => (link as { act?: unknown }).act);
 type Valid = Extract<AccessCheck, { kind: "valid" }>;
 type Invalid = Extract<AccessCheck, { kind: "invalid" }>;
 type Checked =
