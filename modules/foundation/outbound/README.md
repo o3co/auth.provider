@@ -26,6 +26,7 @@
 - A `proxy` (an http origin alone, as the URL parser writes it, without credentials; `proxy-authorization` apart) carries every https request, but to `direct-hosts` (list internal hosts there too), by CONNECT with TLS to the destination inside. Then outbound resolves no name: it checks the name and any address in the URL; the proxy checks where a name resolves (boot warns so, and of credentials sent over http past the loopback). A refused tunnel is `proxy-refused`.
 - Plain http, a `plain-loopback` or `plain-internal` pair's, never goes through the proxy: outbound resolves the name and checks every address itself.
 - Each boot that names `plain-internal` pairs warns `outbound.plain_internal`, with their count alone: what goes to them, passwords, tokens, credentials and keys, is in the clear.
+- List in `plain-internal` only peers on a network trusted against reading and changing what passes, such as one task, a closed cluster network or a service mesh; where possible, use https with an internal CA and `internal-hosts` instead.
 - Proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, either case) are never read; with one set and no `proxy`, boot is refused, naming the variable alone, unless `direct-despite-proxy` is set.
 
 ## Depends on
