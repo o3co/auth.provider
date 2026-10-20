@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { secretBytes } from "./secret.ts";
+import { secretBytes } from "../secret/secret.ts";
 
 const kid = z
 	.string()

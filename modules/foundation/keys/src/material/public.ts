@@ -1,4 +1,5 @@
-import { createPrivateKey, createPublicKey, type KeyObject, type webcrypto } from "node:crypto";
+import { createPrivateKey, createPublicKey, KeyObject, type webcrypto } from "node:crypto";
+import { calculateJwkThumbprint, exportJWK, type JWK } from "jose";
 import { canonical } from "./jws.ts";
 
 export type Jwk = Readonly<Record<string, unknown>>;
@@ -108,4 +109,13 @@ export function publicMembers(jwk: unknown): Readonly<Record<string, string>> | 
 		rebuilt[m] = value;
 	}
 	return inOneForm(rebuilt) ? rebuilt : undefined;
+}
+
+/**
+ * A key's JWK thumbprint (RFC 7638), SHA-256 in base64url: of a key read (`KeyObject`), from its
+ * JWK; of a JWK given, from its required members as written.
+ */
+export async function thumbprint(key: KeyObject | Jwk): Promise<string> {
+	const jwk = key instanceof KeyObject ? await exportJWK(key) : key;
+	return calculateJwkThumbprint(jwk as JWK, "sha256");
 }

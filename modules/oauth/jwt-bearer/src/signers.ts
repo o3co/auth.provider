@@ -1,6 +1,6 @@
 import type { ExternalJwt, JwksSource, PemKey, Policy, Verifier } from "@mod/external-jwt";
 import { isUnavailable, Unavailable } from "@mod/kernel";
-import { calculateJwkThumbprint, exportJWK, importSPKI, type JWK } from "jose";
+import { thumbprint as keyThumbprint, publicPem } from "@mod/keys";
 import { algorithms, type SignerAlgorithm, type SignerKey, type SignerKeys } from "./contract.ts";
 
 /** A JWK thumbprint's shape (RFC 7638, SHA-256): 43 characters of base64url. */
@@ -14,8 +14,7 @@ export interface Signers {
 	verifierFor(subject: string, kid: string | undefined): Promise<Verifier | undefined>;
 }
 
-const thumbprintOf = (jwk: SignerKey) =>
-	calculateJwkThumbprint(jwk as JWK, "sha256").catch(() => undefined);
+const thumbprintOf = (jwk: SignerKey) => keyThumbprint(jwk).catch(() => undefined);
 
 /** Keys written in the section; with thumbprints, each key verifies only the subject that is its own. */
 export async function writtenSigners(
@@ -30,8 +29,8 @@ export async function writtenSigners(
 	}
 	const byThumbprint = new Map<string, Verifier>();
 	for (const key of keys) {
-		const jwk = await exportJWK(await importSPKI(key.pem, key.alg));
-		const own = await thumbprintOf(jwk);
+		const read = publicPem(key.pem);
+		const own = read && (await keyThumbprint(read).catch(() => undefined));
 		if (own) byThumbprint.set(own, jwt.verifierOf({ pem: [key] }, policy));
 	}
 	return { thumbprint, verifierFor: async (subject) => byThumbprint.get(subject) };

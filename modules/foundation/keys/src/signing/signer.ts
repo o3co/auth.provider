@@ -4,8 +4,8 @@ import {
 	decodeProtectedHeader,
 	type ProtectedHeaderParameters,
 } from "jose";
-import type { Keys, VerifyResult } from "./contract.ts";
-import { isCanonicalJws } from "./jws.ts";
+import type { Keys, VerifyResult } from "../contract.ts";
+import { isCanonicalJws } from "../material/jws.ts";
 import { expired, type Ring, type RingKey } from "./ring.ts";
 
 const encoder = new TextEncoder();

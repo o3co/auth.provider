@@ -1,4 +1,4 @@
-import { generateKeyPairSync, type KeyObject } from "node:crypto";
+import { createPublicKey, generateKeyPairSync, type KeyObject } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
 	isCanonicalJws,
@@ -7,6 +7,7 @@ import {
 	publicJwk,
 	publicMembers,
 	publicPem,
+	thumbprint,
 	verifiesUnder,
 	verifyAlgorithms,
 } from "../src/contract.ts";
@@ -166,4 +167,21 @@ it("tells an algorithm it verifies under from any other name, an inherited one t
 	for (const other of ["HS256", "none", "toString", "constructor", 256]) {
 		expect(isVerifyAlgorithm(other), String(other)).toBe(false);
 	}
+});
+
+describe("thumbprint", () => {
+	it("answers a public key's RFC 7638 SHA-256 thumbprint, as the RFC's example gives it", async () => {
+		// RFC 7638, section 3.1: the example RSA key and its thumbprint.
+		const n =
+			"0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw";
+		const key = createPublicKey({ key: { kty: "RSA", n, e: "AQAB" }, format: "jwk" });
+		expect(await thumbprint(key)).toBe("NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs");
+		// The same key written as PEM has the same thumbprint.
+		const pem = publicPem(key.export({ type: "spki", format: "pem" }).toString());
+		expect(pem && (await thumbprint(pem))).toBe("NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs");
+		// A JWK given is taken by its required members as written.
+		expect(await thumbprint({ kty: "RSA", n, e: "AQAB", kid: "any" })).toBe(
+			"NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs",
+		);
+	});
 });

@@ -20,15 +20,16 @@ export interface Keys {
 
 export const keys = contract<Keys>("keys");
 
-export { isCanonicalJws } from "./jws.ts";
+export { isCanonicalJws } from "./material/jws.ts";
 export {
 	isVerifyAlgorithm,
 	type Jwk,
 	publicJwk,
 	publicMembers,
 	publicPem,
+	thumbprint,
 	type VerifyAlgorithm,
 	verifiesUnder,
 	verifyAlgorithms,
-} from "./public.ts";
-export { bearerToken, secretBytes } from "./secret.ts";
+} from "./material/public.ts";
+export { bearerToken, secretBytes } from "./secret/secret.ts";
