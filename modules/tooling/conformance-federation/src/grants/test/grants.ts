@@ -138,20 +138,9 @@ export async function grantsTarget(
 		form: Record<string, string>,
 		headers: Record<string, string> = { origin },
 	) => {
-		const res = await fetch(`${base}/session/federation-grants/consent`, {
-			method: "POST",
-			redirect: "manual",
-			headers: {
-				"x-forwarded-proto": "https",
-				"x-forwarded-for": b.from,
-				"x-forwarded-host": new URL(origin).host,
-				"content-type": "application/x-www-form-urlencoded",
-				cookie: b.cookies(),
-				...headers,
-			},
-			body: new URLSearchParams(form),
-		});
-		return { status: res.status, location: res.headers.get("location") ?? "" };
+		// The browser keeps what the answer sets, the round trip's cookie among them.
+		const res = await b.form("/session/federation-grants/consent", form, headers);
+		return { status: res.status, location: res.location };
 	};
 	const callback = (b: Browser, query: URLSearchParams) =>
 		b.get(`/session/federation-grants/callback/calendar?${query}`);

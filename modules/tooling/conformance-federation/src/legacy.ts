@@ -89,6 +89,9 @@ onLegacy(federationArea, {
 		"link-state-outlives-session",
 		"federation-returns-to-authorization",
 		"federation-auth-time-from-upstream",
+		// The legacy build ties a connection's callback to the session alone: another browser's is
+		// refused for its session, and spends the state.
+		"grants-round-trip-tied-to-browser",
 	],
 	map: (part) => {
 		// The legacy GitHub, Google and Apple types fix their hosts in code, and the standalone build
