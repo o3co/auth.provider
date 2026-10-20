@@ -25,7 +25,7 @@ const signing = z.discriminatedUnion("alg", [
 		kid: signingKid,
 		alg: z.literal("HS256").describe(signingAlg),
 		secret: secretBytes({ atLeast: 32 }, { hex: true }).describe(
-			"The HMAC secret for HS256: at least 32 bytes, in hex or base64, of at least 8 byte values.",
+			"The HMAC secret for HS256, its decoded bytes the HMAC key: read as hex where the value is whole bytes of hex, else as base64 (64 hex characters are base64 too, so hex is read first); at least 32 bytes, of at least 8 byte values.",
 		),
 	}),
 ]);
