@@ -25,6 +25,7 @@
 - A module, sink, added feature or axis choice not named as an npm package is refused, before anything is written; so is a name the workspace lacks, one that is not a feature, a pattern or group not known, and axes or groups for full.
 - With a workspace, each dependency links to the workspace's package; a module the workspace does not hold is refused. Built into a bundle and given none, it reads the bundle's index: the app depends on each public bundle at the index's version, imports public entries, and takes the fragments the index holds; a module it does not hold is refused.
 - A pattern whose store is kept in memory says in its README that the deployment runs as one instance.
+- A listed app holds the modules listed with the wirings and bridges they come with, not what they need to run nor their settings, so it may not start as made; the command says so. An app holding what its modules need is made from a pattern, with `--add`.
 
 ## Data
 - Writes the target only, through `app-output`; reads the workspace's package list or the bundle's index, and the cards and fragments of the modules it composes.
