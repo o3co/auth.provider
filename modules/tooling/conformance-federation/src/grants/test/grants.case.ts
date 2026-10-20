@@ -126,19 +126,22 @@ describe("federation grants: refusals", () => {
 		expect((await t.open(bob, lodged.body.connect_uri)).opened.status).toBe(403);
 	});
 
-	it("refuses a callback that comes back in another browser, and spends its state", async () => {
-		const lodged = await t.lodge();
-		const first = await t.loggedIn();
-		const { challenge } = await t.open(first, lodged.body.connect_uri);
-		const accepted = await t.answer(first, { challenge, decision: "accept" });
-		const query = t.corp.authorize(accepted.location, {
-			subject: "u-alice",
-			tokens: { scope: scopes.join(" ") },
-		});
-		const elsewhere = await t.callback(await t.loggedIn(), query);
-		expect(t.returned(elsewhere).get("error")).toBe("reauthentication_required");
-		expect((await t.callback(first, query)).status).toBe(400);
-	});
+	// Ours ties a connection's round trip to the browser that began it, as well as to its session.
+	it.skipIf(areaTarget().differs("grants-round-trip-tied-to-browser"))(
+		"takes nothing for a callback that comes back in another browser, leaving the round trip to its own",
+		async () => {
+			const lodged = await t.lodge();
+			const first = await t.loggedIn();
+			const { challenge } = await t.open(first, lodged.body.connect_uri);
+			const accepted = await t.answer(first, { challenge, decision: "accept" });
+			const query = t.corp.authorize(accepted.location, {
+				subject: "u-alice",
+				tokens: { scope: scopes.join(" ") },
+			});
+			expect((await t.callback(await t.loggedIn(), query)).status).toBe(400);
+			expect((await t.callback(first, query)).status).toBe(303);
+		},
+	);
 
 	it("holds no token that is not a bearer, nor one without a refresh token, nor one wider than shown", async () => {
 		for (const [tokens, error] of [

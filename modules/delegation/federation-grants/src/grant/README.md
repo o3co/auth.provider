@@ -29,4 +29,4 @@ Internal module of `federation-grants`: what a grant and a browser step are, and
 - Step format 1: kind, grant, intent, session, and an upstream round trip's verifier and nonce.
 
 ## Depends on
-- `kernel`, `http` (the public origin), `seal`, `subject-revocation`, `clients`, `federation`; the package's store interfaces
+- `kernel`, `http` (the public origin), `seal`, `subject-revocation`, `clients`, `upstreams` (the connections' delegations); the package's store interfaces

@@ -23,4 +23,4 @@ Internal module of `federation-grants`: the client routes, and the revocation fo
 - The follower writes only over the state it judged, ends a covered grant or pending intent, and leaves an established grant kept with only its renewal ended.
 
 ## Depends on
-- `http`, `request-source`, `clients`, `rate-limit`, `audit`, `federation`, `subject-revocation` (the follower's type), `kernel`; `grant`, `refresh`, the package's store interfaces
+- `http`, `request-source`, `clients`, `rate-limit`, `audit`, `upstreams` (the configured connections), `subject-revocation` (the follower's type), `kernel`; `grant`, `refresh`, the package's store interfaces

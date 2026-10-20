@@ -26,4 +26,4 @@ Internal module of `federation-grants`: handing a grant's upstream token, and re
 - A refresh the upstream answered hands out and writes nothing when the grant is past its end by then, or its subject's revocation ends it, even a grant its subject's listing missed, which only the boundary ends.
 
 ## Depends on
-- `federation`, `kernel`; `grant`, the package's store interfaces
+- `upstreams` (the delegation's refresh), `kernel`; `grant`, the package's store interfaces

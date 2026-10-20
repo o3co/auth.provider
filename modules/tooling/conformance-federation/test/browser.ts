@@ -72,6 +72,9 @@ export function browser(base: () => string, origin: string) {
 	const get = (path: string, kept?: string) => send(path, kept);
 	const navigate = (path: string, headers: Record<string, string>) =>
 		send(path, undefined, undefined, headers);
+	/** Posts a form with the headers of the page that posts it, keeping what the answer sets. */
+	const form = (path: string, fields: Record<string, string>, headers: Record<string, string>) =>
+		send(path, undefined, { form: new URLSearchParams(fields), headers });
 	/** Posts a form from another site's page, as an upstream answering in a posted form has it sent. */
 	const post = (path: string, form: URLSearchParams, at: string, kept?: string) =>
 		send(path, kept, { form, headers: { origin: at, "sec-fetch-site": "cross-site" } });
@@ -136,7 +139,7 @@ export function browser(base: () => string, origin: string) {
 		const claims = JSON.parse(Buffer.from(idToken.split(".")[1] ?? "", "base64url").toString());
 		return String(claims.sub);
 	};
-	return { from, get, navigate, post, submit, cookies, session, loggedInAs };
+	return { from, get, navigate, post, form, submit, cookies, session, loggedInAs };
 }
 
 export type Browser = ReturnType<typeof browser>;

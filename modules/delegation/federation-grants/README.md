@@ -41,7 +41,7 @@
 
 ## Invariants
 - A grant route reads the body, then the owner; an unknown grant and another client's or subject's answer the same bytes.
-- A state is spent before its code is exchanged, at its own connection; the intent, browser session and subject are checked before and after the exchange.
+- A connection's upstream round trip is `upstream-round-trip`'s, taken before its code is exchanged, at its own connection; the intent, browser session and subject are checked before and after the exchange.
 - The upstream account matches the grant's and the client's `upstream_sub`; with `identity-check: required`, another holder or no answer refuses.
 - Only a bearer token with a refresh token, a finite life within the connection's and a scope within what was shown is held.
 - A revocation is the end: no refresh or activation writes over it, and an ordinary logout leaves grants.
@@ -51,7 +51,7 @@
 - Tokens, secrets and upstream text reach neither answers, logs nor audit.
 
 ## Depends on
-- `kernel`, `http`, `url-setting`, `request-source`, `clients`, `session`, `csrf`, `users`, `upstreams`, `seal`, `subject-revocation`, `rate-limit`, `audit`
+- `kernel`, `http`, `url-setting`, `request-source`, `clients`, `session`, `csrf`, `users`, `upstreams`, `upstream-round-trip`, `seal`, `subject-revocation`, `rate-limit`, `audit`
 
 ## Vocabulary
 - intent: a client's asking for a grant, connected once by the user. connection: an entry of the operator's `connections`, and the user's steps for an intent.
