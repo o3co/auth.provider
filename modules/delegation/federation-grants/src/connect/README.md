@@ -6,10 +6,10 @@ Internal module of `federation-grants`: the browser half of a connection.
 - Answers the link a client sends the user to, the question, the user's decision, and the upstream's callback, where a grant is activated.
 
 ## Not here
-- The client routes (`api`), session entry (`session`), the CSRF policy (`csrf`, declared by the package), the upstream's requests (the IdP type).
+- The client routes (`api`), session entry (`session`), the CSRF policy (`csrf`, declared by the package), the upstream's requests (the IdP type). Whose upstream account a callback reached, and the identity check (`upstream-account`).
 
 ## Offers
-- `browser`, built by `connectOver` from the build context through `connectWith` (sessions, clients, users, upstreams, stores, `grant`'s parts, audit, settings, origin, runtime) → `connect`, `question`, `decide`, `callback`.
+- `browser`, built by `connectOver` from the build context through `connectWith` (sessions, clients, `upstream-account`'s check, upstreams, stores, `grant`'s parts, audit, settings, origin, runtime) → `connect`, `question`, `decide`, `callback`.
 
 ## Invariants
 - Every step enters the session at `use` as the intent's subject; a short session is told whose it is at `none` before anything else.
@@ -24,4 +24,4 @@ Internal module of `federation-grants`: the browser half of a connection.
 - A failure after the round trip is taken ends the intent, is audited, and returns to the client only while it lists the URI.
 
 ## Depends on
-- `http`, `request-source`, `session`, `clients`, `users`, `upstreams` (the delegation), `upstream-round-trip` (round trips), `audit`, `kernel`; `grant`, the package's store interfaces
+- `http`, `request-source`, `session`, `clients`, `upstream-account`, `upstreams` (the delegation), `upstream-round-trip` (round trips), `audit`, `kernel`; `grant`, the package's store interfaces

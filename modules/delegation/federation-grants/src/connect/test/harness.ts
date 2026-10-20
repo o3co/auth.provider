@@ -35,6 +35,7 @@ import {
 	retentionMs,
 } from "../../grant/grant.ts";
 import { section } from "../../section.ts";
+import { upstreamAccountWith } from "../../upstream-account/upstream-account.ts";
 import { browserBase, connectWith } from "../connect.ts";
 
 export const origin = "https://issuer.example";
@@ -194,7 +195,7 @@ export async function connector(
 	const browser = connectWith({
 		sessions: app.get(sessions),
 		clients,
-		users,
+		upstreamAccount: upstreamAccountWith({ users, check: settings["identity-check"] }),
 		upstreams,
 		grants: stores.grants,
 		steps: stores.steps,
