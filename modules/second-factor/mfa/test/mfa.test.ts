@@ -1174,6 +1174,20 @@ describe("an enrollment witness", () => {
 		);
 	});
 
+	it("marks no subject whose first binding another subject's factor already holds the value of, so it stays usable", async () => {
+		const witness = witnessStandIn();
+		const { decided, bindKind } = await serve(
+			{},
+			{ kinds: [card, backup], extra: [witness.module] },
+		);
+		expect(await bindKind("ann", "card", "c1")).toMatchObject({ kind: "bound" });
+		expect(await bindKind("bob", "card", "c1")).toEqual({ kind: "duplicate" });
+		expect(witness.marks.has("bob")).toBe(false);
+		// Not marked, bob holding nothing reads as never enrolled, not as a store that lost a factor.
+		expect(await decided.asks("bob")).not.toBe(undefined);
+		expect(await bindKind("bob", "card", "c2")).toMatchObject({ kind: "bound" });
+	});
+
 	it("marks the subject before its first counting factor is written, and only then", async () => {
 		const { bindCode, witness } = await witnessed();
 		await bindCode("ana");

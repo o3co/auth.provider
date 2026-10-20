@@ -101,6 +101,9 @@ export const secretBasic = (checker: SecretChecker): AuthMethod => ({
 			!sends(request, "client_id") || request.fields.single("client_id") === credentials.id;
 		return named && secretMatches(checker, client, credentials.secret);
 	},
+	decoy: async (request) => {
+		await checker.check(undefined, basic(request)?.secret ?? "");
+	},
 });
 
 export const secretPost = (checker: SecretChecker): AuthMethod => ({
@@ -114,6 +117,9 @@ export const secretPost = (checker: SecretChecker): AuthMethod => ({
 	verify: async (request, client) => {
 		const secret = request.fields.single("client_secret");
 		return secret !== undefined && secretMatches(checker, client, secret);
+	},
+	decoy: async (request) => {
+		await checker.check(undefined, request.fields.single("client_secret") ?? "");
 	},
 });
 

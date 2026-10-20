@@ -61,6 +61,9 @@ const where = (diagnostic: ts.Diagnostic) => {
 	return `${diagnostic.file.fileName}:${line + 1}: ${text}`;
 };
 
+/** Whether a package is the test runner, or one of its parts. */
+const isTestRunner = (name: string) => name === "vitest" || name.startsWith("@vitest/");
+
 type Manifests = ReadonlyMap<
 	string,
 	{ readonly bundle: string; readonly path: string; readonly written: MemberManifest }
@@ -173,6 +176,13 @@ export function buildBundles(input: {
 			}),
 		),
 	);
+	// A test runner is the workspace's alone: a member depending on one would have every app install it.
+	const runners = [...manifests.values()].flatMap(({ written }) =>
+		Object.keys(written.dependencies)
+			.filter(isTestRunner)
+			.map((name) => `${written.name}: depends on ${name}, a test runner; an app would install it`),
+	);
+	if (runners.length > 0) return { built: [], problems: runners };
 	// What any member requires as a peer, with its range: every bundle using it asks the app for it.
 	const required: Record<string, string> = {};
 	for (const { written } of manifests.values()) {

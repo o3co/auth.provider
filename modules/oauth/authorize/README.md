@@ -12,9 +12,9 @@
 - Route `/oauth/authorize` (GET; a POST is a `303` to the GET with the same parameters, which reads the session)
 - Both methods take other sites' requests, with the reason declared: a request arrives as the client's navigation and only starts what the user's own login and consent complete.
 - Contribution of the return path `/oauth/authorize` to `login-gates`
-- Contribution to `issuer`'s metadata items: `authorization_endpoint` (on `http`'s public origin), `response_types_supported` (`code`), `code_challenge_methods_supported` (`S256`), `response_modes_supported` (`query`), `request_uri_parameter_supported` (`false`)
+- Contribution to `issuer`'s metadata items: `authorization_endpoint` (on `http`'s public origin), `response_types_supported` (`code`), `code_challenge_methods_supported` (`S256`), `response_modes_supported` (`query`), `request_uri_parameter_supported` (`false`), `authorization_response_iss_parameter_supported` (`true`)
 - Contribution of `redirect-uris`' client metadata section (`authorize`) to `clients`
-- Operator section: `login-page` (the login page. The return URL is added as `redirect_to`), `step-up-page` (the page that raises authentication. Optional); both https URLs (http only on a loopback host) by `url-setting`'s part for configured URLs, `oidc-mode` (`oidc-required` or `dual`), `requests` (requests per source in each window, over both methods), `window`
+- Operator section: `login-page` (the login page. The return URL is added as `redirect_to`, and `prompt=login` and `max_age` where asked), `step-up-page` (the page that raises authentication. Optional); both https URLs (http only on a loopback host) by `url-setting`'s part for configured URLs, `oidc-mode` (`oidc-required` or `dual`), `requests` (requests per source in each window, over both methods), `window`
 - Audit events (to `audit`, declared in `./audit-events`):
   - `authorize.granted` when a code is given, with the subject, `client` and `response_type` `code`.
   - `authorize.rejected` on a refusal decided for the client or its consent, with no subject, and `client` and `reason`.
@@ -36,7 +36,9 @@
 - A first-party client (by `consent`) is never asked for consent. Any other is asked when `consent`'s records do not cover the scope, or with `prompt=consent`; a denial comes back as `access_denied`.
 - Until the client and redirect URI are confirmed, errors are JSON with no redirect (unavailable: the routes' declared `503` `temporarily_unavailable`). After that every answer, errors and unavailable included, is a redirect to the redirect URI carrying `state` (when given once and not too long) and `iss`.
 - A fresh login that `prompt=login` or `max_age` demands counts only through a `reauth` record, made for the whole request when the browser is sent to log in and taken by that request. A session whose authentication time `session` answers as unknown meets neither, nor an essential `auth_time`, so a login is asked again.
-- Back from its login (its record taken) with the authentication time still unknown, a request is refused with `login_required`.
+- Back from its login (its record taken) with a session still not new enough, its authentication time unknown or known, a request is refused with `login_required`, never sent to log in again.
+- A request carrying a re-authentication record that is not its own (spent, unknown, or made for other parameters, a demand taken out of it included) is refused with `login_required`.
+- The login page is told the `prompt=login` and `max_age` a request asked, beside `redirect_to`, to hand to a login it starts elsewhere (an upstream's), so that login is new too.
 
 ## Depends on
 - `kernel`, `http`, `request-source`, `url-setting`, `clients`, `redirect-uris`, `reauth`, `session`, `consent`, `code-grant`, `issuer`, `grants` (the audience rule), `token-endpoint` (error answers), `client-allowance`, `tokens`, `login-gates`, `acr`, `rate-limit`, `audit`

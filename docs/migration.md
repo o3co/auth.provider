@@ -16,6 +16,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 - [Behavior changes](#behavior-changes)
 - [From 0.18.0-rc.1](#from-0180-rc1)
 - [From 0.18.0-rc.2](#from-0180-rc2)
+- [From 0.18.0-rc.3](#from-0180-rc3)
 - [Operational notes](#operational-notes)
 
 ## Before you start
@@ -100,10 +101,11 @@ MFA factors and upstream tokens are sealed, so dumping them needs 0.17's sealing
 
 1. Generate the app with `create-auth-provider`, naming the modules you use (for example `@mod/authorize`, `@mod/code-grant`, `@mod/refresh`, `@mod/oidc`). Their default wirings and bridges are added for you, and one log sink (`log-stdout`) unless you name another.
 2. Write the app's `application.conf`, in its `config` directory, from your 0.17 settings, section by section, with the [mapping](#configuration-mapping) below. Start from the file `create-auth-provider` writes.
-3. Move `clients.yaml` entries into `clients.registered` and `users.yaml` entries into `users.registered`, keeping client secrets as their bcrypt hashes.
-4. Point the app at an empty Redis (or a new `redis.prefix`) that meets the [requirements](#redis).
-5. Start the app. A refused boot exits with status 78 and prints one `refused <where>: <reason>` line per problem on standard error; fix them and start again. Refusals name the setting, never its value.
-6. Run your clients against it, paying attention to the [behavior changes](#behavior-changes).
+3. Remove 0.17's environment variables. 0.18 reads a variable only where your HOCON writes `${?VAR}`, so a 0.17 variable left in the environment is ignored without a word, and the setting it controlled takes its 0.18 default: `OAUTH_ACCESS_TOKEN_EXPIRES_IN` left set, say, changes no access token's lifetime. Before you upgrade, delete every 0.17 variable from the environment, the orchestrator's manifests and the secret store, and write each value you keep into `application.conf`, or bind it there with `${?VAR}` under a name of your own. Boot does not tell you of one left set.
+4. Move `clients.yaml` entries into `clients.registered` and `users.yaml` entries into `users.registered`, keeping client secrets as their bcrypt hashes.
+5. Point the app at an empty Redis (or a new `redis.prefix`) that meets the [requirements](#redis).
+6. Start the app. A refused boot exits with status 78 and prints one `refused <where>: <reason>` line per problem on standard error; fix them and start again. Refusals name the setting, never its value.
+7. Run your clients against it, paying attention to the [behavior changes](#behavior-changes).
 
 ## How configuration works now
 
@@ -148,7 +150,7 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 | `key-store.local.algorithm` | `keys.signing.alg` | Required (`EdDSA`, `ES256`, `RS256`, `HS256`) |
 | `key-store.local.kid` | `keys.signing.kid` | Required; 1–128 of `A-Za-z0-9._~-` |
 | `key-store.local.privateKey`, `privateKeyPath` | `keys.signing.private-key` | PKCS #8 PEM text; no file paths |
-| `key-store.local.secret` | `keys.signing.secret` | `oidc` needs an asymmetric key |
+| `key-store.local.secret` | `keys.signing.secret` | `oidc` needs an asymmetric key. 0.17 took the string's own bytes as the HMAC key; 0.18 decodes the value (hex where it is whole bytes of hex, else base64) and takes the decoded bytes, so a value copied as written boots with other key bytes, and every token 0.17 signed, and every party holding that string, no longer match. To keep the same key, write the hex of the old string's UTF-8 bytes (`printf %s "$OLD" \| od -An -v -tx1 \| tr -d ' \n'`); the floor of 32 bytes of 8 byte values or more still applies |
 | `key-store.local.previousKeys` | `keys.previous` (`kid`, `alg`, `public-key`, `expires-at`) | `alg` per entry; asymmetric only |
 
 ### Clients
@@ -348,7 +350,7 @@ A proxy in front of the session grant passes `Origin` and `Sec-Fetch-Site` throu
 | 0.17 | 0.18 | Notes |
 |---|---|---|
 | `oauth-session.enabled` | compose `session-grant` + `session-tokens` | |
-| `allowedGrantTypes` holding `session` | `sections.token-endpoint.grants` holding `session` | Always enforced; public clients may use it too |
+| `allowedGrantTypes` holding `session` | `sections.client-allowance.grants` holding `session` | Always enforced; public clients may use it too |
 | `oauth.requireEmailVerified` (for the session grant) | compose `verified-email` | One policy for every grant but `refresh_token` and `client_credentials`; refused as before (`invalid_grant`) |
 
 ### Client ID Metadata Documents
@@ -587,7 +589,7 @@ Upstream links and MFA enrollment are no longer kept by the ledger. An upstream 
 
 A ledger that suspends a user stops new logins and grants by its answers. To end the user's open sessions and issued tokens as well, compose `subject-revocation-http` and have the ledger post the subject to `/ledger/subject-revocations`; see [Revoking a user from the ledger](runbook.md#revoking-a-user-from-the-ledger).
 
-A ledger can also be asked for a user by subject, so a user who signs in upstream has the ledger's attributes, such as the address `mfa-email` mails: set `users-http.subject-url`. It is posted `{"subject"}` the same way; a `200` with an `id` is the user (no `username` asked), `404` and `410` are no such user, and anything else, `401` and `403` included, is unavailable. Likewise `users-http.upstream-url` is posted `{"idp", "subject"}` to look a user up by upstream identity, read the same way; with it, the ledger's answer is the last word, and links users keeps are not read. With a `credential`, every URL must be at one origin. Reading the password call's `401` as no such user is kept for 0.17's ledgers, and is to go in a later release, after which it reads as a lookup's does; a `403` is already unavailable.
+A ledger can also be asked for a user by subject, so a user who signs in upstream has the ledger's attributes, such as the address `mfa-email` mails: set `users-http.subject-url`. It is posted `{"subject"}` the same way; a `200` with an `id` is the user (no `username` asked), `404` and `410` are no such user, and anything else, `401` and `403` included, is unavailable. Likewise `users-http.upstream-url` is posted `{"idp", "subject"}` to look a user up by upstream identity, read the same way; with it, the ledger's answer is the last word, and links users keeps are not read. A lookup's `404` reads as no such user whatever sent it, and nothing is logged: the ledger must refuse a caller it does not accept with `401` or `403`, never `404`, and a gateway in front of it that answers an unknown route `404` (a mistyped `subject-url` or `upstream-url`, a route not deployed) makes every user unknown, so a federated login answers `unknown_user` and a subject's attributes drop out of its tokens. With a `credential`, every URL must be at one origin. Reading the password call's `401` as no such user is kept for 0.17's ledgers, and is to go in a later release, after which it reads as a lookup's does; a `403` is already unavailable.
 
 ### MFA and federation
 
@@ -631,9 +633,36 @@ A ledger can also be asked for a user by subject, so a user who signs in upstrea
 - `/_healthcheck` still answers `200 {"status":"ok"}`, now with `Content-Type: application/json` (no charset) and `Cache-Control: no-store`. Probes that match the exact content type need updating.
 - `/readyz` answers `{"status":"ready"}` or `{"status":"unready"}` only; the `checks` list is gone.
 
+### Log and audit lines
+
+Both streams are still one JSON object per line on standard output, but neither line keeps 0.17's shape. A log pipeline that routes or alerts on 0.17's fields stops matching without an error: a filter on `name == "audit"` no longer separates the audit trail, a numeric `level` threshold matches nothing, and `msg` and the `audit.*` fields are gone. Change those filters before you upgrade.
+
+| | 0.17 | 0.18 |
+|---|---|---|
+| Log line (`log-stdout`) | pino's: `level` a number (`30`, `40`, …), `time`, `name: "provider"`, `msg` | `level` (a string: `trace`, `debug`, `info`, `warn`, `error` or `fatal`), `at` (epoch ms) and `event` first, then the line's fields; no `name`, `time` or `msg` |
+| Audit line (`audit-stdout`) | pino's, with `name: "audit"`, the event type as `msg` and the event under `audit` | `kind`, `at` (epoch ms), and `subject` and `attributes` where given; no `level`, `name` or `msg` |
+| Telling them apart | `name` (`provider` or `audit`) | A line with `level` is a log line; a line with `kind` and no `level` is an audit event |
+
+```json
+{"level":"info","at":1792502666577,"event":"http.listening","port":18080}
+{"kind":"token.issued","attributes":{"client":"svc-client","source":"127.0.0.1","grant_type":"client_credentials"},"at":1792502671322}
+```
+
+A threshold on pino's numbers becomes a set of names: `level >= 40` is `level` in `warn`, `error` or `fatal`. An alert on `msg` matches `event` on a log line and `kind` on an audit line. An audit event's fields map as below; each event's attributes are in the [audit event reference](audit-events.md).
+
+| 0.17 (`audit.*`) | 0.18 |
+|---|---|
+| `type` | `kind` |
+| `timestamp` (an ISO time) | `at` (epoch ms) |
+| `subject` | `subject` |
+| `clientId` | `attributes.client` |
+| `ip` | `attributes.source` |
+| `userAgent` | `attributes.userAgent`, on the events that carry it |
+| `details.*` | `attributes.*` |
+
 ## From 0.18.0-rc.1
 
-Coming from rc.1, read this section, then [From 0.18.0-rc.2](#from-0180-rc2).
+Coming from rc.1, read this section, then [From 0.18.0-rc.2](#from-0180-rc2) and [From 0.18.0-rc.3](#from-0180-rc3).
 
 - **Sealing keys**: `seal.keys` is refused at boot; write its first key as `seal.current` and the rest as `seal.previous`. Rotating a key now has a procedure, in the [runbook](runbook.md#rotating-the-sealing-key).
 - **MFA factor lists written by rc.1** hold no subject, so `reseal` cannot seal their secrets again and counts them as left (exit 2) until the user next proves or changes a factor, which writes the subject. While such lists remain, do not retire a `previous` key that sealed them.
@@ -681,7 +710,7 @@ Coming from rc.1, read this section, then [From 0.18.0-rc.2](#from-0180-rc2).
 
 ## From 0.18.0-rc.2
 
-What changed since rc.2. Coming from rc.1, read [From 0.18.0-rc.1](#from-0180-rc1) first.
+What changed since rc.2, before [From 0.18.0-rc.3](#from-0180-rc3). Coming from rc.1, read [From 0.18.0-rc.1](#from-0180-rc1) first.
 
 - **Trusted proxies**: a `http.trusted-proxies` entry covering every address of a family (any `/0`, or every IPv4 address mapped into IPv6, as `::ffff:0:0/96` or `::/1`) now refuses boot at that entry, as it would make every client a proxy; list the proxies' own addresses.
 - **zod**: the packages take `zod` as a required peer (`^4.6.0`); an app depends on `zod` itself, at the version the packages take.
@@ -708,6 +737,23 @@ What changed since rc.2. Coming from rc.1, read [From 0.18.0-rc.1](#from-0180-rc
 - **Held logins** (a federation login a gate holds, its upstream tokens sealed until it opens) are kept by the new `upstream-handoff`, in a new space, `upstream-handoff-store.held-logins`, which the store must replicate; `federation-store.transactions` is no longer used. A login held before the upgrade and resumed after it, before its deadline, opens without handing its upstream tokens over; one resumed past its deadline is refused, as before. The log events of handing tokens over are renamed from `federation.*` to `upstream-handoff.*`: `receiver_failed`, `link_join_failed`, `link_join_undo_failed` and `held_login_refused`.
 - **A login through an upstream that a second factor holds** used to answer the upstream's callback with JSON a browser cannot act on. Set `federation.held-page`, a page on the public origin that goes on with it, as the [login page guide](login-page.md#a-login-through-an-upstream-that-a-second-factor-holds) describes; `federation` refuses to boot where its origin is another. During a rolling upgrade, set it only once every instance runs this version: an earlier one answers that page's read `400`. Rolling back makes the logins held meanwhile answer `400` until their transactions end, 30 minutes at most.
 - **An app generated with an earlier release candidate that composes `federation`**: its `src/main.ts` imports `federation-store` and none of `upstream-round-trip`, `upstream-round-trip-store`, `upstream-handoff` and `upstream-handoff-store`, and `federation` now refuses to boot without the round trips. Generate the app again, or add those four modules and remove `federation-store`. Its configuration is unchanged.
+
+## From 0.18.0-rc.3
+
+What changed since rc.3. Coming from an earlier release candidate, read the sections above first.
+
+- **A login page that offers sign-in through an upstream**: the provider now adds `prompt=login` and `max_age` beside `redirect_to` when the client asked them. Hand them on to the upstream's start (`/session/oauth/federation/<idp>`), so the upstream logs the user in again; see the [login page guide](login-page.md).
+- **A request carrying a re-authentication record that is not its own** (spent, unknown, or made for other parameters, as when a demand was taken out of its return): it is refused with `login_required`. A login page that returns to `redirect_to` as it was given is not affected.
+- **A request back from its login still not new enough**: it is refused with `login_required` whether the session's authentication time is known or not. rc.3 sent it to the login page again.
+- **Discovery**: the metadata says `authorization_response_iss_parameter_supported: true`; every redirect answer already carried `iss`.
+- **0.17's environment variables** are not read, and nothing warns of one left set: if the environment or secret store you carried from 0.17 still holds them, remove them as [Migration steps](#migration-steps) says, writing the values you keep into the configuration.
+- **A user ledger's lookups** read a `404` as no such user, whatever sent it: refuse a caller the ledger does not accept with `401` or `403`, never `404`, and check that each URL reaches the route itself, as [User ledger over HTTP](#user-ledger-over-http) says.
+- **Log and audit lines** have the shape they had in earlier release candidates, but no earlier guide described it, nor how 0.17's filters stop matching: see [Log and audit lines](#log-and-audit-lines).
+- **An HS256 secret carried from 0.17**: 0.18 decodes `keys.signing.secret` and takes the decoded bytes as the key, where 0.17 took the string's own bytes; a value copied as written signs with another key. The [mapping](#issuer-and-signing-keys) says how to keep 0.17's.
+- **A client's session grant** is allowed under `sections.client-allowance.grants`; an earlier guide named `sections.token-endpoint.grants`, which refuses boot as an unknown section.
+- **An address in `outbound.deny`** is refused also where a name resolves to it, not only where a URL writes it: a name that resolves to an address you denied is no longer reached. An IPv4 address carried in IPv6 counts as the IPv4 one.
+- **A federation grant's renewals** count with its lodgings: a client's renewals and lodgings together take `federation-grants.lodges` per `lodge-window`, and past it a renewal answers `429` with `retry-after`. Raise `lodges` where clients renew often.
+- **`federation` with no IdP** still boots, but warns `federation.no_idps` at each boot, as every login answers not found.
 
 ## Operational notes
 

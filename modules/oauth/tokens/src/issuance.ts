@@ -52,9 +52,12 @@ export function issuing(
 	return {
 		admits: judge,
 		issue: async (request, limits) => {
-			const judged = await judge(request);
+			// One frozen copy, taken before anything waits, is both what the policies judge and what is
+			// signed: a caller changing its own grant or limits meanwhile changes neither.
+			const taken = deepFreeze(structuredClone({ request, limits }));
+			const judged = await judge(taken.request);
 			if (judged.kind === "refused") return judged;
-			return { kind: "issued", access: await issueAccess(request.grant, limits) };
+			return { kind: "issued", access: await issueAccess(taken.request.grant, taken.limits) };
 		},
 	};
 }

@@ -2,6 +2,8 @@
 
 The provider has no login screen of its own. When a browser asks the authorization endpoint without a session fresh enough, the provider sends it to the page you set as `authorize.login-page`, adding `redirect_to`: the URL to come back to. Your page asks for the username and password and makes two requests to the provider. This guide gives each request and answer; it does not prescribe how the page looks.
 
+When the client asked for a new login (`prompt=login`) or a recent one (`max_age`), the provider adds those two beside `redirect_to`. A page that offers sign-in through an upstream hands them on to the upstream's start (`GET /session/oauth/federation/<idp>?redirect_to=…&prompt=login&max_age=…`), so the upstream asks the user to log in again too. A request that comes back from its login still not new enough is refused with `login_required`; it is not sent to the page again.
+
 ## Where the page is served
 
 Serve the page from the provider's public origin (`http.public-origin`), for example behind the same reverse proxy. The login is refused unless it carries same-origin evidence (an `Origin` that is the public origin) or the double-submit token, and any cross-origin evidence refuses it; the cookies both requests set belong to that origin. Where the deployment can make cookies secure, a request over plain http is refused.

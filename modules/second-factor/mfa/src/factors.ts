@@ -279,6 +279,11 @@ export function factorDecisions(p: FactorParts): Factors {
 			const asFirst = found.first || from?.kind === "login";
 			// The mark goes first: a first factor never stands unwitnessed, and another binding's mark closes this one.
 			const witness = asFirst ? p.witness : undefined;
+			const unique = found.kind.uniqueSecret?.({ secret: found.secret, state });
+			// A value another factor holds is refused before the mark, which would else stay with nothing beside it.
+			if (witness && unique !== undefined && (await records.taken(found.kind.kind, unique))) {
+				return { kind: "duplicate" };
+			}
 			if (witness) {
 				const owned = found.token !== undefined && (await markedBy(witness, subject, found.token));
 				if (!owned) return closed(subject, found.kind.kind, "competing");
@@ -317,7 +322,6 @@ export function factorDecisions(p: FactorParts): Factors {
 				await dropped(subject, ours);
 				return closed(subject, factor.kind, "reset-cleared");
 			}
-			const unique = found.kind.uniqueSecret?.({ secret: found.secret, state });
 			if (unique !== undefined && !(await records.claim(subject, factor.kind, unique, fid))) {
 				// Another factor holds the value: this one goes again.
 				await records.decide(subject, (all) => ({

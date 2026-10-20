@@ -1,5 +1,5 @@
 import { type Site, site } from "@mod/http";
-import type { BuildContext, Refusal } from "@mod/kernel";
+import { type BuildContext, isUnavailable, type Refusal } from "@mod/kernel";
 import { type IdpType, idpTypes, type Upstream, UpstreamMismatch } from "@mod/upstreams";
 import { callbackPath, federationIdps, type Idp, proves } from "../round-trip/round-trip.ts";
 import type { Settings } from "../section.ts";
@@ -17,6 +17,8 @@ export async function idpsIn(c: BuildContext<Settings>) {
 		site: await c.get(site),
 	});
 	if (refusals.length > 0) c.refuseAll(refusals);
+	// Composed with none, every login answers not found; a deployment still configuring may mean it.
+	if (idps.size === 0) c.log.warn("federation.no_idps");
 	return idps;
 }
 
@@ -72,7 +74,10 @@ async function openUpstream(
 		if (error instanceof UpstreamMismatch) {
 			return { refusal: { where: [at.where, ...error.at].join("."), reason: error.message } };
 		}
-		return { refusal: { where: at.where, reason: "the upstream does not match its settings" } };
+		const reason = isUnavailable(error)
+			? "the upstream could not be reached"
+			: "the upstream does not match its settings";
+		return { refusal: { where: at.where, reason } };
 	}
 }
 

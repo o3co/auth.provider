@@ -15,7 +15,7 @@ import { policyOf, policySettings } from "@mod/outbound-policy";
 import { configuredUrl } from "@mod/url-setting/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DestinationRefused, type OutboundUnavailable } from "../src/contract.ts";
-import { outboundOver, section } from "../src/module.ts";
+import { lookupsAtOnce, outboundOver, section } from "../src/module.ts";
 import { type Resolver, send } from "../src/transport.ts";
 
 /** The operator's policy at its plainest, checking the addresses a test's admitted URL reaches. */
@@ -135,6 +135,7 @@ const over = (
 	resolve: Resolver,
 	settings: Record<string, unknown> = {},
 	deadlineOf?: (ms: number) => AbortSignal,
+	lookups?: number,
 ) =>
 	outboundOver(
 		section.parse({
@@ -145,6 +146,7 @@ const over = (
 		resolve,
 		{},
 		deadlineOf,
+		lookups,
 	);
 /** Lets pending work run until `done` holds, by turns of the event loop, never by the clock. */
 const until = async (done: () => boolean) => {
@@ -375,6 +377,39 @@ describe("outbound", () => {
 		await until(() => calls.length === 2);
 		deadlines.at(-1)?.abort();
 		expect(await again).toBe("unavailable: timeout");
+	});
+
+	it("lets no more names resolve at once than half the threadpool, so slow names never take all of it", async () => {
+		const settles: ((addresses: readonly string[]) => void)[] = [];
+		const slow: Resolver = () =>
+			new Promise((done) => {
+				settles.push(done);
+			});
+		const deadlines: AbortController[] = [];
+		const deadlineOf = () => {
+			const deadline = new AbortController();
+			deadlines.push(deadline);
+			return deadline.signal;
+		};
+		// Sixteen requests may run, yet a threadpool of four takes two lookups at once.
+		const outbound = over(slow, { "max-concurrent": 16 }, deadlineOf, lookupsAtOnce("4", 16));
+		const held = [failure(outbound.fetch(svc("/ok"))), failure(outbound.fetch(svc("/ok")))];
+		await until(() => settles.length === 2);
+		expect(await failure(outbound.fetch(svc("/ok")))).toBe("unavailable: busy");
+		// An address written in the URL needs no lookup, so it is still reached.
+		expect((await outbound.fetch(`http://127.0.0.1:${port}/ok`)).status).toBe(200);
+		for (const deadline of deadlines) deadline.abort();
+		expect(await Promise.all(held)).toEqual(["unavailable: timeout", "unavailable: timeout"]);
+		for (const settle of settles) settle(["127.0.0.1"]);
+	});
+
+	it("takes half the threadpool, at least one and never more than max-concurrent, four threads when unset or unreadable", () => {
+		expect(
+			[undefined, "", "4", "x", "0", "-2", "1", "2", "3", "8", "64", "1024"].map((size) =>
+				lookupsAtOnce(size, 16),
+			),
+		).toEqual([2, 2, 2, 2, 2, 2, 1, 1, 2, 4, 16, 16]);
+		expect(lookupsAtOnce("8", 1)).toBe(1);
 	});
 
 	it("refuses a switch of protocols and gives its place back, and waits past an informational answer", async () => {

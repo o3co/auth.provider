@@ -286,6 +286,41 @@ it("builds no bundle the workspace does not ship", () => {
 	expect(existsSync(join(out, "feature"))).toBe(false);
 });
 
+it("refuses a shipped member that depends on a test runner, and builds nothing", () => {
+	const declared = join(root, "modules/feature/app/package.json");
+	const before = readFileSync(declared, "utf8");
+	const read = JSON.parse(before);
+	writeFileSync(
+		declared,
+		JSON.stringify({
+			...read,
+			dependencies: { ...read.dependencies, vitest: "5.0.4", "@vitest/expect": "5.0.4" },
+		}),
+	);
+	try {
+		const { built, problems } = buildBundles({
+			bundles: bundles(),
+			release: { version: "0.18.0" },
+			out: join(root, "dist-runner"),
+		});
+		expect(problems).toEqual([
+			"@mod/app: depends on vitest, a test runner; an app would install it",
+			"@mod/app: depends on @vitest/expect, a test runner; an app would install it",
+		]);
+		expect(built).toEqual([]);
+		// A bundle the workspace does not ship is not asked.
+		const [base, feature] = bundles() as [Bundle, Bundle];
+		const unshipped = buildBundles({
+			bundles: [base, { ...feature, shipped: false }],
+			release: { version: "0.18.0" },
+			out: join(root, "dist-runner-unshipped"),
+		});
+		expect(unshipped.problems).toEqual([]);
+	} finally {
+		writeFileSync(declared, before);
+	}
+});
+
 it("tells what does not build, by file", () => {
 	write("modules/base/kernel/src/broken.ts", `export const n: number = "not a number";\n`);
 	write(

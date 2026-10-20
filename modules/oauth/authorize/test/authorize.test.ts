@@ -418,7 +418,10 @@ describe("authorize: session and consent", () => {
 		expect(asked.at?.pathname).toBe("/login");
 		const resume = new URL(asked.at?.searchParams.get("redirect_to") ?? "");
 		expect(resume.searchParams.get("prompt")).toBe("login");
-		expect((await authorize(resume.search.slice(1), old)).at?.pathname).toBe("/login");
+		// Back from its login with a session no newer: refused, never sent round again.
+		expect((await authorize(resume.search.slice(1), old)).at?.searchParams.get("error")).toBe(
+			"login_required",
+		);
 		const again = await authorize(request({ prompt: "login" }), old);
 		const resumed = new URL(again.at?.searchParams.get("redirect_to") ?? "");
 		now += 1000;
@@ -426,7 +429,10 @@ describe("authorize: session and consent", () => {
 		expect((await authorize(resumed.search.slice(1), fresh)).at?.searchParams.has("code")).toBe(
 			true,
 		);
-		expect((await authorize(resumed.search.slice(1), fresh)).at?.pathname).toBe("/login");
+		// The record is spent: coming back with it again is refused, not sent round.
+		expect((await authorize(resumed.search.slice(1), fresh)).at?.searchParams.get("error")).toBe(
+			"login_required",
+		);
 	});
 });
 
@@ -450,7 +456,7 @@ it("counts a login from the moment the re-authentication was asked, to the milli
 	};
 	const sameSecond = await resumeOf();
 	const early = await login("alice", ["pwd"], now - 500);
-	expect((await authorize(sameSecond, early)).at?.pathname).toBe("/login");
+	expect((await authorize(sameSecond, early)).at?.searchParams.get("error")).toBe("login_required");
 	const atTheMoment = await resumeOf();
 	const then = await login("alice", ["pwd"], now);
 	expect((await authorize(atTheMoment, then)).at?.searchParams.has("code")).toBe(true);
@@ -792,13 +798,18 @@ describe("authorize: what the reviews asked to pin down", () => {
 			new URL(theirs.at?.searchParams.get("redirect_to") ?? "").searchParams.get("reauth") ?? "";
 		now += 10_000;
 		const victim = await login();
+		// Another request's record is refused outright, never counted and never sent round.
 		expect(
-			(await authorize(request({ prompt: "login", reauth: stolen }), victim)).at?.pathname,
-		).toBe("/login");
+			(await authorize(request({ prompt: "login", reauth: stolen }), victim)).at?.searchParams.get(
+				"error",
+			),
+		).toBe("login_required");
 		now += 1000;
-		expect((await authorize(request({ max_age: "0", reauth: stolen }), victim)).at?.pathname).toBe(
-			"/login",
-		);
+		expect(
+			(await authorize(request({ max_age: "0", reauth: stolen }), victim)).at?.searchParams.get(
+				"error",
+			),
+		).toBe("login_required");
 	});
 
 	it("asks for a newer login past max_age, and lets the resumed request through after one", async () => {
@@ -947,7 +958,9 @@ it("binds a re-authentication to the whole request", async () => {
 	now += 1000;
 	const fresh = await login();
 	resume.searchParams.set("state", "changed");
-	expect((await authorize(resume.search.slice(1), fresh)).at?.pathname).toBe("/login");
+	expect((await authorize(resume.search.slice(1), fresh)).at?.searchParams.get("error")).toBe(
+		"login_required",
+	);
 });
 
 it("revokes a code's token when its session logs out later", async () => {
@@ -1025,9 +1038,10 @@ it("does not count a re-authentication made for the same client with another sta
 	now += 1000;
 	const fresh = await login();
 	expect(
-		(await authorize(request({ prompt: "login", reauth: first, state: "other" }), fresh)).at
-			?.pathname,
-	).toBe("/login");
+		(
+			await authorize(request({ prompt: "login", reauth: first, state: "other" }), fresh)
+		).at?.searchParams.get("error"),
+	).toBe("login_required");
 	const otherChallenge = createHash("sha256").update("x".repeat(43)).digest("base64url");
 	expect(
 		(
@@ -1035,8 +1049,8 @@ it("does not count a re-authentication made for the same client with another sta
 				request({ prompt: "login", reauth: second, code_challenge: otherChallenge }),
 				fresh,
 			)
-		).at?.pathname,
-	).toBe("/login");
+		).at?.searchParams.get("error"),
+	).toBe("login_required");
 });
 
 it("writes nothing for a plain request without a session, even when writes would fail", async () => {
@@ -1044,6 +1058,83 @@ it("writes nothing for a plain request without a session, even when writes would
 	down.reauths.failNext("save");
 	const res = await authorize(request());
 	expect(res.at?.pathname).toBe("/login");
+});
+
+it("refuses a request back with a re-authentication record its parameters no longer match, as when the demand was taken out of it", async () => {
+	const { authorize, login } = await serve();
+	const old = await login();
+	now += 10_000;
+	for (const asked of [{ prompt: "login" }, { max_age: "5" }]) {
+		const sent = await authorize(request(asked), old);
+		const resume = new URL(sent.at?.searchParams.get("redirect_to") ?? "");
+		const reauth = resume.searchParams.get("reauth") ?? "";
+		// The demand dropped from the return, the record kept.
+		const stripped = await authorize(request({ reauth }), old);
+		expect(stripped.at?.searchParams.get("error"), JSON.stringify(asked)).toBe("login_required");
+		expect(stripped.at?.searchParams.has("code")).toBe(false);
+	}
+	// A record no one made is refused alike.
+	const made = await authorize(request({ reauth: "x".repeat(43) }), old);
+	expect(made.at?.searchParams.get("error")).toBe("login_required");
+	// Without the record, the demand is asked afresh, as any request's.
+	const again = await authorize(request({ prompt: "login" }), old);
+	const resume = new URL(again.at?.searchParams.get("redirect_to") ?? "");
+	expect(resume.searchParams.has("reauth")).toBe(true);
+});
+
+it("takes max_age=0 as a login new to this request: met by one made after the asking, refused without one", async () => {
+	const { authorize, login } = await serve();
+	const old = await login();
+	now += 1000;
+	const sent = await authorize(request({ max_age: "0" }), old);
+	expect([sent.at?.pathname, sent.at?.searchParams.get("max_age")]).toEqual(["/login", "0"]);
+	const resume = new URL(sent.at?.searchParams.get("redirect_to") ?? "").search.slice(1);
+	expect((await authorize(resume, old)).at?.searchParams.get("error")).toBe("login_required");
+	const second = await authorize(request({ max_age: "0" }), old);
+	const resumed = new URL(second.at?.searchParams.get("redirect_to") ?? "").search.slice(1);
+	now += 1000;
+	const fresh = await login();
+	expect((await authorize(resumed, fresh)).at?.searchParams.has("code")).toBe(true);
+});
+
+it("tells the login page the prompt=login and max_age the request asked, beside redirect_to, and nothing it did not ask", async () => {
+	const { authorize, login } = await serve();
+	const old = await login();
+	now += 120_000;
+	const both = await authorize(request({ prompt: "login", max_age: "60" }), old);
+	expect([
+		both.at?.pathname,
+		both.at?.searchParams.get("prompt"),
+		both.at?.searchParams.get("max_age"),
+	]).toEqual(["/login", "login", "60"]);
+	const aged = await authorize(request({ max_age: "60" }), old);
+	expect([aged.at?.searchParams.get("prompt"), aged.at?.searchParams.get("max_age")]).toEqual([
+		null,
+		"60",
+	]);
+	const plain = await authorize(request());
+	expect([plain.at?.searchParams.has("prompt"), plain.at?.searchParams.has("max_age")]).toEqual([
+		false,
+		false,
+	]);
+});
+
+it("refuses a request back from its login whose session is still not new enough, the time known, rather than sending it round again", async () => {
+	const { authorize, login } = await serve();
+	const old = await login();
+	now += 10_000;
+	const asked = await authorize(request({ prompt: "login" }), old);
+	const resume = new URL(asked.at?.searchParams.get("redirect_to") ?? "");
+	now += 1000;
+	// A login whose authentication time stays before the asking, as an upstream's within its clock allowance may.
+	const stale = await login("alice", ["pwd"], now - 5000);
+	const back = await authorize(resume.search.slice(1), stale);
+	expect(back.at?.searchParams.get("error")).toBe("login_required");
+	const aged = await authorize(request({ max_age: "1" }), stale);
+	const resumed = new URL(aged.at?.searchParams.get("redirect_to") ?? "");
+	expect((await authorize(resumed.search.slice(1), stale)).at?.searchParams.get("error")).toBe(
+		"login_required",
+	);
 });
 
 it("never counts a login whose authentication time is unknown as the newer one prompt=login asks, and refuses it back from the login", async () => {
@@ -1265,7 +1356,7 @@ it("offers a contributed acr unless the operator's table names the same acr", as
 	expect(met.at?.searchParams.has("code")).toBe(true);
 });
 
-it("names among the issuer's metadata where it is, that it answers with a code in the query, PKCE by S256 alone, and no request_uri", async () => {
+it("names among the issuer's metadata where it is, that it answers with a code in the query, PKCE by S256 alone, no request_uri, and `iss` on every redirect answer", async () => {
 	const published = contract<readonly MetadataItem[]>("published");
 	const reader = defineModule({ name: "reader" }, (m) => [
 		m.provide(published).by((c) => c.collect(metadata)),
@@ -1280,6 +1371,11 @@ it("names among the issuer's metadata where it is, that it answers with a code i
 	expect(items).toContainEqual({ name: "code_challenge_methods_supported", value: ["S256"] });
 	expect(items).toContainEqual({ name: "response_modes_supported", value: ["query"] });
 	expect(items).toContainEqual({ name: "request_uri_parameter_supported", value: false });
+	// Every redirect answer carries `iss` (RFC 9207).
+	expect(items).toContainEqual({
+		name: "authorization_response_iss_parameter_supported",
+		value: true,
+	});
 });
 
 it("takes its pages only as https URLs (http only on a loopback host) kept as written: no userinfo, no fragment", () => {

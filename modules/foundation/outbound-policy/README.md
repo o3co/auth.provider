@@ -18,7 +18,7 @@
 - `hostEntryOf`: an operator's host list entry, as an entry or a narrower's host; `withinHosts`: whether a URL's host is among hosts.
 
 ## Invariants
-- No host is reached by name unless `allow` names it (`.name` for it and the names under it) or `allow-any-public` is set, never both; `deny` is checked first.
+- No host is reached by name unless `allow` names it (`.name` for it and the names under it) or `allow-any-public` is set, never both; `deny` is checked first. An address `deny` names is refused also where a name resolved to it, an IPv4 address carried in IPv6 as the IPv4 one; a name `deny` names is the URL's host alone.
 - An `allow` or `deny` entry that is not a host, a `plain-loopback` entry that is not a host and a port written as 1–65535 without a leading zero, or a host list entry that is neither a host nor `.name` is refused. An entry is read as written: letters, digits and hyphens, or a whole address; only case and Unicode are corrected.
 - A URL is https, without user information, on no port the Fetch standard calls bad nor port 0. Plain http reaches a named `plain-loopback` pair at loopback addresses alone; signed material also takes it at public addresses, from the caller's hosts only.
 - Hosts compare lowercase, in punycode, without a trailing dot, in canonical IP form, with IPv4 carried in IPv6 as IPv4; an empty label is denied.

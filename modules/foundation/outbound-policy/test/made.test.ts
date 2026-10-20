@@ -31,6 +31,25 @@ describe("a policy made from the operator's settings", () => {
 		expect(reasonOf(() => policy.admitAddresses([], admitted))).toBe("special-address");
 	});
 
+	it("refuses an address a deny entry names, whatever name resolved to it, in IPv6 carrying it too", () => {
+		const policy = made({ deny: ["93.184.216.34", "2001:db8::7", ".bad.example"] });
+		const admitted = policy.admit("https://ok.example/");
+		for (const addresses of [
+			["93.184.216.34"],
+			["8.8.8.8", "93.184.216.34"],
+			["::ffff:93.184.216.34"],
+			["::ffff:5db8:d822"],
+			["2001:db8:0:0:0:0:0:7"],
+		]) {
+			expect(
+				reasonOf(() => policy.admitAddresses(addresses, admitted)),
+				addresses.join(),
+			).toBe("denied");
+		}
+		// A name entry denies the URL's host alone; addresses another name resolved to stay reachable.
+		expect(policy.admitAddresses(["8.8.8.8"], admitted)).toEqual(["8.8.8.8"]);
+	});
+
 	it("cuts a request at the caps a caller narrows, never widens, and at the signed cap for signed material", () => {
 		const policy = made({
 			timeout: "2s",
