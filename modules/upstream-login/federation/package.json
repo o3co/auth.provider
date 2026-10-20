@@ -6,7 +6,6 @@
 	"kind": "adapter",
 	"replaces": "@mod/upstreams",
 	"default": true,
-	"storeWiring": true,
 	"exports": {
 		".": "./src/contract.ts",
 		"./module": "./src/module.ts",
