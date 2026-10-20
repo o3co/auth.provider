@@ -205,8 +205,17 @@ describe.runIf(!areaTarget().differs("federation-login-held-at-gates"))(
 				const login = await read(b);
 				expect(login.purpose).toBe("enroll-login");
 				const { proved } = await d.bind(b, login.transaction);
-				// Bound with no binding proof, the factor counts from the next login; after one, it lets this one in.
-				expect(await b.session()).toBe(proved);
+				if (proved) {
+					// Where the target asks a binding proof first, the factor bound after it lets this login in.
+					expect(await b.session()).toBe(true);
+				} else {
+					// Where it asks none, the factor counts from the next login, and this one stays held.
+					expect(await b.session()).toBe(false);
+				}
+				// Either way, the next login is held to prove the factor bound.
+				const next = await d.upstreamLogin("bob");
+				expect([next.answer.status, next.answer.location]).toEqual([303, heldPage]);
+				expect((await read(next.b)).purpose).toBe("login");
 			});
 
 			it("goes on at the held page: the factor proved there lets the login in where it asked, and hands the upstream tokens", async () => {
