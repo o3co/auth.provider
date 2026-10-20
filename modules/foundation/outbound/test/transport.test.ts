@@ -12,6 +12,7 @@ import {
 } from "node:net";
 import { isUnavailable } from "@mod/kernel";
 import { policyOf, policySettings } from "@mod/outbound-policy";
+import { configuredUrl } from "@mod/url-setting/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DestinationRefused, type OutboundUnavailable } from "../src/contract.ts";
 import { outboundOver, section } from "../src/module.ts";
@@ -252,6 +253,10 @@ describe("outbound", () => {
 	it("never follows a redirect, and answers a 304 as it is", async () => {
 		const { resolve } = svcResolver();
 		expect(await failure(over(resolve).fetch(svc("/moved")))).toBe("redirect");
+		// Nor for the operator's own URL: a request reaches no origin but the one admitted.
+		const inside = over(resolve, { "internal-hosts": ["svc.test"] });
+		const own = { internal: configuredUrl(svc("/moved")) };
+		expect(await failure(inside.fetch(svc("/moved"), {}, own))).toBe("redirect");
 		expect((await over(resolve).fetch(svc("/same"))).status).toBe(304);
 	});
 
