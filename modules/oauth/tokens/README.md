@@ -10,7 +10,7 @@
 
 ## Offers
 - Issuance only through `issue`, policies first: `issue(request: grant, grant type, session, `continuing` (set by an issuing side whose grant the policies already let through); limits)` → issued, or refused by the first policy to refuse.
-- The order policies are asked in: tokens' own rule first (an authentication time over 300 s ahead of the clock), then the issuance policies in name order, each asked the grant as its caller verified it; any answer but allowed refuses.
+- The order policies are asked in: tokens' own rule first (an authentication time over 300 s ahead of the clock), then the issuance policies in name order, each asked the grant as its caller verified it; any answer but allowed refuses. All of them answer within `issuance-timeout` together: past it the issuance is unavailable, and the signal each policy is given aborts.
 - `admits` makes the same judgment without issuing; a policy that cannot tell is unavailable. `issue` takes one frozen copy of the request and its limits before anything waits: every policy reads it and the issuing signs it, so neither a policy nor a caller changing its own objects meanwhile changes what is signed.
 - What it issues for: a grant (subject, issued-to, audience, scope; optionally an actor chain, `amr`, an authentication time and `acr`), an expiry cap, a binding, and a lifetime other than the section's (1–86400 s) → the token, its id, expiry and token type.
 - Verification → the id, the grant, the token type (Bearer, or the bound kind's) and the binding; the validity check `sender-binding` admits a request at a resource by.
@@ -19,7 +19,7 @@
 - Extension points: issuance policies (request → allowed / refused with an audit reason and a client description); access conditions, and exactly one subject check (token id, subject, issue time → holds / revoked; unavailable when unknown); a revoked answer fails the token as revoked. A policy reads session-built state late (`c.late`), else boot cycles.
 - Store interface for revoked tokens (id, lifetime → created / exists; id → kept), with its needs: never evicted, survives a crash, does not come back on failover.
 - `jwks_uri` among `issuer`'s metadata: `keys`' key set path on `http`'s public origin; left out without one.
-- Operator section: `access-token-lifetime` (written with its unit, `1s` to `1d` in whole seconds, default `1h`), `revocation` (`denylist` or `unsupported`), `subject-check` (`none` states that no module checks subjects).
+- Operator section: `access-token-lifetime` (written with its unit, `1s` to `1d` in whole seconds, default `1h`), `revocation` (`denylist` or `unsupported`), `issuance-timeout` (written with its unit, `1s` to `1m`, default `10s`), `subject-check` (`none` states that no module checks subjects).
 - `./testing`: the contract test every implementation passes, the store interface's contract test, configuration builders, and a stand-in: in memory, unsigned, ending and reading bindings as `tokens` does.
 
 ## Invariants

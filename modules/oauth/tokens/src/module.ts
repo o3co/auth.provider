@@ -151,7 +151,10 @@ export default defineModule({ name: "tokens", section }, (m) => [
 			};
 		};
 
-		const judge = judging(await c.collect(issuancePolicies), c.clock.now);
+		const timeout = c.section["issuance-timeout"];
+		const judge = judging(await c.collect(issuancePolicies), c.clock.now, () =>
+			AbortSignal.timeout(timeout),
+		);
 		const issueAccess: IssueAccess = async (grant, limits) => {
 			const lifetimeSeconds = lifetimeOf(limits?.lifetimeSeconds, lifetime);
 			const { iat, exp } = expiryOf(c.clock.now(), lifetimeSeconds, limits?.notAfter);
