@@ -19,6 +19,8 @@ export interface Rules {
 	readonly plainLoopback: readonly string[];
 	/** The hosts an operator's own URL may reach at a private address. */
 	readonly internal: readonly string[];
+	/** The `host:port` pairs an operator's own URL may reach over plain http, at private addresses alone. */
+	readonly plainInternal: readonly string[];
 }
 
 /** Ports the Fetch standard calls bad, and port 0. */
@@ -129,7 +131,8 @@ export function isPair(pair: string): boolean {
 	return /^[1-9][0-9]{0,4}$/.test(port) && Number(port) <= 65_535 && isHost(host);
 }
 
-const pairOf = (pair: string) => {
+/** A pair spelled one way: its host as `normalized` spells hosts, its port as written. */
+export const pairOf = (pair: string) => {
 	const { host, port } = splitPair(pair);
 	return `${normalized(host)}:${port}`;
 };
@@ -207,13 +210,21 @@ export function admitUrl(
 		throw new DestinationRefused("not-allowed");
 	}
 	const plain = url.protocol === "http:";
-	const loopback = plain && policy.plainLoopback.some((pair) => pairOf(pair) === `${host}:${port}`);
-	if (plain && !loopback && !signed) throw new DestinationRefused("scheme");
+	const pair = `${host}:${port}`;
+	const loopback = plain && policy.plainLoopback.some((listed) => pairOf(listed) === pair);
 	// Named by its configured URL, the operator's own reach ends at that URL's origin.
 	const own =
 		narrower.internal !== undefined && URL.parse(narrower.internal)?.origin === url.origin;
+	// An outside party's choice never takes the operator's plain reach, whatever else the caller names.
+	const plainInternal =
+		plain &&
+		!loopback &&
+		own &&
+		narrower.outsideChosen !== true &&
+		policy.plainInternal.some((listed) => pairOf(listed) === pair);
+	if (plain && !loopback && !plainInternal && !signed) throw new DestinationRefused("scheme");
 	const internal = own && listed(host, policy.internal);
-	return { url, host, port, plain, loopback, internal };
+	return { url, host, port, plain, loopback, internal, plainInternal };
 }
 
 const isPrivate = (address: string) => {
@@ -230,12 +241,21 @@ function refusing(reach: Pick<Admitted, "loopback" | "internal">): (address: str
 
 /**
  * One special-purpose address refuses them all; a named plain pair reaches loopback alone, and an
- * internal host private addresses too.
+ * internal host private addresses too. A plain-internal pair reaches private addresses alone, every
+ * one of them: a public one among them is `plain-public`, any other `special-address`.
  */
 export function admitAddresses(
 	addresses: readonly string[],
-	reach: Pick<Admitted, "loopback" | "internal">,
+	reach: Pick<Admitted, "loopback" | "internal" | "plainInternal">,
 ): readonly string[] {
+	if (reach.plainInternal) {
+		const outside = addresses.filter((address) => !isPrivate(address));
+		if (addresses.length === 0 || outside.some(isSpecial)) {
+			throw new DestinationRefused("special-address");
+		}
+		if (outside.length > 0) throw new DestinationRefused("plain-public");
+		return addresses;
+	}
 	if (addresses.length === 0 || addresses.some(refusing(reach))) {
 		throw new DestinationRefused("special-address");
 	}
@@ -262,8 +282,10 @@ export function remedyOf(
 		}
 		case "scheme":
 			return url?.protocol === "http:"
-				? "plain http reaches only a host:port that outbound.plain-loopback names; otherwise write the URL with https"
+				? "plain http reaches only a host:port that outbound.plain-loopback names, or, for a URL of your own configuration on a private network, one that outbound.plain-internal names; otherwise write the URL with https"
 				: "only https and http URLs are reached";
+		case "plain-public":
+			return "a host:port outbound.plain-internal names is reached over plain http at private addresses alone, and its name resolved to a public one: write the URL with https, or point the name at the private network";
 		case "userinfo":
 			return "write the URL without a user or password";
 		case "port":
@@ -281,15 +303,17 @@ export function remedyOf(
 	}
 }
 
-/** Why a credential must not go to these URLs: more than one origin, or one neither https nor a named plain-loopback pair. */
+/** Why a credential must not go to these URLs: more than one origin, or one neither https nor a pair plain-loopback or plain-internal names. */
 export function credentialRefusal(
 	urls: readonly string[],
 	plainLoopback: readonly string[],
+	plainInternal: readonly string[] = [],
 ): CredentialRefusal | undefined {
 	const parsed = urls.map((raw) => URL.parse(raw));
 	const named = (url: URL) => {
 		const port = url.port === "" ? 80 : Number(url.port);
-		return plainLoopback.some((pair) => pairOf(pair) === `${normalized(url.hostname)}:${port}`);
+		const pair = `${normalized(url.hostname)}:${port}`;
+		return [...plainLoopback, ...plainInternal].some((listed) => pairOf(listed) === pair);
 	};
 	const sent = (url: URL | null) =>
 		url?.protocol === "https:" || (url?.protocol === "http:" && named(url));
@@ -312,6 +336,7 @@ export function policyOf(settings: PolicySettings): Policy {
 		deny: settings.deny,
 		plainLoopback: settings["plain-loopback"],
 		internal: settings["internal-hosts"],
+		plainInternal: settings["plain-internal"],
 	};
 	const limitsOf = (narrower: Narrower = {}, signed = false): Limits => ({
 		maxBytes: Math.min(
@@ -349,7 +374,7 @@ export function policyOf(settings: PolicySettings): Policy {
 			const reason = refusalOf(url, narrower);
 			return reason && `${reason}: ${remedyOf(reason, url, rules, narrower)}`;
 		},
-		credentialRefusal: (urls) => credentialRefusal(urls, rules.plainLoopback),
+		credentialRefusal: (urls) => credentialRefusal(urls, rules.plainLoopback, rules.plainInternal),
 		listed,
 		limitsOf,
 	};
