@@ -229,6 +229,29 @@ it("runs every area whose module a pattern composes against it, the full templat
 	expect(missing).toEqual([]);
 });
 
+// a2a's card says what each --add brings; this holds the card to what combinations composes, so a
+// change of dependencies that makes the card wrong fails here.
+it("brings to a2a by --add what its card says: token-exchange alone, clients-cimd the code flow but no authorization", () => {
+	const base = modulesOf("a2a");
+	const brought = (added: string) =>
+		modulesOf("a2a", { add: [added] }).filter((m) => m !== added && !base.includes(m));
+	expect(brought("@mod/token-exchange")).toEqual([]);
+	const cimd = brought("@mod/clients-cimd");
+	expect(cimd).toEqual(
+		expect.arrayContaining([
+			"@mod/consent",
+			"@mod/code-grant",
+			"@mod/refresh",
+			"@mod/session-lifecycle",
+			"@mod/csrf",
+			"@mod/users",
+		]),
+	);
+	for (const absent of ["@mod/authorize", "@mod/acr", "@mod/login-gates"]) {
+		expect(cimd, absent).not.toContain(absent);
+	}
+});
+
 it("lists what conformance adds to a pattern for its run, each composing with the pattern", () => {
 	const adds = Object.fromEntries(patterns().map((p) => [p.name, p.conformanceAdd]));
 	expect(adds).toMatchObject({
