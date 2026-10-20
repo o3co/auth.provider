@@ -166,12 +166,20 @@ export function buildBundles(input: {
 					exports: read.exports ?? {},
 					dependencies: read.dependencies ?? {},
 					...(read.peerDependencies ? { peerDependencies: read.peerDependencies } : {}),
+					...(read.peerDependenciesMeta ? { peerDependenciesMeta: read.peerDependenciesMeta } : {}),
 					...(read.bin ? { bin: read.bin } : {}),
 				};
 				return [member.name, { bundle: basename(bundle.dir), path: member.dir, written }] as const;
 			}),
 		),
 	);
+	// What any member requires as a peer, with its range: every bundle using it asks the app for it.
+	const required: Record<string, string> = {};
+	for (const { written } of manifests.values()) {
+		for (const [name, range] of Object.entries(written.peerDependencies ?? {})) {
+			if (!written.peerDependenciesMeta?.[name]?.optional) required[name] = range;
+		}
+	}
 	// Each member's entries resolve to its sources, whatever node_modules holds.
 	const paths = Object.fromEntries(
 		[...manifests.values()].flatMap(({ path, written }) =>
@@ -231,6 +239,7 @@ export function buildBundles(input: {
 			{ dir: bundle.dir, members, about: described.about },
 			input.release,
 			(name) => manifests.get(name)?.bundle,
+			required,
 		);
 		if ("problems" in made) {
 			problems.push(...made.problems);

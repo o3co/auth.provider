@@ -27,7 +27,8 @@
 - A missing or unreadable manifest is reported as missing, and only once.
 - A cycle is reported along its path, from the first bundle it is reached by.
 - Module code never names a bundle; a built file names each member as `<bundle's public name>/<member's directory>[/<entry>]`, and a declaration's own imports point at built `.js` files.
-- A bundle depends on other bundles at its own version, and on an outside package at the one version its members state; two versions refuse it. Members' peers are optional, as only test builders read them.
+- A bundle depends on other bundles at its own version, and on an outside package at the one version its members state; two versions refuse it. Members' peers are offered as each states them, optional where its `peerDependenciesMeta` says so (a test builder's).
+- An outside package a member requires as a peer is a required peer, in that range, of every bundle depending on it, not a dependency: the app then holds the one copy the public types name, where a bundle's own copy beside the app's would make two types of one name and fail the app's type check.
 
 ## Depends on
 - `create-app` (its patterns, for the release check), `trial` (the layer the release check boots each image on); it asks pnpm for the workspace packages, reads their manifests, and compiles with TypeScript; the release check builds and runs images with Docker.

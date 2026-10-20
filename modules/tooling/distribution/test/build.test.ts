@@ -27,7 +27,8 @@ beforeAll(() => {
 		"modules/base/kernel/package.json",
 		manifest("@mod/kernel", {
 			exports: { ".": "./src/contract.ts", "./module": "./src/module.ts" },
-			dependencies: { zod: "4.6.5" },
+			peerDependencies: { zod: "^4.6.0", vitest: "5.0.4" },
+			peerDependenciesMeta: { vitest: { optional: true } },
 		}),
 	);
 	write(
@@ -63,7 +64,7 @@ beforeAll(() => {
 		manifest("@mod/app", {
 			kind: "feature",
 			exports: { ".": "./src/contract.ts" },
-			dependencies: { "@mod/kernel": "workspace:*" },
+			dependencies: { "@mod/kernel": "workspace:*", zod: "4.6.5" },
 		}),
 	);
 	write(
@@ -124,6 +125,13 @@ it("builds each shipped bundle: its members' files built and named publicly, the
 		dependencies: { "@o3co/auth-provider-base": "0.18.0" },
 		exports: { "./app": { types: "./app/src/contract.d.ts", default: "./app/src/contract.js" } },
 	});
+	// A peer the kernel requires, every bundle depending on it asks the app for; vitest stays optional.
+	const base = JSON.parse(readFileSync(join(out, "base/package.json"), "utf8"));
+	expect(base.peerDependencies).toEqual({ vitest: "5.0.4", zod: "^4.6.0" });
+	expect(base.peerDependenciesMeta).toEqual({ vitest: { optional: true } });
+	expect(feature.peerDependencies).toEqual({ zod: "^4.6.0" });
+	expect(feature.dependencies.zod).toBeUndefined();
+	expect(feature.peerDependenciesMeta).toBeUndefined();
 });
 
 it("writes the index a bundle asks for: each shipped member's manifest, public names and section example", () => {
