@@ -24,6 +24,11 @@
 	"peerDependencies": {
 		"vitest": "5.0.4"
 	},
+	"peerDependenciesMeta": {
+		"vitest": {
+			"optional": true
+		}
+	},
 	"devDependencies": {
 		"@mod/records": "workspace:*",
 		"@mod/session-participants": "workspace:*",

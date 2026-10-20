@@ -8,6 +8,7 @@ export interface MemberManifest {
 	readonly exports: Readonly<Record<string, string>>;
 	readonly dependencies: Readonly<Record<string, string>>;
 	readonly peerDependencies?: Readonly<Record<string, string>>;
+	readonly peerDependenciesMeta?: Readonly<Record<string, { readonly optional?: boolean }>>;
 	readonly bin?: Readonly<Record<string, string>>;
 }
 
@@ -74,8 +75,10 @@ const built = (memberDir: string, source: string) => {
 /**
  * A bundle's package.json: what it says of itself; each member's entries under its directory's
  * name, built; other bundles at the release's version; outside packages at the one version the
- * members state; the members' peers as optional, as only their test builders read them. Refuses
- * an outside package stated at two versions, naming both.
+ * members state; the members' peers as each states them, optional where it says so. An outside
+ * package some member requires as a peer (`required`, with its range) is a required peer here too
+ * in place of a dependency, so the app holds its one copy. Refuses an outside package stated at two
+ * versions, naming both.
  */
 export function bundleManifest(
 	bundle: {
@@ -85,12 +88,14 @@ export function bundleManifest(
 	},
 	release: Release,
 	bundleOf: (name: string) => string | undefined,
+	required: Readonly<Record<string, string>> = {},
 ): { readonly manifest: Record<string, unknown> } | { readonly problems: readonly string[] } {
 	const own = basename(bundle.dir);
 	const exports: Record<string, unknown> = {};
 	const dependencies: Record<string, string> = {};
 	const stated = new Map<string, { readonly version: string; readonly by: string }>();
 	const peers: Record<string, string> = {};
+	const optional = new Set<string>();
 	const bin: Record<string, string> = {};
 	const problems: string[] = [];
 	for (const member of bundle.members) {
@@ -103,6 +108,11 @@ export function bundleManifest(
 				if (other !== own) dependencies[publicNameOf(other)] = release.version;
 				continue;
 			}
+			const range = required[name];
+			if (range !== undefined) {
+				peers[name] = range;
+				continue;
+			}
 			const before = stated.get(name);
 			if (before && before.version !== version) {
 				problems.push(
@@ -113,6 +123,9 @@ export function bundleManifest(
 			dependencies[name] = before?.version ?? version;
 		}
 		Object.assign(peers, member.peerDependencies);
+		for (const [name, meta] of Object.entries(member.peerDependenciesMeta ?? {})) {
+			if (meta.optional) optional.add(name);
+		}
 		for (const [command, source] of Object.entries(member.bin ?? {})) {
 			bin[command] = built(member.dir, source).default;
 		}
@@ -120,7 +133,9 @@ export function bundleManifest(
 	if (problems.length > 0) return { problems };
 	const sorted = (entries: Record<string, string>) =>
 		Object.fromEntries(Object.entries(entries).sort(([a], [b]) => (a < b ? -1 : 1)));
-	const peerNames = Object.keys(peers);
+	const optionalPeers = Object.keys(peers).filter(
+		(name) => optional.has(name) && required[name] === undefined,
+	);
 	return {
 		manifest: {
 			name: publicNameOf(bundle.dir),
@@ -135,11 +150,11 @@ export function bundleManifest(
 			...(Object.keys(bin).length > 0 ? { bin } : {}),
 			exports,
 			dependencies: sorted(dependencies),
-			...(peerNames.length > 0
+			...(Object.keys(peers).length > 0 ? { peerDependencies: sorted(peers) } : {}),
+			...(optionalPeers.length > 0
 				? {
-						peerDependencies: sorted(peers),
 						peerDependenciesMeta: Object.fromEntries(
-							peerNames.sort().map((name) => [name, { optional: true }]),
+							optionalPeers.sort().map((name) => [name, { optional: true }]),
 						),
 					}
 				: {}),

@@ -146,14 +146,15 @@ describe("a bundle's manifest", () => {
 		});
 	});
 
-	it("offers the members' peers as optional, and a member's command, built", () => {
+	it("offers the members' peers as each states them, optional or not, and a member's command, built", () => {
 		const made = bundleManifest(
 			{
 				dir: "/repo/modules/scaffold",
 				members: [
 					member("create-app", {
 						bin: { "create-app": "./src/main.ts" },
-						peerDependencies: { vitest: "5.0.3" },
+						peerDependencies: { vitest: "5.0.3", zod: "^4.6.0" },
+						peerDependenciesMeta: { vitest: { optional: true } },
 					}),
 				],
 			},
@@ -162,9 +163,29 @@ describe("a bundle's manifest", () => {
 		);
 		expect("manifest" in made && made.manifest).toMatchObject({
 			bin: { "create-app": "./create-app/src/main.js" },
-			peerDependencies: { vitest: "5.0.3" },
-			peerDependenciesMeta: { vitest: { optional: true } },
+			peerDependencies: { vitest: "5.0.3", zod: "^4.6.0" },
 		});
+		expect("manifest" in made && made.manifest.peerDependenciesMeta).toEqual({
+			vitest: { optional: true },
+		});
+	});
+
+	it("asks the app for a package a member requires as a peer, in its range, in place of a dependency", () => {
+		const made = bundleManifest(
+			{
+				dir: "/repo/modules/oauth",
+				members: [member("tokens", { dependencies: { zod: "4.6.7", jose: "6.2.12" } })],
+			},
+			{ version: "0.18.0" },
+			bundleOf,
+			{ zod: "^4.6.0" },
+		);
+		expect("manifest" in made && made.manifest).toMatchObject({
+			dependencies: { jose: "6.2.12" },
+			peerDependencies: { zod: "^4.6.0" },
+		});
+		expect("manifest" in made && JSON.stringify(made.manifest.dependencies)).not.toContain("zod");
+		expect("manifest" in made && "peerDependenciesMeta" in made.manifest).toBe(false);
 	});
 
 	it("refuses members that state one outside package at two versions, naming both", () => {

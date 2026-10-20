@@ -37,9 +37,15 @@ it("assembles what combinations composes in full, each axis with one adapter, an
 	expect(await imports(target)).toEqual(modules);
 	const pkg = JSON.parse(await read(target, "package.json"));
 	expect(Object.keys(pkg.dependencies)).toEqual([kernel, ...modules, "zod"]);
-	// An app writing sections of its own takes the zod the packages take.
-	const kernelManifest = manifest(kernel) as { readonly dependencies?: Record<string, string> };
-	expect(pkg.dependencies.zod).toBe(kernelManifest.dependencies?.zod);
+	// An app writing sections of its own holds the one zod the kernel asks of it as a peer: the
+	// version the workspace tests with, within the kernel's range.
+	const kernelManifest = manifest(kernel) as {
+		readonly peerDependencies?: Record<string, string>;
+		readonly devDependencies?: Record<string, string>;
+	};
+	expect(pkg.dependencies.zod).toBe(kernelManifest.devDependencies?.zod);
+	const [major, minor] = String(pkg.dependencies.zod).split(".");
+	expect(kernelManifest.peerDependencies?.zod).toBe(`^${major}.${minor}.0`);
 	expect(pkg.scripts).toEqual({
 		start: "node --env-file-if-exists=.env src/main.ts",
 		reseal: "node --env-file-if-exists=.env src/reseal.ts",

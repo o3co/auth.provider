@@ -30,6 +30,11 @@
 	"peerDependencies": {
 		"vitest": "5.0.4"
 	},
+	"peerDependenciesMeta": {
+		"vitest": {
+			"optional": true
+		}
+	},
 	"devDependencies": {
 		"@mod/issuer": "workspace:*",
 		"@mod/records": "workspace:*",
