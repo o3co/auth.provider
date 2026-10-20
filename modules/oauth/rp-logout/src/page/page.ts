@@ -27,7 +27,7 @@ export function frontChannelPage(
 		.map(({ url, withSession }) => {
 			url.searchParams.set("iss", at.issuer);
 			if (withSession) url.searchParams.set("sid", at.session);
-			return `<iframe src="${escaped(url.href)}" hidden aria-hidden="true" referrerpolicy="no-referrer"></iframe>`;
+			return `<iframe src="${escaped(url.href)}" hidden aria-hidden="true" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin"></iframe>`;
 		})
 		.join("");
 	const origins = [...new Set(loadable.map(({ url }) => url.origin))];
