@@ -37,12 +37,11 @@ export function upstreamAccountWith(p: UpstreamAccountParts) {
 			}
 			if (p.check !== "required") return undefined;
 			// Any failure of the ledger reads as unverifiable, unavailable or not.
-			const holder = await p.users.byUpstream(idp, reached.subject).then(
-				(found) => (found.kind === "none" ? "nobody" : found.user.subject),
-				() => undefined,
-			);
-			if (holder === undefined) return "identity_unverifiable";
-			return holder !== "nobody" && holder !== grant.subject ? "identity_conflict" : undefined;
+			const found = await p.users.byUpstream(idp, reached.subject).catch(() => undefined);
+			if (found === undefined) return "identity_unverifiable";
+			return found.kind === "user" && found.user.subject !== grant.subject
+				? "identity_conflict"
+				: undefined;
 		},
 	};
 }
