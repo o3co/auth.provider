@@ -123,6 +123,7 @@ export function completionOver(
 				return loginRequired;
 			// Another factor took the place the binding kept: the factor stands, and codes can be reissued.
 			if (reissued.kind === "full") return factorLimit;
+			// Left is `unknown-kind`, which cannot come: codes are due only where a way back is composed.
 			if (reissued.kind !== "reissued") return factor;
 			// The last wait before the codes go out is the revocation's: none may come after it.
 			if (await revokedSince(p.revocation, t)) return loginRequired;
