@@ -1,6 +1,12 @@
 import type { Log } from "@mod/kernel";
 import type { AuthContext, LoginFacts } from "@mod/session";
 
+export function checkAuthenticatedAt(facts: LoginFacts): void {
+	const at = facts.authenticatedAt;
+	if (at !== "unknown" && !(Number.isFinite(at) && at >= 0 && at <= 8.64e15))
+		throw new TypeError('authenticatedAt must be epoch milliseconds or "unknown"');
+}
+
 /** The authentication time a session keeps from its login: the one reported, at most the opening. */
 export function authenticatedAtOf(
 	facts: LoginFacts,
