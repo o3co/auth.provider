@@ -23,6 +23,7 @@
 		"@mod/seal": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
+		"@mod/upstream-round-trip": "workspace:*",
 		"@mod/upstreams": "workspace:*",
 		"@mod/url-setting": "workspace:*",
 		"@mod/users": "workspace:*",

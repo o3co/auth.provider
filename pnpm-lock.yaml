@@ -128,6 +128,9 @@ importers:
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
+      '@mod/upstream-round-trip':
+        specifier: workspace:*
+        version: link:../../upstream-login/upstream-round-trip
       '@mod/upstreams':
         specifier: workspace:*
         version: link:../../upstream-login/upstreams

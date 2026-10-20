@@ -53,9 +53,18 @@ describe("a connection in the browser, through the assembled module", () => {
 		const other = await h.login();
 		expect((await h.open(lodged, other)).opened.status).toBe(400);
 		expect((await h.decide(challenge, other)).answered.status).toBe(403);
-		const { state } = await h.decide(challenge, alice);
-		const elsewhere = await h.callback(state, other);
-		expect(h.location(elsewhere).searchParams.get("error")).toBe("reauthentication_required");
+		const { answered, state } = await h.decide(challenge, alice);
+		// Another browser carries no round trip: nothing is spent.
+		expect((await h.callback(state, other)).status).toBe(400);
+		// The round trip's own cookie in a browser of another session is taken, and refused for it.
+		const trip = answered.cookies.find((c) => c.includes("federation-grants.")) ?? "";
+		const swapped = await h.browse(
+			"GET",
+			"/session/federation-grants/callback/cal",
+			`${other}; ${trip.split(";")[0] ?? ""}`,
+			{ state, code: "c" },
+		);
+		expect(h.location(swapped).searchParams.get("error")).toBe("reauthentication_required");
 		// The state was spent: the right browser cannot use it after.
 		expect((await h.callback(state, alice)).status).toBe(400);
 	});
