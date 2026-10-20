@@ -54,7 +54,7 @@ it("writes a section's defaults as HOCON: each described, a unit value bare, a k
 it("holds, committed beside each package, the defaults generated from its section's schema", async () => {
 	for (const s of await sections) {
 		const conf = readFileSync(referenceConfFile(s.dir), "utf8");
-		const stale = `${s.owner}'s reference.conf is generated from its schema: run \`pnpm --filter @mod/create-app run configuration\``;
+		const stale = `${s.owner}'s reference.conf is generated from its schema: run \`pnpm --filter @mod/references run configuration\``;
 		expect(conf, stale).toBe(referenceConfOf(s));
 		for (const r of s.rows.filter((r) => r.default !== undefined)) {
 			expect(parseString(conf).get(r.key), r.key).toEqual(r.default);
