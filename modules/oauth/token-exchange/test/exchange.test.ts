@@ -3,7 +3,14 @@ import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, confidentialClient, publicClient } from "@mod/clients/testing";
-import { type GrantOutcome, sessionIssuances, targetRules } from "@mod/grants";
+import {
+	type GrantOutcome,
+	sessionIssuances,
+	type TokenTie,
+	type TokenTieAnswer,
+	targetRules,
+	tokenTies,
+} from "@mod/grants";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import issuerModule from "@mod/issuer/module";
@@ -17,7 +24,6 @@ import {
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
-import { type FamilyHandle, type Lineage, lineage } from "@mod/refresh";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Binding, senderBindings } from "@mod/sender-binding";
 import { sessions } from "@mod/session";
@@ -54,8 +60,8 @@ const allowed = allowancesFor({
 });
 
 /**
- * Families and sessions in memory; `during` runs while a token is being recorded to a session.
- * Looser than refresh's lineage: `adopt` revokes nothing it refuses, and a family always ends 60 s on.
+ * Families and sessions in memory, as the `family` and `session` ties answer them; `during` runs
+ * while a token is being recorded to a session. Looser than refresh: a family always ends 60 s on.
  */
 function ties(during: () => void = () => {}) {
 	const families = new Map<string, { ended: boolean }>();
@@ -64,22 +70,42 @@ function ties(during: () => void = () => {}) {
 	const open = new Set<string>();
 	/** Sessions that are open but short of a requirement to be used. */
 	const short = new Set<string>();
-	const handle = (name: string) => name as unknown as FamilyHandle;
-	const kept: Lineage = {
-		of: async (id) => {
+	/** The ties joined, in order. */
+	const joined: string[] = [];
+	const family: TokenTie = {
+		name: "family",
+		tieOf: async (id) => {
 			const name = memberOf.get(id);
 			if (name === undefined) return { kind: "none" };
-			return families.get(name)?.ended
-				? { kind: "ended" }
-				: { kind: "family", family: handle(name), expiresAt: now + 60_000 };
+			if (families.get(name)?.ended) return { kind: "ended", reason: "family has ended" };
+			return {
+				kind: "held",
+				ends: now + 60_000,
+				join: async (issued) => {
+					joined.push("family");
+					if (families.get(name)?.ended) return false;
+					memberOf.set(issued.id, name);
+					return true;
+				},
+			};
 		},
-		adopt: async (family, issued) => {
-			const name = family as unknown as string;
-			if (families.get(name)?.ended) return "ended";
-			memberOf.set(issued.id, name);
-			return "adopted";
+	};
+	const session: TokenTie = {
+		name: "session",
+		tieOf: async (id) => {
+			const handle = sessionOf.get(id);
+			if (handle === undefined) return { kind: "none" };
+			if (short.has(handle)) return { kind: "ended", reason: "session is short of a requirement" };
+			if (!open.has(handle)) return { kind: "ended", reason: "session has ended" };
+			return {
+				kind: "held",
+				session: handle,
+				join: async () => {
+					joined.push("session");
+					return open.has(handle);
+				},
+			};
 		},
-		start: async () => undefined,
 	};
 	return {
 		families,
@@ -87,8 +113,9 @@ function ties(during: () => void = () => {}) {
 		sessionOf,
 		open,
 		short,
+		joined,
 		module: defineModule({ name: "ties" }, (m) => [
-			m.provide(lineage).by(() => kept),
+			m.contribute(tokenTies).by(() => family),
 			m.provide(sessions).by(() =>
 				stubSessions({
 					entryOf: async (h) =>
@@ -104,17 +131,12 @@ function ties(during: () => void = () => {}) {
 				}),
 			),
 		]),
-		/** session-tokens in memory, recording what token-endpoint tells it. */
+		/** session-tokens in memory: its tie, and recording what token-endpoint tells it. */
 		recording: defineModule({ name: "recording" }, (m) => [
-			m.provide(sessionTokens).by(() => ({
-				sessionOf: async (id) => {
-					const session = sessionOf.get(id);
-					return session === undefined ? { kind: "unbound" } : { kind: "bound", handle: session };
-				},
-			})),
+			m.contribute(tokenTies).by(() => session),
 			m.contribute(sessionIssuances).by(() => ({
-				issued: async (session, issued) => {
-					sessionOf.set(issued.id, session);
+				issued: async (handle, issued) => {
+					sessionOf.set(issued.id, handle);
 					during();
 				},
 			})),
@@ -152,6 +174,8 @@ async function serve(
 		extra?: Module[];
 		/** In place of the tied session-tokens. */
 		sessionTokens?: Module[];
+		/** The session's tie composed before the family's. */
+		reversed?: boolean;
 	} = {},
 ) {
 	const tied = options.tied ?? ties();
@@ -184,8 +208,9 @@ async function serve(
 			secretHashModule,
 			grantCaller,
 			clientAllowanceModule,
-			tied.module,
-			...(options.sessionTokens ?? [tied.recording]),
+			...(options.reversed
+				? [...(options.sessionTokens ?? [tied.recording]), tied.module]
+				: [tied.module, ...(options.sessionTokens ?? [tied.recording])]),
 			dpopKind,
 			...(verifier
 				? [
@@ -255,6 +280,14 @@ const subjectOf = (token: string, type = accessTokenType) => ({
 });
 const said = (outcome: GrantOutcome) =>
 	outcome.kind === "error" ? [outcome.error, outcome.description] : ["issued"];
+/** A tie named `name`, answering what `answer` gives for each token id. */
+const tieModule = (
+	name: string,
+	answer: (id: string) => TokenTieAnswer | Promise<TokenTieAnswer>,
+) =>
+	defineModule({ name: `tie-${name}` }, (m) => [
+		m.contribute(tokenTies).by(() => ({ name, tieOf: async (id) => answer(id) })),
+	]);
 
 describe("token-exchange", () => {
 	it("issues an access token for the subject, narrowed to the scope asked, with no actor", async () => {
@@ -721,6 +754,147 @@ describe("token-exchange: how the issued token ends", () => {
 		expect(await s.issuing.verifyAccess(s.revoked[0] ?? "")).toMatchObject({ reason: "revoked" });
 	});
 
+	it("refuses an ended family or session of the actor token too, after the subject's, and never issues from the actor's session", async () => {
+		const s = await serve();
+		const subject = await s.issue();
+		const actor = await s.issue({ subject: "carol" });
+		const pair = {
+			...subjectOf(subject.token),
+			actor_token: actor.token,
+			actor_token_type: accessTokenType,
+		};
+		s.tied.families.set("f", { ended: true });
+		s.tied.memberOf.set(subject.id, "f");
+		s.tied.memberOf.set(actor.id, "f");
+		expect(said(await s.exchange("app", pair))).toEqual([
+			"invalid_request",
+			"subject_token family has ended",
+		]);
+		s.tied.memberOf.delete(subject.id);
+		expect(said(await s.exchange("app", pair))).toEqual([
+			"invalid_request",
+			"actor_token family has ended",
+		]);
+		s.tied.memberOf.delete(actor.id);
+		s.tied.short.add("short");
+		s.tied.sessionOf.set(actor.id, "short");
+		expect(said(await s.exchange("app", pair))).toEqual([
+			"invalid_request",
+			"actor_token session is short of a requirement",
+		]);
+		s.tied.open.add("h");
+		s.tied.sessionOf.set(actor.id, "h");
+		const issued = await s.issued(await s.exchange("app", pair));
+		expect([s.tied.sessionOf.get(issued.id), s.tied.joined]).toEqual([undefined, []]);
+	});
+
+	it("ends the token by the earliest end its subject token's ties give", async () => {
+		let marked = "";
+		const limit = tieModule("limit", (id) =>
+			id === marked
+				? { kind: "held", ends: now + 30_000, join: async () => true }
+				: { kind: "none" },
+		);
+		const s = await serve({ extra: [limit] });
+		const subject = await s.issue();
+		marked = subject.id;
+		s.tied.families.set("f", { ended: false });
+		s.tied.memberOf.set(subject.id, "f");
+		const outcome = await s.exchange("app", subjectOf(subject.token));
+		expect([outcome.kind === "issued" && outcome.body.expires_in]).toEqual([30]);
+	});
+
+	it("revokes the token it issued when a tie it joins has ended meanwhile, whichever tie", async () => {
+		let marked = "";
+		const late = tieModule("limit", (id) =>
+			id === marked ? { kind: "held", join: async () => false } : { kind: "none" },
+		);
+		const s = await serve({ extra: [late] });
+		const subject = await s.issue();
+		marked = subject.id;
+		expect(said(await s.exchange("app", subjectOf(subject.token)))).toEqual([
+			"invalid_request",
+			"subject_token has ended",
+		]);
+		expect(s.revoked).toHaveLength(1);
+		expect(await s.issuing.verifyAccess(s.revoked[0] ?? "")).toMatchObject({ reason: "revoked" });
+	});
+
+	it("reads and joins a family before a session, however they are composed, stopping at the first that ended", async () => {
+		for (const reversed of [false, true]) {
+			const s = await serve({ reversed });
+			const subject = await s.issue();
+			s.tied.families.set("f", { ended: true });
+			s.tied.memberOf.set(subject.id, "f");
+			s.tied.sessionOf.set(subject.id, "closed");
+			expect(said(await s.exchange("app", subjectOf(subject.token)))).toEqual([
+				"invalid_request",
+				"subject_token family has ended",
+			]);
+			s.tied.families.set("f", { ended: false });
+			s.tied.open.add("h");
+			s.tied.sessionOf.set(subject.id, "h");
+			await s.issued(await s.exchange("app", subjectOf(subject.token)));
+			expect(s.tied.joined).toEqual(["family", "session"]);
+		}
+		const tied = ties(() => tied.families.set("f", { ended: true }));
+		const s = await serve({ tied, reversed: true });
+		const subject = await s.issue();
+		tied.families.set("f", { ended: false });
+		tied.memberOf.set(subject.id, "f");
+		tied.open.add("h");
+		tied.sessionOf.set(subject.id, "h");
+		expect(said(await s.exchange("app", subjectOf(subject.token)))).toEqual([
+			"invalid_request",
+			"subject_token has ended",
+		]);
+		expect(tied.joined).toEqual(["family"]);
+	});
+
+	it("takes the ties from the check right before issuing", async () => {
+		let calls = 0;
+		let marked = "";
+		const changing = tieModule("limit", (id) =>
+			id !== marked
+				? { kind: "none" }
+				: ++calls === 1
+					? { kind: "held", join: async () => true }
+					: { kind: "ended", reason: "limit has ended" },
+		);
+		const s = await serve({ extra: [changing] });
+		const subject = await s.issue();
+		marked = subject.id;
+		expect(said(await s.exchange("app", subjectOf(subject.token)))).toEqual([
+			"invalid_request",
+			"subject_token limit has ended",
+		]);
+		expect(calls).toBe(2);
+	});
+
+	it("is unavailable where two ties name two sessions, and where a tie cannot tell", async () => {
+		let marked = "";
+		const elsewhere = tieModule("elsewhere", (id) =>
+			id === marked ? { kind: "held", session: "h2", join: async () => true } : { kind: "none" },
+		);
+		const s = await serve({ extra: [elsewhere] });
+		const subject = await s.issue();
+		marked = subject.id;
+		s.tied.open.add("h");
+		s.tied.sessionOf.set(subject.id, "h");
+		await expect(s.exchange("app", subjectOf(subject.token))).rejects.toThrow(Unavailable);
+		const blind = await serve({
+			extra: [
+				tieModule("blind", () => {
+					throw new Unavailable("blind");
+				}),
+			],
+		});
+		await expect(blind.exchange("app", subjectOf((await blind.issue()).token))).rejects.toThrow(
+			Unavailable,
+		);
+		expect(blind.revoked).toEqual([]);
+	});
+
 	it("checks the tokens again right before issuing", async () => {
 		const s = await serve({
 			verifier: outside((call) => (call === 1 ? outsideAnswer : { kind: "invalid" })),
@@ -867,6 +1041,29 @@ describe("token-exchange: what any verifier may answer", () => {
 			"invalid_request",
 			"subject_token has been used",
 		]);
+	});
+
+	it("leaves a once-only token unused when the actor token's tie cannot tell", async () => {
+		const { verifier, calls } = answering(
+			{ kind: "foreign", clients: ["app"] },
+			async () => "consumed",
+		);
+		let marked = "";
+		const blind = tieModule("blind", (id) => {
+			if (id === marked) throw new Unavailable("blind");
+			return { kind: "none" };
+		});
+		const s = await serve({ verifier, extra: [blind] });
+		const actor = await s.issue({ subject: "carol" });
+		marked = actor.id;
+		await expect(
+			s.exchange("app", {
+				...outsider,
+				actor_token: actor.token,
+				actor_token_type: accessTokenType,
+			}),
+		).rejects.toThrow(Unavailable);
+		expect(calls.filter((call) => call.startsWith("consume"))).toEqual([]);
 	});
 
 	it("leaves a once-only token unused when the policies refuse or a check cannot tell", async () => {

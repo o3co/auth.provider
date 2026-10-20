@@ -38,6 +38,7 @@
 		"@mod/session-tokens": "workspace:*",
 		"@mod/store": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
+		"@mod/token-exchange": "workspace:*",
 		"vitest": "5.0.4"
 	},
 	"peerDependencies": {

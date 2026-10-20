@@ -1,6 +1,7 @@
 import { clientAllowance } from "@mod/client-allowance";
-import { type BuildContext, Unavailable } from "@mod/kernel";
-import type { FamilyHandle, Lineage } from "../contract.ts";
+import type { TokenTie } from "@mod/grants";
+import { type BuildContext, contract, Unavailable } from "@mod/kernel";
+import type { IssuedToken, Lineage } from "../contract.ts";
 import { refreshGrantType } from "../contract.ts";
 import type { founding } from "../grant/found.ts";
 import { foundingIn } from "../grant/grant.ts";
@@ -8,6 +9,26 @@ import { fromStoredLink, liveFamily } from "../record.ts";
 import type { Settings } from "../section.ts";
 import type { Revoker, Stores } from "../settle/settle.ts";
 import { familyStore, tokenFamilies } from "../store.ts";
+
+declare const handle: unique symbol;
+/** A family as the `family` tie names it; only refresh reads it. */
+type FamilyHandle = { readonly [handle]: true };
+
+type TokenFamily =
+	| { readonly kind: "family"; readonly family: FamilyHandle; readonly expiresAt: number }
+	| { readonly kind: "none" }
+	| { readonly kind: "ended" };
+
+/** What `lineage` and the `family` tie are given from. Every call throws Unavailable when it cannot tell. */
+export interface Families extends Lineage {
+	/** The family a token was issued from; ask only for a token already verified. */
+	of(tokenId: string): Promise<TokenFamily>;
+	/** Adds a token that ends by the family's end; when not adopted, the token is revoked. */
+	adopt(family: FamilyHandle, issued: IssuedToken): Promise<"adopted" | "ended">;
+}
+
+/** The families, built once for `lineage` and the `family` tie alike. */
+export const families = contract<Families>("refresh.families");
 
 /** A handle names the token it was asked for, so a family's own name never leaves refresh. */
 const handleOf = (tokenId: string) => tokenId as unknown as FamilyHandle;
@@ -38,7 +59,7 @@ export function lineageOver(
 	revoker: Revoker,
 	found: ReturnType<typeof founding>,
 	now: () => number,
-): Lineage {
+): Families {
 	const { familyOf, unended } = familyReader(stores, now);
 	return {
 		of: async (tokenId) => {
@@ -92,6 +113,21 @@ export async function lineageIn(c: BuildContext<Settings>) {
 	const { stores, revoker, found } = await foundingIn(c);
 	return lineageOver(stores, revoker, found, c.clock.now);
 }
+
+/** The `family` tie: a token's family as `of` answers it; a token issued from it is adopted. */
+export const familyTie = (kept: Pick<Families, "of" | "adopt">): TokenTie => ({
+	name: "family",
+	tieOf: async (tokenId) => {
+		const found = await kept.of(tokenId);
+		if (found.kind === "none") return { kind: "none" };
+		if (found.kind === "ended") return { kind: "ended", reason: "family has ended" };
+		return {
+			kind: "held",
+			ends: found.expiresAt,
+			join: async (issued) => (await kept.adopt(found.family, issued)) === "adopted",
+		};
+	},
+});
 
 /** tokens' access condition: an access token of an ended family no longer holds. Built on the stores alone, as tokens asks it while it is being built itself. */
 export async function conditionOver(c: BuildContext<Settings>) {

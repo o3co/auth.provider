@@ -11,6 +11,7 @@
 
 ## Offers
 - `sessionOf(token id)` → bound, with the session handle, or unbound when no session recorded it.
+- `grants`' token tie `session`: a token's session, `ended` (`session has ended`, `session is short of a requirement`) or held with its handle while `session` lets it in; joining a token issued from it checks that again and records nothing, as `issue` records it.
 - Store interfaces, each with its needs (never evicted, survives a crash, does not come back on failover) and contract test (`./testing`):
   - the tokens issued in each session: add a reference for its lifetime → the references pushed out, which await in that same write until settled; the references kept, each with how long it still lives; how many it keeps to a session;
   - the token index: token id → session handle, saved once per id, for a lifetime;
@@ -29,7 +30,7 @@
 - A host stopped past the add leaves the session listed.
 - The window left: more adds at once than the margin push one out unlisted, and the host stops before listing it.
 - On close, it answers done only after revoking every recorded token. If it cannot, it throws; the session stays closing, and a later close continues. Safe to repeat, and from several hosts at once.
-- Closing a session, revoking a token or pushing its reference out leaves its index entry, so the token still answers its session; the caller checks whether that session is open.
+- Closing a session, revoking a token or pushing its reference out leaves its index entry, so the token still answers its session; whether that session is open is checked by whoever asks, as the `session` tie does.
 - `sessionOf` throws unavailable when the index cannot tell, never unbound.
 - Boot is refused where access tokens cannot be revoked.
 

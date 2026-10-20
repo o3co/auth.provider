@@ -1214,21 +1214,12 @@ importers:
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
-      '@mod/refresh':
-        specifier: workspace:*
-        version: link:../refresh
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../sender-binding
-      '@mod/session':
-        specifier: workspace:*
-        version: link:../../identity/session
-      '@mod/session-tokens':
-        specifier: workspace:*
-        version: link:../session-tokens
       '@mod/token-endpoint':
         specifier: workspace:*
         version: link:../token-endpoint
@@ -1537,6 +1528,9 @@ importers:
       '@mod/token-endpoint':
         specifier: workspace:*
         version: link:../token-endpoint
+      '@mod/token-exchange':
+        specifier: workspace:*
+        version: link:../token-exchange
       vitest:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
@@ -1854,18 +1848,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
-      '@mod/refresh':
-        specifier: workspace:*
-        version: link:../refresh
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../sender-binding
-      '@mod/session':
-        specifier: workspace:*
-        version: link:../../identity/session
-      '@mod/session-tokens':
-        specifier: workspace:*
-        version: link:../session-tokens
       '@mod/tokens':
         specifier: workspace:*
         version: link:../tokens
@@ -1879,6 +1864,12 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
+      '@mod/session-tokens':
+        specifier: workspace:*
+        version: link:../session-tokens
       '@mod/token-endpoint':
         specifier: workspace:*
         version: link:../token-endpoint

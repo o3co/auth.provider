@@ -14,7 +14,7 @@ import { additions, codes } from "@mod/code-grant";
 import codeGrantModule from "@mod/code-grant/module";
 import { codeGrantConfig } from "@mod/code-grant/testing";
 import codeGrantStore from "@mod/code-grant-store/module";
-import { grants, targetRules } from "@mod/grants";
+import { grants, targetRules, tokenTies } from "@mod/grants";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
@@ -46,6 +46,7 @@ import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { revocableKinds } from "@mod/token-control";
 import tokenControl from "@mod/token-control/module";
 import { grantCaller, grantCalls, grantInput } from "@mod/token-endpoint/testing";
+import tokenExchange from "@mod/token-exchange/module";
 import {
 	type AccessGrant,
 	type IssueLimits,
@@ -85,6 +86,7 @@ afterEach(async () => {
 });
 const verifier = "v".repeat(43);
 const challenge = createHash("sha256").update(verifier).digest("base64url");
+const exchangeType = "urn:ietf:params:oauth:grant-type:token-exchange";
 const allowed = (grants: string[]) =>
 	allowancesFor({ grants, scopes: ["read", "write"], audiences: ["https://api"] });
 /** What modules contribute to `point`, read back after assembly. */
@@ -96,6 +98,7 @@ function collecting<T>(name: string, point: ExtensionPoint<T>) {
 	};
 }
 const grantsSeen = collecting("grants-seen", grants);
+const tiesSeen = collecting("ties-seen", tokenTies);
 /** The family name a refresh token carries before its dot. */
 const familyNameOf = (token: string | undefined) => (token ?? "").split(".")[0] ?? "";
 /** An access token issued as a code redemption issues it, under the issuance policies. */
@@ -152,6 +155,7 @@ async function serve(
 			refreshModule,
 			stores.module,
 			grantsSeen.module,
+			tiesSeen.module,
 			...(options.extra ?? []),
 		],
 		config: {
@@ -163,6 +167,7 @@ async function serve(
 				confidentialClient({ id: "other", sections: allowed(both) }),
 				confidentialClient({ id: "coded", sections: allowed(["authorization_code"]) }),
 				publicClient({ id: "pub", sections: allowed(both) }),
+				confidentialClient({ id: "exchanger", sections: allowed([...both, exchangeType]) }),
 			]),
 			...codeGrantConfig(),
 			...refreshConfig({
@@ -249,7 +254,18 @@ async function serve(
 		grant("refresh_token", as, { refresh_token: token ?? "", ...extra });
 	const active = async (token: string | undefined) =>
 		(await app.get(tokens).verifyAccess(token ?? "")).kind === "valid";
-	return { app, stores, down, session, post, redeem, refresh, active, audited: audited.events };
+	return {
+		app,
+		stores,
+		down,
+		session,
+		post,
+		grant,
+		redeem,
+		refresh,
+		active,
+		audited: audited.events,
+	};
 }
 
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
@@ -876,12 +892,19 @@ describe("lineage", () => {
 			{ subject: "alice", issuedTo: "app", audience: ["https://api"], scope: ["read"] },
 			notAfter === undefined ? {} : { notAfter },
 		);
-	/** The family of a code's first access token, as `of` answers it. */
+	/** What the `family` tie answers for a token. */
+	const tieOf = (s: Served, tokenId: string) => {
+		const family = s.app.get(tiesSeen.seen).find((t) => t.name === "family");
+		if (!family) throw new Error("no family tie");
+		return family.tieOf(tokenId);
+	};
+	/** The family of a code's first access token, as the tie holds it. */
 	const familyOf = async (s: Served, first: Record<string, string>) => {
-		const found = await s.app.get(lineage).of(await idOf(s, first.access_token ?? ""));
-		if (found.kind !== "family") throw new Error(`no family: ${found.kind}`);
+		const found = await tieOf(s, await idOf(s, first.access_token ?? ""));
+		if (found.kind !== "held") throw new Error(`no family: ${found.kind}`);
 		return found;
 	};
+	const ended = { kind: "ended", reason: "family has ended" };
 	const beginning = async (s: Served, as: string) => {
 		const client = (await s.app.get(clients).find(as)) as Client;
 		const { token: _, ...access } = await issue(s);
@@ -893,14 +916,14 @@ describe("lineage", () => {
 		const s = await serve({ lifetime: 60 });
 		const first = await s.redeem();
 		const found = await familyOf(s, first);
-		expect(found.expiresAt).toBeLessThanOrEqual(Date.now() + 60_000);
+		expect(found.ends).toBeLessThanOrEqual(Date.now() + 60_000);
 		const next = await s.refresh(first.refresh_token);
-		const rotated = await s.app.get(lineage).of(await idOf(s, next.body.access_token ?? ""));
-		expect(rotated).toMatchObject({ kind: "family", expiresAt: found.expiresAt });
+		const rotated = await tieOf(s, await idOf(s, next.body.access_token ?? ""));
+		expect(rotated).toMatchObject({ kind: "held", ends: found.ends });
 		const coded = await s.redeem("coded");
 		const none = { kind: "none" };
-		expect(await s.app.get(lineage).of(await idOf(s, coded.access_token ?? ""))).toEqual(none);
-		expect(await s.app.get(lineage).of((await issue(s)).id)).toEqual(none);
+		expect(await tieOf(s, await idOf(s, coded.access_token ?? ""))).toEqual(none);
+		expect(await tieOf(s, (await issue(s)).id)).toEqual(none);
 	});
 
 	it("never hands out a family's own name", async () => {
@@ -916,39 +939,32 @@ describe("lineage", () => {
 		const id = await idOf(reused, first.access_token ?? "");
 		await reused.refresh(first.refresh_token);
 		await reused.refresh(first.refresh_token);
-		expect(await reused.app.get(lineage).of(id)).toEqual({ kind: "ended" });
+		expect(await tieOf(reused, id)).toEqual(ended);
 		await stop();
 		const closed = await serve();
 		const opened = await closed.redeem();
 		const openedId = await idOf(closed, opened.access_token ?? "");
 		await closed.app.get(sessions).close(closed.session.id);
-		expect(await closed.app.get(lineage).of(openedId)).toEqual({ kind: "ended" });
+		expect(await tieOf(closed, openedId)).toEqual(ended);
 		await stop();
 		const s = await serve({ lifetime: 2 });
 		const short = await s.redeem();
 		const shortId = await idOf(s, short.access_token ?? "");
 		shift += 2000;
-		expect(await s.app.get(lineage).of(shortId)).toEqual({ kind: "ended" });
+		expect(await tieOf(s, shortId)).toEqual(ended);
 		await s.stores.links.records.create("lost", { format: 1, family: "gone" } as never, 60_000);
-		expect(await s.app.get(lineage).of("lost")).toEqual({ kind: "ended" });
+		expect(await tieOf(s, "lost")).toEqual(ended);
 		await s.stores.links.records.create("odd", { format: 2 } as never, 60_000);
-		expect(
-			isUnavailable(
-				await s.app
-					.get(lineage)
-					.of("odd")
-					.catch((e) => e),
-			),
-		).toBe(true);
+		expect(isUnavailable(await tieOf(s, "odd").catch((e) => e))).toBe(true);
 	});
 
 	it("adopts a token into a live family, so the family's end revokes it too", async () => {
 		const s = await serve();
 		const first = await s.redeem();
 		const found = await familyOf(s, first);
-		const issued = await issue(s, found.expiresAt);
-		expect(await s.app.get(lineage).adopt(found.family, issued)).toBe("adopted");
-		expect(await s.app.get(lineage).of(issued.id)).toMatchObject({ kind: "family" });
+		const issued = await issue(s, found.ends);
+		expect(await found.join(issued)).toBe(true);
+		expect(await tieOf(s, issued.id)).toMatchObject({ kind: "held" });
 		await s.refresh(first.refresh_token);
 		await s.refresh(first.refresh_token);
 		expect(await s.active(issued.token)).toBe(false);
@@ -957,16 +973,46 @@ describe("lineage", () => {
 	it("adopts the same token again, and never a token id another family holds", async () => {
 		const s = await serve();
 		const found = await familyOf(s, await s.redeem());
-		const issued = await issue(s, found.expiresAt);
-		expect(await s.app.get(lineage).adopt(found.family, issued)).toBe("adopted");
-		expect(await s.app.get(lineage).adopt(found.family, issued)).toBe("adopted");
-		const taken = await issue(s, found.expiresAt);
+		const issued = await issue(s, found.ends);
+		expect(await found.join(issued)).toBe(true);
+		expect(await found.join(issued)).toBe(true);
+		const taken = await issue(s, found.ends);
 		await s.stores.links.records.create(taken.id, { format: 1, family: "other" } as never, 60_000);
-		const adopted = await s.app
-			.get(lineage)
-			.adopt(found.family, taken)
-			.catch((e) => e);
-		expect(isUnavailable(adopted)).toBe(true);
+		expect(isUnavailable(await found.join(taken).catch((e) => e))).toBe(true);
+	});
+
+	it("ties a token to its family as `family`: none, ended, or held to the family's end, joining one issued from it", async () => {
+		const s = await serve();
+		const first = await s.redeem();
+		const held = await familyOf(s, first);
+		expect(held.session).toBeUndefined();
+		expect(await tieOf(s, (await issue(s)).id)).toEqual({ kind: "none" });
+		const joined = await issue(s, held.ends);
+		expect(await held.join(joined)).toBe(true);
+		expect((await tieOf(s, joined.id)).kind).toBe("held");
+		await s.post("/oauth/revoke", "app", { token: first.refresh_token ?? "" });
+		expect(await tieOf(s, joined.id)).toEqual(ended);
+		const late = await issue(s, held.ends);
+		expect(await held.join(late)).toBe(false);
+		expect(await s.active(late.token)).toBe(false);
+	});
+
+	it("has a token token-exchange issues from a family's access token end with the family", async () => {
+		const s = await serve({ extra: [tokenExchange] });
+		const first = await s.redeem("exchanger");
+		const exchange = () =>
+			s.grant(exchangeType, "exchanger", {
+				subject_token: first.access_token ?? "",
+				subject_token_type: "urn:ietf:params:oauth:token-type:access_token",
+			});
+		const exchanged = await exchange();
+		expect(exchanged.status).toBe(200);
+		expect(await s.active(exchanged.body.access_token)).toBe(true);
+		await s.refresh(first.refresh_token, "exchanger");
+		await s.refresh(first.refresh_token, "exchanger");
+		expect(await s.active(exchanged.body.access_token)).toBe(false);
+		// The family's end revoked the subject token too, so it no longer validates.
+		expect((await exchange()).body).toMatchObject({ error: "invalid_request" });
 	});
 
 	it("revokes the token and answers ended for a family that has ended", async () => {
@@ -974,8 +1020,8 @@ describe("lineage", () => {
 		const first = await s.redeem();
 		const found = await familyOf(s, first);
 		await s.post("/oauth/revoke", "app", { token: first.refresh_token ?? "" });
-		const issued = await issue(s, found.expiresAt);
-		expect(await s.app.get(lineage).adopt(found.family, issued)).toBe("ended");
+		const issued = await issue(s, found.ends);
+		expect(await found.join(issued)).toBe(false);
 		expect(await s.active(issued.token)).toBe(false);
 	});
 
@@ -983,14 +1029,14 @@ describe("lineage", () => {
 		const s = await serve();
 		const first = await s.redeem();
 		const found = await familyOf(s, first);
-		const issued = await issue(s, found.expiresAt);
+		const issued = await issue(s, found.ends);
 		// The family's tokens are listed and revoked just before this one joins the list.
 		const add = s.stores.byFamily.add.bind(s.stores.byFamily);
 		s.stores.byFamily.add = async (...args) => {
 			await s.post("/oauth/revoke", "app", { token: first.refresh_token ?? "" });
 			return add(...args);
 		};
-		expect(await s.app.get(lineage).adopt(found.family, issued)).toBe("ended");
+		expect(await found.join(issued)).toBe(false);
 		expect(await s.active(issued.token)).toBe(false);
 	});
 
@@ -998,7 +1044,7 @@ describe("lineage", () => {
 		const s = await serve({ lifetime: 60 });
 		const found = await familyOf(s, await s.redeem());
 		const issued = await issue(s);
-		await expect(s.app.get(lineage).adopt(found.family, issued)).rejects.toThrow();
+		await expect(found.join(issued)).rejects.toThrow();
 		expect(await s.active(issued.token)).toBe(false);
 	});
 
@@ -1007,12 +1053,8 @@ describe("lineage", () => {
 		const first = await s.redeem();
 		const found = await familyOf(s, first);
 		shift += 1000;
-		const issued = await issue(s, found.expiresAt);
-		const adopted = await s.app
-			.get(lineage)
-			.adopt(found.family, issued)
-			.catch((e) => e);
-		expect(isUnavailable(adopted)).toBe(true);
+		const issued = await issue(s, found.ends);
+		expect(isUnavailable(await found.join(issued).catch((e) => e))).toBe(true);
 		expect(await s.active(first.access_token)).toBe(false);
 	});
 
@@ -1020,7 +1062,7 @@ describe("lineage", () => {
 		const s = await serve();
 		const begun = await beginning(s, "app");
 		const token = await s.app.get(lineage).start(begun);
-		expect(await s.app.get(lineage).of(begun.access.id)).toMatchObject({ kind: "family" });
+		expect(await tieOf(s, begun.access.id)).toMatchObject({ kind: "held" });
 		await s.app.get(sessions).close(s.session.id);
 		const next = await s.refresh(token);
 		expect(next.status).toBe(200);

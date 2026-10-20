@@ -15,16 +15,15 @@
 		"@mod/grants": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/kernel": "workspace:*",
-		"@mod/refresh": "workspace:*",
 		"@mod/sender-binding": "workspace:*",
-		"@mod/session": "workspace:*",
-		"@mod/session-tokens": "workspace:*",
 		"@mod/tokens": "workspace:*",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"@mod/http": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
+		"@mod/session": "workspace:*",
+		"@mod/session-tokens": "workspace:*",
 		"@mod/token-endpoint": "workspace:*",
 		"vitest": "5.0.4"
 	}

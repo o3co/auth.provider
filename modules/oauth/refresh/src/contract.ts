@@ -2,15 +2,6 @@ import type { Client } from "@mod/clients";
 import { contract } from "@mod/kernel";
 import type { Binding } from "@mod/sender-binding";
 
-declare const handle: unique symbol;
-/** A family as `lineage` names it to others; only refresh reads it. */
-export type FamilyHandle = { readonly [handle]: true };
-
-export type TokenFamily =
-	| { readonly kind: "family"; readonly family: FamilyHandle; readonly expiresAt: number }
-	| { readonly kind: "none" }
-	| { readonly kind: "ended" };
-
 /** An issued access token, as `tokens` answered it. */
 export interface IssuedToken {
 	readonly id: string;
@@ -34,12 +25,8 @@ export interface Beginning {
 	readonly access: IssuedToken;
 }
 
-/** The families access tokens belong to. Every call throws Unavailable when it cannot tell. */
+/** Families bound to no session, started by another grant. Throws Unavailable when it cannot tell. */
 export interface Lineage {
-	/** The family a token was issued from; ask only for a token already verified. */
-	of(tokenId: string): Promise<TokenFamily>;
-	/** Adds a token that ends by the family's end; when not adopted, the token is revoked. */
-	adopt(family: FamilyHandle, issued: IssuedToken): Promise<"adopted" | "ended">;
 	/** Starts a family and answers its first refresh token; nothing when the client may not refresh. */
 	start(beginning: Beginning): Promise<string | undefined>;
 }
