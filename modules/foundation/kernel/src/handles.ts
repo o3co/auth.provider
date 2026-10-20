@@ -1,7 +1,7 @@
 export interface Contract<T> {
 	readonly kind: "contract";
 	readonly label: string;
-	/** The modules that may take it, by name; with none, any module may. */
+	/** The modules that may take it, by name; when omitted, any module may, and an empty list lets none. */
 	readonly takenBy?: readonly string[];
 	readonly __type?: T;
 }

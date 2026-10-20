@@ -653,31 +653,62 @@ describe("takenBy", () => {
 		m.provide(signer).by(() => ({ sign: () => "signed" })),
 	]);
 	/** A module named `name` providing `out`, which takes the signer as `how` says. */
-	const taker = (name: string, how: "get" | "late" | "caught") => {
+	const taker = (name: string, how: "get" | "late" | "caught" | "late-caught") => {
 		const out = contract<object>(`${name}-out`);
 		return defineModule({ name }, (m) => [
 			m.provide(out).by(async (c) => {
 				if (how === "late") c.late(signer);
 				else if (how === "get") await c.get(signer);
-				else await c.get(signer).catch(() => undefined);
+				else if (how === "caught") await c.get(signer).catch(() => undefined);
+				else
+					try {
+						c.late(signer);
+					} catch {}
 				return {};
 			}),
 		]);
 	};
 	const refusal = (where: string) => ({ where, reason: "signer is taken by issuer alone" });
 
-	it("lets a module the contract names take it, and the composition root besides", async () => {
+	it("lets a module the contract names take it, by get or late, and the composition root besides", async () => {
 		const app = await assemble({ modules: [keys, taker("issuer", "get")], config: single });
 		expect(app.get(signer).sign()).toBe("signed");
-		await assemble({ modules: [keys, taker("issuer", "late")], config: single });
+		const signs = contract<{ sign(): string }>("signs");
+		const late = defineModule({ name: "issuer" }, (m) => [
+			m.provide(signs).by((c) => {
+				const later = c.late(signer);
+				return { sign: () => later().sign() };
+			}),
+		]);
+		const lateApp = await assemble({ modules: [keys, late], config: single });
+		expect(lateApp.get(signs).sign()).toBe("signed");
 	});
 
 	it("refuses boot when a module it does not name takes it, by get or late, even when the taker catches the throw", async () => {
-		for (const how of ["get", "late", "caught"] as const) {
+		for (const how of ["get", "late", "caught", "late-caught"] as const) {
 			const refused = await refusalsOf(
 				assemble({ modules: [keys, taker("tokens", how)], config: single }),
 			);
 			expect(refused, how).toEqual([refusal("tokens")]);
+		}
+	});
+
+	it("binds the contract object, never its label: a lookalike reaches no provider", async () => {
+		for (const lookalike of [
+			contract<{ sign(): string }>("signer"),
+			contract<{ sign(): string }>("signer", { takenBy: ["tokens"] }),
+		]) {
+			for (const how of ["get", "late"] as const) {
+				const tokens = defineModule({ name: "tokens" }, (m) => [
+					m.provide(contract<object>("tokens-out")).by(async (c) => {
+						if (how === "get") await c.get(lookalike);
+						else c.late(lookalike);
+						return {};
+					}),
+				]);
+				const refused = await refusalsOf(assemble({ modules: [keys, tokens], config: single }));
+				expect(refused, how).toEqual([{ where: "tokens", reason: "no module provides signer" }]);
+			}
 		}
 	});
 
