@@ -1,5 +1,5 @@
 import { type Audit, audit, declaredAudit } from "@mod/audit";
-import { type Client, type Clients, clients } from "@mod/clients";
+import { type Client, type Clients, clients, recordRefusedAuthentication } from "@mod/clients";
 import { type HttpRequest, type HttpResponse, jsonAnswer, noStore } from "@mod/http";
 import { type BuildContext, type Clock, isUnavailable, type Random } from "@mod/kernel";
 import { attemptLimit, type RateLimit } from "@mod/rate-limit";
@@ -583,6 +583,8 @@ export function apiWith(p: ApiParts) {
 	return async (request: HttpRequest): Promise<HttpResponse> => {
 		try {
 			const authenticated = await p.clients.authenticate(request);
+			if (authenticated.kind === "refused")
+				recordRefusedAuthentication(p.audit, request, authenticated);
 			if (authenticated.kind === "refused" || authenticated.client.kind !== "confidential") {
 				const challenges = authenticated.kind === "refused" ? authenticated.challenges : [];
 				return error(
