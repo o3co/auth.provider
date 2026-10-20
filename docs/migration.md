@@ -772,6 +772,8 @@ What changed since rc.4. Coming from an earlier release candidate, read the sect
 - **Added claims and restrictions**: a refreshed or exchanged token carries no added claim; never use one for a restriction that must hold on.
 - **Audit**: `token.issued` may carry `claims`, the names of the claims a grant added, and `claims_left`, how many names did not fit.
 - **A URL that takes plain http on a loopback host** (a login or step-up page, a return target, a federation grant's page) now also takes a name under `localhost` (such as `http://app.localhost:3000/`), `localhost.` with its trailing dot, and 127/8 mapped into IPv6 (`http://[::ffff:7f00:1]/`): the host is judged by its name alone, as `url-setting`'s `isLoopbackName` does for every module. `localhost.localdomain`, `0.0.0.0` and any other host over http still refuse boot.
+- **mail-smtp with `security = none`** boots for the same loopback hosts by name (a name under `localhost`, `localhost.`), and sends only when the connected peer is a loopback address, 127/8 mapped into IPv6 in any spelling included.
+- **Sign in with Apple**: a callback on a name under `localhost` or on 127/8 mapped into IPv6 now refuses boot, as `localhost` and 127/8 already did.
 
 ## Operational notes
 
