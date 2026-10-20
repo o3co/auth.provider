@@ -347,7 +347,7 @@ describe("the callback", () => {
 		h.events.push = push;
 		// Anything else that throws is not an outage, and is not audited as one.
 		const broken = await h.started();
-		h.stores.pending.remove = async () => {
+		h.script.exchange = async () => {
 			throw new Error("broken");
 		};
 		await expect(h.callback(broken.state, broken.browser)).rejects.toThrow("broken");
@@ -380,6 +380,41 @@ describe("the callback", () => {
 		expect(errorOf(h, await h.callback(flow.state, flow.browser))).toBe(
 			"reauthentication_required",
 		);
+	});
+
+	it("keeps a connection the pending list cannot drop: audited as authorized, and the browser sent back", async () => {
+		const h = await connector();
+		const flow = await h.started();
+		h.stores.pending.remove = async () => {
+			throw new Unavailable("pending");
+		};
+		const done = await h.callback(flow.state, flow.browser);
+		expect([done.status, h.location(done).searchParams.get("grant_id"), errorOf(h, done)]).toEqual([
+			303,
+			flow.id,
+			null,
+		]);
+		expect(statusOf(h, flow.id)).toBe("active");
+		const authorized = h.events.filter((e) => e.kind === "federation.grant.authorized");
+		expect(authorized.map((e) => e.subject)).toEqual(["alice"]);
+		expect(failed(h)).toEqual([]);
+		expect(h.logs()).toContainEqual(
+			expect.objectContaining({
+				event: "federation-grants.pending_remove_failed",
+				fields: { kind: "Unavailable" },
+			}),
+		);
+	});
+
+	it("refuses an activation once the intent's time ran out during the exchange", async () => {
+		const h = await connector();
+		const flow = await h.started({ endsAt: h.now() + 1000 });
+		h.script.exchange = async () => {
+			h.advance(1000);
+			return upstreamLogin();
+		};
+		expect(errorOf(h, await h.callback(flow.state, flow.browser))).toBe("grant_not_authorizable");
+		expect(statusOf(h, flow.id)).toBe("pending");
 	});
 
 	it("activates only the intent it was for, and writes nothing over another", async () => {

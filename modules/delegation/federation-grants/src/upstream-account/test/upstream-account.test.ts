@@ -4,12 +4,12 @@ import { upstreamAccountWith } from "../upstream-account.ts";
 
 const at = { issuer: "https://corp.example", subject: "u-alice" };
 const grant = { subject: "alice" };
-/** A ledger answering who holds an upstream identity: a subject, nobody, or a throw. */
-const ledger = (holds: string | "nobody" | Error) =>
+/** A ledger answering who holds an upstream identity: a subject, nobody (undefined), or a throw. */
+const ledger = (holds: string | undefined | Error) =>
 	({
 		byUpstream: async () => {
 			if (holds instanceof Error) throw holds;
-			return holds === "nobody"
+			return holds === undefined
 				? { kind: "none" }
 				: { kind: "user", user: { subject: holds, attributes: {} } };
 		},
@@ -42,8 +42,15 @@ describe("whose upstream account a connection reached", () => {
 		const none = upstreamAccountWith({ users: ledger("bob"), check: "none" });
 		expect(none.check).toBe("none");
 		expect(await none.refusal(grant, {}, "corp", at)).toBeUndefined();
-		const nobody = upstreamAccountWith({ users: ledger("nobody"), check: "required" });
+		const nobody = upstreamAccountWith({ users: ledger(undefined), check: "required" });
 		expect(await nobody.refusal(grant, {}, "corp", at)).toBeUndefined();
+	});
+
+	it("tells a holder from no holder by the ledger's answer, whatever the holder's subject reads", async () => {
+		for (const subject of ["nobody", "", "none"]) {
+			const other = upstreamAccountWith({ users: ledger(subject), check: "required" });
+			expect(await other.refusal(grant, {}, "corp", at)).toBe("identity_conflict");
+		}
 	});
 
 	it("reads any failure of the ledger as unverifiable", async () => {

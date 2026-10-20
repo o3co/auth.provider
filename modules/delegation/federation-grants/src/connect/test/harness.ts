@@ -319,6 +319,7 @@ export async function connector(
 		script,
 		asked,
 		events: recorded.events,
+		logs: () => logged.lines(),
 		relist: (connections: string[], returns: string[]) => {
 			listed.connections = connections;
 			listed.returns = returns;

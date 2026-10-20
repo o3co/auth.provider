@@ -14,7 +14,7 @@ Internal module of `federation-grants`: whose upstream account a connection reac
 
 ## Invariants
 - An account other than the grant's recorded one, or than its intent's expected subject, is `account_mismatch`.
-- Under `required`, an account another user holds is `identity_conflict`; one nobody holds, or the subject's own, passes. Under `none`, nobody is asked.
+- Under `required`, an account another user holds is `identity_conflict`, whatever that user's subject reads; one nobody holds, or the subject's own, passes. Under `none`, nobody is asked.
 - Any failure of the lookup reads as `identity_unverifiable`, an unavailable ledger and any other throw alike.
 
 ## Depends on
