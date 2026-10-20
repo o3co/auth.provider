@@ -41,6 +41,7 @@ export function testIdpType(
 				open: async (read) => {
 					const { issuer, path, mode } = read;
 					if (issuer.includes("mismatch")) throw new Error("not this upstream");
+					if (issuer.includes("unreachable")) throw new Unavailable("test upstream");
 					if (issuer.includes("misdescribed")) {
 						throw new UpstreamMismatch("the description names another issuer", ["issuer"]);
 					}
