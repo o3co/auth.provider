@@ -124,7 +124,13 @@ export interface Section {
 	readonly dir: string;
 	readonly schema: Schema;
 	readonly rows: Row[];
+	/** The fragment's keys read from env that no row holds: under a map whose names are the operator's. */
+	readonly unfixed: readonly string[];
 }
+
+/** The keys read from env that no row holds, as one under a map (a record whose names the operator picks). */
+export const unfixedKeys = (rows: readonly Row[], read: readonly string[]): string[] =>
+	read.filter((key) => !rows.some((row) => row.key === key));
 
 /** Every section of the workspace. */
 export async function sectionsIn(root: string): Promise<Section[]> {
@@ -150,12 +156,14 @@ export async function sectionsIn(root: string): Promise<Section[]> {
 		};
 		const schema = module?.section?.["~standard"].jsonSchema?.input({ target: "draft-2020-12" });
 		if (module?.section && schema) {
+			const rows = rowsOf(schema as JsonSchema, [module.name], at);
 			found.push({
 				section: module.name,
 				owner: name,
 				dir,
 				schema: module.section,
-				rows: rowsOf(schema as JsonSchema, [module.name], at),
+				rows,
+				unfixed: unfixedKeys(rows, [...env.keys()]),
 			});
 		} else if (fragment && name === kernel) {
 			// The kernel reads its own section, by the schema its contract exports.
@@ -164,14 +172,15 @@ export async function sectionsIn(root: string): Promise<Section[]> {
 			const rows = read
 				? rowsOf(read as JsonSchema, [fragment.section], at)
 				: fragmentRows(fragment, at);
-			found.push({ section: fragment.section, owner: name, dir, schema: own, rows });
+			const unfixed = unfixedKeys(rows, [...env.keys()]);
+			found.push({ section: fragment.section, owner: name, dir, schema: own, rows, unfixed });
 		}
 	}
 	return found.sort((a, b) => (a.section < b.section ? -1 : 1));
 }
 
 /** A section modules add to client records: its name, its contributor, its schema and its rows under `sections`. */
-export type ClientSection = Omit<Section, "dir">;
+export type ClientSection = Omit<Section, "dir" | "unfixed">;
 
 /** Contributions as sections, by name: their keys under `path`. */
 const asSections = (found: readonly Contributed[], path: (name: string) => string[]) =>
@@ -203,7 +212,7 @@ const text = (value: string | undefined) =>
 
 /** The reference, generated: one table per section, then one per client metadata section and per IdP type. */
 export function referenceOf(
-	sections: readonly Omit<Section, "dir" | "schema">[],
+	sections: readonly Omit<Section, "dir" | "schema" | "unfixed">[],
 	clients: readonly Omit<ClientSection, "schema">[] = [],
 	types: readonly Omit<ClientSection, "schema">[] = [],
 ): string {
@@ -299,7 +308,11 @@ const hoconValue = (value: unknown) =>
 		: JSON.stringify(value);
 
 /** A section's defaults as HOCON, for an operator to read: each key, described, with its default or what it needs. */
-export function referenceConfOf({ section, owner, rows }: Omit<Section, "dir" | "schema">): string {
+export function referenceConfOf({
+	section,
+	owner,
+	rows,
+}: Omit<Section, "dir" | "schema" | "unfixed">): string {
 	const keys = rows.flatMap((r) => {
 		const key = r.key.split(".").slice(1).map(hoconKey).join(".");
 		const about = (r.description ?? "")

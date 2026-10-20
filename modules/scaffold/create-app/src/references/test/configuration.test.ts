@@ -8,6 +8,7 @@ import {
 	referenceOf,
 	rowsOf,
 	sectionsIn,
+	unfixedKeys,
 } from "../configuration.ts";
 
 // These tests read the whole workspace, which is slow when the machine is busy.
@@ -79,6 +80,31 @@ it("merges the keys of a union of objects, required only where every variant req
 		{ key: "u.mode", type: "off | on", required: true },
 		{ key: "u.hosts", type: "list of string", required: false },
 	]);
+});
+
+it("tells a key read from env that no fixed key of the schema holds, as one under a map the operator names", () => {
+	const schema = {
+		type: "object",
+		properties: {
+			url: { type: "string" },
+			idps: {
+				type: "object",
+				additionalProperties: { type: "object", properties: { type: { type: "string" } } },
+			},
+		},
+	};
+	const rows = rowsOf(schema, ["f"], () => ({}));
+	expect(unfixedKeys(rows, ["f.url", "f.idps.google.type"])).toEqual(["f.idps.google.type"]);
+});
+
+it("reads from env only fixed keys of each section, never one under a map whose names are the operator's, naming the fragment", async () => {
+	const unfixed = (await sectionsIn(root)).flatMap((s) =>
+		s.unfixed.map(
+			(key) =>
+				`${s.owner}'s config.example: ${key} is under a map the operator names; give its entries in the local layer`,
+		),
+	);
+	expect(unfixed).toEqual([]);
 });
 
 it("finds keys in every section, so none is left out by a shape the reference cannot read", async () => {
