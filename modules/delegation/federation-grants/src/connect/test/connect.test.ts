@@ -329,6 +329,31 @@ describe("the callback", () => {
 		expect(cleared(await h.callback(odd.state, odd.browser))).toBe(false);
 	});
 
+	it("audits a browser route the store cannot answer as a failed connection, unavailable, whatever the record does", async () => {
+		const h = await connector();
+		const failed = () => h.events.filter((e) => e.kind === "federation.grant.authorization_failed");
+		const down = await h.started();
+		h.stores.down.failNext("read");
+		expect((await h.callback(down.state, down.browser)).status).toBe(503);
+		expect(failed().map((e) => e.attributes?.outcome)).toEqual(["unavailable"]);
+		// Recording is best effort: a record that throws leaves the answer a 503.
+		const push = h.events.push;
+		h.events.push = () => {
+			throw new Error("record failed");
+		};
+		const again = await h.started();
+		h.stores.down.failNext("read");
+		expect((await h.callback(again.state, again.browser)).status).toBe(503);
+		h.events.push = push;
+		// Anything else that throws is not an outage, and is not audited as one.
+		const broken = await h.started();
+		h.stores.pending.remove = async () => {
+			throw new Error("broken");
+		};
+		await expect(h.callback(broken.state, broken.browser)).rejects.toThrow("broken");
+		expect(failed()).toHaveLength(1);
+	});
+
 	it("keeps only the later of two round trips of one connection begun in one browser", async () => {
 		const h = await connector();
 		const first = await h.started();

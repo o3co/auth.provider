@@ -550,6 +550,13 @@ export function connectWith(p: ConnectParts) {
 			} catch (error) {
 				if (!isUnavailable(error)) throw error;
 				p.log.error("federation-grants.browser_unavailable", { path: request.path.slice(0, 100) });
+				// Audited as a failed connection, though which grant is not known here; best effort.
+				try {
+					const from = determinedSource(request);
+					audited.record("federation.grant.authorization_failed", {
+						attributes: { outcome: "unavailable", ...(from ? { source: from } : {}) },
+					});
+				} catch {}
 				return plain(503, "This service is unavailable. Try again later.");
 			}
 		};
