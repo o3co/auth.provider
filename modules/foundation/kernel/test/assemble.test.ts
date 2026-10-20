@@ -646,3 +646,47 @@ describe("late", () => {
 		expect(() => later?.()).toThrow("before assembly is done");
 	});
 });
+
+describe("takenBy", () => {
+	const signer = contract<{ sign(): string }>("signer", { takenBy: ["issuer"] });
+	const keys = defineModule({ name: "keys" }, (m) => [
+		m.provide(signer).by(() => ({ sign: () => "signed" })),
+	]);
+	/** A module named `name` providing `out`, which takes the signer as `how` says. */
+	const taker = (name: string, how: "get" | "late" | "caught") => {
+		const out = contract<object>(`${name}-out`);
+		return defineModule({ name }, (m) => [
+			m.provide(out).by(async (c) => {
+				if (how === "late") c.late(signer);
+				else if (how === "get") await c.get(signer);
+				else await c.get(signer).catch(() => undefined);
+				return {};
+			}),
+		]);
+	};
+	const refusal = (where: string) => ({ where, reason: "signer is taken by issuer alone" });
+
+	it("lets a module the contract names take it, and the composition root besides", async () => {
+		const app = await assemble({ modules: [keys, taker("issuer", "get")], config: single });
+		expect(app.get(signer).sign()).toBe("signed");
+		await assemble({ modules: [keys, taker("issuer", "late")], config: single });
+	});
+
+	it("refuses boot when a module it does not name takes it, by get or late, even when the taker catches the throw", async () => {
+		for (const how of ["get", "late", "caught"] as const) {
+			const refused = await refusalsOf(
+				assemble({ modules: [keys, taker("tokens", how)], config: single }),
+			);
+			expect(refused, how).toEqual([refusal("tokens")]);
+		}
+	});
+
+	it("binds only the contracts that name their takers", async () => {
+		const open = contract<object>("open");
+		const anyone = defineModule({ name: "anyone" }, (m) => [m.provide(open).by(() => ({}))]);
+		const reader = defineModule({ name: "reader" }, (m) => [
+			m.provide(contract<object>("read")).by(async (c) => c.get(open)),
+		]);
+		await assemble({ modules: [anyone, reader], config: single });
+	});
+});

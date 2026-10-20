@@ -135,11 +135,22 @@ export async function assemble(input: AssemblyInput): Promise<Assembly> {
 		seen.add(from);
 		return [...(waits.get(from) ?? [])].some((next) => waitsOn(next, to, seen));
 	};
+	/** A module a contract does not name taking it is refused, recorded even where the taker catches the throw. */
+	const mayTake = (contract: Contract<unknown>, item: Item) => {
+		const { takenBy } = contract;
+		if (takenBy === undefined || takenBy.includes(item.module.name)) return;
+		refusals.push({
+			where: item.module.name,
+			reason: `${contract.label} is taken by ${takenBy.join(", ")} alone`,
+		});
+		throw new DependencyFailed();
+	};
 	/** What a factory sees while `item` is built; `next` is the stack its requests extend. */
 	const contextFor = (item: Item, next: readonly Item[]): BuildContext<unknown> => ({
 		...runtime,
 		section: sections.get(item.module),
 		get: async <T>(contract: Contract<T>) => {
+			mayTake(contract as Contract<unknown>, item);
 			const provider = providers.get(contract as Contract<unknown>);
 			if (!provider) {
 				refusals.push({
@@ -171,6 +182,7 @@ export async function assemble(input: AssemblyInput): Promise<Assembly> {
 			}
 		},
 		late: <T>(contract: Contract<T>) => {
+			mayTake(contract as Contract<unknown>, item);
 			lateNamed.push({ contract: contract as Contract<unknown>, by: item.module.name });
 			return () => {
 				if (!assembled) throw new Error(`${contract.label} is used before assembly is done`);
