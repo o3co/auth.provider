@@ -55,7 +55,8 @@ const none = deepFreeze({ kind: "none" } as const);
 export default defineModule({ name: "users-http", section, replicaSafe: true }, (m) => [
 	m.contribute(ledgers).by(async (c): Promise<Ledger> => {
 		const { "max-response-size": maxBytes, timeout: timeoutMs } = c.section;
-		// The operator's own URL: a host in `internal-hosts` is reached at a private address at its origin.
+		// The operator's own URL: reached at a private address at its origin, for a host in
+		// `internal-hosts` or, over plain http, a host:port `plain-internal` names.
 		const narrowerOf = (url: ConfiguredUrl) => ({
 			hosts: [new URL(url).hostname],
 			internal: url,
