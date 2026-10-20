@@ -2700,6 +2700,12 @@ importers:
         specifier: workspace:*
         version: link:../mfa-witness
     devDependencies:
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      '@mod/seal':
+        specifier: workspace:*
+        version: link:../../foundation/seal
       vitest:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
