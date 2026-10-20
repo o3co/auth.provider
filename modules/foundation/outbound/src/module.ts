@@ -1,4 +1,3 @@
-import { isIP } from "node:net";
 import { contract, defineModule } from "@mod/kernel";
 import {
 	type CredentialPolicy,
@@ -13,7 +12,7 @@ import {
 	policyOf,
 	policySettings,
 } from "@mod/outbound-policy";
-import { urlSetting } from "@mod/url-setting";
+import { isLoopbackName, urlSetting } from "@mod/url-setting";
 import { z } from "zod";
 import {
 	type Outbound,
@@ -25,8 +24,6 @@ import {
 } from "./contract.ts";
 import { type Resolver, type Route, send, systemResolver, type Trust } from "./transport.ts";
 
-const isLoopbackHost = (host: string) =>
-	host === "localhost" || host === "[::1]" || (isIP(host) === 4 && host.startsWith("127."));
 export const section = policySettings
 	.safeExtend({
 		"max-concurrent": z
@@ -198,7 +195,7 @@ export default defineModule({ name: "outbound", section, replicaSafe: true }, (m
 		if (proxy !== undefined) {
 			const host = new URL(proxy).hostname;
 			c.log.warn("outbound.proxy_checks_addresses", { host });
-			if (c.section["proxy-authorization"] && !isLoopbackHost(host)) {
+			if (c.section["proxy-authorization"] && !isLoopbackName(host)) {
 				c.log.warn("outbound.proxy_credentials_in_clear", { host });
 			}
 		}

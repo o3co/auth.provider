@@ -181,6 +181,12 @@ it("boots with a proxy configured whatever the variables say, and warns what it 
 		"outbound.proxy_checks_addresses",
 		"outbound.proxy_credentials_in_clear",
 	]);
+	// A name under localhost is a loopback host, as url-setting's isLoopbackName judges it.
+	await withProxy({
+		proxy: "http://proxy.localhost:3128",
+		"proxy-authorization": "Basic dGVzdA==",
+	});
+	expect(warned().slice(5)).toEqual(["outbound.proxy_checks_addresses"]);
 	expect(JSON.stringify(recorded.lines())).not.toContain("dGVzdA==");
 });
 

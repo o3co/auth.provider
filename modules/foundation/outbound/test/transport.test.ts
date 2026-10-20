@@ -208,6 +208,26 @@ describe("outbound", () => {
 		expect(calls).toEqual([]);
 	});
 
+	it("sends plain http to a plain-loopback pair only where every address it resolves to is loopback", async () => {
+		const before = seen.length;
+		for (const addresses of [
+			["10.0.0.1"],
+			["127.0.0.1", "10.0.0.1"],
+			["::7f00:1"],
+			["::ffff:0:7f00:1"],
+		]) {
+			const { resolve } = table({ "svc.test": addresses });
+			expect(await failure(over(resolve).fetch(svc("/ok"))), addresses.join()).toBe(
+				"special-address",
+			);
+		}
+		expect(seen.length).toBe(before);
+		for (const addresses of [["127.0.0.1"], ["::ffff:127.0.0.1"]]) {
+			const { resolve } = table({ "svc.test": addresses });
+			expect((await over(resolve).fetch(svc("/ok"))).status, addresses.join()).toBe(200);
+		}
+	});
+
 	it("refuses a name when any address it resolves to is special, before connecting", async () => {
 		const { resolve } = table({ "public.test": ["8.8.8.8", "10.0.0.1"], "inside.test": ["::1"] });
 		const before = seen.length;
