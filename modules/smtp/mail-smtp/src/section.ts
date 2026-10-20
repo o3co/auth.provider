@@ -1,7 +1,8 @@
 import { setting } from "@mod/kernel";
 import { canonicalAddress, isAddress } from "@mod/mail";
+import { isLoopbackName } from "@mod/url-setting";
 import { z } from "zod";
-import { isLoopbackHost, mailboxOf } from "./relay/relay.ts";
+import { mailboxOf } from "./relay/relay.ts";
 
 /** One line of text: well formed, not blank, no control character. */
 const line = z.string().refine((s) => s.isWellFormed() && s.trim() !== "" && !/\p{Cc}/u.test(s), {
@@ -59,7 +60,7 @@ export const section = z
 		if (s.password !== undefined && s.user === undefined) {
 			ctx.addIssue({ code: "custom", path: ["user"], message: "is needed with password" });
 		}
-		if (s.security === "none" && !isLoopbackHost(s.host)) {
+		if (s.security === "none" && !isLoopbackName(s.host)) {
 			ctx.addIssue({
 				code: "custom",
 				path: ["security"],

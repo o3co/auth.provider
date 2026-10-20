@@ -2743,6 +2743,12 @@ importers:
       '@mod/mail':
         specifier: workspace:*
         version: link:../../foundation/mail
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../../foundation/url-setting
       nodemailer:
         specifier: 10.1.2
         version: 10.1.2

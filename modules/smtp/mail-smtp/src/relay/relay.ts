@@ -1,4 +1,5 @@
-import { BlockList, isIP, isIPv4, connect as netConnect, type Socket } from "node:net";
+import { connect as netConnect, type Socket } from "node:net";
+import { isLoopbackAddress } from "@mod/outbound-policy";
 import addressparser from "nodemailer/lib/addressparser";
 import MailComposer from "nodemailer/lib/mail-composer";
 import SMTPConnection from "nodemailer/lib/smtp-connection";
@@ -32,24 +33,6 @@ export interface Letter {
 
 /** Opens the TCP connection to the relay. */
 export type Open = (host: string, port: number) => Socket;
-
-const loopback = new BlockList();
-loopback.addSubnet("127.0.0.0", 8, "ipv4");
-loopback.addAddress("::1", "ipv6");
-
-/** Whether an address is loopback, an IPv4-mapped one included. */
-export function isLoopback(address: string | undefined): boolean {
-	if (address === undefined) return false;
-	const mapped = /^::ffff:(.+)$/i.exec(address)?.[1];
-	if (mapped !== undefined && isIPv4(mapped)) return loopback.check(mapped, "ipv4");
-	const family = isIP(address);
-	return family !== 0 && loopback.check(address, family === 4 ? "ipv4" : "ipv6");
-}
-
-/** Where plaintext may go: `localhost`, or a loopback address `isIP` reads as written. */
-export function isLoopbackHost(host: string): boolean {
-	return host.toLowerCase() === "localhost" || isLoopback(host);
-}
 
 /** The one mailbox `from` names, alone or after a display name, or none; its address unchecked. */
 export function mailboxOf(from: string): Mailbox | undefined {
@@ -106,7 +89,7 @@ function openSocket(settings: RelaySettings, open: Open, ms: number, held: Held)
 		};
 		const onClose = () => fail(new RelayFailure("connection"));
 		const onConnect = () => {
-			if (settings.security === "none" && !isLoopback(socket.remoteAddress)) {
+			if (settings.security === "none" && !isLoopbackAddress(socket.remoteAddress ?? "")) {
 				return fail(new RelayFailure("security"));
 			}
 			settle();

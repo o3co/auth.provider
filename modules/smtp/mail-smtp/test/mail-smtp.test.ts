@@ -418,6 +418,32 @@ describe("settings", () => {
 		}
 	});
 
+	it("allows plaintext to a host url-setting's isLoopbackName takes, and to no other", async () => {
+		for (const host of [
+			"LocalHost",
+			"a.localhost",
+			"localhost.",
+			"127.0.0.1",
+			"::1",
+			"::ffff:127.0.0.1",
+		]) {
+			await expect(boot(section(25, { host })), host).resolves.toBeDefined();
+		}
+		for (const host of [
+			"localhost.example",
+			"127.0.0.08",
+			"2130706433",
+			"10.0.0.1",
+			"::ffff:a00:1",
+		]) {
+			const found = await refusals(section(25, { host }));
+			expect(
+				found.map((f) => f.where),
+				host,
+			).toEqual(["mail-smtp.security"]);
+		}
+	});
+
 	it("allows plaintext by the host alone, whatever NODE_ENV says", async () => {
 		const before = process.env.NODE_ENV;
 		try {

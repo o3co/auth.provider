@@ -9,7 +9,7 @@ Internal module of `mail-smtp`: one SMTP conversation per send, over a pinned `n
 
 ## Offers
 - `relayOver(settings, open?)` gives a function from a letter (one checked address in mail's canonical form, subject, text) to sent or limited; it throws `RelayFailure` (stage, codes). No library type crosses it.
-- `mailboxOf(from)` (splits off a display name; the section checks the address), `isLoopback(address)` and `isLoopbackHost(host)`, for the section's checks.
+- `mailboxOf(from)` (splits off a display name; the section checks the address), for the section's checks.
 
 ## Invariants
 - Before STARTTLS, only EHLO and STARTTLS are sent in the clear.
@@ -17,4 +17,4 @@ Internal module of `mail-smtp`: one SMTP conversation per send, over a pinned `n
 - A `RelayFailure` keeps no text from the relay or the library, and no cause.
 
 ## Depends on
-- `nodemailer` (SMTP connection, message composer, address parser); nothing in the workspace.
+- `nodemailer` (SMTP connection, message composer, address parser); `outbound-policy` (`isLoopbackAddress`, for the peer under `none`).
