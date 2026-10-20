@@ -1,4 +1,5 @@
 import { deepFreeze, Unavailable } from "@mod/kernel";
+import { addedClaimsOf } from "./added-claims/added-claims.ts";
 import type {
 	Admitted,
 	IssuancePolicy,
@@ -68,17 +69,27 @@ export type IssueAccess = (
 	limits?: IssueLimits,
 ) => Promise<IssuedAccess>;
 
+/**
+ * The request with the claims its grant adds checked and copied, before anything else reads them;
+ * an empty set is none. Throws TypeError, the grant's maker's mistake, on claims outside the rules.
+ */
+function checkedRequest(request: IssuanceRequest): IssuanceRequest {
+	const { claims: given, ...grant } = request.grant;
+	const claims = addedClaimsOf(given);
+	return { ...request, grant: claims ? { ...grant, claims } : grant };
+}
+
 /** `admits` and `issue` over the judgment and the issuing, alike for tokens and its stand-in. */
 export function issuing(
 	judge: (request: IssuanceRequest) => Promise<Admitted>,
 	issueAccess: IssueAccess,
 ): Pick<Tokens, "admits" | "issue"> {
 	return {
-		admits: judge,
+		admits: async (request) => judge(checkedRequest(request)),
 		issue: async (request, limits) => {
 			// One frozen copy, taken before anything waits, is both what the policies judge and what is
 			// signed: a caller changing its own grant or limits meanwhile changes neither.
-			const taken = deepFreeze(structuredClone({ request, limits }));
+			const taken = deepFreeze(structuredClone({ request: checkedRequest(request), limits }));
 			const judged = await judge(taken.request);
 			if (judged.kind === "refused") return judged;
 			return { kind: "issued", access: await issueAccess(taken.request.grant, taken.limits) };

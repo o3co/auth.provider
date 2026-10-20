@@ -1,5 +1,8 @@
 import { contract, extensionPoint } from "@mod/kernel";
 import type { Binding, TokenValidity } from "@mod/sender-binding";
+import type { AddedClaims } from "./added-claims/added-claims.ts";
+
+export type { AddedClaims, AddedValue } from "./added-claims/added-claims.ts";
 
 /** Who acts for the subject, and the actor it acts for in turn (`act`). */
 export interface Actor {
@@ -20,6 +23,11 @@ export interface AccessGrant {
 	/** The authentication time is not known: no `auth_time` is written, whatever `authenticatedAt` holds. */
 	readonly authenticatedAtUnknown?: true;
 	readonly acr?: string;
+	/**
+	 * Claims the grant adds to its access token: JSON within `added-claims`' limits, no name
+	 * reserved; an empty set is none. What the grant states, never what the provider vouches for.
+	 */
+	readonly claims?: AddedClaims;
 }
 
 export interface IssuedAccess {
@@ -29,6 +37,8 @@ export interface IssuedAccess {
 	readonly expiresAt: number;
 	readonly expiresIn: number;
 	readonly tokenType: string;
+	/** The names of the claims the grant added, in name order; none where it added none. */
+	readonly addedClaims?: readonly string[];
 }
 
 export type AccessCheck =

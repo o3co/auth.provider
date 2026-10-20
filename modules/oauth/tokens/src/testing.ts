@@ -246,6 +246,23 @@ export function tokensContract(
 			});
 		});
 
+		it("carries the claims a grant adds, read back frozen and named in name order, and refuses a reserved one", async () => {
+			const place = await open({ revocable: true });
+			const claims = { b: { c: [1] }, a: "x" };
+			const issued = await place.tokens.issue({ grant: { ...grant, claims }, grantType: "test" });
+			if (issued.kind !== "issued") throw new Error(issued.policy);
+			expect(issued.access.addedClaims).toEqual(["a", "b"]);
+			const checked = await place.tokens.verifyAccess(issued.access.token);
+			if (checked.kind !== "valid") throw new Error(checked.reason);
+			expect(checked.grant.claims).toEqual(claims);
+			expect(Object.isFrozen(checked.grant.claims?.b)).toBe(true);
+			const plain = await issueFor(place.tokens, grant);
+			expect("addedClaims" in plain).toBe(false);
+			const reserved = { grant: { ...grant, claims: { scope: "x" } }, grantType: "test" };
+			await expect(place.tokens.issue(reserved)).rejects.toThrow(TypeError);
+			await expect(place.tokens.admits(reserved)).rejects.toThrow(TypeError);
+		});
+
 		it("refuses an authentication time beyond its allowance ahead of the clock", async () => {
 			const place = await open({ revocable: true });
 			const at = (authenticatedAt: number) => ({
@@ -507,6 +524,7 @@ export function tokensStandIn(
 					expiresAt: exp * 1000,
 					expiresIn: exp - iat,
 					tokenType: binding?.tokenType ?? "Bearer",
+					...(grant.claims ? { addedClaims: Object.freeze(Object.keys(grant.claims).sort()) } : {}),
 				};
 			};
 			const stand: Tokens = {
