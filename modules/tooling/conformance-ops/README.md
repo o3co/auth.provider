@@ -8,7 +8,7 @@
 ## Not here
 - Scene composition and drivers (`conformance`). Starting the legacy system (`conformance-legacy`). Key and OAuth parts (`conformance-keys`, `conformance-oauth`).
 
-## Interface
+## Offers
 - Area `ops` and the shape of its part (where the scrape answers, the log level)
 - The need `scrapePathSetting`, which the legacy target cannot meet
 

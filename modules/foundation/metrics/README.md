@@ -11,7 +11,7 @@
 - How counts are published, how help and label values are escaped, and the process's own counts (the adapter's).
 - Whether dependencies are up (the emitter's, through a gauge), and tracing.
 
-## Interface
+## Offers
 - `counter`, `histogram` and `gauge` make an instrument from its spec; a gauge also takes the read that gives its series.
 - An emitter makes its instruments at each build and contributes them to `instruments`, keyed by name, without needing `metrics`.
 - `instruments` is the extension point; metrics attaches its recorder to each instrument it collects.

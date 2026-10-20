@@ -10,7 +10,7 @@
 - Routing and the `503` and `500` answers belong to `http`; the gauge of whether dependencies are up, to `http-ops`.
 - Limiting who may scrape belongs to the proxy, which the provider always sits behind.
 
-## Interface
+## Offers
 - Composition definition only: it contributes `GET <path>` to `http`'s routes, with no policy and no body, and `http` answers HEAD as GET.
 - The answer is `200` with `text/plain; version=0.0.4; charset=utf-8`, `no-store` and `Pragma: no-cache`.
 - The body is what `metrics` samples at the scrape, then the process defaults prefixed `auth_provider_`.

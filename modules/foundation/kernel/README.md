@@ -9,7 +9,7 @@
 ## Not here
 - Feature vocabulary, other modules' names, per-feature kinds of extension point, the outside and storage, and what each configuration item means.
 
-## Interface
+## Offers
 - `defineModule`: name, section schema (zod, the library that reads sections), multi-instance declaration (a boolean, or a function asked only with a section that passed), provisions and contributions. `contract` and `extensionPoint` (exactly one / at least one / any number / keyed) make the handles.
 - `assemble`: answers `get`, `start` and `stop(deadlineMs?)` (without one, `stop-deadline`), or rejects with `BootRefused` (one module may raise several refusals).
 - `stop`: after the periodic tasks, runs the stop hooks in reverse order, each given a signal that aborts at the deadline; the hooks left are then called without waiting.
