@@ -216,6 +216,20 @@ describe("federation grants: refreshing upstream tokens", () => {
 		expect((await t.grantCall(id, "status")).body.status).toBe("reauthorization_required");
 	});
 
+	it("asks for reauthorization when the upstream wants the user at a refresh: 410 from then on", async () => {
+		const { id } = await due();
+		t.corp.answerRefresh({ status: 400, json: { error: "interaction_required" } });
+		for (const _ of [1, 2]) {
+			const token = await t.grantCall(id, "token");
+			expect([token.status, token.body.error]).toEqual([410, "reauthorization_required"]);
+		}
+		const status = (await t.grantCall(id, "status")).body;
+		expect([status.status, status.reason]).toEqual([
+			"reauthorization_required",
+			"upstream_interaction_required",
+		]);
+	});
+
 	it("keeps the credential while the upstream is down, even with invalid_grant in its body", async () => {
 		const { id } = await due();
 		t.corp.answerRefresh({ status: 503, json: { error: "invalid_grant" } });
