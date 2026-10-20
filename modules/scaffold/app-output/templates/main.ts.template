@@ -1,0 +1,28 @@
+import { assemble, BootRefused, loadConfig } from "{{kernel}}";
+{{imports}}
+
+/** A refused boot: each refusal on its own line of standard error, then exit 78. */
+const refused = (error: unknown): never => {
+	if (!(error instanceof BootRefused)) throw error;
+	for (const refusal of error.refusals) {
+		process.stderr.write(`refused ${refusal.where}: ${refusal.reason}\n`);
+	}
+	process.exit(78);
+};
+
+const files = (process.env.APP_CONFIG ?? "config/application.conf").split(",");
+const app = await loadConfig({ files, env: process.env })
+	.then((config) => assemble({ modules: [{{modules}}], config }))
+	.catch(refused);
+// Taken before starting, so a signal while starting stops once started instead of killing.
+let started: Promise<void> = Promise.resolve();
+const stop = async () => {
+	await started.catch(() => undefined);
+	// Within the kernel's `stop-deadline`.
+	await app.stop();
+	process.exit(0);
+};
+process.once("SIGTERM", stop);
+process.once("SIGINT", stop);
+started = app.start();
+await started;

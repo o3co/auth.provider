@@ -1,0 +1,17 @@
+{
+	"name": "@mod/app-output",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "assembly",
+	"exports": {
+		".": "./src/contract.ts"
+	},
+	"dependencies": {
+		"@mod/kernel": "workspace:*",
+		"@o3co/ts.hocon": "1.14.3"
+	},
+	"devDependencies": {
+		"vitest": "5.0.4"
+	}
+}
