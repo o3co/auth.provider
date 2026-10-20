@@ -32,6 +32,7 @@
 - The set carries a strong ETag, answers 304 to it, and is cached five minutes.
 - An outside JWK with a private member, a `kid` that is no string, or a key member not in its one form, is refused; so is a private PEM.
 - An outside key may verify only for signatures (`use`, `key_ops`) and only under an algorithm its kind and curve fit.
+- Internal modules `material` (outside key material), `secret` (secret settings), `signing` (the provider's key ring) and `jwks` (the public key set).
 
 ## Depends on
 - `kernel`, `http`

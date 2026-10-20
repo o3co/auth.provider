@@ -8,7 +8,7 @@ import { CompactSign } from "jose";
 import { afterEach, describe, expect, it } from "vitest";
 import { keys } from "../src/contract.ts";
 import keysModule from "../src/module.ts";
-import { section as keysSection } from "../src/section.ts";
+import { section as keysSection } from "../src/signing/section.ts";
 import { keysConfig } from "../src/testing.ts";
 
 let now = Date.parse("2026-01-01T00:00:00Z");

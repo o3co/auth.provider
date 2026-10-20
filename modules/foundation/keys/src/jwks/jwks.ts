@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
-import { expired, type Ring } from "./ring.ts";
+import { expired, type Ring } from "../signing/ring.ts";
 
 const cacheControl = "public, max-age=300";
 

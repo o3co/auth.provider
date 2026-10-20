@@ -1,5 +1,5 @@
 import { createPrivateKey, createPublicKey, createSecretKey, type KeyObject } from "node:crypto";
-import { bytesOf } from "./secret.ts";
+import { bytesOf } from "../secret/secret.ts";
 import type { AsymmetricAlg, Section } from "./section.ts";
 
 export interface RingKey {
