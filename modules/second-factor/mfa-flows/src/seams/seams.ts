@@ -52,12 +52,11 @@ export interface FlowParts {
 	readonly transactions: FlowTransactions;
 	/** Whom `mfa`'s kinds are asked for, by the transaction's purpose. */
 	askedFrom(t: ByPurpose): AskedFrom;
-	/** Goes on with a held login, adding what was proved to its amr and what `carried` makes to its answer, made once it opens; a response it makes closes the session. A body `carried` makes never holds `status`, which marks a response. */
+	/** Goes on with a held login, adding what was proved to its amr. */
 	resume(
 		request: HttpRequest,
 		t: Transaction & { readonly purpose: "login" | "enroll-login" },
 		proved: readonly string[],
-		carried?: () => Promise<object | HttpResponse>,
 	): Promise<HttpResponse>;
 	/** Goes on with a held login, adding what was proved to its amr; what `made` makes is made once it opens: its answer closes the session and is answered, and what it adds goes to the answer. */
 	resumeWith(
@@ -97,18 +96,7 @@ export const flowPartsOf = (parts: {
 }): FlowParts => ({
 	transactions: parts.transactions,
 	askedFrom,
-	// Marked here until its callers move to resumeWith: a body never holds `status`.
-	resume: (request, t, proved, carried) =>
-		parts.resume(
-			request,
-			t,
-			proved,
-			carried &&
-				(async () => {
-					const made = await carried();
-					return "status" in made ? { answer: made as HttpResponse } : { adds: made };
-				}),
-		),
+	resume: (request, t, proved) => parts.resume(request, t, proved),
 	resumeWith: (request, t, proved, made) => parts.resume(request, t, proved, made),
 	record: auditedBy(parts.audit),
 	answers: {

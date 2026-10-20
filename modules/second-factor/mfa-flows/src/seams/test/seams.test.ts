@@ -1,4 +1,4 @@
-import { type HttpResponse, jsonAnswer } from "@mod/http";
+import { jsonAnswer } from "@mod/http";
 import { testRequest } from "@mod/http/testing";
 import { Unavailable } from "@mod/kernel";
 import { recordingLog } from "@mod/kernel/testing";
@@ -35,13 +35,17 @@ it("passes a marked maker to the resume as it is", async () => {
 	expect(seen).toEqual([{ answer }, { adds: { status: "x" } }]);
 });
 
-it("marks what an unmarked maker makes for the resume, until its callers move to resumeWith", async () => {
+it("resumes with no maker through resume, which carries nothing", async () => {
 	const { built, seen } = parts();
-	const answer: HttpResponse = jsonAnswer(401, { error: "login_required" });
-	await built.resume(testRequest(), t, ["otp"], async () => answer);
-	await built.resume(testRequest(), t, ["otp"], async () => ({ factor: "f" }));
-	await built.resume(testRequest(), t, ["otp"]);
-	expect(seen).toEqual([{ answer }, { adds: { factor: "f" } }]);
+	const carried = async () => ({ adds: { factor: "f" } });
+	// A maker given anyway is no part of resume's contract, and never reaches the resume.
+	await (built.resume as (...args: unknown[]) => Promise<unknown>)(
+		testRequest(),
+		t,
+		["otp"],
+		carried,
+	);
+	expect(seen).toEqual([]);
 });
 
 /** The parts over the package's own resume, a login opening; `closes` says how its close answers. */
