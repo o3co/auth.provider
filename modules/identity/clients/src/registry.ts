@@ -154,10 +154,15 @@ export function registry(
 			const challenges = only.method.challenge ? [only.method.challenge] : [];
 			const refused = (reason: Refused["reason"]) =>
 				({ kind: "refused", reason, challenges }) as const;
+			// Refused only after the work its credentials would cost, so the time tells no client id apart.
+			const refusedAfterWork = async (reason: Refused["reason"]) => {
+				await only.method.decoy?.(request);
+				return refused(reason);
+			};
 			const found = await lookup(only.id);
-			if (found === undefined) return refused("unknown_client");
-			if (found === "invalid") return refused("invalid_record");
-			if (found.method !== only.method.name) return refused("wrong_method");
+			if (found === undefined) return refusedAfterWork("unknown_client");
+			if (found === "invalid") return refusedAfterWork("invalid_record");
+			if (found.method !== only.method.name) return refusedAfterWork("wrong_method");
 			if (!(await only.method.verify(request, found))) return refused("bad_credentials");
 			return {
 				kind: "authenticated",

@@ -185,7 +185,7 @@ Compose `mfa-witness-http` to have the outside user ledger remember which subjec
 
 **Composing it where subjects already hold a factor.** The provider marks a subject only when it binds that subject's first counting factor with the witness composed. A subject who enrolled before carries no mark, and the provider never adds one later: if its factor records are then lost, the subject reads as one who never enrolled, and under `mfa.mode = optional` logs in without a second factor. Before composing the witness, mark at the ledger every subject that already holds a counting factor (any token will do; the provider only reads whether a mark is there), and keep marking newly enrolled subjects that way until the witness is composed on every instance.
 
-**A mark left with no factor.** A binding stopped by a reset or a revocation after it marked the subject leaves the mark with no factor: that subject is refused as inconsistent until an operator resets its second factors, which clears the mark.
+**A mark left with no factor.** A binding stopped by a reset or a revocation after it marked the subject, or whose write then failed (the factor store unavailable), leaves the mark with no factor: that subject is refused as inconsistent until an operator resets its second factors, which clears the mark.
 
 **While the ledger cannot answer.** Subjects holding no counting factor get `503` at login, when they start their first enrollment and when they change their credentials, until it answers; subjects holding one are let through without asking it.
 
