@@ -1,5 +1,4 @@
 export { type Assembly, type AssemblyInput, assemble } from "./assemble.ts";
-export { type ConfigSource, loadConfig } from "./config/config.ts";
 export {
 	type Issue as ConfigurationIssue,
 	kernelConfig,

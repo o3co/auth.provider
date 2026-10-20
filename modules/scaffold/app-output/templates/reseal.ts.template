@@ -1,4 +1,5 @@
-import { assemble, BootRefused, loadConfig } from "{{kernel}}";
+import { loadConfig } from "{{configFiles}}";
+import { assemble, BootRefused } from "{{kernel}}";
 import { resealing } from "{{seal}}";
 {{imports}}
 

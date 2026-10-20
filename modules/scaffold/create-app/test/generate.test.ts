@@ -29,7 +29,12 @@ it("assembles the modules asked for, with the wirings and bridges they come with
 	const expected = [...completedList, "@mod/log-stdout"];
 	expect(imported).toEqual(expected);
 	const manifest = JSON.parse(await readFile(join(target, "package.json"), "utf8"));
-	expect(Object.keys(manifest.dependencies)).toEqual(["@mod/kernel", ...expected, "zod"]);
+	expect(Object.keys(manifest.dependencies)).toEqual([
+		"@mod/kernel",
+		"@mod/config-files",
+		...expected,
+		"zod",
+	]);
 });
 
 it("assembles the sink the plan names instead, and lists a sink asked for only once", async () => {
@@ -138,6 +143,7 @@ it("links each dependency to the workspace when given one, and refuses a module 
 	const manifest = JSON.parse(await readFile(join(target, "package.json"), "utf8"));
 	expect(manifest.dependencies).toEqual({
 		"@mod/kernel": `link:${join(root, "modules", "foundation", "kernel")}`,
+		"@mod/config-files": `link:${join(root, "modules", "foundation", "config-files")}`,
 		"@mod/log-stdout": `link:${join(root, "modules", "log-sinks", "log-stdout")}`,
 		zod: "4.6.7",
 	});
@@ -188,6 +194,7 @@ it("stops once started on a SIGTERM that comes while it starts, instead of being
 	await mkdir(join(target, "node_modules", "@test"), { recursive: true });
 	for (const [name, dir] of [
 		["kernel", "foundation/kernel"],
+		["config-files", "foundation/config-files"],
 		["log-stdout", "log-sinks/log-stdout"],
 	]) {
 		await symlink(

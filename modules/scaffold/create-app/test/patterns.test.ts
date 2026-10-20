@@ -13,6 +13,7 @@ import { type Choice, selectionOf } from "../src/patterns/pattern.ts";
 import { patternNamed } from "../src/patterns/patterns.ts";
 import {
 	boot,
+	configFiles,
 	kernel,
 	readsScalarsFromEnv,
 	refusesEmptyOnlyForSections,
@@ -114,7 +115,7 @@ describe.each(named)("the pattern %s", (name) => {
 		const modules = modulesOf(name);
 		expect(await imports(target)).toEqual(modules);
 		const pkg = JSON.parse(await read(target, "package.json"));
-		expect(Object.keys(pkg.dependencies)).toEqual([kernel, ...modules, "zod"]);
+		expect(Object.keys(pkg.dependencies)).toEqual([kernel, configFiles, ...modules, "zod"]);
 		const card = readFileSync(cardFile(name), "utf8");
 		expect(card.startsWith(`# ${name}\n`)).toBe(true);
 		expect(card.trimEnd().split("\n").length).toBeLessThanOrEqual(10);

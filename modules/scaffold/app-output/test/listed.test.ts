@@ -23,7 +23,12 @@ it("writes a listed app: its entry and manifest, and kernel's section alone", as
 		].sort(),
 	);
 	const manifest = JSON.parse(await read(target, "package.json"));
-	expect(Object.keys(manifest.dependencies)).toEqual(["@mod/kernel", "@mod/http", "zod"]);
+	expect(Object.keys(manifest.dependencies)).toEqual([
+		"@mod/kernel",
+		"@mod/config-files",
+		"@mod/http",
+		"zod",
+	]);
 	expect(manifest.scripts).toEqual({ start: "node src/main.ts" });
 	expect(await read(target, "src/main.ts")).toContain('import m0 from "@o3co/x-http/module";');
 	expect(JSON.parse(await read(target, "config/application.conf"))).toEqual(kernelConfig());

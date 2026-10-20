@@ -3,6 +3,8 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 export const kernel = "@mod/kernel";
+/** Where an app's entry reads its configuration files from. */
+export const configFiles = "@mod/config-files";
 
 /** An npm package name, scoped or not: what the app's imports and dependencies can name. */
 const packageName = /^(@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/;
@@ -61,6 +63,7 @@ export async function filled(template: string, fill: Readonly<Record<string, str
 export const mainSource = (modules: readonly string[], importOf = (name: string) => name) =>
 	filled("main.ts.template", {
 		kernel: importOf(kernel),
+		configFiles: importOf(configFiles),
 		imports: modules.map((name, i) => `import m${i} from "${importOf(name)}/module";`).join("\n"),
 		modules: modules.map((_, i) => `m${i}`).join(", "),
 	});
@@ -69,6 +72,7 @@ export const mainSource = (modules: readonly string[], importOf = (name: string)
 export const resealSource = (modules: readonly string[], importOf = (name: string) => name) =>
 	filled("reseal.ts.template", {
 		kernel: importOf(kernel),
+		configFiles: importOf(configFiles),
 		seal: importOf(sealPackage),
 		imports: modules.map((name, i) => `import m${i} from "${importOf(name)}/module";`).join("\n"),
 		modules: modules.map((_, i) => `m${i}`).join(", "),
@@ -79,7 +83,8 @@ export const sealPackage = "@mod/seal";
 
 export const withKernel = (modules: readonly string[]) => [
 	kernel,
-	...modules.filter((name) => name !== kernel),
+	configFiles,
+	...modules.filter((name) => name !== kernel && name !== configFiles),
 ];
 
 /** Writes every file, by its path in the project, once all are made: nothing is written for a project that fails. */

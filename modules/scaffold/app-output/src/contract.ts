@@ -9,4 +9,4 @@ export {
 } from "./fragments.ts";
 export { writeListed } from "./listed.ts";
 export type { Card, Packages, Release } from "./packages.ts";
-export { kernel, mainSource, namesPackages, vacant } from "./project.ts";
+export { configFiles, kernel, mainSource, namesPackages, vacant } from "./project.ts";

@@ -31,3 +31,4 @@
 
 ## Depends on
 - The workspace's package list; `app-output`'s fragments and the variables they read; `create-app`'s generation of the full template; `trial`'s layer; `combinations` (the full template and its opt-ins); `kernel`, to assemble it; `clients`' metadata sections, `upstreams`' IdP types and `http`'s routes and marks, read from their contracts; the HOCON library, to read a written `reference.conf` back; `kernel`'s `setting`, the form its tests hold time and size keys to.
+- `config-files`, to read the assembled template's configuration files.

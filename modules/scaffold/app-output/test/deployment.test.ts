@@ -33,9 +33,10 @@ it("writes the deployment of the modules from the packages given", async () => {
 		].sort(),
 	);
 	const manifest = JSON.parse(await read(target, "package.json"));
-	// The kernel comes first, whether or not it is listed, and the app has no reseal without seal.
+	// The kernel and its configuration files come first, whether or not listed, and no reseal without seal.
 	expect(Object.keys(manifest.dependencies)).toEqual([
 		"@mod/kernel",
+		"@mod/config-files",
 		"@mod/http",
 		"@mod/clients",
 		"zod",

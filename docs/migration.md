@@ -17,6 +17,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 - [From 0.18.0-rc.1](#from-0180-rc1)
 - [From 0.18.0-rc.2](#from-0180-rc2)
 - [From 0.18.0-rc.3](#from-0180-rc3)
+- [From 0.18.0-rc.4](#from-0180-rc4)
 - [Operational notes](#operational-notes)
 
 ## Before you start
@@ -755,6 +756,12 @@ What changed since rc.3. Coming from an earlier release candidate, read the sect
 - **An address in `outbound.deny`** is refused also where a name resolves to it, not only where a URL writes it: a name that resolves to an address you denied is no longer reached. An IPv4 address carried in IPv6 counts as the IPv4 one.
 - **A federation grant's renewals** count with its lodgings: a client's renewals and lodgings together take `federation-grants.lodges` per `lodge-window`, and past it a renewal answers `429` with `retry-after`. Raise `lodges` where clients renew often.
 - **`federation` with no IdP** still boots, but warns `federation.no_idps` at each boot, as every login answers not found.
+
+## From 0.18.0-rc.4
+
+What changed since rc.4. Coming from an earlier release candidate, read the sections above first.
+
+- **An app's entry reads its configuration files through `@mod/config-files`**: `loadConfig` and `ConfigSource` moved there from `@mod/kernel`, unchanged. An app generated with an earlier release candidate imports `loadConfig` from the kernel in `src/main.ts` (and `src/reseal.ts`, where it has one): import it from `config-files` and add that package to the app's dependencies, or generate the app again. Its configuration is unchanged.
 
 ## Operational notes
 
