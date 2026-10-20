@@ -1,4 +1,5 @@
 import { contract } from "@mod/kernel";
+import type { ConfiguredUrl } from "@mod/url-setting";
 
 /** Why a destination was refused before anything was sent, or why its answer was. */
 export type RefusalReason =
@@ -29,10 +30,11 @@ export interface Narrower {
 	readonly maxBytes?: number;
 	readonly timeoutMs?: number;
 	/**
-	 * The URL is the operator's, from their configuration, never one given from outside; its host may
-	 * then reach a private address when `internal-hosts` lists it.
+	 * The operator's URL, as url-setting read it from their configuration: a request at its origin
+	 * may reach a private address when `internal-hosts` lists the host. `true` says the same of the
+	 * URL being sent, without naming it.
 	 */
-	readonly internal?: true;
+	readonly internal?: true | ConfiguredUrl;
 }
 
 /** The destination policy's refusals, as an operator reads them at boot, apart from sending: no name is resolved. */

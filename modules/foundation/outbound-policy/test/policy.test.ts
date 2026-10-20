@@ -1,3 +1,4 @@
+import { configuredUrl } from "@mod/url-setting/testing";
 import { describe, expect, it } from "vitest";
 import { DestinationRefused, type RefusalReason } from "../src/contract.ts";
 import {
@@ -127,6 +128,19 @@ describe("admitUrl", () => {
 		expect(internal("https://svc.corp/"), "a leading dot covers the name itself too").toBe(true);
 		expect(internal("https://other.corp/")).toBe(false);
 		expect(admitUrl("https://alb.corp/", policy).internal, "a URL from elsewhere").toBe(false);
+	});
+
+	it("takes a host as internal for the operator's configured URL only at that URL's origin", () => {
+		const policy = { ...open, internal: ["alb.corp"], plainLoopback: [] };
+		const configured = configuredUrl("https://alb.corp/verify");
+		const internal = (raw: string) => admitUrl(raw, policy, { internal: configured }).internal;
+		expect(internal("https://alb.corp/subject")).toBe(true);
+		// Another port is another service on that host; another scheme another origin.
+		expect(internal("https://alb.corp:8443/verify")).toBe(false);
+		expect(
+			reasonOf(() => admitUrl("http://alb.corp/verify", policy, { internal: configured })),
+		).toBe("scheme");
+		expect(internal("https://other.corp/verify")).toBe(false);
 	});
 });
 
