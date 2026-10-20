@@ -396,6 +396,30 @@ describe("URLs a section checks once they all parse", () => {
 		expect(issues({ token: "https://ok.example/t" })).toBeUndefined();
 	});
 
+	it("asks with the configured URL a key names as the one it is sent for, and with none where it names none", () => {
+		const seen: unknown[] = [];
+		const check = urlsChecked(
+			(url, _hosts, internal) => {
+				seen.push([url, internal]);
+				return undefined;
+			},
+			{
+				urls: (s: { a: string; b: string }) => [s.a, s.b],
+				sent: (s) => ({
+					a: { url: s.a, hosts: [], internal: configuredUrl(s.b) },
+					b: { url: s.b, hosts: [] },
+				}),
+			},
+		);
+		check({ a: "https://x.example/a", b: "https://x.example/b" }, {
+			addIssue: () => {},
+		} as never);
+		expect(seen).toEqual([
+			["https://x.example/a", "https://x.example/b"],
+			["https://x.example/b", undefined],
+		]);
+	});
+
 	it("asks nothing while a URL is no URL, leaving that to its key's own refusal", () => {
 		asked.length = 0;
 		const refused = urlsChecked(
