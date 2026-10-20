@@ -699,8 +699,9 @@ it("takes origins as url-setting does: an origin alone, in the form the parser w
 			() => [],
 			(error: BootRefused) => error.refusals,
 		);
-	expect(await refusals({ "public-origin": "https://as.example/x" })).toEqual([
-		{ where: "http.public-origin", reason: expect.stringContaining("a URL: an origin alone") },
+	const alone = "a URL: an origin alone, with no path (not even a trailing `/`) and no query";
+	expect(await refusals({ "public-origin": "https://as.example/" })).toEqual([
+		{ where: "http.public-origin", reason: alone },
 	]);
 	for (const origin of ["https://*.example", "https://App.example", "https://app.example:443"]) {
 		expect(await refusals({ "cors-origins": [origin] }), origin).toEqual([
