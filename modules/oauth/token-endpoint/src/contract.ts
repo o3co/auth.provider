@@ -58,7 +58,7 @@ export function oauthError(
 export async function authenticateClient(
 	clients: Clients,
 	request: HttpRequest,
-	audit?: Pick<Audit, "record">,
+	audit: Pick<Audit, "record">,
 ): Promise<
 	| {
 			readonly kind: "client";
@@ -73,10 +73,9 @@ export async function authenticateClient(
 		return { kind: "client", client: authenticated.client, challenges: authenticated.challenges };
 	}
 	const source = determinedSource(request);
-	if (audit)
-		declaredAudit(audit, events).record("client.authentication.failure", {
-			attributes: { ...(source === undefined ? {} : { source }), reason: authenticated.reason },
-		});
+	declaredAudit(audit, events).record("client.authentication.failure", {
+		attributes: { ...(source === undefined ? {} : { source }), reason: authenticated.reason },
+	});
 	if (authenticated.reason === "multiple_methods") {
 		return {
 			kind: "refused",
