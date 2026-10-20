@@ -11,6 +11,7 @@ import {
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import {
+	DestinationRefused,
 	type Narrower,
 	type Outbound,
 	type OutboundRequest,
@@ -147,19 +148,23 @@ interface World {
 	readonly more?: Record<string, Handler>;
 	/** Hosts outbound's destination policy refuses. */
 	readonly refused?: readonly string[];
+	/** How the issuer's description answers, in place of the usual one. */
+	readonly describes?: Handler;
 }
 
 async function open(world: World = {}) {
 	const stub = stubOutbound({
 		...world.more,
-		[`${issuer}/.well-known/openid-configuration`]: () =>
-			ok({
-				issuer,
-				authorization_endpoint: `${issuer}/authorize`,
-				token_endpoint: `${issuer}/token`,
-				jwks_uri: `${issuer}/jwks`,
-				...world.description,
-			}),
+		[`${issuer}/.well-known/openid-configuration`]:
+			world.describes ??
+			(() =>
+				ok({
+					issuer,
+					authorization_endpoint: `${issuer}/authorize`,
+					token_endpoint: `${issuer}/token`,
+					jwks_uri: `${issuer}/jwks`,
+					...world.description,
+				})),
 		[`${issuer}/jwks`]: () => (world.keysUnreachable ? "unreachable" : ok({ keys: [rsa.jwk] })),
 		[`${issuer}/token`]: world.token ?? (() => ok({ id_token: "missing" })),
 	});
@@ -427,6 +432,23 @@ describe("idp-oidc", () => {
 			]);
 			await expect(open({ description, settings: named }), name).resolves.toBeDefined();
 		}
+	});
+
+	it("refuses at boot, under issuer and naming outbound's reason, a description outbound refuses to fetch", async () => {
+		for (const reason of ["special-address", "redirect"] as const) {
+			const describes = () => {
+				throw new DestinationRefused(reason);
+			};
+			const thrown = await open({ describes }).catch((e) => e);
+			expect(thrown, reason).toBeInstanceOf(UpstreamMismatch);
+			expect([thrown.at, thrown.message], reason).toEqual([
+				["issuer"],
+				`outbound's destination policy refuses the description: ${reason}`,
+			]);
+		}
+		// An issuer that cannot be reached is not one that does not match.
+		const unreachable = await open({ describes: () => "unreachable" }).catch((e) => e);
+		expect(isUnavailable(unreachable)).toBe(true);
 	});
 
 	it("reaches an endpoint the operator gives on another host", async () => {
