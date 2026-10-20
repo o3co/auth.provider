@@ -53,6 +53,11 @@ export interface SessionsPlace {
 	/** Subjects whose sessions the participant finished closing. */
 	readonly closed: readonly string[];
 	failClosing(on: boolean): void;
+	/**
+	 * Runs `meanwhile` once, after the next entry by cookie has read which session the cookie opens
+	 * and before it reads that session; a place whose entry is one read leaves it out.
+	 */
+	readonly betweenCookieAndSession?: (meanwhile: () => Promise<unknown>) => void;
 }
 
 /** How a place opens: with a requirement that judges changing credentials (the default), or with none. */
@@ -215,6 +220,27 @@ export function sessionsContract(
 			expect(raised?.raised).toBe(true);
 			const afterRaise = place.request(raised?.cookies);
 			expect((await place.sessions.enterFor(afterRaise, "credentials")).kind).toBe("entered");
+		});
+
+		it("lets the cookie a raise retires into no raised session, even where the raise lands between reading the cookie and the session", async (test) => {
+			const place = await open();
+			const between = place.betweenCookieAndSession;
+			if (!between) return test.skip();
+			for (const enter of [
+				async (asked: HttpRequest) => (await place.sessions.enter(asked)) !== undefined,
+				async (asked: HttpRequest) =>
+					(await place.sessions.enterFor(asked, "credentials")).kind !== "absent",
+			]) {
+				const done = await place.sessions.complete(place.request(), facts(place));
+				const asked = place.request(done.cookies);
+				let raised: Awaited<ReturnType<Sessions["raise"]>>;
+				between(async () => {
+					raised = await place.sessions.raise(asked, ["strong"]);
+				});
+				expect(await enter(asked)).toBe(false);
+				expect(raised?.raised).toBe(true);
+				expect(await enter(place.request(raised?.cookies))).toBe(true);
+			}
 		});
 
 		it("raises under a new cookie, keeping the session and its authentication time", async () => {

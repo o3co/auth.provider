@@ -30,6 +30,8 @@ export function memoryStores() {
 	};
 	/** The writes that take effect once more and then answer Unavailable, as a place whose answer was lost. */
 	const lost = new Set<"sessions.save" | "listed.add" | "cookies.save">();
+	/** What runs once, after the cookie index's next read answers. */
+	const afterIndexRead: { next: (() => Promise<unknown>) | undefined } = { next: undefined };
 	const answered = async <T>(
 		write: "sessions.save" | "listed.add" | "cookies.save",
 		done: Promise<T>,
@@ -57,12 +59,18 @@ export function memoryStores() {
 			const { create: save, read, remove } = index.records;
 			return down.cookies.wrap({
 				save: (...given) => answered("cookies.save", save(...given)),
-				read,
+				read: async (...given) => {
+					const value = await read(...given);
+					const meanwhile = afterIndexRead.next;
+					afterIndexRead.next = undefined;
+					await meanwhile?.();
+					return value;
+				},
 				remove,
 			});
 		}),
 		m.provide(closingList).by(() => down.closing.wrap(kept.deferred)),
 		m.provide(subjectSessions).by(() => listed),
 	]);
-	return { module, kept, index, listed, listingCap: size.perShard, down, lost };
+	return { module, kept, index, listed, listingCap: size.perShard, down, lost, afterIndexRead };
 }
