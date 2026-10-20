@@ -33,7 +33,8 @@ export interface Narrower {
 	readonly timeoutMs?: number;
 	/**
 	 * The operator's URL, as url-setting read it from their configuration: a request at its origin
-	 * may reach a private address when `internal-hosts` lists the host.
+	 * may reach a private address when `internal-hosts` lists the host, or over plain http when
+	 * `plain-internal` names its host:port.
 	 */
 	readonly internal?: ConfiguredUrl;
 	/** An outside party chooses the destination (a client's metadata document, say): its name lookups take a share apart, so they never hold every lookup. */

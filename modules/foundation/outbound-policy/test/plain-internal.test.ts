@@ -49,6 +49,15 @@ describe("plain http to a pair plain-internal names", () => {
 		).toBe("scheme");
 	});
 
+	it("matches an IPv6 pair however the list spells the address", () => {
+		const url = "http://[fd12::1]:9092/verify";
+		for (const pair of ["[fd12::1]:9092", "[FD12:0:0::1]:9092", "[fd12:0000::0001]:9092"]) {
+			const listed = { ...rules, plainInternal: [pair] };
+			const admitted = admitUrl(url, listed, { internal: configuredUrl(url) });
+			expect([admitted.plain, admitted.plainInternal], pair).toEqual([true, true]);
+		}
+	});
+
 	it("is never taken where an outside party chose the destination, though the narrower also names it", () => {
 		expect(
 			reasonOf(() =>
@@ -144,6 +153,12 @@ describe("plain-internal in the settings", () => {
 		});
 		expect(both.success).toBe(false);
 		expect(both.error?.issues.map((issue) => issue.path.join("."))).toEqual(["plain-internal"]);
+		const bothIPv6 = policySettings.safeParse({
+			"allow-any-public": true,
+			"plain-loopback": ["[FD12:0::1]:8080"],
+			"plain-internal": ["[fd12::1]:8080"],
+		});
+		expect(bothIPv6.error?.issues.map((issue) => issue.path.join("."))).toEqual(["plain-internal"]);
 		expect(
 			policySettings.safeParse({ "allow-any-public": true, "plain-internal": ["a.internal"] })
 				.success,
