@@ -11,13 +11,14 @@ const now = 1_800_000_000_000;
 const random = { bytes: (n: number) => crypto.getRandomValues(new Uint8Array(n)) };
 
 function place(store?: RoundTripStore) {
-	const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
+	let at = now;
+	const kept = memoryRecords<StoredRoundTrip>(() => at, { shards: 1, perShard: 1 });
 	const records: RoundTripStore = store ?? {
 		save: kept.records.create,
 		update: kept.records.change,
 	};
 	const cookies = cookiesFor(true);
-	const trips = roundTripsOver({ store: records, cookies, random, clock: { now: () => now } });
+	const trips = roundTripsOver({ store: records, cookies, random, clock: { now: () => at } });
 	/** A request back from the upstream over https, carrying these Set-Cookie values as its cookies. */
 	const back = (...set: string[]) =>
 		testRequest({
@@ -27,7 +28,13 @@ function place(store?: RoundTripStore) {
 			]),
 			source: { address: "198.51.100.1", scheme: "https", determined: true },
 		});
-	return { trips, back };
+	return {
+		trips,
+		back,
+		advance: (ms: number) => {
+			at += ms;
+		},
+	};
 }
 
 const bytesOf = (text: string) => Buffer.from(text, "base64url").length;
@@ -81,6 +88,47 @@ describe("an upstream round trip", () => {
 		});
 		expect((await trips.take(request, "fed.corp", begun.state)).kind).toBe("taken");
 		expect(await trips.take(request, "fed.corp", begun.state)).toEqual({ kind: "none" });
+	});
+
+	it("is read while it lives, by its own name, without being taken, written or lengthened", async () => {
+		const { trips, back, advance } = place();
+		const begun = await trips.begin({ name: "fed.corp", carried: { at: 1 }, lifetimeMs: 60_000 });
+		const request = back(begun.cookie);
+		const live = {
+			state: begun.state,
+			nonce: begun.nonce,
+			challenge: begun.challenge,
+			challengeMethod: "S256",
+			carried: { at: 1 },
+		};
+		expect(await trips.current(request, "fed.corp")).toEqual(live);
+		expect(await trips.current(back(), "fed.corp")).toBeUndefined();
+		const renamed = back(begun.cookie.replace("fed.corp", "fed.other"));
+		expect(await trips.current(renamed, "fed.other")).toBeUndefined();
+		advance(30_000);
+		expect(await trips.current(request, "fed.corp")).toEqual(live);
+		// Its end is where its start put it, however often it is read.
+		advance(30_001);
+		expect(await trips.current(request, "fed.corp")).toBeUndefined();
+		expect(await trips.take(request, "fed.corp", begun.state)).toEqual({ kind: "none" });
+	});
+
+	it("is read as none once taken, or kept in a shape it does not know", async () => {
+		const { trips, back } = place();
+		const begun = await trips.begin({ name: "a", carried: null, lifetimeMs: 60_000 });
+		expect((await trips.take(back(begun.cookie), "a", begun.state)).kind).toBe("taken");
+		expect(await trips.current(back(begun.cookie), "a")).toBeUndefined();
+		const unknown = { format: 2 } as unknown as StoredRoundTrip;
+		const odd: RoundTripStore = {
+			save: async () => "created",
+			update: async (_cookie, change) => ({
+				before: unknown,
+				after: change(unknown)?.value ?? unknown,
+			}),
+		};
+		const other = place(odd);
+		const kept = await other.trips.begin({ name: "a", carried: null, lifetimeMs: 60_000 });
+		expect(await other.trips.current(other.back(kept.cookie), "a")).toBeUndefined();
 	});
 
 	it("is taken by one of two callbacks at once, never both", async () => {
