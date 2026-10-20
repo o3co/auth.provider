@@ -780,6 +780,29 @@ describe("recovery codes written by the reissue", () => {
 		expect(h.events).toEqual([]);
 	});
 
+	it("keeps one place for two bindings at once of a subject holding no codes, where the first set lands", async () => {
+		const h = await serve({ "max-factors": 4 });
+		// A first factor, its codes not yet written; two more bind at once, neither as the first.
+		await bindLater(h, "fia");
+		const [one, two] = [await h.provedCode("fia"), await h.provedCode("fia")];
+		const bound = await Promise.all([
+			h.decided.bind("fia", one.pending, one.state),
+			h.decided.bind("fia", two.pending, two.state),
+		]);
+		expect(bound.map((b) => b.kind === "bound" && b.codesDue)).toEqual([true, true]);
+		const first = await h.decided.reissue("fia", await h.decided.fenceOf("fia"));
+		expect(first.kind).toBe("reissued");
+		expect((await h.decided.held("fia")).map((f) => f.kind).sort()).toEqual([
+			"backup",
+			"code",
+			"code",
+			"code",
+		]);
+		// The second reissue replaces the set: it takes no further place.
+		expect((await h.decided.reissue("fia", await h.decided.fenceOf("fia"))).kind).toBe("reissued");
+		expect(await h.decided.held("fia")).toHaveLength(4);
+	});
+
 	it("owes no codes where no way back is composed", async () => {
 		const h = await serve({}, { kinds: [code] });
 		const bound = await bindLater(h, "eve");
