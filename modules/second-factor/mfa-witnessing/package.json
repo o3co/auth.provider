@@ -22,6 +22,8 @@
 		"@mod/mfa-witness": "workspace:*"
 	},
 	"devDependencies": {
+		"@mod/records": "workspace:*",
+		"@mod/seal": "workspace:*",
 		"vitest": "5.0.4"
 	}
 }
