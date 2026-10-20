@@ -205,6 +205,8 @@ describe("outbound", () => {
 			"special-address",
 		);
 		expect(await failure(out.fetch("https://other.corp/", {}, quick))).toBe("special-address");
+		// The same host at another port is another service: its private answer is refused.
+		expect(await failure(out.fetch("https://alb.corp:8443/", {}, quick))).toBe("special-address");
 		expect(
 			await failure(out.fetch(`https://127.0.0.1:${port}/ok`, {}, quick)),
 			"loopback stays refused",
