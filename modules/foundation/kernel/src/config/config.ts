@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { type Config, ParseError, parse, ResolveError } from "@o3co/ts.hocon";
-import { BootRefused } from "./refusal.ts";
+import { BootRefused } from "../refusal.ts";
 
 export interface ConfigSource {
 	/** Highest priority first. */

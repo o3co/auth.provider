@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { assemble, contract, defineModule, loadConfig } from "../src/contract.ts";
-import { quietRuntime } from "../src/testing.ts";
-import { refusalsOf } from "./refusals.ts";
+import { refusalsOf } from "../../../test/refusals.ts";
+import { assemble, contract, defineModule, loadConfig } from "../../contract.ts";
+import { quietRuntime } from "../../testing.ts";
 
 async function files(...contents: string[]): Promise<string[]> {
 	const dir = await mkdtemp(join(tmpdir(), "kernel-config-"));

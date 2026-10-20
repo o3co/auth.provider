@@ -1,12 +1,11 @@
+export { type Assembly, type AssemblyInput, assemble } from "./assemble.ts";
+export { type ConfigSource, loadConfig } from "./config/config.ts";
 export {
-	type Assembly,
-	type AssemblyInput,
-	assemble,
 	type Issue as ConfigurationIssue,
 	kernelConfig,
 	readConfigured,
-} from "./assemble.ts";
-export { type ConfigSource, loadConfig } from "./config.ts";
+} from "./config/sections.ts";
+export { type KernelSettings, kernelSection } from "./config/settings.ts";
 export { deepFreeze } from "./freeze.ts";
 export {
 	type Contract,
@@ -15,7 +14,7 @@ export {
 	type ExtensionRule,
 	extensionPoint,
 } from "./handles.ts";
-export { logSinks } from "./log.ts";
+export { type Probe, probes, type Readiness, type ReadinessReport } from "./lifecycle/readiness.ts";
 export {
 	type BuildContext,
 	type Contribution,
@@ -27,8 +26,8 @@ export {
 	type Parts,
 	type Provision,
 } from "./module.ts";
-export { type Probe, probes, type Readiness, type ReadinessReport } from "./readiness.ts";
 export { BootRefused, isUnavailable, type Refusal, Unavailable } from "./refusal.ts";
+export { logSinks } from "./runtime/log.ts";
 export type {
 	Clock,
 	Log,
@@ -38,7 +37,6 @@ export type {
 	LogSink,
 	Random,
 	Runtime,
-} from "./runtime.ts";
+} from "./runtime/runtime.ts";
 export { sameSecret } from "./secret.ts";
 export { type DurationUnit, type SizeUnit, setting } from "./setting/setting.ts";
-export { type KernelSettings, kernelSection } from "./settings.ts";

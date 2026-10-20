@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { thresholds } from "./log.ts";
-import { setting } from "./setting/setting.ts";
+import { thresholds } from "../runtime/log.ts";
+import { setting } from "../setting/setting.ts";
 
 const stopRange = { error: "whole seconds from 1 to 3600" };
 

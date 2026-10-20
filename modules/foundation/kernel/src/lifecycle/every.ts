@@ -1,4 +1,4 @@
-import type { Log } from "./runtime.ts";
+import type { Log } from "../runtime/runtime.ts";
 
 /** A task run at a fixed interval while the app runs; runs never overlap. */
 export function periodic(
