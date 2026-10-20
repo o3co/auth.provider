@@ -58,8 +58,7 @@ export const testEnrollment = defineModule({ name: "test-enrollment" }, (m) => [
 				}
 				if (!(await transactions.take(txId))) return answers.unknownTransaction;
 				const label = requests.field(request, "label");
-				const asked = askedFrom(t);
-				const bound = await decided.bind(t.subject, pending, proved.state, label, asked, "later");
+				const bound = await decided.bind(t.subject, pending, proved.state, label, askedFrom(t));
 				if (bound.kind !== "bound") return jsonAnswer(400, { error: bound.kind });
 				// The codes are written by the reissue, as the enrollment writes them.
 				const reissued = bound.codesDue ? await decided.reissue(t.subject, bound.fence) : undefined;
