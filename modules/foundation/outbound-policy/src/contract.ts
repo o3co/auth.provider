@@ -85,6 +85,8 @@ export interface Limits {
 export interface OutboundLimits {
 	/** The operator's caps narrowed, never widened; throws RangeError on a narrowing that is not positive and finite. */
 	of(narrower?: Narrower): Limits;
+	/** How many names the caller's requests may resolve at once, `outsideChosen` taking a share apart; 0 is none, so every such request is unavailable. */
+	lookupsOf?(narrower?: Narrower): number;
 }
 
 export const outboundLimits = contract<OutboundLimits>("outbound.limits");
