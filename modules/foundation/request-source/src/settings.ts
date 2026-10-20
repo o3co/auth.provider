@@ -50,7 +50,13 @@ export function addressesOf(entries: readonly string[]): AddressList {
 /** The trusted proxies and the hops through them, as an operator's section takes them. */
 export const sourceSettings = z.strictObject({
 	"trusted-proxies": z
-		.array(block)
+		.array(
+			// A proxy trusted at every address would make every client a proxy, so no source is ever told.
+			block.refine(
+				(s) => blockOf(s)?.prefix !== 0,
+				"a block covering every address (/0): every source would be undetermined; list the proxies' own addresses",
+			),
+		)
 		.prefault([])
 		.describe(
 			"Proxies whose forwarded headers are believed: IPs without a zone, or CIDRs with one prefix length in decimal without a leading zero. Always set behind a proxy: otherwise every request's source is the proxy, and all look like one source.",
