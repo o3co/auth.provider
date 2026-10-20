@@ -956,6 +956,17 @@ describe("federation", () => {
 		expect(told).toEqual([
 			{ where: "federation.idps.a.issuer", reason: "the description names another issuer" },
 		]);
+		// An upstream that cannot be reached is told apart from one that does not match.
+		const reasons = async (issuer: string) =>
+			serve({ federation: { idps: { a: { type: "test", issuer } } } }).catch(
+				(error: BootRefused) => error.refusals,
+			);
+		expect(await reasons("https://mismatch.example")).toEqual([
+			{ where: "federation.idps.a", reason: "the upstream does not match its settings" },
+		]);
+		expect(await reasons("https://unreachable.example")).toEqual([
+			{ where: "federation.idps.a", reason: "the upstream could not be reached" },
+		]);
 		expect(
 			await refused({ "Bad.Name": { type: "test", issuer: "https://idp.example" } }),
 		).not.toEqual([]);

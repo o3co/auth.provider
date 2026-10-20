@@ -274,7 +274,7 @@ From `@mod/keys`.
 | `keys.signing.kid` | string |  | yes | `KEYS_SIGNING_KID` | `signing-1` | The key id tokens signed with this key carry, unique in the ring. |
 | `keys.signing.alg` | EdDSA \| ES256 \| RS256 \| HS256 |  | yes | `KEYS_SIGNING_ALG` | `EdDSA` | The algorithm the provider signs with. |
 | `keys.signing.private-key` | string |  |  | `KEYS_SIGNING_PRIVATE_KEY` | `"-----BEGIN PRIVATE KEY-----\nREPLACE-PKCS8-PEM-PRIVATE-KEY\n-----END PRIVATE KEY-----"` | The signing key, as a PKCS8 PEM. |
-| `keys.signing.secret` | string |  |  |  |  | The HMAC secret for HS256: at least 32 bytes, in hex or base64, of at least 8 byte values. |
+| `keys.signing.secret` | string |  |  |  |  | The HMAC secret for HS256, its decoded bytes the HMAC key: read as hex where the value is whole bytes of hex, else as base64 (64 hex characters are base64 too, so hex is read first); at least 32 bytes, of at least 8 byte values. |
 | `keys.next.kid` | string |  |  |  |  | The key id of the key that signs next, unique in the ring. |
 | `keys.next.alg` | EdDSA \| ES256 \| RS256 |  |  |  |  | The algorithm the next key will sign with. |
 | `keys.next.public-key` | string |  |  |  |  | The next key's public half, as PEM; a private PEM is taken too. |

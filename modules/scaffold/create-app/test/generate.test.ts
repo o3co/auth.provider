@@ -230,9 +230,14 @@ it("stops once started on a SIGTERM that comes while it starts, instead of being
 
 it("makes an app from the command naming session by its default, with session's bridges", async () => {
 	const target = join(await mkdtemp(join(tmpdir(), "create-app-")), "app");
-	const io = { out: () => {}, err: () => {} };
+	const out: string[] = [];
+	const io = { out: (text: string) => out.push(text), err: () => {} };
 	expect(await run([target, "@mod/session-lifecycle", "@mod/tokens", "@mod/code-grant"], io)).toBe(
 		0,
+	);
+	// A listed app holds no module its modules need, nor their settings: it cannot start as made.
+	expect(out.join("")).toBe(
+		`created ${target}\nnext: add the modules and settings the listed modules need, then cd ${target} && pnpm install && pnpm start\n`,
 	);
 	const imported = await importedModules(target);
 	expect(imported).toContain("@mod/session-tokens");
