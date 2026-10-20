@@ -2,7 +2,8 @@
 
 ## Responsibilities
 - Owns the access token: its format, issuance, verification and revocation; stamps and checks `issuer`'s URL as `iss`.
-- Owns the access token denylist, its internal module `denylist`, and the rules of the claims a grant adds, its internal module `added-claims`.
+- Owns the access token denylist, its internal module `denylist`.
+- Applies `added-claims`' rules to the claims a grant adds, at `issue`, at `admits` and when a token is read back.
 
 ## Not here
 - The procedures that lead to issuance, authenticating the requester, and other token kinds.
@@ -28,15 +29,14 @@
 - With no subject check, the section states `subject-check` `none`; with one, it does not; boot is refused otherwise. Under `none`, a revoked subject's boundary stops no access token: one lives until its expiry unless revoked another way, such as closing its session.
 - Unavailable keys, store or checks answer unavailable, never a negative verdict.
 - Added claims are the grant's statement: signed with the rest, a resource cannot tell them from the provider's, so composing a grant trusts it with its tokens' content.
-- An added claim is JSON alone (plain objects, arrays with no hole, strings, finite numbers, booleans, null), read from own enumerable data properties without calling anything. Reserved at the top: every name `tokens` writes, and names a specification gives a meaning it never writes, which `AddedClaims` lists; at any depth, `__proto__`, `constructor`, `prototype` and `toJSON`.
-- Limits: a name of 1–255 code points, well formed (no lone surrogate), with no control character or space, a well-formed string of 2048, 256 members or values to an object or array, 1024 values, 8 deep, 4 KiB as JSON; each is checked before the walk goes on. A claim outside these is the grant's maker's mistake (TypeError at `issue` and `admits`, a 500 with no audit); a token read back with one is refused as `shape`.
+- An added claim follows `added-claims`' rules, its shape, reserved names and limits; one outside them is the grant's maker's mistake (TypeError at `issue` and `admits`, a 500 with no audit), and a token read back with one is refused as `shape`.
 - A token over 16 KiB, or an actor chain over 16, is neither issued (TypeError) nor read.
 
 ## Data
 - Revoked tokens by id, through the store interface, kept by `denylist`.
 
 ## Depends on
-- `kernel`, `http`, `keys`, `issuer`, `sender-binding`
+- `kernel`, `http`, `keys`, `issuer`, `sender-binding`, `added-claims`
 
 ## Vocabulary
 - scope / audience: the range of permission a token grants, and the token's recipient.

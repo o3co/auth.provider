@@ -1917,6 +1917,9 @@ importers:
 
   modules/oauth/tokens:
     dependencies:
+      '@mod/added-claims':
+        specifier: workspace:*
+        version: link:../../foundation/added-claims
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http

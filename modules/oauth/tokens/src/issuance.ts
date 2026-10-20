@@ -1,5 +1,5 @@
+import { addedClaimsOf } from "@mod/added-claims";
 import { deepFreeze, Unavailable } from "@mod/kernel";
-import { addedClaimsOf } from "./added-claims/added-claims.ts";
 import type {
 	Admitted,
 	IssuancePolicy,

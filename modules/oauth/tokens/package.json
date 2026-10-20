@@ -11,6 +11,7 @@
 		"./module": "./src/module.ts"
 	},
 	"dependencies": {
+		"@mod/added-claims": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/kernel": "workspace:*",

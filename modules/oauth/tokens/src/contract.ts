@@ -1,8 +1,8 @@
+import type { AddedClaims } from "@mod/added-claims";
 import { contract, extensionPoint } from "@mod/kernel";
 import type { Binding, TokenValidity } from "@mod/sender-binding";
-import type { AddedClaims } from "./added-claims/added-claims.ts";
 
-export type { AddedClaims, AddedValue } from "./added-claims/added-claims.ts";
+export type { AddedClaims, AddedValue } from "@mod/added-claims";
 
 /** Who acts for the subject, and the actor it acts for in turn (`act`). */
 export interface Actor {

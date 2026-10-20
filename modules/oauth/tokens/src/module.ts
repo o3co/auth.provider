@@ -1,10 +1,10 @@
+import { type AddedClaims, addedClaimsIn, addedClaimsOf } from "@mod/added-claims";
 import { site } from "@mod/http";
 import { issuer, metadata } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
 import { keys } from "@mod/keys";
 import { senderBinding } from "@mod/sender-binding";
 import { z } from "zod";
-import { type AddedClaims, addedClaimsIn, addedClaimsOf } from "./added-claims/added-claims.ts";
 import {
 	type AccessCheck,
 	type AccessGrant,
