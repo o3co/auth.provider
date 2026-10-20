@@ -1,6 +1,8 @@
 import { type HttpRequest, jsonAnswer, type Route, use } from "@mod/http";
+import type { BuildContext } from "@mod/kernel";
 import { requestsPerSource, type Window } from "@mod/rate-limit";
-import type { Passkeys } from "@mod/webauthn";
+import { type Passkeys, passkeys } from "@mod/webauthn";
+import type { Settings } from "../section.ts";
 
 /** The client the options are for; false unless named as one non-empty string. */
 function requesterOf({ fields, mistyped }: HttpRequest): string | false {
@@ -10,6 +12,10 @@ function requesterOf({ fields, mistyped }: HttpRequest): string | false {
 }
 
 /** Request options the same for everyone, whose challenge only the client named redeems. */
+/** The options route over the assembly's passkeys, limited per source as the package's section says. */
+export const optionsRouteIn = async (c: BuildContext<Settings>) =>
+	optionsRoute(await c.get(passkeys), { limit: c.section.requests, ms: c.section.window * 1000 });
+
 export function optionsRoute(passkeys: Passkeys, window: Window): Route {
 	return {
 		method: "POST",

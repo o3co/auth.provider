@@ -1,11 +1,13 @@
-import { type Audit, declaredAudit } from "@mod/audit";
+import { type Audit, audit, declaredAudit } from "@mod/audit";
 import { clientAllowance } from "@mod/client-allowance";
 import type { Grant, GrantOutcome } from "@mod/grants";
-import type { Lineage } from "@mod/refresh";
-import type { SubjectRevocation } from "@mod/subject-revocation";
-import type { Passkeys } from "@mod/webauthn";
-import events from "./audit-events.ts";
-import { passkeyAmr, webauthnGrantType } from "./contract.ts";
+import { issuer } from "@mod/issuer";
+import type { BuildContext } from "@mod/kernel";
+import { type Lineage, lineage } from "@mod/refresh";
+import { type SubjectRevocation, subjectRevocation } from "@mod/subject-revocation";
+import { type Passkeys, passkeys } from "@mod/webauthn";
+import events from "../audit-events.ts";
+import { passkeyAmr, webauthnGrantType } from "../contract.ts";
 
 type Refusal = Extract<Awaited<ReturnType<Passkeys["assert"]>>, { kind: "refused" }>["reason"];
 
@@ -42,6 +44,16 @@ export interface LoginParts {
 }
 
 /** The passkey login grant: an assertion of a kept passkey for the client's tokens. */
+/** The grant over the contracts the assembly gives. */
+export const passkeyGrantIn = async (c: BuildContext<unknown>) =>
+	passkeyGrant({
+		passkeys: await c.get(passkeys),
+		lineage: await c.get(lineage),
+		revocation: await c.get(subjectRevocation),
+		audit: await c.get(audit),
+		issuer: (await c.get(issuer)).url,
+	});
+
 export function passkeyGrant(p: LoginParts): Grant {
 	return {
 		grantType: webauthnGrantType,
