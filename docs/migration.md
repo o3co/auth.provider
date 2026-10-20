@@ -715,6 +715,7 @@ What changed since rc.2. Coming from rc.1, read [From 0.18.0-rc.1](#from-0180-rc
 What changed since rc.3. Coming from an earlier release candidate, read the sections above first.
 
 - **A login page that offers sign-in through an upstream**: the provider now adds `prompt=login` and `max_age` beside `redirect_to` when the client asked them. Hand them on to the upstream's start (`/session/oauth/federation/<idp>`), so the upstream logs the user in again; see the [login page guide](login-page.md).
+- **A request carrying a re-authentication record that is not its own** (spent, unknown, or made for other parameters, as when a demand was taken out of its return): it is refused with `login_required`. A login page that returns to `redirect_to` as it was given is not affected.
 - **A request back from its login still not new enough**: it is refused with `login_required` whether the session's authentication time is known or not. rc.3 sent it to the login page again.
 - **Discovery**: the metadata says `authorization_response_iss_parameter_supported: true`; every redirect answer already carried `iss`.
 
