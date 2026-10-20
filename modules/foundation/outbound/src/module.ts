@@ -100,6 +100,7 @@ interface Paths {
 	readonly fetch: Outbound["fetch"];
 	readonly fetchSigned: SignedOutbound["fetch"];
 	readonly explained: OutboundRefusals["explained"];
+	readonly plainInternal: NonNullable<OutboundRefusals["plainInternal"]>;
 	readonly credentialRefusalOf: CredentialPolicy["refusalOf"];
 	readonly limitsOf: OutboundLimits["of"];
 	readonly lookupsOf: NonNullable<OutboundLimits["lookupsOf"]>;
@@ -178,6 +179,7 @@ export function outboundOver(
 		fetchSigned: (url, request, narrower) => go(url, request, narrower, true),
 		credentialRefusalOf: policy.credentialRefusal,
 		explained: policy.explain,
+		plainInternal: policy.plainInternal,
 		// The call `go` cuts a request by, for a plain request.
 		limitsOf: (narrower) => policy.limitsOf(narrower, false),
 		lookupsOf: (narrower) => (narrower?.outsideChosen ? outsideLookups : lookups - outsideLookups),
@@ -211,7 +213,10 @@ export default defineModule({ name: "outbound", section, replicaSafe: true }, (m
 	// One set of counts for both paths.
 	m.provide(outbound).by(async (c) => ({ fetch: (await c.get(paths)).fetch })),
 	m.provide(signedOutbound).by(async (c) => ({ fetch: (await c.get(paths)).fetchSigned })),
-	m.provide(outboundRefusals).by(async (c) => ({ explained: (await c.get(paths)).explained })),
+	m.provide(outboundRefusals).by(async (c) => {
+		const { explained, plainInternal } = await c.get(paths);
+		return { explained, plainInternal };
+	}),
 	m.provide(credentialPolicy).by(async (c) => ({
 		refusalOf: (await c.get(paths)).credentialRefusalOf,
 	})),

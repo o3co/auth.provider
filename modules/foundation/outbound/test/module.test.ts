@@ -293,6 +293,21 @@ it("answers at boot why the policy refuses a URL, or nothing when it lets it thr
 	).toBe("special-address");
 });
 
+it("answers at boot whether a URL is taken as plain-internal, for the caller's own URL alone", async () => {
+	onlyProxy();
+	const refusals = (
+		await boot({ "allow-any-public": true, "plain-internal": ["ledger.internal:9092"] })
+	).get(outboundRefusals);
+	const url = "http://ledger.internal:9092/verify";
+	const own = { internal: configuredUrl(url) };
+	expect([
+		refusals.plainInternal?.(url, own),
+		refusals.plainInternal?.(url),
+		refusals.plainInternal?.(url, { ...own, outsideChosen: true }),
+		refusals.plainInternal?.("http://ledger.internal:9093/verify", own),
+	]).toEqual([true, false, false, false]);
+});
+
 it("explains at boot why the policy refuses a URL by the keys that let it through, naming no value", async () => {
 	onlyProxy();
 	const rules = {
