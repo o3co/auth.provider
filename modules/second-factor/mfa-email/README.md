@@ -11,7 +11,7 @@
   - Enrolment: a 16-character code (Crockford's base32, 80 bits) mailed to the address the account states; its first proof is that code.
   - Challenge: six digits mailed to the factor's address, good until the earlier of `code-lifetime` and the end the caller gives.
   - Both show `{sent_to, expires_in}`: the address's first character and its domain, and the seconds the code lives.
-- Contribution to `mfa-binding-proof`'s binding proofs (boot is refused without `mfa-binding-proof` composed): `account-email`, available while the account states an address; a 16-character code good for ten minutes at most. A proof that passes tells `users` the address is the subject's (`verifiedContact`).
+- Contribution to `mfa-binding-proof`'s binding proofs (boot is refused without `mfa-binding-proof` composed): `account-email`, available while the account states an address; a 16-character code good for ten minutes at most. A proof that passes tells `users` the address is the subject's (`verifiedContact`); past the contacts `users` keeps, it still passes, logging `mfa-email.contact_not_kept` without the address.
 - Mail purposes `mfa-email.enrollment`, `mfa-email.login`, `mfa-email.proof`, taking `code` and `minutes`; `mfa-email-wording` words them.
 - `purposes` and their type `Purpose`, for the module that words them.
 - Operator section: `adds-second-factor` (whether a proof adds `mfa`, and so whether the factor counts; default false), `code-lifetime` (1m–30m, default `10m`, written with its unit).

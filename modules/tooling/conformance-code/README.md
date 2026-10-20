@@ -6,6 +6,7 @@
 - Owns the scenes of the metadata document's code flow and logout items, and of clients whose id is the URL of their metadata document.
 - Owns the scenes of refusing users whose email is not verified, and a client that is not first-party when consent cannot ask.
 - Owns the scenes of the audit events of consent and code redemption.
+- Owns the scenes of a password login meeting a client's demand for a fresh login (internal module `fresh-login`).
 - Owns the scenes of what a subject's revocation by the ledger ends.
 - Sets up the code flow area's parts (consent step, refresh, acr table, session grant, metadata document clients, logout with the back-channel origins allowed) on each of the legacy and new targets.
 - A code flow part can leave out the consent step.

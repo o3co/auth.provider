@@ -32,8 +32,7 @@ Each promise below holds across every module composed. Each names what keeps it 
    - Bridges such as `session-tokens` come in every app composed through `combinations`; an app composed by hand must compose them itself, or the promise does not hold for what they join.
 2. **`prompt=login` and `max_age` are met only by a fresh authentication.**
    - Kept by: `reauth`'s re-authentication record, which `authorize` makes for the request and takes once; `session` never counts an authentication time it does not know as fresh.
-   - Scenes: federation ("federation logins meeting a client's demand for a fresh login", and the freshness scenes through Google and Apple).
-   - No scene yet for a password login.
+   - Scenes: code ("password logins meeting a client's demand for a fresh login"), federation ("federation logins meeting a client's demand for a fresh login", and the freshness scenes through Google and Apple).
    - One exception, through an upstream: a login the upstream says came within its clock allowance before the demand counts as fresh, even where the upstream did not authenticate again (`federation`'s card, "Fresh enough"). The login page hands `prompt=login` and `max_age` to the upstream, which asks the user again where it honours them. To narrow the allowance, lower `federation.idps.<name>.clock-skew` for that IdP.
 3. **A dependency that cannot answer never grants anything.**
    - It covers what an authorization decision waits on; a notice sent best effort, such as an audit event or a logout notice to a client, decides nothing.

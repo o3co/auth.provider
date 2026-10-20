@@ -1,0 +1,115 @@
+import { createHash, generateKeyPairSync } from "node:crypto";
+import { areaTarget, type Started } from "@mod/conformance";
+import type { ClientScene } from "@mod/conformance-oauth";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { codeScene } from "../../main.ts";
+import { browserAt } from "../../testing.ts";
+
+const issuer = "https://issuer.example";
+const callback = "https://app.example/cb";
+const pair = generateKeyPairSync("ed25519");
+const challenge = createHash("sha256").update("v".repeat(43)).digest("base64url");
+const app: ClientScene = {
+	id: "app",
+	kind: "confidential",
+	method: "client_secret_post",
+	secret: "app-secret-0123456789abcdef",
+	grants: ["authorization_code"],
+	scopes: ["openid"],
+	defaultScopes: ["openid"],
+	redirectUris: [callback],
+	firstParty: true,
+};
+const scene = codeScene({
+	issuer,
+	keys: {
+		signing: {
+			kid: "fresh",
+			alg: "EdDSA",
+			privatePem: pair.privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+			publicPem: pair.publicKey.export({ format: "pem", type: "spki" }).toString(),
+		},
+	},
+	clients: [app],
+	users: [{ identifier: "alice", password: "correct horse battery" }],
+});
+
+let running: Started;
+let base = "";
+beforeAll(async () => {
+	running = await areaTarget().start(scene);
+	if (running.kind !== "running") throw new Error(`refused:\n${running.output}`);
+	base = running.baseUrl;
+});
+afterAll(async () => {
+	if (running?.kind === "running") await running.stop();
+});
+
+const browser = browserAt(() => base, issuer, {
+	username: "alice",
+	password: "correct horse battery",
+});
+const request = (extra: Record<string, string>) => ({
+	response_type: "code",
+	client_id: "app",
+	redirect_uri: callback,
+	state: "s1",
+	scope: "openid",
+	code_challenge: challenge,
+	code_challenge_method: "S256",
+	...extra,
+});
+
+/** The request the deployment sends the browser back to once it logs in; what follows `?`. */
+async function sentToLogIn(extra: Record<string, string>) {
+	const res = await browser.authorize(request(extra));
+	expect(res.status).toBe(302);
+	const back = new URL(res.at?.searchParams.get("redirect_to") ?? "", issuer);
+	expect(`${back.origin}${back.pathname}`).toBe(`${issuer}/oauth/authorize`);
+	return back;
+}
+const errorOf = async (back: URL) =>
+	(await browser.authorize(back.search.slice(1))).at?.searchParams.get("error");
+const codeOf = async (back: URL) =>
+	(await browser.authorize(back.search.slice(1))).at?.searchParams.has("code");
+/** A new password login, as the login page makes one, for the next request. */
+const logInAgain = async () => {
+	browser.forget();
+	await browser.login();
+};
+
+describe("password logins meeting a client's demand for a fresh login", () => {
+	it("meets prompt=login only with a login after the demand, refusing a return without one", async () => {
+		await browser.login();
+		const stale = await sentToLogIn({ prompt: "login" });
+		expect(await errorOf(stale)).toBe("login_required");
+		const back = await sentToLogIn({ prompt: "login" });
+		await logInAgain();
+		expect(await codeOf(back)).toBe(true);
+	});
+
+	// The legacy build counts a login in the same second as within max_age=0, and asks no new one.
+	it.skipIf(areaTarget().differs("max-age-zero-asks-a-new-login"))(
+		"meets max_age=0 only with a login after the demand, refusing a return without one",
+		async () => {
+			await browser.login();
+			const stale = await sentToLogIn({ max_age: "0" });
+			expect(await errorOf(stale)).toBe("login_required");
+			const back = await sentToLogIn({ max_age: "0" });
+			await logInAgain();
+			expect(await codeOf(back)).toBe(true);
+		},
+	);
+
+	// The legacy build keeps no record of the demand, so a return without it is a request like any other.
+	it.skipIf(areaTarget().differs("return-keeps-its-demand"))(
+		"refuses a return whose demand was taken out of it, its re-authentication kept",
+		async () => {
+			await browser.login();
+			const back = await sentToLogIn({ prompt: "login" });
+			back.searchParams.delete("prompt");
+			await logInAgain();
+			expect(await errorOf(back)).toBe("login_required");
+		},
+	);
+});
