@@ -1,5 +1,5 @@
 import type { AllowanceLists } from "@mod/client-allowance";
-import type { ClientRecord } from "@mod/clients";
+import { type ClientRecord, clients, type RecordRefusal } from "@mod/clients";
 import type { BuildContext, Log } from "@mod/kernel";
 import {
 	DestinationRefused,
@@ -41,10 +41,12 @@ export interface ReadingParts {
 	readonly narrower: Narrower;
 	readonly ceiling: Omit<AllowanceLists, "grants">;
 	readonly log: Log;
+	/** Where a record fails the checks `clients` holds a source's to, as `checkRecord` answers. */
+	readonly check: (record: ClientRecord) => Promise<readonly RecordRefusal[] | undefined>;
 }
 
 /** Fetches and judges one document; a refusal is remembered, a failure is not. */
-export function readingWith({ outbound: out, narrower, ceiling, log }: ReadingParts) {
+export function readingWith({ outbound: out, narrower, ceiling, log, check }: ReadingParts) {
 	const refused = (id: string, reason: string): Fetched<ClientRecord> => {
 		log.warn("clients-cimd.document_refused", { client: loggable(id), reason });
 		return { kind: "refused" };
@@ -75,6 +77,9 @@ export function readingWith({ outbound: out, narrower, ceiling, log }: ReadingPa
 		if (read.kind !== "object") return refused(id, "not a JSON object");
 		const record = recordOf(new URL(id), read.value, ceiling);
 		if ("refused" in record) return refused(id, record.refused);
+		// Checked before it is kept: one that throws is not remembered, as a failed fetch is not.
+		const refusals = await check(record);
+		if (refusals) return refused(id, `record at ${refusals.map((r) => r.path).join(", ")}`);
 		return { kind: "found", value: record, maxAgeMs: maxAgeMsOf(answer) };
 	};
 }
@@ -82,6 +87,7 @@ export function readingWith({ outbound: out, narrower, ceiling, log }: ReadingPa
 /** The reading over `outbound` and the operator's section. */
 export async function readingOver(c: BuildContext<Settings>) {
 	const s = c.section;
+	const known = c.late(clients);
 	return readingWith({
 		outbound: await c.get(outbound),
 		narrower: {
@@ -91,5 +97,7 @@ export async function readingOver(c: BuildContext<Settings>) {
 		},
 		ceiling: { scopes: s.scopes, audiences: s.audiences },
 		log: c.log,
+		// Late: `clients` is built from the sources, this one among them.
+		check: (record) => known().checkRecord(record),
 	});
 }
