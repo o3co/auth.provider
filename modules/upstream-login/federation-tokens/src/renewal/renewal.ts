@@ -215,7 +215,7 @@ export function renewalWith(parts: Parts) {
 		const refreshed = answer.kind === "refreshed" ? answer : undefined;
 		if (!refreshed) return failed("unknown");
 		const said = refreshed.tokens as unknown as Partial<Record<keyof UpstreamTokens, unknown>>;
-		// A rotated refresh token is kept even when the rest of the answer is refused.
+		// A rotated refresh token is kept when the answer matches the IdP type's token answer schema, even where the rest of it is refused here.
 		const refreshToken = text(said.refreshToken) ?? kept.refreshToken;
 		// None said is the whole grant again; one wider than the grant, or unreadable, changes nothing.
 		const answered = said.scope === undefined ? [] : scopeOf(said.scope);
