@@ -46,7 +46,18 @@ export function issuedInMemory(size = 1000) {
 		},
 	};
 	const { records } = memoryRecords<string>(() => clock(), { shards: 1, perShard: 1 });
-	const pending = memoryRecords<never>(() => clock(), { shards: 1, perShard: 100 }).deferred;
+	const deferred = memoryRecords<never>(() => clock(), { shards: 1, perShard: 100 }).deferred;
+	// Runs once before the next session is taken off the list, as another request at that moment would.
+	let beforeDone: (() => Promise<void>) | undefined;
+	const pending = {
+		...deferred,
+		done: async (session: string) => {
+			const running = beforeDone;
+			beforeDone = undefined;
+			await running?.();
+			return deferred.done(session);
+		},
+	};
 	const down = unavailableSwitch<TokenIndex>("token-index");
 	const index = down.wrap({ save: records.create, read: records.read });
 	const module = defineModule({ name: "issued-tokens" }, (m) => [
@@ -69,6 +80,9 @@ export function issuedInMemory(size = 1000) {
 	};
 	/** Takes the session off the list, as a sweep that found nothing awaiting does. */
 	const sweptDone = (session: string) => pending.done(session);
+	const beforeNextDone = (running: () => Promise<void>) => {
+		beforeDone = running;
+	};
 	const stopAfterNextAdd = () => {
 		stopping = true;
 	};
@@ -84,6 +98,7 @@ export function issuedInMemory(size = 1000) {
 		down,
 		pendingListed,
 		sweptDone,
+		beforeNextDone,
 		stopAfterNextAdd,
 		beforeNextSettle,
 	};

@@ -63,7 +63,11 @@ const settler =
 			await kept.settled(session, reference);
 		}
 		// Another add may have pushed one out meanwhile: the session stays listed for it.
-		if ((await kept.awaiting(session)).length === 0) await sessions.done(session);
+		if ((await kept.awaiting(session)).length > 0) return;
+		await sessions.done(session);
+		// One pushed out between that read and taking the session off is listed again: whichever came
+		// last, this read or that add's own listing, leaves the session listed while one awaits.
+		if ((await kept.awaiting(session)).length > 0) await sessions.add(session);
 	};
 
 /** Records a token as issued from a session. */
