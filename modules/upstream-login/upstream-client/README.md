@@ -8,7 +8,7 @@
 - What a type asks of its upstream beyond these, and which of these rules it takes (the type). Making a start's state, nonce and challenge, and the login's round trip (`federation`). Checking a JWT's signature and times (`external-jwt`).
 
 ## Offers
-- `credentialSetting`: a non-empty credential. `clientSetting`: `client-id` and `client-secret`, which a type extends with its own settings. `endpointSetting`: an http or https URL, by `http`'s part for configured URLs. `scopeSetting`: one scope, in RFC 6749's characters.
+- `credentialSetting`: a credential that is not blank. `clientSetting`: `client-id` and `client-secret`, which a type extends with its own settings. `endpointSetting`: an http or https URL, by `http`'s part for configured URLs. `scopeSetting`: one scope, in RFC 6749's characters.
 - `authorizationUrl` (the endpoint, the start, the client ID and scopes, the type's own parameters) → the URL.
 - `basicAuthorization` (client ID, secret) → the HTTP Basic header value, each part form-urlencoded (RFC 6749 §2.3.1).
 - `answerOf` (an answer as `outbound` reads JSON, a schema) → what the schema reads. `tokenAnswerOf` (an answer, the scope asked) → the upstream tokens, and the id_token apart.
@@ -18,7 +18,7 @@
 - `guarded` (a type's call) → what it gives, or what it throws.
 
 ## Invariants
-- A credential, the client's ID and secret among them, that is empty or not well-formed text (half a surrogate pair) refuses boot.
+- A credential, the client's ID and secret among them, that is blank (empty or whitespace alone) or not well-formed text (half a surrogate pair) refuses boot; any other is taken as written.
 - federation's parameters are set first: `response_type` `code`, the client ID, the redirect URI, the scopes joined by spaces, the state and the PKCE challenge with its method.
 - A type's own parameter with the name of one of federation's is dropped; it never replaces it.
 - Other parameters already in the endpoint's query stay.
