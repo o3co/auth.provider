@@ -1,3 +1,0 @@
-audit {
-	http-url = "https://audit.example.invalid/events"
-}

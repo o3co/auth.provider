@@ -179,7 +179,7 @@ npx @o3co/create-auth-provider@next my-provider-dpop --pattern simple-web --add 
 
 機能ごとに `--add` を繰り返し指定してください。`simple-web` のストアを Redis にするには、`--axis @mod/store=@mod/redis` を追加します。パターンのログイン方式、グラント、その他の機能グループも置き換えられます。axis とグループのオプションは、`full` 以外のパターンで使えます。すべてのオプションは `npx @o3co/create-auth-provider@next --help` で確認できます。
 
-パターンを選ばず、モジュールを自分で列挙する方法もあります。その場合、モジュール同士の接続に必要なものはジェネレーターが追加し、設定は自分で記述します。各種プロジェクトに含まれるものは [create-app](modules/scaffold/create-app/README.md) を参照してください。
+パターンを選ばず、モジュールを自分で列挙する方法もあります。その場合、モジュール同士の接続に必要なものはジェネレーターが追加し、設定は自分で記述します。各種プロジェクトに含まれるものは [app-output](modules/scaffold/app-output/README.md) を参照してください。
 
 既存アプリのモジュール構成を変更するには、空のディレクトリに新しいプロジェクトを生成し、設定をコピーしてください。ジェネレーターは、ファイルがあるディレクトリを上書きしません。
 

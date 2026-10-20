@@ -4,14 +4,6 @@ import { fragmentFile } from "@mod/app-output";
 import { assemble } from "@mod/kernel";
 import { parse } from "@o3co/ts.hocon";
 import { expect, it, vi } from "vitest";
-import {
-	envExample,
-	fragmentsIn,
-	fragmentsOf,
-	localConfExample,
-	settingsOf,
-	writtenOf,
-} from "../src/fragments.ts";
 import { isTree, packageDirs, root, type Tree } from "./full-app.ts";
 
 // These tests read the whole workspace, which is slow when the machine is busy.
@@ -254,46 +246,4 @@ it("refuses by its section's schema every fragment holding a REPLACE- sample, as
 	for (const f of withSamples) {
 		expect(await issuesOf(f.schema, f.tree[f.section ?? ""]), f.name).toBeDefined();
 	}
-});
-
-it("names each key's environment variable from the section and the key path, and refuses two keys reading one", async () => {
-	const fixtures = join(import.meta.dirname, "fixtures", "collide");
-	const [one, other] = await fragmentsIn([join(fixtures, "one"), join(fixtures, "other")]);
-	if (!one || !other) throw new Error("fixtures missing");
-	expect(settingsOf([one]).map((s) => [s.key, s.env])).toEqual([
-		["audit-http.url", "AUDIT_HTTP_URL"],
-		["audit-http.retry.max-ms", "AUDIT_HTTP_RETRY_MAX_MS"],
-	]);
-	expect(() => settingsOf([one, other])).toThrow(
-		"audit-http.url and audit.http-url both read AUDIT_HTTP_URL",
-	);
-});
-
-it("skips a package without a fragment, and refuses one holding other than one section", async () => {
-	const fixtures = join(import.meta.dirname, "fixtures", "collide");
-	expect(await fragmentsIn([join(fixtures, "none")])).toEqual([]);
-	await expect(fragmentsIn([join(fixtures, "two")])).rejects.toThrow(
-		"does not hold exactly one section",
-	);
-	await expect(fragmentsIn([join(fixtures, "one"), join(fixtures, "one")])).rejects.toThrow(
-		"a second fragment for audit-http",
-	);
-});
-
-it("keeps a value its owner's example gives in several lines out of the env example, read from env still and written in the local layer", () => {
-	const text =
-		'k {\n\tid = "REPLACE-KEY-ID"\n\tpem = """-----BEGIN KEY-----\nREPLACE-KEY\n-----END KEY-----"""\n}\n';
-	const fragments = fragmentsOf([{ from: "k", text }]);
-	expect(settingsOf(fragments).map((s) => s.env)).toEqual(["K_ID", "K_PEM"]);
-	expect(envExample(settingsOf(fragments))).not.toContain("K_PEM");
-	expect(envExample(settingsOf(fragments))).toContain("# K_ID=REPLACE-KEY-ID");
-	expect(writtenOf(fragments)).toEqual([
-		{
-			key: "k.pem",
-			example: '"""-----BEGIN KEY-----\nREPLACE-KEY\n-----END KEY-----"""',
-			spansSections: false,
-			severalLines: true,
-		},
-	]);
-	expect(localConfExample(fragments)).toContain('# k.pem = """-----BEGIN KEY-----\n# REPLACE-KEY');
 });
