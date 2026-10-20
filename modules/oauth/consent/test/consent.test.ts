@@ -634,6 +634,34 @@ describe("consent's sections", () => {
 		expect(await check(displayed({ name: "Acme", host: "acme.example\r\n" }))).toBe("refused");
 	});
 
+	it("copies a metadata document's name, page and host, refusing a name absent, not a string or blank", async () => {
+		const from = { id: "https://acme.example/client.json", host: "acme.example" };
+		const copy = (document: Record<string, unknown>) =>
+			clientSection.fromDocument?.(document, from);
+		expect(clientSection.reads).toEqual(["client_name", "client_uri"]);
+		for (const name of [undefined, 7, " \t\n "]) {
+			expect(copy({ client_name: name }), String(name)).toEqual({ refused: "client_name" });
+		}
+		expect(copy({ client_name: " Acme ", client_uri: "http://acme.example/" })).toEqual({
+			value: { name: " Acme ", uri: "http://acme.example/", host: "acme.example" },
+		});
+		expect(copy({ client_name: "Acme", client_uri: 7 })).toEqual({
+			value: { name: "Acme", uri: 7, host: "acme.example" },
+		});
+		const copied = copy({
+			client_name: "Acme",
+			"first-party": true,
+			first_party: true,
+			host: "evil.example",
+			logo_uri: "https://acme.example/logo.png",
+		});
+		expect(copied).toEqual({ value: { name: "Acme", host: "acme.example" } });
+		const value = copied !== undefined && "value" in copied ? copied.value : undefined;
+		expect(await clientSection.schema["~standard"].validate(value)).toEqual({
+			value: { "first-party": false, name: "Acme", host: "acme.example" },
+		});
+	});
+
 	it("takes a challenge's time written with its unit, in whole seconds from 1m to 1h, 10m unless set", () => {
 		const page = "https://as.example/consent";
 		const takes = (value: unknown) =>
