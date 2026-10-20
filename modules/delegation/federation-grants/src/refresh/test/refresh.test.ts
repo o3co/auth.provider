@@ -373,6 +373,31 @@ describe("refreshing a grant's token", () => {
 		expect(ended).not.toHaveProperty("sealed");
 	});
 
+	it("hands no held token while the end an upstream asked could not be written, until that token ends", async () => {
+		for (const [kind, reason] of [
+			["invalid_grant", "upstream_invalid_grant"],
+			["interaction_required", "upstream_interaction_required"],
+		] as const) {
+			const r = await refresher(300);
+			r.advance(151_000);
+			r.upstream.push(() => {
+				r.stores.down.failNext("change");
+				return { kind } as UpstreamRefresh;
+			});
+			// Due only for the time it asks: the end cannot be written, and the store's outage is told.
+			await expect(r.call({ minTtlMs: 200_000 }), kind).rejects.toThrow();
+			expect(await r.stored(), kind).toMatchObject({ status: "active" });
+			// A request the held token would serve is refused as the upstream answered, not handed it.
+			expect(said(await r.call()), kind).toBe(`reauthorize ${reason}`);
+			expect(r.asked, kind).toHaveLength(1);
+			// Once that token has ended, the upstream is asked again, and the end written.
+			r.advance(150_000);
+			r.upstream.push({ kind });
+			expect(said(await r.call()), kind).toBe(`reauthorize ${reason}`);
+			expect(await r.stored(), kind).toMatchObject({ status: "reauthorization_required" });
+		}
+	});
+
 	it("writes a rotated refresh token before it judges the rest, and marks a token it cannot hold", async () => {
 		const r = await refresher(4);
 		r.advance(4100);
