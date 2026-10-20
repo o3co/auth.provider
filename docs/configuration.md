@@ -158,6 +158,7 @@ From `@mod/federation`.
 |---|---|---|---|---|---|---|
 | `federation.idps` | map | `{}` |  |  |  | Each IdP by name (1 to 32 lowercase letters, digits and `-`, not starting with `-`): its `type`, `upstream-amr` (the upstream's amr values mapped to ours; none by default; mapping one to `mfa`, say, trusts the upstream's claim for that amr and any acr it satisfies, such as `urn:o3co:acr:mfa`) and the type's own settings. |
 | `federation.landing` | string |  |  |  |  | The https URL a login lands on when it named no return target; the public origin's root by default. |
+| `federation.held-page` | string |  |  |  |  | The page a browser goes to when a gate holds its login, to go on there: on the public origin, as it reads the held login with this deployment's cookies; https, or http on a loopback host. Without it, a held login is answered 403 with the gate's answer. |
 | `federation.transaction-lifetime` | string | `10m` |  |  |  | How long a round trip, or a held login's tokens, may wait, from 1m to 1h. |
 | `federation.requests` | integer (1–1000) | `60` |  |  |  | Starts and callbacks allowed per source in each window. |
 | `federation.window` | string | `1m` |  |  |  | The window `requests` counts in, from 1s to 1h. |

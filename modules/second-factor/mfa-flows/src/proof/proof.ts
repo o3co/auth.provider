@@ -303,11 +303,14 @@ export function proofOver(p: ProofParts) {
 	};
 
 	const transaction: Handler = async (request) => {
-		const txId = request.headers.get("mfa-transaction");
+		const named = request.headers.get("mfa-transaction");
+		// Named by no header, it is the browser's own, by its cookie: the page a navigation lands on asks so.
+		const txId = named ?? p.transactions.carried(request);
 		const found = await p.transactions.find(request, txId);
 		if (!found) return unknownTransaction;
 		if (await revokedSince(p.revocation, found.transaction)) return loginRequired;
 		return jsonAnswer(200, {
+			...(named === undefined && txId !== undefined ? { transaction: txId } : {}),
 			purpose: found.transaction.purpose,
 			factors: await p.factors.held(found.transaction.subject),
 			attempts_remaining: found.transaction.attemptsLeft,

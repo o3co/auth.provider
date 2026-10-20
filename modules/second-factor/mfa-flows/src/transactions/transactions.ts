@@ -63,6 +63,18 @@ export const transactionsIn = async (c: BuildContext<Settings>) =>
 
 export function transactionsOver(parts: TransactionParts) {
 	const { store, listings, jar, random, clock, ttlMs, attempts } = parts;
+	/**
+	 * The browser's cookie: the transaction it names and the browser's secret, or the secret alone as
+	 * an earlier one was written. An empty part or another dot is no cookie.
+	 */
+	const cookieOf = (request: HttpRequest) => {
+		const carried = jar.lookup(request, "mfa");
+		if (carried.kind !== "found") return undefined;
+		const parts = carried.value.split(".");
+		if (parts.some((part) => part === "") || parts.length > 2) return undefined;
+		const [first = "", second] = parts;
+		return second === undefined ? { browser: first } : { id: first, browser: second };
+	};
 	/** Whether the transaction is still among its holder's live ones; a listing that cannot tell throws. */
 	const listed = async (id: string, t: Transaction) =>
 		(await listings.members(holderOf(t))).some(({ member }) => member === hashOf(id));
@@ -117,16 +129,19 @@ export function transactionsOver(parts: TransactionParts) {
 				id,
 				deadline: value.deadline,
 				expiresIn: Math.floor(ttlMs / 1000),
-				cookies: [jar.write("mfa", browser, Math.floor(ttlMs / 1000))],
+				cookies: [jar.write("mfa", `${id}.${browser}`, Math.floor(ttlMs / 1000))],
 			};
 		},
+		/** The transaction the browser's cookie names, or none: only a request naming none in its header asks it. */
+		carried: (request: HttpRequest) => cookieOf(request)?.id,
 		/** The deadline of a transaction started now; one started later ends no sooner. */
 		nextDeadline: () => clock.now() + ttlMs,
 		/** The transaction, only for the browser that started it, while it is in use. */
 		find: async (request: HttpRequest, id: string | undefined) => {
-			const carried = jar.lookup(request, "mfa");
-			const browser = carried.kind === "found" ? carried.value : undefined;
-			if (!id || !browser) return undefined;
+			const cookie = cookieOf(request);
+			// A cookie naming its transaction answers for that one alone.
+			if (!id || !cookie || (cookie.id !== undefined && cookie.id !== id)) return undefined;
+			const browser = cookie.browser;
 			const found = transactionOf(await store.read(id));
 			const now = clock.now();
 			if (!found || !live(found, now) || found.browser !== hashOf(browser)) return undefined;

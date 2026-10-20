@@ -241,7 +241,12 @@ export async function serve(
 		],
 		config: {
 			...kernelConfig(),
-			...httpConfig({ "trusted-proxies": ["127.0.0.1"], "public-origin": "https://as.example" }),
+			// `app.example` is an origin the deployment lets read the routes that declare CORS.
+			...httpConfig({
+				"trusted-proxies": ["127.0.0.1"],
+				"public-origin": "https://as.example",
+				"cors-origins": ["https://app.example"],
+			}),
 			...sealConfig(),
 			...mfaConfig(pick(false)),
 			...flowsConfig(pick(true)),
@@ -290,7 +295,11 @@ export async function serve(
 				: {}),
 		});
 		keep(res.headers.getSetCookie(), use);
-		return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+		return {
+			status: res.status,
+			headers: res.headers,
+			body: (await res.json()) as Record<string, unknown>,
+		};
 	};
 	/** A fresh browser, signed in by password. */
 	const signIn = async (subject = "alice") => {

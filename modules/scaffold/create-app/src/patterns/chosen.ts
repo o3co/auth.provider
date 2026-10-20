@@ -54,6 +54,11 @@ export function chosenLines(modules: readonly string[]): string[] {
 					"- A federation login finds its user through the ledger's lookup by subject (`users-http.subject-url`), or by upstream identity (`users-http.upstream-url`).",
 				]
 			: []),
+		...(modules.includes("@mod/federation") && modules.includes("@mod/mfa-flows")
+			? [
+					"- A federation login a second factor holds goes on at `federation.held-page`, a page on the public origin; without it, the browser stops at the factor's answer.",
+				]
+			: []),
 		...(modules.includes("@mod/audit")
 			? [
 					`- Audit events named in \`audit.receivers = [${auditReceiversOf((m) => modules.includes(m)).join(", ")}]\`.`,

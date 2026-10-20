@@ -32,7 +32,8 @@ Internal module of `federation`: one round trip through an upstream IdP, a login
 - The local user is found by the IdP's name and the upstream subject only. The amr is `fed` plus the mapped upstream values, once each.
 - The session gets the upstream profile's email (verified only where the type says so), name and picture under `login-attributes`' source name for the IdP, nothing else of it.
 - Audit records come only after the take, with `idp` and the source when `request-source` determined it: the local subject on success or hold, the reason on failure. None records an unavailable answer.
-- Success is a 302 to the round trip's return target or the landing. A held login is a 403 with the gate's answer and cookies.
+- Success is a 302 to the round trip's return target or the landing. A held login carries that same return in its `done`, and is a 303 to `held-page`, with no query, and the cookies; without one, a 403 with the gate's answer and cookies.
+- `loginIn` refuses boot for a `held-page` off the public origin.
 
 ## Data
 - What a round trip carries for federation: the return target, `prompt` and max age, and for a link the session entered at its start and its subject. Read back by its own shape: another is none.
