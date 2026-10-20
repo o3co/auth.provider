@@ -1,6 +1,6 @@
 # mfa-web
 
-- Use: a web login by password with a second factor (TOTP, a code by email, recovery codes); the code flow with refresh, and client credentials.
+- Use: a web login by password with a second factor (TOTP and recovery codes, and a code by email, which counts as one only where mfa-email's `adds-second-factor` is set); the code flow with refresh, and client credentials.
 - Composes: simple-web's login and code flow (userinfo included), the second factor and its flows (enrolment, login, reset, lock release), a session's management of its own factors, and the acr it meets.
 - Its store is in Redis: losing it loses the registered factors.
 - Factors are sealed with the `seal` key ring (`seal.current`, and `seal.previous` while one rotates).
