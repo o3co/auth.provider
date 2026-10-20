@@ -1851,18 +1851,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
-      '@mod/refresh':
-        specifier: workspace:*
-        version: link:../refresh
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../sender-binding
-      '@mod/session':
-        specifier: workspace:*
-        version: link:../../identity/session
-      '@mod/session-tokens':
-        specifier: workspace:*
-        version: link:../session-tokens
       '@mod/tokens':
         specifier: workspace:*
         version: link:../tokens
@@ -1876,6 +1867,12 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
+      '@mod/session-tokens':
+        specifier: workspace:*
+        version: link:../session-tokens
       '@mod/token-endpoint':
         specifier: workspace:*
         version: link:../token-endpoint

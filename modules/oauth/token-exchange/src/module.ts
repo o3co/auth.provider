@@ -1,10 +1,7 @@
 import { metadataSections, type Section } from "@mod/clients";
-import { grants } from "@mod/grants";
+import { grants, tokenTies } from "@mod/grants";
 import { issuer } from "@mod/issuer";
 import { defineModule, setting } from "@mod/kernel";
-import { lineage } from "@mod/refresh";
-import { sessions } from "@mod/session";
-import { sessionTokens } from "@mod/session-tokens";
 import { tokens } from "@mod/tokens";
 import { z } from "zod";
 import { selfIssued } from "./answer.ts";
@@ -60,9 +57,7 @@ export default defineModule({ name: "token-exchange", section }, (m) => [
 		return exchangeGrant({
 			verifiers: new Map(verifiers.map((verifier) => [verifier.tokenType, verifier])),
 			tokens: await c.get(tokens),
-			lineage: await c.get(lineage),
-			sessionTokens: await c.get(sessionTokens),
-			sessions: await c.get(sessions),
+			ties: await c.collect(tokenTies),
 			issuer: (await c.get(issuer)).url,
 			maxActorDepth: c.section["max-actor-depth"],
 			...(c.section["max-lifetime"] === undefined
