@@ -27,6 +27,7 @@
 - A missing or unreadable manifest is reported as missing, and only once.
 - A cycle is reported along its path, from the first bundle it is reached by.
 - Module code never names a bundle; a built file names each member as `<bundle's public name>/<member's directory>[/<entry>]`, and a declaration's own imports point at built `.js` files.
+- A shipped member depending on a test runner (`vitest` or a `@vitest/` package) refuses the build: an app would install it. A test builder takes it as an optional peer.
 - A bundle depends on other bundles at its own version, and on an outside package at the one version its members state; two versions refuse it. Members' peers are offered as each states them, optional where its `peerDependenciesMeta` says so (a test builder's).
 - An outside package a member requires as a peer is a required peer, in that range, of every bundle depending on it, not a dependency: the app then holds the one copy the public types name, where a bundle's own copy beside the app's would make two types of one name and fail the app's type check.
 
