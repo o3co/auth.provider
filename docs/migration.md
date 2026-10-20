@@ -761,7 +761,7 @@ What changed since rc.3. Coming from an earlier release candidate, read the sect
 
 What changed since rc.4. Coming from an earlier release candidate, read the sections above first.
 
-- **An app's entry reads its configuration files through `@mod/config-files`**: `loadConfig` and `ConfigSource` moved there from `@mod/kernel`, unchanged. An app generated with an earlier release candidate imports `loadConfig` from the kernel in `src/main.ts` (and `src/reseal.ts`, where it has one): import it from `config-files` and add that package to the app's dependencies, or generate the app again. Its configuration is unchanged.
+- **An app's entry reads its configuration files from the `config-files` module**: `loadConfig` and `ConfigSource` moved there from the kernel, unchanged. An app generated with an earlier release candidate imports `loadConfig` from the kernel in `src/main.ts` (and `src/reseal.ts`, where it has one). An app on the published packages imports it from `@o3co/auth-provider-foundation/config-files` instead of `@o3co/auth-provider-foundation/kernel`, and upgrades `@o3co/auth-provider-foundation`; it adds no dependency. An app in the workspace imports it from `@mod/config-files` and adds that package to its dependencies. Or generate the app again. Its configuration is unchanged.
 - **`client.authentication.failure` is declared by `clients`** (`@mod/clients/audit-events`), no longer by `token-endpoint`, with the same name and attributes: a receiver needs no change, and a check of your own that reads the declarations finds it there. A route of your own that calls `clients`' `authenticate` records its refusal through `recordRefusedAuthentication`, handing it the `audit` your module takes.
 
 ## Operational notes
