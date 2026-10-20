@@ -8,7 +8,7 @@ import type { Joined } from "@mod/upstream-handoff";
 import type { UpstreamLogin } from "@mod/upstreams";
 import { expect, it } from "vitest";
 import type { Completing, Idp } from "../../round-trip/round-trip.ts";
-import type { Transaction } from "../../round-trip/transaction.ts";
+import type { Trip } from "../../round-trip/trip.ts";
 import { linkWith } from "../link.ts";
 
 const alice: AuthContext = { subject: "alice", amr: ["pwd"], authenticatedAt: 0 };
@@ -79,10 +79,7 @@ function standIn() {
 		log: logged.log,
 		landing,
 	});
-	const transaction: Transaction = {
-		format: 1,
-		idp: "corp",
-		state: "st",
+	const trip: Trip = {
 		nonce: "n",
 		verifier: "v",
 		startedAt: 0,
@@ -93,7 +90,7 @@ function standIn() {
 		name: "corp",
 		idp: { upstreamAmr: new Map() } as Pick<Idp, "upstreamAmr"> as Idp,
 		upstreamLogin,
-		transaction,
+		trip,
 		source: "127.0.0.1",
 		userAgent: "ua/1",
 		cleared: ["federation.corp=; Max-Age=0"],
@@ -109,7 +106,7 @@ function standIn() {
 		withdrawn,
 		logged,
 		link,
-		transaction,
+		trip,
 		completing,
 	};
 }
@@ -186,7 +183,7 @@ it("returns to the target the start named, and hands nothing on when the upstrea
 	const { tokens: _, ...tokenless } = upstreamLogin;
 	const done = await s.link.complete(
 		s.completing({
-			transaction: { ...s.transaction, redirectTo: "https://app.example/back" },
+			trip: { ...s.trip, redirectTo: "https://app.example/back" },
 			upstreamLogin: tokenless,
 		}),
 	);
@@ -329,9 +326,9 @@ it("takes the tokens back before failing as unavailable when the session cannot 
 it("records a refusal after the take for the subject a link started for, and nothing for a login's", () => {
 	const s = standIn();
 	const at = { name: "corp", reason: "exchange_failed", source: "127.0.0.1", userAgent: "ua/1" };
-	s.link.failed({ ...at, transaction: s.transaction });
-	const { link: _, ...login } = s.transaction;
-	s.link.failed({ ...at, transaction: login });
+	s.link.failed({ ...at, trip: s.trip });
+	const { link: _, ...login } = s.trip;
+	s.link.failed({ ...at, trip: login });
 	expect(s.events).toEqual([
 		{
 			kind: "federation.identity.link_refused",

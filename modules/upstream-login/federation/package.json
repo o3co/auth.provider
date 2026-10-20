@@ -15,7 +15,6 @@
 	},
 	"dependencies": {
 		"@mod/audit": "workspace:*",
-		"@mod/cookies": "workspace:*",
 		"@mod/csrf": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/kernel": "workspace:*",
@@ -25,6 +24,7 @@
 		"@mod/request-source": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/upstream-handoff": "workspace:*",
+		"@mod/upstream-round-trip": "workspace:*",
 		"@mod/upstreams": "workspace:*",
 		"@mod/url-setting": "workspace:*",
 		"@mod/users": "workspace:*",
@@ -34,12 +34,14 @@
 		"vitest": "5.0.4"
 	},
 	"devDependencies": {
+		"@mod/cookies": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/seal": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
 		"@mod/store": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/upstream-handoff": "workspace:*",
+		"@mod/upstream-round-trip": "workspace:*",
 		"vitest": "5.0.4"
 	}
 }

@@ -46,7 +46,7 @@ export function loginWith(p: LoginParts): Continuation {
 	return {
 		begin: async () => ({ carried: {} }),
 		failed: ({ name, reason, source }) => record("failed", name, { reason, source }),
-		complete: async ({ request, name, idp, upstreamLogin, transaction, source, cleared }) => {
+		complete: async ({ request, name, idp, upstreamLogin, trip, source, cleared }) => {
 			const found = await p.users.byUpstream(name, upstreamLogin.subject);
 			if (found.kind !== "user") {
 				record("failed", name, { reason: "unknown_user", source });
@@ -54,8 +54,7 @@ export function loginWith(p: LoginParts): Continuation {
 			}
 			const mapped = upstreamLogin.amr.flatMap((value) => idp.upstreamAmr.get(value) ?? []);
 			const amr = [...new Set([...proves, ...mapped])];
-			const done =
-				transaction.redirectTo === undefined ? {} : { redirect_to: transaction.redirectTo };
+			const done = trip.redirectTo === undefined ? {} : { redirect_to: trip.redirectTo };
 			const subject = found.user.subject;
 			const handing = p.handoff.of(name, subject, upstreamLogin.tokens, p.heldLoginLifetimeMs);
 			const from = handing && {
@@ -63,7 +62,7 @@ export function loginWith(p: LoginParts): Continuation {
 				carry: handing.carry,
 				deadline: handing.deadline,
 			};
-			const authenticatedAt = onOurClock(upstreamLogin.authenticatedAt, transaction.startedAt, idp);
+			const authenticatedAt = onOurClock(upstreamLogin.authenticatedAt, trip.startedAt, idp);
 			const facts = { subject, amr, authenticatedAt, ...attributesOf(name, upstreamLogin.profile) };
 			const outcome = await p.logins.login(request, facts, done, from);
 			const held = outcome.kind === "held";
@@ -72,7 +71,7 @@ export function loginWith(p: LoginParts): Continuation {
 			const cookies = [...cleared, ...outcome.cookies];
 			return held
 				? jsonAnswer(403, outcome.answer, { cookies })
-				: sent(transaction.redirectTo ?? p.landing, cookies);
+				: sent(trip.redirectTo ?? p.landing, cookies);
 		},
 	};
 }

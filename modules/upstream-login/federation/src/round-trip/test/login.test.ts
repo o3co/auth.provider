@@ -37,7 +37,7 @@ function loginOf(upstreamAmr: ReadonlyMap<string, string> = new Map()) {
 		name: "corp",
 		idp: { upstreamAmr, upstream: { clockSkewMs: skewMs } } as unknown as Idp,
 		upstreamLogin,
-		transaction: { format: 1, idp: "corp", state: "st", nonce: "n", verifier: "v", startedAt },
+		trip: { nonce: "n", verifier: "v", startedAt },
 		cleared: [],
 	});
 	return { handed, complete: (at: UpstreamLogin) => login.complete(completing(at)) };

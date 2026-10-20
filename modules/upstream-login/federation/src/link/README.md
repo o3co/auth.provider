@@ -3,11 +3,11 @@
 Internal module of `federation`: a round trip that links the upstream identity to the account the browser is logged in as.
 
 ## Responsibilities
-- At the start, admits a link only from this deployment's own page and for a session entered at `credentials`, and records that session and its subject in the transaction.
+- At the start, admits a link only from this deployment's own page and for a session entered at `credentials`, and records that session and its subject in the round trip.
 - At the callback, links the upstream identity to that subject through `users`, and hands the upstream tokens to that session.
 
 ## Not here
-- The round trip itself: the transaction, its take, the exchange and the freshness check (`round-trip`). The link records and their conflicts (`users`). Entering the session and its requirements (`session`).
+- The round trip itself: its take (`upstream-round-trip`), the exchange and the freshness check (`round-trip`). The link records and their conflicts (`users`). Entering the session and its requirements (`session`).
 
 ## Offers
 - `linkIn`: `linkWith` built from the build context.

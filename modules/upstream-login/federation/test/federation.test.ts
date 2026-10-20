@@ -28,6 +28,8 @@ import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { heldLoginStore, type StoredHeldLogin } from "@mod/upstream-handoff";
 import handoffModule from "@mod/upstream-handoff/module";
+import { roundTripStore, type StoredRoundTrip } from "@mod/upstream-round-trip";
+import roundTripModule from "@mod/upstream-round-trip/module";
 import {
 	type Delegation,
 	idpType,
@@ -102,6 +104,8 @@ interface Setup {
 	readonly store?: Module;
 	/** In place of the held logins' store. */
 	readonly held?: Module;
+	/** In place of the round trips' store. */
+	readonly trips?: Module;
 	readonly origin?: string | null;
 	/** Modules that receive upstream tokens; seal comes with them. */
 	readonly receivers?: Module[];
@@ -124,6 +128,16 @@ async function serve(setup: Setup = {}) {
 			},
 			update: keptHeld.records.change,
 			remove: keptHeld.records.remove,
+		})),
+	]);
+	const keptTrips = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
+	const trips = defineModule({ name: "trips" }, (m) => [
+		m.provide(roundTripStore).by(() => ({
+			save: async (key, value, lifetimeMs) => {
+				saved.push(JSON.stringify(value));
+				return keptTrips.records.create(key, value, lifetimeMs);
+			},
+			update: keptTrips.records.change,
 		})),
 	]);
 	const store = defineModule({ name: "transactions" }, (m) => [
@@ -156,6 +170,8 @@ async function serve(setup: Setup = {}) {
 			setup.store ?? store,
 			handoffModule,
 			setup.held ?? held,
+			roundTripModule,
+			setup.trips ?? trips,
 			...(setup.extra ?? []),
 			...(receiving.length > 0 ? [sealModule, ...receiving] : []),
 		],
@@ -752,15 +768,36 @@ describe("federation", () => {
 		expect((await s.get(`${base}/corp?max_age=123456789`)).status).toBe(302);
 	});
 
-	it("is unavailable when it cannot keep a transaction", async () => {
-		const alwaysExists = defineModule({ name: "transactions" }, (m) => [
-			m.provide(transactionStore).by(() => ({
-				save: async () => "exists" as const,
-				update: async () => undefined,
-				remove: async () => {},
+	it("answers a round trip carrying what it does not know as invalid_state, spent and its cookie cleared", async () => {
+		const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
+		const odd = defineModule({ name: "trips" }, (m) => [
+			m.provide(roundTripStore).by(() => ({
+				save: (key, value, lifetimeMs) =>
+					kept.records.create(
+						key,
+						{ ...(value as object), carried: { unheard: 1 } } as unknown as StoredRoundTrip,
+						lifetimeMs,
+					),
+				update: kept.records.change,
 			})),
 		]);
-		const s = await serve({ store: alwaysExists });
+		const s = await serve({ trips: odd });
+		const started = await s.begin();
+		const back = await s.callback(`code=good&state=${started.state}`, started.cookie);
+		expect([back.status, back.body]).toEqual([400, { error: "invalid_state" }]);
+		expect(back.cookies).toContain(clearedOf(started.cookie));
+		const again = await s.callback(`code=good&state=${started.state}`, started.cookie);
+		expect([again.status, again.cookies]).toEqual([400, []]);
+	});
+
+	it("is unavailable when it cannot keep a round trip", async () => {
+		const alwaysExists = defineModule({ name: "trips" }, (m) => [
+			m.provide(roundTripStore).by(() => ({
+				save: async () => "exists" as const,
+				update: async () => undefined,
+			})),
+		]);
+		const s = await serve({ trips: alwaysExists });
 		const res = await s.begin();
 		expect([res.status, res.body]).toEqual([503, { error: "temporarily_unavailable" }]);
 	});
