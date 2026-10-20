@@ -11,7 +11,6 @@ export type {
 	Transaction,
 	TransactionBase,
 } from "./transactions/records.ts";
-export type { Transactions } from "./transactions/transactions.ts";
 
 /** The enrollment routes' handlers, from the module binding factors: exactly one contribution. */
 export const enrollmentFlow = extensionPoint<EnrollmentFlow>("mfa-flows.enrollment-flow", {
