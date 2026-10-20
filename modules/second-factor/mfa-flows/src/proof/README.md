@@ -11,11 +11,11 @@ Internal module of `mfa-flows`: holding a login or a session until a factor is p
 ## Offers
 - `gateOver` (`mfa`'s factor decisions, `transactions`) → the gate's hold.
 - `resumeOver` (`session`'s close, `login-gates`, `subject-revocation`, `transactions`, `kernel`'s log) → going on with a login held at the gate, adding what was proved to its amr, and what it carries to `done` once it opens.
-- `proofOver` (`mfa`'s factor decisions, `session`, `login-gates`, `rate-limit`'s lockouts and the package's policy, `subject-revocation`, `transactions`, `audit`, `kernel`'s log, enrollment's answer to a challenge) → the handlers of challenge, verify, the transaction's view, and step-up.
+- `proofOver` (`mfa`'s factor decisions, `session`, `login-gates`, `rate-limit`'s lockouts and the package's policy, `subject-revocation`, `transactions`, `audit`, `kernel`'s log, the enrollment flow's answer to a challenge) → the handlers of challenge, verify, the transaction's view, and step-up.
 
 ## Invariants
 - The gate starts a login transaction when the subject must prove a factor, and a first-enrollment one when it must bind one; it holds the login's facts, `done` and `from` unread.
-- Verify takes only login and step-up transactions, a step-up one only from the session that started it. Challenge takes these and an enrollment's, which enrollment answers.
+- Verify takes only login and step-up transactions, a step-up one only from the session that started it. Challenge takes these and an enrollment's, which the enrollment flow answers.
 - A challenge is asked with the transaction's deadline as its latest end, for whom `transactions` names (`askedFrom`), and asking voids the challenge before, unavailable included. A sent one is kept sealed; the next attempt takes it, and passes it to the proof only for the factor it was sent for.
 - A challenge sent is answered `200` with what to show, recorded as `mfa.challenge.sent` with `kind` and `purpose`. A factor whose kind sends none is answered `200` with nothing; limited is `429 rate_limited`; refused is `403 mfa_factor_refused`, recorded as `mfa.email_address_mismatch` with `kind` and `purpose` only when the kind says the factor's contact changed.
 - Only kinds where guessing works count toward lockout.

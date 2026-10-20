@@ -6,7 +6,7 @@ Internal module of `mfa-flows`: the shapes of what the module binding factors gi
 - Defines the enrollment flow's shape (`enrollmentFlow`'s contribution) and the parts (`flowParts`), and builds the parts from what the package already has.
 
 ## Not here
-- Declaring the contract and the extension point (the package's contract). Pulling the contracts the parts are built from (`wiring`). What the enrollment flow does (its contributor, or the package's `enrollment`).
+- Declaring the contract and the extension point (the package's contract). Pulling the contracts the parts are built from (`wiring`). What the enrollment flow does (its contributor, `mfa-enrollment`).
 
 ## Offers
 - `EnrollmentFlow`: the handlers of `POST enrollment` and `POST enrollment/complete`, and the answer to a challenge in an enrollment's transaction.

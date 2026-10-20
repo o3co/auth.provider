@@ -30,6 +30,7 @@ import { afterEach } from "vitest";
 import flowsModule from "../src/module.ts";
 import { section } from "../src/section.ts";
 import { type FlowSettings, flowsConfig } from "../src/testing.ts";
+import { testEnrollment } from "./enrolling.ts";
 import { memoryTransactions } from "./stores.ts";
 
 /** How far the kernel's clock runs ahead of the host's; it goes back after each test. */
@@ -199,7 +200,12 @@ interface Call {
 type Settings = Partial<MfaSettings> & Partial<FlowSettings>;
 const flowKeys = Object.keys(section.shape);
 
-export async function serve(settings: Settings = {}, extra: Module[] = []) {
+/** The package over its parts; `enrolling` is the enrollment flow composed (the test one unless given, none with `null`). */
+export async function serve(
+	settings: Settings = {},
+	extra: Module[] = [],
+	enrolling: Module | null = testEnrollment,
+) {
 	const pick = (own: boolean) =>
 		Object.fromEntries(Object.entries(settings).filter(([k]) => flowKeys.includes(k) === own));
 	const simulated = simulatedStore();
@@ -230,6 +236,7 @@ export async function serve(settings: Settings = {}, extra: Module[] = []) {
 			mfaEntry,
 			bindingProofModule,
 			flowsModule,
+			...(enrolling ? [enrolling] : []),
 			code,
 			backup,
 			...extra,

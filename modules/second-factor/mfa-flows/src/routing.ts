@@ -13,10 +13,6 @@ export const unknownTransaction = jsonAnswer(400, {
 });
 export const loginRequired = jsonAnswer(401, { error: "login_required" });
 export const unavailable = jsonAnswer(503, { error: "temporarily_unavailable" });
-export const invalidLabel = jsonAnswer(400, {
-	error: "invalid_request",
-	error_description: "invalid label",
-});
 
 /** A single value from the body; the query is never read, so nothing secret goes in a URL. */
 export const field = (request: HttpRequest, name: string) => request.fields.single(name);
