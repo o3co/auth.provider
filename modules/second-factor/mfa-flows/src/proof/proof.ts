@@ -61,17 +61,16 @@ export interface ResumeParts {
 
 /**
  * Goes on with a held login after the gate `mfa`, adding `proved` to its amr; answers what it held,
- * with `carried` once it opens. One made by a function is made only then: a response it makes
- * instead closes the session and is answered, and a throw closes it as best it can and goes on.
+ * with what `carried` makes once it opens, and only then: a response it makes instead closes the
+ * session and is answered, and a throw closes it as best it can and goes on.
  */
-/** What a resumed login adds to its answer once it opens, or what makes it then. */
-type Carried = object | (() => Promise<object | HttpResponse>);
-const isMaker = (c: Carried): c is () => Promise<object | HttpResponse> => typeof c === "function";
+/** What makes, once a resumed login opens, what it adds to its answer. */
+type Carried = () => Promise<object | HttpResponse>;
 const isResponse = (made: object): made is HttpResponse => "status" in made;
 
 export function resumeOver(p: ResumeParts) {
 	/** What carried makes once the session opened; a response it makes closes the session. */
-	const madeIn = async (handle: string, carried: () => Promise<object | HttpResponse>) => {
+	const madeIn = async (handle: string, carried: Carried) => {
 		let made: object | HttpResponse;
 		try {
 			made = await carried();
@@ -108,10 +107,7 @@ export function resumeOver(p: ResumeParts) {
 			return { ...loginRequired, cookies: [p.transactions.cleared()] };
 		}
 		await opened?.(resumed.session.id);
-		const made =
-			carried !== undefined && isMaker(carried)
-				? await madeIn(resumed.session.id, carried)
-				: carried;
+		const made = carried === undefined ? undefined : await madeIn(resumed.session.id, carried);
 		// Its cookie never goes out: the session closed, or failing to, is no one's.
 		if (made !== undefined && isResponse(made)) {
 			return { ...made, cookies: [...(made.cookies ?? []), p.transactions.cleared()] };
