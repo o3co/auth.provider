@@ -37,7 +37,7 @@
 - A proof adds its own amr kept to its kind's (else its kind's), and `mfa` when its kind adds it. A label not of its shape is refused before anything is read.
 - A first counting factor begins only where every gate contributed admits it, given what the caller holds (`mfa-binding-proof`'s asks its proof); `begin` asks the kind for nothing before. With no gate, the first factor trusts whoever binds it.
 - With a witness (`mfa-witness`, at most one, two refusing boot), a subject it marks while holding no counting factor is unavailable to login, a first binding and credentials, recorded as `mfa.enrollment_inconsistent`; a witness that cannot be read is unavailable alike.
-- A first binding marks the witness with its own token before it writes, and binds nothing (`first-binding-closed`) where another binding's mark stands or a reset cleared its own as it wrote; one a reset or a fence reached between its read and its mark leaves the mark, which only a reset clears.
+- A first binding marks the witness with its own token before it writes, and binds nothing (`first-binding-closed`) where another binding's mark stands or a reset cleared its own as it wrote; one a reset or a fence reached between its read and its mark, or whose write fails, leaves the mark, which only a reset clears.
 - With a witness, the last counting factor is never removed; `clear` removes the factors, then the mark. Without one, a lost store reads as never enrolled.
 
 ## Depends on
