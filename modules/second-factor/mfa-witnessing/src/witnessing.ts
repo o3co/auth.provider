@@ -23,7 +23,7 @@ export function standingOf(p: StandingParts) {
 		if (p.witness === undefined || !(await p.witness.read(subject))) return "none" as const;
 		audited.record("mfa.enrollment_inconsistent", { subject, attributes: { at } });
 		p.log.warn("mfa.enrollment_inconsistent", { at });
-		throw new Unavailable("mfa-witnessing");
+		throw new Unavailable("mfa");
 	};
 }
 
@@ -74,7 +74,7 @@ export function settlingOf(p: SettlingParts) {
 				return;
 			}
 		}
-		throw new Unavailable("mfa-witnessing");
+		throw new Unavailable("mfa");
 	};
 }
 
@@ -94,7 +94,11 @@ export function witnessingWith(p: WitnessingParts): Witnessing {
 	};
 }
 
-/** Fills a missing mark beside a counting factor; never clears one, which may be a store that lost its factors. */
+/**
+ * Fills a missing mark beside a counting factor, and reads the factors again after: a mark it set
+ * beside nothing counting (a reset took the factors meanwhile) goes; one it did not set is never
+ * cleared, as it may be a store that lost its factors.
+ */
 export function backfillWith(p: {
 	readonly witness: EnrollmentWitness;
 	readonly counting: (subject: string) => Promise<boolean>;
@@ -105,8 +109,16 @@ export function backfillWith(p: {
 		const marked = await p.witness.read(subject);
 		if (counts && marked) return "held" as const;
 		if (!counts) return marked ? ("inconsistent" as const) : ("none" as const);
-		await markedBy(p.witness, subject, p.token());
-		if (!(await p.witness.read(subject))) throw new Unavailable("mfa-witnessing");
-		return "marked" as const;
+		const ours = await markedBy(p.witness, subject, p.token());
+		// Read again: a reset may have taken the factors, and another may have marked, meanwhile.
+		if (!(await p.counting(subject))) {
+			if (ours) {
+				await p.witness.clear(subject);
+				return "none" as const;
+			}
+			return (await p.witness.read(subject)) ? ("inconsistent" as const) : ("none" as const);
+		}
+		if (!(await p.witness.read(subject))) throw new Unavailable("mfa");
+		return ours ? ("marked" as const) : ("held" as const);
 	};
 }

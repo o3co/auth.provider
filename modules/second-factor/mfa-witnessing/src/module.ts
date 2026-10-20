@@ -16,9 +16,10 @@ export default defineModule({ name: "mfa-witnessing" }, (m) => [
 		return witnessingWith({ witness, audit: await c.get(audit), log: c.log, token });
 	}),
 	m.provide(witnessBackfill).by(async (c) => {
-		const [witness] = await c.collect(enrollmentWitnesses);
-		if (!witness)
+		const [witness, ...more] = await c.collect(enrollmentWitnesses);
+		if (!witness || more.length > 0) {
 			return c.refuse("mfa-witnessing", "needs exactly one enrollment witness composed");
+		}
 		const counts = new Map((await c.collect(factorKinds)).map((k) => [k.kind, k.counts]));
 		const decided = c.late(factors);
 		const token = () => Buffer.from(c.random.bytes(16)).toString("base64url");

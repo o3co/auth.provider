@@ -1,7 +1,7 @@
 # mfa-witnessing
 
 ## Responsibilities
-- Keeps the enrollment witness in line with `mfa`'s counting factors, so that losing `mfa`'s store never reads as never enrolled. Bridges `mfa` and the witness composed (`mfa-witness`'s `enrollmentWitnesses`).
+- Keeps the enrollment witness in line with `mfa`'s counting factors, so that losing `mfa`'s store does not read as never enrolled, but for a factor lost between its write and its mark. Bridges `mfa` and the witness composed (`mfa-witness`'s `enrollmentWitnesses`).
 - Fills the mark of a subject that enrolled before the witness was composed (`witnessBackfill`).
 
 ## Not here
@@ -12,7 +12,7 @@
   - `standing`: `held` for a subject holding a counting factor; `none` where the witness marks nothing either; a mark beside nothing counting is recorded as `mfa.enrollment_inconsistent` (`at`), logged, and unavailable, as is a witness that cannot be read.
   - `settle`, after a binding's write: a counting factor with no mark is marked under a new token; a mark beside nothing counting goes only where this call set it (a reset took the factor meanwhile). It reads again after each change, settles twice at most, then is unavailable while they still differ.
   - `cleared`, after a reset: the mark goes.
-- Contract `witnessBackfill`: `settle(subject)` → `marked` (filled), `held`, `none`, or `inconsistent` (a mark beside nothing counting, left as it is); unavailable where the witness or `mfa` cannot answer.
+- Contract `witnessBackfill`: `settle(subject)` → `marked` (this call filled it), `held` (marked already, or by another meanwhile), `none`, or `inconsistent` (a mark it did not set beside nothing counting, left as it is). It reads the factors again after marking: a mark it set beside nothing counting (a reset took the factors meanwhile) goes. Unavailable where the witness or `mfa` cannot answer, named `mfa` as `mfa` names it.
 - Audit event `mfa.enrollment_inconsistent`, declared in `./audit-events`.
 
 ## Invariants
