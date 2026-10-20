@@ -631,6 +631,33 @@ A ledger can also be asked for a user by subject, so a user who signs in upstrea
 - `/_healthcheck` still answers `200 {"status":"ok"}`, now with `Content-Type: application/json` (no charset) and `Cache-Control: no-store`. Probes that match the exact content type need updating.
 - `/readyz` answers `{"status":"ready"}` or `{"status":"unready"}` only; the `checks` list is gone.
 
+### Log and audit lines
+
+Both streams are still one JSON object per line on standard output, but neither line keeps 0.17's shape. A log pipeline that routes or alerts on 0.17's fields stops matching without an error: a filter on `name == "audit"` no longer separates the audit trail, a numeric `level` threshold matches nothing, and `msg` and the `audit.*` fields are gone. Change those filters before you upgrade.
+
+| | 0.17 | 0.18 |
+|---|---|---|
+| Log line (`log-stdout`) | pino's: `level` a number (`30`, `40`, …), `time`, `name: "provider"`, `msg` | `level` (a string: `trace`, `debug`, `info`, `warn`, `error` or `fatal`), `at` (epoch ms) and `event` first, then the line's fields; no `name`, `time` or `msg` |
+| Audit line (`audit-stdout`) | pino's, with `name: "audit"`, the event type as `msg` and the event under `audit` | `kind`, `at` (epoch ms), and `subject` and `attributes` where given; no `level`, `name` or `msg` |
+| Telling them apart | `name` (`provider` or `audit`) | A line with `level` is a log line; a line with `kind` and no `level` is an audit event |
+
+```json
+{"level":"info","at":1792502666577,"event":"http.listening","port":18080}
+{"kind":"token.issued","attributes":{"client":"svc-client","source":"127.0.0.1","grant_type":"client_credentials"},"at":1792502671322}
+```
+
+A threshold on pino's numbers becomes a set of names: `level >= 40` is `level` in `warn`, `error` or `fatal`. An alert on `msg` matches `event` on a log line and `kind` on an audit line. An audit event's fields map as below; each event's attributes are in the [audit event reference](audit-events.md).
+
+| 0.17 (`audit.*`) | 0.18 |
+|---|---|
+| `type` | `kind` |
+| `timestamp` (an ISO time) | `at` (epoch ms) |
+| `subject` | `subject` |
+| `clientId` | `attributes.client` |
+| `ip` | `attributes.source` |
+| `userAgent` | `attributes.userAgent`, on the events that carry it |
+| `details.*` | `attributes.*` |
+
 ## From 0.18.0-rc.1
 
 Coming from rc.1, read this section, then [From 0.18.0-rc.2](#from-0180-rc2).
@@ -683,6 +710,7 @@ Coming from rc.1, read this section, then [From 0.18.0-rc.2](#from-0180-rc2).
 
 What changed since rc.2. Coming from rc.1, read [From 0.18.0-rc.1](#from-0180-rc1) first.
 
+- **Log and audit lines** have the shape they had in rc.2, but no earlier guide described it, nor how 0.17's filters stop matching: see [Log and audit lines](#log-and-audit-lines).
 - **Trusted proxies**: a `http.trusted-proxies` entry covering every address of a family (any `/0`, or every IPv4 address mapped into IPv6, as `::ffff:0:0/96` or `::/1`) now refuses boot at that entry, as it would make every client a proxy; list the proxies' own addresses.
 - **zod**: the packages take `zod` as a required peer (`^4.6.0`); an app depends on `zod` itself, at the version the packages take.
 - **Sessions in an app composed by hand, and an entry requirement or closing participant of your own**: `session`'s points for entry requirements and closing participants are gone; they are the bridges `session-requirements` and `session-participants`, which `combinations` composes with `session`, and `session-lifecycle` refuses to boot without them. Contribute to their points, importing the types from them.
