@@ -12,6 +12,13 @@ export const section = z.strictObject({
 		.describe(
 			"Whether revoked access tokens are kept in a denylist and refused, or revocation is not supported.",
 		),
+	"issuance-timeout": setting
+		.duration("ms")
+		.pipe(z.number().int().min(1000).max(60_000))
+		.prefault("10s")
+		.describe(
+			"How long the issuance policies may take together, from `1s` to `1m`; past it, the issuance is unavailable.",
+		),
 	"subject-check": z
 		.literal("none")
 		.optional()

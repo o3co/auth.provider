@@ -357,7 +357,9 @@ describe("outbound", () => {
 			deadlines.push(deadline);
 			return deadline.signal;
 		};
-		const outbound = over(slow, { "max-concurrent": 1 }, deadlineOf);
+		const other = `http://other.svc.test:${port}/ok`;
+		const pairs = [`svc.test:${port}`, `other.svc.test:${port}`, `127.0.0.1:${port}`];
+		const outbound = over(slow, { "max-concurrent": 1, "plain-loopback": pairs }, deadlineOf);
 		const first = failure(outbound.fetch(svc("/ok")));
 		await until(() => calls.length === 1);
 		deadlines.at(-1)?.abort();
@@ -366,7 +368,7 @@ describe("outbound", () => {
 		expect((await outbound.fetch(`http://127.0.0.1:${port}/ok`)).status).toBe(200);
 		// The name still resolving holds the only lookup, so another name is refused at once.
 		for (let i = 0; i < 3; i++) {
-			expect(await failure(outbound.fetch(svc("/ok")))).toBe("unavailable: busy");
+			expect(await failure(outbound.fetch(other))).toBe("unavailable: busy");
 		}
 		expect(calls).toHaveLength(1);
 		settle(["127.0.0.1"]);
@@ -391,16 +393,81 @@ describe("outbound", () => {
 			deadlines.push(deadline);
 			return deadline.signal;
 		};
-		// Sixteen requests may run, yet a threadpool of four takes two lookups at once.
-		const outbound = over(slow, { "max-concurrent": 16 }, deadlineOf, lookupsAtOnce("4", 16));
-		const held = [failure(outbound.fetch(svc("/ok"))), failure(outbound.fetch(svc("/ok")))];
+		// Sixteen requests may run, yet a threadpool of four takes two lookups at once: one of the
+		// deployment's own, one of the names an outside party chose.
+		const url = (host: string) => `http://${host}:${port}/ok`;
+		const pairs = ["a.svc.test", "b.svc.test", "c.svc.test", "127.0.0.1"].map(
+			(host) => `${host}:${port}`,
+		);
+		const outbound = over(
+			slow,
+			{ "max-concurrent": 16, "plain-loopback": pairs },
+			deadlineOf,
+			lookupsAtOnce("4", 16),
+		);
+		const held = [
+			failure(outbound.fetch(url("a.svc.test"))),
+			failure(outbound.fetch(url("c.svc.test"), {}, { outsideChosen: true })),
+		];
 		await until(() => settles.length === 2);
-		expect(await failure(outbound.fetch(svc("/ok")))).toBe("unavailable: busy");
+		expect(await failure(outbound.fetch(url("b.svc.test")))).toBe("unavailable: busy");
 		// An address written in the URL needs no lookup, so it is still reached.
 		expect((await outbound.fetch(`http://127.0.0.1:${port}/ok`)).status).toBe(200);
 		for (const deadline of deadlines) deadline.abort();
 		expect(await Promise.all(held)).toEqual(["unavailable: timeout", "unavailable: timeout"]);
 		for (const settle of settles) settle(["127.0.0.1"]);
+	});
+
+	it("gives lookups an outside party chose half the share, so theirs never hold every lookup", async () => {
+		const settles = new Map<string, (addresses: readonly string[]) => void>();
+		const slow: Resolver = (host) =>
+			new Promise((done) => {
+				settles.set(host, done);
+			});
+		const pairs = ["a.svc.test", "b.svc.test", "svc.test"].map((host) => `${host}:${port}`);
+		const outbound = over(slow, { "max-concurrent": 16, "plain-loopback": pairs }, undefined, 2);
+		const chosen = { outsideChosen: true } as const;
+		const url = (host: string) => `http://${host}:${port}/ok`;
+		const resolving = outbound.fetch(url("a.svc.test"), {}, chosen).catch(() => undefined);
+		await until(() => settles.has("a.svc.test"));
+		// The outside party's share, one of two, is held: another name it chose is refused at once.
+		expect(await failure(outbound.fetch(url("b.svc.test"), {}, chosen))).toBe("unavailable: busy");
+		// The rest is the deployment's own: its name still resolves.
+		const own = outbound.fetch(svc("/ok"));
+		await until(() => settles.has("svc.test"));
+		settles.get("svc.test")?.(["127.0.0.1"]);
+		expect((await own).status).toBe(200);
+		settles.get("a.svc.test")?.(["127.0.0.1"]);
+		await resolving;
+	});
+
+	it("answers how many names a caller may resolve at once, the outside party's share apart", () => {
+		const shares = (lookups: number) => {
+			const out = over(table({}).resolve, { "max-concurrent": 16 }, undefined, lookups);
+			return [out.lookupsOf({ outsideChosen: true }), out.lookupsOf({}), out.lookupsOf()];
+		};
+		expect([shares(1), shares(2), shares(5)]).toEqual([
+			[0, 1, 1],
+			[1, 1, 1],
+			[2, 3, 3],
+		]);
+	});
+
+	it("resolves a name once for the requests asking it at once, taking one place", async () => {
+		const calls: string[] = [];
+		let settle: (addresses: readonly string[]) => void = () => {};
+		const slow: Resolver = (host) => {
+			calls.push(host);
+			return new Promise((done) => {
+				settle = done;
+			});
+		};
+		const outbound = over(slow, { "max-concurrent": 16 }, undefined, 1);
+		const answers = [outbound.fetch(svc("/ok")), outbound.fetch(svc("/ok"))];
+		await until(() => calls.length === 1);
+		settle(["127.0.0.1"]);
+		expect((await Promise.all(answers)).map((answer) => answer.status)).toEqual([200, 200]);
+		expect(calls).toEqual(["svc.test"]);
 	});
 
 	it("takes half the threadpool, at least one and never more than max-concurrent, four threads when unset or unreadable", () => {

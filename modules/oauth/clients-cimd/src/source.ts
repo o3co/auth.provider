@@ -12,9 +12,13 @@ import type { Settings } from "./section.ts";
 export const supportedOver = async (c: BuildContext<Settings>) =>
 	(await c.get(composedGrants)).has(codeGrantType) ? true : undefined;
 
-/** Refuses boot where the size or the timeout is above outbound's cap, naming the key, never a value. */
+/**
+ * Refuses boot where the size or the timeout is above outbound's cap, naming the key, never a value,
+ * or where outbound gives the names a document chooses no lookup.
+ */
 const withinOutbound = async (c: BuildContext<Settings>) => {
-	const caps = (await c.get(outboundLimits)).of();
+	const limits = await c.get(outboundLimits);
+	const caps = limits.of();
 	const above = (key: string, raise: string) => ({
 		where: `clients-cimd.${key}`,
 		reason: `is above outbound's cap: lower it, or raise outbound.${raise}`,
@@ -22,6 +26,16 @@ const withinOutbound = async (c: BuildContext<Settings>) => {
 	const refusals = [
 		...(c.section["max-size"] > caps.maxBytes ? [above("max-size", "max-response-size")] : []),
 		...(c.section.timeout > caps.timeoutMs ? [above("timeout", "timeout")] : []),
+		// Given none, every document's fetch would answer unavailable.
+		...(limits.lookupsOf?.({ outsideChosen: true }) === 0
+			? [
+					{
+						where: "clients-cimd",
+						reason:
+							"outbound resolves no name a metadata document chooses: run with UV_THREADPOOL_SIZE of 4 or more",
+					},
+				]
+			: []),
 	];
 	if (refusals.length > 0) c.refuseAll(refusals);
 };

@@ -236,6 +236,24 @@ it("lists the session again after an add pushed one out, though a sweep took it 
 	expect(await s.t.verifyAccess(first.token)).toEqual({ kind: "invalid", reason: "revoked" });
 });
 
+it("keeps the session listed where an add pushed one out while the sweep took it off, nothing awaiting a moment before", async () => {
+	const s = await boot({ size: 2, margin: 1 });
+	const first = await s.issue();
+	now += 1000;
+	await s.issue();
+	now += 1000;
+	// The sweep found nothing awaiting; before it takes the session off, an add pushes one out and
+	// its own settle fails.
+	s.issued.beforeNextDone(async () => {
+		s.down.failNext("revokeReferenced");
+		await expect(s.issue()).rejects.toSatisfy(isUnavailable);
+	});
+	await new Promise((resolve) => setTimeout(resolve, 1300));
+	expect(await s.issued.pendingListed()).toEqual([s.session.id]);
+	await new Promise((resolve) => setTimeout(resolve, 1300));
+	expect(await s.t.verifyAccess(first.token)).toEqual({ kind: "invalid", reason: "revoked" });
+});
+
 it("refuses to start with a margin that is not below the cap, telling neither number", async () => {
 	await expect(boot({ size: 4, margin: 4 })).rejects.toMatchObject({
 		refusals: [

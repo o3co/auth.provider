@@ -74,8 +74,8 @@ export type IssuanceVerdict =
 /** A rule an operator composes on whether an access token may be issued at all. */
 export interface IssuancePolicy {
 	readonly name: string;
-	/** Throws Unavailable when it cannot tell. */
-	judge(request: IssuanceRequest): Promise<IssuanceVerdict>;
+	/** Throws Unavailable when it cannot tell. `signal` aborts at the policies' deadline, so it may stop its own work. */
+	judge(request: IssuanceRequest, signal?: AbortSignal): Promise<IssuanceVerdict>;
 }
 
 export const issuancePolicies = extensionPoint<IssuancePolicy>("tokens.issuance-policies", {

@@ -34,6 +34,8 @@ export interface Narrower {
 	 * may reach a private address when `internal-hosts` lists the host.
 	 */
 	readonly internal?: ConfiguredUrl;
+	/** An outside party chooses the destination (a client's metadata document, say): its name lookups take a share apart, so they never hold every lookup. */
+	readonly outsideChosen?: true;
 }
 
 /** The destination policy's refusals, as an operator reads them at boot, apart from sending: no name is resolved. */
@@ -83,6 +85,8 @@ export interface Limits {
 export interface OutboundLimits {
 	/** The operator's caps narrowed, never widened; throws RangeError on a narrowing that is not positive and finite. */
 	of(narrower?: Narrower): Limits;
+	/** How many names the caller's requests may resolve at once, `outsideChosen` taking a share apart; 0 is none, so every such request is unavailable. */
+	lookupsOf?(narrower?: Narrower): number;
 }
 
 export const outboundLimits = contract<OutboundLimits>("outbound.limits");

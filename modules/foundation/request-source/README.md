@@ -17,7 +17,7 @@
 - `ignoredForwarding`: whether to warn now of `X-Forwarded-For` from a peer not trusted.
 
 ## Invariants
-- A trusted proxy covering every address of a family (`/0` however written, or every IPv4 address mapped into IPv6, as `::ffff:0:0/96` or `::/1`, since a mapped peer is checked as IPv4) refuses boot at its entry: every client would be a proxy, so every source would be undetermined.
+- A trusted proxy covering every address of a family (`/0` however written, or every IPv4 address mapped into IPv6, as `::ffff:0:0/96` or `::/1`, since a mapped peer is checked as IPv4) refuses boot at its entry, and entries that together cover every address of a family (their blocks joined as intervals, an IPv6 block's share of the mapped addresses counting as IPv4) refuse it at the list: every client would be a proxy, so every source would be undetermined.
 - A trusted proxy is an IP address without a zone, or a CIDR block with one decimal prefix length without a leading zero.
 - No proxy is trusted by default.
 - `proxy-hops` is a whole number from 1 to 10, and 1 by default.

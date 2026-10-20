@@ -24,11 +24,11 @@
 - A record of a token the index binds to another session fails as unavailable, so `token-endpoint` revokes that token.
 - A token is indexed before its reference is kept, for the same lifetime, so every kept reference names its session in the index.
 - An add within `push-out-margin` of the store's size lists its session first.
-- What an add pushes out awaits in the set's own write; its tokens are revoked and settled, and the session leaves the list once nothing awaits.
+- What an add pushes out awaits in the set's own write; its tokens are revoked and settled, and the session leaves the list once nothing awaits, read again after it leaves: one pushed out meanwhile lists it again.
 - A pushed-out token that cannot be revoked fails the record and is left to the sweep, which every host runs every `sweep-interval` over the listed sessions.
 - Closing a session revokes what awaits too.
 - A host stopped past the add leaves the session listed.
-- Every add that pushes one out lists its session again. The window left: the push-out found it unlisted (more adds at once than the margin, or a sweep that found nothing awaiting took it off before the add), and the host stops before listing it again.
+- Every add that pushes one out lists its session again. The window left: the push-out found it unlisted (more adds at once than the margin), and the host stops before listing it again.
 - On close, it answers done only after revoking every recorded token. If it cannot, it throws; the session stays closing, and a later close continues. Safe to repeat, and from several hosts at once.
 - Closing a session, revoking a token or pushing its reference out leaves its index entry, so the token still answers its session; whether that session is open is checked by whoever asks, as the `session` tie does.
 - `sessionOf` throws unavailable when the index cannot tell, never unbound.

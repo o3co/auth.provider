@@ -130,6 +130,8 @@ export async function readingOver(c: BuildContext<Settings>) {
 			...(s.allow.length > 0 ? { hosts: s.allow } : {}),
 			maxBytes: s["max-size"],
 			timeoutMs: s.timeout,
+			// A client id is a URL whoever asks for it chooses: its lookups take outbound's share apart.
+			outsideChosen: true,
 		},
 		ceiling: { scopes: s.scopes, audiences: s.audiences },
 		log: c.log,
