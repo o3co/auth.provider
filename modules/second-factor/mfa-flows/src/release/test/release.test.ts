@@ -335,7 +335,8 @@ describe("a user's own release of the second-factor lockout", () => {
 		const path = "/session/mfa/lock/release";
 		const first = await s.call("POST", path, {}, { jar });
 		expect([first.status, first.body]).toEqual([200, { lock: "released" }]);
-		expect(await s.call("POST", path, {}, { jar })).toEqual(first);
+		const again = await s.call("POST", path, {}, { jar });
+		expect([again.status, again.body]).toEqual([first.status, first.body]);
 		expect(s.events.filter((e) => e.kind === "mfa.lock.recovered")).toHaveLength(1);
 	});
 });
