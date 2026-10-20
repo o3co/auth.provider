@@ -68,6 +68,7 @@ it("names by hand only the keys no module's example holds", async () => {
 	const section = readme.split("## Keys no example holds")[1]?.split("\n## ")[0] ?? "";
 	expect([...section.matchAll(/^- `([a-z0-9.-]+)`/gm)].map((m) => m[1])).toEqual([
 		"authorize.step-up-page",
+		"federation.held-page",
 		"http.trusted-proxies",
 		"http.client-certificate",
 		"users.registered",
@@ -251,6 +252,12 @@ it("gives a generated app a trial layer by its own modules, with hosts under .in
 		Object.keys(all)
 			.filter((section) => section !== "keys" && section !== "http")
 			.sort(),
+	);
+});
+
+it("tells the operator to set the page a federation login a second factor holds goes on at", async () => {
+	expect(await read(await generated(), "README.md")).toContain(
+		"- `federation.held-page`: the page a federation login a second factor holds goes on at, on the public origin; without it, the browser stops at the factor's answer.",
 	);
 });
 

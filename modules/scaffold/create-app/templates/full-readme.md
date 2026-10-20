@@ -55,6 +55,7 @@ Each module's card, as installed, is the truth about it: what it does, its route
 No module's example holds these: write them in the local layer when the deployment needs them.
 
 - `authorize.step-up-page`: the page that raises authentication (optional).
+- `federation.held-page`: the page a federation login a second factor holds goes on at, on the public origin; without it, the browser stops at the factor's answer.
 - `http.trusted-proxies`: the proxies in front, whose forwarded addresses are believed.
 - `http.client-certificate`: where a proxy forwards client certificates, when a feature needs them.
 - `users.registered`: leave unset while the user ledger is composed; boot refuses both.

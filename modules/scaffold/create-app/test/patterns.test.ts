@@ -63,6 +63,14 @@ it("tells a federation app taking users from a ledger to give it the lookup by s
 	expect(chosenLines(["@mod/users-http"])).not.toContain(ledger);
 });
 
+it("tells a federation app whose logins a second factor holds to set the page they go on at", () => {
+	const held =
+		"- A federation login a second factor holds goes on at `federation.held-page`, a page on the public origin; without it, the browser stops at the factor's answer.";
+	expect(chosenLines(["@mod/federation", "@mod/mfa-flows"])).toContain(held);
+	expect(chosenLines(["@mod/federation"])).not.toContain(held);
+	expect(chosenLines(["@mod/mfa-flows"])).not.toContain(held);
+});
+
 async function freePort(): Promise<number> {
 	return new Promise((resolve) => {
 		const server = createServer().listen(0, "127.0.0.1", () => {
