@@ -1,7 +1,7 @@
 import { factors } from "@mod/mfa";
 import { revocations } from "@mod/subject-revocation";
 import { describe, expect, it } from "vitest";
-import { clock, during, serve } from "./harness.ts";
+import { clock, during, serve, takingTheCodesPlace, transactionCookie } from "./harness.ts";
 
 /** What an operator's reset does to a subject (`mfa-reset`), here without it: both boundaries, and the factors removed between them. */
 const resetting = async (s: Awaited<ReturnType<typeof serve>>, subject: string) => {
@@ -33,6 +33,50 @@ describe("a binding a reset or a revocation comes into", () => {
 		expect([revoked.status, revoked.body]).toEqual([401, { error: "login_required" }]);
 		expect(await s.app.get(factors).held("nia")).toEqual([]);
 	});
+	it("leaves the codes unseen, answering 401, where a revocation lands after the reissue wrote them and before the last check", async () => {
+		const s = await serve();
+		await s.signIn("ula");
+		const begun = await s.call("POST", "/session/mfa/enrollment", { kind: "code" });
+		clock.shift += 1000;
+		// The revocation lands once a write holds the codes: the reissue's, after the bind's.
+		const onceWritten = async () => {
+			const held = await s.app.get(factors).held("ula");
+			if (!held.some((f) => f.kind === "backup")) {
+				during.written = onceWritten;
+				return;
+			}
+			await s.app.get(revocations).record("ula");
+			clock.shift += 1000;
+		};
+		during.code = async () => {
+			during.written = onceWritten;
+		};
+		const done = await s.call("POST", "/session/mfa/enrollment/complete", {
+			transaction_id: String(begun.body.transaction),
+			proof: `${begun.body.secret}:0`,
+		});
+		expect([done.status, done.body]).toEqual([401, { error: "login_required" }]);
+		// Written and seen by no one: a reset clears them, and the subject can reissue them.
+		expect((await s.app.get(factors).held("ula")).map((f) => f.kind)).toEqual(["code", "backup"]);
+	});
+
+	it("answers 409 clearing the transaction where another factor took the codes' place in a binding on the password alone", async () => {
+		const s = await serve({ "max-factors": 2 });
+		await s.signIn("una");
+		const begun = await s.call("POST", "/session/mfa/enrollment", { kind: "code" });
+		expect(transactionCookie(s.jar())).toBeDefined();
+		takingTheCodesPlace();
+		const done = await s.call("POST", "/session/mfa/enrollment/complete", {
+			transaction_id: String(begun.body.transaction),
+			proof: `${begun.body.secret}:0`,
+		});
+		expect([done.status, done.body, transactionCookie(s.jar())]).toEqual([
+			409,
+			{ error: "mfa_factor_limit" },
+			undefined,
+		]);
+	});
+
 	it("writes no recovery codes once a revocation completed after the factor was written", async () => {
 		const s = await serve();
 		await s.signIn("uma");

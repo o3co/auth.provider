@@ -6,7 +6,15 @@ import { factorKinds, type Sending } from "@mod/mfa-extensions";
 import { sessions } from "@mod/session";
 import { revocations } from "@mod/subject-revocation";
 import { afterEach, describe, expect, it } from "vitest";
-import { clock, during, factorsDown, serve, sessionsDown } from "./harness.ts";
+import {
+	clock,
+	during,
+	factorsDown,
+	serve,
+	sessionsDown,
+	takingTheCodesPlace,
+	transactionCookie,
+} from "./harness.ts";
 
 /** How the binding proof answers its next send, and whether it can read what it checks; each sent one keeps its own code. */
 const contact = { sent: 0, answer: undefined as Sending | undefined, unreadable: false };
@@ -186,6 +194,53 @@ describe("a binding proof before a first factor", () => {
 		expect(s.jar().get("__Host-session")).not.toBe(old);
 		expect(await amrOf(s)).toEqual(["pwd", "otp", "mfa"]);
 		expect((await s.app.get(factors).held("rex")).map((f) => f.kind)).toEqual(["code"]);
+	});
+
+	it("closes a login's opened session and answers 409 clearing its transaction where another factor took the codes' place, the factor standing", async () => {
+		const s = await serve({ mode: "required", "max-factors": 2 }, [contactProof]);
+		const { tx } = await s.heldLogin("ned");
+		await s.call("POST", "/session/mfa/enrollment", { kind: "code", transaction_id: tx });
+		expect(transactionCookie(s.jar())).toBeDefined();
+		takingTheCodesPlace();
+		const done = await boundOnProof(s, tx);
+		expect([done.status, done.body]).toEqual([409, { error: "mfa_factor_limit" }]);
+		expect([s.jar().get("__Host-session"), transactionCookie(s.jar())]).toEqual([
+			undefined,
+			undefined,
+		]);
+		expect((await s.app.get(factors).held("ned")).map((f) => f.kind)).toEqual(["code", "code"]);
+	});
+
+	it("answers 409 with the raised session's cookie where another factor took the codes' place, the session staying raised", async () => {
+		const s = await serve({ "max-factors": 2 }, [contactProof]);
+		await s.signIn("ola");
+		const old = s.jar().get("__Host-session");
+		const asked = await s.call("POST", "/session/mfa/enrollment", { kind: "code" });
+		takingTheCodesPlace();
+		const done = await boundOnProof(s, String(asked.body.transaction));
+		expect([done.status, done.body]).toEqual([409, { error: "mfa_factor_limit" }]);
+		expect(s.jar().get("__Host-session")).not.toBe(old);
+		expect(await amrOf(s)).toEqual(["pwd", "otp", "mfa"]);
+	});
+
+	it("answers the factor alone, writing no codes, where the raise finds no session or is not written", async () => {
+		const s = await serve({}, [contactProof]);
+		await s.signIn("pia");
+		const gone = await s.call("POST", "/session/mfa/enrollment", { kind: "code" });
+		during.raised = () => undefined;
+		const unraised = await boundOnProof(s, String(gone.body.transaction));
+		expect([unraised.status, (unraised.body.factor as { kind: string }).kind]).toEqual([
+			200,
+			"code",
+		]);
+		expect(unraised.body.recovery_codes).toBeUndefined();
+		await s.signIn("pip");
+		const asked = await s.call("POST", "/session/mfa/enrollment", { kind: "code" });
+		during.raised = (answer) => answer && { ...answer, raised: false };
+		const unwritten = await boundOnProof(s, String(asked.body.transaction));
+		expect([unwritten.status, unwritten.body.recovery_codes]).toEqual([200, undefined]);
+		expect([codesTouched(s, "pia"), codesTouched(s, "pip")]).toEqual([false, false]);
+		expect((await s.app.get(factors).held("pip")).map((f) => f.kind)).toEqual(["code"]);
 	});
 
 	it("writes no recovery codes when a login's first factor cannot go on to show them", async () => {

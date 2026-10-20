@@ -54,9 +54,29 @@ export const during = {
 	written: undefined as (() => Promise<void>) | undefined,
 	/** Runs once after the next session raised or opened, before it answers, as a slow store would. */
 	entered: undefined as (() => Promise<void>) | undefined,
+	/** Changes the next raise's answer once, as a raise not written would. */
+	raised: undefined as
+		| ((answer: Awaited<ReturnType<Sessions["raise"]>>) => Awaited<ReturnType<Sessions["raise"]>>)
+		| undefined,
+	/** Changes the factor list once before the factor store's next change, as another request writing in between would. */
+	rewrite: undefined as ((record: StoredFactors) => StoredFactors) | undefined,
 	/** How many of the next revocations move the boundary but answer that a close did not finish. */
 	unfinishedRecords: 0,
 };
+/** Once the next proof is judged, the bind writes; then a copy of the factor lands before the reissue writes, taking the codes' place. */
+export const takingTheCodesPlace = () => {
+	during.code = async () => {
+		during.written = async () => {
+			during.rewrite = (record) => {
+				const { factors: all } = record as unknown as { factors: { id: string }[] };
+				return { ...record, factors: [...all, { ...all[0], id: "other" }] } as never;
+			};
+		};
+	};
+};
+/** The name of the browser's mfa transaction cookie, when it holds one. */
+export const transactionCookie = (jar: ReadonlyMap<string, string>) =>
+	[...jar.keys()].find((name) => name.includes("mfa"));
 /** Sessions whose next raise or opening holds its answer while `during.entered` runs once. */
 const entering = {
 	...sessionsDown,
@@ -70,7 +90,12 @@ const entering = {
 		};
 		return sessionsDown.wrap({
 			...kept,
-			raise: (...args: Parameters<Sessions["raise"]>) => held(kept.raise(...args)),
+			raise: async (...args: Parameters<Sessions["raise"]>) => {
+				const answer = await held(kept.raise(...args));
+				const change = during.raised;
+				during.raised = undefined;
+				return change ? change(answer) : answer;
+			},
 			complete: (...args: Parameters<Sessions["complete"]>) => held(kept.complete(...args)),
 		});
 	},
@@ -107,6 +132,8 @@ afterEach(async () => {
 	sessionsDown.restore();
 	during.release = undefined;
 	during.backup = undefined;
+	during.raised = undefined;
+	during.rewrite = undefined;
 	during.unfinishedRecords = 0;
 	await stop();
 });
@@ -179,8 +206,13 @@ const factorStand = () => {
 				save: (key: string, record: StoredFactors) =>
 					afterWrite(stand.records.create(key, record, "endless")),
 				read: stand.records.read,
-				update: (...args: Parameters<typeof stand.records.change>) =>
-					afterWrite(stand.records.change(...args)),
+				update: async (...args: Parameters<typeof stand.records.change>) => {
+					const rewrite = during.rewrite;
+					during.rewrite = undefined;
+					if (rewrite)
+						await stand.records.change(args[0], (record) => ({ value: rewrite(record) }));
+					return afterWrite(stand.records.change(...args));
+				},
 				scan: stand.records.scan,
 			}),
 		),

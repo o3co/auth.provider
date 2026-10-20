@@ -115,7 +115,9 @@ export function completionOver(
 		/** The answer, with the recovery codes where they are due: written only now, just before they go out. */
 		const shown = async (): Promise<object | HttpResponse> => {
 			if (!bound.codesDue) return factor;
-			// Checked before the write too: the fence stops it only where a revocation moves it (`mfa-revocation`).
+			// Checked before the write too, as the fence may not stop it: an app composed by hand may lack
+			// `mfa-revocation`, which moves it, and even with it a revocation's record moves its boundary
+			// before its followers move the fence.
 			if (await revokedSince(p.revocation, t)) return loginRequired;
 			const reissued = await p.factors.reissue(t.subject, bound.fence);
 			// A reset or a revocation since the binding began, or the factor gone meanwhile: no one sees codes.
@@ -134,6 +136,7 @@ export function completionOver(
 		// login never finishes that login.
 		if (!heldOf(t).proved) {
 			const made = await shown();
+			if (made === factorLimit) return { ...factorLimit, cookies: [transactions.cleared()] };
 			if (isAnswer(made)) return made;
 			return jsonAnswer(200, made, { cookies: [transactions.cleared()] });
 		}
