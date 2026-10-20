@@ -14,9 +14,7 @@ What to change from rc.2 is in [From 0.18.0-rc.2](docs/migration.md#from-0180-rc
 - `session-tokens`: a token an add pushed out of a session near its cap could miss the sweep's retry, where a sweep took the session off its list at that moment; the session is now listed again after every such add.
 - `mfa-enrollment`: a first factor's recovery codes could stay usable though never shown, where its login or its session's raise failed and taking them back failed too; they are now written only as they go out.
 - `mfa-email`: a code by mail counted as a second factor though `mfa-email.adds-second-factor` was not set; by default it is now a way back only. An app generated from the `mfa-web` pattern does not set it: set it to keep a code by mail counting.
-<!-- rc.3 #1957, once merged:
 - `session-lifecycle`: an entry by a cookie a raise retired could, for one request racing the raise, be judged on the raised session; an entry now checks again that its cookie still names the session.
--->
 
 ### Changed
 
