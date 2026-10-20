@@ -20,12 +20,8 @@ import {
 } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import outboundModule from "@mod/outbound/module";
-import { lineage } from "@mod/refresh";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Binding, senderBindings } from "@mod/sender-binding";
-import { sessions } from "@mod/session";
-import { stubSessions } from "@mod/session/testing";
-import { sessionTokens } from "@mod/session-tokens";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
@@ -80,24 +76,6 @@ const settings = {
 	},
 };
 
-/** No family and no session for any token: an id_token has neither. */
-const untied = defineModule({ name: "untied" }, (m) => [
-	m.provide(lineage).by(() => ({
-		of: async () => ({ kind: "none" }),
-		adopt: async () => "adopted",
-		start: async () => undefined,
-	})),
-	m.provide(sessions).by(() =>
-		stubSessions({
-			entryOf: async (id) => ({
-				kind: "entered",
-				session: { id, context: { subject: "alice", amr: [], authenticatedAt: 0 } },
-				endsAt: Number.MAX_SAFE_INTEGER,
-			}),
-		}),
-	),
-	m.provide(sessionTokens).by(() => ({ sessionOf: async () => ({ kind: "unbound" }) })),
-]);
 const dpopKind = defineModule({ name: "dpop-kind" }, (m) => [
 	m
 		.contribute(senderBindings)
@@ -125,7 +103,6 @@ const boot = (section: unknown, extra: readonly Module[] = []) =>
 			secretHashModule,
 			grantCaller,
 			clientAllowanceModule,
-			untied,
 			dpopKind,
 			outboundModule,
 			externalJwtModule,
