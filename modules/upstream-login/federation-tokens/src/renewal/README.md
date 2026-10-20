@@ -26,4 +26,4 @@ Internal module of `federation-tokens`: keeping each session's upstream tokens a
 - A login's tokens are checked against their session once written; when it closed or fell short of a requirement meanwhile, they are withdrawn.
 
 ## Depends on
-- `federation`, `kernel`, `session`; the package's store interface and `vault`
+- `upstreams` (the refresh, the tokens), `kernel`, `session`; the package's store interface and `vault`
