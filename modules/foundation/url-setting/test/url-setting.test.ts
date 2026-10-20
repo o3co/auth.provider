@@ -273,6 +273,10 @@ it("takes plain http beside the schemes only on a loopback host, where the rules
 		"http://127.0.0.1:3000/login?x=1",
 		"http://127.255.0.1/",
 		"http://[::1]:3000/login",
+		// Names under localhost, a trailing dot and a mapped loopback address, as isLoopbackName judges.
+		"http://localhost./",
+		"http://a.localhost:3000/login",
+		"http://[::ffff:7f00:1]/",
 		"https://a.example/login",
 	]) {
 		expect(local.parse(value)).toBe(value);
@@ -292,15 +296,12 @@ it("decides plain http's loopback host on the parser's form only, each edge refu
 			"a URL: http only on a loopback host",
 			[
 				// A name that only resolves to a loopback address, or may not.
-				"http://localhost./",
-				"http://a.localhost/",
 				"http://localhost.localdomain/",
 				"http://127.0.0.1.nip.io/",
-				// Every address, not a loopback one.
+				// Every address, not a loopback one, nor 127/8 carried in IPv6 unmapped.
 				"http://0.0.0.0/",
 				"http://[::]/",
-				// An IPv4-mapped IPv6 loopback address, in the parser's form.
-				"http://[::ffff:7f00:1]/",
+				"http://[::7f00:1]/",
 				"http://126.255.255.255/",
 				"http://128.0.0.1/",
 				"http://10.0.0.1/",

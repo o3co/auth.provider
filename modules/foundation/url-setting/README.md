@@ -14,7 +14,7 @@
 
 ## Invariants
 - A configured URL is written `<scheme>://` in lower case.
-- Its scheme is one of the schemes the module gives; with `loopbackHttp`, also `http`, on a loopback host only: `localhost`, an IPv4 address in 127.0.0.0/8 or `[::1]`, judged on the host as the parser writes it. Any other host over `http` is refused, `localhost.`, a subdomain of `localhost`, `0.0.0.0` and an IPv4-mapped address among them.
+- Its scheme is one of the schemes the module gives; with `loopbackHttp`, also `http`, on a host `isLoopbackName` takes, judged on the host as the parser writes it, by its name alone. Any other host over `http` is refused, `localhost.localdomain` and `0.0.0.0` among them.
 - It has a host.
 - It holds no userinfo.
 - It holds no fragment, not even a bare `#`.

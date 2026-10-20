@@ -49,18 +49,10 @@ function refusal(value: string, rules: UrlRules): string | undefined {
 	const kind = difference(url, authority, path, value);
 	if (kind) return form(kind);
 	// Decided on the parser's form only, which the value now is, so no other spelling reaches here.
-	if (!rules.schemes.some((s) => s === scheme) && !loopback(url.hostname)) {
+	if (!rules.schemes.some((s) => s === scheme) && !isLoopbackName(url.hostname)) {
 		return "a URL: http only on a loopback host";
 	}
 	return undefined;
-}
-
-/**
- * Whether a host, as the parser writes it, is a loopback one: `localhost`, an IPv4 address in
- * 127.0.0.0/8 (the parser writes every IPv4 address as four decimal parts), or `[::1]`.
- */
-function loopback(hostname: string): boolean {
-	return hostname === "localhost" || hostname === "[::1]" || /^127(\.\d{1,3}){3}$/.test(hostname);
 }
 
 /**
