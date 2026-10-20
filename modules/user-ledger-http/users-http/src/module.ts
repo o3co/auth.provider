@@ -2,7 +2,7 @@ import { deepFreeze, defineModule, setting } from "@mod/kernel";
 import { bearerToken } from "@mod/keys";
 import { outbound } from "@mod/outbound";
 import { credentialPolicy, destinationRefusal, outboundRefusals } from "@mod/outbound-policy";
-import { urlSetting } from "@mod/url-setting";
+import { type ConfiguredUrl, urlSetting } from "@mod/url-setting";
 import { type Ledger, ledgers } from "@mod/users";
 import { z } from "zod";
 import { calls } from "./calls/calls.ts";
@@ -56,10 +56,10 @@ const credentialRefusals = {
 export default defineModule({ name: "users-http", section, replicaSafe: true }, (m) => [
 	m.contribute(ledgers).by(async (c): Promise<Ledger> => {
 		const { "max-response-size": maxBytes, timeout: timeoutMs } = c.section;
-		// The operator's own URL: a host in `internal-hosts` is reached at a private address.
-		const narrowerOf = (url: string) => ({
+		// The operator's own URL: a host in `internal-hosts` is reached at a private address at its origin.
+		const narrowerOf = (url: ConfiguredUrl) => ({
 			hosts: [new URL(url).hostname],
-			internal: true as const,
+			internal: url,
 			...(maxBytes === undefined ? {} : { maxBytes }),
 			...(timeoutMs === undefined ? {} : { timeoutMs }),
 		});

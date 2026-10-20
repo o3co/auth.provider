@@ -1,3 +1,4 @@
+import { configuredUrl } from "@mod/url-setting/testing";
 import { describe, expect, it } from "vitest";
 import { DestinationRefused, type RefusalReason } from "../src/contract.ts";
 import {
@@ -119,14 +120,48 @@ describe("admitUrl", () => {
 
 	it("takes a host as internal only when the caller's URL is the operator's and internal-hosts lists it", () => {
 		const policy = { ...open, internal: ["ALB.corp", ".svc.corp", "10.0.0.5"] };
-		const internal = (raw: string, narrower = { internal: true as const }) =>
-			admitUrl(raw, policy, narrower).internal;
+		const internal = (raw: string) =>
+			admitUrl(raw, policy, { internal: configuredUrl(raw) }).internal;
 		expect(internal("https://alb.corp/")).toBe(true);
 		expect(internal("https://a.b.svc.corp/")).toBe(true);
 		expect(internal("https://10.0.0.5/")).toBe(true);
 		expect(internal("https://svc.corp/"), "a leading dot covers the name itself too").toBe(true);
 		expect(internal("https://other.corp/")).toBe(false);
 		expect(admitUrl("https://alb.corp/", policy).internal, "a URL from elsewhere").toBe(false);
+	});
+
+	it("takes a host as internal for the operator's configured URL only at that URL's origin", () => {
+		const policy = { ...open, internal: ["alb.corp"], plainLoopback: [] };
+		const configured = configuredUrl("https://alb.corp/verify");
+		const internal = (raw: string) => admitUrl(raw, policy, { internal: configured }).internal;
+		expect(internal("https://alb.corp/subject")).toBe(true);
+		// Another port is another service on that host; another scheme another origin.
+		expect(internal("https://alb.corp:8443/verify")).toBe(false);
+		expect(
+			reasonOf(() => admitUrl("http://alb.corp/verify", policy, { internal: configured })),
+		).toBe("scheme");
+		expect(internal("https://other.corp/verify")).toBe(false);
+	});
+
+	it("compares origins as the URL parser writes them, and holds each to its own configured URL", () => {
+		// Two internal hosts: each reached only for its own URL, though both are listed.
+		const policy = {
+			...open,
+			internal: ["alb.corp", "db.corp", "xn--bcher-kva.corp", "[fd00::1]"],
+		};
+		const reach = (raw: string, own: string) =>
+			admitUrl(raw, policy, { internal: configuredUrl(own) }).internal;
+		expect(reach("https://ALB.corp:443/x", "https://alb.corp/")).toBe(true);
+		expect(reach("https://bücher.corp/x", "https://xn--bcher-kva.corp/")).toBe(true);
+		expect(reach("https://[fd00:0::1]/x", "https://[fd00::1]/")).toBe(true);
+		expect(reach("https://db.corp/x", "https://alb.corp/")).toBe(false);
+		expect(reach("https://alb.corp/x", "https://db.corp/")).toBe(false);
+		// Plain http admitted at a named pair, then held to the configured https origin: not its own.
+		const plain = { ...policy, plainLoopback: ["alb.corp:443"] };
+		const admitted = admitUrl("http://alb.corp:443/x", plain, {
+			internal: configuredUrl("https://alb.corp/"),
+		});
+		expect([admitted.loopback, admitted.internal]).toEqual([true, false]);
 	});
 });
 
