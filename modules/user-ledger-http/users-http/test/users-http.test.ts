@@ -624,8 +624,10 @@ describe("users-http", () => {
 			runtime,
 		});
 		await app.get(collected)[0]?.verify("alice", "correct horse");
-		expect(checked).toMatchObject([{ internal: true }]);
-		expect(sent).toMatchObject([{ internal: true }]);
+		// Named by the URL itself, so only its origin is reached at a private address.
+		const own = { internal: settings()["verify-url"] };
+		expect(checked).toMatchObject([own]);
+		expect(sent).toMatchObject([own]);
 	});
 
 	it("refuses to start on a verify-url outbound's policy refuses, saying which of its keys to set", async () => {
