@@ -139,7 +139,13 @@ describe("federation grants: refusals", () => {
 				tokens: { scope: scopes.join(" ") },
 			});
 			expect((await t.callback(await t.loggedIn(), query)).status).toBe(400);
-			expect((await t.callback(first, query)).status).toBe(303);
+			// A failure is sent back by 303 too: the connection is made, with no error, and the grant serves.
+			const done = await t.callback(first, query);
+			expect(done.status).toBe(303);
+			expect(t.returned(done).get("error")).toBeNull();
+			const id = String(lodged.body.grant_id);
+			expect(t.returned(done).get("grant_id")).toBe(id);
+			expect((await t.grantCall(id, "status")).body.status).toBe("active");
 		},
 	);
 
