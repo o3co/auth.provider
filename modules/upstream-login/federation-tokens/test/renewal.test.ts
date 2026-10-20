@@ -27,6 +27,28 @@ async function linked(
 }
 
 describe("when a token ends", () => {
+	it("keeps the earlier end when a refresh answers the same token, timing the next refresh from then", async () => {
+		for (const [said, left] of [
+			[600, 25],
+			[10, 10],
+			[undefined, 25],
+		] as const) {
+			let asked = 0;
+			const h = await linked({ refreshToken: "r-1", expiresInSeconds: 100 }, async () => {
+				asked += 1;
+				return answer({ accessToken: "up-1", expiresInSeconds: said });
+			});
+			h.advance(75_000);
+			expect((await h.get()).json, String(said)).toMatchObject({
+				access_token: "up-1",
+				expires_in: left,
+			});
+			// Its life counted from the refresh: not due again at once, so the upstream is not asked each request.
+			await h.get();
+			expect(asked, String(said)).toBe(1);
+		}
+	});
+
 	it("takes an end at login that is not a positive number as due, renewing it at the first request", async () => {
 		for (const said of [0, -5, Number.NaN, "300"]) {
 			const h = await linked({ refreshToken: "r-1", expiresInSeconds: said });
@@ -107,9 +129,12 @@ describe("when a token ends", () => {
 describe("the scope", () => {
 	const granted = { refreshToken: "r-1", expiresInSeconds: 0, scope: ["read", "write"] };
 
-	/** A session whose first refresh narrows its scope to `read`, the next answering `next`. */
+	/** A session whose first refresh narrows its scope to `read`, the next answering `next` with a new token. */
 	const narrowed = async (next: Said) => {
-		const answers = [answer({ scope: ["read"], expiresInSeconds: 1 }), answer(next)];
+		const answers = [
+			answer({ scope: ["read"], expiresInSeconds: 1 }),
+			answer({ accessToken: "up-3", ...next }),
+		];
 		const h = await linked(granted, async () => answers.shift() ?? answer({}), {
 			settings: { "refresh-before": "0s" },
 		});
@@ -134,7 +159,7 @@ describe("the scope", () => {
 			const h = await linked(granted, async () => answer({ scope }));
 			expect((await h.get()).json).toMatchObject({ access_token: "up-2", scope: "read write" });
 			const narrow = await narrowed({ scope });
-			expect((await narrow.get()).json).toMatchObject({ access_token: "up-2", scope: "read" });
+			expect((await narrow.get()).json).toMatchObject({ access_token: "up-3", scope: "read" });
 		}
 	});
 });
@@ -191,11 +216,15 @@ describe("what the upstream says, read once at the boundary", () => {
 		const asked: string[] = [];
 		const h = await linked({ refreshToken: "r-1", expiresInSeconds: 0 }, async (refreshToken) => {
 			asked.push(refreshToken);
-			return answer({ refreshToken: "", expiresInSeconds: 1 });
+			return answer({
+				accessToken: `up-${asked.length + 1}`,
+				refreshToken: "",
+				expiresInSeconds: 1,
+			});
 		});
 		expect((await h.get()).json).toMatchObject({ access_token: "up-2" });
 		h.advance(1000);
-		expect((await h.get()).json).toMatchObject({ access_token: "up-2" });
+		expect((await h.get()).json).toMatchObject({ access_token: "up-3" });
 		expect(asked).toEqual(["r-1", "r-1"]);
 	});
 
@@ -328,7 +357,7 @@ describe("a refresh racing other writers", () => {
 		expect(marks[0]).not.toBe(marks[1]);
 	});
 
-	it("lets go of its lock only while it still holds it, never one another host took after it ran out", async () => {
+	it("writes nothing once its lock ran out, and lets go only of its own, never one another host took", async () => {
 		const at: { h?: Awaited<ReturnType<typeof linked>> } = {};
 		const lock = () => `${at.h?.session.id}\ncorp`;
 		at.h = await linked(
@@ -341,10 +370,30 @@ describe("a refresh racing other writers", () => {
 			},
 			{ settings: { "lock-lifetime": "1s" } },
 		);
-		expect((await at.h.get()).json).toMatchObject({ access_token: "up-2" });
+		// The other host refreshes now: an answer written here would race it.
+		expect((await at.h.get()).json).toEqual({ error: "temporarily_unavailable" });
 		// Past the moment a lock let go would end: the other host's must still be held.
 		at.h.advance(1000);
 		expect(await at.h.stores.locks.hold(lock(), "third", 60_000)).toBe("exists");
+	});
+
+	it("keeps its lock while a slow upstream answers, and stops keeping it once let go", async () => {
+		const at: { h?: Awaited<ReturnType<typeof linked>> } = {};
+		const lock = () => `${at.h?.session.id}\ncorp`;
+		at.h = await linked(
+			due,
+			async () => {
+				// Longer than the lock's second, in real time, as a slow upstream takes.
+				await new Promise((resolve) => setTimeout(resolve, 1300));
+				expect(await at.h?.stores.locks.hold(lock(), "another", 60_000)).toBe("exists");
+				return answer({});
+			},
+			{ settings: { "lock-lifetime": "1s" } },
+		);
+		expect((await at.h.get()).json).toMatchObject({ access_token: "up-2" });
+		// Let go, and not kept again after: another host takes it once the release ends.
+		await new Promise((resolve) => setTimeout(resolve, 700));
+		expect(await at.h.stores.locks.hold(lock(), "third", 60_000)).toBe("created");
 	});
 });
 

@@ -229,19 +229,16 @@ describe("hints past their time", () => {
 		]);
 	});
 
-	unless("old-logout-hint-on-get")(
-		"refuses on a GET a hint issued over a day ago, not posted",
+	unless("old-logout-hint")(
+		"refuses a hint issued over a day ago, by GET or POST, leaving the session open",
 		async () => {
 			const at = await signedIn();
 			const hint = aged(at.idToken, 90_000);
-			const answer = await logout(at, "GET", { id_token_hint: hint });
-			expect([answer.status, answer.json?.error, await stillSignedIn(at)]).toEqual([
-				400,
-				"invalid_token",
-				true,
-			]);
-			expect((await logout(at, "POST", { id_token_hint: hint })).status).toBe(200);
-			expect(await stillSignedIn(at)).toBe(false);
+			for (const method of ["GET", "POST"] as const) {
+				const answer = await logout(at, method, { id_token_hint: hint });
+				expect([answer.status, answer.json?.error], method).toEqual([400, "invalid_token"]);
+			}
+			expect(await stillSignedIn(at)).toBe(true);
 		},
 	);
 });

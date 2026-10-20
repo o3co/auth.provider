@@ -58,7 +58,7 @@ onLegacy(codeArea, {
 		"back-channel-by-host-and-port",
 		// An expired logout hint is refused; and an old one on a GET gets a page that asks to confirm.
 		"expired-logout-hint",
-		"old-logout-hint-on-get",
+		"old-logout-hint",
 		// A resource the exchange refuses still uses the code up.
 		"resource-mismatch-keeps-code",
 		// Ours answers userinfo only for a token issued with openid.

@@ -205,7 +205,7 @@ From `@mod/federation-tokens`.
 |---|---|---|---|---|---|---|
 | `federation-tokens.refresh-before` | string | `30s` |  |  |  | A token this close to its end is refreshed before it is handed over, from 0s to 1h. |
 | `federation-tokens.max-lifetime` | string | `1d` |  |  |  | The longest a token is taken to live, from 1m to 365d: caps what an upstream says, and stands for an answer that says nothing. |
-| `federation-tokens.lock-lifetime` | string | `5s` |  |  |  | How long one refresh holds its lock, and how long another request waits for it, from 1s to 1m. |
+| `federation-tokens.lock-lifetime` | string | `5s` |  |  |  | How long a refresh's lock lasts unless kept, as it is every half of this while the refresh runs, and how long another request waits for it, from 1s to 1m. |
 | `federation-tokens.requests` | integer (1–1000) | `60` |  |  |  | Requests allowed per source in each window. |
 | `federation-tokens.window` | string | `1m` |  |  |  | The window `requests` counts in, from 1s to 1h. |
 
