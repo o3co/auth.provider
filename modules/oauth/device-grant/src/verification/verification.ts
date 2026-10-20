@@ -101,10 +101,7 @@ export function verificationWith(v: Verifying): Pick<Route, "handle" | "unavaila
 			if (admitted.kind === "refused") {
 				const { policy, reason } = admitted;
 				audited("device.approval_refused", { client: device.clientId, policy, reason });
-				return jsonAnswer(403, {
-					error: "access_denied",
-					error_description: admitted.description,
-				});
+				return oauthError(403, "access_denied", admitted.description);
 			}
 		}
 		const decision: Pick<Device, "state" | "approval"> =

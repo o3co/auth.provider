@@ -519,13 +519,13 @@ describe("polling", () => {
 	});
 
 	it("refuses and records an approval a contributed policy refuses, before keeping it, as 0.17 refused an unverified email", async () => {
-		const denying = { on: true };
+		const denying = { on: true, description: "not now" };
 		const policy = defineModule({ name: "deny-alice" }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "deny-alice",
 				judge: async (request) =>
 					denying.on && request.grant.subject === "alice"
-						? { kind: "refused" as const, reason: "denied", description: "not now" }
+						? { kind: "refused" as const, reason: "denied", description: denying.description }
 						: { kind: "allowed" as const },
 			})),
 		]);
@@ -552,6 +552,10 @@ describe("polling", () => {
 				},
 			},
 		]);
+		// A description is printable ASCII but `"` and `\`, as the token endpoint answers one.
+		denying.description = 'ask "ops"\\\né';
+		const shaped = await s.verify(cookie, { action: "approve", user_code: user });
+		expect(shaped.body).toEqual({ error: "access_denied", error_description: "ask ?ops????" });
 		denying.on = false;
 		expect((await s.verify(cookie, { action: "approve", user_code: user })).status).toBe(200);
 	});
