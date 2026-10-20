@@ -523,6 +523,20 @@ export function apiWith(p: ApiParts) {
 	const byId = async (request: HttpRequest, client: Client, id: string, step: string) => {
 		const route = byIdRoutes.get(step);
 		if (!route) return error(404, "not_found");
+		try {
+			return await byRoute(request, client, id, route);
+		} catch (thrown) {
+			// An outage is audited as the route's refusal, as one answered without throwing is; recording
+			// is best effort, and the 503 is answered where every route's is.
+			if (isUnavailable(thrown) && route.denied) {
+				try {
+					record(route.denied, undefined, { client: client.id, reason: "unavailable" }, request);
+				} catch {}
+			}
+			throw thrown;
+		}
+	};
+	const byRoute = async (request: HttpRequest, client: Client, id: string, route: ById) => {
 		// Before the grant's owner is known, a refusal is audited by the client only.
 		const early = (why: string, refusal: HttpResponse) => {
 			if (route.denied) {
