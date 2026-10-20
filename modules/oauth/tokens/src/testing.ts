@@ -64,6 +64,9 @@ export function tokensContract(
 	}) => Promise<TokensUnderTest>,
 ): void {
 	const grant = { subject: "s", issuedTo: "c", audience: ["api"], scope: ["read"] };
+	/** An actor chain n deep. */
+	const chain = (n: number): Actor =>
+		n === 1 ? { subject: "a1" } : { subject: `a${n}`, actor: chain(n - 1) };
 	/** Issues through `issue`, which no policy here refuses, and answers what it issued. */
 	const issueFor = async (tokens: Tokens, grant: AccessGrant, limits?: IssueLimits) => {
 		const issued = await tokens.issue({ grant, grantType: "test" }, limits);
@@ -299,8 +302,6 @@ export function tokensContract(
 
 		it("issues and reads back an actor chain 16 deep, and refuses one of 17 as the caller's mistake", async () => {
 			const place = await open({ revocable: true });
-			const chain = (n: number): Actor =>
-				n === 1 ? { subject: "a1" } : { subject: `a${n}`, actor: chain(n - 1) };
 			const deepest = await issueFor(place.tokens, { ...grant, actor: chain(16) });
 			expect(await place.tokens.verifyAccess(deepest.token)).toMatchObject({
 				kind: "valid",
@@ -309,6 +310,29 @@ export function tokensContract(
 			const over = { grant: { ...grant, actor: chain(17) }, grantType: "test" };
 			await expect(place.tokens.issue(over)).rejects.toThrow(TypeError);
 			await expect(place.tokens.admits(over)).rejects.toThrow(TypeError);
+		});
+
+		it("reads a grant's actor once, so a getter answering otherwise the second time changes nothing", async () => {
+			const place = await open({ revocable: true });
+			const shifting = (first: Actor | undefined) => {
+				let reads = 0;
+				const given = Object.defineProperty({ ...grant }, "actor", {
+					enumerable: true,
+					get: () => (++reads === 1 ? first : chain(17)),
+				});
+				return { request: { grant: given as AccessGrant, grantType: "test" }, reads: () => reads };
+			};
+			const none = shifting(undefined);
+			const issued = await place.tokens.issue(none.request);
+			if (issued.kind !== "issued") throw new Error(issued.policy);
+			expect(none.reads()).toBe(1);
+			const checked = await place.tokens.verifyAccess(issued.access.token);
+			expect(checked.kind === "valid" && "actor" in checked.grant).toBe(false);
+			const admitted = shifting(undefined);
+			expect((await place.tokens.admits(admitted.request)).kind).toBe("allowed");
+			expect(admitted.reads()).toBe(1);
+			const deep = shifting(chain(17));
+			await expect(place.tokens.issue(deep.request)).rejects.toThrow(TypeError);
 		});
 
 		it("refuses an authentication time beyond its allowance ahead of the clock", async () => {

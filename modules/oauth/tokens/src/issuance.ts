@@ -8,7 +8,7 @@ import type {
 	IssueLimits,
 	Tokens,
 } from "./contract.ts";
-import { chainWithin } from "./limits.ts";
+import { actorSnapshot } from "./limits.ts";
 
 /** How far ahead of the clock an authentication time may be, as 0.17 allowed. */
 export const authenticatedAheadMs = 300_000;
@@ -76,12 +76,15 @@ export type IssueAccess = (
  * or an actor chain deeper than tokens reads, counted before anything copies it.
  */
 function checkedRequest(request: IssuanceRequest): IssuanceRequest {
-	if (!chainWithin(request.grant.actor, (link) => (link as { actor?: unknown }).actor)) {
-		throw new TypeError("tokens: an actor chain is over 16 deep, or holds what is no actor");
-	}
-	const { claims: given, ...grant } = request.grant;
-	const claims = addedClaimsOf(given);
-	return { ...request, grant: claims ? { ...grant, claims } : grant };
+	// Each of the caller's properties is read once: what is checked is what is copied and signed.
+	const { grant: given, ...rest } = request;
+	const { claims: added, actor: chain, ...grant } = given;
+	const actor = actorSnapshot(chain);
+	const claims = addedClaimsOf(added);
+	return {
+		...rest,
+		grant: { ...grant, ...(actor ? { actor } : {}), ...(claims ? { claims } : {}) },
+	};
 }
 
 /** `admits` and `issue` over the judgment and the issuing, alike for tokens and its stand-in. */
