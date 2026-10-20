@@ -4,7 +4,7 @@ Notable changes, newest first, in the form of [Keep a Changelog](https://keepach
 
 Changes up to 0.17.0 are in [the 0.17.0 changelog](https://github.com/o3co/auth.provider/blob/v0.17.0/CHANGELOG.md).
 
-## [0.18.0-rc.4] - unreleased
+## [0.18.0-rc.4] - 2026-10-21
 
 What to change from rc.3 is in [From 0.18.0-rc.3](docs/migration.md#from-0180-rc3); coming from an earlier release candidate, read its section first.
 
