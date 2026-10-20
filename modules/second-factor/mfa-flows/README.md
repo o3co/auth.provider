@@ -1,12 +1,12 @@
 # mfa-flows
 
 ## Responsibilities
-- Owns transactions (short records waiting for a second factor) and drives the login gate, step-up, and enrollment.
+- Owns transactions (short records waiting for a second factor) and drives the login gate and step-up, and the routes of enrollment.
 - Owns the numbers of the lockout policy (the mechanism is `rate-limit`).
 - Owns a user's own release of their lockout.
 
 ## Not here
-- Factor records and decisions about them (`mfa`). Verifying each factor (the side contributing the kind). Session records and raise (`session`). The login flow (`login-gates`). Managing a session's own factors (`mfa-management`). An operator's reset of a subject's factors (`mfa-reset`, which takes the lockout through `flowParts`).
+- Factor records and decisions about them (`mfa`). Verifying each factor (the side contributing the kind). Session records and raise (`session`). The login flow (`login-gates`). Managing a session's own factors (`mfa-management`). Binding a new factor (`mfa-enrollment`, through `enrollmentFlow`). An operator's reset of a subject's factors (`mfa-reset`, which takes the lockout through `flowParts`).
 
 ## Offers
 - Contributions: the `login-gates` gate `mfa`, and the step `mfa-flows` that proves a factor to `mfa`.
@@ -19,7 +19,7 @@
 - `lockout` in the section holds the lockout numbers (`budget` 10 by default, `budget-window` `7d`); `rate-limit` judges their shape, refusing boot when it does not fit.
 - Store interface for transactions by their unguessable identifier, never kept in clear: save for a lifetime, read, change from what it holds (the lifetime stays). Contents are not shown to it. Its needs: never evicted, survives a crash, never back after a failover.
 - Store interface for each holder's live transactions (a session's handle, or a held login's subject), each by a digest of its identifier for its lifetime: add (answering those pushed out past 5, a constant), members, remove. Its needs: never evicted, survives a crash and a failover, confirmed reads.
-- Extension point `enrollmentFlow` (at most one): the handlers of `POST enrollment` and `POST enrollment/complete`, and the answer to a challenge in an enrollment's transaction; the routes stay declared here, and where none is contributed the package's own `enrollment` answers.
+- Extension point `enrollmentFlow` (exactly one, boot refused otherwise): the handlers of `POST enrollment` and `POST enrollment/complete`, and the answer to a challenge in an enrollment's transaction; the routes stay declared here. `mfa-enrollment` contributes it, coming wherever this package is composed.
 - Contract `flowParts`, for the module binding factors: the transactions, the resume of a held login, recording through this package's declaration, the common answers, the request helpers, and the lockout's name and policy (`seams`' card).
 - `./testing`: test configuration builders, and the store interfaces' contract tests for every implementation (see `transactions`' card).
 
@@ -39,7 +39,7 @@
 - Transactions: one per identifier (256 random bits), kept for `transaction-lifetime`. Its needs say what the place must keep it through (a taken one coming back could finish a login twice); the wiring side meets them.
 
 ## Depends on
-- `kernel`, `http`, `cookies`, `request-source`, `csrf`, `session`, `login-gates`, `subject-revocation`, `rate-limit`, `audit`, `mfa` (the factor decision interface, the label's shape), `mfa-binding-proof` (the binding proof)
+- `kernel`, `http`, `cookies`, `request-source`, `csrf`, `session`, `login-gates`, `subject-revocation`, `rate-limit`, `audit`, `mfa` (the factor decision interface)
 
 ## Vocabulary
 - Transaction: a short-lived record waiting for second-factor confirmation. Its purpose is login, login with a first enrollment, step-up, or enrollment.

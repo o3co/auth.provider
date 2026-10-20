@@ -2,12 +2,10 @@ import { audit } from "@mod/audit";
 import type { BuildContext } from "@mod/kernel";
 import { logins } from "@mod/login-gates";
 import { factors } from "@mod/mfa";
-import { bindingProof } from "@mod/mfa-binding-proof";
 import { type LockoutPolicy, lockouts } from "@mod/rate-limit";
 import { longestRecentMs, sessions } from "@mod/session";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { enrollmentFlow } from "../contract.ts";
-import { enrollmentOver } from "../enrollment/enrollment.ts";
 import { permitsOver } from "../permits/permits.ts";
 import { proofOver, resumeOver } from "../proof/proof.ts";
 import { releaseOver } from "../release/release.ts";
@@ -59,18 +57,10 @@ export async function handlersOver(c: BuildContext<Settings>, policy: LockoutPol
 		recent: (at) => shared.sessions.recent(at),
 		keepMs: longestRecentMs,
 	});
-	// The flow contributed, where a module binding factors gives one; else the package's own.
+	// The one flow the module binding factors contributes; the kernel refuses boot without it.
 	const [flow] = await c.collect(enrollmentFlow);
-	const own = async () => {
-		const { challengeBinding, ...handlers } = enrollmentOver({
-			...shared,
-			bindingProof: await c.get(bindingProof),
-			audit: await c.get(audit),
-			resume: resumeOver(resuming),
-		});
-		return { ...handlers, challenge: challengeBinding };
-	};
-	const { challenge, ...enrollment } = flow ?? (await own());
+	if (!flow) throw new Error("no enrollment flow");
+	const { challenge, ...enrollment } = flow;
 	const proof = proofOver({
 		...resuming,
 		enrollmentChallenge: challenge,

@@ -6,7 +6,7 @@ Internal module of `mfa-flows`: transactions over the package's store interface,
 - Starts, finds, spends, takes and changes transactions, on `kernel`'s clock.
 
 ## Not here
-- What a request may do with a transaction, and every answer (`proof`, `enrollment`). What a binding keeps in one (`enrollment`). The store's implementation (the wiring side).
+- What a request may do with a transaction, and every answer (`proof`, and `mfa-enrollment` through `flowParts`). What a binding keeps in one (`mfa-enrollment`). The store's implementation (the wiring side).
 
 ## Offers
 - `transactionsIn` (the build context) → the operations below. It takes the package's store interface and `cookies`' contract from the assembly, and randomness, the clock and the package's `transaction-lifetime` and `attempts-per-transaction` from the context.

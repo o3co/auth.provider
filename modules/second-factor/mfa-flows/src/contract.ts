@@ -12,10 +12,9 @@ export type {
 } from "./transactions/records.ts";
 export type { Transactions } from "./transactions/transactions.ts";
 
-/** The enrollment routes' handlers, from the module binding factors: at most one contribution. */
+/** The enrollment routes' handlers, from the module binding factors: exactly one contribution. */
 export const enrollmentFlow = extensionPoint<EnrollmentFlow>("mfa-flows.enrollment-flow", {
-	multiplicity: "keyed",
-	keyOf: () => "enrollment-flow",
+	multiplicity: "one",
 });
 
 /** What this package gives the module binding factors; built without asking for an enrollment flow. */
