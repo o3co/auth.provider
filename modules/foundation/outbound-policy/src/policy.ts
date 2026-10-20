@@ -384,6 +384,18 @@ export function policyOf(settings: PolicySettings): Policy {
 			const reason = refusalOf(url, narrower);
 			return reason && `${reason}: ${remedyOf(reason, url, rules, narrower)}`;
 		},
+		plainInternal: (url, narrower = {}) => {
+			try {
+				const admitted = admitUrl(url, rules, narrower, false);
+				if (admitted.plainInternal !== true) return false;
+				// As `explain`: an address written in the URL is checked now, a name's when sent.
+				if (isIP(admitted.host) !== 0) admitAddresses([admitted.host], admitted);
+				return true;
+			} catch (error) {
+				if (error instanceof DestinationRefused) return false;
+				throw error;
+			}
+		},
 		credentialRefusal: (urls) => credentialRefusal(urls, rules.plainLoopback, rules.plainInternal),
 		listed,
 		limitsOf,

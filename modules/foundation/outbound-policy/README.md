@@ -9,6 +9,7 @@
 
 ## Offers
 - `outbound.refusals`: at boot, why the policy refuses a URL and what to set, `<reason>: <what to set>` (`outbound.allow`, `outbound.plain-loopback`, `outbound.plain-internal`, `outbound.internal-hosts`, `outbound.deny`, or the URL to write otherwise), naming keys alone and never the URL's host, port or other value; nothing when the policy lets it through.
+- `outbound.refusals`' `plainInternal`: at boot, whether a URL is taken as plain http to a `plain-internal` pair for the caller's own `internal` URL, resolving no name; absent, it is read as no.
   - It resolves no name and sends nothing, so a caller sending credentials can refuse boot on a destination it could never reach; a name passes on its name, an address in the URL is checked at once. A host the caller's own narrowing leaves out is told as no key to set.
 - `destinationRefusal` (the refusals, a URL, a narrowing, what is refused, `it` unless given) → the boot refusal every module gives for it, `outbound's destination policy refuses <what>: <reason>: <what to set>`, or nothing; the words are this package's alone.
 - `outbound.credentials`: at boot, why a caller's credential must not go to its URLs (`origins`: more than one; `scheme`: one neither https nor a named `plain-loopback` or `plain-internal` pair), or nothing; `credentialRefusalText` gives either in the words every caller uses.
