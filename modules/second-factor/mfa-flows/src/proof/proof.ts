@@ -59,15 +59,15 @@ export interface ResumeParts {
 	readonly log: Pick<Log, "warn">;
 }
 
+/** What makes, once a resumed login opens, what it adds to its answer; a body never holds `status`. */
+type Carried = () => Promise<object | HttpResponse>;
+const isResponse = (made: object): made is HttpResponse => "status" in made;
+
 /**
  * Goes on with a held login after the gate `mfa`, adding `proved` to its amr; answers what it held,
  * with what `carried` makes once it opens, and only then: a response it makes instead closes the
  * session and is answered, and a throw closes it as best it can and goes on.
  */
-/** What makes, once a resumed login opens, what it adds to its answer. */
-type Carried = () => Promise<object | HttpResponse>;
-const isResponse = (made: object): made is HttpResponse => "status" in made;
-
 export function resumeOver(p: ResumeParts) {
 	/** What carried makes once the session opened; a response it makes closes the session. */
 	const madeIn = async (handle: string, carried: Carried) => {
