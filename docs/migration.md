@@ -51,6 +51,8 @@ Where each 0.17 package went:
 | `@o3co/auth-provider-test-kit` | each package's `/<module>/testing` |
 | `@o3co/create-auth-provider` and the standalone template | `@o3co/create-auth-provider` (runs `-scaffold`'s create-app) and `-scaffold` |
 
+The packages take `zod` 4.6.7. An app that writes sections of its own uses that version too, or pins it for every package with a pnpm `overrides` entry, so one copy of zod reads every section.
+
 New in 0.18, with no 0.17 package: `-audit-receivers` (audit to stdout or HTTP), `-log-sinks`, `-metrics-publishers` (Prometheus) and `-templates` (the stores' wirings).
 
 The 18 packages of 0.17 are deprecated.
@@ -129,7 +131,7 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 | `logging.level` | `kernel.logging.level` | |
 | `http.port` (default 3000) | `http.port` (default 8080) | |
 | (all interfaces) | `http.host` (default `127.0.0.1`) | Set `0.0.0.0` in a container |
-| `http.trustProxy` | `http.trusted-proxies` (IPs or CIDRs), `http.proxy-hops` | Named ranges and `true` are gone; list addresses |
+| `http.trustProxy` | `http.trusted-proxies` (IPs or CIDRs), `http.proxy-hops` | Named ranges and `true` are gone; list addresses. A block of every address (`0.0.0.0/0`, `::/0`, any `/0`) refuses boot, as every source would be undetermined |
 | `http.readinessTimeoutMs` | `http-ops.readiness-deadline` | |
 | `http.cors.allowedOrigins` | `http.cors-origins` | Exact https origins, as a HOCON list |
 | (from the issuer) | `http.public-origin` | Cookies are `__Host-` and `Secure` when it is https |
@@ -199,7 +201,7 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 | `session.redirectAllowlist`, per-IdP `redirectAllowlist` | `login-gates.return-targets` | Exact https URLs, one list |
 | `session.csrf.trustedOrigins` | removed | Same-origin evidence is checked against `http.public-origin` |
 | `users.yaml` | `users.registered` (`identifier`, `subject`, `password-hash`, `attributes`, `upstream`) | Hashes are bcrypt or scrypt; plain passwords are refused |
-| `repositories.user.http.*` | `users-http.verify-url`, `credential`, `timeout` | [Some answers read differently](#user-ledger-over-http) |
+| `repositories.user.http.*` | `users-http.verify-url`, `subject-url`, `upstream-url`, `credential`, `timeout` | [Some answers read differently](#user-ledger-over-http); `subject-url` and `upstream-url` are new: a user by subject, and by upstream identity (then the ledger, not `users`, holds the links) |
 
 ### MFA and passkeys
 
@@ -422,7 +424,7 @@ For a second factor by mail alone, with no other factor to enrol, set `mfa-email
 |---|---|---|
 | `adapters.auditSink` | `audit.receivers` (names, or `none`) | Required; compose `audit-stdout` or `audit-http` for those receivers |
 | `standard-smtp-mail-sender.*` | `mail-smtp.host`, `port`, `security`, `user`, `password`, `from` | `secure` is now `security` |
-| (development mail sender) | the `mail` module with `mail.accept-unsent = true` | |
+| (development mail sender) | the `mail` module with `mail.accept-unsent = true` | It sends nothing and logs the purpose and a hash of the address alone: a code or link in the message is never logged, unlike 0.17's |
 | `core.outbound.allowedHosts` | `outbound.allow`, or `outbound.allow-any-public = true` | An empty list now reaches nothing. Entries as before: a host, or `.name` for the name and the names under it |
 | `core.outbound.deniedHosts`, `timeoutMs`, `maxResponseBytes` | `outbound.deny`, `timeout`, `max-response-size` | `deny` takes entries as `allow` does |
 | `core.outbound.internalHosts` | `outbound.internal-hosts`; `outbound.plain-loopback` (`host:port`) for plain http at loopback | `internal-hosts` reaches private addresses (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7) for the users-http ledger and the audit-http collector only; a client's URLs (key sets, back-channel logout) never reach a private, loopback or link-local address. `.name` still covers the name and the names under it |
@@ -575,7 +577,7 @@ These are requests 0.17 accepted, or answered differently, that 0.18 refuses or 
 |---|---|---|
 | Verify a password | `POST {authenticateUrl}` with `{"email","password"}` | `POST {verify-url}` with `{"email","password"}`, `Content-Type` and `Accept: application/json` |
 | Credential | | `Authorization: Bearer {credential}` when `credential` is set; none sent otherwise |
-| Find a user by subject | none | none: the ledger is never asked, and `users-http` answers every lookup by subject as one it cannot answer |
+| Find a user by subject | none | `POST {subject-url}` with `{"subject"}`: `200` with the user, its `id` the subject asked; `404` or `410`: no such user; anything else is unavailable. Without `subject-url`, every lookup by subject is one it cannot answer |
 | Success | any `2xx` with the user | `200` with a JSON object: `id` (the subject) and a non-empty `username`; `email`, `name`, `picture`, `groups` and a boolean `emailVerified` (only beside `email`) are kept as attributes, other fields dropped |
 | No such user, or a wrong password | `401` or `403` | `401` alone, unless a `credential` was sent and the answer carries a Bearer challenge: that refuses the credential, and reads as unavailable. A `403` reads as unavailable (`503`): answer a wrong password `401` |
 | Anything else | | Any other status, `404` and other `2xx` included, or a `200` that is not such an object: the ledger is unavailable, and the login answers `503` |
@@ -752,6 +754,19 @@ The proxy resolves the names it carries and checks their addresses itself, and b
 Behind a TLS-terminating proxy, set `http.trusted-proxies` and `http.proxy-hops`. Only `X-Forwarded-For` and the forwarded scheme are read from a trusted proxy; `Forwarded` is ignored. With an https public origin, browser requests that change state must arrive over https, so a missing proxy setting refuses them.
 
 No setting trusts a proxy by its hop count alone: `http.proxy-hops` only bounds how many trusted proxies a request passes through. List the load balancer's subnet as CIDRs in `http.trusted-proxies`, and let only the load balancer reach the app's port.
+
+Behind a CDN in front of the load balancer, list both: the load balancer's subnet and the ranges the CDN reaches the origin from, and set `http.proxy-hops = 2`:
+
+```hocon
+http.trusted-proxies = [
+  "10.0.1.0/24",        // the load balancer's subnet
+  "203.0.113.0/24",     // the CDN's ranges toward the origin, as the CDN publishes them
+  "2001:db8:cd::/48",
+]
+http.proxy-hops = 2
+```
+
+A block of every address (`0.0.0.0/0`, `::/0`) refuses boot: it would trust every client as a proxy, so no source could be told. To pass a long list per environment, put it in its own file and name that file in `APP_CONFIG`, or `include file("trusted-proxies.conf")` it from the environment's file. An array is replaced from one file to the next, never added to, so the file that wins holds the whole list.
 
 ### Redis
 

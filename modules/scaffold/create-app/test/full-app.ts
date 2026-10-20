@@ -49,6 +49,8 @@ export const read = (target: string, path: string) => readFile(join(target, path
 export async function linked(target: string): Promise<string> {
 	const pkg = JSON.parse(await read(target, "package.json"));
 	for (const [name, link] of Object.entries(pkg.dependencies) as [string, string][]) {
+		// zod, from the registry, is for sections the operator writes: the generated app imports none.
+		if (!link.startsWith("link:")) continue;
 		const [scope, base] = name.split("/") as [string, string];
 		await mkdir(join(target, "node_modules", scope), { recursive: true });
 		await symlink(link.slice("link:".length), join(target, "node_modules", scope, base));

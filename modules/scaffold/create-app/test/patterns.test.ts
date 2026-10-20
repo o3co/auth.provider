@@ -8,7 +8,7 @@ import { composed, full } from "@mod/combinations";
 import { describe, expect, it, vi } from "vitest";
 import { generate, patterns } from "../src/contract.ts";
 import { generatePattern } from "../src/pattern.ts";
-import { auditReceiversOf, chosenLines } from "../src/patterns/chosen.ts";
+import { auditReceiversLine, auditReceiversOf, chosenLines } from "../src/patterns/chosen.ts";
 import { type Choice, selectionOf } from "../src/patterns/pattern.ts";
 import { patternNamed } from "../src/patterns/patterns.ts";
 import {
@@ -50,6 +50,10 @@ it("names in audit.receivers each composed adapter's receiver, and audit's own l
 	expect(chosenLines(["@mod/audit"])).toContain(
 		"- Audit events named in `audit.receivers = [log]`.",
 	);
+	// The README's value says the same.
+	expect(auditReceiversLine(["@mod/audit-stdout"])).toBe("`stdout`");
+	expect(auditReceiversLine(["@mod/audit-http", "@mod/audit-stdout"])).toBe("`http`, `stdout`");
+	expect(auditReceiversLine([])).toBe("`log`, audit's own, writing events to the log");
 });
 
 it("tells a federation app taking users from a ledger to give it the lookup by subject", () => {
@@ -102,7 +106,7 @@ describe.each(named)("the pattern %s", (name) => {
 		const modules = modulesOf(name);
 		expect(await imports(target)).toEqual(modules);
 		const pkg = JSON.parse(await read(target, "package.json"));
-		expect(Object.keys(pkg.dependencies)).toEqual([kernel, ...modules]);
+		expect(Object.keys(pkg.dependencies)).toEqual([kernel, ...modules, "zod"]);
 		const card = readFileSync(cardFile(name), "utf8");
 		expect(card.startsWith(`# ${name}\n`)).toBe(true);
 		expect(card.trimEnd().split("\n").length).toBeLessThanOrEqual(10);

@@ -188,7 +188,7 @@ RUN apk add --no-cache tini && npm install --global corepack@${corepack} && core
 WORKDIR /app
 
 FROM base AS deps
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yam[l] ./
 RUN pnpm install --frozen-lockfile --prod
 
 FROM base AS runtime

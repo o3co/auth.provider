@@ -29,7 +29,7 @@ it("assembles the modules asked for, with the wirings and bridges they come with
 	const expected = [...completedList, "@mod/log-stdout"];
 	expect(imported).toEqual(expected);
 	const manifest = JSON.parse(await readFile(join(target, "package.json"), "utf8"));
-	expect(Object.keys(manifest.dependencies)).toEqual(["@mod/kernel", ...expected]);
+	expect(Object.keys(manifest.dependencies)).toEqual(["@mod/kernel", ...expected, "zod"]);
 });
 
 it("assembles the sink the plan names instead, and lists a sink asked for only once", async () => {
@@ -139,6 +139,7 @@ it("links each dependency to the workspace when given one, and refuses a module 
 	expect(manifest.dependencies).toEqual({
 		"@mod/kernel": `link:${join(root, "modules", "foundation", "kernel")}`,
 		"@mod/log-stdout": `link:${join(root, "modules", "log-sinks", "log-stdout")}`,
+		zod: "4.6.7",
 	});
 	const elsewhere = await mkdtemp(join(tmpdir(), "create-app-"));
 	await expect(

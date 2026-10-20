@@ -33,6 +33,15 @@ export function auditReceiversOf(composed: (module: string) => boolean): string[
 	return named.length > 0 ? named : ["log"];
 }
 
+/** The receivers `audit.receivers` names, as the README writes them. */
+export function auditReceiversLine(modules: readonly string[]): string {
+	return auditReceiversOf((m) => modules.includes(m))
+		.map((name) =>
+			name === "log" ? "`log`, audit's own, writing events to the log" : `\`${name}\``,
+		)
+		.join(", ");
+}
+
 /** One line for each choice the composed modules show. */
 export function chosenLines(modules: readonly string[]): string[] {
 	return [
