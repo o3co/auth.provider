@@ -142,6 +142,27 @@ describe("admitUrl", () => {
 		).toBe("scheme");
 		expect(internal("https://other.corp/verify")).toBe(false);
 	});
+
+	it("compares origins as the URL parser writes them, and holds each to its own configured URL", () => {
+		// Two internal hosts: each reached only for its own URL, though both are listed.
+		const policy = {
+			...open,
+			internal: ["alb.corp", "db.corp", "xn--bcher-kva.corp", "[fd00::1]"],
+		};
+		const reach = (raw: string, own: string) =>
+			admitUrl(raw, policy, { internal: configuredUrl(own) }).internal;
+		expect(reach("https://ALB.corp:443/x", "https://alb.corp/")).toBe(true);
+		expect(reach("https://bücher.corp/x", "https://xn--bcher-kva.corp/")).toBe(true);
+		expect(reach("https://[fd00:0::1]/x", "https://[fd00::1]/")).toBe(true);
+		expect(reach("https://db.corp/x", "https://alb.corp/")).toBe(false);
+		expect(reach("https://alb.corp/x", "https://db.corp/")).toBe(false);
+		// Plain http admitted at a named pair, then held to the configured https origin: not its own.
+		const plain = { ...policy, plainLoopback: ["alb.corp:443"] };
+		const admitted = admitUrl("http://alb.corp:443/x", plain, {
+			internal: configuredUrl("https://alb.corp/"),
+		});
+		expect([admitted.loopback, admitted.internal]).toEqual([true, false]);
+	});
 });
 
 describe("admitUrl for signed material", () => {
