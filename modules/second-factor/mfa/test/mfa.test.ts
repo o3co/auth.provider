@@ -23,6 +23,7 @@ import {
 	type Sending,
 } from "@mod/mfa-extensions";
 import { witnessStandIn } from "@mod/mfa-witness/testing";
+import { seal } from "@mod/seal";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import { sessionStandIn } from "@mod/session/testing";
@@ -1199,6 +1200,15 @@ describe("an enrollment witness", () => {
 	it("tells whether every session needs a second factor, as the mode says", async () => {
 		expect((await serve({ mode: "required" })).decided.secondFactorRequired()).toBe(true);
 		expect((await serve({ mode: "optional" })).decided.secondFactorRequired()).toBe(false);
+	});
+
+	it("binds a first pending sealed by an earlier version, holding a token and no fence", async () => {
+		const { app, decided } = await serve();
+		const sealed = app
+			.get(seal)
+			.seal(JSON.stringify({ kind: "code", secret: "s", first: true, token: "t" }), "hal\npending");
+		expect((await decided.bind("hal", sealed, 0)).kind).toBe("bound");
+		expect((await decided.held("hal")).map((f) => f.kind)).toEqual(["code"]);
 	});
 
 	it("keeps today's behaviour without a witness: a wiped store reads as never enrolled", async () => {
