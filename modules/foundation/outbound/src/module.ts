@@ -13,6 +13,7 @@ import {
 	policyOf,
 	policySettings,
 } from "@mod/outbound-policy";
+import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
 import {
 	type Outbound,
@@ -24,18 +25,6 @@ import {
 } from "./contract.ts";
 import { type Resolver, type Route, send, systemResolver, type Trust } from "./transport.ts";
 
-/** An http origin, as written and as read alike: no credentials, path, query or stray character. */
-const isProxyOrigin = (value: string) => {
-	if (/[\s\p{Cc}]/u.test(value)) return false;
-	const url = URL.parse(value);
-	return (
-		url?.protocol === "http:" &&
-		url.username === "" &&
-		url.password === "" &&
-		url.hostname !== "" &&
-		(value === url.origin || value === `${url.origin}/`)
-	);
-};
 const isLoopbackHost = (host: string) =>
 	host === "localhost" || host === "[::1]" || (isIP(host) === 4 && host.startsWith("127."));
 export const section = policySettings
@@ -53,9 +42,7 @@ export const section = policySettings
 			.describe(
 				"Whether to boot while a proxy variable is set and no proxy is configured; the variables are never read.",
 			),
-		proxy: z
-			.string()
-			.refine(isProxyOrigin, "an http origin, without credentials, path or query")
+		proxy: urlSetting({ schemes: ["http"], origin: true })
 			.optional()
 			.describe(
 				"The proxy every https request goes through by CONNECT, but to direct hosts; it resolves names and checks their addresses.",

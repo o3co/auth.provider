@@ -22,11 +22,11 @@
 - A 3xx other than 304 is refused as a redirect; a 101, an encoded answer, a body past the size cap, or headers past Node's 16 KiB are unavailable, and the connection is closed; other 1xx answers are waited past.
 - One deadline, the policy's limit, covers resolving (or the tunnel), connecting, the headers and the body; the body is cut at the policy's size.
 - A request past `max-concurrent` is unavailable at once, and each request gives its place back however it ends. Name lookups, which no deadline stops, count apart under the same limit; names resolve as the system does, hosts file included.
-- A `proxy` (an http origin without credentials; `proxy-authorization` apart) carries every https request, but to `direct-hosts` (list internal hosts there too) and plain-loopback pairs, by CONNECT with TLS to the destination inside. Then outbound resolves no name: it checks the name and any address in the URL; the proxy checks where a name resolves (boot warns so, and of credentials sent over http past the loopback). A refused tunnel is `proxy-refused`.
+- A `proxy` (an http origin alone, as the URL parser writes it, without credentials; `proxy-authorization` apart) carries every https request, but to `direct-hosts` (list internal hosts there too) and plain-loopback pairs, by CONNECT with TLS to the destination inside. Then outbound resolves no name: it checks the name and any address in the URL; the proxy checks where a name resolves (boot warns so, and of credentials sent over http past the loopback). A refused tunnel is `proxy-refused`.
 - Proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, either case) are never read; with one set and no `proxy`, boot is refused, naming the variable alone, unless `direct-despite-proxy` is set.
 
 ## Depends on
-- `kernel`, `outbound-policy`
+- `kernel`, `outbound-policy`, `url-setting` (the proxy's origin)
 
 ## Vocabulary
 - failure: why outbound is unavailable, for a caller to log by, with no value and no body: `timeout` (the deadline came), `too-large` (a body or headers past the cap), `unreachable` (no address, no connection, or the connection lost), `unsupported-answer` (a 101 or an encoded answer), `busy` (past `max-concurrent`), `proxy-refused`.
