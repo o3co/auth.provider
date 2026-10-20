@@ -1,10 +1,10 @@
 # mfa-witness
 
 ## Responsibilities
-- Owns the contract of an enrollment witness: who remembers, apart from `mfa`'s store, that a subject holds a counting factor, so losing that store never reads as never enrolled.
+- Owns the contract of an enrollment witness: who remembers, apart from `mfa`'s store, that a subject holds a counting factor, so losing that store does not read as never enrolled, but for a factor lost between its write and its mark.
 
 ## Not here
-- What `mfa` decides with the witness, and when it marks or clears it: `mfa`.
+- What is decided with the witness, and when it is marked or cleared: `mfa` and `mfa-witnessing`.
 - Where the mark is kept: the implementation, such as an outside user ledger's adapter.
 
 ## Offers

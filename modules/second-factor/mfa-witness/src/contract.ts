@@ -11,7 +11,7 @@ export interface EnrollmentWitness {
 	read(subject: string): Promise<boolean>;
 	/** Sets the mark to `token` unless one is set, at once; whether the mark is `token`'s after. The same token answers alike however often. */
 	enroll(subject: string, token: string): Promise<boolean>;
-	/** Removes the mark; mfa asks it only when a reset clears the subject's factors. */
+	/** Removes the mark: after a reset clears the subject's factors, or where the call that set it finds nothing counting. */
 	clear(subject: string): Promise<void>;
 }
 
