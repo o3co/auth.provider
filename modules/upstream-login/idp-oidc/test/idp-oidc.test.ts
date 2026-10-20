@@ -65,10 +65,20 @@ const granted = (idToken: string, more: Record<string, unknown> = {}) =>
 
 /** An outbound that answers from a table of handlers by URL, keeping what it was asked. */
 function stubOutbound(handlers: Record<string, Handler>) {
-	const asked: { url: string; request: OutboundRequest; hosts?: readonly string[] }[] = [];
+	const asked: {
+		url: string;
+		request: OutboundRequest;
+		hosts?: readonly string[];
+		internal?: string;
+	}[] = [];
 	const outbound: Outbound = {
 		fetch: async (url, request = {}, narrower = {}) => {
-			asked.push({ url, request, ...(narrower.hosts ? { hosts: narrower.hosts } : {}) });
+			asked.push({
+				url,
+				request,
+				...(narrower.hosts ? { hosts: narrower.hosts } : {}),
+				...(narrower.internal ? { internal: narrower.internal } : {}),
+			});
 			if (narrower.hosts && !withinHosts(url, narrower.hosts)) {
 				throw new Error("outside the narrowed hosts");
 			}
@@ -386,7 +396,7 @@ describe("idp-oidc", () => {
 		expect(policyAsked).toEqual([
 			{
 				url: `${issuer}/.well-known/openid-configuration`,
-				narrower: { hosts: ["idp.example", "x.example"] },
+				narrower: { hosts: ["idp.example", "x.example"], internal: issuer },
 			},
 		]);
 		const elsewhere = "https://keys.other.example/jwks";
@@ -396,8 +406,8 @@ describe("idp-oidc", () => {
 		]);
 		const hosts = ["idp.example", "keys.other.example"];
 		expect(policyAsked).toEqual([
-			{ url: `${issuer}/token`, narrower: { hosts } },
-			{ url: elsewhere, narrower: { hosts } },
+			{ url: `${issuer}/token`, narrower: { hosts, internal: `${issuer}/token` } },
+			{ url: elsewhere, narrower: { hosts, internal: elsewhere } },
 		]);
 		expect(refusalsOf(givenEndpoints)).toEqual([refused("token-endpoint"), refused("jwks-uri")]);
 	});
@@ -458,6 +468,26 @@ describe("idp-oidc", () => {
 		// An issuer that cannot be reached is not one that does not match.
 		const unreachable = await open({ describes: () => "unreachable" }).catch((e) => e);
 		expect(isUnavailable(unreachable)).toBe(true);
+	});
+
+	it("reaches as the operator's URL the issuer for all its description names, and each given endpoint for itself", async () => {
+		const described = await answering(await idToken());
+		await described.upstream.exchange(codeExchange());
+		expect(described.asked.map((a) => [a.url, a.internal])).toEqual([
+			[`${issuer}/.well-known/openid-configuration`, issuer],
+			[`${issuer}/token`, issuer],
+			[`${issuer}/jwks`, issuer],
+		]);
+		const elsewhere = "https://keys.other.example/jwks";
+		const given = await answering(await idToken(), {
+			settings: { ...givenEndpoints, "jwks-uri": elsewhere },
+			more: { [elsewhere]: () => ok({ keys: [rsa.jwk] }) },
+		});
+		await given.upstream.exchange(codeExchange());
+		expect(given.asked.map((a) => [a.url, a.internal])).toEqual([
+			[`${issuer}/token`, `${issuer}/token`],
+			[elsewhere, elsewhere],
+		]);
 	});
 
 	it("reaches an endpoint the operator gives on another host", async () => {
