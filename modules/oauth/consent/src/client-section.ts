@@ -53,19 +53,6 @@ export const clientSection: Section<ClientShown> = {
 	reads: ["client_name", "client_uri"],
 };
 
-/** What a source puts in consent's section of a client it found, for the consent page to show. */
-export function displayed(shown: {
-	readonly name: string;
-	readonly uri?: string | undefined;
-	readonly host: string;
-}): unknown {
-	return {
-		name: shown.name,
-		host: shown.host,
-		...(shown.uri === undefined ? {} : { uri: shown.uri }),
-	};
-}
-
 /** Whether the client needs no consent: only one the operator registered can be first-party. */
 export function isFirstParty(client: Client): boolean {
 	return client.registered && client.section(clientSection)["first-party"];
