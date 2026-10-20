@@ -11,6 +11,12 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | `authorize.granted` | `client`, `source`, `response_type` | a code is given, with the subject and `response_type` `code` |
 | `authorize.rejected` | `client`, `source`, `reason`, `policy` | a refusal decided for the client or its consent, with no subject and its `reason` (`grant_type_not_allowed`, `scope_omitted_without_default`, `client_not_first_party`, `consent_required`, or an issuance policy's reason with `policy` its name) |
 
+## @mod/clients
+
+| Kind | Attributes | Recorded when |
+|---|---|---|
+| `client.authentication.failure` | `source`, `reason` | a caller records a client's refused authentication, before any client is known: the token, introspection, revocation and device authorization endpoints, and federation-grants' client routes; with `reason` (`no_credentials`, `multiple_methods`, `malformed_credentials`, `unknown_client`, `wrong_method`, `bad_credentials` or `invalid_record`); the client id claimed is never named |
+
 ## @mod/consent
 
 | Kind | Attributes | Recorded when |
@@ -148,7 +154,6 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `client.authentication.failure` | `source`, `reason` | a client's authentication is refused, before any client is known, with `reason` (`no_credentials`, `multiple_methods`, `malformed_credentials`, `unknown_client`, `wrong_method`, `bad_credentials` or `invalid_record`); the client id claimed is never named |
 | `token.issued` | `client`, `source`, `grant_type` | a grant issues |
 | `token.issued.failure` | `client`, `source`, `grant_type`, `reason`, `error`, `policy`, `refusal` | a request is refused, with `reason` (`repeated_parameter`, `mistyped_parameter`, `missing_grant_type`, `unsupported_grant_type`, `grant_type_not_allowed`, `unsupported_body`, `multiple_bindings`, `binding_refused`, `binding_required`, `binding_kind_not_named`, `untargeted`, `grant_refused`, or `issuance_refused` with the refusing `policy` and its `refusal`) and the answer's `error`; `grant_type` once it is known |
 

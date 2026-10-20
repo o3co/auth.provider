@@ -1,6 +1,9 @@
+import { type Audit, declaredAudit } from "@mod/audit";
 import type { HttpRequest } from "@mod/http";
 import { contract, extensionPoint } from "@mod/kernel";
+import { determinedSource } from "@mod/request-source";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import events from "./audit-events.ts";
 
 /** A metadata section a module adds to client records; absent sections take the schema's default. */
 export interface Section<T> {
@@ -126,3 +129,15 @@ export const metadataSections = extensionPoint<Section<unknown>>("clients.metada
 	multiplicity: "keyed",
 	keyOf: (section) => section.name,
 });
+
+/** Records a refused authentication on the caller's audit, by its reason and the source alone. */
+export function recordRefusedAuthentication(
+	audit: Pick<Audit, "record">,
+	request: HttpRequest,
+	refused: Extract<Authentication, { kind: "refused" }>,
+): void {
+	const source = determinedSource(request);
+	declaredAudit(audit, events).record("client.authentication.failure", {
+		attributes: { ...(source === undefined ? {} : { source }), reason: refused.reason },
+	});
+}

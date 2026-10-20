@@ -430,12 +430,18 @@ importers:
 
   modules/identity/clients:
     dependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/request-source':
+        specifier: workspace:*
+        version: link:../../foundation/request-source
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash

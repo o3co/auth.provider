@@ -7,11 +7,14 @@
 	"exports": {
 		".": "./src/contract.ts",
 		"./testing": "./src/testing.ts",
-		"./module": "./src/module.ts"
+		"./module": "./src/module.ts",
+		"./audit-events": "./src/audit-events.ts"
 	},
 	"dependencies": {
+		"@mod/audit": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/kernel": "workspace:*",
+		"@mod/request-source": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
 		"@standard-schema/spec": "1.1.0",
 		"zod": "4.6.7"

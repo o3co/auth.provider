@@ -3,6 +3,7 @@ import { auditStandIn } from "@mod/audit/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import { authMethods } from "@mod/clients";
+import clientEvents from "@mod/clients/audit-events";
 import { clientsConfig, confidentialClient, publicClient } from "@mod/clients/testing";
 import { type Grant, grants, sessionIssuances, targetRules } from "@mod/grants";
 import { listening } from "@mod/http";
@@ -51,7 +52,11 @@ let events: readonly AuditEvent[] = [];
 // Every event a test records is one the module declares, with attributes it declares.
 afterEach(() => {
 	for (const { kind, attributes } of events) {
-		const known: readonly string[] = declared[kind as keyof typeof declared]?.attributes ?? [];
+		const all: Readonly<Record<string, { readonly attributes: readonly string[] }>> = {
+			...clientEvents,
+			...declared,
+		};
+		const known: readonly string[] = all[kind]?.attributes ?? [];
 		expect(known, `${kind} is declared`).not.toEqual([]);
 		expect(
 			Object.keys(attributes ?? {}).filter((name) => !known.includes(name)),
