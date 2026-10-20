@@ -7,7 +7,7 @@
 
 ## Not here
 - Authenticating by `none` (`clients`). Matching redirect URIs (`redirect-uris`). Consent and its page (`consent`). The destination policy (`outbound`).
-- What each section's values mean: the owners' schemas check them, and `clients` refuses the record as a whole on any error.
+- What each section takes from a document and what its values mean: each owner's copy (`fromDocument`) and schema, as `metadataSections` holds them; `clients` refuses the record as a whole on any error.
 
 ## Offers
 - Composition definition only: a contribution to `clientSources`, and the metadata item `client_id_metadata_document_supported` (`true`).
@@ -19,10 +19,11 @@
 - Its host is checked before the fetch, spelled as `outbound` spells hosts: `deny` first, then a non-empty `allow`. An `allow` list also narrows `outbound`'s hosts.
 - The fetch goes only through `outbound`, asks for JSON, and narrows its size and time. Only a `200` with a JSON media type and one object is a document.
 - Boot is refused where `max-size` or `timeout` is above `outbound`'s cap, as its `outboundLimits` answers it, naming the key and no value.
+- Boot is refused where no composed section copies `redirect_uris` or `client_name` (its `reads`), and where a section it computes (`client-allowance`) is copied from a document too.
 - The document's `client_id` equals the id. It has no `client_secret` or `client_secret_expires_at`, and its `token_endpoint_auth_method` is `none` or absent.
-- `redirect_uris` is a non-empty list of strings, put in `redirect-uris`' section (`authorize`) as it is. `grant_types` (default the code) holds the code; `response_types`, if present, holds `code`; `client_name` is not blank; `client_uri`, if present, is https without whitespace or control characters.
+- `redirect_uris` is a non-empty list of strings, CIMD's rule for a client with the code flow alone: its section takes an empty list, and checks each URI's form. `grant_types` (default the code) holds the code; `response_types`, if present, holds `code`.
 - Its allowances come from `client-allowance` within the ceiling: the code, refresh only when the document names it, the scopes it asks (all the ceiling's when it asks none), the operator's audiences. An empty answer refuses the record.
-- `consent`'s section gets the name, the page and the id's host. The client is public, by `none`, and never registered, so it is never first-party.
+- Each other section is as its owner copies it from the document, with the id and its host; a field a copy refuses refuses the document. The client is public, by `none`, and never registered.
 - A failed fetch or a refused document is no client (not unavailable). Other fields (keys, logo) are not read.
 - A document whose record `clients`' `checkRecord` refuses (a redirect URI `redirect-uris` refuses, say) is refused before it is kept, logged with where the record fails (`record at sections.authorize.redirect-uris.0`), never a value; a check that throws is a failed fetch.
 - A refused document, destination or outbound failure is remembered for `refused-lifetime`; running out of time or of `outbound`'s places is not.
@@ -35,4 +36,4 @@
 - Kept documents, remembered refusals and running fetches, in this process only (see `fetching`). Safe on multiple instances.
 
 ## Depends on
-- `kernel`, `clients`, `client-allowance`, `outbound`, `outbound-policy`, `redirect-uris`, `grants`, `code-grant`, `refresh`, `consent`, `issuer`
+- `kernel`, `clients`, `client-allowance`, `outbound`, `outbound-policy`, `grants`, `code-grant`, `refresh`, `issuer`

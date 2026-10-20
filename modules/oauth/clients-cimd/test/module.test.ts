@@ -95,7 +95,13 @@ const collector = defineModule({ name: "test-collector" }, (m) => [
 
 async function boot(
 	settings: Record<string, unknown> = {},
-	options: { code?: boolean; registered?: unknown[]; caps?: Limits; extra?: Module[] } = {},
+	options: {
+		code?: boolean;
+		registered?: unknown[];
+		caps?: Limits;
+		extra?: Module[];
+		owners?: Module;
+	} = {},
 ) {
 	const recording = recordingLog();
 	const app = await assemble({
@@ -103,7 +109,7 @@ async function boot(
 			outboundStandIn(options.caps),
 			clientsModule,
 			secretHashModule,
-			owners,
+			options.owners ?? owners,
 			tokenEndpointStandIn(options.code === false ? [] : ["authorization_code"]),
 			clientsCimd,
 			collector,
@@ -328,6 +334,48 @@ describe("clients-cimd: a refused document", () => {
 		expect(line).toMatchObject({ level: "warn", event: "clients-cimd.document_refused" });
 		expect(line?.fields).toEqual({ client: long.slice(0, 200), reason: "client_id" });
 		expect(app.lines()[1]?.fields).toEqual({ client: id, reason: "client_id" });
+	});
+});
+
+describe("clients-cimd: the sections a document's record is built from", () => {
+	const allowanceStandIn = (copied: boolean) => ({
+		name: "client-allowance",
+		schema: z.record(z.string(), z.unknown()),
+		...(copied ? { fromDocument: () => ({ value: { grants: ["password"] } }) } : {}),
+	});
+	const ownersOf = (...sections: object[]) =>
+		defineModule({ name: "owners" }, (m) =>
+			sections.map((one) => m.contribute(metadataSections).by(() => one as never)),
+		);
+	const refusedBoot = (owners: Module) =>
+		boot({}, { owners }).then(
+			() => [],
+			(error: BootRefused) => error.refusals.map((r) => r.reason),
+		);
+
+	it("refuses boot where no composed section copies a field a document client needs", async () => {
+		expect(await refusedBoot(ownersOf(redirects, allowanceStandIn(false)))).toEqual([
+			"no composed section reads a document's client_name",
+		]);
+		expect(await refusedBoot(ownersOf(clientSection, allowanceStandIn(false)))).toEqual([
+			"no composed section reads a document's redirect_uris",
+		]);
+	});
+
+	it("refuses boot where a section it computes is copied from a document by its owner", async () => {
+		expect(await refusedBoot(ownersOf(redirects, clientSection, allowanceStandIn(true)))).toEqual([
+			"client-allowance is computed here, and copied from a document by its owner too",
+		]);
+	});
+
+	it("is none, logged with where, for a page the consent section refuses", async () => {
+		answer = () => json({ ...document, client_uri: "http://app.example/" });
+		const app = await boot();
+		expect(await app.find()).toBeUndefined();
+		expect(app.lines()[0]?.fields).toEqual({
+			client: id,
+			reason: "record at sections.consent.uri",
+		});
 	});
 });
 

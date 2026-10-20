@@ -235,25 +235,21 @@ it("runs every area whose module a pattern composes against it, the full templat
 
 // a2a's card says what each --add brings; this holds the card to what combinations composes, so a
 // change of dependencies that makes the card wrong fails here.
-it("brings to a2a by --add what its card says: token-exchange alone, clients-cimd the code flow but no authorization", () => {
+it("brings to a2a by --add what its card says: token-exchange alone, clients-cimd the code flow, authorize beside it consent and the login", () => {
 	const base = modulesOf("a2a");
-	const brought = (added: string) =>
-		modulesOf("a2a", { add: [added] }).filter((m) => m !== added && !base.includes(m));
+	const brought = (...added: string[]) =>
+		modulesOf("a2a", { add: added }).filter((m) => !added.includes(m) && !base.includes(m));
 	expect(brought("@mod/token-exchange")).toEqual([]);
 	const cimd = brought("@mod/clients-cimd");
 	expect(cimd).toEqual(
-		expect.arrayContaining([
-			"@mod/consent",
-			"@mod/code-grant",
-			"@mod/refresh",
-			"@mod/session-lifecycle",
-			"@mod/csrf",
-			"@mod/users",
-		]),
+		expect.arrayContaining(["@mod/code-grant", "@mod/refresh", "@mod/session-lifecycle"]),
 	);
-	for (const absent of ["@mod/authorize", "@mod/acr", "@mod/login-gates"]) {
+	for (const absent of ["@mod/consent", "@mod/csrf", "@mod/acr", "@mod/login-gates"]) {
 		expect(cimd, absent).not.toContain(absent);
 	}
+	expect(brought("@mod/clients-cimd", "@mod/authorize")).toEqual(
+		expect.arrayContaining(["@mod/consent", "@mod/acr", "@mod/login-gates", "@mod/csrf"]),
+	);
 });
 
 it("lists what conformance adds to a pattern for its run, each composing with the pattern", () => {
