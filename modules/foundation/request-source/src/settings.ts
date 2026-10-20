@@ -51,6 +51,68 @@ function coversAFamily(entry: string) {
 	);
 }
 
+/** An IPv4 address as a number. */
+const ipv4Number = (address: string) =>
+	address.split(".").reduce((n, part) => (n << 8n) | BigInt(Number(part)), 0n);
+
+/** An IPv6 address as a number, `::` and a dotted IPv4 tail written out. */
+function ipv6Number(address: string): bigint {
+	const tail = /(\d+\.\d+\.\d+\.\d+)$/.exec(address)?.[1];
+	const hex = tail
+		? `${address.slice(0, -tail.length)}${(ipv4Number(tail) >> 16n).toString(16)}:${(ipv4Number(tail) & 0xffffn).toString(16)}`
+		: address;
+	const [head = "", rest] = hex.split("::");
+	const before = head === "" ? [] : head.split(":");
+	const after = rest === undefined || rest === "" ? [] : rest.split(":");
+	const groups =
+		rest === undefined
+			? before
+			: [...before, ...Array(8 - before.length - after.length).fill("0"), ...after];
+	return groups.reduce((n, group) => (n << 16n) | BigInt(Number.parseInt(group, 16)), 0n);
+}
+
+/** Where IPv4 lies inside IPv6: the mapped addresses, `::ffff:0:0/96`, as a mapped peer is checked as IPv4. */
+const mapped = { start: 0xffff_0000_0000n, end: 0xffff_ffff_ffffn };
+
+/** Whether intervals together cover every number from 0 to `last`. */
+function coverAll(intervals: readonly { start: bigint; end: bigint }[], last: bigint): boolean {
+	let reached = -1n;
+	for (const { start, end } of intervals.toSorted((a, b) => (a.start < b.start ? -1 : 1))) {
+		if (start > reached + 1n) return false;
+		if (end > reached) reached = end;
+	}
+	return reached >= last;
+}
+
+/**
+ * Whether entries together cover a whole family: their blocks, as intervals, leave no address of
+ * IPv4 or of IPv6 out. An IPv6 block's share of the mapped addresses counts as IPv4 too. Both ends
+ * of a family held tells nothing of a union, so the intervals are joined; an entry covering a family
+ * alone is left to its own refusal.
+ */
+function coverAFamilyTogether(entries: readonly string[]): boolean {
+	const v4: { start: bigint; end: bigint }[] = [];
+	const v6: { start: bigint; end: bigint }[] = [];
+	for (const entry of entries) {
+		const read = blockOf(entry);
+		// One that covers a family alone is refused at its own place.
+		if (!read || coversAFamily(entry)) continue;
+		const bits = read.family === 4 ? 32n : 128n;
+		const host = bits - BigInt(read.prefix ?? Number(bits));
+		const value = read.family === 4 ? ipv4Number(read.address) : ipv6Number(read.address);
+		const start = (value >> host) << host;
+		const end = start | ((1n << host) - 1n);
+		if (read.family === 4) v4.push({ start, end });
+		else {
+			v6.push({ start, end });
+			const low = start > mapped.start ? start : mapped.start;
+			const high = end < mapped.end ? end : mapped.end;
+			if (low <= high) v4.push({ start: low - mapped.start, end: high - mapped.start });
+		}
+	}
+	return coverAll(v4, (1n << 32n) - 1n) || coverAll(v6, (1n << 128n) - 1n);
+}
+
 /** The addresses entries a schema took (by `addressList`) list: whether an address is among them. */
 export function addressesOf(entries: readonly string[]): AddressList {
 	const list = blockListOf(entries, "an address list entry");
@@ -71,6 +133,10 @@ export const sourceSettings = z.strictObject({
 				(s) => blockOf(s) === undefined || !coversAFamily(s),
 				"a block covering every address of a family (/0, or every IPv4 address mapped into IPv6): every source would be undetermined; list the proxies' own addresses",
 			),
+		)
+		.refine(
+			(entries) => !coverAFamilyTogether(entries),
+			"entries that together cover every address of a family: every source would be undetermined; list the proxies' own addresses",
 		)
 		.prefault([])
 		.describe(
