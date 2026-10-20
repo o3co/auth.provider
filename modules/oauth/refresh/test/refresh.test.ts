@@ -14,7 +14,7 @@ import { additions, codes } from "@mod/code-grant";
 import codeGrantModule from "@mod/code-grant/module";
 import { codeGrantConfig } from "@mod/code-grant/testing";
 import codeGrantStore from "@mod/code-grant-store/module";
-import { grants, targetRules } from "@mod/grants";
+import { grants, type TokenTie, targetRules, tokenTies } from "@mod/grants";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
@@ -967,6 +967,30 @@ describe("lineage", () => {
 			.adopt(found.family, taken)
 			.catch((e) => e);
 		expect(isUnavailable(adopted)).toBe(true);
+	});
+
+	it("ties a token to its family as `family`: none, ended, or held to the family's end, joining one issued from it", async () => {
+		const tied = contract<readonly TokenTie[]>("test.ties");
+		const reader = defineModule({ name: "tie-reader" }, (m) => [
+			m.provide(tied).by((c) => c.collect(tokenTies)),
+		]);
+		const s = await serve({ extra: [reader] });
+		const family = s.app.get(tied).find((t) => t.name === "family");
+		if (!family) throw new Error("no family tie");
+		const first = await s.redeem();
+		const found = await familyOf(s, first);
+		const held = await family.tieOf(await idOf(s, first.access_token ?? ""));
+		if (held.kind !== "held") throw new Error(`not held: ${held.kind}`);
+		expect([held.ends, held.session]).toEqual([found.expiresAt, undefined]);
+		expect(await family.tieOf((await issue(s)).id)).toEqual({ kind: "none" });
+		const joined = await issue(s, found.expiresAt);
+		expect(await held.join(joined)).toBe(true);
+		expect((await family.tieOf(joined.id)).kind).toBe("held");
+		await s.post("/oauth/revoke", "app", { token: first.refresh_token ?? "" });
+		expect(await family.tieOf(joined.id)).toEqual({ kind: "ended", reason: "family has ended" });
+		const late = await issue(s, found.expiresAt);
+		expect(await held.join(late)).toBe(false);
+		expect(await s.active(late.token)).toBe(false);
 	});
 
 	it("revokes the token and answers ended for a family that has ended", async () => {

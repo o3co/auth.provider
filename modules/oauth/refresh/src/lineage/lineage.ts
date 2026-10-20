@@ -1,4 +1,5 @@
 import { clientAllowance } from "@mod/client-allowance";
+import type { TokenTie } from "@mod/grants";
 import { type BuildContext, Unavailable } from "@mod/kernel";
 import type { FamilyHandle, Lineage } from "../contract.ts";
 import { refreshGrantType } from "../contract.ts";
@@ -92,6 +93,21 @@ export async function lineageIn(c: BuildContext<Settings>) {
 	const { stores, revoker, found } = await foundingIn(c);
 	return lineageOver(stores, revoker, found, c.clock.now);
 }
+
+/** The `family` tie: a token's family as `of` answers it; a token issued from it is adopted. */
+export const familyTie = (families: Pick<Lineage, "of" | "adopt">): TokenTie => ({
+	name: "family",
+	tieOf: async (tokenId) => {
+		const found = await families.of(tokenId);
+		if (found.kind === "none") return { kind: "none" };
+		if (found.kind === "ended") return { kind: "ended", reason: "family has ended" };
+		return {
+			kind: "held",
+			ends: found.expiresAt,
+			join: async (issued) => (await families.adopt(found.family, issued)) === "adopted",
+		};
+	},
+});
 
 /** tokens' access condition: an access token of an ended family no longer holds. Built on the stores alone, as tokens asks it while it is being built itself. */
 export async function conditionOver(c: BuildContext<Settings>) {
