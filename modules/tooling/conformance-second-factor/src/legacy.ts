@@ -17,7 +17,12 @@ onLegacy(secondFactorArea, {
 			STANDARD_SMTP_MAIL_SENDER_FROM: "conformance@issuer.example",
 			// The fake SMTP server speaks plain SMTP at loopback, which the sender takes only when told.
 			...(part.mail
-				? { MFA_EMAIL_FACTOR_ENABLED: "true", STANDARD_SMTP_MAIL_SENDER_SECURE: "none" }
+				? {
+						MFA_EMAIL_FACTOR_ENABLED: "true",
+						// As on the new target, its proof adds `mfa`.
+						MFA_EMAIL_FACTOR_ADDS_MFA: "true",
+						STANDARD_SMTP_MAIL_SENDER_SECURE: "none",
+					}
 				: {}),
 		},
 		// The lockout's numbers have no variables: the configuration file holds them.

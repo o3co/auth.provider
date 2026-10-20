@@ -32,6 +32,8 @@ const setUp = (part: SecondFactorPart): NewPart => ({
 		mfa: { mode: part.mode },
 		// As on legacy, no proof of the address is asked before a first binding.
 		...(part.mail ? { "mfa-binding-proof": { mode: "never" } } : {}),
+		// The scenes bind a code by mail as a factor that counts, which it is only where its proof adds `mfa`.
+		...(part.mail ? { "mfa-email": { "adds-second-factor": true } } : {}),
 		...(part.mail
 			? {
 					"mail-smtp": {
