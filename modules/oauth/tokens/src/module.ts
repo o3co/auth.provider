@@ -2,7 +2,7 @@ import { type AddedClaims, addedClaimsIn, addedClaimsOf } from "@mod/added-claim
 import { site } from "@mod/http";
 import { issuer, metadata } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
-import { keys } from "@mod/keys";
+import { accessTokenSigning, keys } from "@mod/keys";
 import { senderBinding } from "@mod/sender-binding";
 import { denylistAllowanceMs, denylistOver, revokedTokens } from "@mod/token-denylist";
 import { z } from "zod";
@@ -17,7 +17,7 @@ import {
 	tokens,
 } from "./contract.ts";
 import { type IssueAccess, issuing, judging } from "./issuance.ts";
-import { chainWithin, expiryOf, keptGrant, lifetimeOf, tokenId } from "./limits.ts";
+import { chainWithin, expiryOf, issuedWithin, keptGrant, lifetimeOf, tokenId } from "./limits.ts";
 import { namedBy } from "./reference.ts";
 import { section } from "./section.ts";
 
@@ -112,7 +112,7 @@ export default defineModule({ name: "tokens", section }, (m) => [
 		return { name: "jwks_uri", value: origin && new URL(path, origin).href };
 	}),
 	m.provide(tokens).by(async (c) => {
-		const signer = await c.get(keys);
+		const signing = await c.get(accessTokenSigning);
 		const bindings = await c.get(senderBinding);
 		const subjects = await c.collect(subjectChecks);
 		// Exactly one module checks subject revocation, or the operator states that none does.
@@ -140,7 +140,7 @@ export default defineModule({ name: "tokens", section }, (m) => [
 		/** Verifies everything but revocation; `allowanceMs` keeps a just-expired token valid. */
 		const check = async (token: string, allowanceMs = 0): Promise<Checked> => {
 			if (token.length > compactLimit) return { kind: "invalid", reason: "shape" };
-			const verified = await signer.verify(token, "at+jwt");
+			const verified = await signing.verify(token);
 			if (verified.kind === "invalid") return { kind: "invalid", reason: "signature" };
 			// Taken from the payload as signed, before the shape drops what it does not name: a member
 			// reserved and never written, or one outside the rules, is no token of tokens'.
@@ -152,6 +152,10 @@ export default defineModule({ name: "tokens", section }, (m) => [
 			if (claims.iss !== iss) return { kind: "invalid", reason: "issuer" };
 			if (claims.exp * 1000 + allowanceMs <= c.clock.now())
 				return { kind: "invalid", reason: "expired" };
+			// Times tokens never issues: a token signed past it, or whose iat moved, is no token of tokens'.
+			if (!issuedWithin(claims.iat, claims.exp, c.clock.now())) {
+				return { kind: "invalid", reason: "shape" };
+			}
 			const bound = Object.entries(claims.cnf ?? {}).map(([member, confirmation]) => ({
 				member,
 				confirmation,
@@ -191,7 +195,7 @@ export default defineModule({ name: "tokens", section }, (m) => [
 					? { cnf: { [limits.binding.member]: limits.binding.confirmation } }
 					: {}),
 			};
-			const token = await signer.sign(claims, "at+jwt");
+			const token = await signing.sign(claims);
 			// Its standard claims have no cap of their own: one past what tokens reads is never answered.
 			if (token.length > compactLimit) {
 				throw new TypeError(`tokens: the access token is over ${compactLimit} bytes`);

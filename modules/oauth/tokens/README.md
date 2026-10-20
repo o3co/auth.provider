@@ -25,6 +25,7 @@
 
 ## Invariants
 - A token without `typ`, with several bindings, or with a binding no kind of the composition writes is refused.
+- Signed and verified through `keys`' `accessTokenSigning` alone. A token whose `exp` comes before its `iat`, whose `iat` is over 60 s ahead of the clock (hosts' clocks differ), or with over a day between them is none `tokens` issues: refused as `shape`.
 - `act`, `amr`, `auth_time` (to the second) and `acr` are written only when the grant gives them; an empty `amr` counts as none, `auth_time` is never after `iat`, and none is written where the grant marks its authentication time unknown; an empty `acr` or an authentication time that is no number is the caller's mistake.
 - With no subject check, the section states `subject-check` `none`; with one, it does not; boot is refused otherwise. Under `none`, a revoked subject's boundary stops no access token: one lives until its expiry unless revoked another way, such as closing its session.
 - Unavailable keys, store or checks answer unavailable, never a negative verdict.

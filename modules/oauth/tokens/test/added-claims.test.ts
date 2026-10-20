@@ -5,7 +5,7 @@ import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
-import { keys } from "@mod/keys";
+import { accessTokenSigning } from "@mod/keys";
 import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
 import senderBindingModule from "@mod/sender-binding/module";
@@ -48,7 +48,7 @@ async function boot(extra: Module[] = []) {
 		},
 		runtime,
 	});
-	return { t: app.get(tokens), signer: app.get(keys) };
+	return { t: app.get(tokens), signer: app.get(accessTokenSigning) };
 }
 
 /** A token signed as tokens signs one, with what a test puts in its payload. */
@@ -64,7 +64,7 @@ const signedWith = async (signer: Awaited<ReturnType<typeof boot>>["signer"], ex
 		jti: "j",
 		...extra,
 	};
-	return signer.sign(payload, "at+jwt");
+	return signer.sign(payload);
 };
 
 describe("claims a grant adds to its access token", () => {
