@@ -76,7 +76,8 @@ What each module contains is described by that module's contract card (each modu
 | Wiring device-grant's store interfaces to records | wiring | device-grant-store |
 | Wiring dpop's store interface to records | wiring | dpop-store |
 | Wiring tokens' store interface to records | wiring | tokens-store |
-| Wiring federation's store interface to records | wiring | federation-store |
+| Wiring upstream-round-trip's store interface to records under a secret | wiring | upstream-round-trip-store |
+| Wiring upstream-handoff's store interface to records under a secret | wiring | upstream-handoff-store |
 | Wiring subject-revocation's store interface to records | wiring | subject-revocation-store |
 | Wiring consent's store interfaces to records | wiring | consent-store |
 | Wiring session-tokens' store interfaces to records' keyed sets, records and deferred work | wiring | session-tokens-store |
@@ -96,10 +97,12 @@ What each module contains is described by that module's contract card (each modu
 | User ledger, upstream identity, link, verified contact, claimed contact | vocabulary | users |
 | The names and value types of user attributes (the OIDC claim names), and a subject's shape | contract / vocabulary | users |
 | The HTTP user ledger (verifying passwords at the operator's URL), its request shape and credential | contribution / setting | users-http |
-| Logging in through an upstream IdP (start, callback, transaction) | contract | federation |
+| Logging in through an upstream IdP (start and callback) | contract | federation |
 | Linking an upstream identity to the account a browser is logged in as (start and callback) | contract | federation |
 | What an opened upstream is to the provider: its authorization URL, code exchange and what its login says | contract | upstreams |
-| Opening the configured IdPs through their types and handing their logins' tokens to the receivers, as `upstreams`' default | contract implementation | federation |
+| Opening the configured IdPs through their types, as `upstreams`' default | contract implementation | federation |
+| One authorization round trip to an upstream: its state, nonce, verifier and cookie, kept and taken once at its callback | contract | upstream-round-trip |
+| Handing a login's upstream tokens to the receivers once its session opens, a held login's kept sealed until then, and a link's join | contract | upstream-handoff |
 | Upstream IdP types | extension point kind | upstreams |
 | Receiving the upstream tokens of a login once its session opens, or once a link joins it | extension point kind | upstreams |
 | An upstream's refresh, end of session and offline delegation, by IdP name | contract | upstreams |

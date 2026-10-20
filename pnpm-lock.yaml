@@ -2910,21 +2910,6 @@ importers:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
 
-  modules/templates/federation-store:
-    dependencies:
-      '@mod/federation':
-        specifier: workspace:*
-        version: link:../../upstream-login/federation
-      '@mod/kernel':
-        specifier: workspace:*
-        version: link:../../foundation/kernel
-      '@mod/records':
-        specifier: workspace:*
-        version: link:../../foundation/records
-      '@mod/store':
-        specifier: workspace:*
-        version: link:../../foundation/store
-
   modules/templates/federation-tokens-store:
     dependencies:
       '@mod/federation-tokens':
@@ -3585,9 +3570,6 @@ importers:
       '@mod/audit':
         specifier: workspace:*
         version: link:../../foundation/audit
-      '@mod/cookies':
-        specifier: workspace:*
-        version: link:../../foundation/cookies
       '@mod/csrf':
         specifier: workspace:*
         version: link:../../identity/csrf
@@ -3609,12 +3591,15 @@ importers:
       '@mod/request-source':
         specifier: workspace:*
         version: link:../../foundation/request-source
-      '@mod/seal':
-        specifier: workspace:*
-        version: link:../../foundation/seal
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/upstream-handoff':
+        specifier: workspace:*
+        version: link:../upstream-handoff
+      '@mod/upstream-round-trip':
+        specifier: workspace:*
+        version: link:../upstream-round-trip
       '@mod/upstreams':
         specifier: workspace:*
         version: link:../upstreams
@@ -3628,9 +3613,15 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/cookies':
+        specifier: workspace:*
+        version: link:../../foundation/cookies
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
+      '@mod/seal':
+        specifier: workspace:*
+        version: link:../../foundation/seal
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash

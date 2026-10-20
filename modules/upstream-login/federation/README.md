@@ -15,45 +15,43 @@
 - Provides `upstreams`, as its default adapter.
 - Declares to `users` (`upstreamNames`) each IdP's name with the issuer its upstream says.
 - The operator section (its keys in the settings list).
-- Store interface for transactions, its needs (survives failover) and contract test; test configuration builders and an IdP type for tests (`./testing`)
-- Audit events for a callback that took its transaction, with `idp` and the source `request-source` determined: `federation.login.succeeded`, or `federation.login.held` when a gate held it, with the local subject; `federation.login.failed` with `reason` (`upstream_refused`, `exchange_failed`, `login_required`, `unknown_user`)
+- Test configuration builders and an IdP type for tests (`./testing`)
+- Audit events for a callback that took its round trip, with `idp` and the source `request-source` determined: `federation.login.succeeded`, or `federation.login.held` when a gate held it, with the local subject; `federation.login.failed` with `reason` (`upstream_refused`, `exchange_failed`, `login_required`, `unknown_user`)
 - For a link, `federation.identity.linked`, or `federation.identity.link_refused` with `reason` (`conflict`, `session_short` or one of the first three), for the subject it started for.
 - No audit event comes before the take or records an unavailable answer, and none holds the upstream subject, tokens or text.
 - Answer codes: `not_found` (404), `repeated_parameter`, `invalid_redirect`, `invalid_request`, `invalid_state`, `upstream_refused` (400), `unknown_user`, `login_required` (401), a gate's or a session requirement's answer, `link_requires_trusted_origin` (403), `identity_conflict` (409), `method_not_allowed` (405, with `allow`), `exchange_failed` (502), `temporarily_unavailable` (503)
 - Success is a 302 to the return target or the landing; a held login is a 403 with the gate's answer and cookies.
 
 ## Invariants
-- A login's state, nonce and PKCE verifier (S256) are kept server-side in its transaction for `transaction-lifetime`. Only a callback at the same IdP carrying its state takes it, once, before the code is exchanged; a callback from elsewhere spends nothing.
-- The start refuses a return target `login-gates` does not allow (`invalid_redirect`) and a `max_age` that is not 1 to 9 digits. A repeated parameter is refused after the path and method.
-- A start finding a transaction under its cookie is unavailable.
-- The state is compared in constant time. No cookie, no state, or no transaction to take is `invalid_state`. From the take on, every answer clears the cookie, unavailable included.
+- Each start begins an `upstream-round-trip` round trip named `federation.<idp>`, kept for `transaction-lifetime`, cross-site for an IdP that answers in a posted form; its callback takes it before the code is exchanged.
+- A callback that takes nothing is `invalid_state`; one whose round trip carries what federation does not read is `invalid_state` too, its round trip spent.
+- From the take on, every answer clears the round trip's cookie, unavailable included.
+- The start refuses a return target `login-gates` does not allow (`invalid_redirect`).
+- The start refuses a `max_age` that is not 1 to 9 digits (`invalid_request`).
+- A repeated parameter is refused after the path and method.
 - An `error` or no code is `upstream_refused`, with no exchange.
-- A failed exchange is logged with the IdP and its kind only. An unavailable upstream is 503.
+- A failed exchange is logged with the IdP and its kind only.
+- An unavailable upstream is 503.
+- The start is declared as the user's own navigation, and the callback as the IdP's redirect or posted form, each in place of a policy keeping other sites out; both change state.
 - A login reports the upstream's login time as when the user authenticated, on our clock (a time before the start but within the type's clock allowance before the start's second counts as the start, to the millisecond), or that it is unknown.
 - After `prompt=login` or a max age, a login counts only when the upstream says when the user logged in.
 - Fresh enough: after `prompt=login`, the upstream's login time plus the type's clock allowance is not before the start's second (so an upstream that does not authenticate again passes a login up to that allowance before the start); with a max age, it is within the max age of now.
-- The local user is found only by the IdP's name and the upstream subject. An unknown identity is refused, and nothing is created.
+- The local user is found only by the IdP's name and the upstream subject.
+- An unknown identity is refused, and nothing is created.
 - Only a start that asks links, from this deployment's own page (`csrf`'s origin evidence), for a session entered at `credentials`.
 - Its callback links only while that session is open with the same subject and the browser is in no other session; never by email.
 - A link creates no session and changes no session cookie.
 - Without `mfa`, an open session of any age may link.
 - A link whose tokens cannot be handed over is `503`, and one whose session closed or changed hands meanwhile `401`, the link kept.
-- The login proves `fed` plus only the upstream amr values the operator maps (declared as provable). An upstream's text and tokens never reach the browser or the logs.
+- The login proves `fed` plus only the upstream amr values the operator maps (declared as provable).
+- An upstream's text and tokens never reach the browser or the logs.
 - Of what an upstream says of the user, only its profile's email, name and picture reach the session, as strings, under the IdP's source name (`loginSource.upstream`).
 - Its email is verified only where the type says the upstream verified it in the type's own form; otherwise it is unverified.
 - Groups and other claims never reach the session.
-- A held login's tokens are kept for `transaction-lifetime` from the hold; if they cannot be kept, the callback is unavailable.
-- A held login resumes within `transaction-lifetime` of the callback.
+- A login's upstream tokens go to their receivers through `upstream-handoff`, which keeps a held login's for `transaction-lifetime`, its resume's deadline; if they cannot be kept, the callback is unavailable.
 - An IdP's redirect URI is the public origin plus its callback path.
 - Boot is refused for an unknown type, settings the type refuses, an upstream that does not match its settings (under the key and with the reason the type gives, where it gives them), or no public origin, one reason per issue, all at once.
-- An IdP that answers in a posted form has a cross-site cookie, so only `__Host-` and Secure; it refuses boot where cookies cannot be secure.
-
-## Data
-- Transaction record, by its cookie. The store derives its name from the cookie and never keeps the cookie in clear.
-- Held login record, in the transaction store. It must never come back on failover.
+- An IdP that answers in a posted form refuses boot where cookies cannot be secure, as its round trip's cookie is cross-site.
 
 ## Depends on
-- `kernel`, `upstreams`, `audit`, `csrf` (origin evidence), `http`, `cookies`, `request-source`, `url-setting`, `login-attributes`, `login-gates`, `session`, `users`, `rate-limit`, `seal` (only with token receivers)
-
-## Vocabulary
-- transaction: one round trip, a login's or a link's, from its start to its callback, taken once.
+- `kernel`, `upstreams`, `upstream-round-trip`, `upstream-handoff`, `audit`, `csrf` (origin evidence), `http`, `request-source`, `url-setting`, `login-attributes`, `login-gates`, `session`, `users`, `rate-limit`

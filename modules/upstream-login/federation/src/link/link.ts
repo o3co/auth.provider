@@ -3,8 +3,8 @@ import { type OriginEvidence, originEvidence } from "@mod/csrf";
 import { jsonAnswer } from "@mod/http";
 import type { BuildContext, Log } from "@mod/kernel";
 import { type Sessions, sessions } from "@mod/session";
+import { type Handoff, handoff } from "@mod/upstream-handoff";
 import { type Users, users } from "@mod/users";
-import { type Handoff, handoff } from "../handoff/handoff.ts";
 import {
 	type Continuation,
 	landingIn,
@@ -64,21 +64,21 @@ export function linkWith(p: LinkParts): Continuation {
 			const { id, context } = entry.session;
 			return { carried: { link: { session: id, subject: context.subject } } };
 		},
-		failed: ({ name, reason, transaction, source, userAgent }) => {
-			// The round trip hands this a link's transaction only; a login's has no subject to record.
-			if (transaction.link) {
+		failed: ({ name, reason, trip, source, userAgent }) => {
+			// The round trip hands this a link's trip only; a login's has no subject to record.
+			if (trip.link) {
 				record("link_refused", name, {
-					subject: transaction.link.subject,
+					subject: trip.link.subject,
 					reason,
 					source,
 					userAgent,
 				});
 			}
 		},
-		complete: async ({ request, name, upstreamLogin, transaction, source, userAgent, cleared }) => {
-			// Chosen by `transaction.link`, so it is always there: a missing one is a broken round trip.
-			const link = transaction.link;
-			if (!link) throw new Error("a link's transaction names its session");
+		complete: async ({ request, name, upstreamLogin, trip, source, userAgent, cleared }) => {
+			// Chosen by `trip.link`, so it is always there: a missing one is a broken round trip.
+			const link = trip.link;
+			if (!link) throw new Error("a link's trip names its session");
 			const refused = (status: number, reason: string, error = reason) => {
 				record("link_refused", name, { subject: link.subject, reason, source, userAgent });
 				return jsonAnswer(status, { error }, { cookies: cleared });
@@ -122,7 +122,7 @@ export function linkWith(p: LinkParts): Continuation {
 					return jsonAnswer(401, { error: "login_required" }, { cookies: cleared });
 				}
 			}
-			return sent(transaction.redirectTo ?? p.landing, cleared);
+			return sent(trip.redirectTo ?? p.landing, cleared);
 		},
 	};
 }
