@@ -22,7 +22,7 @@ export const policySettings = z
 				"Whether requests may reach any host at a public address, instead of naming hosts in `allow`.",
 			),
 		deny: hostEntries.describe(
-			"The hosts requests never reach, checked before `allow`; `.name` covers the name and the names under it.",
+			"The hosts requests never reach, checked before `allow`; `.name` covers the name and the names under it. An address listed is refused also where a name resolves to it.",
 		),
 		"plain-loopback": z
 			.array(z.string().refine(isPair, "not a host:port pair"))

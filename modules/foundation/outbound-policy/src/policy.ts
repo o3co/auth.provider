@@ -320,6 +320,16 @@ export function policyOf(settings: PolicySettings): Policy {
 		),
 		timeoutMs: Math.min(settings.timeout, narrowing(narrower.timeoutMs)),
 	});
+	/**
+	 * The addresses a host resolved to, checked: a `deny` entry naming one refuses them all, whatever
+	 * name resolved to it (an IPv4 address carried in IPv6 is the IPv4 one), and so does a special one.
+	 */
+	const checkedAddresses: Policy["admitAddresses"] = (addresses, admitted) => {
+		if (addresses.some((address) => matches(normalized(address) ?? address, rules.deny))) {
+			throw new DestinationRefused("denied");
+		}
+		return admitAddresses(addresses, admitted);
+	};
 	/** Why the policy refuses the URL, or undefined when it lets it through; no name is resolved. */
 	const refusalOf = (url: string, narrower: Narrower): RefusalReason | undefined => {
 		try {
@@ -334,7 +344,7 @@ export function policyOf(settings: PolicySettings): Policy {
 	};
 	return {
 		admit: (url, narrower = {}, signed = false) => admitUrl(url, rules, narrower, signed),
-		admitAddresses,
+		admitAddresses: checkedAddresses,
 		explain: (url, narrower = {}) => {
 			const reason = refusalOf(url, narrower);
 			return reason && `${reason}: ${remedyOf(reason, url, rules, narrower)}`;
