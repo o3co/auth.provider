@@ -40,13 +40,22 @@ const section = clientSetting.extend({
 /** The section; boot is refused on a URL it sends to that outbound's destination policy refuses. */
 export const settingsOf = (refusals: OutboundRefusals) =>
 	section.superRefine(
-		urlsChecked((url, hosts) => destinationRefusal(refusals, url, { hosts }), {
-			urls: (s) => [s["token-endpoint"], s.api],
-			sent: (s) => ({
-				"token-endpoint": { url: s["token-endpoint"], hosts: hostsOf(s) },
-				api: { url: userUrl(s.api), hosts: hostsOf(s) },
-			}),
-		}),
+		// Asked with the same narrowing as the requests: each sent for the endpoint the operator set.
+		urlsChecked(
+			(url, hosts, internal) =>
+				destinationRefusal(refusals, url, { hosts, ...(internal ? { internal } : {}) }),
+			{
+				urls: (s) => [s["token-endpoint"], s.api],
+				sent: (s) => ({
+					"token-endpoint": {
+						url: s["token-endpoint"],
+						hosts: hostsOf(s),
+						internal: s["token-endpoint"],
+					},
+					api: { url: userUrl(s.api), hosts: hostsOf(s), internal: s.api },
+				}),
+			},
+		),
 	);
 
 export type Settings = z.output<typeof section>;

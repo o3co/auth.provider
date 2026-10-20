@@ -27,7 +27,12 @@ const policyRefusing = (refused: readonly string[] = []): OutboundRefusals => ({
 const settings = settingsOf(policyRefusing());
 
 function open(handlers: { token?: Handler; user?: Handler }, more: Record<string, unknown> = {}) {
-	const asked: { url: string; request: OutboundRequest; hosts?: readonly string[] }[] = [];
+	const asked: {
+		url: string;
+		request: OutboundRequest;
+		hosts?: readonly string[];
+		internal?: string;
+	}[] = [];
 	const table: Record<string, Handler | undefined> = {
 		"https://github.com/login/oauth/access_token":
 			handlers.token ?? (() => ok({ access_token: "gho_x", token_type: "bearer" })),
@@ -35,7 +40,12 @@ function open(handlers: { token?: Handler; user?: Handler }, more: Record<string
 	};
 	const outbound: Outbound = {
 		fetch: async (url, request = {}, narrower = {}) => {
-			asked.push({ url, request, ...(narrower.hosts ? { hosts: narrower.hosts } : {}) });
+			asked.push({
+				url,
+				request,
+				...(narrower.hosts ? { hosts: narrower.hosts } : {}),
+				...(narrower.internal ? { internal: narrower.internal } : {}),
+			});
 			const answer = table[url]?.(request) ?? ok({}, 404);
 			if (answer === "unreachable") throw new Unavailable("stub");
 			if (answer === "broken") throw new Error("refused by the destination policy");
@@ -149,6 +159,11 @@ describe("idp-github", () => {
 			["github.com", "api.github.com"],
 			["github.com", "api.github.com"],
 		]);
+		// Each sent for the endpoint the operator set, so one on an internal network is reached as theirs.
+		expect(asked.map((a) => a.internal)).toEqual([
+			"https://github.com/login/oauth/access_token",
+			"https://api.github.com",
+		]);
 	});
 
 	it("refuses at boot, at its key, an endpoint outbound's policy refuses, GitHub's own included", () => {
@@ -165,8 +180,14 @@ describe("idp-github", () => {
 		expect(refusalsOf(["github.com"])).toEqual([refused("token-endpoint")]);
 		const hosts = ["github.com", "api.github.com"];
 		expect(policyAsked).toEqual([
-			{ url: "https://github.com/login/oauth/access_token", narrower: { hosts } },
-			{ url: "https://api.github.com/user", narrower: { hosts } },
+			{
+				url: "https://github.com/login/oauth/access_token",
+				narrower: { hosts, internal: "https://github.com/login/oauth/access_token" },
+			},
+			{
+				url: "https://api.github.com/user",
+				narrower: { hosts, internal: "https://api.github.com" },
+			},
 		]);
 		expect(refusalsOf(["api.github.com"])).toEqual([refused("api")]);
 		const enterprise = {
@@ -177,8 +198,14 @@ describe("idp-github", () => {
 		expect(refusalsOf(["github.com", "api.github.com"], enterprise)).toBeUndefined();
 		// The API's trailing slash is not doubled, and a host named twice is narrowed to once.
 		expect(policyAsked).toEqual([
-			{ url: "https://ghe.example/t", narrower: { hosts: ["ghe.example"] } },
-			{ url: "https://ghe.example/api/v3/user", narrower: { hosts: ["ghe.example"] } },
+			{
+				url: "https://ghe.example/t",
+				narrower: { hosts: ["ghe.example"], internal: "https://ghe.example/t" },
+			},
+			{
+				url: "https://ghe.example/api/v3/user",
+				narrower: { hosts: ["ghe.example"], internal: "https://ghe.example/api/v3/" },
+			},
 		]);
 		expect(refusalsOf(["ghe.example"], enterprise)).toEqual([
 			refused("token-endpoint"),
