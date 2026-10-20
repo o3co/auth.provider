@@ -24,7 +24,7 @@
 
 ## Invariants
 - Nothing is kept between calls: each asks the ledger again.
-- The ledger is reached only through `outbound`, at the URLs' host alone; a redirect is not followed. The URLs are internal destinations, named to `outbound` by one of them (they share one origin): a private address is reached only when their host is in `outbound.internal-hosts`, and only at their origin (scheme, host and port).
+- The ledger is reached only through `outbound`, at the URLs' host alone; a redirect is not followed. The URLs are internal destinations, named to `outbound` by one of them (they share one origin): a private address is reached only when their host is in `outbound.internal-hosts` or, over plain http, when `outbound.plain-internal` names their `host:port`, and only at their origin (scheme, host and port).
 - Boot is refused on a URL that outbound's destination policy refuses (at that URL's key, saying which of `outbound`'s keys to set, by `outbound.refusals`), and on URLs `outbound.credentials` will not send the credential to, as when they are at two origins (at `credential`); `outbound` sends the credential as its `credential`.
 - A destination refused when sending, or no answer in time or size, is unavailable. Each failure logs one `mfa-witness-http.ledger_failed` warning with its `call` and its status, or its kind alone: outbound's refusal reason or failure, `no-answer` or `malformed`. No subject, token, text or bytes from the ledger, nor the credential, are logged.
 - The deployment's to keep, not checked here: the ledger keeps `mfa-witness`'s promises (per subject linearizable, `enroll`'s set-if-absent atomic, an answered write lasting, no read behind it), and does not carry out a write it receives past its `deadline`.
