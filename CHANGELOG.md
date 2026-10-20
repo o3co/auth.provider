@@ -11,6 +11,14 @@ What to change from rc.3 is in [From 0.18.0-rc.3](docs/migration.md#from-0180-rc
 ### Security
 
 - `authorize`: the re-authentication a request asked for with `prompt=login` or `max_age` could be skipped by a login through an upstream, or loop there. The login page is now told of both beside `redirect_to`, and a request back from its login still not new enough, or carrying a re-authentication record that is not its own, is refused with `login_required`.
+- `rp-logout`: a client's front-channel logout page, framed in the provider's logout page, could navigate the top window, submit forms or open popups; each frame is now sandboxed, keeping its scripts and its own origin.
+- `outbound`: names that answer slowly, some of which an outside party chooses, could hold every thread of Node's threadpool, stalling hashing and the file system with them; at most half the threadpool now resolves names at once, and one lookup more is unavailable at once.
+- `outbound-policy`: an address `outbound.deny` names was still reached through any name resolving to it; it is now refused wherever a name resolves to it.
+- `tokens`: a caller changing its grant or limits while the issuance policies judged it had a token signed for what no policy judged; the policies and the signing now read one copy, taken before anything waits.
+- `clients`: the time to refuse a client told whether its id existed; an unknown client, an invalid record and another method's client are now refused only after the work its credentials would cost.
+- `mfa`: with a witness composed, a first binding whose value another factor held left the witness's mark with no factor, the subject unavailable until a reset; the value is checked again just before the mark.
+- `federation-grants`: where an upstream answered a refresh `invalid_grant` or `interaction_required` and the grant's end could not be written, the held token was still handed out; the host whose write failed now refuses the grant under the upstream's reason until the held token ends, and a later request asks the upstream again.
+- `federation-grants`: a client's renewals were not counted with its lodgings; they now share `lodges` per `lodge-window`, and past it a renewal answers `429` with `retry-after` and writes nothing.
 
 ### Changed
 
@@ -18,6 +26,9 @@ What to change from rc.3 is in [From 0.18.0-rc.3](docs/migration.md#from-0180-rc
 - An app `create-auth-provider` makes from listed packages is told to add the modules and settings they need before it starts, no longer to start as made.
 - A login page that offers an upstream hands the `prompt` and `max_age` it is given to the upstream's start (`/session/oauth/federation/<idp>`).
 - The issuer's metadata says `authorization_response_iss_parameter_supported: true`; every redirect answer already carried `iss`.
+- An authentication method of your own may offer `decoy`, the work a verify would cost, which `clients` runs before refusing a client it cannot check.
+- `federation` warns `federation.no_idps` at each boot where `federation.idps` names none, as every login then answers not found.
+- An IdP's client id or secret of whitespace alone refuses boot, as an empty one does.
 
 ### Fixed
 
