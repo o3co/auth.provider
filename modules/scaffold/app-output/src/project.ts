@@ -38,15 +38,19 @@ const pnpm = "pnpm@11.3.0";
 /** The zod the packages take, so a section the app writes is read by the same copy. */
 const zod = "4.6.7";
 
-/** The project's manifest, starting the app with `start`, and resealing with `reseal` when given. */
-export const manifestOf = (start: string, dependencies: Record<string, string>, reseal?: string) =>
+/** The project's manifest, starting the app with `start`, and running each of `scripts` by its name. */
+export const manifestOf = (
+	start: string,
+	dependencies: Record<string, string>,
+	scripts: Readonly<Record<string, string>> = {},
+) =>
 	`${JSON.stringify(
 		{
 			name: "auth-provider-app",
 			private: true,
 			type: "module",
 			packageManager: pnpm,
-			scripts: reseal === undefined ? { start } : { start, reseal },
+			scripts: { start, ...scripts },
 			dependencies: { ...dependencies, zod },
 		},
 		null,
@@ -68,18 +72,43 @@ export const mainSource = (modules: readonly string[], importOf = (name: string)
 		modules: modules.map((_, i) => `m${i}`).join(", "),
 	});
 
-/** The app's reseal entry, for an app that composes `seal`: the same modules, built and never started. */
-export const resealSource = (modules: readonly string[], importOf = (name: string) => name) =>
-	filled("reseal.ts.template", {
-		kernel: importOf(kernel),
-		configFiles: importOf(configFiles),
-		seal: importOf(sealPackage),
-		imports: modules.map((name, i) => `import m${i} from "${importOf(name)}/module";`).join("\n"),
-		modules: modules.map((_, i) => `m${i}`).join(", "),
-	});
+/**
+ * The app's entries besides `start`, each for an app that composes its package: the same modules,
+ * built and never started, running what that package offers. The template's mark `entry` names it.
+ */
+const entries = [
+	{ script: "reseal", file: "src/reseal.ts", template: "reseal.ts.template", runs: "@mod/seal" },
+	{
+		script: "witness-backfill",
+		file: "src/witness-backfill.ts",
+		template: "witness-backfill.ts.template",
+		runs: "@mod/mfa-witnessing",
+	},
+];
 
-/** The package whose resealers the reseal entry runs. */
-export const sealPackage = "@mod/seal";
+/**
+ * The scripts and files of the entries the composed modules call for; `run` writes the command
+ * that runs a file, as the project starts its app.
+ */
+export async function entriesOf(
+	modules: readonly string[],
+	importOf: (name: string) => string,
+	run: (file: string) => string,
+) {
+	const called = entries.filter((entry) => modules.includes(entry.runs));
+	const files: Record<string, string> = {};
+	for (const entry of called) {
+		files[entry.file] = await filled(entry.template, {
+			kernel: importOf(kernel),
+			configFiles: importOf(configFiles),
+			entry: importOf(entry.runs),
+			imports: modules.map((name, i) => `import m${i} from "${importOf(name)}/module";`).join("\n"),
+			modules: modules.map((_, i) => `m${i}`).join(", "),
+		});
+	}
+	const scripts = Object.fromEntries(called.map((entry) => [entry.script, run(entry.file)]));
+	return { scripts, files };
+}
 
 export const withKernel = (modules: readonly string[]) => [
 	kernel,

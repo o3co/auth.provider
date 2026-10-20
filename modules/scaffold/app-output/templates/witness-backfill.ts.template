@@ -1,0 +1,40 @@
+import { createInterface } from "node:readline";
+import { loadConfig } from "{{configFiles}}";
+import { assemble, BootRefused, isUnavailable } from "{{kernel}}";
+import { witnessBackfill } from "{{entry}}";
+{{imports}}
+
+/** A refused boot: each refusal on its own line of standard error, then exit 78. */
+const refused = (error: unknown): never => {
+	if (!(error instanceof BootRefused)) throw error;
+	for (const refusal of error.refusals) {
+		process.stderr.write(`refused ${refusal.where}: ${refusal.reason}\n`);
+	}
+	process.exit(78);
+};
+
+// The app as `start` builds it, never started: no route is served while marks are filled.
+const files = (process.env.APP_CONFIG ?? "config/application.conf").split(",");
+const app = await loadConfig({ files, env: process.env })
+	.then((config) => assemble({ modules: [{{modules}}], config }))
+	.catch(refused);
+const backfill = app.get(witnessBackfill);
+const counts = { marked: 0, held: 0, none: 0, inconsistent: 0, failed: 0 };
+// One subject a line; a blank line is skipped. No subject is ever written out.
+for await (const line of createInterface({ input: process.stdin, crlfDelay: Infinity })) {
+	const subject = line.trim();
+	if (subject === "") continue;
+	try {
+		counts[await backfill.settle(subject)] += 1;
+	} catch (error) {
+		if (!isUnavailable(error)) throw error;
+		counts.failed += 1;
+	}
+}
+process.stdout.write(
+	`marked ${counts.marked} held ${counts.held} none ${counts.none} inconsistent ${counts.inconsistent} failed ${counts.failed}\n`,
+);
+// Stopped, though never started, so its stop hooks run; a stop that fails keeps the code.
+await app.stop().catch(() => undefined);
+// An inconsistent subject is counted, not failed: only a subject that could not be settled is 1.
+process.exit(counts.failed === 0 ? 0 : 1);
