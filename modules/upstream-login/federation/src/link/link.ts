@@ -17,7 +17,7 @@ import type { Settings } from "../section.ts";
 export interface LinkParts {
 	readonly origin: Pick<OriginEvidence, "sameOrigin">;
 	readonly sessions: Pick<Sessions, "enterFor" | "enter" | "entryOf">;
-	readonly users: Pick<Users, "link">;
+	readonly users: Pick<Users, "link" | "unlink">;
 	readonly audit: Pick<Audit, "record">;
 	readonly handoff: Pick<Handoff, "joined" | "withdrawn">;
 	readonly log: Pick<Log, "warn">;
@@ -88,7 +88,8 @@ export function linkWith(p: LinkParts): Continuation {
 			const current = await p.sessions.enter(request);
 			if (current !== undefined && current.id !== link.session)
 				return refused(401, "login_required");
-			const held = await p.sessions.entryOf(link.session);
+			// At the level its start entered at, by its handle (a posted answer carries no cookie).
+			const held = await p.sessions.entryOf(link.session, "credentials");
 			// Short of a requirement is answered as closed, but recorded with its own reason.
 			if (held.kind === "short") return refused(401, "session_short", "login_required");
 			if (held.kind !== "entered" || held.session.context.subject !== link.subject) {
@@ -99,28 +100,26 @@ export function linkWith(p: LinkParts): Continuation {
 			const linked = await p.users.link(link.subject, upstream);
 			if (linked === "conflict") return refused(409, "conflict", "identity_conflict");
 			if (linked === "linked") record("linked", name, { subject: link.subject, source, userAgent });
-			if (upstreamLogin.tokens) {
-				const joined = await p.handoff.joined(
-					{ id: link.session, context },
-					name,
-					upstreamLogin.tokens,
-				);
-				// Read again: a session closed, short of a requirement or logged in as someone else while
-				// joining keeps none of the IdP's tokens, nor does one that cannot tell. Not `refused`: the
-				// link stands, so no refusal is recorded.
-				const stillHeld = async () => {
-					try {
-						const again = await p.sessions.entryOf(link.session);
-						return again.kind === "entered" && again.session.context.subject === link.subject;
-					} catch (error) {
-						await p.handoff.withdrawn(link.session, name, joined);
-						throw error;
-					}
-				};
-				if (!(await stillHeld())) {
-					await p.handoff.withdrawn(link.session, name, joined);
-					return jsonAnswer(401, { error: "login_required" }, { cookies: cleared });
-				}
+			const joined = upstreamLogin.tokens
+				? await p.handoff.joined({ id: link.session, context }, name, upstreamLogin.tokens)
+				: undefined;
+			// A best-effort amends for a session closed meanwhile: what this request wrote is undone.
+			const undo = async () => {
+				if (joined !== undefined) await p.handoff.withdrawn(link.session, name, joined);
+				if (linked !== "linked") return;
+				if ((await p.users.unlink(link.subject, upstream)) === "fixed")
+					p.log.warn("federation.link_kept_fixed", { idp: name });
+			};
+			let again: Awaited<ReturnType<typeof p.sessions.entryOf>>;
+			try {
+				again = await p.sessions.entryOf(link.session, "credentials");
+			} catch (error) {
+				await undo();
+				throw error;
+			}
+			if (again.kind !== "entered" || again.session.context.subject !== link.subject) {
+				await undo();
+				return refused(401, "session_closed_during_link", "login_required");
 			}
 			return sent(trip.redirectTo ?? p.landing, cleared);
 		},
