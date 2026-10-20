@@ -49,7 +49,7 @@ describe("introspection", () => {
 		expect(await answer("api", "garbage"), "no token at all").toEqual(inactive);
 	});
 
-	it("refuses public clients, missing tokens, repeated parameters and bad client credentials", async () => {
+	it("refuses public clients, missing tokens, repeated parameters and bad client credentials, recording only the credentials' refusal", async () => {
 		const s = await serve();
 		const token = await s.issue();
 		expect((await s.post("/oauth/introspect", undefined, { token, client_id: "pub" })).status).toBe(
@@ -68,6 +68,13 @@ describe("introspection", () => {
 		}
 		const wrong = { token, client_id: "api", client_secret: `${clientSecret("api")}x` };
 		expect((await s.post("/oauth/introspect", undefined, wrong)).status).toBe(401);
+		expect(s.events).toEqual([
+			{
+				kind: "client.authentication.failure",
+				at: expect.any(Number),
+				attributes: { source: "127.0.0.1", reason: "bad_credentials" },
+			},
+		]);
 	});
 
 	it("answers 503 when a condition on access tokens cannot tell, never inactive, recording and warning so", async () => {

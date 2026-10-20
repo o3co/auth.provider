@@ -104,6 +104,12 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 |---|---|---|
 | `mfa.reset` | `by`, `kinds`, `count`, `sessions`, `sessionsAgain`, `complete`, `requestedBy` | an operator's reset gets past its input, finished or not (`complete`) |
 
+## @mod/passkey-registration
+
+| Kind | Attributes | Recorded when |
+|---|---|---|
+| `passkey.registered` | `source` | a passkey is kept for the session's subject, the event's subject |
+
 ## @mod/rate-limit
 
 | Kind | Attributes | Recorded when |
@@ -142,6 +148,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
+| `client.authentication.failure` | `source`, `reason` | a client's authentication is refused, before any client is known, with `reason` (`no_credentials`, `multiple_methods`, `malformed_credentials`, `unknown_client`, `wrong_method`, `bad_credentials` or `invalid_record`); the client id claimed is never named |
 | `token.issued` | `client`, `source`, `grant_type` | a grant issues |
 | `token.issued.failure` | `client`, `source`, `grant_type`, `reason`, `error`, `policy`, `refusal` | a request is refused, with `reason` (`repeated_parameter`, `mistyped_parameter`, `missing_grant_type`, `unsupported_grant_type`, `grant_type_not_allowed`, `unsupported_body`, `multiple_bindings`, `binding_refused`, `binding_required`, `binding_kind_not_named`, `untargeted`, `grant_refused`, or `issuance_refused` with the refusing `policy` and its `refusal`) and the answer's `error`; `grant_type` once it is known |
 

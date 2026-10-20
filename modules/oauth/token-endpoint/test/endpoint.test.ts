@@ -490,7 +490,7 @@ describe("token endpoint", () => {
 		const post = await serve([polled]);
 		const cc = { grant_type: "client_credentials" };
 		expect((await post(cc, "basic")).status).toBe(200);
-		// Refused before the client is known, so not recorded.
+		// Refused before the client is known: the authentication's failure, naming no client.
 		await post(cc, "basic", { secret: "nope" });
 		// A grant type nothing dispatches to is recorded without its name.
 		await post({ grant_type: "foo" }, "basic");
@@ -515,6 +515,11 @@ describe("token endpoint", () => {
 		});
 		expect(events).toEqual([
 			{ kind: "token.issued", at, attributes: { client: "basic", source, ...cc } },
+			{
+				kind: "client.authentication.failure",
+				at,
+				attributes: { source, reason: "bad_credentials" },
+			},
 			failed("basic", { reason: "unsupported_grant_type", error: "unsupported_grant_type" }),
 			failed("basic", { reason: "missing_grant_type", error: "invalid_request" }),
 			failed("nogrant", { ...cc, reason: "grant_type_not_allowed", error: "unauthorized_client" }),

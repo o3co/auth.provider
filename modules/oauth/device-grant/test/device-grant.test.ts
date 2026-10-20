@@ -253,6 +253,14 @@ describe("device authorization", () => {
 			["scope", "read"],
 		]);
 		expect([twice.status, twice.body.error]).toEqual([400, "invalid_request"]);
+		// Only the client's refused authentication is recorded, naming no client.
+		expect(s.events).toEqual([
+			{
+				kind: "client.authentication.failure",
+				at: expect.any(Number),
+				attributes: { source: "198.51.100.1", reason: "bad_credentials" },
+			},
+		]);
 	});
 
 	it("refuses a resource where the composed rule refuses one to what takes no audience", async () => {

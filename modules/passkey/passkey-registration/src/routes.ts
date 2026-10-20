@@ -1,15 +1,19 @@
+import { type Audit, declaredAudit } from "@mod/audit";
 import { csrfChecked } from "@mod/csrf";
 import { type HttpRequest, type HttpResponse, jsonAnswer, type Route, use } from "@mod/http";
 import { isUnavailable } from "@mod/kernel";
 import { isLabel } from "@mod/labels";
 import { requestsPerSource, type Window } from "@mod/rate-limit";
+import { determinedSource } from "@mod/request-source";
 import type { Sessions } from "@mod/session";
 import type { RegistrationRefusal, Registrations } from "@mod/webauthn";
+import events from "./audit-events.ts";
 
 export interface RouteParts {
 	readonly sessions: Sessions;
 	readonly registrations: Registrations;
 	readonly window: Window;
+	readonly audit: Audit;
 }
 
 /** Each refusal in the words clients of these routes know. */
@@ -85,6 +89,11 @@ export function registrationRoutes(p: RouteParts): {
 				...(description ? { error_description: description } : {}),
 			});
 		}
+		const source = determinedSource(request);
+		declaredAudit(p.audit, events).record("passkey.registered", {
+			subject,
+			attributes: source === undefined ? {} : { source },
+		});
 		const { credential } = kept;
 		return jsonAnswer(200, {
 			credentialId: credential.id,

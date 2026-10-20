@@ -35,7 +35,7 @@ export function revocation(
 	audit: Audit,
 ): Pick<Route, "handle" | "unavailable"> {
 	const answer = async (request: HttpRequest): Promise<HttpResponse> => {
-		const authenticated = await authenticateClient(clients, request);
+		const authenticated = await authenticateClient(clients, request, audit);
 		if (authenticated.kind === "refused") return authenticated.response;
 		if (request.form.repeated().length > 0) {
 			return oauthError(400, "invalid_request", "repeated parameter");

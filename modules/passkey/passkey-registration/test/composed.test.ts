@@ -49,9 +49,7 @@ async function serve(
 	{ withMfa = false } = {},
 ) {
 	const store = simulatedStore();
-	const mfa = withMfa
-		? [auditStandIn().module, sealModule, loginGates, mfaStore, mfaModule, mfaEntry, step]
-		: [];
+	const mfa = withMfa ? [sealModule, loginGates, mfaStore, mfaModule, mfaEntry, step] : [];
 	const app = await assemble({
 		modules: [
 			http,
@@ -65,6 +63,7 @@ async function serve(
 			webauthnStore,
 			webauthn,
 			registration,
+			auditStandIn().module,
 			...mfa,
 		],
 		config: {

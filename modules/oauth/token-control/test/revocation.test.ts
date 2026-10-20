@@ -129,7 +129,7 @@ describe("revocation", () => {
 		expect([(await s.post("/oauth/revoke", "app", { token })).status, s.events]).toEqual([503, []]);
 	});
 
-	it("refuses a request without a token, a repeated parameter, and an unknown client", async () => {
+	it("refuses a request without a token, a repeated parameter, and an unknown client, recording only the client's refusal", async () => {
 		const s = await serve();
 		const error = async (form: Form, as = "app") => {
 			const answer = await s.post("/oauth/revoke", as, form);
@@ -150,6 +150,13 @@ describe("revocation", () => {
 				["token_type_hint", "access_token"],
 			]),
 		).toEqual([400, "invalid_request"]);
+		expect(s.events).toEqual([
+			{
+				kind: "client.authentication.failure",
+				at: expect.any(Number),
+				attributes: { source: "127.0.0.1", reason: "unknown_client" },
+			},
+		]);
 	});
 
 	it("tells the issuing client that access tokens cannot be revoked where that was declared", async () => {

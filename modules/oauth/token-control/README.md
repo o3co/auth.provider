@@ -18,6 +18,7 @@
 
 ## Invariants
 - Each route counts requests per source on its own, before any client is authenticated, and answers `429` past the limit.
+- Both routes authenticate the client through `token-endpoint`'s `authenticateClient`, handing it the audit, which records a refusal as `client.authentication.failure`.
 - Both routes refuse a repeated parameter with `invalid_request`.
 - Introspection refuses public clients.
 - Introspection answers active only for a valid token whose audience the caller may see (`token-endpoint`'s allowance); every other token is `active:false`.
