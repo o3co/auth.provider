@@ -12,7 +12,7 @@
 	"dependencies": {
 		"@mod/kernel": "workspace:*",
 		"@mod/store": "workspace:*",
-		"ioredis": "5.11.1",
+		"ioredis": "6.0.0",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
