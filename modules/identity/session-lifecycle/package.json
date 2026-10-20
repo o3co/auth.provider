@@ -22,7 +22,7 @@
 		"zod": "4.6.7"
 	},
 	"peerDependencies": {
-		"vitest": "5.0.4"
+		"vitest": "5.0.5"
 	},
 	"peerDependenciesMeta": {
 		"vitest": {
@@ -33,6 +33,6 @@
 		"@mod/records": "workspace:*",
 		"@mod/session-participants": "workspace:*",
 		"@mod/session-requirements": "workspace:*",
-		"vitest": "5.0.4"
+		"vitest": "5.0.5"
 	}
 }

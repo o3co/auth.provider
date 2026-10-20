@@ -15,12 +15,12 @@
 		"@mod/outbound": "workspace:*",
 		"@mod/outbound-policy": "workspace:*",
 		"@mod/sender-binding": "workspace:*",
-		"asn1js": "3.0.10",
+		"asn1js": "3.1.0",
 		"pkijs": "3.4.1",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"@mod/http": "workspace:*",
-		"vitest": "5.0.4"
+		"vitest": "5.0.5"
 	}
 }

@@ -37,6 +37,6 @@
 		"@mod/subject-revocation": "workspace:*",
 		"@mod/upstream-handoff": "workspace:*",
 		"@mod/upstream-round-trip": "workspace:*",
-		"vitest": "5.0.4"
+		"vitest": "5.0.5"
 	}
 }

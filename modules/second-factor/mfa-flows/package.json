@@ -35,10 +35,10 @@
 		"@mod/seal": "workspace:*",
 		"@mod/session-requirements": "workspace:*",
 		"@mod/store": "workspace:*",
-		"vitest": "5.0.4"
+		"vitest": "5.0.5"
 	},
 	"peerDependencies": {
-		"vitest": "5.0.4"
+		"vitest": "5.0.5"
 	},
 	"peerDependenciesMeta": {
 		"vitest": {
