@@ -137,15 +137,16 @@ describe("the logout a client starts", () => {
 		expect(await h.stillOpen(session.id)).toBe(false);
 	});
 
-	it("refuses on a GET a hint issued more than a day ago, but takes it posted", async () => {
+	it("refuses a hint issued more than a day ago, by GET or POST, and closes nothing", async () => {
 		const h = await serve();
 		const { session } = await h.login();
 		const iat = 1_800_000_000 - 86_401;
 		const hint = await h.hintFor(session.id, { iat, exp: iat + 86_400 });
-		expect((await h.call("GET", { id_token_hint: hint })).json?.error).toBe("invalid_token");
+		for (const method of ["GET", "POST"] as const) {
+			const out = await h.call(method, { id_token_hint: hint });
+			expect([out.status, out.json?.error], method).toEqual([400, "invalid_token"]);
+		}
 		expect(await h.stillOpen(session.id)).toBe(true);
-		expect((await h.call("POST", { id_token_hint: hint })).status).toBe(200);
-		expect(await h.stillOpen(session.id)).toBe(false);
 	});
 
 	it("sends the browser back with its state only to a return the hint's client registered", async () => {

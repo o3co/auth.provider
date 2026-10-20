@@ -382,6 +382,7 @@ Compose `userinfo` and `oidc` for the userinfo endpoint and ID tokens, `rp-logou
 | (ID token lifetime fixed at 3600 s) | `oidc.id-token-lifetime` | Default `1h`; `1m` to `1d` |
 | `oauth.oidcMode` | `authorize.oidc-mode` (`oidc-required` or `dual`) | Default `oidc-required`, as before |
 | `/oauth/logout` (with the oauth endpoints) | compose `rp-logout` + `rp-logout-store` | `oidc` judges the `id_token_hint` |
+| (an old `id_token_hint` led to a page asking to confirm) | (no setting) | A hint issued more than 24 hours ago is refused `400 invalid_token`, by GET or POST, and the session stays open; the RP sends a fresher hint, or the user logs out at `POST /session/logout` |
 | `POST /session/logout` (session module) | compose `logout` | |
 | upstream end-session from `/oauth/logout` | compose `rp-logout-federation` | Needs `federation-tokens` |
 | `core.sessionLifecycle.sweepIntervalSeconds` | `session-lifecycle.sweep-interval` (pending closes), `rp-logout.sweep-interval` (pending notices) | Defaults `30s` and `1m`; `0` (no sweep) is gone |
