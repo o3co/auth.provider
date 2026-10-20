@@ -1,5 +1,5 @@
 import { type Audit, declaredAudit } from "@mod/audit";
-import { isUnavailable, type Log, Unavailable } from "@mod/kernel";
+import { type Log, Unavailable } from "@mod/kernel";
 import { isLabel } from "@mod/labels";
 import {
 	type FactorKind,
@@ -13,7 +13,7 @@ import events from "./audit-events.ts";
 import type { Factors, Fence, Shown } from "./contract.ts";
 import { type Factor, factorRecords, sealContext } from "./records/records.ts";
 import type { FactorStore } from "./store.ts";
-import { markedBy, standingOf } from "./witness/witness.ts";
+import { settlingOf, standingOf } from "./witness/witness.ts";
 
 export interface FactorParts {
 	readonly stored: FactorStore;
@@ -59,8 +59,6 @@ interface Pending {
 	readonly secret: string;
 	/** Begun while the subject held no counting factor: it binds only while it would still be the first. */
 	readonly first?: true;
-	/** The first binding's own mark at the witness, never shown or logged. */
-	readonly token?: string;
 	/** The subject's fence when it began: a reset or a fence since leaves it nothing to bind. None reads as 0. */
 	readonly fences?: number;
 }
@@ -104,9 +102,7 @@ export function factorDecisions(p: FactorParts): Factors {
 		const value = JSON.parse(opened(pending, sealContext(subject, "pending"))) as Pending;
 		const kind = p.kinds.get(value.kind);
 		const fences = typeof value.fences === "number" ? value.fences : 0;
-		return kind
-			? { kind, secret: value.secret, first: value.first === true, token: value.token, fences }
-			: undefined;
+		return kind ? { kind, secret: value.secret, first: value.first === true, fences } : undefined;
 	};
 	const recovery = async (subject: string) => {
 		const kind = [...p.kinds.values()].find(isWayBack);
@@ -128,22 +124,15 @@ export function factorDecisions(p: FactorParts): Factors {
 		return { factor, show: enrolled.show };
 	};
 	const standing = standingOf(p);
+	const settle = settlingOf({
+		witness: p.witness,
+		counting: async (subject) => counting(await records.list(subject), p.kinds).length > 0,
+		token: id,
+	});
 	/** A first binding refused, recorded with why; nothing of it is kept. */
 	const closed = (subject: string, kind: string, reason: "competing" | "reset-cleared") => {
 		audited.record("mfa.first_binding_conflict", { subject, attributes: { kind, reason } });
 		return { kind: "first-binding-closed" } as const;
-	};
-	/** The factors removed, once more where the store cannot answer the first time. */
-	const dropped = async (subject: string, gone: ReadonlySet<string>) => {
-		const drop = () =>
-			records.decide(subject, (all) => ({
-				next: all.filter((f) => !gone.has(f.id)),
-				verdict: undefined,
-			}));
-		await drop().catch((error: unknown) => {
-			if (!isUnavailable(error)) throw error;
-			return drop();
-		});
 	};
 	// Factors first, then the mark: a failure between leaves a mark and no factor, which stops logins.
 	const clear = async (subject: string) => {
@@ -256,7 +245,7 @@ export function factorDecisions(p: FactorParts): Factors {
 			const value: Pending = {
 				kind: kind.kind,
 				secret: enrolled.secret,
-				...(first ? { first, token: id() } : {}),
+				...(first ? { first } : {}),
 				...(fences > 0 ? { fences } : {}),
 			};
 			const pending = p.seal.seal(JSON.stringify(value), sealContext(subject, "pending"));
@@ -277,17 +266,12 @@ export function factorDecisions(p: FactorParts): Factors {
 			if ((await records.fences(subject)) !== found.fences) return { kind: "fenced" };
 			// Asked from a login, it binds only as the first, whenever and however it began.
 			const asFirst = found.first || from?.kind === "login";
-			// The mark goes first: a first factor never stands unwitnessed, and another binding's mark closes this one.
-			const witness = asFirst ? p.witness : undefined;
+			// A mark beside nothing counting is a store that lost its factors: no first binding refills it.
+			if (asFirst && p.witness) {
+				const counts = counting(await records.list(subject), p.kinds).length > 0;
+				await standing(subject, counts, "binding");
+			}
 			const unique = found.kind.uniqueSecret?.({ secret: found.secret, state });
-			// A value another factor holds is refused before the mark, which would else stay with nothing beside it.
-			if (witness && unique !== undefined && (await records.taken(found.kind.kind, unique))) {
-				return { kind: "duplicate" };
-			}
-			if (witness) {
-				const owned = found.token !== undefined && (await markedBy(witness, subject, found.token));
-				if (!owned) return closed(subject, found.kind.kind, "competing");
-			}
 			const fid = id();
 			const factor: Factor = {
 				id: fid,
@@ -311,15 +295,13 @@ export function factorDecisions(p: FactorParts): Factors {
 					return { next: [...all, factor], verdict: { due } };
 				},
 			);
-			// Any mark is left: only a reset clears one, as the mark may be a newer binding's by now.
 			if (written === "fenced") return { kind: "fenced" };
 			if (written === "full") return { kind: "full" };
 			if (written === "closed") return closed(subject, factor.kind, "competing");
 			const { due } = written;
 			const ours = new Set([fid]);
-			// A reset that cleared the mark meanwhile cleared this subject: what was written goes too.
-			if (witness && !(await witness.read(subject))) {
-				await dropped(subject, ours);
+			// A reset since the write took what was written: nothing stands for this binding.
+			if (!(await records.list(subject)).some((f) => f.id === fid)) {
 				return closed(subject, factor.kind, "reset-cleared");
 			}
 			if (unique !== undefined && !(await records.claim(subject, factor.kind, unique, fid))) {
@@ -331,6 +313,8 @@ export function factorDecisions(p: FactorParts): Factors {
 				return { kind: "duplicate" };
 			}
 			recorded("factor.enrolled", subject, { kind: factor.kind, factor: fid });
+			// The mark follows the factor: a write that fails leaves none, and a missing one is filled here.
+			await settle(subject);
 			return { kind: "bound", factor: shown(factor), fence: found.fences as Fence, codesDue: due };
 		},
 		fence: (subject) => records.fence(subject),
