@@ -29,6 +29,7 @@
 - A `proof` sent as a JSON object (a WebAuthn response, say) reaches the kind as its JSON text; an array, number or other non-string is absent.
 - The gate asks `mfa` what login requires: nothing lets the login through; a proof or a first enrollment starts a transaction and holds it.
 - The transaction identifier comes from the body's `transaction_id` or the `MFA-Transaction` header, never a URL; it is tied to the browser by its own cookie. Unknown, other browser, used, expired, and a body and header that differ all get the same `400`, and nothing is used up.
+- `GET transaction` naming none answers the browser's own transaction, whatever its purpose, by its cookie alone, with its identifier: the page a navigation lands on reads it so. No other route takes a transaction from the cookie alone.
 - A challenge sent is held sealed by `mfa`, and the next attempt takes it once; asking again voids it.
 - An attempt is used before the proof is judged, and success takes the transaction exactly once. A proof that cannot be judged (unavailable) is `503` and gives its attempt back. When `rate-limit` cannot settle a success once it is taken, the transaction stays spent and the answer is `503` (fail closed). Lockout counts only kinds where guessing works; while locked out, even a correct proof gets `429`.
 - If the subject was revoked after the transaction started, every route naming it answers `401 login_required`, and a POST ends it; a login opening meanwhile is closed. If the store cannot answer, `503`, never a negative verdict.
