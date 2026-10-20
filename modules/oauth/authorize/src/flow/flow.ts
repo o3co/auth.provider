@@ -94,6 +94,8 @@ export function flowWith(parts: FlowParts): Flow {
 			return { kind: "send", to: login.href };
 		};
 		const taken = await reauths.take(one("reauth"), params);
+		// Back with a record that is not this request's (spent, unknown, or its demand taken out): never let through.
+		if (params.has("reauth") && taken === undefined) return refusal("login_required");
 
 		const session = await entered.enter(request);
 		if (!session) return toLogin();
