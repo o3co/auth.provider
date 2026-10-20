@@ -32,6 +32,11 @@ export interface ClientRecord {
 	readonly sections: Readonly<Record<string, unknown>>;
 }
 
+/** Where a record fails, from its root (`method`, `sections.consent.uri`); never a value. */
+export interface RecordRefusal {
+	readonly path: string;
+}
+
 export interface ClientSource {
 	find(id: string): Promise<ClientRecord | undefined>;
 }
@@ -72,6 +77,12 @@ export type Authentication =
 
 export interface Clients {
 	find(id: string): Promise<Client | undefined>;
+	/**
+	 * Checks a record as `find` holds a source's: the rule for a registered one, a known method and
+	 * each section's schema. Answers where each part fails, nothing when it fits; rejects when a
+	 * schema throws.
+	 */
+	checkRecord(record: ClientRecord): Promise<readonly RecordRefusal[] | undefined>;
 	authenticate(request: HttpRequest): Promise<Authentication>;
 	/** The names of the ways a client can authenticate here, built in and contributed. */
 	methods(): readonly string[];

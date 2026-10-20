@@ -8,6 +8,7 @@
 
 ## Offers
 - `find` (id → client or none) and `authenticate` (request → client or a typed refusal, never null); both throw unavailable when a source is unavailable.
+- `checkRecord` (record → where it fails, or nothing): the checks `find` holds a source's record to (the registered rule, a known method, each section's schema), each failure a path from the record's root (`sections.consent.uri`), never a value or message; it rejects when a schema throws.
 - An authenticated answer carries the challenges for a later 401 to that client: its method's, or every method's when its method has none.
 - `methods` names the usable authentication methods, built in and contributed; `signingAlgorithms` names the algorithms they take signed credentials in.
 - A client gives its metadata by section, and says whether the operator registered it or another source named it.

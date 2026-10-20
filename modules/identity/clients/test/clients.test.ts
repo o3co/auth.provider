@@ -493,6 +493,41 @@ describe("clients", () => {
 		}
 	});
 
+	it("checks a record as find holds a source's, answering where each part fails and never a value", async () => {
+		const c = await boot();
+		const good = { id: "doc", kind: "public", method: "none", sections: {} };
+		const pathsOf = async (record: unknown) =>
+			(await c.checkRecord(record as ClientRecord))?.map((refusal) => refusal.path);
+		expect(await c.checkRecord(good as ClientRecord)).toBeUndefined();
+		expect(await pathsOf({ ...good, sections: { grants: { allowed: ["a"] } } })).toBeUndefined();
+		expect(await pathsOf({ ...good, kind: "secret" })).toEqual(["kind"]);
+		expect(await pathsOf({ ...good, id: "" })).toEqual(["id"]);
+		expect(await pathsOf({ ...good, note: "x" })).toEqual(["note"]);
+		expect(await pathsOf({ ...good, method: "ghost" })).toEqual(["method"]);
+		expect(await pathsOf({ ...good, sections: { ghost: {} } })).toEqual(["sections.ghost"]);
+		expect(await pathsOf({ ...good, sections: { grants: { allowed: ["a", 2] } } })).toEqual([
+			"sections.grants.allowed.1",
+		]);
+		const refused = await c.checkRecord({
+			...good,
+			kind: "s3cret-kind",
+			sections: { grants: { allowed: "s3cret-allowed" } },
+		} as never);
+		expect(JSON.stringify(refused)).not.toContain("s3cret");
+		expect(refused?.map((refusal) => Object.keys(refusal))).toEqual([["path"]]);
+		const unreadable = new Proxy(
+			{},
+			{
+				get: () => {
+					throw new Error("unreadable");
+				},
+			},
+		);
+		await expect(
+			c.checkRecord({ ...good, sections: { grants: unreadable } } as ClientRecord),
+		).rejects.toThrow("unreadable");
+	});
+
 	it("answers an authenticated client with its method's challenge, or every method's when it has none", async () => {
 		const challenged = method("challenged", {
 			challenge: 'Challenged realm="x"',
