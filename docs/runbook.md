@@ -53,6 +53,22 @@ A server that does not fsync every write cannot give the durable guarantee. Set 
 
 Connect with `rediss://` for TLS. The password goes in the URL. The URL is never logged, and a refusal never quotes it.
 
+### Managed Redis/Valkey with replicas
+
+A managed, non-cluster Redis or Valkey with replicas and automatic failover serves `redis.replication = replicas` when three things hold.
+
+**Set these in the service's own configuration**, then declare the same values in `redis.server-settings` where it refuses `CONFIG`:
+
+- `min-replicas-to-write` of 1 or more, and `min-replicas-max-lag` of 1 or more, so a primary cut off from its replicas stops taking writes;
+- `maxmemory-policy noeviction`;
+- for the durable spaces, `appendonly yes` and `appendfsync always`, or `redis.durability = none` where the service offers neither (see [A managed Redis that refuses `CONFIG`](#a-managed-redis-that-refuses-config)).
+
+Where the service keeps these in a parameter group whose defaults are 0 or another policy, make a group of your own with these values: declaring them while the server holds the defaults is a statement the check cannot see past.
+
+**Allow these commands**, besides the data commands: `EVAL` and `EVALSHA`, with `INFO` called from a script (`INFO server`, `INFO replication`); `ROLE`; `WAIT`; `SCAN`; `TIME`; `PEXPIRETIME`. A replicated write is confirmed by a round of `ROLE`, `INFO server`, a `SET` and a `WAIT`, and every script reads `INFO`. Boot checks the settings, not these commands, so a service that refuses or renames one boots and answers `/readyz` 200, and then every write to a replicated space answers 503: a login's first write shows it. Until boot and the probe run a confirmation round themselves (0.19), sign in once after deploying, and after changing the service's configuration.
+
+**Know what the service's failover keeps.** A write to a replicated space is confirmed only once every replica `ROLE` shows has it, and a primary that sees no replica confirms nothing. So a confirmed write is on every replica that was connected when it was confirmed, and survives the service promoting any of them. It can be lost only where the service promotes a replica that had already dropped out of replication (one `ROLE` no longer showed), as it then holds nothing confirmed since. On a managed service you cannot keep such a replica from promotion yourself: check how the service picks the replica to promote, and prefer one that promotes the most up-to-date. A request that reaches the new primary in the middle of a failover answers 503 rather than an answer the new server did not compute, and versions never repeat across the failover.
+
 ### Choosing `replication`
 
 - `replicas`: writes that must survive a failover wait until every replica has them. While no replica is seen, or replicas lag, those writes are unavailable and the requests that need them answer 503. The system denies rather than allows.
