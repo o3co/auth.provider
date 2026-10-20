@@ -232,9 +232,28 @@ const isPrivate = (address: string) => {
 	return inList(privately, spelled) && !inList(metadata, spelled);
 };
 
+/**
+ * Whether an IP address, however written (bracketed, in any case, IPv4 mapped into IPv6), reaches
+ * loopback: 127/8 or `::1`. A name is none; nor is an IPv6 form that carries 127/8 unmapped, which no
+ * connection takes to loopback.
+ */
+export function isLoopbackAddress(address: string): boolean {
+	const bare = address.startsWith("[") && address.endsWith("]") ? address.slice(1, -1) : address;
+	const family = isIP(bare);
+	if (family === 4) return !address.startsWith("[") && loopback.ipv4.check(bare, "ipv4");
+	if (family !== 6) return false;
+	const written = unbracketed(URL.parse(`https://[${bare}]`)?.hostname ?? "");
+	const mapped = /^::ffff:[0-9a-f]{1,4}:[0-9a-f]{1,4}$/.test(written)
+		? carried(written)
+		: undefined;
+	return mapped === undefined
+		? loopback.ipv6.check(written, "ipv6")
+		: loopback.ipv4.check(mapped, "ipv4");
+}
+
 /** What refuses an address by reach: all but loopback (carried in IPv6 too) for a plain pair; special but private ones for an internal host. */
 function refusing(reach: Pick<Admitted, "loopback" | "internal">): (address: string) => boolean {
-	if (reach.loopback) return (address) => !inList(loopback, normalized(address) ?? address);
+	if (reach.loopback) return (address) => !isLoopbackAddress(address);
 	if (reach.internal) return (address) => isSpecial(address) && !isPrivate(address);
 	return isSpecial;
 }
