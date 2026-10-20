@@ -16,6 +16,7 @@
   - `settle(subject)` → `marked` (this call filled it), `held` (marked already, or by another meanwhile), `none`, or `inconsistent` (a mark it did not set beside nothing counting, left as it is).
   - It reads the factors again after marking: a mark it set beside nothing counting (a reset took the factors meanwhile) goes. After that clear it reads again and marks anew where one counts, three times at most.
   - Unavailable where the witness or `mfa` cannot answer, named `mfa` as `mfa` names it.
+  - Unavailable too where a reset lands between its last read of the factors and its last read of the witness, though neither then holds anything; asked again, it answers `none`.
 - Audit event `mfa.enrollment_inconsistent`, declared in `./audit-events`.
 
 ## Invariants
