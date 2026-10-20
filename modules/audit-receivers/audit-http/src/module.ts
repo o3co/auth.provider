@@ -1,7 +1,12 @@
 import { auditReceivers } from "@mod/audit";
 import { defineModule } from "@mod/kernel";
 import { outbound } from "@mod/outbound";
-import { credentialPolicy, destinationRefusal, outboundRefusals } from "@mod/outbound-policy";
+import {
+	credentialPolicy,
+	credentialRefusalText,
+	destinationRefusal,
+	outboundRefusals,
+} from "@mod/outbound-policy";
 import { section } from "./section.ts";
 
 export default defineModule({ name: "audit-http", section, replicaSafe: true }, (m) => [
@@ -13,11 +18,11 @@ export default defineModule({ name: "audit-http", section, replicaSafe: true }, 
 		if (refused !== undefined) {
 			return c.refuse("audit-http.url", refused);
 		}
-		if (authorization !== undefined && (await c.get(credentialPolicy)).refusalOf([url])) {
-			return c.refuse(
-				"audit-http.url",
-				"a secret Authorization value goes over https alone, or to a named plain-loopback pair",
-			);
+		const credentialRefused =
+			authorization === undefined ? undefined : (await c.get(credentialPolicy)).refusalOf([url]);
+		if (credentialRefused !== undefined) {
+			const reason = `a secret Authorization value ${credentialRefusalText(credentialRefused)}`;
+			return c.refuse("audit-http.url", reason);
 		}
 		const out = await c.get(outbound);
 		const headers = { "content-type": "application/json" };
