@@ -718,10 +718,10 @@ it("declares mfa only where a kind adds a second factor", async () => {
 });
 
 describe("recovery codes written by the reissue", () => {
-	/** Binds a code factor for the subject, leaving the recovery codes for later. */
+	/** Binds a code factor for the subject, which writes no recovery codes. */
 	const bindLater = async (h: Awaited<ReturnType<typeof serve>>, subject: string) => {
 		const { pending, state } = await h.provedCode(subject);
-		return h.decided.bind(subject, pending, state, undefined, undefined, "later");
+		return h.decided.bind(subject, pending, state);
 	};
 
 	it("binds with no codes, answering the fence it began under and that codes are due; the reissue makes the first set", async () => {

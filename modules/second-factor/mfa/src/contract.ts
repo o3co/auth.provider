@@ -105,8 +105,6 @@ export interface Factors {
 		state: unknown,
 		label?: string,
 		from?: AskedFrom,
-		/** Read no more: no binding writes codes. Kept until callers stop passing it. */
-		codes?: "later",
 	): Promise<
 		| {
 				readonly kind: "bound";
