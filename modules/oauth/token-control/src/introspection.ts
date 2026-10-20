@@ -35,7 +35,7 @@ export function introspection(
 	audit: Audit,
 ): Pick<Route, "handle" | "unavailable"> {
 	const answer = async (request: HttpRequest): Promise<HttpResponse> => {
-		const authenticated = await authenticateClient(clients, request);
+		const authenticated = await authenticateClient(clients, request, audit);
 		if (authenticated.kind === "refused") return authenticated.response;
 		const caller = authenticated.client;
 		if (caller.kind !== "confidential")
