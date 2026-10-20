@@ -10,14 +10,18 @@
 ## Offers
 - Contribution to `mfa`'s `witnessing`:
   - `standing`: `held` for a subject holding a counting factor; `none` where the witness marks nothing either; a mark beside nothing counting is recorded as `mfa.enrollment_inconsistent` (`at`), logged, and unavailable, as is a witness that cannot be read.
-  - `settle`, after a binding's write: a counting factor with no mark is marked under a new token; a mark beside nothing counting goes only where this call set it (a reset took the factor meanwhile). It reads again after each change, settles twice at most, then is unavailable while they still differ.
+  - `settle`, after a binding's write: a counting factor with no mark is marked under a new token; a mark beside nothing counting goes only where this call set it (a reset took the factor meanwhile). After that clear it reads the factors again and marks anew where one counts. It reads again after each change, settles twice at most, then is unavailable while they still differ.
   - `cleared`, after a reset: the mark goes.
-- Contract `witnessBackfill`: `settle(subject)` → `marked` (this call filled it), `held` (marked already, or by another meanwhile), `none`, or `inconsistent` (a mark it did not set beside nothing counting, left as it is). It reads the factors again after marking: a mark it set beside nothing counting (a reset took the factors meanwhile) goes. Unavailable where the witness or `mfa` cannot answer, named `mfa` as `mfa` names it.
+- Contract `witnessBackfill`:
+  - `settle(subject)` → `marked` (this call filled it), `held` (marked already, or by another meanwhile), `none`, or `inconsistent` (a mark it did not set beside nothing counting, left as it is).
+  - It reads the factors again after marking: a mark it set beside nothing counting (a reset took the factors meanwhile) goes. After that clear it reads again and marks anew where one counts, three times at most.
+  - Unavailable where the witness or `mfa` cannot answer, named `mfa` as `mfa` names it.
 - Audit event `mfa.enrollment_inconsistent`, declared in `./audit-events`.
 
 ## Invariants
 - A mark follows a written factor: between a binding's write and its mark the factor stands unwitnessed, and a write that fails leaves no mark.
 - A mark this package did not set is never cleared but by a reset; it may be a store that lost its factors.
+- A clear of its own mark can take a binding's mark set just before it; where the store also loses that binding's factor before the next read, the subject reads as never enrolled.
 - Boot is refused without exactly one witness composed.
 - Comes once `mfa` and `mfa-witness-http` are both composed, through `combinations`; an app composed by hand with another witness composes it too.
 

@@ -24,25 +24,36 @@ const kinds = defineModule({ name: "kinds" }, (m) => [
 	m.contribute(factorKinds).by(() => ({ kind: "code", counts: true }) as never),
 	m.contribute(factorKinds).by(() => ({ kind: "backup", counts: false }) as never),
 ]);
-const holding = (held: Record<string, string[]>) =>
-	defineModule({ name: "factors-stand-in" }, (m) => [
+/** `afterRead` runs after the n-th read of the factors has taken its answer, as a request racing it would. */
+const holding = (held: Record<string, string[]>, afterRead?: (n: number) => void) => {
+	let reads = 0;
+	return defineModule({ name: "factors-stand-in" }, (m) => [
 		m.provide(factors).by(
 			() =>
 				({
-					held: async (subject: string) =>
-						(held[subject] ?? []).map((kind, i) => ({ id: `${i}`, kind })),
+					held: async (subject: string) => {
+						const answer = (held[subject] ?? []).map((kind, i) => ({ id: `${i}`, kind }));
+						reads += 1;
+						afterRead?.(reads);
+						return answer;
+					},
 				}) as unknown as Factors,
 		),
 	]);
+};
 
-async function boot(held: Record<string, string[]> = {}, witnesses = [witnessStandIn()]) {
+async function boot(
+	held: Record<string, string[]> = {},
+	witnesses = [witnessStandIn()],
+	afterRead?: (n: number) => void,
+) {
 	const recorded = auditStandIn();
 	const logged = recordingLog();
 	const app = await assemble({
 		modules: [
 			...witnesses.map((w) => w.module),
 			kinds,
-			holding(held),
+			holding(held, afterRead),
 			recorded.module,
 			bridge,
 			reader,
@@ -105,6 +116,24 @@ it("leaves no mark when a reset takes the factors while it fills one, and clears
 	};
 	expect(await app.get(witnessBackfill).settle("ann")).toBe("none");
 	expect(witness.marks.has("ann")).toBe(false);
+});
+
+it("marks anew when its clear takes the mark a new binding set after a reset", async () => {
+	const held: Record<string, string[]> = { ann: ["code"] };
+	const stand = witnessStandIn();
+	// After the late read that sees the reset, a new binding writes its factor and marks it.
+	const { app } = await boot(held, [stand], (n) => {
+		if (n !== 2) return;
+		held.ann = ["code"];
+		stand.marks.set("ann", "binding");
+	});
+	// A reset takes the factors and the mark right after the backfill marks.
+	stand.next.afterEnroll = () => {
+		held.ann = [];
+		stand.marks.delete("ann");
+	};
+	expect(await app.get(witnessBackfill).settle("ann")).toBe("marked");
+	expect(stand.marks.has("ann")).toBe(true);
 });
 
 it("answers held, not marked, where another marked the subject while it filled", async () => {

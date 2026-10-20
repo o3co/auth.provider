@@ -30,6 +30,26 @@ it("clears a mark it set itself when the factor went meanwhile, as a reset's rem
 	expect(marks.has("cid")).toBe(false);
 });
 
+it("marks anew when its clear takes the mark a new binding set after a reset", async () => {
+	const stand = witnessStandIn();
+	const reads = [true, false, true, true];
+	let n = 0;
+	const settle = settlingOf({
+		witness: stand.witness,
+		counting: async () => {
+			const counts = reads[Math.min(n++, reads.length - 1)] ?? false;
+			// After the late read that sees the reset, a new binding writes its factor and marks it.
+			if (n === 2) stand.marks.set("hal", "binding");
+			return counts;
+		},
+		token: () => `t${n}`,
+	});
+	// A reset takes the factor and the mark right after this call marks.
+	stand.next.afterEnroll = () => stand.marks.delete("hal");
+	await settle("hal");
+	expect(stand.marks.has("hal")).toBe(true);
+});
+
 it("never clears a mark it did not set, which may be a store that lost its factors", async () => {
 	const { settle, marks } = settled([false]);
 	marks.set("dee", "theirs");
