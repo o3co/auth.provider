@@ -223,6 +223,9 @@ export function apiWith(p: ApiParts) {
 			return { value: records.stored({ ...grant, intent: { ...grant.intent, ended: why } }) };
 		});
 
+	/** How many intents, lodged or renewed, one client may write in a window. */
+	const lodgeWindow = () => ({ limit: settings.lodges, ms: settings["lodge-window"] * 1000 });
+
 	const lodge = async (request: HttpRequest, client: Client): Promise<HttpResponse> => {
 		const body = bodyOf(
 			request,
@@ -250,8 +253,7 @@ export function apiWith(p: ApiParts) {
 		}
 		const { intent } = asked;
 		// Counted per client, whatever subject it names, so no client fills the store.
-		const window = { limit: settings.lodges, ms: settings["lodge-window"] * 1000 };
-		const counted = await p.lodges.hit("federation-grants.lodges", client.id, window);
+		const counted = await p.lodges.hit("federation-grants.lodges", client.id, lodgeWindow());
 		if (counted.kind === "limited") {
 			denied("rate_limited");
 			const after = String(Math.ceil(counted.retryAfterMs / 1000));
@@ -321,6 +323,18 @@ export function apiWith(p: ApiParts) {
 		const asked = intentFrom(body, client, configured.connection, "reauthorization");
 		if (asked.kind === "refused") return asked.answer;
 		const { intent } = asked;
+		// Counted with the client's lodgings: each renewal writes an intent and a link too.
+		const counted = await p.lodges.hit("federation-grants.lodges", client.id, lodgeWindow());
+		if (counted.kind === "limited") {
+			record(
+				"federation.grant.request.denied",
+				grant.subject,
+				{ client: client.id, outcome: "rate_limited" },
+				request,
+			);
+			const after = String(Math.ceil(counted.retryAfterMs / 1000));
+			return error(429, "rate_limited", "provider", { "retry-after": after });
+		}
 		const changed = await p.grants.change(grant.id, (stored) => {
 			const now = records.grantOf(stored);
 			if (now?.status === "revoked" || now?.status === "pending" || !now) return undefined;

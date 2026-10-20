@@ -179,8 +179,8 @@ From `@mod/federation-grants`.
 | `federation-grants.refresh-before` | string | `30s` |  |  |  | A token this close to its end is refreshed, once half its life is spent: a duration with a unit, from 0s to 1h, e.g. 30s. |
 | `federation-grants.rotations` | integer (1–1000) | `24` |  |  |  | Upstream refreshes a grant may take in each rotation-window, from 1 to 1000. |
 | `federation-grants.rotation-window` | string | `1h` |  |  |  | The window a grant's upstream refreshes are counted in: a duration with a unit, from 1s to 1d, e.g. 1h. |
-| `federation-grants.lodges` | integer (1–100000) | `60` |  |  |  | Intents a client may lodge in each lodge-window, whatever subject it names, from 1 to 100000. |
-| `federation-grants.lodge-window` | string | `1m` |  |  |  | The window a client's lodged intents are counted in: a duration with a unit, from 1s to 1d, e.g. 1m. |
+| `federation-grants.lodges` | integer (1–100000) | `60` |  |  |  | Intents a client may lodge or renew in each lodge-window, together, whatever subject it names, from 1 to 100000. |
+| `federation-grants.lodge-window` | string | `1m` |  |  |  | The window a client's lodged and renewed intents are counted in: a duration with a unit, from 1s to 1d, e.g. 1m. |
 | `federation-grants.revocation-skew` | string | `1s` |  |  |  | How far apart hosts' clocks may be: a grant made this soon after its subject's revocation counts as revoked. A duration with a unit, from 0s to 5m, e.g. 1s. |
 | `federation-grants.sweep-interval` | string | `1h` |  |  |  | How often each host walks every grant kept, erasing the credentials of one past its end or ended by its subject's revocation though no request reads it: a duration with a unit, from 1m to 1d, e.g. 1h. |
 | `federation-grants.keep-on-subject-revocation` | boolean | `false` |  |  |  | Whether a subject's revocation may be asked to leave its established grants. |

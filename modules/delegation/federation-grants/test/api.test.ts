@@ -43,6 +43,22 @@ describe("the client routes", () => {
 		expect(h.events.filter((e) => e.kind === "federation.grant.request.denied").length).toBe(1);
 	});
 
+	it("counts renewals with lodgings per client, answering 429 past the limit and writing nothing", async () => {
+		const h = await harness({ settings: { lodges: 2 } });
+		const { id } = await h.connected();
+		const renew = () => h.grantCall(id, "reauthorize", { redirect_uri: back, state: "r" });
+		expect((await renew()).status).toBeLessThan(400);
+		const before = h.stores.peek(id);
+		expect(said(await renew())).toBe("429 rate_limited provider 60");
+		expect(h.stores.peek(id)).toEqual(before);
+		const denied = h.events.filter((e) => e.kind === "federation.grant.request.denied");
+		expect(denied.map((e) => [e.subject, e.attributes?.outcome])).toEqual([
+			["alice", "rate_limited"],
+		]);
+		// Another client's count is its own.
+		expect((await h.lodge({ sub: "c" }, "other")).status).toBe(201);
+	});
+
 	it("pushes out the oldest first-time intent of a pair past the cap, which then cannot connect", async () => {
 		const h = await harness();
 		const first = await h.started();

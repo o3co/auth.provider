@@ -92,12 +92,12 @@ export const section = z.strictObject({
 		.max(100_000)
 		.prefault(60)
 		.describe(
-			"Intents a client may lodge in each lodge-window, whatever subject it names, from 1 to 100000.",
+			"Intents a client may lodge or renew in each lodge-window, together, whatever subject it names, from 1 to 100000.",
 		),
 	"lodge-window": seconds(1, 86_400)
 		.prefault("1m")
 		.describe(
-			"The window a client's lodged intents are counted in: a duration with a unit, from 1s to 1d, e.g. 1m.",
+			"The window a client's lodged and renewed intents are counted in: a duration with a unit, from 1s to 1d, e.g. 1m.",
 		),
 	"revocation-skew": seconds(0, 300)
 		.prefault("1s")
