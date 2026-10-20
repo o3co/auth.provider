@@ -5,7 +5,7 @@ import { factors } from "@mod/mfa";
 import { type LockoutPolicy, lockouts } from "@mod/rate-limit";
 import { longestRecentMs, sessions } from "@mod/session";
 import { subjectRevocation } from "@mod/subject-revocation";
-import { enrollmentFlow } from "../contract.ts";
+import { type EnrollmentFlow, enrollmentFlow } from "../contract.ts";
 import { permitsOver } from "../permits/permits.ts";
 import { proofOver, resumeOver } from "../proof/proof.ts";
 import { releaseOver } from "../release/release.ts";
@@ -59,8 +59,7 @@ export async function handlersOver(c: BuildContext<Settings>, policy: LockoutPol
 	});
 	// The one flow the module binding factors contributes; the kernel refuses boot without it.
 	const [flow] = await c.collect(enrollmentFlow);
-	if (!flow) throw new Error("no enrollment flow");
-	const { challenge, ...enrollment } = flow;
+	const { challenge, ...enrollment } = flow as EnrollmentFlow;
 	const proof = proofOver({
 		...resuming,
 		enrollmentChallenge: challenge,
