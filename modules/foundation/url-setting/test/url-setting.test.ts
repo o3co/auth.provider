@@ -292,7 +292,7 @@ it("takes an origin alone where the rules ask one: no path, not even /, and no q
 		expect(
 			origin.safeParse(value).error?.issues.map((i) => i.message),
 			value,
-		).toEqual(["a URL: an origin alone, with no path or query"]);
+		).toEqual(["a URL: an origin alone, with no path (not even a trailing `/`) and no query"]);
 	}
 });
 
