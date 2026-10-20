@@ -95,7 +95,7 @@ it("composes the workspace's full template: each axis's default, no owner it rep
 });
 
 // An axis whose owner has no module: a module that needs only the owner gets the owner's default adapter.
-it("composes federation, upstreams' default, with its wiring, where a selection needs upstreams alone", () => {
+it("composes federation, upstreams' default, with the wirings of what it needs, where a selection needs upstreams alone", () => {
 	const selections = [
 		{ features: { login: ["@mod/upstreams"] } },
 		{ features: {}, add: ["@mod/idp-apple"] },
@@ -103,7 +103,11 @@ it("composes federation, upstreams' default, with its wiring, where a selection 
 	];
 	for (const selection of selections) {
 		expect(composed(selection), JSON.stringify(selection)).toEqual(
-			expect.arrayContaining(["@mod/federation", "@mod/federation-store"]),
+			expect.arrayContaining([
+				"@mod/federation",
+				"@mod/upstream-round-trip-store",
+				"@mod/upstream-handoff-store",
+			]),
 		);
 	}
 });
