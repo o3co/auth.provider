@@ -14,6 +14,7 @@
 - `./testing`: the contract test, test configuration builders, and a simulated replicated store that loses what a space's missing guarantees allow (unconfirmed writes on failover, writes not durable on restart, entries not kept from eviction under memory pressure).
 
 ## Invariants
+- Declared `forWiring`: a feature's storage is built on this by its wiring, so no feature depends on it; a feature's tests take it through `./testing` alone.
 - Versions are opaque, compared only for equality, and never repeat for a key, even after a delete or a failure (for memory, within the process).
 - A value lives only while the store clock is before its expiry; at the expiry, reads and writes both see it expired.
 - Failures are unavailable, apart from absent and conflict; only declared spaces are accepted, with the guarantees they declare.
