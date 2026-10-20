@@ -1,0 +1,3 @@
+# upstream-round-trip-store
+
+Wires `upstream-round-trip`'s store interface, round trips, to `records`' records under a secret, so a round trip's cookie never reaches the store. Its one space declares a guarantee for each need `upstream-round-trip` states. A need with nothing mapped to it, a guarantee or records under a secret, fails the type check, and `upstream-round-trip`'s store contract, run on a store that loses what a missing guarantee allows, checks what each guarantee means. The wiring only maps, with no branches or loops. Depends on `kernel`, `upstream-round-trip`, `records` and `store`.

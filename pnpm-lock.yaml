@@ -3027,6 +3027,25 @@ importers:
         specifier: workspace:*
         version: link:../../oauth/sender-binding
 
+  modules/templates/upstream-round-trip-store:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+      '@mod/upstream-round-trip':
+        specifier: workspace:*
+        version: link:../../upstream-login/upstream-round-trip
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
   modules/templates/users-store:
     dependencies:
       '@mod/kernel':
@@ -3697,6 +3716,28 @@ importers:
       vitest:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
+  modules/upstream-login/upstream-round-trip:
+    dependencies:
+      '@mod/cookies':
+        specifier: workspace:*
+        version: link:../../foundation/cookies
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
 
   modules/upstream-login/upstreams:
     dependencies:
