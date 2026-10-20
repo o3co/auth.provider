@@ -1,10 +1,10 @@
 import { routes } from "@mod/http";
 import { contract, defineModule } from "@mod/kernel";
-import { keys } from "./contract.ts";
+import { accessTokenSigning, keys } from "./contract.ts";
 import { jwksResponse } from "./jwks/jwks.ts";
 import { type Ring, readRing } from "./signing/ring.ts";
 import { section } from "./signing/section.ts";
-import { signer } from "./signing/signer.ts";
+import { accessSigner, signer } from "./signing/signer.ts";
 
 const ring = contract<Ring>("keys.ring");
 const keySetPath = "/.well-known/jwks.json";
@@ -20,6 +20,7 @@ export default defineModule({ name: "keys", section }, (m) => [
 		...signer(await c.get(ring), c.clock.now),
 		keySetPath: () => keySetPath,
 	})),
+	m.provide(accessTokenSigning).by(async (c) => accessSigner(await c.get(ring), c.clock.now)),
 	m.contribute(routes).by(async (c) => {
 		const current = await c.get(ring);
 		return {
