@@ -24,10 +24,11 @@ export default defineModule({ name: "mfa-witness-http", section, replicaSafe: tr
 			enroll: c.section["enroll-url"],
 			clear: c.section["clear-url"],
 		};
-		// The operator's own URLs: a host in `internal-hosts` is reached at a private address.
+		// The operator's own URLs, at one origin as their credential's rule holds them: a host in
+		// `internal-hosts` is reached at a private address there alone.
 		const narrower = {
 			hosts: [...new Set(Object.values(urls).map((url) => new URL(url).hostname))],
-			internal: true as const,
+			internal: urls.read,
 			timeoutMs,
 			...(maxBytes === undefined ? {} : { maxBytes }),
 		};
