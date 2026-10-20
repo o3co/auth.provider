@@ -5,7 +5,7 @@ import { recordingLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { memoryTransactions } from "../../../test/stores.ts";
 import type { TransactionStore } from "../../store.ts";
-import type { Transaction } from "../records.ts";
+import { type Transaction, transactionOf } from "../records.ts";
 import { transactionsOver } from "../transactions.ts";
 
 const jar: Cookies = {
@@ -71,20 +71,32 @@ it("starts a transaction holding what it is given, in format 2", async () => {
 	expect([record.format, record.held]).toEqual([2, { pending: "p" }]);
 });
 
-it("reads a format 1 record's binding fields as what it holds", async () => {
+it("reads a format 1 record's binding fields as what it holds, wherever it is read", async () => {
 	const { clock, kept, transactions, start } = opened();
 	const { id } = await start();
+	const binding = {
+		pending: "p",
+		bindingChallenge: { proof: "contact", sealed: "s" },
+		bindingPassed: { kind: "code", pass: "x" },
+		proved: true,
+	};
 	await kept.transactions.update(id, (record) => {
 		const { format: _, held: __, ...rest } = record as unknown as Transaction;
-		const old = { ...rest, pending: "p", bindingPassed: { kind: "code", pass: "x" }, proved: true };
-		return { value: old as never };
+		return { value: { ...rest, ...binding } as never };
 	});
+	// As find and every change read it: the binding's fields are what it holds, and the top keeps none.
+	const read = transactionOf(await kept.transactions.read(id)) as Transaction &
+		Record<string, unknown>;
+	expect([read.format, read.held, read.pending, read.bindingChallenge]).toEqual([
+		2,
+		binding,
+		undefined,
+		undefined,
+	]);
 	clock.now = 1;
-	expect(await transactions.keep(id, (held) => held)).toEqual({
-		held: { pending: "p", bindingPassed: { kind: "code", pass: "x" }, proved: true },
-	});
-	const record = (await kept.transactions.read(id)) as unknown as Record<string, unknown>;
-	expect([record.format, record.pending, record.proved]).toEqual([2, undefined, undefined]);
+	expect(await transactions.keep(id, (held) => held)).toEqual({ held: binding });
+	const written = (await kept.transactions.read(id)) as unknown as Record<string, unknown>;
+	expect([written.format, written.pending, written.proved]).toEqual([2, undefined, undefined]);
 });
 
 it("holds or clears a challenge only in a transaction still in use", async () => {
