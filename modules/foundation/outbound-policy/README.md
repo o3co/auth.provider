@@ -24,7 +24,7 @@
 - Hosts compare lowercase, in punycode, without a trailing dot, in canonical IP form, with IPv4 carried in IPv6 as IPv4; an empty label is denied.
 - One special-purpose address refuses them all: IANA's blocks not globally reachable, multicast, and IPv6 outside global unicast. Only an `internal` URL, at a host in `internal-hosts`, reaches private ones: 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7, but the cloud metadata addresses in them (100.100.100.200, fd00:ec2::254, fd20:ce::254).
 - A caller names `internal` the operator's URL as url-setting read it (a `ConfiguredUrl`, a type nothing else makes) and reaches a private address only at that URL's origin: scheme, host and port. A redirect is never followed, so no other origin is reached.
-- A caller narrows the hosts and caps, never widens them; a narrowing's size or time that is not positive and finite is the caller's error. Signed material always names its hosts, none meaning none.
+- A caller narrows the hosts and caps, never widens them; a narrowing's size or time that is not positive and finite is the caller's error. Signed material always names its hosts, none meaning none. A caller whose destinations an outside party chooses marks them `outsideChosen`, for outbound to give their lookups a share apart.
 - A credential goes to one origin alone, over https or to a named `plain-loopback` pair: the policy answers this (`outbound.credentials`), and the caller applies it at boot. The sender applies the other two rules: no credential with signed material (`credential`), and no redirect followed (`redirect`).
 
 ## Depends on

@@ -34,6 +34,8 @@ export interface Narrower {
 	 * may reach a private address when `internal-hosts` lists the host.
 	 */
 	readonly internal?: ConfiguredUrl;
+	/** An outside party chooses the destination (a client's metadata document, say): its name lookups take a share apart, so they never hold every lookup. */
+	readonly outsideChosen?: true;
 }
 
 /** The destination policy's refusals, as an operator reads them at boot, apart from sending: no name is resolved. */
