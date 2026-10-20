@@ -7,7 +7,7 @@ import {
 	kernelConfig,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { type Message, mail, mailPurposes, mailTemplates } from "@mod/mail";
 import {
 	type BindingProof,
@@ -23,7 +23,8 @@ import { readLongCode, shortCode } from "../src/codes.ts";
 import emailModule from "../src/module.ts";
 
 let now = 1_800_000_000_000;
-const runtime = quietRuntime({ clock: { now: () => now } });
+const logged = recordingLog();
+const runtime = quietRuntime({ clock: { now: () => now }, log: logged.log });
 /** What the account states, by subject; `null` cannot be told. */
 const contacts = new Map<string, string | null>();
 const sent: Message[] = [];
@@ -33,6 +34,8 @@ const sessions = new Map<string, { email: string; vouched: boolean }>();
 const verified: [string, unknown][] = [];
 /** What the sender answers; `unavailable` throws as a sender that cannot tell. */
 let answer: "sent" | "limited" | "unavailable" = "sent";
+/** Whether users keeps no more verified contacts for the subject, as past its limit. */
+let contactsFull = false;
 beforeEach(() => {
 	now = 1_800_000_000_000;
 	contacts.clear();
@@ -40,6 +43,7 @@ beforeEach(() => {
 	sent.length = 0;
 	verified.length = 0;
 	answer = "sent";
+	contactsFull = false;
 });
 
 const seen = contract<{
@@ -65,6 +69,7 @@ const outside = defineModule({ name: "outside" }, (m) => [
 					return value === undefined ? [] : [{ kind: "email", value }];
 				},
 				verifiedContact: async (subject: string, contact: unknown) => {
+					if (contactsFull) throw new RangeError("users: a subject keeps at most 20 contacts");
 					verified.push([subject, contact]);
 				},
 			}) satisfies Pick<Users, "claimedContacts" | "verifiedContact"> as never,
@@ -316,6 +321,19 @@ it("fails as unavailable, sending nothing and judging no code, on a stored value
 	await expect(kind.enroll("ann", [broken])).rejects.toSatisfy(isUnavailable);
 	const { proof } = await boot();
 	await expect(proof.check("ann", unreadable, "x")).rejects.toSatisfy(isUnavailable);
+});
+
+it("passes a right code though users keeps no more verified contacts, logging that it kept none and never the address", async () => {
+	const { proof } = await boot();
+	contacts.set("ann", "ann@example.com");
+	const asked = await proof.send("ann", now + 3_600_000);
+	if (asked.kind !== "sent") throw new Error("not sent");
+	contactsFull = true;
+	expect(await proof.check("ann", asked.kept, String(last().values.code))).toBe(true);
+	expect(verified).toEqual([]);
+	const warned = logged.lines().filter((l) => l.event === "mfa-email.contact_not_kept");
+	expect(warned).toHaveLength(1);
+	expect(JSON.stringify(warned)).not.toContain("ann@example.com");
 });
 
 it("proves the account's address before a first binding, by a long code good for ten minutes at most", async () => {
