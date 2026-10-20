@@ -4,9 +4,11 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "feature",
+	"storeWiring": true,
 	"exports": {
 		".": "./src/contract.ts",
-		"./testing": "./src/testing.ts"
+		"./testing": "./src/testing.ts",
+		"./module": "./src/module.ts"
 	},
 	"dependencies": {
 		"@mod/cookies": "workspace:*",

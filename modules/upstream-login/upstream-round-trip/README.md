@@ -12,6 +12,7 @@
 ## Offers
 - `roundTrips.begin` (a name, what the caller carries as JSON, a lifetime, cross-site or not) → the state, nonce and S256 challenge for the upstream, and the cookie to set.
 - `roundTrips.take` (the callback's request, the name, its `state`) → `taken` (what was carried, the verifier and nonce for the exchange, when it started, and the cookie cleared) or `none`.
+- Composition definition (`./module`): provides `roundTrips` over the store interface the assembly wires and `cookies`.
 - Store interface for round trips, its needs (survives failover, names from the secret) and contract test (`./testing`).
 - The caller adds the cookie cleared to every answer after a take, and reads what it carried with its own schema.
 
