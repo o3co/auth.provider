@@ -179,7 +179,7 @@ describe("C. client credentials: a secret kept as a bcrypt hash", () => {
 });
 
 describe.runIf(areaTarget().can(auditEvents.need))("C. client credentials: audit events", () => {
-	it("records an issuance and a refused grant with the client and the grant type, never the token or secret", async () => {
+	it("records an issuance and a refused grant with the client and the grant type, and a refused client by its reason alone, never the token or secret", async () => {
 		const trail = auditEvents.of(running);
 		const issued = await trail.during(() => token(cc, ["basic", secretOf("basic")]));
 		const refused = await trail.during(() => token(cc, ["nogrant", secretOf("nogrant")]));
@@ -202,8 +202,19 @@ describe.runIf(areaTarget().can(auditEvents.need))("C. client credentials: audit
 				},
 			},
 		]);
-		expect(unknown.events).toEqual([]);
-		const sent = JSON.stringify([issued.events, refused.events]);
+		// Before any client is known: the reason and the source, never the client id claimed.
+		expect(unknown.events).toEqual(
+			areaTarget().differs("client-authentication-failure-recorded")
+				? []
+				: [
+						{
+							kind: "client.authentication.failure",
+							at: expect.any(Number),
+							attributes: { source: expect.any(String), reason: "bad_credentials" },
+						},
+					],
+		);
+		const sent = JSON.stringify([issued.events, refused.events, unknown.events]);
 		expect(sent).not.toContain(String(issued.result.body.access_token));
 		expect(sent).not.toMatch(/secret/);
 	});
