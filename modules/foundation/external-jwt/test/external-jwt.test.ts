@@ -1,6 +1,7 @@
 import { createHmac, generateKeyPairSync } from "node:crypto";
 import { isUnavailable, Unavailable } from "@mod/kernel";
 import { DestinationRefused, type Outbound, type OutboundResponse } from "@mod/outbound";
+import { configuredUrl } from "@mod/url-setting/testing";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Algorithm, KeySource, Policy, Reason } from "../src/contract.ts";
 import { testSigner } from "../src/testing.ts";
@@ -338,12 +339,22 @@ describe("a key set at a URL", () => {
 		body: new TextEncoder().encode(JSON.stringify(json)),
 	});
 	function served() {
-		const asked: { url: string; hosts: readonly string[] | undefined; accept?: string }[] = [];
+		const asked: {
+			url: string;
+			hosts: readonly string[] | undefined;
+			accept?: string;
+			internal?: string;
+		}[] = [];
 		let next: () => Promise<OutboundResponse> = async () => answer(500, {});
 		const outbound: Outbound = {
 			fetch: async (url, init, narrower) => {
 				const accept = init?.headers?.accept;
-				asked.push({ url, hosts: narrower?.hosts, ...(accept ? { accept } : {}) });
+				asked.push({
+					url,
+					hosts: narrower?.hosts,
+					...(accept ? { accept } : {}),
+					...(narrower?.internal ? { internal: narrower.internal } : {}),
+				});
 				return next();
 			},
 		} as Outbound;
@@ -545,6 +556,27 @@ describe("a key set at a URL", () => {
 		now += 1_000;
 		expect((await verifier.verify(await signer.sign(fresh()))).kind).toBe("valid");
 		expect(s.asked).toHaveLength(2);
+	});
+
+	it("keeps a set fetched as the operator's configured URL apart from one that is not, whichever comes first", async () => {
+		const signer = await testSigner("ES256", "k1");
+		const url = "https://issuer.example/jwks";
+		const internal = configuredUrl(url);
+		for (const order of [
+			[false, true],
+			[true, false],
+		]) {
+			const s = served();
+			s.serve([signer.jwk]);
+			const jwt = externalJwtOver({ clock, outbound: s.outbound, keySetMaxAgeMs: 86_400_000 });
+			const token = await signer.sign(fresh());
+			for (const own of order) {
+				const source = { jwks: { url, hosts: ["issuer.example"], ...(own ? { internal } : {}) } };
+				expect((await jwt.verifierOf(source, policy).verify(token)).kind).toBe("valid");
+			}
+			// Each fetched its own set, and only the configured one asks to reach as the operator's.
+			expect(s.asked.map((a) => a.internal)).toEqual(order.map((own) => (own ? url : undefined)));
+		}
 	});
 
 	it("keeps one set for a URL and its hosts, whichever verifier asks", async () => {
