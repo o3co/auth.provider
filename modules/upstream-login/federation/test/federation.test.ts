@@ -289,7 +289,8 @@ describe("federation", () => {
 		const s = await serve({ federation: { "transaction-lifetime": "1m" } });
 		const first = await s.begin("?prompt=login&max_age=60");
 		const kept = s.saved.length;
-		for (const site of [{ "sec-fetch-site": "cross-site" }, {}]) {
+		const sites = [{ "sec-fetch-site": "cross-site" }, { "sec-fetch-site": "same-site" }, {}];
+		for (const site of sites) {
 			const again = await s.get(`${base}/corp`, first.cookie, site);
 			// The same request upstream as the first start's, whatever this one asked; no cookie, nothing kept.
 			expect([again.status, again.location, again.cookies], JSON.stringify(site)).toEqual([
@@ -299,6 +300,10 @@ describe("federation", () => {
 			]);
 		}
 		expect(s.saved.length).toBe(kept);
+		// Each the first start's request whole: its state, nonce, challenge, prompt and max age.
+		const [asked, ...again] = s.asked.starts;
+		expect(asked).toMatchObject({ prompt: "login", maxAgeSeconds: 60 });
+		expect(again).toEqual(sites.map(() => asked));
 		// Read, it is not lengthened: it ends where the first start put it.
 		now += 30_000;
 		const answered = await s.callback(`code=good&state=${first.state}`, first.cookie);
@@ -308,6 +313,50 @@ describe("federation", () => {
 			"sec-fetch-site": "cross-site",
 		});
 		expect(linking.status).toBe(403);
+	});
+
+	it("goes on with a link's live round trip on a login's start from another site, which ends in the link", async () => {
+		const s = await serve();
+		const first = await s.begin();
+		const loggedIn = await s.callback(
+			`code=good&state=${first.state}&iss=https://idp.example`,
+			first.cookie,
+		);
+		const session = loggedIn.cookies.filter((c) => !c.includes("federation.corp=")).join("; ");
+		const linking = await s.get(`${base}/corp?link=1`, session, {
+			"sec-fetch-site": "same-origin",
+		});
+		const cookie = linking.cookies.find((c) => c.includes("federation.corp")) ?? "";
+		const again = await s.get(`${base}/corp`, `${session}; ${cookie}`, {
+			"sec-fetch-site": "cross-site",
+		});
+		expect([again.status, again.location, again.cookies]).toEqual([302, linking.location, []]);
+		const state = new URL(linking.location).searchParams.get("state") ?? "";
+		const before = s.events.length;
+		await s.callback(`code=good&state=${state}&iss=https://idp.example`, `${session}; ${cookie}`);
+		expect(s.events.slice(before).map((e) => e.kind)).not.toContain("federation.login.succeeded");
+	});
+
+	it("begins anew where the browser's live round trip carries what federation does not read", async () => {
+		const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
+		let garbled = false;
+		const trips = defineModule({ name: "trips" }, (m) => [
+			m.provide(roundTripStore).by(() => ({
+				save: kept.records.create,
+				update: async (key, change) => {
+					const read = await kept.records.change(key, change);
+					if (!garbled || !read) return read;
+					const odd = { ...(read.before as object), carried: { unheard: 1 } } as never;
+					return { before: odd, after: odd };
+				},
+			})),
+		]);
+		const s = await serve({ trips });
+		const first = await s.begin();
+		garbled = true;
+		const again = await s.get(`${base}/corp`, first.cookie, { "sec-fetch-site": "cross-site" });
+		expect(new URL(again.location).searchParams.get("state")).not.toBe(first.state);
+		expect(again.cookies.filter((c) => c.includes("federation.corp"))).toHaveLength(1);
 	});
 
 	it("begins anew on a start from this deployment's own page, or once the browser's round trip has ended or been taken", async () => {
