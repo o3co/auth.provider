@@ -36,7 +36,10 @@ it("assembles what combinations composes in full, each axis with one adapter, an
 	const modules = full();
 	expect(await imports(target)).toEqual(modules);
 	const pkg = JSON.parse(await read(target, "package.json"));
-	expect(Object.keys(pkg.dependencies)).toEqual([kernel, ...modules]);
+	expect(Object.keys(pkg.dependencies)).toEqual([kernel, ...modules, "zod"]);
+	// An app writing sections of its own takes the zod the packages take.
+	const kernelManifest = manifest(kernel) as { readonly dependencies?: Record<string, string> };
+	expect(pkg.dependencies.zod).toBe(kernelManifest.dependencies?.zod);
 	expect(pkg.scripts).toEqual({
 		start: "node --env-file-if-exists=.env src/main.ts",
 		reseal: "node --env-file-if-exists=.env src/reseal.ts",
@@ -130,6 +133,8 @@ it("writes the image, and what git and the image leave out", async () => {
 	);
 	expect(docker).toMatch(/^ENTRYPOINT \["\/sbin\/tini", "--"\]$/m);
 	expect(docker).toContain("pnpm install --frozen-lockfile --prod");
+	// The workspace file, where the operator writes one, installs as pnpm reads it; none is needed.
+	expect(docker).toMatch(/^COPY package\.json pnpm-lock\.yaml pnpm-workspace\.yam\[l\] \.\/$/m);
 	expect(docker).toMatch(
 		/^HEALTHCHECK --interval=30s --timeout=5s --start-period=\d+s --retries=3 .*\/_healthcheck/m,
 	);
@@ -257,7 +262,8 @@ it("indexes for agents each composed module's card and section defaults as insta
 	const target = await installed();
 	const index = await read(target, "AGENTS.md");
 	const pkg = JSON.parse(await read(target, "package.json"));
-	const composed = Object.keys(pkg.dependencies);
+	// zod, beside the modules, is no module: the index lists modules alone.
+	const composed = Object.keys(pkg.dependencies).filter((name) => name !== "zod");
 	const rows = [...index.matchAll(/^\| `(@[^`]+)` \| `([^`]+)` \| (?:`([^`]+)`)? \|$/gm)];
 	expect(rows.map((r) => r[1])).toEqual(composed);
 	for (const [, name, card, references] of rows) {

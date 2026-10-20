@@ -1,7 +1,7 @@
 /** A pattern's project: what `combinations` composes from the pattern's selection and the operator's choice. */
 import { composed } from "@mod/combinations";
 import { writeDeployment } from "./deployment.ts";
-import { chosenLines } from "./patterns/chosen.ts";
+import { auditReceiversLine, chosenLines } from "./patterns/chosen.ts";
 import { type Choice, oneInstance, type Pattern, selectionOf } from "./patterns/pattern.ts";
 import { cardOf, patternNamed } from "./patterns/patterns.ts";
 import { namesPackages } from "./project.ts";
@@ -36,6 +36,7 @@ export async function generatePattern(
 			use: pattern.use,
 			card,
 			chosen: chosenLines(modules).join("\n"),
+			receivers: auditReceiversLine(modules),
 			deployment,
 		},
 	});

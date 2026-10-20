@@ -64,7 +64,7 @@ Each module's card, as installed, is the truth about it: what it does, its route
 
 - `kernel.deployment`: {{deployment}}
 - `tokens.revocation`: `denylist`, or `unsupported` to answer revocation as unsupported.
-- `audit.receivers`: the names of the audit receivers composed; `log` writes events to the log.
+- `audit.receivers`: the names of the audit receivers composed: {{receivers}}.
 
 Write secrets, such as the signing key, in `.env` or the local layer only; neither goes into git or the image.
 

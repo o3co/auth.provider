@@ -29,7 +29,7 @@
 ## Invariants
 - A target that holds anything is refused, never overwritten; a missing or empty one is taken.
 - A module, sink, added feature or axis choice not named as an npm package is refused, before anything is written; so is a name the workspace lacks, one that is not a feature, a pattern or group not known, and axes or groups for full.
-- With a workspace, each dependency links to the workspace's package; a module the workspace does not hold is refused. Built into a bundle and given none, it reads the bundle's index: the app depends on each public bundle at the index's version, imports public entries, and takes the fragments the index holds; a module it does not hold is refused.
+- With a workspace, each dependency links to the workspace's package; a module the workspace does not hold is refused. The app also depends on `zod` at the packages' version. Built into a bundle and given none, it reads the bundle's index: the app depends on each public bundle at the index's version, imports public entries, and takes the fragments the index holds; a module it does not hold is refused.
 - A listed app's configuration file holds `kernel`'s section only, and no secret values.
 - A pattern whose store is kept in memory says in its README that the deployment runs as one instance.
 - The full template's and a pattern's configuration file reads the collected fragments' scalar keys from env only, holding no values; each variable is the section and key path joined by `_`, upper-cased, `-` as `_`.
