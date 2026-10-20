@@ -92,6 +92,9 @@ it("composes the workspace's full template: each axis's default, no owner it rep
 		});
 	expect(composed.filter((name) => optIns().includes(name) && !needed(name))).toEqual([]);
 	expect(full(["@mod/dpop"])).toContain("@mod/dpop");
+	// A bridge that opts in comes with what it joins: the witness's keeper with the witness.
+	expect(full(["@mod/mfa-witness-http"])).toContain("@mod/mfa-witnessing");
+	expect(composed).not.toContain("@mod/mfa-witnessing");
 });
 
 // An axis whose owner has no module: a module that needs only the owner gets the owner's default adapter.
