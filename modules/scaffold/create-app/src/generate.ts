@@ -6,11 +6,10 @@ import { packagesFor } from "./packages.ts";
 import { generatePattern, type PatternPlan } from "./pattern.ts";
 import { fullName } from "./patterns/patterns.ts";
 import {
+	entriesOf,
 	mainSource,
 	manifestOf,
 	namesPackages,
-	resealSource,
-	sealPackage,
 	vacant,
 	withKernel,
 	writeProject,
@@ -55,15 +54,15 @@ export async function generate(given: Plan): Promise<void> {
 	// Without a sink, the app's log lines would go nowhere.
 	const modules = asked.includes(sink) ? asked : [...asked, sink];
 	const packages = packagesFor(plan);
-	const seals = modules.includes(sealPackage);
+	const entries = await entriesOf(modules, packages.importOf, (file) => `node ${file}`);
 	await writeProject(plan.target, {
 		"package.json": manifestOf(
 			"node src/main.ts",
 			packages.dependencies(withKernel(modules)),
-			seals ? "node src/reseal.ts" : undefined,
+			entries.scripts,
 		),
 		"src/main.ts": await mainSource(modules, packages.importOf),
-		...(seals ? { "src/reseal.ts": await resealSource(modules, packages.importOf) } : {}),
+		...entries.files,
 		"config/application.conf": `${JSON.stringify(kernelConfig(), null, "\t")}\n`,
 		".gitignore": "node_modules/\nconfig/local*.conf\n",
 	});

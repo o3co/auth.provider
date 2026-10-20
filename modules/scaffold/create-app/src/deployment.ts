@@ -11,11 +11,10 @@ import {
 } from "./fragments.ts";
 import { type Card, packagesFor, type Release } from "./packages.ts";
 import {
+	entriesOf,
 	filled,
 	mainSource,
 	manifestOf,
-	resealSource,
-	sealPackage,
 	vacant,
 	withKernel,
 	writeProject,
@@ -70,15 +69,16 @@ export async function writeDeployment(
 	const packages = packagesFor(plan);
 	const fragments = await packages.fragments(names);
 	const settings = settingsOf(fragments);
-	const seals = names.includes(sealPackage);
+	const run = (file: string) => `node --env-file-if-exists=.env ${file}`;
+	const entries = await entriesOf(modules, packages.importOf, run);
 	await writeProject(plan.target, {
 		"package.json": manifestOf(
 			"node --env-file-if-exists=.env src/main.ts",
 			packages.dependencies(names),
-			seals ? "node --env-file-if-exists=.env src/reseal.ts" : undefined,
+			entries.scripts,
 		),
 		[paths.main]: await mainSource(modules, packages.importOf),
-		...(seals ? { "src/reseal.ts": await resealSource(modules, packages.importOf) } : {}),
+		...entries.files,
 		[paths.application]: applicationConf(fragments),
 		[paths.localExample]: localConfExample(fragments),
 		".env.example": envExample(settings),

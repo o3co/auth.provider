@@ -106,6 +106,32 @@ it("writes the kernel's configuration, a start script and what git leaves out", 
 	const ignored = (await readFile(join(target, ".gitignore"), "utf8")).split("\n");
 	expect(ignored).toEqual(["node_modules/", "config/local*.conf", ""]);
 	await expect(readFile(join(target, "src", "reseal.ts"), "utf8")).rejects.toThrow();
+	await expect(readFile(join(target, "src", "witness-backfill.ts"), "utf8")).rejects.toThrow();
+});
+
+it("writes a witness-backfill script for an app that keeps the enrollment witness, settling each subject it reads", async () => {
+	const target = await mkdtemp(join(tmpdir(), "create-app-"));
+	await generate({ target, modules: ["@mod/mfa-witnessing", "@mod/log-stdout"], workspace: root });
+	const manifest = JSON.parse(await readFile(join(target, "package.json"), "utf8"));
+	expect(manifest.scripts).toEqual({
+		start: "node src/main.ts",
+		"witness-backfill": "node src/witness-backfill.ts",
+	});
+	const source = await readFile(join(target, "src", "witness-backfill.ts"), "utf8");
+	// The app built and never started, a subject a line from standard input, and only counts told.
+	for (const part of [/witnessBackfill/, /\.settle\(/, /process\.stdin/, /await app\.stop\(\)/]) {
+		expect(source).toMatch(part);
+	}
+	expect(source).not.toMatch(/app\.start\(/);
+	await linked(target);
+	const run = spawnSync(process.execPath, ["src/witness-backfill.ts"], {
+		cwd: target,
+		env: { ...process.env, APP_CONFIG: "config/application.conf" },
+		input: "alice\n",
+		encoding: "utf8",
+	});
+	// Its sections unset, boot is refused as the app's is, telling no subject.
+	expect([run.status, run.stdout]).toEqual([78, ""]);
 });
 
 it("writes a reseal script for an app that seals, which seals again through each holder and tells the counts", async () => {
