@@ -23,7 +23,7 @@
 - An issuer's description that names an endpoint not on https (or on http where the issuer is) refuses boot.
 - Boot is refused, at its key, on a URL this server sends to that `outbound`'s destination policy refuses with those hosts: the description's own URL (at `issuer`), or `token-endpoint` and `jwks-uri` without discovery; it says which of `outbound`'s keys to set (`outbound.refusals`).
 - A description whose token endpoint or key set that policy refuses also refuses boot.
-- A description's refusal is told at `issuer`, with its reason; one the policy gives names the endpoint and the policy's reason.
+- A description's refusal, `outbound` refusing to fetch it included, is told at `issuer`, with its reason; one the policy gives names the endpoint and the policy's reason.
 - An answer naming another issuer in `iss` is refused before its code is used.
 - An answer without `iss` is refused where the issuer's description offers `iss` or the operator requires it.
 - Where neither requires `iss`, boot logs a warning naming the IdP (answers are then taken without `iss`).

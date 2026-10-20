@@ -1,6 +1,11 @@
 import type { ExternalJwt } from "@mod/external-jwt";
 import type { Clock, Log } from "@mod/kernel";
-import { jsonObjectOf, type Outbound, type OutboundResponse } from "@mod/outbound";
+import {
+	DestinationRefused,
+	jsonObjectOf,
+	type Outbound,
+	type OutboundResponse,
+} from "@mod/outbound";
 import { destinationRefusal, type OutboundRefusals, withinHosts } from "@mod/outbound-policy";
 import {
 	answerOf,
@@ -53,8 +58,13 @@ const mismatch = (reason: string) => new UpstreamMismatch(reason, ["issuer"]);
 /** The endpoints the issuer's description names; throws, refusing boot, where they do not hold. */
 async function discovered(s: Settings, { outbound, refusals }: Reach, hosts: readonly string[]) {
 	const where = descriptionUrl(s.issuer);
+	// A destination outbound refuses, as an answer that does not hold, refuses boot under the issuer.
+	const fetched = await outbound.fetch(where, {}, { hosts }).catch((error: unknown) => {
+		if (!(error instanceof DestinationRefused)) throw error;
+		throw mismatch(`outbound's destination policy refuses the description: ${error.reason}`);
+	});
 	// Refused as the upstream's answer, which at boot refuses boot.
-	const described = answerOf(jsonObjectOf(await outbound.fetch(where, {}, { hosts })), description);
+	const described = answerOf(jsonObjectOf(fetched), description);
 	if (described.issuer !== s.issuer) throw mismatch("the description names another issuer");
 	const endSession = described.end_session_endpoint;
 	// The end of session too: the browser takes the login's id_token there.
