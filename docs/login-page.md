@@ -66,7 +66,7 @@ That page goes on with the login:
 
 1. `GET /session/mfa/transaction` with no `MFA-Transaction` header. The browser's cookie names its transaction, and the answer carries `transaction`, `purpose` and `factors`. A `400` means none is in progress: start the sign-in again.
 2. With `purpose` `login`, prove a factor as the [second-factor recipe](recipe-mfa-page.md) does after a password login: `challenge` where the factor needs one, then `verify`, naming `transaction` in each body. With `enroll-login`, the user has no second factor yet and binds a first one through `enrollment` and `enrollment/complete`, as the recipe's first steps show; `verify` refuses that transaction.
-3. Send the browser to the answer's `redirect_to`: where the login was going, else `federation.landing`, else the public origin's root.
+3. Send the browser to the answer's `redirect_to`: where the login was going, else `federation.landing`, else the public origin's root. A first factor bound without a binding proof counts only from the next sign-in: its answer carries the factor and its recovery codes but no `redirect_to`, and no session opens, so show the codes, then start the sign-in through the upstream again.
 
 The transaction's identifier never goes in a URL; only this `GET` takes it from the cookie alone.
 
