@@ -38,12 +38,16 @@ export const beforeNextChange: { run?: (() => Promise<unknown>) | undefined } = 
 export const afterNextChange: { run?: (() => Promise<unknown>) | undefined } = {};
 /** Runs once as the factor store's next read is asked, before it answers, as a slow store would. */
 export const onNextRead: { run?: (() => Promise<unknown>) | undefined } = {};
+/** Changes the record once before the factor store's next change, as another request writing in between would. */
+export const raceNextChange: { change?: ((record: StoredFactors) => StoredFactors) | undefined } =
+	{};
 afterEach(async () => {
 	clock.shift = 0;
 	factorsDown.restore();
 	beforeNextChange.run = undefined;
 	afterNextChange.run = undefined;
 	onNextRead.run = undefined;
+	raceNextChange.change = undefined;
 	await stop();
 });
 
@@ -106,6 +110,9 @@ const factorStand = () => {
 					const run = beforeNextChange.run;
 					beforeNextChange.run = undefined;
 					await run?.();
+					const race = raceNextChange.change;
+					raceNextChange.change = undefined;
+					if (race) await stand.records.change(args[0], (record) => ({ value: race(record) }));
 					const changed = await stand.records.change(...args);
 					const after = afterNextChange.run;
 					afterNextChange.run = undefined;
@@ -213,6 +220,8 @@ export async function serve(settings: Settings = {}) {
 		if (proved.kind !== "valid") throw new Error(proved.kind);
 		const bound = await decided.bind(subject, begun.pending, proved.state);
 		if (bound.kind !== "bound") throw new Error(bound.kind);
+		// The codes are written by the reissue, as an enrollment writes them.
+		if (bound.codesDue) await decided.reissue(subject, bound.fence);
 		return bound.factor.id;
 	};
 	return { app, call, signIn, bindCode, jar: () => jar, port: () => app.get(listening).port() };

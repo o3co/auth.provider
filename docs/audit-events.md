@@ -84,7 +84,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | `mfa.factor.removed` | `kind`, `factor` | a factor is removed |
 | `mfa.first_binding_conflict` | `kind`, `reason` | a first binding is refused, at its start or as it is written; nothing is kept. `reason` `competing`: another counting factor counts, bound since it began or held already for a binding asked from a login, or the witness holds another binding's mark; `reset-cleared`: a reset cleared the witness's mark as it was written |
 | `mfa.recovery_code.used` | `kind`, `factor`, `remaining` | a recovery code is used; `remaining` when the kind tells how many are left |
-| `mfa.recovery_codes.generated` | `kind`, `regenerated` | recovery codes come with a first counting factor, or are reissued (`regenerated`) |
+| `mfa.recovery_codes.generated` | `kind`, `regenerated` | recovery codes are written by a reissue: a first set after a first counting factor, or one replacing the set held (`regenerated`) |
 
 ## @mod/mfa-flows
 

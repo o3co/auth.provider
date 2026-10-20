@@ -262,6 +262,8 @@ async function serve(
 		const { pending, state, secret } = await provedCode(subject, passed);
 		const bound = await decided.bind(subject, pending, state, label);
 		if (bound.kind !== "bound") throw new Error(bound.kind);
+		// The codes are the reissue's to write, as an enrollment asks it.
+		if (bound.codesDue) await decided.reissue(subject, bound.fence);
 		return { ...bound, secret };
 	};
 	/** Binds a factor of the kind, its first proof being `proof`. */
@@ -270,7 +272,9 @@ async function serve(
 		if (begun.kind !== "begun") throw new Error(begun.kind);
 		const proved = await decided.provePending(subject, begun.pending, proof);
 		if (proved.kind !== "valid") throw new Error(proved.kind);
-		return decided.bind(subject, begun.pending, proved.state);
+		const bound = await decided.bind(subject, begun.pending, proved.state);
+		if (bound.kind === "bound" && bound.codesDue) await decided.reissue(subject, bound.fence);
+		return bound;
 	};
 	/** The identifier of the subject's first factor of the kind. */
 	const idOf = async (subject: string, kind: string) =>
@@ -307,10 +311,10 @@ describe("decisions on the subject's factors", () => {
 		if (bound.kind !== "bound") throw new Error(bound.kind);
 		// What the binding adds is its first proof's amr, answered by `provePending`.
 		expect("amr" in bound).toBe(false);
-		expect(bound.recoveryCodes).toBeDefined();
-		// Named, so a caller that cannot show them can take them back.
-		const codes = (await decided.held("zed")).find((f) => f.id === bound.recoveryCodesFactor);
-		expect(codes?.kind).toBe("backup");
+		// The binding writes no codes: they are due, for the reissue to write.
+		expect([bound.codesDue, "recoveryCodes" in bound]).toEqual([true, false]);
+		expect((await decided.held("zed")).map((f) => f.kind)).toEqual(["code"]);
+		expect((await decided.reissue("zed", bound.fence)).kind).toBe("reissued");
 		expect(await decided.asks("zed")).toBe("proof");
 	});
 
@@ -713,6 +717,99 @@ it("declares mfa only where a kind adds a second factor", async () => {
 	expect(app.get(logins).achievable(["mfa"])).toBe(false);
 });
 
+describe("recovery codes written by the reissue", () => {
+	/** Binds a code factor for the subject, which writes no recovery codes. */
+	const bindLater = async (h: Awaited<ReturnType<typeof serve>>, subject: string) => {
+		const { pending, state } = await h.provedCode(subject);
+		return h.decided.bind(subject, pending, state);
+	};
+
+	it("binds with no codes, answering the fence it began under and that codes are due; the reissue makes the first set", async () => {
+		const h = await serve();
+		const { decided, events } = h;
+		const began = await decided.fenceOf("ana");
+		const bound = await bindLater(h, "ana");
+		if (bound.kind !== "bound") throw new Error(bound.kind);
+		expect([bound.fence, bound.codesDue, "recoveryCodes" in bound]).toEqual([began, true, false]);
+		expect((await decided.held("ana")).map((f) => f.kind)).toEqual(["code"]);
+		const first = await decided.reissue("ana", bound.fence);
+		if (first.kind !== "reissued") throw new Error(first.kind);
+		expect((await decided.held("ana")).map((f) => f.kind)).toEqual(["code", "backup"]);
+		// A subject holding codes owes none: a further binding answers nothing due.
+		const again = await bindLater(h, "ana");
+		expect(again.kind === "bound" && again.codesDue).toBe(false);
+		expect((await decided.reissue("ana", await decided.fenceOf("ana"))).kind).toBe("reissued");
+		expect(events.map((e) => [e.kind, e.attributes?.regenerated])).toEqual([
+			["mfa.factor.enrolled", undefined],
+			["mfa.recovery_codes.generated", "false"],
+			["mfa.factor.enrolled", undefined],
+			["mfa.recovery_codes.generated", "true"],
+		]);
+	});
+
+	it("writes no codes for a fence that moved after the binding began", async () => {
+		const h = await serve();
+		const bound = await bindLater(h, "bea");
+		if (bound.kind !== "bound") throw new Error(bound.kind);
+		await h.decided.fence("bea");
+		expect(await h.decided.reissue("bea", bound.fence)).toEqual({ kind: "fenced" });
+		expect((await h.decided.held("bea")).map((f) => f.kind)).toEqual(["code"]);
+	});
+
+	it("keeps the codes a place: a binding of a subject holding none counts them against the limit", async () => {
+		const h = await serve({ "max-factors": 2 });
+		const bound = await bindLater(h, "cal");
+		expect(bound.kind === "bound" && bound.codesDue).toBe(true);
+		expect(await bindLater(h, "cal")).toEqual({ kind: "full" });
+		expect((await h.decided.reissue("cal", await h.decided.fenceOf("cal"))).kind).toBe("reissued");
+	});
+
+	it("adds no first set past the limit, decided on the factors as written", async () => {
+		const h = await serve({ "max-factors": 2 });
+		await bindLater(h, "dax");
+		h.events.length = 0;
+		// Another binding takes the place kept for the codes before the reissue writes.
+		h.place.raceNextChange((record) => {
+			const { factors: all } = record as unknown as { factors: { id: string }[] };
+			return { ...record, factors: [...all, { ...all[0], id: "other" }] };
+		});
+		expect(await h.decided.reissue("dax", await h.decided.fenceOf("dax"))).toEqual({
+			kind: "full",
+		});
+		expect((await h.decided.held("dax")).map((f) => f.kind)).toEqual(["code", "code"]);
+		expect(h.events).toEqual([]);
+	});
+
+	it("keeps one place for two bindings at once of a subject holding no codes, where the first set lands", async () => {
+		const h = await serve({ "max-factors": 4 });
+		// A first factor, its codes not yet written; two more bind at once, neither as the first.
+		await bindLater(h, "fia");
+		const [one, two] = [await h.provedCode("fia"), await h.provedCode("fia")];
+		const bound = await Promise.all([
+			h.decided.bind("fia", one.pending, one.state),
+			h.decided.bind("fia", two.pending, two.state),
+		]);
+		expect(bound.map((b) => b.kind === "bound" && b.codesDue)).toEqual([true, true]);
+		const first = await h.decided.reissue("fia", await h.decided.fenceOf("fia"));
+		expect(first.kind).toBe("reissued");
+		expect((await h.decided.held("fia")).map((f) => f.kind).sort()).toEqual([
+			"backup",
+			"code",
+			"code",
+			"code",
+		]);
+		// The second reissue replaces the set: it takes no further place.
+		expect((await h.decided.reissue("fia", await h.decided.fenceOf("fia"))).kind).toBe("reissued");
+		expect(await h.decided.held("fia")).toHaveLength(4);
+	});
+
+	it("owes no codes where no way back is composed", async () => {
+		const h = await serve({}, { kinds: [code] });
+		const bound = await bindLater(h, "eve");
+		expect(bound.kind === "bound" && bound.codesDue).toBe(false);
+	});
+});
+
 describe("challenges sent before a proof", () => {
 	afterEach(() => {
 		ping.answer = "sent";
@@ -877,13 +974,9 @@ describe("values no two factors may hold", () => {
 			const binds = await Promise.all(subjects.map(proved));
 			const bound = await Promise.all(binds.map((bind) => bind()));
 			expect(bound.map((b) => b.kind).sort()).toEqual(["bound", "duplicate"]);
+			// The duplicate leaves nothing; the binding writes no codes beside the one bound.
 			const held = await Promise.all(subjects.map((subject) => decided.held(subject)));
-			expect(
-				held
-					.flat()
-					.map((f) => f.kind)
-					.sort(),
-			).toEqual(["backup", "card"]);
+			expect(held.flat().map((f) => f.kind)).toEqual(["card"]);
 			return subjects[bound.findIndex((b) => b.kind === "bound")] ?? "";
 		};
 		const first = await race(["cat", "dan"]);
@@ -921,11 +1014,13 @@ describe("a binding begun", () => {
 		expect((await decided.begin("bob", "told")).kind).toBe("begun");
 	});
 
-	it("binds nothing when the way back will not enrol, as when the store cannot answer", async () => {
+	it("writes no codes when the way back will not enrol, as when the store cannot answer, the factor standing", async () => {
 		const { decided, provedCode } = await serve({}, { kinds: [code, stuck] });
 		const { pending, state } = await provedCode("cal");
-		await expect(decided.bind("cal", pending, state)).rejects.toThrow(Unavailable);
-		expect(await decided.held("cal")).toEqual([]);
+		const bound = await decided.bind("cal", pending, state);
+		if (bound.kind !== "bound") throw new Error(bound.kind);
+		await expect(decided.reissue("cal", bound.fence)).rejects.toThrow(Unavailable);
+		expect((await decided.held("cal")).map((f) => f.kind)).toEqual(["code"]);
 	});
 });
 

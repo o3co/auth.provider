@@ -82,6 +82,8 @@ export function handlersOver(p: HandlerParts) {
 		if ("status" in allowed) return allowed;
 		const reissued = await p.factors.reissue(allowed.session.context.subject, allowed.fence);
 		if (reissued.kind === "fenced") return loginRequired;
+		// A first set another factor's binding left no place for.
+		if (reissued.kind === "full") return jsonAnswer(409, { error: "mfa_factor_limit" });
 		if (reissued.kind === "reissued") {
 			// The fence guards the write, not the handing: a revocation complete by the time the codes
 			// came back leaves them unseen, though they replaced the old ones.

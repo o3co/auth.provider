@@ -15,6 +15,7 @@ import {
 	postedTransaction,
 	proofOf,
 	revokedSince,
+	unavailable,
 	unknownTransaction,
 } from "../routing.ts";
 import { lockoutName } from "../section.ts";
@@ -59,13 +60,42 @@ export interface ResumeParts {
 	readonly log: Pick<Log, "warn">;
 }
 
-/** Goes on with a held login after the gate `mfa`, adding `proved` to its amr; answers what it held, with `carried` once it opens. */
+/** What makes, once a resumed login opens, what it adds to its answer; a body never holds `status`. */
+type Carried = () => Promise<object | HttpResponse>;
+const isResponse = (made: object): made is HttpResponse => "status" in made;
+
+/**
+ * Goes on with a held login after the gate `mfa`, adding `proved` to its amr; answers what it held,
+ * with what `carried` makes once it opens, and only then: a response it makes instead closes the
+ * session and is answered, and a throw closes it as best it can and goes on, an unavailable part
+ * answering `503` as a response.
+ */
 export function resumeOver(p: ResumeParts) {
+	/** What carried makes once the session opened; a response it makes closes the session. */
+	const madeIn = async (handle: string, carried: Carried): Promise<object | HttpResponse> => {
+		let made: object | HttpResponse;
+		try {
+			made = await carried();
+		} catch (error) {
+			await p.sessions.close(handle).catch(() => undefined);
+			// Answered as a response, so the transaction's cookie is cleared too.
+			if (isUnavailable(error)) return unavailable;
+			throw error;
+		}
+		if (!isResponse(made)) return made;
+		try {
+			await p.sessions.close(handle);
+		} catch (error) {
+			if (isUnavailable(error)) return unavailable;
+			throw error;
+		}
+		return made;
+	};
 	return async (
 		request: HttpRequest,
 		t: Transaction & { readonly purpose: "login" | "enroll-login" },
 		proved: readonly string[],
-		carried?: object,
+		carried?: Carried,
 		opened?: (handle: string) => Promise<void>,
 	) => {
 		const facts = t.facts ?? { subject: t.subject, amr: [] };
@@ -87,8 +117,13 @@ export function resumeOver(p: ResumeParts) {
 			return { ...loginRequired, cookies: [p.transactions.cleared()] };
 		}
 		await opened?.(resumed.session.id);
+		const made = carried === undefined ? undefined : await madeIn(resumed.session.id, carried);
+		// Its cookie never goes out: the session closed, or failing to, is no one's.
+		if (made !== undefined && isResponse(made)) {
+			return { ...made, cookies: [...(made.cookies ?? []), p.transactions.cleared()] };
+		}
 		const cookies = [...resumed.cookies, p.transactions.cleared()];
-		const done = carried ? { ...(t.done as object | undefined), ...carried } : (t.done ?? {});
+		const done = made ? { ...(t.done as object | undefined), ...made } : (t.done ?? {});
 		return jsonAnswer(200, done, { cookies });
 	};
 }

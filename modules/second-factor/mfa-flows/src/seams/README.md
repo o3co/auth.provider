@@ -11,7 +11,7 @@ Internal module of `mfa-flows`: the shapes of what the module binding factors gi
 ## Offers
 - `EnrollmentFlow`: the handlers of `POST enrollment` and `POST enrollment/complete`, and the answer to a challenge in an enrollment's transaction.
 - `FlowTransactions`: a transaction's lifecycle as the module binding factors uses it (start, next deadline, find, spend, judged, take, `keep`, cleared), and no more.
-- `FlowParts`, its own interface, not shaped from this package's internals: `transactions` (`FlowTransactions`), `askedFrom`, `resume` (going on with a held login), `record` (through the package's declaration of its audit events), `answers` (unknown transaction, login required, unavailable), `requests` (`field`, `proofOf`, `postedTransaction`, `revokedSince`, `managing`), and `lockout` (its name and policy).
+- `FlowParts`, its own interface, not shaped from this package's internals: `transactions` (`FlowTransactions`), `askedFrom`, `resume` (going on with a held login, what it carries made once it opens), `record` (through the package's declaration of its audit events), `answers` (unknown transaction, login required, unavailable), `requests` (`field`, `proofOf`, `postedTransaction`, `revokedSince`, `managing`), and `lockout` (its name and policy).
 - `flowPartsOf` (the transactions, the resume, `audit`'s record, the lockout policy) → the parts.
 
 ## Invariants

@@ -46,12 +46,12 @@ export interface FlowParts {
 	readonly transactions: FlowTransactions;
 	/** Whom `mfa`'s kinds are asked for, by the transaction's purpose. */
 	askedFrom(t: ByPurpose): AskedFrom;
-	/** Goes on with a held login, adding what was proved to its amr and `carried` to its answer once it opens. */
+	/** Goes on with a held login, adding what was proved to its amr and what `carried` makes to its answer, made once it opens; a response it makes closes the session. A body `carried` makes never holds `status`, which marks a response. */
 	resume(
 		request: HttpRequest,
 		t: Transaction & { readonly purpose: "login" | "enroll-login" },
 		proved: readonly string[],
-		carried?: object,
+		carried?: () => Promise<object | HttpResponse>,
 	): Promise<HttpResponse>;
 	/** Records `mfa.<kind>` through this package's declaration, with the request's source. */
 	record(

@@ -1,4 +1,5 @@
 import { type HttpResponse, jsonAnswer } from "@mod/http";
+import { isUnavailable } from "@mod/kernel";
 import { type Factors, isLabel } from "@mod/mfa";
 import type { Handler } from "@mod/mfa-flows";
 import type { bindingProofOver } from "../binding-proof/binding-proof.ts";
@@ -16,9 +17,10 @@ type Refused<T extends (...args: never[]) => Promise<{ readonly kind: string }>,
 	Done
 >;
 type Refusal = Refused<Factors["begin"], "begun"> | Refused<Factors["bind"], "bound">;
+const factorLimit = jsonAnswer(409, { error: "mfa_factor_limit" });
 /** What `mfa` refuses a binding with, as answered here; anything else refuses it too. */
 const refusals: Readonly<Partial<Record<Refusal, HttpResponse>>> = {
-	full: jsonAnswer(409, { error: "mfa_factor_limit" }),
+	full: factorLimit,
 	duplicate: jsonAnswer(409, { error: "mfa_factor_duplicate" }),
 	limited: jsonAnswer(429, { error: "rate_limited" }),
 	refused: jsonAnswer(403, { error: "mfa_factor_refused" }),
@@ -37,7 +39,7 @@ export function completionOver(
 	proofs: Pick<ReturnType<typeof bindingProofOver>, "bindingProof">,
 ) {
 	const { transactions, askedFrom } = p.flow;
-	const { unknownTransaction, loginRequired } = p.flow.answers;
+	const { unknownTransaction, loginRequired, unavailable } = p.flow.answers;
 	const { resume } = p.flow;
 	const { field, postedTransaction, proofOf, revokedSince } = p.flow.requests;
 	const { enrolling, outsideSession, keep } = place;
@@ -109,44 +111,53 @@ export function completionOver(
 			return t.purpose === "enroll-login" ? loginRequired : enrollmentConflict;
 		}
 		if (bound.kind !== "bound") return refusals[bound.kind] ?? unknownTransaction;
-		/** Takes back the codes no one will see; read just before, a reset or a revocation in between leaves them, unseen all the same. */
-		const takeBack = async () => {
-			const id = bound.recoveryCodesFactor;
-			if (id) await p.factors.remove(t.subject, id, await p.factors.fenceOf(t.subject));
+		const factor = { factor: bound.factor };
+		/** The answer, with the recovery codes where they are due: written only now, just before they go out. */
+		const shown = async (): Promise<object | HttpResponse> => {
+			if (!bound.codesDue) return factor;
+			// Checked before the write too, as the fence may not stop it: an app composed by hand may lack
+			// `mfa-revocation`, which moves it, and even with it a revocation's record moves its boundary
+			// before its followers move the fence.
+			if (await revokedSince(p.revocation, t)) return loginRequired;
+			const reissued = await p.factors.reissue(t.subject, bound.fence);
+			// A reset or a revocation since the binding began, or the factor gone meanwhile: no one sees codes.
+			if (reissued.kind === "fenced" || reissued.kind === "no-qualifying-factor")
+				return loginRequired;
+			// Another factor took the place the binding kept: the factor stands, and codes can be reissued.
+			if (reissued.kind === "full") return factorLimit;
+			// Left is `unknown-kind`, which cannot come: codes are due only where a way back is composed.
+			if (reissued.kind !== "reissued") return factor;
+			// The last wait before the codes go out is the revocation's: none may come after it.
+			if (await revokedSince(p.revocation, t)) return loginRequired;
+			return { ...factor, recovery_codes: reissued.codes };
 		};
-		// The fence guards the write, not the showing: a revocation complete by now leaves the codes unseen.
-		if (bound.recoveryCodesFactor !== undefined && (await revokedSince(p.revocation, t))) {
-			await takeBack().catch(() => undefined);
-			return loginRequired;
-		}
-		const codes = bound.recoveryCodes === undefined ? {} : { recovery_codes: bound.recoveryCodes };
-		const body = { factor: bound.factor, ...codes };
+		const isAnswer = (made: object): made is HttpResponse => "status" in made;
 		// A first factor bound on the password alone counts from the next sign-in: binding it during a
 		// login never finishes that login.
-		if (!heldOf(t).proved) return jsonAnswer(200, body, { cookies: [transactions.cleared()] });
-		// Bound on a binding proof, it counts at once by its first proof: the login goes on, or the session is raised.
-		// Either can fail after the codes were made: then they go, as no one would ever see them.
-		const shown = async (answer: () => Promise<HttpResponse>) => {
-			try {
-				const answered = await answer();
-				// The last wait before the codes go out is the revocation's: none may come after it.
-				if (bound.recoveryCodesFactor !== undefined && (await revokedSince(p.revocation, t))) {
-					await takeBack().catch(() => undefined);
-					return loginRequired;
-				}
-				return answered;
-			} catch (error) {
-				// One that cannot go stays unseen, as before; the failure answered is the first.
-				await takeBack().catch(() => undefined);
-				throw error;
-			}
-		};
-		if (t.purpose === "enroll-login") return shown(() => resume(request, t, proved.amr, body));
-		return shown(async () => {
-			const raised = await p.sessions.raise(request, proved.amr);
-			const cookies = [...(raised?.cookies ?? []), transactions.cleared()];
-			return jsonAnswer(200, body, { cookies });
-		});
+		if (!heldOf(t).proved) {
+			const made = await shown();
+			if (made === factorLimit) return { ...factorLimit, cookies: [transactions.cleared()] };
+			if (isAnswer(made)) return made;
+			return jsonAnswer(200, made, { cookies: [transactions.cleared()] });
+		}
+		// Bound on a binding proof, it counts at once by its first proof: the login goes on, its codes
+		// made once it opened, or the session is raised, and its codes made once it is.
+		if (t.purpose === "enroll-login") return resume(request, t, proved.amr, shown);
+		const raised = await p.sessions.raise(request, proved.amr);
+		const cookies = [...(raised?.cookies ?? []), transactions.cleared()];
+		// A raise not written leaves the factor to count from the next sign-in: no codes for it now.
+		if (!raised?.raised) return jsonAnswer(200, factor, { cookies });
+		let made: object | HttpResponse;
+		try {
+			made = await shown();
+		} catch (error) {
+			// The raise retired the old cookie: the new one goes out with the failure.
+			if (isUnavailable(error)) return { ...unavailable, cookies };
+			throw error;
+		}
+		if (made === factorLimit) return { ...factorLimit, cookies };
+		if (isAnswer(made)) return made;
+		return jsonAnswer(200, made, { cookies });
 	};
 
 	return { enroll, complete };

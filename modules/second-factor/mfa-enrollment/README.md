@@ -20,6 +20,7 @@
 - A session's enrollment goes on (enrollment, its challenge, completion) only from that session, entered the same way; without it or from another, it is refused as a missing session is. A login's first enrollment needs no session.
 - Each call to `mfa` names whom it is for: the session by its handle, or the transaction's (`askedFrom`).
 - `mfa` refusing a binding, as it begins or binds, is answered: full `409 mfa_factor_limit`, duplicate `409 mfa_factor_duplicate`, limited `429 rate_limited`, refused `403 mfa_factor_refused`, binding proof required `403 mfa_binding_proof_required`; an unknown kind `400`.
+- A factor bound whose recovery codes find no place left (another factor took it) is answered `409 mfa_factor_limit`: the factor stands, codes can be reissued, and a login's opened session is closed, so the user signs in again.
 - The secret in mid-enrollment is held in the transaction, still sealed by `mfa`; its contents are not read.
 - What a binding keeps (the binding begun, the binding proof's challenge and pass, whether a proof passed) is what the transaction holds, each change made by `transactions`' `keep` from what it holds.
 

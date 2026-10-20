@@ -60,8 +60,9 @@ export const testEnrollment = defineModule({ name: "test-enrollment" }, (m) => [
 				const label = requests.field(request, "label");
 				const bound = await decided.bind(t.subject, pending, proved.state, label, askedFrom(t));
 				if (bound.kind !== "bound") return jsonAnswer(400, { error: bound.kind });
-				const codes =
-					bound.recoveryCodes === undefined ? {} : { recovery_codes: bound.recoveryCodes };
+				// The codes are written by the reissue, as the enrollment writes them.
+				const reissued = bound.codesDue ? await decided.reissue(t.subject, bound.fence) : undefined;
+				const codes = reissued?.kind === "reissued" ? { recovery_codes: reissued.codes } : {};
 				const body = { factor: bound.factor, ...codes };
 				return jsonAnswer(200, body, { cookies: [transactions.cleared()] });
 			},
