@@ -11,12 +11,12 @@ Internal module of `mfa`: how mfa asks the enrollment witness, and how a first b
 ## Offers
 - `standingOf` (witness, audit, log) → (subject, whether it holds a counting factor, where it is judged) → `held` or `none`; a mark beside no counting factor records `mfa.enrollment_inconsistent` with `at`, logs a warning and is unavailable, as is a witness that cannot be read.
 - `markedBy` (witness, subject, token): whether the mark is the token's, asking again while the witness is unavailable.
+- `settlingOf` (witness, whether the subject holds a counting factor, new tokens) → (subject): after a write, a counting factor with no mark is marked under a new token; a mark with nothing counting is cleared only where this call set it (a reset took the factor meanwhile), as any other may be a store that lost its factors. It reads again after each change, settles twice at most, and is unavailable while they still differ.
 
 ## Invariants
 - A subject holding a counting factor is `held` without asking the witness.
 - `markedBy` asks again three times with the same token, which answers alike, before it fails as unavailable.
-- A first pending binding holds a token of 16 random bytes, sealed with it, never shown or logged; a first pending binding holding none is refused under a witness.
-- After a first binding writes, mfa reads the mark again: gone, a reset cleared it, so the binding takes back what it wrote (once more where the store cannot answer the first time) and is refused with `reason` `reset-cleared`; another binding's mark refuses it with `competing`.
+- A binding marks only after its factor is written, so the mark always follows a factor; a first binding meeting a mark with nothing counting is a store that lost its factors, and is unavailable before it writes. A pending binding's token, sealed by earlier versions, is no longer read.
 
 ## Depends on
 - `mfa-witness` (its contract), `audit`, `kernel`

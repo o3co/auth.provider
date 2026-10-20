@@ -41,3 +41,40 @@ export async function markedBy(witness: EnrollmentWitness, subject: string, toke
 		}
 	}
 }
+
+export interface SettlingParts {
+	/** None composed leaves nothing to settle. */
+	readonly witness: EnrollmentWitness | undefined;
+	/** Whether the subject holds a counting factor, as written now. */
+	readonly counting: (subject: string) => Promise<boolean>;
+	/** A new token for a mark this call sets. */
+	readonly token: () => string;
+}
+
+/**
+ * Brings the witness's mark in line with the subject's counting factors after a write: a factor
+ * with no mark is marked; a mark with nothing counting goes only where this call set it (a reset
+ * took the factor meanwhile), as any other may be a store that lost its factors. Read again after
+ * each change, it settles twice at most, then is unavailable while they still differ.
+ */
+export function settlingOf(p: SettlingParts) {
+	return async (subject: string) => {
+		const witness = p.witness;
+		if (witness === undefined) return;
+		let set = false;
+		for (let round = 0; round < 3; round++) {
+			const counts = await p.counting(subject);
+			const marked = await witness.read(subject);
+			if (counts === marked) return;
+			if (round === 2) break;
+			if (counts) {
+				set = (await markedBy(witness, subject, p.token())) || set;
+			} else if (set) {
+				await witness.clear(subject);
+			} else {
+				return;
+			}
+		}
+		throw new Unavailable("mfa");
+	};
+}
