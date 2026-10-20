@@ -3,7 +3,7 @@ import { isUnavailable, type Log, Unavailable } from "@mod/kernel";
 import type { EnrollmentWitness } from "@mod/mfa-witness";
 import events from "../audit-events.ts";
 
-import type { Asked } from "../contract.ts";
+import type { Asked, Witnessing } from "../contract.ts";
 
 export interface StandingParts {
 	/** None composed leaves the store alone to tell. */
@@ -46,7 +46,7 @@ export interface SettlingParts {
 	/** None composed leaves nothing to settle. */
 	readonly witness: EnrollmentWitness | undefined;
 	/** Whether the subject holds a counting factor, as written now. */
-	readonly counting: (subject: string) => Promise<boolean>;
+	readonly counting: () => Promise<boolean>;
 	/** A new token for a mark this call sets. */
 	readonly token: () => string;
 }
@@ -63,7 +63,7 @@ export function settlingOf(p: SettlingParts) {
 		if (witness === undefined) return;
 		let set = false;
 		for (let round = 0; round < 3; round++) {
-			const counts = await p.counting(subject);
+			const counts = await p.counting();
 			const marked = await witness.read(subject);
 			if (counts === marked) return;
 			if (round === 2) break;
@@ -76,5 +76,19 @@ export function settlingOf(p: SettlingParts) {
 			}
 		}
 		throw new Unavailable("mfa");
+	};
+}
+
+/** The witnessing over a witness composed beside mfa itself, for an app that does not compose `mfa-witnessing`. */
+export function witnessingOver(
+	p: StandingParts & { readonly token: () => string },
+): Witnessing | undefined {
+	const witness = p.witness;
+	if (witness === undefined) return undefined;
+	const standing = standingOf(p);
+	return {
+		standing: async (subject, counts, at) => standing(subject, counts, at),
+		settle: (subject, counting) => settlingOf({ witness, counting, token: p.token })(subject),
+		cleared: (subject) => witness.clear(subject),
 	};
 }
