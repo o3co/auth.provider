@@ -1,0 +1,20 @@
+{
+	"name": "@mod/upstream-round-trip-store",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "wiring",
+	"wires": "@mod/upstream-round-trip",
+	"exports": {
+		"./module": "./src/module.ts"
+	},
+	"dependencies": {
+		"@mod/kernel": "workspace:*",
+		"@mod/records": "workspace:*",
+		"@mod/store": "workspace:*",
+		"@mod/upstream-round-trip": "workspace:*"
+	},
+	"devDependencies": {
+		"vitest": "5.0.4"
+	}
+}
