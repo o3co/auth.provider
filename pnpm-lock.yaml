@@ -910,9 +910,6 @@ importers:
       '@mod/code-grant':
         specifier: workspace:*
         version: link:../code-grant
-      '@mod/consent':
-        specifier: workspace:*
-        version: link:../consent
       '@mod/grants':
         specifier: workspace:*
         version: link:../grants
@@ -928,9 +925,6 @@ importers:
       '@mod/outbound-policy':
         specifier: workspace:*
         version: link:../../foundation/outbound-policy
-      '@mod/redirect-uris':
-        specifier: workspace:*
-        version: link:../redirect-uris
       '@mod/refresh':
         specifier: workspace:*
         version: link:../refresh
@@ -938,6 +932,12 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/consent':
+        specifier: workspace:*
+        version: link:../consent
+      '@mod/redirect-uris':
+        specifier: workspace:*
+        version: link:../redirect-uris
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash

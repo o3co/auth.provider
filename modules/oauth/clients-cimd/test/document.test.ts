@@ -1,3 +1,5 @@
+import { clientSection } from "@mod/consent";
+import { redirects } from "@mod/redirect-uris";
 import { describe, expect, it } from "vitest";
 import { documentUrl, recordOf } from "../src/document/document.ts";
 
@@ -8,8 +10,10 @@ const doc = {
 	redirect_uris: ["https://app.example/cb"],
 };
 const ceiling = { scopes: ["openid", "read"], audiences: ["https://api.example"] };
+/** The sections their owners copy from a document, as composed. */
+const copies = [redirects, clientSection];
 const record = (fields: Record<string, unknown>, limits = ceiling) =>
-	recordOf(new URL(id), { ...doc, ...fields }, limits);
+	recordOf(new URL(id), { ...doc, ...fields }, limits, copies);
 /** The client-allowance section of the record, or the refusal as it is. */
 const allowances = (fields: Record<string, unknown>, limits = ceiling) => {
 	const made = record(fields, limits);
@@ -74,7 +78,7 @@ describe("document record", () => {
 
 	it("shows the id's host without its port", () => {
 		const ported = "https://app.example:8443/c";
-		const made = recordOf(new URL(ported), { ...doc, client_id: ported }, ceiling);
+		const made = recordOf(new URL(ported), { ...doc, client_id: ported }, ceiling, copies);
 		expect("sections" in made && made.sections.consent).toMatchObject({ host: "app.example" });
 	});
 
@@ -111,16 +115,19 @@ describe("document record", () => {
 		["no name", { client_name: undefined }],
 		["a blank name", { client_name: " \t" }],
 		["a name not a string", { client_name: 1 }],
-		["a page not https", { client_uri: "http://app.example/" }],
-		["a page not a URL", { client_uri: "app" }],
-		["a page in a list", { client_uri: ["https://app.example/"] }],
-		["a page with a tab the parser drops", { client_uri: "https://app.example/\tx" }],
-		["a page with a space before it", { client_uri: " https://app.example/" }],
-		["a page with a line break", { client_uri: "https://app.example/x\n" }],
 		["a scope not a string", { scope: ["read"] }],
 		["a scope not scope tokens", { scope: "read  write" }],
 	])("is refused for %s", (_, fields) => {
 		expect(record(fields)).toHaveProperty("refused");
+	});
+
+	it("puts each section an owner copies from the document, as copied, the field a copy refuses refusing it", () => {
+		expect(record({ client_uri: ["https://app.example/"] })).toMatchObject({
+			sections: { consent: { uri: ["https://app.example/"] } },
+		});
+		expect(record({ client_name: " " })).toEqual({ refused: "client_name" });
+		const made = recordOf(new URL(id), doc, ceiling, []);
+		expect("sections" in made && Object.keys(made.sections)).toEqual(["client-allowance"]);
 	});
 
 	it("takes the method none, and response types holding code", () => {

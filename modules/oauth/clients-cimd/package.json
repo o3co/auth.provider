@@ -12,17 +12,17 @@
 		"@mod/client-allowance": "workspace:*",
 		"@mod/clients": "workspace:*",
 		"@mod/code-grant": "workspace:*",
-		"@mod/consent": "workspace:*",
 		"@mod/grants": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/outbound": "workspace:*",
 		"@mod/outbound-policy": "workspace:*",
-		"@mod/redirect-uris": "workspace:*",
 		"@mod/refresh": "workspace:*",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
+		"@mod/consent": "workspace:*",
+		"@mod/redirect-uris": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
 		"vitest": "5.0.4"
 	}
