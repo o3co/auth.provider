@@ -1,4 +1,5 @@
 import { type Audit, declaredAudit } from "@mod/audit";
+import { type OriginEvidence, originEvidence } from "@mod/csrf";
 import type { HttpRequest, HttpResponse, Site, Values } from "@mod/http";
 import { jsonAnswer, noStore, site } from "@mod/http";
 import { type BuildContext, type Clock, contract, isUnavailable, type Log } from "@mod/kernel";
@@ -8,7 +9,7 @@ import { type RoundTrips, roundTrips } from "@mod/upstream-round-trip";
 import { type Upstream, type UpstreamLogin, UpstreamRefused } from "@mod/upstreams";
 import events from "../audit-events.ts";
 import type { Settings } from "../section.ts";
-import { type Trip, toCarried, tripOf } from "./trip.ts";
+import { carriedOf, type Trip, type TripCarried, toCarried, tripOf } from "./trip.ts";
 
 export const base = "/session/oauth/federation";
 /** Each IdP's own callback, named after it, so two never share one. */
@@ -59,6 +60,7 @@ export interface Continuation {
 export interface Flow {
 	readonly idps: ReadonlyMap<string, Idp>;
 	readonly trips: RoundTrips;
+	readonly origin: Pick<OriginEvidence, "sameOrigin">;
 	/** The return targets a login may name. */
 	readonly logins: Pick<Logins, "returnAllowed">;
 	readonly login: Continuation;
@@ -123,6 +125,7 @@ export async function roundTripIn(
 		...ends,
 		idps: await c.get(federationIdps),
 		trips: await c.get(roundTrips),
+		origin: await c.get(originEvidence),
 		logins: await c.get(logins),
 		clock: c.clock,
 		log: c.log,
@@ -164,6 +167,12 @@ interface At {
 	readonly params: Values;
 }
 
+/** What a start asks of the upstream's login, as its round trip carries it. */
+const askedOf = (trip: Pick<TripCarried, "prompt" | "maxAgeSeconds">) => ({
+	...(trip.prompt === undefined ? {} : { prompt: trip.prompt }),
+	...(trip.maxAgeSeconds === undefined ? {} : { maxAgeSeconds: trip.maxAgeSeconds }),
+});
+
 async function start(flow: Flow, { name, idp, request, params }: At) {
 	const field = (key: string) => params.single(key);
 	const target = field("redirect_to");
@@ -178,11 +187,26 @@ async function start(flow: Flow, { name, idp, request, params }: At) {
 	const linking = ["1", "true"].includes(field("link") ?? "");
 	const begun = await (linking ? flow.link : flow.login).begin(request, name);
 	if ("answer" in begun) return begun.answer;
+	if (!flow.origin.sameOrigin(request)) {
+		const live = await flow.trips.current(request, tripName(name));
+		const kept = live && carriedOf(live.carried);
+		if (live && kept) {
+			const location = idp.upstream.authorizationUrl({
+				state: live.state,
+				nonce: live.nonce,
+				challenge: live.challenge,
+				challengeMethod: live.challengeMethod,
+				redirectUri: idp.redirectUri,
+				...askedOf(kept),
+			});
+			return sent(location, []);
+		}
+	}
 	// What the browser asks of the upstream's login, kept for the callback to judge it by.
-	const asked = {
+	const asked = askedOf({
 		...(field("prompt") === "login" ? { prompt: "login" as const } : {}),
 		...(maxAge === undefined ? {} : { maxAgeSeconds: Number(maxAge) }),
-	};
+	});
 	const trip = await flow.trips.begin({
 		name: tripName(name),
 		carried: toCarried({

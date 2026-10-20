@@ -25,11 +25,15 @@ const carried = z.strictObject({
 });
 
 export const toCarried = (trip: TripCarried) => trip as unknown as Carried;
+/** What a round trip carried for federation; nothing for a shape this does not know. */
+export const carriedOf = (value: Carried): TripCarried | undefined => {
+	const read = carried.safeParse(value);
+	// The shape checked is the type's own; zod's output loses only its readonly marks.
+	return read.success ? (read.data as TripCarried) : undefined;
+};
 /** The trip a taken round trip carried; nothing for a shape this does not know. */
 export const tripOf = (taken: Extract<Taken, { kind: "taken" }>): Trip | undefined => {
-	const read = carried.safeParse(taken.carried);
-	if (!read.success) return undefined;
-	// The shape checked is the type's own; zod's output loses only its readonly marks.
-	const kept = read.data as TripCarried;
+	const kept = carriedOf(taken.carried);
+	if (!kept) return undefined;
 	return { ...kept, startedAt: taken.startedAt, verifier: taken.verifier, nonce: taken.nonce };
 };

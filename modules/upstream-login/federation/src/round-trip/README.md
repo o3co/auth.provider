@@ -3,7 +3,7 @@
 Internal module of `federation`: one round trip through an upstream IdP, a login's or a link's, from its start to its callback.
 
 ## Responsibilities
-- Answers a start: checks what the browser asked, asks the continuation (the link when `link` is `1` or `true`, else the login), begins an `upstream-round-trip` round trip, and sends the browser to the upstream.
+- Answers a start: checks what the browser asked, asks the continuation (the link when `link` is `1` or `true`, else the login), begins an `upstream-round-trip` round trip (or, from another site, goes on with the browser's live one), and sends the browser to the upstream.
 - Answers a callback: takes the round trip once, has the upstream exchange its code, and hands the upstream login to the continuation the round trip names (the link when it records a session, else the login), so neither ends in the other; the login (`login.ts`) hands it to `login-gates`.
 - Decides whether an upstream login is fresh enough, finds the local user, and maps the amr and the profile.
 - Freshness is judged here on `kernel`'s clock, never by a type.

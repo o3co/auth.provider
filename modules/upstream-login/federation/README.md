@@ -25,7 +25,7 @@
 - A held login is a 303 to `held-page`, with no query, and the cookies; without one, a 403 with the gate's answer and cookies.
 
 ## Invariants
-- Each start begins an `upstream-round-trip` round trip named `federation.<idp>`, kept for `transaction-lifetime`, cross-site for an IdP that answers in a posted form; its callback takes it before the code is exchanged.
+- A start begins an `upstream-round-trip` round trip named `federation.<idp>`, kept for `transaction-lifetime`, cross-site for an IdP that answers in a posted form, taken by its callback before the code is exchanged; one not from this deployment's own page (`csrf`'s origin evidence) goes on with the browser's live one instead: its first request whole, its return target and `prompt` too, no cookie set.
 - A callback that takes nothing is `invalid_state`; one whose round trip carries what federation does not read is `invalid_state` too, its round trip spent.
 - From the take on, every answer clears the round trip's cookie, unavailable included.
 - The start refuses a return target `login-gates` does not allow (`invalid_redirect`).

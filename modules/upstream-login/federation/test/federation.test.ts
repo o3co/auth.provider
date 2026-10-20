@@ -285,6 +285,51 @@ describe("federation", () => {
 		expect(started.cookies.filter((c) => c.includes("federation.corp"))).toHaveLength(1);
 	});
 
+	it("goes on with the browser's live login round trip on a start from another site, or one that says nothing of its site", async () => {
+		const s = await serve({ federation: { "transaction-lifetime": "1m" } });
+		const first = await s.begin("?prompt=login&max_age=60");
+		const kept = s.saved.length;
+		for (const site of [{ "sec-fetch-site": "cross-site" }, {}]) {
+			const again = await s.get(`${base}/corp`, first.cookie, site);
+			// The same request upstream as the first start's, whatever this one asked; no cookie, nothing kept.
+			expect([again.status, again.location, again.cookies], JSON.stringify(site)).toEqual([
+				302,
+				first.location,
+				[],
+			]);
+		}
+		expect(s.saved.length).toBe(kept);
+		// Read, it is not lengthened: it ends where the first start put it.
+		now += 30_000;
+		const answered = await s.callback(`code=good&state=${first.state}`, first.cookie);
+		expect(answered.status).toBe(302);
+		// A link from another site is still refused before anything else.
+		const linking = await s.get(`${base}/corp?link=1`, first.cookie, {
+			"sec-fetch-site": "cross-site",
+		});
+		expect(linking.status).toBe(403);
+	});
+
+	it("begins anew on a start from this deployment's own page, or once the browser's round trip has ended or been taken", async () => {
+		const s = await serve({ federation: { "transaction-lifetime": "1m" } });
+		const fresh = (started: { location: string }) =>
+			new URL(started.location).searchParams.get("state");
+		const first = await s.begin();
+		const own = await s.get(`${base}/corp`, first.cookie, { "sec-fetch-site": "same-origin" });
+		expect(fresh(own)).not.toBe(first.state);
+		expect(own.cookies.filter((c) => c.includes("federation.corp"))).toHaveLength(1);
+		const second = await s.begin();
+		await s.callback(`code=good&state=${second.state}`, second.cookie);
+		const afterTaken = await s.get(`${base}/corp`, second.cookie, {
+			"sec-fetch-site": "cross-site",
+		});
+		expect(fresh(afterTaken)).not.toBe(second.state);
+		const third = await s.begin();
+		now += 60_000;
+		const afterEnd = await s.get(`${base}/corp`, third.cookie, { "sec-fetch-site": "cross-site" });
+		expect(fresh(afterEnd)).not.toBe(third.state);
+	});
+
 	it("checks a link start's origin before it makes any transaction, so another site starts none", async () => {
 		const s = await serve();
 		const first = await s.begin();
