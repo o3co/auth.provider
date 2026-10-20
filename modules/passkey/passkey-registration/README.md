@@ -12,6 +12,7 @@
 - Route `POST /oauth/webauthn/registration/verify`: takes `{response, nickname?}`, answers `{credentialId, transports, backedUp}`, with `transports` only when the authenticator names some.
   - Both take JSON or no body, use `csrf`'s policy and `rate-limit`'s requests policy, and enter the session at level `credentials`. Every answer is `no-store`.
   - Errors: `401 unauthorized`, `403` `csrf` or the requirement's answer, `400` (`invalid_request`, `challenge_invalid`, `credential_id_conflict`, `credential_limit`, or the ceremony's refusal: `origin_mismatch`, `top_origin_mismatch`, `challenge_mismatch`, `rp_id_mismatch`, `algorithm_not_allowed`, `attestation_invalid`, `user_verification_required`, `unknown`), `415` for another body, `429 rate_limited`, `503` `temporarily_unavailable` (a store) or `service_unavailable` (requests not counted).
+- Audit event `passkey.registered`, with the subject and `source` (when determined), once a passkey is kept; never its credential id, nickname or ceremony. Declared in `./audit-events`, listed in the audit event reference.
 - Operator section: `requests` (1–100000, default 60) in `window` (1s–1d, default `5m`, written with its unit), over both routes.
 
 ## Invariants
@@ -24,4 +25,4 @@
 - Entry at `credentials` is `mfa`'s judgement where it is composed; else `session` needs a recent sign-in at a known time.
 
 ## Depends on
-- `kernel`, `http`, `labels`, `webauthn`, `session`, `csrf`, `rate-limit`
+- `kernel`, `http`, `request-source`, `labels`, `webauthn`, `session`, `csrf`, `rate-limit`, `audit`

@@ -1,3 +1,4 @@
+import { auditStandIn } from "@mod/audit/testing";
 import cookiesModule from "@mod/cookies/module";
 import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
@@ -47,6 +48,7 @@ const credential = {
 async function serve(section: Record<string, unknown> = {}) {
 	const state = { answer: { kind: "registered", credential } as Registered, down: false };
 	const asked: unknown[][] = [];
+	const audit = auditStandIn();
 	const standIn = defineModule({ name: "webauthn" }, (m) => [
 		m.provide(registrations).by(() => ({
 			creation: async (subject) => {
@@ -72,6 +74,7 @@ async function serve(section: Record<string, unknown> = {}) {
 			rateLimitStandIn,
 			holding,
 			standIn,
+			audit.module,
 			registration,
 		],
 		config: {
@@ -115,7 +118,7 @@ async function serve(section: Record<string, unknown> = {}) {
 			};
 		};
 	};
-	return { state, asked, browser };
+	return { state, asked, browser, events: audit.events };
 }
 
 describe("registration from a session", () => {
@@ -131,7 +134,7 @@ describe("registration from a session", () => {
 	});
 
 	it("keeps the response for the session's subject with its nickname, answering the credential's id, transports and backup state", async () => {
-		const { browser, asked, state } = await serve();
+		const { browser, asked, state, events } = await serve();
 		const post = await browser("sam");
 		const response = { id: "Y3JlZA", subject: "kim" };
 		expect(await post("verify", { response, nickname: "laptop", subject: "kim" })).toMatchObject({
@@ -147,6 +150,13 @@ describe("registration from a session", () => {
 			backedUp: false,
 		});
 		expect(asked[1]).toEqual(["register", "sam", response, undefined]);
+		// Each passkey kept is recorded for the subject, with the source alone: no id, nickname or ceremony.
+		const registered = { kind: "passkey.registered", subject: "sam", at: expect.any(Number) };
+		const attributes = { source: "198.51.100.1" };
+		expect(events).toEqual([
+			{ ...registered, attributes },
+			{ ...registered, attributes },
+		]);
 	});
 
 	it("answers 401 without a session, and the requirement's answer when the session falls short", async () => {
@@ -192,8 +202,8 @@ describe("registration from a session", () => {
 		expect(asked).toHaveLength(2);
 	});
 
-	it("answers each refusal of webauthn in the words clients of these routes know", async () => {
-		const { browser, state } = await serve();
+	it("answers each refusal of webauthn in the words clients of these routes know, recording none", async () => {
+		const { browser, state, events } = await serve();
 		const post = await browser("sam");
 		const answers = {
 			origin: { error: "origin_mismatch" },
@@ -223,6 +233,7 @@ describe("registration from a session", () => {
 				cacheControl: "no-store",
 			});
 		}
+		expect(events).toEqual([]);
 	});
 
 	it("answers 503 when webauthn cannot tell", async () => {

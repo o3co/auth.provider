@@ -104,6 +104,12 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 |---|---|---|
 | `mfa.reset` | `by`, `kinds`, `count`, `sessions`, `sessionsAgain`, `complete`, `requestedBy` | an operator's reset gets past its input, finished or not (`complete`) |
 
+## @mod/passkey-registration
+
+| Kind | Attributes | Recorded when |
+|---|---|---|
+| `passkey.registered` | `source` | a passkey is kept for the session's subject, the event's subject |
+
 ## @mod/rate-limit
 
 | Kind | Attributes | Recorded when |
