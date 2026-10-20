@@ -80,6 +80,19 @@ describe("accessTokenSigning", () => {
 		expect(await access.verify(byOld)).toEqual({ kind: "invalid", reason: "kid_expired" });
 	});
 
+	it("is the only way to an access token: keys' sign and verify refuse its typ, in any case or as a media type", async () => {
+		const { access, k } = await open(rotated);
+		const token = await access.sign({ sub: "a" });
+		for (const typ of ["at+jwt", "AT+JWT", "At+Jwt", "application/at+jwt", "Application/AT+JWT"]) {
+			await expect(k.sign({ sub: "a" }, typ), typ).rejects.toThrow(TypeError);
+			await expect(k.verify(token, typ), typ).rejects.toThrow(TypeError);
+		}
+		// Other types are signed and verified as before.
+		for (const typ of ["JWT", "logout+jwt", "at+jwt2", "application/jwt"]) {
+			expect((await k.verify(await k.sign({ sub: "a" }, typ), typ)).kind, typ).toBe("valid");
+		}
+	});
+
 	it("signs and verifies with an HMAC secret as with a key pair", async () => {
 		const { access } = await open({
 			signing: { kid: "s", alg: "HS256", secret: randomBytes(32).toString("base64") },

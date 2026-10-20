@@ -8,8 +8,8 @@
 - The meaning of what is signed. Which outside keys a module trusts, and where it gets them.
 
 ## Offers
-- `keys`: sign claims under a `typ` (adding the `kid`), and verify a token, answering valid with frozen claims or why not (`malformed`, `typ`, `kid_unknown`, `kid_expired`, `signature`).
-- `accessTokenSigning`: sign claims as an access token (`at+jwt`, adding the `kid`) and verify one, under the ring and answers of `keys`.
+- `keys`: sign claims under a `typ` (adding the `kid`), and verify a token, answering valid with frozen claims or why not (`malformed`, `typ`, `kid_unknown`, `kid_expired`, `signature`). Either refuses the access token type (`at+jwt` in any case, `application/` too) as the caller's TypeError.
+- `accessTokenSigning`: sign claims as an access token (`at+jwt`, adding the `kid`) and verify one, under the ring and answers of `keys`: the one way to either.
 - Whether signing is asymmetric, the `alg` it signs with, and the path of the public key set, a route contributed to `http` that answers its listed origins.
 - `publicJwk`: a JWK the platform reads as a public key, kept as given.
 - `publicPem`: a public key written as PEM.
