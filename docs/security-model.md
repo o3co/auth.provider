@@ -34,6 +34,7 @@ Each promise below holds across every module composed. Each names what keeps it 
    - Kept by: `reauth`'s re-authentication record, which `authorize` makes for the request and takes once; `session` never counts an authentication time it does not know as fresh.
    - Scenes: federation ("federation logins meeting a client's demand for a fresh login", and the freshness scenes through Google and Apple).
    - No scene yet for a password login.
+   - One exception, through an upstream: a login the upstream says came within its clock allowance before the demand counts as fresh, even where the upstream did not authenticate again (`federation`'s card, "Fresh enough"). The login page hands `prompt=login` and `max_age` to the upstream, which asks the user again where it honours them. To narrow the allowance, lower `federation.idps.<name>.clock-skew` for that IdP.
 3. **A dependency that cannot answer never grants anything.**
    - It covers what an authorization decision waits on; a notice sent best effort, such as an audit event or a logout notice to a client, decides nothing.
    - Kept by: `kernel`'s `Unavailable`, which `http` answers `503`, or as the route declares; the authorization endpoint, once it trusts the redirect URI, answers it to the client by a redirect with `error=temporarily_unavailable`.

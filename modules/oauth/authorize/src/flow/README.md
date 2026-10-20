@@ -19,8 +19,9 @@ Internal module of `authorize`: the steps a request goes through once its redire
 ## Invariants
 - The order: a denial coming back from consent, the request's form, acr_values and `claims`, the scope, taking the re-authentication record, the session's entry and freshness, the step-up, a client consent cannot serve, the issuance policies, consent, the audience asked, the code.
 - `tokens`' `admits` is asked as the code's exchange will ask: the subject, the client, the scope, the audience asked (the default while it is refused), the session's amr and authentication time (marked when it is unknown), the met acr, grant type `authorization_code` and the session. A refusal is `access_denied` with the policy's description, recorded with the policy's name and reason.
-- Without a session fresh enough, the browser goes to the login page with `redirect_to` back to the endpoint, without the old record's name and carrying a new re-authentication record when `prompt=login`, `max_age` or an essential `auth_time` was asked.
-- A request back from its login, its record taken, whose session's authentication time is still unknown while one of those is asked, is refused with `login_required`, not sent to log in again.
+- Without a session fresh enough, the browser goes to the login page with `redirect_to` back to the endpoint, without the old record's name and carrying a new re-authentication record when `prompt=login`, `max_age` or an essential `auth_time` was asked; `prompt=login` and `max_age` themselves go beside `redirect_to`.
+- A request that names a re-authentication record it cannot take (spent, unknown, or another request's) is refused with `login_required`, before its session is read.
+- A request back from its login, its record taken, whose session is still not new enough (its authentication time unknown, or known and before the asking), is refused with `login_required`, not sent to log in again.
 - The audience asked is read before the issuance policies, so they judge the code's audience; its refusal (`invalid_target`) goes back with `state` and `iss`, unrecorded and with no code, only after consent and the policies.
 - Each step returns its decision as data; only `route` builds answers.
 - `code-grant` is asked for a code for the client, redirect URI, PKCE challenge, nonce, session, subject and the met acr.

@@ -25,6 +25,11 @@ export default defineModule({ name: "authorize", section }, (m) => [
 	// Answers only in the query, and takes no request object by reference (discovery's default is true).
 	m.contribute(metadata).by(() => ({ name: "response_modes_supported", value: ["query"] })),
 	m.contribute(metadata).by(() => ({ name: "request_uri_parameter_supported", value: false })),
+	// Every redirect answer, errors included, carries `iss` (RFC 9207 §3).
+	m.contribute(metadata).by(() => ({
+		name: "authorization_response_iss_parameter_supported",
+		value: true,
+	})),
 	// The POST is a 303 to the GET with the same parameters, so both take other sites' requests alike.
 	...(["GET", "POST"] as const).map((method) =>
 		m.contribute(routes).by(async (c) => {

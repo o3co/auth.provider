@@ -35,7 +35,7 @@ From `@mod/authorize`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `authorize.login-page` | string |  | yes | `AUTHORIZE_LOGIN_PAGE` | `https://login.example.invalid/login` | The login page, given the return URL as `redirect_to`: an https URL (http only on a loopback host). |
+| `authorize.login-page` | string |  | yes | `AUTHORIZE_LOGIN_PAGE` | `https://login.example.invalid/login` | The login page, given the return URL as `redirect_to`, and the `prompt=login` and `max_age` a request asked: an https URL (http only on a loopback host). |
 | `authorize.step-up-page` | string |  |  |  |  | Where a session that falls short of an acr is sent to raise its authentication: an https URL (http only on a loopback host). |
 | `authorize.oidc-mode` | oidc-required \| dual | `oidc-required` |  |  |  | oidc-required refuses a request whose own scope does not name openid, as invalid_scope; dual lets it through with the scope it asks or the client's default. |
 | `authorize.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over both methods together; over it, 429. |
