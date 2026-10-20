@@ -7,7 +7,7 @@
 ## Not here
 - Purposes, wording and locale (the sending side and mail's templates). Checking and rendering a message (mail's `preparer`; only what it returns is sent). The address rule (mail's `isAddress`). Counting sends (the relay's limits).
 
-## Interface
+## Offers
 - Composition definition only (provides `mail`); it cannot be composed beside mail's logging-only sender.
 - Operator section: `host` (required), `port` (default 587), `security` (`starttls` by default, `tls` or `none`), `from` (one address mail's `isAddress` takes, a display name allowed), `user` and `password` (both or neither), `deadline` (the whole send, 100ms–10m, default `40s`, written with its unit), `concurrent-sends` (sends at once on a host, 1–1000, default 20).
 
