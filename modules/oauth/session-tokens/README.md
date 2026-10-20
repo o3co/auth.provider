@@ -28,7 +28,7 @@
 - A pushed-out token that cannot be revoked fails the record and is left to the sweep, which every host runs every `sweep-interval` over the listed sessions.
 - Closing a session revokes what awaits too.
 - A host stopped past the add leaves the session listed.
-- The window left: more adds at once than the margin push one out unlisted, and the host stops before listing it.
+- Every add that pushes one out lists its session again. The window left: the push-out found it unlisted (more adds at once than the margin, or a sweep that found nothing awaiting took it off before the add), and the host stops before listing it again.
 - On close, it answers done only after revoking every recorded token. If it cannot, it throws; the session stays closing, and a later close continues. Safe to repeat, and from several hosts at once.
 - Closing a session, revoking a token or pushing its reference out leaves its index entry, so the token still answers its session; whether that session is open is checked by whoever asks, as the `session` tie does.
 - `sessionOf` throws unavailable when the index cannot tell, never unbound.

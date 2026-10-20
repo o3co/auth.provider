@@ -83,8 +83,10 @@ const recorder =
 		const { pushedOut } = await kept.add(session, referenceOf(token), keepMs);
 		if (pushedOut.length === 0) return;
 		parts.log.info("session-tokens.pushed_out", { count: pushedOut.length });
-		// Adds at once past the margin pushed one out unlisted: listed now, the window left.
-		if (!near) await sessions.add(session);
+		// Listed again whether or not it was before: adds at once past the margin pushed one out
+		// unlisted, and a sweep finding nothing awaiting may have taken it off before the add. The
+		// window left is a host stopping between the add and this.
+		await sessions.add(session);
 		await settler(parts)(session);
 	};
 

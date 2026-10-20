@@ -220,6 +220,22 @@ it("lists a session before an add within the margin of its cap, and not before o
 	expect(await s.issued.pendingListed()).toEqual([s.session.id]);
 });
 
+it("lists the session again after an add pushed one out, though a sweep took it off between the listing and the add", async () => {
+	const s = await boot({ size: 2, margin: 1 });
+	const first = await s.issue();
+	now += 1000;
+	await s.issue();
+	now += 1000;
+	// Listed before the add, near the cap; a sweep finding nothing awaiting takes it off before the add.
+	s.issued.beforeNextAdd(() => s.issued.sweptDone(s.session.id));
+	s.down.failNext("revokeReferenced");
+	await expect(s.issue()).rejects.toSatisfy(isUnavailable);
+	// The pushed-out token awaits with its session listed, so the sweep revokes it.
+	expect(await s.issued.pendingListed()).toEqual([s.session.id]);
+	await new Promise((resolve) => setTimeout(resolve, 1300));
+	expect(await s.t.verifyAccess(first.token)).toEqual({ kind: "invalid", reason: "revoked" });
+});
+
 it("refuses to start with a margin that is not below the cap, telling neither number", async () => {
 	await expect(boot({ size: 4, margin: 4 })).rejects.toMatchObject({
 		refusals: [
