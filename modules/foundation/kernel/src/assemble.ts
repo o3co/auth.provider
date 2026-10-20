@@ -50,7 +50,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return proto === null || proto === Object.prototype;
 }
 
-type Issue = {
+/** Why a value read as a section is read does not hold: zod's issue, or one configuration cannot hold. */
+export type Issue = {
 	readonly message: string;
 	readonly path?: readonly PropertyKey[];
 	readonly code?: string;
@@ -93,6 +94,12 @@ function readSection<T>(
 		throw error;
 	}
 }
+
+/**
+ * Reads `raw` against `schema` as a section is read, for a value a section passes through to a
+ * schema of its own: a string converts as the schema asks; the value, or why it does not hold.
+ */
+export const readConfigured = readSection;
 
 /** The value as HOCON holds it (undefined fields absent, only plain objects nested), `at` its path as `raw.a[0].b`. */
 function plainTree(value: unknown, at: string): unknown {

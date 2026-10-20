@@ -2,7 +2,9 @@ export {
 	type Assembly,
 	type AssemblyInput,
 	assemble,
+	type Issue as ConfigurationIssue,
 	kernelConfig,
+	readConfigured,
 } from "./assemble.ts";
 export { type ConfigSource, loadConfig } from "./config.ts";
 export { deepFreeze } from "./freeze.ts";
