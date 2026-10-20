@@ -21,7 +21,7 @@
 - Store interface for each holder's live transactions (a session's handle, or a held login's subject), each by a digest of its identifier for its lifetime: add (answering those pushed out past 5, a constant), members, remove. Its needs: never evicted, survives a crash and a failover, confirmed reads.
 - Extension point `enrollmentFlow` (exactly one, boot refused otherwise): the handlers of `POST enrollment` and `POST enrollment/complete`, and the answer to a challenge in an enrollment's transaction; the routes stay declared here. `mfa-enrollment` contributes it, coming wherever this package is composed.
 - Contract `flowParts`, for the module binding factors: the transactions, the resume of a held login, recording through this package's declaration, the common answers, the request helpers, and the lockout's name and policy (`seams`' card).
-- `./testing`: test configuration builders, and the store interfaces' contract tests for every implementation (see `transactions`' card).
+- `./testing`: test configuration builders and the section's keys (`flowKeys`), and the store interfaces' contract tests for every implementation (see `transactions`' card).
 
 ## Invariants
 - Internal modules, and what each is given: `wiring`'s card. The package's module declares the routes.

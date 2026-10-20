@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
-import type { section } from "./section.ts";
+import { section } from "./section.ts";
 import {
 	type StoredTransaction,
 	type TransactionListings,
@@ -13,6 +13,9 @@ export type FlowSettings = z.input<typeof section>;
 export function flowsConfig(settings: Partial<FlowSettings> = {}) {
 	return { "mfa-flows": { ...settings } };
 }
+
+/** The keys of this package's section, so a test can tell its settings from `mfa`'s. */
+export const flowKeys: readonly string[] = Object.keys(section.shape);
 
 /** A place that keeps mfa-flows' transactions, as one implementation of its store interface offers it. */
 export interface TransactionPlace {

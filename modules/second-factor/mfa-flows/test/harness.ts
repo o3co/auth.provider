@@ -28,8 +28,7 @@ import { type Revocations, revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach } from "vitest";
 import flowsModule from "../src/module.ts";
-import { section } from "../src/section.ts";
-import { type FlowSettings, flowsConfig } from "../src/testing.ts";
+import { type FlowSettings, flowKeys, flowsConfig } from "../src/testing.ts";
 import { testEnrollment } from "./enrolling.ts";
 import { memoryTransactions } from "./stores.ts";
 
@@ -198,7 +197,6 @@ interface Call {
 
 /** Settings for both sections; each goes to the module that reads it. */
 type Settings = Partial<MfaSettings> & Partial<FlowSettings>;
-const flowKeys = Object.keys(section.shape);
 
 /** The package over its parts; `enrolling` is the enrollment flow composed (the test one unless given, none with `null`). */
 export async function serve(
