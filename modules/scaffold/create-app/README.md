@@ -12,14 +12,12 @@
 - What the full template and a selection compose: `combinations`.
 - The local layer that boots a generated app for a test or a conformance run: `trial`.
 - The project's files, from the configuration and its examples to the image, the guide and the app's entry, and what they are held to: `app-output`.
+- The configuration, audit event and route references, and each package's `reference.conf`: `references`.
 
 ## Offers
 - `generate`, and the `create-app` command around it (also `run`, the command on given arguments, answering its exit status, for a package that runs it): packages listed make their app; none makes a pattern's, `--pattern` naming it (default `full`), `--add` naming features to add, `--axis <owner>=<module>` an axis's choice and `--<group>` a group's features, comma-separated (not for full).
 - `--list` names, one a line, what `--add` takes: `combinations`' `addable`.
 - `patterns()`: each pattern's name, use, conformance areas and what conformance adds for its run.
-- The configuration reference and each package's `reference.conf` (its section's defaults as HOCON, for reading only), from each section's schema and fragment, written by `pnpm --filter @mod/create-app run configuration`; their tests check each key's description and default, how time and size are written, and that no `.default()` is left (internal module `references`).
-- The audit event reference beside it: each module's events as its `./audit-events` declares them through `audit`, written by the same command and held to the committed file the same way.
-- A kind two modules declare must be declared alike in the audit event reference.
 - A pattern's README opens with its use and carries its card; the full template's names the opt-in features not added.
 
 ## Invariants
@@ -32,7 +30,7 @@
 - Writes the target only, through `app-output`; reads the workspace's package list or the bundle's index, and the cards and fragments of the modules it composes.
 
 ## Depends on
-- `app-output` (it writes the project, from the packages create-app gives it), `kernel`, `combinations` (the modules it assembles become dependencies of the project), `trial` (the references assemble on its layer).
+- `app-output` (it writes the project, from the packages create-app gives it), `combinations` (the modules it assembles become dependencies of the project).
 
 ## Vocabulary
 - fragment: a module's example of its section, placeholders only; a secret's is `REPLACE-…` text its section refuses.

@@ -233,6 +233,7 @@ What each module contains is described by that module's contract card (each modu
 | Generating a project: the command, the plan, and where the packages come from (the workspace or a bundle's index) | contract | create-app |
 | A generated project's files (a listed app, or a deployment of full or a pattern: the module list, configuration gathered from the modules' fragments, env and local examples, Dockerfile, README) | template | app-output |
 | The patterns: each one's use, selection, conformance areas and card, and the operator's choice over them | template | create-app (`patterns`) |
+| The generated references: the configuration reference, each package's `reference.conf`, the audit event reference and the route reference | contract | references |
 | What is composed together by default (a feature's wiring, the bridges between features), a selection's composition (what it needs to run, each axis's adapter), the full template, and the features that opt in | contract | combinations |
 | Declaring that a feature's store interfaces must be wired (`storeWiring` in the feature's package.json, checked by guard) | setting | the feature whose store interfaces must be wired |
 | How distribution is bundled | setting | distribution |

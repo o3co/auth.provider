@@ -2176,13 +2176,13 @@ importers:
       '@mod/combinations':
         specifier: workspace:*
         version: link:../combinations
+    devDependencies:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
       '@mod/trial':
         specifier: workspace:*
         version: link:../trial
-    devDependencies:
       '@o3co/ts.hocon':
         specifier: 1.14.3
         version: 1.14.3(zod@4.6.7)
