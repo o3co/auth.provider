@@ -1,14 +1,11 @@
-import { audit } from "@mod/audit";
 import { csrfChecked } from "@mod/csrf";
 import { type Route, routes, use } from "@mod/http";
 import { defineModule, isUnavailable } from "@mod/kernel";
 import { loginGates } from "@mod/login-gates";
 import { factors, proofSteps } from "@mod/mfa";
-import { lockoutProblem, lockouts, requestsPerSource } from "@mod/rate-limit";
-import { revocations } from "@mod/subject-revocation";
-import { flowParts, mfaReset } from "./contract.ts";
+import { lockoutProblem, requestsPerSource } from "@mod/rate-limit";
+import { flowParts } from "./contract.ts";
 import { gateOver } from "./proof/proof.ts";
-import { resetOver } from "./reset/reset.ts";
 import { type Handler, unavailable } from "./routing.ts";
 import { section } from "./section.ts";
 import { transactionsIn } from "./transactions/transactions.ts";
@@ -41,16 +38,6 @@ const withUnavailable =
 export default defineModule({ name: "mfa-flows", section, replicaSafe: true }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "mfa-flows" })),
 	m.provide(flowParts).by(partsIn),
-	m.provide(mfaReset).by(async (c) =>
-		resetOver({
-			factors: await c.get(factors),
-			revocations: await c.get(revocations),
-			lockouts: await c.get(lockouts),
-			policy: policyOf(c.section),
-			audit: await c.get(audit),
-			log: c.log,
-		}),
-	),
 	m.contribute(loginGates).by(async (c) => ({
 		name: "mfa",
 		hold: gateOver({

@@ -3,16 +3,13 @@
 ## Responsibilities
 - Owns transactions (short records waiting for a second factor) and drives the login gate, step-up, and enrollment.
 - Owns the numbers of the lockout policy (the mechanism is `rate-limit`).
-- Owns an operator's reset of a subject's second factors, and a user's own release of their lockout.
+- Owns a user's own release of their lockout.
 
 ## Not here
-- Factor records and decisions about them (`mfa`). Verifying each factor (the side contributing the kind). Session records and raise (`session`). The login flow (`login-gates`). Managing a session's own factors (`mfa-management`).
+- Factor records and decisions about them (`mfa`). Verifying each factor (the side contributing the kind). Session records and raise (`session`). The login flow (`login-gates`). Managing a session's own factors (`mfa-management`). An operator's reset of a subject's factors (`mfa-reset`, which takes the lockout through `flowParts`).
 
 ## Offers
 - Contributions: the `login-gates` gate `mfa`, and the step `mfa-flows` that proves a factor to `mfa`.
-- `mfaReset.reset(subject, { requestedBy? })`, for an embedder that has verified who asks: ends the subject's sessions, removes every factor, releases the lockout, and answers how many factors went.
-- `mfaReset` is there whenever mfa-flows is composed, so the one template can use it as is; checking who asks stays the embedder's.
-- A reset that cannot do a step rejects as unavailable; running it again finishes it. It records `mfa.reset` and logs a line (see `reset`'s card).
 - Routes under `/session/mfa/`, whose URLs outside users rely on: `GET transaction`, `POST challenge`, `POST verify`, `POST step-up`, `POST enrollment`, `POST enrollment/complete`, `POST lock/release`.
 - Audit events carry the subject, the transaction's `purpose` and the `source` where determined; never a proof, a challenge or a transaction id.
 - `mfa.challenge.sent` (`kind`): a factor's or a binding proof's challenge sent; a login held or a step-up begun records nothing.
