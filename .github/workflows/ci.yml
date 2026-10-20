@@ -6,8 +6,10 @@ on:
   pull_request:
     branches: [develop, main, 'release/**']
   # Daily audit and conformance (see the `audit` and `conformance` jobs). A
-  # `schedule` event runs on the repository's default branch only; every other
-  # job that builds or tests is gated on the event.
+  # `schedule` event runs on the repository's default branch (main) only: the
+  # audit reads main, what was released, and the conformance jobs check out
+  # develop, which pull requests to develop do not run conformance on. Every
+  # other job that builds or tests is gated on the event.
   schedule:
     - cron: '17 3 * * *'
 
@@ -203,6 +205,9 @@ jobs:
       patterns: ${{ steps.plan.outputs.patterns }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The daily run tests develop, where merged work waits for the next release.
+          ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -237,6 +242,8 @@ jobs:
       - run: echo "LEGACY_DIR=$RUNNER_TEMP/legacy-0.17.0" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
+          # The daily run tests develop, where merged work waits for the next release.
+          ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
           # The legacy build clones the v0.17.0 tag from this checkout.
           fetch-depth: 0
           fetch-tags: true
@@ -283,6 +290,9 @@ jobs:
         pattern: ${{ fromJSON(needs.conformance-plan.outputs.patterns) }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The daily run tests develop, where merged work waits for the next release.
+          ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
