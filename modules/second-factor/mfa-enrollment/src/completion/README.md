@@ -13,7 +13,7 @@ Internal module of `mfa-enrollment`: beginning a binding, and completing it with
 
 ## Invariants
 - It asks `mfa-binding-proof` whether a binding proof is asked, which sends nothing, and begins the binding without a pass first: `mfa` answers an unknown kind `400` before any proof is sent.
-- A first factor bound on a binding proof goes on at once: the login resumes, or the session is raised. Its recovery codes are written only after, by `mfa`'s `reissue` under the fence the binding began under, the binding asking `later`; where either fails, none are written, the factor stays, and codes can be reissued.
+- A first factor bound on a binding proof goes on at once: the login resumes, or the session is raised. Its recovery codes are written only after, by `mfa`'s `reissue` under the fence the binding began under; where either fails, none are written, the factor stays, and codes can be reissued.
 - Completion judges the label before an attempt is spent: one that is not a string or not of `mfa`'s shape is `400` `invalid label`, and a missing one binds no label.
 - Completion spends an attempt before the proof is judged, and takes the transaction before binding.
 - A first proof `mfa` cannot judge (unavailable) gives its attempt back.
