@@ -17,7 +17,7 @@
 - IdP settings (under `federation`'s `idps.<name>`): `client-id` (the Services ID), `client-secret`, `team-id`, `key-id`, `private-key` (PKCS8 PEM; all five well-formed text), `secret-lifetime` (1m–15777000s, default `5m`), `scopes` (of `name` and `email`; default `email`), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (default Apple's own), `clock-skew` (0s–5m, default `30s`), `end-session-endpoint` (optional)
 
 ## Invariants
-- Boot is refused for a callback that is not https or is on loopback (`localhost`, 127.0.0.0/8, `[::1]`).
+- Boot is refused for a callback that is not https or is on a loopback host, as `url-setting`'s `isLoopbackName` judges it (`localhost` and the names under it, 127.0.0.0/8, `[::1]`, 127.0.0.0/8 mapped into IPv6).
 - Boot is refused for a key that is no P-256 key in PKCS8.
 - Boot refusals name no key or secret.
 - Boot is refused unless exactly one of `client-secret` and the three signing settings (all of them) is given.
