@@ -25,6 +25,7 @@ The app relies on the deployment for these. Each is required, not advice.
 5. **`rate-limit.fail-mode = open` lets requests through uncounted while the store is down.** Keep the default `closed` unless an outage must not refuse requests.
 6. **`signer-keys-http` asks the ledger once for every assertion.** Each JWT bearer assertion from its issuer is one `POST` to `keys-url`, made before the assertion's signature can be checked and never cached, so a revoked device stops at once. Only the token endpoint's requests per source (`token-endpoint.requests` per `window`) bound these calls: size the ledger for that rate, from every source together.
 7. **RP-initiated logout by GET closes the session without asking** when it carries an `id_token_hint` issued within the last 24 hours, as the specification allows. A relying party, or a page that can make the browser follow its link, can log the user out.
+8. **Keep Node's threadpool at 4 threads or more where `clients-cimd` runs.** Name lookups run on the threadpool, and `outbound` resolves at most half of it at once, giving names an outside party chose (a client's metadata document) half of that, rounded down. With `UV_THREADPOOL_SIZE` at 2 or less, they get none, and `clients-cimd` refuses boot, naming it. The default, 4, gives them one.
 
 ## Redis
 
