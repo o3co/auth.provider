@@ -4,9 +4,10 @@ import { simpleWeb } from "./simple-web.ts";
 export const mfaWeb: Pattern = {
 	name: "mfa-web",
 	use:
-		"Simple-web with a second factor: a one-time password app (TOTP), a code by email, and " +
-		"recovery codes. Its store is in Redis, since losing it loses the factors users have " +
-		"registered; mail goes through an SMTP relay.",
+		"Simple-web with a second factor: a one-time password app (TOTP) and recovery codes, and a " +
+		"code by email, which counts as one only where mfa-email's `adds-second-factor` is set. " +
+		"Its store is in Redis, since losing it loses the factors users have registered; mail goes " +
+		"through an SMTP relay.",
 	axes: {
 		...simpleWeb.axes,
 		"@mod/store": "@mod/redis",

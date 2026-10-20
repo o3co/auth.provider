@@ -122,15 +122,18 @@ it("refuses to boot without mfa-binding-proof composed, naming its contract, so 
 	);
 });
 
-it("declares a guessable, counting factor of amr email, adding mfa only when told", async () => {
+it("declares a guessable factor of amr email, adding mfa and counting only when told", async () => {
 	expect((await boot()).kind).toMatchObject({
 		kind: "email",
 		amr: ["email"],
 		addsSecondFactor: false,
 		guessable: true,
+		counts: false,
+	});
+	expect((await boot({ "adds-second-factor": true })).kind).toMatchObject({
+		addsSecondFactor: true,
 		counts: true,
 	});
-	expect((await boot({ "adds-second-factor": true })).kind.addsSecondFactor).toBe(true);
 });
 
 it("binds the account's address by a long code sent there, showing the address masked", async () => {

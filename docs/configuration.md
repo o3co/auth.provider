@@ -353,7 +353,7 @@ From `@mod/mfa-email`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `mfa-email.adds-second-factor` | boolean | `false` |  |  |  | Whether a code by mail adds `mfa`; by default it is a second factor of its own amr only. |
+| `mfa-email.adds-second-factor` | boolean | `false` |  |  |  | Whether a code by mail adds `mfa` and so meets a required second factor; by default it is a way back of its own amr only. |
 | `mfa-email.code-lifetime` | string | `10m` |  |  |  | How long a code by mail lives, from 1m to 30m, for an enrolment or a sign-in; the proof before a first binding keeps its ten minutes. |
 
 ## mfa-flows
