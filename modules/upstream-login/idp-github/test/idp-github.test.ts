@@ -1,5 +1,6 @@
 import { isUnavailable, Unavailable } from "@mod/kernel";
 import type { Narrower, Outbound, OutboundRequest, OutboundResponse } from "@mod/outbound";
+import { outboundOver, section as outboundSection } from "@mod/outbound/module";
 import type { OutboundRefusals } from "@mod/outbound-policy";
 import { type AuthorizationStart, type CodeExchange, UpstreamRefused } from "@mod/upstreams";
 import { describe, expect, it } from "vitest";
@@ -164,6 +165,37 @@ describe("idp-github", () => {
 			"https://github.com/login/oauth/access_token",
 			"https://api.github.com",
 		]);
+	});
+
+	it("reaches a GitHub Enterprise at a private address as the operator's endpoints, only where outbound.internal-hosts lists its host", async () => {
+		const enterprise = {
+			"client-id": "cid",
+			"client-secret": "sec",
+			"authorization-endpoint": "https://ghe.corp/login/oauth/authorize",
+			"token-endpoint": "https://ghe.corp/login/oauth/access_token",
+			api: "https://ghe.corp/api/v3/",
+		};
+		/** outbound itself, every name resolving to a private address, a request ending fast. */
+		const pathsOf = (internal: readonly string[]) =>
+			outboundOver(
+				outboundSection.parse({
+					allow: ["ghe.corp"],
+					"internal-hosts": internal,
+					timeout: "300ms",
+				}),
+				async () => ["10.0.0.5"],
+			);
+		for (const [internal, expected] of [
+			[[], "refused"],
+			[["ghe.corp"], "unavailable"],
+		] as const) {
+			const paths = pathsOf(internal);
+			// Boot asks with the same narrowing, and outbound's policy refuses no host it allows.
+			const read = settingsOf({ explained: paths.explained }).parse(enterprise);
+			const upstream = opened(read, { fetch: paths.fetch } as Outbound);
+			// Unlisted, the address refuses the token request; listed, it gets past it to the connection.
+			expect(await outcome(upstream.exchange(exchange())), JSON.stringify(internal)).toBe(expected);
+		}
 	});
 
 	it("refuses at boot, at its key, an endpoint outbound's policy refuses, GitHub's own included", () => {
