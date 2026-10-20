@@ -7,11 +7,11 @@ import { defineModule } from "@mod/kernel";
 import { requestsPerSource } from "@mod/rate-limit";
 import { clientBindings, senderBinding } from "@mod/sender-binding";
 import { tokens } from "@mod/tokens";
-import { clientCredentials } from "./client-credentials.ts";
+import { clientCredentials } from "./built-in/client-credentials.ts";
+import { composedRule } from "./built-in/targets.ts";
 import { tokenEndpointLocation } from "./contract.ts";
-import { tokenEndpoint, tokenPath } from "./endpoint.ts";
+import { tokenEndpoint, tokenPath } from "./route/endpoint.ts";
 import { section } from "./section.ts";
-import { composedRule } from "./targets.ts";
 
 /** A browser's public client may send a body's type and its DPoP proof, and read the nonce, the challenge and the wait. */
 const cors = {

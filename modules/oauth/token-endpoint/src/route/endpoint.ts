@@ -6,10 +6,10 @@ import { type HttpRequest, type HttpResponse, jsonAnswer, type Route } from "@mo
 import { determinedSource } from "@mod/request-source";
 import type { Binding, ClientBindings, SenderBindings } from "@mod/sender-binding";
 import type { Tokens } from "@mod/tokens";
+import events from "../audit-events.ts";
+import { authenticateClient, oauthError } from "../contract.ts";
 import { answeredBody } from "./answer.ts";
-import events from "./audit-events.ts";
 import { challenged } from "./challenges.ts";
-import { authenticateClient, oauthError } from "./contract.ts";
 import { issuanceFor, refusedAnswer } from "./issuance.ts";
 
 export const tokenPath = "/oauth/token";
