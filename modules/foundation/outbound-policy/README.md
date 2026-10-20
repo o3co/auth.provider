@@ -14,7 +14,7 @@
 - `outbound.credentials`: at boot, why a caller's credential must not go to its URLs (`origins`: more than one; `scheme`: one neither https nor a named `plain-loopback` or `plain-internal` pair), or nothing; `credentialRefusalText` gives either in the words every caller uses.
 - `outbound.limits`: at boot, where a request under a narrowing is cut (`timeoutMs`, `maxBytes`): the operator's caps narrowed, never widened, the same limits the sender cuts it at.
 - `policySettings`: the keys a section takes for the policy (`allow`, `allow-any-public`, `deny`, `plain-loopback`, `plain-internal`, `internal-hosts`, the size caps and `timeout`); `hostList`: a list of hosts, or `.name` for the name and the names under it.
-- `isLoopbackAddress`: whether an IP address, however written, reaches loopback (127/8, `::1`, or 127/8 mapped into IPv6; never a form that carries it unmapped, nor a name), the one judgement of a loopback address every module uses.
+- `isLoopbackAddress`: whether an IP address, however written, reaches loopback (127/8, `::1`, or 127/8 mapped into IPv6; never a form that carries it unmapped, nor a name), the one judgement of a loopback address every module uses; the literal is judged by url-setting's `isLoopbackName`.
 - `policyOf` (the settings) → the policy: admitting a URL, admitting the addresses it resolved to and answering those checked, explaining a refusal, the credential rule, whether a host is listed, and the limits a request is cut at.
 - `hostEntryOf`: an operator's host list entry, as an entry or a narrower's host; `withinHosts`: whether a URL's host is among hosts.
 

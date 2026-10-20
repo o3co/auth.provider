@@ -1,4 +1,5 @@
 import { BlockList, isIP } from "node:net";
+import { isLoopbackName } from "@mod/url-setting";
 import {
 	type Admitted,
 	type CredentialRefusal,
@@ -78,9 +79,6 @@ const metadata = { ipv4: new BlockList(), ipv6: new BlockList() };
 metadata.ipv4.addAddress("100.100.100.200", "ipv4");
 metadata.ipv6.addAddress("fd00:ec2::254", "ipv6");
 metadata.ipv6.addAddress("fd20:ce::254", "ipv6");
-const loopback = { ipv4: new BlockList(), ipv6: new BlockList() };
-loopback.ipv4.addSubnet("127.0.0.0", 8, "ipv4");
-loopback.ipv6.addAddress("::1", "ipv6");
 
 const familyOf = (address: string) => (isIP(address) === 6 ? "ipv6" : "ipv4");
 const inList = (lists: Record<"ipv4" | "ipv6", BlockList>, address: string) =>
@@ -235,20 +233,13 @@ const isPrivate = (address: string) => {
 /**
  * Whether an IP address, however written (bracketed, in any case, IPv4 mapped into IPv6), reaches
  * loopback: 127/8 or `::1`. A name is none; nor is an IPv6 form that carries 127/8 unmapped, which no
- * connection takes to loopback.
+ * connection takes to loopback. The literal is judged as url-setting's `isLoopbackName` judges it.
  */
 export function isLoopbackAddress(address: string): boolean {
 	const bare = address.startsWith("[") && address.endsWith("]") ? address.slice(1, -1) : address;
 	const family = isIP(bare);
-	if (family === 4) return !address.startsWith("[") && loopback.ipv4.check(bare, "ipv4");
-	if (family !== 6) return false;
-	const written = unbracketed(URL.parse(`https://[${bare}]`)?.hostname ?? "");
-	const mapped = /^::ffff:[0-9a-f]{1,4}:[0-9a-f]{1,4}$/.test(written)
-		? carried(written)
-		: undefined;
-	return mapped === undefined
-		? loopback.ipv6.check(written, "ipv6")
-		: loopback.ipv4.check(mapped, "ipv4");
+	if (family === 0 || (family === 4 && bare !== address)) return false;
+	return isLoopbackName(address);
 }
 
 /** What refuses an address by reach: all but loopback (carried in IPv6 too) for a plain pair; special but private ones for an internal host. */
