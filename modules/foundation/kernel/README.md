@@ -22,7 +22,7 @@
   - `kernelSection` is its schema, with a description of each key for operators; the kernel reads the section through it as a module's is read.
   - `kernelConfig` builds it, single unless told otherwise.
 - `loadConfig` layers HOCON files, earlier ones first; `${...}` reaches environment variables and the same file only.
-  - A section is read as the HOCON library's typed getters read it: a string converts to the number or boolean its schema asks for, and one that does not, or a value configuration cannot hold, refuses boot.
+  - A section, and a value it passes through read by `readConfigured` (the value, or each `ConfigurationIssue`), is read as the HOCON library's typed getters read it: a string converts to the number or boolean its schema asks for, and one that does not, or a value configuration cannot hold, refuses boot.
   - Keys of time and size are read through `setting`: written with their unit, read as a number of it.
 - `./testing`: a switch making an implementation's async calls unavailable (the next call, or named methods until restored), a module whose provision goes through one, a quiet runtime and a recording log.
 
