@@ -16,7 +16,7 @@ import bindingProofModule from "@mod/mfa-binding-proof/module";
 import mfaEntry from "@mod/mfa-entry/module";
 import { factorKinds } from "@mod/mfa-extensions";
 import flowsModule from "@mod/mfa-flows/module";
-import { type FlowSettings, flowsConfig } from "@mod/mfa-flows/testing";
+import { type FlowSettings, flowKeys, flowsConfig } from "@mod/mfa-flows/testing";
 import { type Lockouts, lockouts } from "@mod/rate-limit";
 import rateLimitModule from "@mod/rate-limit/module";
 import { memoryRecords } from "@mod/records/testing";
@@ -197,20 +197,13 @@ interface Call {
 
 /** Settings for both sections; each goes to the module that reads it. */
 type Settings = Partial<MfaSettings> & Partial<FlowSettings>;
-const flowKeys = Object.keys((flowsModule.section as unknown as { shape: object }).shape);
 
 export async function serve(settings: Settings = {}, extra: Module[] = []) {
 	const pick = (own: boolean) =>
 		Object.fromEntries(Object.entries(settings).filter(([k]) => flowKeys.includes(k) === own));
 	const simulated = simulatedStore();
-	let lag = 0;
-	const kept = memoryTransactions(() => runtime.clock.now() + lag);
+	const kept = memoryTransactions(() => runtime.clock.now());
 	const audit = auditStandIn();
-	/** Moves the clocks of the places that keep records away from the kernel's. */
-	const lagStores = (ms: number) => {
-		simulated.shiftClock(ms);
-		lag += ms;
-	};
 	const app = await assemble({
 		modules: [
 			http,
@@ -335,9 +328,7 @@ export async function serve(settings: Settings = {}, extra: Module[] = []) {
 	};
 	return {
 		app,
-		simulated,
 		kept,
-		lagStores,
 		call,
 		signIn,
 		enrollCode,

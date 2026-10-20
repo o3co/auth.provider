@@ -89,6 +89,41 @@ describe("a binding proof before a first factor", () => {
 		expect(await amrOf(s)).toEqual(["pwd", "otp", "mfa"]);
 	});
 
+	it("goes on with a binding whose transaction a host writing format 1 kept: its challenge, proof and completion", async () => {
+		const s = await serve({ mode: "required" }, [contactProof]);
+		/** Writes the transaction as format 1 did: the binding's fields at the top, no format. */
+		const asFormatOne = (tx: string) =>
+			s.kept.transactions.update(tx, (record) => {
+				const {
+					format: _,
+					held,
+					...rest
+				} = record as unknown as {
+					format?: number;
+					held?: object;
+				};
+				return { value: { ...rest, ...held } as never };
+			});
+		const { tx } = await s.heldLogin("ola");
+		await s.call("POST", "/session/mfa/enrollment", { kind: "code", transaction_id: tx });
+		await asFormatOne(tx);
+		const again = await s.call("POST", "/session/mfa/challenge", { transaction_id: tx });
+		expect(again.status).toBe(200);
+		const begun = await s.call("POST", "/session/mfa/enrollment", {
+			kind: "code",
+			transaction_id: tx,
+			proof: `c-${contact.sent}`,
+		});
+		expect(begun.status).toBe(200);
+		await asFormatOne(tx);
+		const done = await s.call("POST", "/session/mfa/enrollment/complete", {
+			transaction_id: tx,
+			proof: `${begun.body.secret}:0`,
+		});
+		expect([done.status, done.body.redirect_to]).toEqual([200, "https://app.example/back"]);
+		expect(await amrOf(s)).toEqual(["pwd", "otp", "mfa"]);
+	});
+
 	it("counts a factor whose kind declares several amr values at once, by the amr its first proof adds", async () => {
 		const s = await serve({ mode: "required" }, [contactProof, pairKind]);
 		const { tx } = await s.heldLogin("pam");

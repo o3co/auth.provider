@@ -1,4 +1,4 @@
-import type { Transaction, Transactions } from "@mod/mfa-flows";
+import type { FlowTransactions, Transaction } from "@mod/mfa-flows";
 
 /** A binding proof's challenge: the proof's name, and what mfa-binding-proof sealed. */
 export interface BindingChallenge {
@@ -19,7 +19,7 @@ export const heldOf = (t: Pick<Transaction, "held"> | undefined): Binding =>
 	(t?.held ?? {}) as Binding;
 
 /** A binding's changes to its transaction, each from what it holds; false when it is no longer in use. */
-export const holding = (transactions: Pick<Transactions, "keep">) => {
+export const holding = (transactions: Pick<FlowTransactions, "keep">) => {
 	const keep = async (id: string, change: (held: Binding) => Binding | undefined) =>
 		(await transactions.keep(id, (held) => change((held ?? {}) as Binding))) !== undefined;
 	return {
