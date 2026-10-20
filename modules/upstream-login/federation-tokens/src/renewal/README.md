@@ -10,6 +10,7 @@ Internal module of `federation-tokens`: keeping each session's upstream tokens a
 - Accepting the caller and what the routes answer (the package). Sealing and the record's shape (`vault`). The refresh request itself (the IdP type, through `federation`).
 
 ## Offers
+- `renewalIn` (the build context) builds it, taking the stores, `upstreams`, the vault and `session`'s entries (late) itself.
 - `renewalWith` (store, locks, `upstreams`, `session`'s entries by handle, vault, `kernel`'s runtime, settings): `current` (session, IdP → handed / an outcome the routes answer), `receive`, `disconnect` (→ the id_token, or not linked), `withdraw`, `close`
 
 ## Invariants

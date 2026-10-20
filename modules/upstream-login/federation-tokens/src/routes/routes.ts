@@ -1,14 +1,23 @@
-import { type Audit, declaredAudit } from "@mod/audit";
-import type { Client, Clients, Section } from "@mod/clients";
-import { type HttpRequest, type HttpResponse, jsonAnswer, noStore } from "@mod/http";
-import { isUnavailable, type Log } from "@mod/kernel";
+import { type Audit, audit, declaredAudit } from "@mod/audit";
+import { type Client, type Clients, clients, type Section } from "@mod/clients";
+import {
+	type HttpRequest,
+	type HttpResponse,
+	jsonAnswer,
+	noStore,
+	type Route,
+	use,
+} from "@mod/http";
+import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
+import { requestsPerSource } from "@mod/rate-limit";
 import { determinedSource } from "@mod/request-source";
-import type { Upstreams } from "@mod/upstreams";
+import { type Upstreams, upstreams } from "@mod/upstreams";
 import { z } from "zod";
-import events from "./audit-events.ts";
-import type { CallerCheck } from "./caller/caller.ts";
-import { endSessionAt } from "./end-session.ts";
-import type { Current, Renewal } from "./renewal/renewal.ts";
+import events from "../audit-events.ts";
+import { type CallerCheck, callerFrom } from "../caller/caller.ts";
+import { endSessionAt } from "../end-session.ts";
+import type { Current, Renewal } from "../renewal/renewal.ts";
+import type { Settings } from "../section.ts";
 
 export const base = "/oauth/federation";
 
@@ -163,4 +172,24 @@ async function logout(
 	record("federation.logout.succeeded", { redirected: String(location !== undefined) });
 	if (location === undefined) return jsonAnswer(200, { disconnected: true });
 	return { status: 303, headers: { ...noStore, location } };
+}
+
+/** The route over the build context, its caller check and its contracts taken here, answering with `renewal`. */
+export async function routesIn(c: BuildContext<Settings>, renewal: Renewal): Promise<Route> {
+	const flow: Flow = {
+		caller: await callerFrom(c),
+		renewal,
+		clients: await c.get(clients),
+		upstreams: await c.get(upstreams),
+		audit: await c.get(audit),
+		log: c.log,
+	};
+	const window = { limit: c.section.requests, ms: c.section.window * 1000 };
+	return {
+		method: "POST",
+		path: `${base}/*`,
+		uses: [use(requestsPerSource, { name: "federation-tokens", window })],
+		crossSite: "A client's own call, authenticated as that client; it reads no cookie.",
+		handle: (request) => federationTokens(flow, request),
+	};
 }

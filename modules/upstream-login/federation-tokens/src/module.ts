@@ -1,19 +1,15 @@
-import { audit } from "@mod/audit";
-import { clients, metadataSections } from "@mod/clients";
-import { routes, use } from "@mod/http";
+import { metadataSections } from "@mod/clients";
+import { routes } from "@mod/http";
 import { contract, defineModule } from "@mod/kernel";
-import { requestsPerSource } from "@mod/rate-limit";
 import { resealers } from "@mod/seal";
-import { sessions } from "@mod/session";
 import { participants } from "@mod/session-participants";
 import { upstreamLoginReceivers, upstreams } from "@mod/upstreams";
-import { callerFrom } from "./caller/caller.ts";
 import { upstreamEndSessions } from "./contract.ts";
 import { endSessionAt } from "./end-session.ts";
-import { type Renewal, renewalWith } from "./renewal/renewal.ts";
-import { base, clientSection, federationTokens } from "./routes.ts";
+import { type Renewal, renewalIn } from "./renewal/renewal.ts";
+import { clientSection, routesIn } from "./routes/routes.ts";
 import { section } from "./section.ts";
-import { refreshLocks, upstreamTokenStore } from "./store.ts";
+import { upstreamTokenStore } from "./store.ts";
 import { resealerOver } from "./vault/resealer.ts";
 import { vaultFrom } from "./vault/vault.ts";
 
@@ -26,23 +22,7 @@ export default defineModule({ name, section }, (m) => [
 	m
 		.contribute(resealers)
 		.by(async (c) => resealerOver(await c.get(upstreamTokenStore), await vaultFrom(c))),
-	m.provide(kept).by(async (c) => {
-		// Late: session collects this module's participant, which uses the keeper.
-		const lateSessions = c.late(sessions);
-		return renewalWith({
-			store: await c.get(upstreamTokenStore),
-			locks: await c.get(refreshLocks),
-			upstreams: await c.get(upstreams),
-			sessions: { entryOf: (handle, level) => lateSessions().entryOf(handle, level) },
-			vault: await vaultFrom(c),
-			clock: c.clock,
-			random: c.random,
-			log: c.log,
-			refreshBeforeMs: c.section["refresh-before"] * 1000,
-			maxLifetimeMs: c.section["max-lifetime"] * 1000,
-			lockMs: c.section["lock-lifetime"] * 1000,
-		});
-	}),
+	m.provide(kept).by(renewalIn),
 	m.contribute(upstreamLoginReceivers).by(async (c) => {
 		const keeper = await c.get(kept);
 		return {
@@ -65,22 +45,5 @@ export default defineModule({ name, section }, (m) => [
 		const keeper = await c.get(kept);
 		return { name, closing: (session) => keeper.close(session.id) };
 	}),
-	m.contribute(routes).by(async (c) => {
-		const flow = {
-			caller: await callerFrom(c),
-			renewal: await c.get(kept),
-			clients: await c.get(clients),
-			upstreams: await c.get(upstreams),
-			audit: await c.get(audit),
-			log: c.log,
-		};
-		const window = { limit: c.section.requests, ms: c.section.window * 1000 };
-		return {
-			method: "POST",
-			path: `${base}/*`,
-			uses: [use(requestsPerSource, { name, window })],
-			crossSite: "A client's own call, authenticated as that client; it reads no cookie.",
-			handle: (request) => federationTokens(flow, request),
-		};
-	}),
+	m.contribute(routes).by(async (c) => routesIn(c, await c.get(kept))),
 ]);
