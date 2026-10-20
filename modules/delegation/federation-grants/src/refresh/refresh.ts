@@ -252,6 +252,7 @@ export function refreshWith(parts: Parts) {
 			maxAccessMs: asked.maxAccessMs,
 			shown: counted.scopes,
 			held: held.refreshToken,
+			kept: held,
 		});
 		if (read.kind === "refused") {
 			// A rotated refresh token is written before anything is judged of the rest.

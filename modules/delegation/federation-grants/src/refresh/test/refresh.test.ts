@@ -556,6 +556,23 @@ describe("refreshing alongside other writers", () => {
 		expect(await r.stores.lockStore.hold("g", "third", 60_000)).toBe("exists");
 	});
 
+	it("keeps the earlier end when the upstream answers the token it holds, and asks no more at once", async () => {
+		const r = await refresher(60);
+		r.advance(35_000);
+		r.upstream.push({
+			kind: "refreshed",
+			tokens: upstreamTokens({ accessToken: "up-1", expiresInSeconds: 600 }) as never,
+		});
+		const first = await r.call();
+		expect(first.kind === "handed" && [first.accessToken, first.expiresInSeconds]).toEqual([
+			"up-1",
+			25,
+		]);
+		// Its life counted from the refresh: not due again until half of what is left is spent.
+		await r.call();
+		expect(r.asked).toHaveLength(1);
+	});
+
 	it("keeps its lock while the upstream answers, and keeps it no longer once it lets go", async () => {
 		vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
 		try {

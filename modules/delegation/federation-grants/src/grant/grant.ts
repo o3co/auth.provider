@@ -300,6 +300,7 @@ export function credentialsFrom(
 		readonly maxAccessMs: number;
 		readonly shown: readonly string[];
 		readonly held?: string;
+		readonly kept?: Pick<Credentials, "accessToken" | "expiresAt">;
 	},
 ):
 	| { readonly kind: "held"; readonly credentials: Credentials }
@@ -323,7 +324,10 @@ export function credentialsFrom(
 			accessToken: said.accessToken,
 			tokenType: said.tokenType,
 			refreshToken,
-			expiresAt: at.now + life * 1000,
+			expiresAt:
+				said.accessToken === at.kept?.accessToken
+					? Math.min(at.now + life * 1000, at.kept.expiresAt)
+					: at.now + life * 1000,
 			obtainedAt: at.now,
 			scope,
 		},
