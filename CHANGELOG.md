@@ -36,7 +36,7 @@ What to change from rc.2 is in [From 0.18.0-rc.2](docs/migration.md#from-0180-rc
 
 - Modules: `upstream-round-trip` and `upstream-handoff`, with their store wirings `upstream-round-trip-store` and `upstream-handoff-store`; `outbound-policy` (outbound's destination policy, with `outboundLimits`); `redirect-uris` and `reauth`; `session-requirements` and `session-participants`; `mfa-enrollment` and `mfa-reset`.
 - The audit event `refresh.family_revoked`, with the subject and the client, when a reused refresh token revokes its family; `authorize` and `token-endpoint` declare their audit events, so the audit event reference lists them.
-<!-- rc.3 #1955: `federation.held-page`. -->
+- `federation.held-page`: the page on the public origin a browser goes to when a second factor holds its login through an upstream, to go on there; set it wherever a second factor is composed beside `federation`. The [login page guide](docs/login-page.md#a-login-through-an-upstream-that-a-second-factor-holds) says what the page does.
 - For modules of your own: `keys`' `thumbprint` (RFC 7638), the same whatever form the key was written in; `clients`' `checkRecord`, and a metadata section's `fromDocument` and `reads`, to copy its value from a client's metadata document.
 - The cards of packages that talk to a server the deployment provides (`redis`, `mail-smtp`) say what it must be, under Deployment.
 - A [recipe for a first login](docs/recipe-first-login.md), from generation to a token.
@@ -45,7 +45,7 @@ What to change from rc.2 is in [From 0.18.0-rc.2](docs/migration.md#from-0180-rc
 
 - `federation-grants` audits a route the store cannot answer: the token and revoke routes as their refusal with the reason `unavailable`, the browser routes as `federation.grant.authorization_failed` with the outcome `unavailable`.
 - `mfa-witness-http`: a write's deadline fell after outbound gave the call up, where outbound's timeout was the shorter; it now ends when outbound gives up.
-<!-- rc.3 #1955: a federation login a gate held left the browser unable to go on. -->
+- A login through an upstream that a second factor held answered the upstream's callback with JSON a browser cannot act on; with `federation.held-page` set, the browser goes there to go on.
 - A refused client authentication at the token, introspection, revocation and device authorization endpoints is recorded as `client.authentication.failure`, with `clients`' `reason` and `source`, never the client id claimed. `authenticateClient` takes the audit as its third argument.
 - `passkey-registration` records `passkey.registered`, with the subject and `source`, once a passkey is kept; it needs `audit` composed.
 
