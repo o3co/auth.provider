@@ -60,33 +60,33 @@ export interface ResumeParts {
 	readonly log: Pick<Log, "warn">;
 }
 
-/** What makes, once a resumed login opens, what it adds to its answer; a body never holds `status`. */
-type Carried = () => Promise<object | HttpResponse>;
-const isResponse = (made: object): made is HttpResponse => "status" in made;
+/** What a resumed login's maker makes once it opens: the answer instead, or what it adds to `done`. */
+type Made = { readonly answer: HttpResponse } | { readonly adds: object };
+type Carried = () => Promise<Made>;
 
 /**
  * Goes on with a held login after the gate `mfa`, adding `proved` to its amr; answers what it held,
- * with what `carried` makes once it opens, and only then: a response it makes instead closes the
+ * with what `carried` makes once it opens, and only then: an answer it makes instead closes the
  * session and is answered, and a throw closes it as best it can and goes on, an unavailable part
- * answering `503` as a response.
+ * answering `503` as an answer.
  */
 export function resumeOver(p: ResumeParts) {
-	/** What carried makes once the session opened; a response it makes closes the session. */
-	const madeIn = async (handle: string, carried: Carried): Promise<object | HttpResponse> => {
-		let made: object | HttpResponse;
+	/** What carried makes once the session opened; an answer it makes closes the session. */
+	const madeIn = async (handle: string, carried: Carried): Promise<Made> => {
+		let made: Made;
 		try {
 			made = await carried();
 		} catch (error) {
 			await p.sessions.close(handle).catch(() => undefined);
-			// Answered as a response, so the transaction's cookie is cleared too.
-			if (isUnavailable(error)) return unavailable;
+			// Answered as an answer, so the transaction's cookie is cleared too.
+			if (isUnavailable(error)) return { answer: unavailable };
 			throw error;
 		}
-		if (!isResponse(made)) return made;
+		if (!("answer" in made)) return made;
 		try {
 			await p.sessions.close(handle);
 		} catch (error) {
-			if (isUnavailable(error)) return unavailable;
+			if (isUnavailable(error)) return { answer: unavailable };
 			throw error;
 		}
 		return made;
@@ -119,11 +119,12 @@ export function resumeOver(p: ResumeParts) {
 		await opened?.(resumed.session.id);
 		const made = carried === undefined ? undefined : await madeIn(resumed.session.id, carried);
 		// Its cookie never goes out: the session closed, or failing to, is no one's.
-		if (made !== undefined && isResponse(made)) {
-			return { ...made, cookies: [...(made.cookies ?? []), p.transactions.cleared()] };
+		if (made !== undefined && "answer" in made) {
+			const { answer } = made;
+			return { ...answer, cookies: [...(answer.cookies ?? []), p.transactions.cleared()] };
 		}
 		const cookies = [...resumed.cookies, p.transactions.cleared()];
-		const done = made ? { ...(t.done as object | undefined), ...made } : (t.done ?? {});
+		const done = made ? { ...(t.done as object | undefined), ...made.adds } : (t.done ?? {});
 		return jsonAnswer(200, done, { cookies });
 	};
 }

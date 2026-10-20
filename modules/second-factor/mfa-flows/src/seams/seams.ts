@@ -41,6 +41,12 @@ export interface FlowTransactions {
 	cleared(): string;
 }
 
+/**
+ * What a resumed login's maker makes once it opens: `answer`, answered instead, the opened session
+ * closed first; or `adds`, added to the `done` its transaction held.
+ */
+export type ResumeMade = { readonly answer: HttpResponse } | { readonly adds: object };
+
 /** What the module binding factors takes of this package; each user narrows it with `Pick`. */
 export interface FlowParts {
 	readonly transactions: FlowTransactions;
@@ -52,6 +58,13 @@ export interface FlowParts {
 		t: Transaction & { readonly purpose: "login" | "enroll-login" },
 		proved: readonly string[],
 		carried?: () => Promise<object | HttpResponse>,
+	): Promise<HttpResponse>;
+	/** Goes on with a held login, adding what was proved to its amr; what `made` makes is made once it opens: its answer closes the session and is answered, and what it adds goes to the answer. */
+	resumeWith(
+		request: HttpRequest,
+		t: Transaction & { readonly purpose: "login" | "enroll-login" },
+		proved: readonly string[],
+		made: () => Promise<ResumeMade>,
 	): Promise<HttpResponse>;
 	/** Records `mfa.<kind>` through this package's declaration, with the request's source. */
 	record(
@@ -84,7 +97,19 @@ export const flowPartsOf = (parts: {
 }): FlowParts => ({
 	transactions: parts.transactions,
 	askedFrom,
-	resume: parts.resume,
+	// Marked here until its callers move to resumeWith: a body never holds `status`.
+	resume: (request, t, proved, carried) =>
+		parts.resume(
+			request,
+			t,
+			proved,
+			carried &&
+				(async () => {
+					const made = await carried();
+					return "status" in made ? { answer: made as HttpResponse } : { adds: made };
+				}),
+		),
+	resumeWith: (request, t, proved, made) => parts.resume(request, t, proved, made),
 	record: auditedBy(parts.audit),
 	answers: {
 		unknownTransaction: routing.unknownTransaction,
