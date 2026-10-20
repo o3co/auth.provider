@@ -27,6 +27,7 @@ export {
 	publicJwk,
 	publicMembers,
 	publicPem,
+	thumbprint,
 	type VerifyAlgorithm,
 	verifiesUnder,
 	verifyAlgorithms,
