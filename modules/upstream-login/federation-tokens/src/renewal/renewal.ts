@@ -75,6 +75,34 @@ function endOf(
 	return { end: now + Math.min(said * 1000, maxMs), obtainedAt: now };
 }
 
+function holding(locks: RefreshLocks, name: string, mark: string, lifetimeMs: number) {
+	const keep = async () => {
+		let ours = false;
+		await locks.update(name, (held) => {
+			ours = held === mark;
+			return ours ? { value: held, lifetimeMs } : undefined;
+		});
+		return ours;
+	};
+	let lost = false;
+	const timer = setInterval(() => {
+		keep().then(
+			(ours) => {
+				if (!ours) {
+					lost = true;
+					clearInterval(timer);
+				}
+			},
+			() => clearInterval(timer),
+		);
+	}, lifetimeMs / 2);
+	timer.unref();
+	return {
+		ours: async () => !lost && (await keep()),
+		stop: () => clearInterval(timer),
+	};
+}
+
 /** Keeps each session's upstream tokens by IdP, and renews one near its end under a lock. */
 export function renewalWith(parts: Parts) {
 	const { store, vault } = parts;
@@ -183,7 +211,13 @@ export function renewalWith(parts: Parts) {
 	};
 
 	/** Asks the upstream for new tokens, holding the lock; writes only over the version read. */
-	const renew = async (session: string, idp: string, entry: Entry, kept: Kept) => {
+	const renew = async (
+		session: string,
+		idp: string,
+		entry: Entry,
+		kept: Kept,
+		held: () => Promise<boolean>,
+	) => {
 		const upstream = parts.upstreams.of(idp);
 		if (!kept.refreshToken) return { kind: "refresh_absent" } as const;
 		if (!upstream?.refresh) return { kind: "not_supported" } as const;
@@ -202,6 +236,7 @@ export function renewalWith(parts: Parts) {
 			return failed("unknown");
 		}
 		if (answer.kind === "limited") return answer;
+		if (!(await held())) return { kind: "unavailable" } as const;
 		if (answer.kind === "invalid_grant") {
 			await rewrite(session, idp, undefined, entry.version);
 			return { kind: "reauthenticate" } as const;
@@ -287,14 +322,16 @@ export function renewalWith(parts: Parts) {
 				if (waited >= parts.lockMs) return { kind: "lock_timeout" };
 				await pause(pollMs);
 			}
+			const keeping = holding(parts.locks, lock, mark, parts.lockMs);
 			try {
 				// Read again under the lock: another request may have renewed or removed it.
 				const now = await opened(session, idp);
 				if (!now) return { kind: "not_linked" };
 				if (!bearer(now.kept.tokenType)) return { kind: "ineligible" };
 				if (!due(now.kept)) return handed(now.kept, false);
-				return await renew(session, idp, now.entry, now.kept);
+				return await renew(session, idp, now.entry, now.kept, keeping.ours);
 			} finally {
+				keeping.stop();
 				// Only while it still holds its own mark: one that ran out may be another host's now.
 				await parts.locks.update(lock, (held) =>
 					held === mark ? { value: held, lifetimeMs: 1 } : undefined,

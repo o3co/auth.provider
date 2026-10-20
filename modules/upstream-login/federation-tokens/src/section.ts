@@ -19,7 +19,7 @@ export const section = z.strictObject({
 	"lock-lifetime": seconds(1, 60)
 		.prefault("5s")
 		.describe(
-			"How long one refresh holds its lock, and how long another request waits for it, from 1s to 1m.",
+			"How long a refresh's lock lasts unless kept, as it is every half of this while the refresh runs, and how long another request waits for it, from 1s to 1m.",
 		),
 	requests: z
 		.number()

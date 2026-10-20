@@ -328,7 +328,7 @@ describe("a refresh racing other writers", () => {
 		expect(marks[0]).not.toBe(marks[1]);
 	});
 
-	it("lets go of its lock only while it still holds it, never one another host took after it ran out", async () => {
+	it("writes nothing once its lock ran out, and lets go only of its own, never one another host took", async () => {
 		const at: { h?: Awaited<ReturnType<typeof linked>> } = {};
 		const lock = () => `${at.h?.session.id}\ncorp`;
 		at.h = await linked(
@@ -341,10 +341,30 @@ describe("a refresh racing other writers", () => {
 			},
 			{ settings: { "lock-lifetime": "1s" } },
 		);
-		expect((await at.h.get()).json).toMatchObject({ access_token: "up-2" });
+		// The other host refreshes now: an answer written here would race it.
+		expect((await at.h.get()).json).toEqual({ error: "temporarily_unavailable" });
 		// Past the moment a lock let go would end: the other host's must still be held.
 		at.h.advance(1000);
 		expect(await at.h.stores.locks.hold(lock(), "third", 60_000)).toBe("exists");
+	});
+
+	it("keeps its lock while a slow upstream answers, and stops keeping it once let go", async () => {
+		const at: { h?: Awaited<ReturnType<typeof linked>> } = {};
+		const lock = () => `${at.h?.session.id}\ncorp`;
+		at.h = await linked(
+			due,
+			async () => {
+				// Longer than the lock's second, in real time, as a slow upstream takes.
+				await new Promise((resolve) => setTimeout(resolve, 1300));
+				expect(await at.h?.stores.locks.hold(lock(), "another", 60_000)).toBe("exists");
+				return answer({});
+			},
+			{ settings: { "lock-lifetime": "1s" } },
+		);
+		expect((await at.h.get()).json).toMatchObject({ access_token: "up-2" });
+		// Let go, and not kept again after: another host takes it once the release ends.
+		await new Promise((resolve) => setTimeout(resolve, 700));
+		expect(await at.h.stores.locks.hold(lock(), "third", 60_000)).toBe("created");
 	});
 });
 
