@@ -13,7 +13,7 @@ import rateLimitModule from "@mod/rate-limit/module";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { senderBindings } from "@mod/sender-binding";
 import { simulatedStore } from "@mod/store/testing";
-import { type IssuanceRequest, issuancePolicies } from "@mod/tokens";
+import { type AddedClaims, type IssuanceRequest, issuancePolicies } from "@mod/tokens";
 import { afterEach, describe, expect, it } from "vitest";
 import declared from "../src/audit-events.ts";
 import { tokenEndpointLocation } from "../src/contract.ts";
@@ -469,6 +469,67 @@ describe("token endpoint", () => {
 		expect((await post({ ...echo, first: "1" }, "oneonly")).status).toBe(200);
 		expect((await post(echo, "oneonly")).status).toBe(200);
 		expect(ran).toBe(3);
+	});
+
+	it("names the claims a grant added to the tokens it issued, never their values, in the order of their names", async () => {
+		const claimed = (name: string, sets: readonly AddedClaims[]) =>
+			defineModule({ name }, (m) => [
+				m.contribute(grants).by(() => ({
+					grantType: name === "twice" ? "urn:test:echo" : "urn:test:other",
+					readsAmbient: "none",
+					handle: async (input) => {
+						for (const claims of sets) {
+							const base = { subject: "sue", issuedTo: input.client.id, audience: [], scope: [] };
+							const grant = Object.keys(claims).length > 0 ? { ...base, claims } : base;
+							const issued = await input.issue(grant);
+							if (issued.kind !== "issued") return { kind: "refused", refusal: issued.refusal };
+						}
+						return { kind: "issued", body: {} };
+					},
+				})),
+			]);
+		const post = await serve([
+			claimed("twice", [
+				{ "zeta.example": "z-value", "alpha.example": 1 },
+				{ "alpha.example": 2, "mid.example": true },
+			]),
+			claimed("none", [{}]),
+		]);
+		expect((await post({ grant_type: "urn:test:echo" }, "echoes")).status).toBe(200);
+		expect(events.at(-1)).toMatchObject({
+			kind: "token.issued",
+			attributes: { claims: "alpha.example mid.example zeta.example" },
+		});
+		expect(JSON.stringify(events.at(-1))).not.toContain("z-value");
+		expect((await post({ grant_type: "urn:test:other" }, "echoes")).status).toBe(200);
+		expect(events.at(-1)?.attributes).not.toHaveProperty("claims");
+	});
+
+	it("cuts the names of added claims short past 2048 characters", async () => {
+		const many = Object.fromEntries(
+			Array.from({ length: 12 }, (_, i) => [`${String(i).padStart(2, "0")}${"n".repeat(198)}`, 0]),
+		);
+		const once = defineModule({ name: "many" }, (m) => [
+			m.contribute(grants).by(() => ({
+				grantType: "urn:test:echo",
+				readsAmbient: "none",
+				handle: async (input) => {
+					const base = { subject: "sue", issuedTo: input.client.id, audience: [], scope: [] };
+					const issued = await input.issue({ ...base, claims: many });
+					return issued.kind === "issued"
+						? { kind: "issued", body: {} }
+						: { kind: "refused", refusal: issued.refusal };
+				},
+			})),
+		]);
+		const post = await serve([once]);
+		expect((await post({ grant_type: "urn:test:echo" }, "echo")).status).toBe(200);
+		const named = String(events.at(-1)?.attributes?.claims);
+		expect([named.length <= 2048, named.endsWith(" …"), named.startsWith("00n")]).toEqual([
+			true,
+			true,
+			true,
+		]);
 	});
 
 	it("records each issuance and each refusal it decides, with the client and the source, never a token or secret", async () => {

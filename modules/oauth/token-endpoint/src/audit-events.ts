@@ -3,8 +3,8 @@ import { auditEvents } from "@mod/audit";
 /** What the token endpoint records; a token or secret is never held. */
 export default auditEvents({
 	"token.issued": {
-		attributes: ["client", "source", "grant_type"],
-		when: "a grant issues",
+		attributes: ["client", "source", "grant_type", "claims"],
+		when: "a grant issues; `claims` names the claims the grant added to the tokens it issued, in their order, one space apart, cut short with `…` past 2048 characters, never their values",
 	},
 	"token.issued.failure": {
 		attributes: ["client", "source", "grant_type", "reason", "error", "policy", "refusal"],
