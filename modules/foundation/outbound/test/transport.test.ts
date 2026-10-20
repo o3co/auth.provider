@@ -195,7 +195,8 @@ describe("outbound", () => {
 	it("reaches a private address for an internal host the caller names as its operator's, and nowhere else", async () => {
 		const { resolve } = table({ "alb.corp": ["10.255.255.1"], "other.corp": ["10.255.255.1"] });
 		const out = over(resolve, { "internal-hosts": ["alb.corp"] });
-		const quick = { internal: true as const, timeoutMs: 100 };
+		// Named by the operator's URL at alb.corp: no other origin is reached at a private address.
+		const quick = { internal: configuredUrl("https://alb.corp/"), timeoutMs: 100 };
 		// Past the address check, the request goes on to connect, where no one answers.
 		expect(await failure(out.fetch("https://alb.corp/", {}, quick))).toMatch(
 			/^unavailable: (timeout|unreachable)$/,
