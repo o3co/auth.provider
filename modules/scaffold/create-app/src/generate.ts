@@ -1,20 +1,10 @@
 import { resolve } from "node:path";
+import { namesPackages, vacant, writeListed } from "@mod/app-output";
 import { completed } from "@mod/combinations";
-import { kernelConfig } from "@mod/kernel";
 import { generateFull } from "./full.ts";
 import { packagesFor } from "./packages.ts";
 import { generatePattern, type PatternPlan } from "./pattern.ts";
 import { fullName } from "./patterns/patterns.ts";
-import {
-	mainSource,
-	manifestOf,
-	namesPackages,
-	resealSource,
-	sealPackage,
-	vacant,
-	withKernel,
-	writeProject,
-} from "./project.ts";
 
 /** A project assembling the modules named. */
 export interface ModulesPlan {
@@ -54,17 +44,5 @@ export async function generate(given: Plan): Promise<void> {
 	const asked = completed(plan.modules);
 	// Without a sink, the app's log lines would go nowhere.
 	const modules = asked.includes(sink) ? asked : [...asked, sink];
-	const packages = packagesFor(plan);
-	const seals = modules.includes(sealPackage);
-	await writeProject(plan.target, {
-		"package.json": manifestOf(
-			"node src/main.ts",
-			packages.dependencies(withKernel(modules)),
-			seals ? "node src/reseal.ts" : undefined,
-		),
-		"src/main.ts": await mainSource(modules, packages.importOf),
-		...(seals ? { "src/reseal.ts": await resealSource(modules, packages.importOf) } : {}),
-		"config/application.conf": `${JSON.stringify(kernelConfig(), null, "\t")}\n`,
-		".gitignore": "node_modules/\nconfig/local*.conf\n",
-	});
+	await writeListed(plan.target, modules, packagesFor(plan));
 }

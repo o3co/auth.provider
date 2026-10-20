@@ -1,4 +1,6 @@
 /** A deployment's project from a list of modules: configuration from their fragments, the image and a guide. */
+
+import type { Card, Release } from "@mod/app-output";
 import {
 	applicationConf,
 	envExample,
@@ -9,7 +11,7 @@ import {
 	type Written,
 	writtenOf,
 } from "./fragments.ts";
-import { type Card, packagesFor, type Release } from "./packages.ts";
+import { packagesFor } from "./packages.ts";
 import {
 	filled,
 	mainSource,

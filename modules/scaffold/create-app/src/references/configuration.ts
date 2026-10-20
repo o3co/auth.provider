@@ -1,8 +1,8 @@
 /** The configuration reference: every module's section, from its schema and its fragment, as one document. */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type Fragment, fragmentsIn, settingsOf } from "../fragments.ts";
-import { kernel, workspacePackages } from "../project.ts";
+import { type Fragment, fragmentsIn, kernel, settingsOf } from "@mod/app-output";
+import { workspacePackages } from "../project.ts";
 import { assembledIn, type Contributed, type Schema } from "./assembled.ts";
 
 /** The part of a JSON Schema the reference reads. */

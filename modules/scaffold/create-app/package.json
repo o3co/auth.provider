@@ -11,6 +11,7 @@
 		".": "./src/contract.ts"
 	},
 	"dependencies": {
+		"@mod/app-output": "workspace:*",
 		"@mod/combinations": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/trial": "workspace:*",

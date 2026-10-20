@@ -2170,6 +2170,9 @@ importers:
 
   modules/scaffold/create-app:
     dependencies:
+      '@mod/app-output':
+        specifier: workspace:*
+        version: link:../app-output
       '@mod/combinations':
         specifier: workspace:*
         version: link:../combinations

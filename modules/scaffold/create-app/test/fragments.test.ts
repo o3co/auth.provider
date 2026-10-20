@@ -1,11 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fragmentFile } from "@mod/app-output";
 import { assemble } from "@mod/kernel";
 import { parse } from "@o3co/ts.hocon";
 import { expect, it, vi } from "vitest";
 import {
 	envExample,
-	fragmentFile,
 	fragmentsIn,
 	fragmentsOf,
 	localConfExample,
