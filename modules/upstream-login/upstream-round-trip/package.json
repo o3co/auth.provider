@@ -14,8 +14,15 @@
 		"@mod/cookies": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/kernel": "workspace:*",
-		"zod": "4.6.7",
+		"zod": "4.6.7"
+	},
+	"peerDependencies": {
 		"vitest": "5.0.4"
+	},
+	"peerDependenciesMeta": {
+		"vitest": {
+			"optional": true
+		}
 	},
 	"devDependencies": {
 		"@mod/records": "workspace:*",
