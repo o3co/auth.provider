@@ -1,15 +1,15 @@
 # grant
 
-Internal module of `refresh`: the `refresh_token` grant, and the refresh token `code-grant` adds to a code's answer.
+Internal module of `refresh`: the `refresh_token` grant.
 
 ## Responsibilities
-- Checks a presented token, rotates its family, and issues the round's access token; starts a family from a code's redemption.
+- Checks a presented token, rotates its family, and issues the round's access token.
 
 ## Not here
-- The stores and revocation (`settle`). What `lineage` answers.
+- How a family begins, from a code or a `start` (`founding`). The stores and revocation (`settle`). What `lineage` answers.
 
 ## Offers
-- `grantOver` and `additionOver` (the build context) → the grant and the addition; `foundingIn` → the founding of families, for `lineage` too.
+- `grantOver` (the build context) → the grant.
 
 ## Invariants
 - Everything that can fail comes before the rotation; the rotation writes only while the family still holds the checked token, and another use, a revocation or a logout coming first revokes the family.
@@ -18,4 +18,4 @@ Internal module of `refresh`: the `refresh_token` grant, and the refresh token `
 - Each access token a family issues is linked to it before it is answered.
 
 ## Depends on
-- `code-grant` (a redemption), `token-endpoint` (the grant), `client-allowance`, `session` (open sessions), `subject-revocation` (the boundary), `issuer` (its URL), `sender-binding`, `clients`, `kernel`; `settle`, the package's records and store interfaces
+- `token-endpoint` (the grant), `client-allowance`, `session` (open sessions), `subject-revocation` (the boundary), `issuer` (its URL), `sender-binding`, `audit`, `kernel`; `founding` (a family's secrets), `settle`, the package's records and store interfaces

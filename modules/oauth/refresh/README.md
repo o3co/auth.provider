@@ -27,7 +27,7 @@
 - Before rotating: the family's session, if any, enters at use (not closed, ended, or short of a requirement); the subject's authentication is past the revocation boundary; the client's allowance covers this round; `tokens`' issuance policies allow it, told the issuance continues a grant (`continuing`). A refusal leaves the token usable.
 - A binding is attached to a public client's family, and to a confidential one's where set, only when it starts. Every refusal is the same `invalid_grant`; a store failure is unavailable, never a negative verdict.
 - The `family` tie's join takes a token only into a live family and only if it ends by the family's end; any other is revoked. Boot is refused where access tokens cannot be revoked.
-- Internal modules `grant` (the grant and the code addition), `lineage` (the contract and the access condition) and `settle` (the stores, revocation, the revocable kind and the participant) each take their contracts from the build context; the package's module only declares.
+- Internal modules `grant` (the grant), `founding` (a family's beginning, the code addition among them), `lineage` (the contract and the access condition) and `settle` (the stores, revocation, the revocable kind and the participant) each take their contracts from the build context; the package's module only declares.
 
 ## Data
 - Family records (the current secret's hash, client, subject, scope, audience, session, authentication context, binding, end; or a revoked mark), what each redemption left, and each access token's family. Every record outlives what it covers by one allowance, for hosts whose clocks lag.
