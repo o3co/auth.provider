@@ -16,6 +16,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 - [Behavior changes](#behavior-changes)
 - [From 0.18.0-rc.1](#from-0180-rc1)
 - [From 0.18.0-rc.2](#from-0180-rc2)
+- [From 0.18.0-rc.3](#from-0180-rc3)
 - [Operational notes](#operational-notes)
 
 ## Before you start
@@ -708,6 +709,14 @@ What changed since rc.2. Coming from rc.1, read [From 0.18.0-rc.1](#from-0180-rc
 - **Held logins** (a federation login a gate holds, its upstream tokens sealed until it opens) are kept by the new `upstream-handoff`, in a new space, `upstream-handoff-store.held-logins`, which the store must replicate; `federation-store.transactions` is no longer used. A login held before the upgrade and resumed after it, before its deadline, opens without handing its upstream tokens over; one resumed past its deadline is refused, as before. The log events of handing tokens over are renamed from `federation.*` to `upstream-handoff.*`: `receiver_failed`, `link_join_failed`, `link_join_undo_failed` and `held_login_refused`.
 - **A login through an upstream that a second factor holds** used to answer the upstream's callback with JSON a browser cannot act on. Set `federation.held-page`, a page on the public origin that goes on with it, as the [login page guide](login-page.md#a-login-through-an-upstream-that-a-second-factor-holds) describes; `federation` refuses to boot where its origin is another. During a rolling upgrade, set it only once every instance runs this version: an earlier one answers that page's read `400`. Rolling back makes the logins held meanwhile answer `400` until their transactions end, 30 minutes at most.
 - **An app generated with an earlier release candidate that composes `federation`**: its `src/main.ts` imports `federation-store` and none of `upstream-round-trip`, `upstream-round-trip-store`, `upstream-handoff` and `upstream-handoff-store`, and `federation` now refuses to boot without the round trips. Generate the app again, or add those four modules and remove `federation-store`. Its configuration is unchanged.
+
+## From 0.18.0-rc.3
+
+What changed since rc.3. Coming from an earlier release candidate, read the sections above first.
+
+- **A login page that offers sign-in through an upstream**: the provider now adds `prompt=login` and `max_age` beside `redirect_to` when the client asked them. Hand them on to the upstream's start (`/session/oauth/federation/<idp>`), so the upstream logs the user in again; see the [login page guide](login-page.md).
+- **A request back from its login still not new enough**: it is refused with `login_required` whether the session's authentication time is known or not. rc.3 sent it to the login page again.
+- **Discovery**: the metadata says `authorization_response_iss_parameter_supported: true`; every redirect answer already carried `iss`.
 
 ## Operational notes
 
