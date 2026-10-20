@@ -304,7 +304,7 @@ describe("the logout a client starts", () => {
 });
 
 describe("the front-channel page", () => {
-	it("frames each client of the session with iss and sid, then moves on to the return", async () => {
+	it("frames each client of the session with iss and sid, in a sandbox keeping scripts and its own origin, then moves on to the return", async () => {
 		const h = await serve();
 		const { session } = await h.login();
 		await h.redeemed(session.id, "app");
@@ -315,6 +315,9 @@ describe("the front-channel page", () => {
 		expect(out.headers["content-type"]).toBe("text/html; charset=utf-8");
 		const frame = `https://app.example/fc?iss=${encodeURIComponent(issuer)}&#38;sid=${session.id}`;
 		expect(out.text).toContain(`<iframe src="${frame}"`);
+		// Scripts and the frame's own origin stay, so the client's page can clear its own cookies.
+		const iframe = /<iframe [^>]*>/.exec(out.text ?? "")?.[0];
+		expect(iframe).toContain(' sandbox="allow-scripts allow-same-origin"');
 		expect(out.text).toContain(`data-target="${back}?state=s"`);
 		const script = /<script>([^<]*)<\/script>/.exec(out.text ?? "")?.[1];
 		expect(out.loads).toEqual({ frames: ["https://app.example"], scripts: [script] });
