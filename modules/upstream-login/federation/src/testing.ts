@@ -37,11 +37,14 @@ export function testIdpType(
 					path: z.string().default("/authorize"),
 					mode: z.enum(["query", "form_post"]).default("query"),
 					"skew-ms": z.number().default(30_000),
+					/** The type refuses its settings, so a test can see a boolean read. */
+					refuses: z.boolean().default(false),
 				}),
 				open: async (read) => {
 					const { issuer, path, mode } = read;
 					if (issuer.includes("mismatch")) throw new Error("not this upstream");
 					if (issuer.includes("unreachable")) throw new Unavailable("test upstream");
+					if (read.refuses) throw new UpstreamMismatch("refused by its settings", ["refuses"]);
 					if (issuer.includes("misdescribed")) {
 						throw new UpstreamMismatch("the description names another issuer", ["issuer"]);
 					}

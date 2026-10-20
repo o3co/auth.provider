@@ -960,6 +960,18 @@ describe("federation", () => {
 		expect(told).toEqual([
 			{ where: "federation.idps.a.issuer", reason: "the description names another issuer" },
 		]);
+		// A type's own settings are read as a section is: a string from the environment converts.
+		const typed = { type: "test", issuer: "https://idp.example", "skew-ms": "0", refuses: "false" };
+		expect(await refused({ corp: typed })).toEqual([]);
+		const converted = await serve({
+			federation: { idps: { corp: { ...typed, refuses: "true" } } },
+		}).catch((error: BootRefused) => error.refusals);
+		expect(converted).toEqual([
+			{ where: "federation.idps.corp.refuses", reason: "refused by its settings" },
+		]);
+		expect(await refused({ corp: { ...typed, "skew-ms": "soon" } })).toEqual([
+			"federation.idps.corp.skew-ms",
+		]);
 		// An upstream that cannot be reached is told apart from one that does not match.
 		const reasons = async (issuer: string) =>
 			serve({ federation: { idps: { a: { type: "test", issuer } } } }).catch(

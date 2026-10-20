@@ -17,7 +17,7 @@ Internal module of `federation`: opening the configured IdPs at boot.
 - Each IdP's redirect URI is the public origin plus its own callback path.
 - An IdP is refused when no module offers its type, when its type refuses its settings (one reason per issue), with no public origin, or when its upstream does not match its settings or cannot be reached (`kernel`'s unavailable), told apart.
 - An IdP whose upstream answers in a posted form is refused when cookies cannot be secure.
-- An IdP's type sees only its own settings, without `type` and `upstream-amr`.
+- An IdP's type sees only its own settings, without `type` and `upstream-amr`, read as a section is (`kernel`'s `readConfigured`): a string from the environment converts as the type's schema asks.
 - With no IdP, boot goes on (a deployment may still be configuring), warning `federation.no_idps` each time: every login then answers not found.
 
 ## Depends on
