@@ -73,7 +73,7 @@ export function credentialRefusalText(refusal: CredentialRefusal): string {
 		: "is sent to one origin alone, but the URLs name more than one";
 }
 
-/** Why a credential must not go to a set of URLs: more than one origin, or a URL neither https nor a named plain-loopback pair. */
+/** Why a credential must not go to a set of URLs: more than one origin, or a URL neither https nor a named plain-loopback or plain-internal pair. */
 export type CredentialRefusal = "origins" | "scheme";
 
 /** Where a caller's credential may go, answered at boot, apart from sending. */
