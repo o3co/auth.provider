@@ -1,5 +1,6 @@
 import type { AuditRecord } from "@mod/audit";
 import type { Authentication, Client, Clients } from "@mod/clients";
+import clientEvents from "@mod/clients/audit-events";
 import { testRequest } from "@mod/http/testing";
 import { describe, expect, it } from "vitest";
 import declared from "../src/audit-events.ts";
@@ -65,9 +66,8 @@ describe("authenticateClient", () => {
 		expect(records).toEqual([]);
 	});
 
-	it("declares the failure with the attributes it records", () => {
-		expect(declared["client.authentication.failure"].attributes).toEqual(["source", "reason"]);
-		for (const reason of reasons)
-			expect(declared["client.authentication.failure"].when).toContain(`\`${reason}\``);
+	it("records the failure clients declares, declaring none of its own", () => {
+		expect(Object.keys(declared)).not.toContain("client.authentication.failure");
+		expect(clientEvents["client.authentication.failure"].attributes).toEqual(["source", "reason"]);
 	});
 });
