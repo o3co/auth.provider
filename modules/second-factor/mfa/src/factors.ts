@@ -269,7 +269,7 @@ export function factorDecisions(p: FactorParts): Factors {
 			if (result.kind !== "valid") return { kind: "invalid" };
 			return { kind: "valid", state: result.state, amr: amrOf(found.kind, result.amr) };
 		},
-		bind: async (subject, pending, state, label, from) => {
+		bind: async (subject, pending, state, label, from, codes) => {
 			if (label !== undefined && !isLabel(label)) return { kind: "malformed-label" };
 			const found = pendingOf(subject, pending);
 			if (!found) return { kind: "unknown" };
@@ -293,24 +293,27 @@ export function factorDecisions(p: FactorParts): Factors {
 				boundAt: p.now(),
 			};
 			// Made before the write, which must be pure; dropped when the subject already holds codes.
-			const codes = await recovery(subject);
+			const made = codes === "later" ? undefined : await recovery(subject);
+			const backed = [...p.kinds.values()].some(isWayBack);
 			// Decided on the factors as written: of two first bindings at once, one brings the codes.
 			const written = await records.decide<
-				"full" | "closed" | "fenced" | { brought: typeof codes }
+				"full" | "closed" | "fenced" | { brought: typeof made; due: boolean }
 			>(subject, (all, fences) => {
 				if (fences !== found.fences) return { verdict: "fenced" };
 				// A first binding another counting factor beat to the subject binds nothing: it was let begin as the first.
 				if (asFirst && counting(all, p.kinds).length > 0) return { verdict: "closed" };
-				const brought = codes && !all.some((f) => f.kind === codes.factor.kind) ? codes : undefined;
-				const added = [factor, ...(brought ? [brought.factor] : [])];
-				if (all.length + added.length > p.maxFactors) return { verdict: "full" };
-				return { next: [...all, ...added], verdict: { brought } };
+				// A subject holding no codes keeps them a place, whether they come now or later.
+				const due = backed && !all.some(wayBack);
+				if (all.length + 1 + (due ? 1 : 0) > p.maxFactors) return { verdict: "full" };
+				const brought = due ? made : undefined;
+				const next = [...all, factor, ...(brought ? [brought.factor] : [])];
+				return { next, verdict: { brought, due: due && !brought } };
 			});
 			// Any mark is left: only a reset clears one, as the mark may be a newer binding's by now.
 			if (written === "fenced") return { kind: "fenced" };
 			if (written === "full") return { kind: "full" };
 			if (written === "closed") return closed(subject, factor.kind, "competing");
-			const { brought } = written;
+			const { brought, due } = written;
 			const ours = new Set([fid, ...(brought ? [brought.factor.id] : [])]);
 			// A reset that cleared the mark meanwhile cleared this subject: what was written goes too.
 			if (witness && !(await witness.read(subject))) {
@@ -336,6 +339,8 @@ export function factorDecisions(p: FactorParts): Factors {
 			return {
 				kind: "bound",
 				factor: shown(factor),
+				fence: found.fences as Fence,
+				codesDue: due,
 				...(brought ? { recoveryCodes: brought.show, recoveryCodesFactor: brought.factor.id } : {}),
 			};
 		},
@@ -375,21 +380,23 @@ export function factorDecisions(p: FactorParts): Factors {
 		reissue: async (subject, fence) => {
 			const codes = await recovery(subject);
 			// Decided on the factors as written: no codes land beside no counting factor, and the old set goes in the same write.
-			const counted = await records.decide<boolean | "fenced">(subject, (all, fences) => {
+			const written = await records.decide<
+				"fenced" | "no-qualifying-factor" | "full" | { replaced: boolean }
+			>(subject, (all, fences) => {
 				if (fences !== fence) return { verdict: "fenced" };
-				const holds = counting(all, p.kinds).length > 0;
-				const next =
-					holds && codes
-						? [...all.filter((f) => f.kind !== codes.factor.kind), codes.factor]
-						: undefined;
-				return { next, verdict: holds };
+				if (counting(all, p.kinds).length === 0) return { verdict: "no-qualifying-factor" };
+				if (!codes) return { verdict: { replaced: false } };
+				const replaced = all.some((f) => f.kind === codes.factor.kind);
+				// A first set takes the place its binding kept, unless another factor took it meanwhile.
+				if (!replaced && all.length + 1 > p.maxFactors) return { verdict: "full" };
+				const next = [...all.filter((f) => f.kind !== codes.factor.kind), codes.factor];
+				return { next, verdict: { replaced } };
 			});
-			if (counted === "fenced") return { kind: "fenced" };
-			if (!counted) return { kind: "no-qualifying-factor" };
+			if (typeof written === "string") return { kind: written };
 			if (!codes) return { kind: "unknown-kind" };
 			recorded("recovery_codes.generated", subject, {
 				kind: codes.factor.kind,
-				regenerated: "true",
+				regenerated: String(written.replaced),
 			});
 			return { kind: "reissued", codes: codes.show };
 		},

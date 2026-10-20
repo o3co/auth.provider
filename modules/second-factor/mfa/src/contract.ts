@@ -105,10 +105,16 @@ export interface Factors {
 		state: unknown,
 		label?: string,
 		from?: AskedFrom,
+		/** `later`: the binding writes no codes, and the caller asks `reissue` for them once it can show them. */
+		codes?: "later",
 	): Promise<
 		| {
 				readonly kind: "bound";
 				readonly factor: Shown;
+				/** The fence the binding began under, unmoved when it was written: what `reissue` is given. */
+				readonly fence: Fence;
+				/** True when the subject held no recovery codes once written, and a way back is composed. */
+				readonly codesDue: boolean;
 				readonly recoveryCodes?: unknown;
 				/** The codes' own factor, so a caller that cannot show them can take them back with `remove`. */
 				readonly recoveryCodesFactor?: string;
@@ -141,13 +147,13 @@ export interface Factors {
 	): Promise<"removed" | "unknown" | "last" | "fenced">;
 	/** Removes every factor of the subject, of any kind, and answers how many and of which kinds; nothing is recorded. */
 	clear(subject: string): Promise<{ readonly count: number; readonly kinds: readonly string[] }>;
-	/** Replaces the recovery codes, for a subject holding a counting factor; nothing once the fence moved past `fence`. */
+	/** Writes the recovery codes, the first set or replacing the old, for a subject holding a counting factor; nothing once the fence moved past `fence`, and no first set past `max-factors` (`full`). */
 	reissue(
 		subject: string,
 		fence: Fence,
 	): Promise<
 		| { readonly kind: "reissued"; readonly codes: unknown }
-		| { readonly kind: "no-qualifying-factor" | "unknown-kind" | "fenced" }
+		| { readonly kind: "no-qualifying-factor" | "unknown-kind" | "fenced" | "full" }
 	>;
 }
 

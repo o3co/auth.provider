@@ -713,6 +713,76 @@ it("declares mfa only where a kind adds a second factor", async () => {
 	expect(app.get(logins).achievable(["mfa"])).toBe(false);
 });
 
+describe("recovery codes written by the reissue", () => {
+	/** Binds a code factor for the subject, leaving the recovery codes for later. */
+	const bindLater = async (h: Awaited<ReturnType<typeof serve>>, subject: string) => {
+		const { pending, state } = await h.provedCode(subject);
+		return h.decided.bind(subject, pending, state, undefined, undefined, "later");
+	};
+
+	it("binds with no codes, answering the fence it began under and that codes are due; the reissue makes the first set", async () => {
+		const h = await serve();
+		const { decided, events } = h;
+		const began = await decided.fenceOf("ana");
+		const bound = await bindLater(h, "ana");
+		if (bound.kind !== "bound") throw new Error(bound.kind);
+		expect([bound.fence, bound.codesDue, "recoveryCodes" in bound]).toEqual([began, true, false]);
+		expect((await decided.held("ana")).map((f) => f.kind)).toEqual(["code"]);
+		const first = await decided.reissue("ana", bound.fence);
+		if (first.kind !== "reissued") throw new Error(first.kind);
+		expect((await decided.held("ana")).map((f) => f.kind)).toEqual(["code", "backup"]);
+		// A subject holding codes owes none: a further binding answers nothing due.
+		const again = await bindLater(h, "ana");
+		expect(again.kind === "bound" && again.codesDue).toBe(false);
+		expect((await decided.reissue("ana", await decided.fenceOf("ana"))).kind).toBe("reissued");
+		expect(events.map((e) => [e.kind, e.attributes?.regenerated])).toEqual([
+			["mfa.factor.enrolled", undefined],
+			["mfa.recovery_codes.generated", "false"],
+			["mfa.factor.enrolled", undefined],
+			["mfa.recovery_codes.generated", "true"],
+		]);
+	});
+
+	it("writes no codes for a fence that moved after the binding began", async () => {
+		const h = await serve();
+		const bound = await bindLater(h, "bea");
+		if (bound.kind !== "bound") throw new Error(bound.kind);
+		await h.decided.fence("bea");
+		expect(await h.decided.reissue("bea", bound.fence)).toEqual({ kind: "fenced" });
+		expect((await h.decided.held("bea")).map((f) => f.kind)).toEqual(["code"]);
+	});
+
+	it("keeps the codes a place: a binding of a subject holding none counts them against the limit", async () => {
+		const h = await serve({ "max-factors": 2 });
+		const bound = await bindLater(h, "cal");
+		expect(bound.kind === "bound" && bound.codesDue).toBe(true);
+		expect(await bindLater(h, "cal")).toEqual({ kind: "full" });
+		expect((await h.decided.reissue("cal", await h.decided.fenceOf("cal"))).kind).toBe("reissued");
+	});
+
+	it("adds no first set past the limit, decided on the factors as written", async () => {
+		const h = await serve({ "max-factors": 2 });
+		await bindLater(h, "dax");
+		h.events.length = 0;
+		// Another binding takes the place kept for the codes before the reissue writes.
+		h.place.raceNextChange((record) => {
+			const { factors: all } = record as unknown as { factors: { id: string }[] };
+			return { ...record, factors: [...all, { ...all[0], id: "other" }] };
+		});
+		expect(await h.decided.reissue("dax", await h.decided.fenceOf("dax"))).toEqual({
+			kind: "full",
+		});
+		expect((await h.decided.held("dax")).map((f) => f.kind)).toEqual(["code", "code"]);
+		expect(h.events).toEqual([]);
+	});
+
+	it("owes no codes where no way back is composed", async () => {
+		const h = await serve({}, { kinds: [code] });
+		const bound = await bindLater(h, "eve");
+		expect(bound.kind === "bound" && bound.codesDue).toBe(false);
+	});
+});
+
 describe("challenges sent before a proof", () => {
 	afterEach(() => {
 		ping.answer = "sent";
