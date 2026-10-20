@@ -63,7 +63,8 @@ async function federated(
 	const query = Object.keys(asked).length === 0 ? "" : `?${new URLSearchParams(asked)}`;
 	const started = await b.get(`${start}${query}`);
 	expect(started.status).toBe(302);
-	return b.get(`${start}/callback?${upstream.authorize(started.location, as)}`);
+	const back = await b.get(`${start}/callback?${upstream.authorize(started.location, as)}`);
+	return Object.assign(back, { asked: new URL(started.location).searchParams });
 }
 
 /** An authorization request from the probe client, with what a scene adds. */
@@ -89,6 +90,17 @@ function sentToLogIn(location: string) {
 	return String(login.searchParams.get("redirect_to"));
 }
 
+/** What the login page hands to a login it starts at an upstream: the `prompt` and `max_age` it was told. */
+function handedOn(location: string) {
+	const login = new URL(location, origin);
+	return Object.fromEntries(
+		["prompt", "max_age"].flatMap((name) => {
+			const value = login.searchParams.get(name);
+			return value === null ? [] : [[name, value]];
+		}),
+	);
+}
+
 // The legacy build returns from a federation login only to a listed target, never to an authorization request.
 describe.skipIf(areaTarget().differs("federation-returns-to-authorization"))(
 	"federation logins meeting a client's demand for a fresh login",
@@ -101,8 +113,12 @@ describe.skipIf(areaTarget().differs("federation-returns-to-authorization"))(
 			// The upstream still holds its own session, and says the user logged in an hour ago.
 			const again = await federated(b, hourAgo, back);
 			expect(again.location).toBe(back);
-			const stale = await b.get(back.slice(origin.length));
-			expect(sentToLogIn(stale.location)).toEqual(expect.stringContaining("prompt=login"));
+			// Back with a login no newer, the request is refused, never sent round again.
+			const stale = new URL((await b.get(back.slice(origin.length))).location);
+			expect([stale.searchParams.get("error"), stale.searchParams.has("code")]).toEqual([
+				"login_required",
+				false,
+			]);
 			// Logging in at the upstream now meets it.
 			const fresh = sentToLogIn((await authorize(b, { prompt: "login" })).location);
 			await federated(b, { subject: "u-alice", authTime: seconds() + 1 }, fresh);
@@ -115,12 +131,33 @@ describe.skipIf(areaTarget().differs("federation-returns-to-authorization"))(
 			expect((await federated(b, { subject: "u-alice", authTime: seconds() - 3600 })).status).toBe(
 				302,
 			);
-			const back = sentToLogIn((await authorize(b, { prompt: "login" })).location);
-			// The login page asks the upstream to log in again; its clock says ten seconds before our start.
-			const again = await federated(b, { subject: "u-alice", authTime: seconds() - 10 }, back, {
-				prompt: "login",
-			});
+			const sent = (await authorize(b, { prompt: "login" })).location;
+			const back = sentToLogIn(sent);
+			// The login page hands on what it was told; the upstream's clock says ten seconds before our start.
+			const again = await federated(
+				b,
+				{ subject: "u-alice", authTime: seconds() - 10 },
+				back,
+				handedOn(sent),
+			);
 			expect(again.location).toBe(back);
+			const answered = await b.get(back.slice(origin.length));
+			expect(new URL(answered.location).searchParams.has("code")).toBe(true);
+		});
+
+		it("tells the login page the prompt=login and max_age asked, which reach the upstream through it", async () => {
+			const b = browser();
+			const sent = (await authorize(b, { prompt: "login", max_age: "600" })).location;
+			expect(handedOn(sent)).toEqual({ prompt: "login", max_age: "600" });
+			const back = sentToLogIn(sent);
+			const again = await federated(
+				b,
+				{ subject: "u-alice", authTime: seconds() },
+				back,
+				handedOn(sent),
+			);
+			expect(again.asked.get("prompt")?.split(" ")).toContain("login");
+			expect(again.asked.get("max_age")).toBe("600");
 			const answered = await b.get(back.slice(origin.length));
 			expect(new URL(answered.location).searchParams.has("code")).toBe(true);
 		});
