@@ -24,7 +24,7 @@
 - Its allowances come from `client-allowance` within the ceiling: the code, refresh only when the document names it, the scopes it asks (all the ceiling's when it asks none), the operator's audiences. An empty answer refuses the record.
 - `consent`'s section gets the name, the page and the id's host. The client is public, by `none`, and never registered, so it is never first-party.
 - A failed fetch or a refused document is no client (not unavailable). Other fields (keys, logo) are not read.
-- A document that an owner's schema refuses (a redirect URI `redirect-uris` refuses, say) is kept as found; `clients` refuses it on every find, and no reason is logged.
+- A document whose record `clients`' `checkRecord` refuses (a redirect URI `redirect-uris` refuses, say) is refused before it is kept, logged with where the record fails (`record at sections.authorize.redirect-uris.0`), never a value; a check that throws is a failed fetch.
 - A refused document, destination or outbound failure is remembered for `refused-lifetime`; running out of time or of `outbound`'s places is not.
 - Fetches have no limit per time or per host beyond `max-concurrent`. Operators keep outside hosts from blocking them by narrowing the document hosts in `outbound`'s `allow`.
 - Without that, a host that does not answer can fill the `max-concurrent` places (8 by default), and an id not kept is none meanwhile.

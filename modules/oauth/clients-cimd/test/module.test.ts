@@ -11,6 +11,7 @@ import {
 	contract,
 	defineModule,
 	kernelConfig,
+	type Module,
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
@@ -94,7 +95,7 @@ const collector = defineModule({ name: "test-collector" }, (m) => [
 
 async function boot(
 	settings: Record<string, unknown> = {},
-	options: { code?: boolean; registered?: unknown[]; caps?: Limits } = {},
+	options: { code?: boolean; registered?: unknown[]; caps?: Limits; extra?: Module[] } = {},
 ) {
 	const recording = recordingLog();
 	const app = await assemble({
@@ -106,6 +107,7 @@ async function boot(
 			tokenEndpointStandIn(options.code === false ? [] : ["authorization_code"]),
 			clientsCimd,
 			collector,
+			...(options.extra ?? []),
 		],
 		config: {
 			...kernelConfig(),
@@ -267,14 +269,36 @@ describe("clients-cimd: a refused document", () => {
 		expect(await (await boot()).find()).toBeUndefined();
 	});
 
-	it("is kept as found when only an owner's schema refuses it, none on every find, unlogged", async () => {
+	it("is none when an owner's schema refuses its record, logged with where and remembered for the refusal time", async () => {
 		answer = () => json({ ...document, redirect_uris: ["http://app.example/cb"] });
 		const app = await boot();
 		expect(await app.find()).toBeUndefined();
-		now += 599_999;
+		now += 59_999;
 		expect(await app.find()).toBeUndefined();
 		expect(sent).toHaveLength(1);
-		expect(app.lines()).toEqual([]);
+		now += 1;
+		await app.find();
+		expect(sent).toHaveLength(2);
+		expect(app.lines()[0]).toEqual({
+			level: "warn",
+			event: "clients-cimd.document_refused",
+			fields: { client: id, reason: "record at sections.authorize.redirect-uris.0" },
+		});
+	});
+
+	it("is none and forgotten, as a failed fetch, when checking its record throws", async () => {
+		const throwing = defineModule({ name: "throwing-owner" }, (m) => [
+			m.contribute(metadataSections).by(() => ({
+				name: "throwing",
+				schema: z.unknown().transform(() => {
+					throw new Error("unreadable");
+				}),
+			})),
+		]);
+		const app = await boot({}, { extra: [throwing] });
+		expect(await app.find()).toBeUndefined();
+		expect(await app.find()).toBeUndefined();
+		expect(sent).toHaveLength(2);
 	});
 
 	it("takes a JSON media type with parameters or a +json suffix", async () => {
