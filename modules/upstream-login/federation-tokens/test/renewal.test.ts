@@ -27,6 +27,28 @@ async function linked(
 }
 
 describe("when a token ends", () => {
+	it("keeps the earlier end when a refresh answers the same token, timing the next refresh from then", async () => {
+		for (const [said, left] of [
+			[600, 25],
+			[10, 10],
+			[undefined, 25],
+		] as const) {
+			let asked = 0;
+			const h = await linked({ refreshToken: "r-1", expiresInSeconds: 100 }, async () => {
+				asked += 1;
+				return answer({ accessToken: "up-1", expiresInSeconds: said });
+			});
+			h.advance(75_000);
+			expect((await h.get()).json, String(said)).toMatchObject({
+				access_token: "up-1",
+				expires_in: left,
+			});
+			// Its life counted from the refresh: not due again at once, so the upstream is not asked each request.
+			await h.get();
+			expect(asked, String(said)).toBe(1);
+		}
+	});
+
 	it("takes an end at login that is not a positive number as due, renewing it at the first request", async () => {
 		for (const said of [0, -5, Number.NaN, "300"]) {
 			const h = await linked({ refreshToken: "r-1", expiresInSeconds: said });
@@ -107,9 +129,12 @@ describe("when a token ends", () => {
 describe("the scope", () => {
 	const granted = { refreshToken: "r-1", expiresInSeconds: 0, scope: ["read", "write"] };
 
-	/** A session whose first refresh narrows its scope to `read`, the next answering `next`. */
+	/** A session whose first refresh narrows its scope to `read`, the next answering `next` with a new token. */
 	const narrowed = async (next: Said) => {
-		const answers = [answer({ scope: ["read"], expiresInSeconds: 1 }), answer(next)];
+		const answers = [
+			answer({ scope: ["read"], expiresInSeconds: 1 }),
+			answer({ accessToken: "up-3", ...next }),
+		];
 		const h = await linked(granted, async () => answers.shift() ?? answer({}), {
 			settings: { "refresh-before": "0s" },
 		});
@@ -134,7 +159,7 @@ describe("the scope", () => {
 			const h = await linked(granted, async () => answer({ scope }));
 			expect((await h.get()).json).toMatchObject({ access_token: "up-2", scope: "read write" });
 			const narrow = await narrowed({ scope });
-			expect((await narrow.get()).json).toMatchObject({ access_token: "up-2", scope: "read" });
+			expect((await narrow.get()).json).toMatchObject({ access_token: "up-3", scope: "read" });
 		}
 	});
 });
@@ -191,11 +216,15 @@ describe("what the upstream says, read once at the boundary", () => {
 		const asked: string[] = [];
 		const h = await linked({ refreshToken: "r-1", expiresInSeconds: 0 }, async (refreshToken) => {
 			asked.push(refreshToken);
-			return answer({ refreshToken: "", expiresInSeconds: 1 });
+			return answer({
+				accessToken: `up-${asked.length + 1}`,
+				refreshToken: "",
+				expiresInSeconds: 1,
+			});
 		});
 		expect((await h.get()).json).toMatchObject({ access_token: "up-2" });
 		h.advance(1000);
-		expect((await h.get()).json).toMatchObject({ access_token: "up-2" });
+		expect((await h.get()).json).toMatchObject({ access_token: "up-3" });
 		expect(asked).toEqual(["r-1", "r-1"]);
 	});
 

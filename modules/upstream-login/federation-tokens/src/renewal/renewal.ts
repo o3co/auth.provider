@@ -284,12 +284,15 @@ export function renewalWith(parts: Parts) {
 			return failed(refused ?? "unknown");
 		}
 		const idToken = text(said.idToken) ?? kept.idToken;
+		const same = accessToken === kept.accessToken && kept.expiresAt !== undefined;
+		const end =
+			same && ends.end !== undefined ? Math.min(ends.end, kept.expiresAt ?? ends.end) : ends.end;
 		const next: Kept = {
 			accessToken,
 			tokenType,
 			refreshToken,
 			...(idToken ? { idToken } : {}),
-			...(ends.end === undefined ? {} : { expiresAt: ends.end }),
+			...(end === undefined ? {} : { expiresAt: end }),
 			...(ends.obtainedAt === undefined ? {} : { obtainedAt: ends.obtainedAt }),
 			granted: kept.granted,
 			scope,
