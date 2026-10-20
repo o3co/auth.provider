@@ -86,6 +86,19 @@ function places(max: number) {
 	};
 }
 
+/** Node's threadpool when `UV_THREADPOOL_SIZE` sets none it can read. */
+const defaultThreadpool = 4;
+
+/**
+ * How many names may resolve at once: half the threadpool, rounded up, at least one and never more
+ * than `max-concurrent`. A lookup runs on the threadpool and no deadline stops it, so names that
+ * answer slowly hold at most half of it, leaving the rest to hashing and the file system.
+ */
+export function lookupsAtOnce(threadpool: string | undefined, maxConcurrent: number): number {
+	const size = /^[1-9]\d*$/.test(threadpool ?? "") ? Number(threadpool) : defaultThreadpool;
+	return Math.min(maxConcurrent, Math.max(1, Math.floor((size + 1) / 2)));
+}
+
 interface Paths {
 	readonly fetch: Outbound["fetch"];
 	readonly fetchSigned: SignedOutbound["fetch"];
@@ -119,6 +132,7 @@ export function outboundOver(
 	resolve: Resolver,
 	trust: Trust = {},
 	deadlineOf: (ms: number) => AbortSignal = AbortSignal.timeout,
+	lookups = lookupsAtOnce(process.env.UV_THREADPOOL_SIZE, settings["max-concurrent"]),
 ): Paths {
 	const policy = policyOf(settings);
 	const direct = settings["direct-hosts"];
@@ -133,9 +147,9 @@ export function outboundOver(
 					direct: (host) => policy.listed(host, direct),
 				};
 	const requestPlace = places(settings["max-concurrent"]);
-	const lookupPlace = places(settings["max-concurrent"]);
+	const lookupPlace = places(lookups);
 	// A name lookup cannot be stopped at a deadline: one still running past it holds a lookup of its
-	// own, never a request's place, and no more run at once than requests may.
+	// own, never a request's place, and no more run at once than half the threadpool.
 	const bounded: Resolver = (host) => lookupPlace(() => resolve(host));
 	const go = async (url: string, request: OutboundRequest, narrower: Narrower, signed: boolean) => {
 		const limits = policy.limitsOf(narrower, signed);
