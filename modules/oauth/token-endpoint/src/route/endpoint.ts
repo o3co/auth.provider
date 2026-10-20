@@ -78,7 +78,7 @@ export function tokenEndpoint(
 ): Pick<Route, "handle" | "unavailable"> {
 	const recorded = declaredAudit(audit, events);
 	const answer = async (request: HttpRequest): Promise<HttpResponse> => {
-		const authenticated = await authenticateClient(clients, request);
+		const authenticated = await authenticateClient(clients, request, audit);
 		if (authenticated.kind === "refused") return authenticated.response;
 		const client = authenticated.client;
 		const source = determinedSource(request);

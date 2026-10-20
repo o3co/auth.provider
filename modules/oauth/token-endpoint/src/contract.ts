@@ -1,7 +1,10 @@
+import { type Audit, declaredAudit } from "@mod/audit";
 import type { Client, Clients } from "@mod/clients";
 import type { OAuthError } from "@mod/grants";
 import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import { contract } from "@mod/kernel";
+import { determinedSource } from "@mod/request-source";
+import events from "./audit-events.ts";
 import { challenged } from "./route/challenges.ts";
 
 /** The built-in grant's type (RFC 6749 §4.4). */
@@ -51,9 +54,11 @@ export function oauthError(
 	});
 }
 
+/** Authenticates the request's client; a refusal is recorded on `audit` once, by its reason and the source alone. */
 export async function authenticateClient(
 	clients: Clients,
 	request: HttpRequest,
+	audit?: Pick<Audit, "record">,
 ): Promise<
 	| {
 			readonly kind: "client";
@@ -67,6 +72,11 @@ export async function authenticateClient(
 	if (authenticated.kind === "authenticated") {
 		return { kind: "client", client: authenticated.client, challenges: authenticated.challenges };
 	}
+	const source = determinedSource(request);
+	if (audit)
+		declaredAudit(audit, events).record("client.authentication.failure", {
+			attributes: { ...(source === undefined ? {} : { source }), reason: authenticated.reason },
+		});
 	if (authenticated.reason === "multiple_methods") {
 		return {
 			kind: "refused",
