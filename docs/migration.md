@@ -662,7 +662,7 @@ A threshold on pino's numbers becomes a set of names: `level >= 40` is `level` i
 
 ## From 0.18.0-rc.1
 
-Coming from rc.1, read this section, then [From 0.18.0-rc.2](#from-0180-rc2).
+Coming from rc.1, read this section, then [From 0.18.0-rc.2](#from-0180-rc2) and [From 0.18.0-rc.3](#from-0180-rc3).
 
 - **Sealing keys**: `seal.keys` is refused at boot; write its first key as `seal.current` and the rest as `seal.previous`. Rotating a key now has a procedure, in the [runbook](runbook.md#rotating-the-sealing-key).
 - **MFA factor lists written by rc.1** hold no subject, so `reseal` cannot seal their secrets again and counts them as left (exit 2) until the user next proves or changes a factor, which writes the subject. While such lists remain, do not retire a `previous` key that sealed them.
@@ -710,11 +710,8 @@ Coming from rc.1, read this section, then [From 0.18.0-rc.2](#from-0180-rc2).
 
 ## From 0.18.0-rc.2
 
-What changed since rc.2. Coming from rc.1, read [From 0.18.0-rc.1](#from-0180-rc1) first.
+What changed since rc.2, before [From 0.18.0-rc.3](#from-0180-rc3). Coming from rc.1, read [From 0.18.0-rc.1](#from-0180-rc1) first.
 
-- **0.17's environment variables** are not read, and nothing warns of one left set: if the environment or secret store you carried from 0.17 still holds them, remove them as [Migration steps](#migration-steps) says, writing the values you keep into the configuration.
-- **A user ledger's lookups** read a `404` as no such user, whatever sent it: refuse a caller the ledger does not accept with `401` or `403`, never `404`, and check that each URL reaches the route itself, as [User ledger over HTTP](#user-ledger-over-http) says.
-- **Log and audit lines** have the shape they had in rc.2, but no earlier guide described it, nor how 0.17's filters stop matching: see [Log and audit lines](#log-and-audit-lines).
 - **Trusted proxies**: a `http.trusted-proxies` entry covering every address of a family (any `/0`, or every IPv4 address mapped into IPv6, as `::ffff:0:0/96` or `::/1`) now refuses boot at that entry, as it would make every client a proxy; list the proxies' own addresses.
 - **zod**: the packages take `zod` as a required peer (`^4.6.0`); an app depends on `zod` itself, at the version the packages take.
 - **Sessions in an app composed by hand, and an entry requirement or closing participant of your own**: `session`'s points for entry requirements and closing participants are gone; they are the bridges `session-requirements` and `session-participants`, which `combinations` composes with `session`, and `session-lifecycle` refuses to boot without them. Contribute to their points, importing the types from them.
@@ -749,6 +746,11 @@ What changed since rc.3. Coming from an earlier release candidate, read the sect
 - **A request carrying a re-authentication record that is not its own** (spent, unknown, or made for other parameters, as when a demand was taken out of its return): it is refused with `login_required`. A login page that returns to `redirect_to` as it was given is not affected.
 - **A request back from its login still not new enough**: it is refused with `login_required` whether the session's authentication time is known or not. rc.3 sent it to the login page again.
 - **Discovery**: the metadata says `authorization_response_iss_parameter_supported: true`; every redirect answer already carried `iss`.
+- **0.17's environment variables** are not read, and nothing warns of one left set: if the environment or secret store you carried from 0.17 still holds them, remove them as [Migration steps](#migration-steps) says, writing the values you keep into the configuration.
+- **A user ledger's lookups** read a `404` as no such user, whatever sent it: refuse a caller the ledger does not accept with `401` or `403`, never `404`, and check that each URL reaches the route itself, as [User ledger over HTTP](#user-ledger-over-http) says.
+- **Log and audit lines** have the shape they had in earlier release candidates, but no earlier guide described it, nor how 0.17's filters stop matching: see [Log and audit lines](#log-and-audit-lines).
+- **An HS256 secret carried from 0.17**: 0.18 decodes `keys.signing.secret` and takes the decoded bytes as the key, where 0.17 took the string's own bytes; a value copied as written signs with another key. The [mapping](#issuer-and-signing-keys) says how to keep 0.17's.
+- **A client's session grant** is allowed under `sections.client-allowance.grants`; an earlier guide named `sections.token-endpoint.grants`, which refuses boot as an unknown section.
 
 ## Operational notes
 
