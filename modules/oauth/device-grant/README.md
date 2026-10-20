@@ -8,7 +8,7 @@
 - Client authentication and OAuth error responses (`token-endpoint`). Session entry and its requirements (`session`). The verification page (the deployment's). Counting (`rate-limit`).
 
 ## Offers
-- Route `POST /oauth/device_authorization`. It takes a form and authenticates the client as the token endpoint does (public clients too). It asks `grants`' target rule, as for a grant taking no audience, whether one may be asked, and answers its refusal.
+- Route `POST /oauth/device_authorization`. It takes a form and authenticates the client as the token endpoint does, recording a refusal (public clients too). It asks `grants`' target rule, as for a grant taking no audience, whether one may be asked, and answers its refusal.
   - Answers `device_code`, `user_code` (`XXXX-XXXX`), `verification_uri`, `verification_uri_complete` (when set), `expires_in` and `interval`.
 - Route `POST /oauth/device/verification`, for the deployment's page. It takes a JSON body as `http` reads it, and answers JSON.
   - Fields: `action` (`lookup`, `approve` or `deny`) and `user_code`. A member that is not a string counts as absent.
