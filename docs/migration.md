@@ -771,6 +771,7 @@ What changed since rc.4. Coming from an earlier release candidate, read the sect
 - **Access tokens not issued by `tokens`**: an `at+jwt` carrying a name reserved for what `tokens` never writes (`nbf`, `roles`, `email` and the like) is refused by `verifyAccess`, which retires such tokens on purpose.
 - **Added claims and restrictions**: a refreshed or exchanged token carries no added claim; never use one for a restriction that must hold on.
 - **Audit**: `token.issued` may carry `claims`, the names of the claims a grant added, and `claims_left`, how many names did not fit.
+- **A URL that takes plain http on a loopback host** (a login or step-up page, a return target, a federation grant's page) now also takes a name under `localhost` (such as `http://app.localhost:3000/`), `localhost.` with its trailing dot, and 127/8 mapped into IPv6 (`http://[::ffff:7f00:1]/`): the host is judged by its name alone, as `url-setting`'s `isLoopbackName` does for every module. `localhost.localdomain`, `0.0.0.0` and any other host over http still refuse boot.
 
 ## Operational notes
 
