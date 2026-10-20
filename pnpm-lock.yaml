@@ -2316,6 +2316,79 @@ importers:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
 
+  modules/second-factor/mfa-enrollment:
+    dependencies:
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mfa':
+        specifier: workspace:*
+        version: link:../mfa
+      '@mod/mfa-binding-proof':
+        specifier: workspace:*
+        version: link:../mfa-binding-proof
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
+      '@mod/mfa-flows':
+        specifier: workspace:*
+        version: link:../mfa-flows
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
+    devDependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
+      '@mod/cookies':
+        specifier: workspace:*
+        version: link:../../foundation/cookies
+      '@mod/csrf':
+        specifier: workspace:*
+        version: link:../../identity/csrf
+      '@mod/login-attributes':
+        specifier: workspace:*
+        version: link:../../identity/login-attributes
+      '@mod/login-gates':
+        specifier: workspace:*
+        version: link:../../identity/login-gates
+      '@mod/mfa-entry':
+        specifier: workspace:*
+        version: link:../mfa-entry
+      '@mod/rate-limit':
+        specifier: workspace:*
+        version: link:../../foundation/rate-limit
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      '@mod/request-source':
+        specifier: workspace:*
+        version: link:../../foundation/request-source
+      '@mod/seal':
+        specifier: workspace:*
+        version: link:../../foundation/seal
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+      '@mod/subject-attributes':
+        specifier: workspace:*
+        version: link:../../identity/subject-attributes
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+
   modules/second-factor/mfa-entry:
     dependencies:
       '@mod/kernel':
