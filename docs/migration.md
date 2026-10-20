@@ -131,7 +131,7 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 | `logging.level` | `kernel.logging.level` | |
 | `http.port` (default 3000) | `http.port` (default 8080) | |
 | (all interfaces) | `http.host` (default `127.0.0.1`) | Set `0.0.0.0` in a container |
-| `http.trustProxy` | `http.trusted-proxies` (IPs or CIDRs), `http.proxy-hops` | Named ranges and `true` are gone; list addresses. A block of every address (`0.0.0.0/0`, `::/0`, any `/0`) refuses boot, as every source would be undetermined |
+| `http.trustProxy` | `http.trusted-proxies` (IPs or CIDRs), `http.proxy-hops` | Named ranges and `true` are gone; list addresses. A block of every address of a family (any `/0`, or every IPv4 address mapped into IPv6, as `::ffff:0:0/96` or `::/1`) refuses boot, as every source would be undetermined |
 | `http.readinessTimeoutMs` | `http-ops.readiness-deadline` | |
 | `http.cors.allowedOrigins` | `http.cors-origins` | Exact https origins, as a HOCON list |
 | (from the issuer) | `http.public-origin` | Cookies are `__Host-` and `Secure` when it is https |
@@ -773,7 +773,7 @@ http.trusted-proxies = [
 http.proxy-hops = 2
 ```
 
-A block of every address (`0.0.0.0/0`, `::/0`) refuses boot: it would trust every client as a proxy, so no source could be told. To pass a long list per environment, put it in its own file and name that file in `APP_CONFIG`, or `include file("trusted-proxies.conf")` it from the environment's file. An array is replaced from one file to the next, never added to, so the file that wins holds the whole list.
+A block of every address of a family (`0.0.0.0/0`, `::/0`, or every IPv4 address mapped into IPv6, as `::ffff:0:0/96`) refuses boot: it would trust every client as a proxy, so no source could be told. To pass a long list per environment, put it in its own file and name that file in `APP_CONFIG`, or `include file("trusted-proxies.conf")` it from the environment's file. An array is replaced from one file to the next, never added to, so the file that wins holds the whole list.
 
 ### Redis
 

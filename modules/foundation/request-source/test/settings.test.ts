@@ -17,14 +17,21 @@ it("takes trusted proxies as IP addresses or CIDR blocks", () => {
 	expect(trusted.check("2001:db8::1", "ipv6")).toBe(true);
 });
 
-it("refuses a trusted proxy covering every address, however written, as no source could be told", () => {
-	for (const entry of ["0.0.0.0/0", "10.1.2.3/0", "::/0", "2001:db8::/0", "::ffff:0:0/0"]) {
+it("refuses a trusted proxy covering every address of a family, however written, as no source could be told", () => {
+	const everyAddress = ["0.0.0.0/0", "10.1.2.3/0", "::/0", "2001:db8::/0", "::ffff:0:0/0"];
+	// Every IPv4 address, mapped into IPv6, as an IPv4-mapped peer is checked as IPv4.
+	const everyIpv4 = ["::ffff:0:0/96", "::ffff:0:0/95", "::/1", "::/64"];
+	for (const entry of [...everyAddress, ...everyIpv4]) {
 		const issues = sourceSettings.safeParse({ "trusted-proxies": [entry] }).error?.issues ?? [];
 		expect(
 			issues.map((issue) => issue.path.join(".")),
 			entry,
 		).toEqual(["trusted-proxies.0"]);
 		expect(issues[0]?.message, entry).toContain("every source would be undetermined");
+	}
+	// A block of part of a family is a proxy's own range.
+	for (const entry of ["10.0.0.0/8", "::ffff:0:0/97", "8000::/1", "2001:db8::/32"]) {
+		expect(sourceSettings.safeParse({ "trusted-proxies": [entry] }).success, entry).toBe(true);
 	}
 	// An address list elsewhere may still hold every address.
 	expect(addressList().safeParse(["0.0.0.0/0", "::/0"]).success).toBe(true);
