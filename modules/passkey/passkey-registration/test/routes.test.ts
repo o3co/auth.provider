@@ -1,3 +1,4 @@
+import { auditStandIn } from "@mod/audit/testing";
 import cookiesModule from "@mod/cookies/module";
 import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
@@ -6,8 +7,10 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
-import { entryRequirements, sessions } from "@mod/session";
+import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import { entryRequirements } from "@mod/session-requirements";
+import sessionRequirements from "@mod/session-requirements/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { type RegistrationRefusal, type Registrations, registrations } from "@mod/webauthn";
 import { afterEach, describe, expect, it } from "vitest";
@@ -45,6 +48,7 @@ const credential = {
 async function serve(section: Record<string, unknown> = {}) {
 	const state = { answer: { kind: "registered", credential } as Registered, down: false };
 	const asked: unknown[][] = [];
+	const audit = auditStandIn();
 	const standIn = defineModule({ name: "webauthn" }, (m) => [
 		m.provide(registrations).by(() => ({
 			creation: async (subject) => {
@@ -65,10 +69,12 @@ async function serve(section: Record<string, unknown> = {}) {
 			csrfStandIn,
 			cookiesModule,
 			sessionStandIn,
+			sessionRequirements,
 			subjectRevocationStandIn,
 			rateLimitStandIn,
 			holding,
 			standIn,
+			audit.module,
 			registration,
 		],
 		config: {
@@ -112,7 +118,7 @@ async function serve(section: Record<string, unknown> = {}) {
 			};
 		};
 	};
-	return { state, asked, browser };
+	return { state, asked, browser, events: audit.events };
 }
 
 describe("registration from a session", () => {
@@ -128,7 +134,7 @@ describe("registration from a session", () => {
 	});
 
 	it("keeps the response for the session's subject with its nickname, answering the credential's id, transports and backup state", async () => {
-		const { browser, asked, state } = await serve();
+		const { browser, asked, state, events } = await serve();
 		const post = await browser("sam");
 		const response = { id: "Y3JlZA", subject: "kim" };
 		expect(await post("verify", { response, nickname: "laptop", subject: "kim" })).toMatchObject({
@@ -144,6 +150,13 @@ describe("registration from a session", () => {
 			backedUp: false,
 		});
 		expect(asked[1]).toEqual(["register", "sam", response, undefined]);
+		// Each passkey kept is recorded for the subject, with the source alone: no id, nickname or ceremony.
+		const registered = { kind: "passkey.registered", subject: "sam", at: expect.any(Number) };
+		const attributes = { source: "198.51.100.1" };
+		expect(events).toEqual([
+			{ ...registered, attributes },
+			{ ...registered, attributes },
+		]);
 	});
 
 	it("answers 401 without a session, and the requirement's answer when the session falls short", async () => {
@@ -170,6 +183,11 @@ describe("registration from a session", () => {
 			{ response: [] },
 			{ response: {}, nickname: "" },
 			{ response: {}, nickname: "x".repeat(65) },
+			{ response: {}, nickname: "\u{1f511}".repeat(65) },
+			{ response: {}, nickname: "desk\u0000top" },
+			{ response: {}, nickname: "desk‮top" },
+			{ response: {}, nickname: "desk⁦top" },
+			{ response: {}, nickname: "x\ud800" },
 			{ response: {}, nickname: 7 },
 		]) {
 			const answer = await post("verify", body);
@@ -178,11 +196,14 @@ describe("registration from a session", () => {
 		}
 		expect((await post("verify")).body.error).toBe("invalid_request");
 		expect((await post("verify", { response: {}, nickname: "x".repeat(64) })).status).toBe(200);
-		expect(asked).toHaveLength(1);
+		expect((await post("verify", { response: {}, nickname: "\u{1f511}".repeat(64) })).status).toBe(
+			200,
+		);
+		expect(asked).toHaveLength(2);
 	});
 
-	it("answers each refusal of webauthn in the words clients of these routes know", async () => {
-		const { browser, state } = await serve();
+	it("answers each refusal of webauthn in the words clients of these routes know, recording none", async () => {
+		const { browser, state, events } = await serve();
 		const post = await browser("sam");
 		const answers = {
 			origin: { error: "origin_mismatch" },
@@ -212,6 +233,7 @@ describe("registration from a session", () => {
 				cacheControl: "no-store",
 			});
 		}
+		expect(events).toEqual([]);
 	});
 
 	it("answers 503 when webauthn cannot tell", async () => {

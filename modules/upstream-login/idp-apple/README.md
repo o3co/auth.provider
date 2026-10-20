@@ -55,4 +55,4 @@
 - Anything else that fails refuses, without the library's or Apple's text.
 
 ## Depends on
-- `kernel`, `upstreams`, `upstream-client`, `outbound`, `external-jwt`
+- `kernel`, `upstreams`, `upstream-client`, `outbound`, `outbound-policy`, `external-jwt`

@@ -1,7 +1,8 @@
 import { deepFreeze, defineModule, setting } from "@mod/kernel";
 import { bearerToken } from "@mod/keys";
-import { credentialPolicy, outbound, outboundRefusals } from "@mod/outbound";
-import { urlSetting } from "@mod/url-setting";
+import { outbound } from "@mod/outbound";
+import { credentialPolicy, destinationRefusal, outboundRefusals } from "@mod/outbound-policy";
+import { type ConfiguredUrl, urlSetting } from "@mod/url-setting";
 import { type Ledger, ledgers } from "@mod/users";
 import { z } from "zod";
 import { calls } from "./calls/calls.ts";
@@ -55,10 +56,10 @@ const credentialRefusals = {
 export default defineModule({ name: "users-http", section, replicaSafe: true }, (m) => [
 	m.contribute(ledgers).by(async (c): Promise<Ledger> => {
 		const { "max-response-size": maxBytes, timeout: timeoutMs } = c.section;
-		// The operator's own URL: a host in `internal-hosts` is reached at a private address.
-		const narrowerOf = (url: string) => ({
+		// The operator's own URL: a host in `internal-hosts` is reached at a private address at its origin.
+		const narrowerOf = (url: ConfiguredUrl) => ({
 			hosts: [new URL(url).hostname],
-			internal: true as const,
+			internal: url,
 			...(maxBytes === undefined ? {} : { maxBytes }),
 			...(timeoutMs === undefined ? {} : { timeoutMs }),
 		});
@@ -72,13 +73,9 @@ export default defineModule({ name: "users-http", section, replicaSafe: true }, 
 		const refusals = await c.get(outboundRefusals);
 		for (const key of urlKeys) {
 			const url = c.section[key];
-			const explained = url === undefined ? undefined : refusals.explained(url, narrowerOf(url));
-			if (explained !== undefined) {
-				return c.refuse(
-					`users-http.${key}`,
-					`outbound's destination policy refuses it: ${explained}`,
-				);
-			}
+			const refused =
+				url === undefined ? undefined : destinationRefusal(refusals, url, narrowerOf(url));
+			if (refused !== undefined) return c.refuse(`users-http.${key}`, refused);
 		}
 		if (refused === "scheme") return c.refuse("users-http.credential", credentialRefusals.scheme);
 		const ask = calls({

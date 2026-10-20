@@ -13,13 +13,11 @@ import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import {
 	type Narrower,
 	type Outbound,
-	type OutboundRefusals,
 	type OutboundRequest,
 	type OutboundResponse,
 	outbound,
-	outboundRefusals,
-	withinHosts,
 } from "@mod/outbound";
+import { type OutboundRefusals, outboundRefusals, withinHosts } from "@mod/outbound-policy";
 import {
 	type AuthorizationStart,
 	type CodeExchange,
@@ -514,7 +512,9 @@ describe("idp-oidc", () => {
 
 	it("gives each default as an operator writes it, read through the key's own schema", () => {
 		const { shape } = settingsOf(asymmetric, policyRefusing());
-		const byDefault = Object.entries(shape).filter(([, key]) => key._zod.def.type === "default");
+		const byDefault = Object.entries(shape).filter(
+			([, key]) => (key._zod.def.type as string) === "default",
+		);
 		expect(byDefault.map(([name]) => name)).toEqual([]);
 		// A default algorithm external-jwt does not know is refused, as one the operator wrote is.
 		const base = { issuer, "client-id": "c", "client-secret": "s" };

@@ -1,6 +1,6 @@
 import { type Audit, declaredAudit } from "@mod/audit";
 import type { Client, Clients, Section } from "@mod/clients";
-import { type HttpRequest, type HttpResponse, noStore } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer, noStore } from "@mod/http";
 import { isUnavailable, type Log } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
 import type { Upstreams } from "@mod/upstreams";
@@ -45,12 +45,6 @@ export interface Flow {
 	readonly log: Pick<Log, "warn">;
 }
 
-const answer = (
-	status: number,
-	json: unknown,
-	headers: Readonly<Record<string, string>> = {},
-): HttpResponse => ({ status, headers: { ...noStore, ...headers }, body: { json } });
-
 /** Each outcome short of a token, as the status and error word clients of this route know. */
 const refusals: Record<Exclude<Current["kind"], "handed" | "limited">, [number, string]> = {
 	not_linked: [404, "federation_not_linked"],
@@ -73,13 +67,13 @@ const receives = (client: Client | undefined) =>
 export async function federationTokens(flow: Flow, request: HttpRequest): Promise<HttpResponse> {
 	const [idp = "", step, ...rest] = request.path.slice(base.length + 1).split("/");
 	if (idp === "" || rest.length > 0 || (step !== "token" && step !== "logout")) {
-		return answer(404, { error: "not_found" });
+		return jsonAnswer(404, { error: "not_found" });
 	}
 	try {
 		const caller = await flow.caller.accepted(request);
 		if (caller.kind === "refused") {
 			const { status, error, headers } = caller;
-			return answer(status, error === undefined ? {} : { error }, headers);
+			return jsonAnswer(status, error === undefined ? {} : { error }, { headers });
 		}
 		const from = determinedSource(request);
 		const record = (kind: Kind, attributes: Record<string, string>) =>
@@ -95,40 +89,46 @@ export async function federationTokens(flow: Flow, request: HttpRequest): Promis
 		if (step === "logout") return await logout(flow, request, idp, caller, record);
 		if (!receives(await flow.clients.find(caller.client))) {
 			record("federation.token.failed", { reason: "forbidden" });
-			return answer(403, { error: "forbidden" });
+			return jsonAnswer(403, { error: "forbidden" });
 		}
 		const current = await flow.renewal.current(caller.session, idp);
 		if (current.kind === "limited") {
 			const after = current.retryAfterSeconds;
 			const said = after !== undefined && Number.isInteger(after) && after >= 1 && after <= 86_400;
-			return answer(429, { error: "rate_limited" }, said ? { "retry-after": String(after) } : {});
+			return jsonAnswer(
+				429,
+				{ error: "rate_limited" },
+				said ? { headers: { "retry-after": String(after) } } : {},
+			);
 		}
 		if (current.kind !== "handed") {
 			const [status, error] = refusals[current.kind];
 			if (status !== 503 && status !== 404) {
 				record("federation.token.failed", { reason: current.kind });
 			}
-			return answer(status, { error }, status === 502 ? { "retry-after": "300" } : {});
+			return jsonAnswer(
+				status,
+				{ error },
+				status === 502 ? { headers: { "retry-after": "300" } } : {},
+			);
 		}
 		// The session may have closed, or fallen short of a requirement, while the upstream answered.
 		if (!(await flow.caller.stillEnters(caller))) {
-			return answer(
+			return jsonAnswer(
 				401,
 				{ error: "invalid_token" },
-				{
-					"www-authenticate": 'Bearer error="invalid_token"',
-				},
+				{ headers: { "www-authenticate": 'Bearer error="invalid_token"' } },
 			);
 		}
 		record("federation.token.succeeded", { refreshed: String(current.refreshed) });
-		return answer(200, {
+		return jsonAnswer(200, {
 			access_token: current.accessToken,
 			token_type: "Bearer",
 			...(current.expiresInSeconds === undefined ? {} : { expires_in: current.expiresInSeconds }),
 			...(current.scope.length > 0 ? { scope: current.scope.join(" ") } : {}),
 		});
 	} catch (error) {
-		if (isUnavailable(error)) return answer(503, { error: "temporarily_unavailable" });
+		if (isUnavailable(error)) return jsonAnswer(503, { error: "temporarily_unavailable" });
 		throw error;
 	}
 }
@@ -144,7 +144,8 @@ async function logout(
 	const asked = request.form.single("post_logout_redirect_uri");
 	const state = request.form.single("state");
 	const disconnected = await flow.renewal.disconnect(caller.session, idp);
-	if (disconnected.kind === "not_linked") return answer(404, { error: "federation_not_linked" });
+	if (disconnected.kind === "not_linked")
+		return jsonAnswer(404, { error: "federation_not_linked" });
 	// A return the client did not register, or a client that cannot be read, is dropped quietly.
 	const client = await flow.clients.find(caller.client).catch(() => undefined);
 	const listed = client?.section(clientSection)["post-logout-redirect-uris"] ?? [];
@@ -160,6 +161,6 @@ async function logout(
 		flow.log,
 	);
 	record("federation.logout.succeeded", { redirected: String(location !== undefined) });
-	if (location === undefined) return answer(200, { disconnected: true });
+	if (location === undefined) return jsonAnswer(200, { disconnected: true });
 	return { status: 303, headers: { ...noStore, location } };
 }

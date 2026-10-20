@@ -36,6 +36,21 @@ function blockListOf(entries: readonly string[], what: string) {
 	return list;
 }
 
+/**
+ * Whether one entry covers a whole family: one block holding both ends of a family holds all of it.
+ * An IPv4-mapped block (`::ffff:0:0/96`, or any holding it) covers every IPv4 address, as a mapped
+ * peer is checked as IPv4.
+ */
+function coversAFamily(entry: string) {
+	const one = blockListOf([entry], "a trusted proxy");
+	const both = (type: "ipv4" | "ipv6", low: string, high: string) =>
+		one.check(low, type) && one.check(high, type);
+	return (
+		both("ipv4", "0.0.0.0", "255.255.255.255") ||
+		both("ipv6", "::", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")
+	);
+}
+
 /** The addresses entries a schema took (by `addressList`) list: whether an address is among them. */
 export function addressesOf(entries: readonly string[]): AddressList {
 	const list = blockListOf(entries, "an address list entry");
@@ -50,7 +65,13 @@ export function addressesOf(entries: readonly string[]): AddressList {
 /** The trusted proxies and the hops through them, as an operator's section takes them. */
 export const sourceSettings = z.strictObject({
 	"trusted-proxies": z
-		.array(block)
+		.array(
+			// A proxy trusted at every address would make every client a proxy, so no source is ever told.
+			block.refine(
+				(s) => blockOf(s) === undefined || !coversAFamily(s),
+				"a block covering every address of a family (/0, or every IPv4 address mapped into IPv6): every source would be undetermined; list the proxies' own addresses",
+			),
+		)
 		.prefault([])
 		.describe(
 			"Proxies whose forwarded headers are believed: IPs without a zone, or CIDRs with one prefix length in decimal without a leading zero. Always set behind a proxy: otherwise every request's source is the proxy, and all look like one source.",

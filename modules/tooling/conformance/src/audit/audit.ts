@@ -27,9 +27,14 @@ export interface AuditSink {
 
 const quietMs = 300;
 const longestMs = 5000;
-const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const pauseFor = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-export async function auditSink(): Promise<AuditSink> {
+/** A test may give the sink's wait, to order what arrives between waits rather than time it. */
+export async function auditSink({
+	pause = () => pauseFor(quietMs),
+}: {
+	readonly pause?: () => Promise<void>;
+} = {}): Promise<AuditSink> {
 	const events: SentEvent[] = [];
 	const fake = await fakeHttp((asked) => {
 		const event: unknown = JSON.parse(asked.body);
@@ -49,7 +54,7 @@ export async function auditSink(): Promise<AuditSink> {
 		let count = -1;
 		while (count !== events.length && Date.now() < deadline) {
 			count = events.length;
-			await pause(quietMs);
+			await pause();
 		}
 	};
 	const trail: AuditTrail = {

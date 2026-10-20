@@ -11,12 +11,32 @@ const alice = {
 };
 
 describe("the scene's users on an app taking users from a ledger", () => {
-	it("are held by a ledger unless one has an upstream link or a bcrypt hash", () => {
+	it("are held by a ledger, upstream links included, unless one has a bcrypt hash", () => {
 		expect(unledgered([alice])).toBeUndefined();
 		const linked = { ...alice, upstream: { idp: "corp", subject: "u" } };
+		expect(unledgered([linked])).toBeUndefined();
 		expect(unledgered([linked, { ...alice, bcrypt: true }])).toBe(
-			"gives users a ledger cannot hold: upstream links, a password hash other than scrypt",
+			"gives users a ledger cannot hold: a password hash other than scrypt",
 		);
+	});
+
+	it("are looked up by upstream identity at the ledger, the IdP and its subject both matching", async () => {
+		const linked = { ...alice, upstream: { idp: "corp", subject: "up-1" } };
+		const ledger = await ledgerParty({ users: [linked] });
+		const section = ledger.config["users-http"] ?? {};
+		const lookup = (idp: string, subject: string) =>
+			fetch(String(section["upstream-url"]), {
+				method: "POST",
+				headers: { authorization: `Bearer ${section.credential}` },
+				body: JSON.stringify({ idp, subject }),
+			});
+		try {
+			expect(section["upstream-url"]).toBe(`${ledger.base}/upstream`);
+			expect(await (await lookup("corp", "up-1")).json()).toMatchObject({ id: "u-1" });
+			expect((await lookup("other", "up-1")).status).toBe(404);
+		} finally {
+			await ledger.stop();
+		}
 	});
 
 	it("leave a scene out where a user is one a ledger cannot hold, and are served by a ledger otherwise", () => {

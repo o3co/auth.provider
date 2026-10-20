@@ -1,14 +1,8 @@
 import { createHash } from "node:crypto";
 import type { HttpRequest } from "@mod/http";
-import { isCanonicalJws, publicMembers } from "@mod/keys";
+import { isCanonicalJws, publicMembers, thumbprint } from "@mod/keys";
 import type { BindingRead, Scene } from "@mod/sender-binding";
-import {
-	calculateJwkThumbprint,
-	compactVerify,
-	decodeProtectedHeader,
-	importJWK,
-	type JWK,
-} from "jose";
+import { compactVerify, decodeProtectedHeader, importJWK, type JWK } from "jose";
 import { z } from "zod";
 import type { Nonces } from "./nonce.ts";
 
@@ -133,5 +127,5 @@ export async function readProof(
 		const ath = createHash("sha256").update(scene.token).digest("base64url");
 		if (claims.ath !== ath) return refused("ath does not match the token");
 	}
-	return { kind: "proved", jkt: await calculateJwkThumbprint(jwk, "sha256"), jti: claims.jti };
+	return { kind: "proved", jkt: await thumbprint(jwk), jti: claims.jti };
 }

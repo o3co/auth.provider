@@ -10,18 +10,22 @@ import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
-import { assemble, BootRefused, defineModule, kernelConfig, type Module } from "@mod/kernel";
+import {
+	assemble,
+	BootRefused,
+	contract,
+	defineModule,
+	kernelConfig,
+	type Module,
+} from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import outboundModule from "@mod/outbound/module";
-import { lineage } from "@mod/refresh";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Binding, senderBindings } from "@mod/sender-binding";
-import { sessions } from "@mod/session";
-import { stubSessions } from "@mod/session/testing";
-import { sessionTokens } from "@mod/session-tokens";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
+import { type ExchangeVerifier, exchangeVerifiers } from "@mod/token-exchange";
 import tokenExchange from "@mod/token-exchange/module";
 import { tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
@@ -72,24 +76,6 @@ const settings = {
 	},
 };
 
-/** No family and no session for any token: an id_token has neither. */
-const untied = defineModule({ name: "untied" }, (m) => [
-	m.provide(lineage).by(() => ({
-		of: async () => ({ kind: "none" }),
-		adopt: async () => "adopted",
-		start: async () => undefined,
-	})),
-	m.provide(sessions).by(() =>
-		stubSessions({
-			entryOf: async (id) => ({
-				kind: "entered",
-				session: { id, context: { subject: "alice", amr: [], authenticatedAt: 0 } },
-				endsAt: Number.MAX_SAFE_INTEGER,
-			}),
-		}),
-	),
-	m.provide(sessionTokens).by(() => ({ sessionOf: async () => ({ kind: "unbound" }) })),
-]);
 const dpopKind = defineModule({ name: "dpop-kind" }, (m) => [
 	m
 		.contribute(senderBindings)
@@ -117,7 +103,6 @@ const boot = (section: unknown, extra: readonly Module[] = []) =>
 			secretHashModule,
 			grantCaller,
 			clientAllowanceModule,
-			untied,
 			dpopKind,
 			outboundModule,
 			externalJwtModule,
@@ -207,6 +192,23 @@ describe("exchange-id-tokens", () => {
 			});
 			if (checked.kind === "valid") expect(checked.expiresAt).toBeLessThanOrEqual(now + 600_000);
 		}
+	});
+
+	it("answers a foreign token for the one client that takes it, with no scope or audience of its own", async () => {
+		const verifiersSeen = contract<readonly ExchangeVerifier[]>("test.verifiers");
+		const reader = defineModule({ name: "verifier-reader" }, (m) => [
+			m.provide(verifiersSeen).by((c) => c.collect(exchangeVerifiers)),
+		]);
+		const app = await boot(settings, [reader]);
+		const verifier = app.get(verifiersSeen).find((v) => v.tokenType === idTokenType);
+		const answer = await verifier?.verify(await apple.sign(appleClaims()));
+		expect(answer).toEqual({
+			kind: "foreign",
+			subject: "acct-1",
+			issuer: "https://appleid.apple.com",
+			expiresAt: expect.any(Number),
+			clients: ["ios-app"],
+		});
 	});
 
 	it("takes an id_token once", async () => {

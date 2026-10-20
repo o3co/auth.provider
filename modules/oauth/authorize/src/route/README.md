@@ -19,4 +19,4 @@ Internal module of `authorize`: the endpoint's requests and answers.
 - What is recorded comes from the decision itself: the subject of a code, the reason of a refusal that carries one, and the refusing policy's name.
 
 ## Depends on
-- `http` (the request and response types, no-store, the public origin); `request-source` (the source); `issuer` (its URL); `audit` (recording); `clients` (finding the client); `grants` (the composed rule); `token-endpoint` (OAuth error responses); `kernel` (the build context, unavailable); `flow`, `redirect-uris`; the package's metadata section
+- `http` (the request and response types, no-store, the public origin); `request-source` (the source); `issuer` (its URL); `audit` (recording); `clients` (finding the client); `grants` (the composed rule); `token-endpoint` (OAuth error responses); `kernel` (the build context, unavailable); `redirect-uris` (matching, the answer's URL, the client's section); `flow`

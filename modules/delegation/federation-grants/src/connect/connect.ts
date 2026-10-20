@@ -1,7 +1,6 @@
-import { createHash } from "node:crypto";
 import { type Audit, audit, declaredAudit } from "@mod/audit";
 import { type Clients, clients } from "@mod/clients";
-import { type HttpRequest, type HttpResponse, noStore } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer, noStore } from "@mod/http";
 import {
 	type BuildContext,
 	type Clock,
@@ -12,6 +11,7 @@ import {
 } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
 import { type Sessions, sessions } from "@mod/session";
+import { type RoundTrips, roundTrips, type Taken } from "@mod/upstream-round-trip";
 import {
 	type DelegatedExchange,
 	type Delegation,
@@ -20,7 +20,7 @@ import {
 	type Upstreams,
 	upstreams,
 } from "@mod/upstreams";
-import { type Users, users } from "@mod/users";
+import { z } from "zod";
 import events from "../audit-events.ts";
 import {
 	connectionsIn,
@@ -46,14 +46,19 @@ import {
 	type StepStore,
 	stepStore,
 } from "../store.ts";
+import {
+	type UpstreamAccounts,
+	upstreamAccountOver,
+} from "../upstream-account/upstream-account.ts";
 
 export interface ConnectParts {
 	readonly sessions: Sessions;
 	readonly clients: Clients;
-	readonly users: Users;
+	readonly upstreamAccount: UpstreamAccounts;
 	readonly upstreams: Upstreams;
 	readonly grants: GrantStore;
 	readonly steps: StepStore;
+	readonly trips: RoundTrips;
 	readonly pending: PendingIntents;
 	readonly records: Records;
 	readonly judge: Judge;
@@ -77,16 +82,21 @@ const plain = (status: number, text: string): HttpResponse => ({
 	},
 	body: text,
 });
-const json = (status: number, body: unknown): HttpResponse => ({
-	status,
-	headers: { ...noStore, "referrer-policy": "no-referrer" },
-	body: { json: body },
-});
+const json = (status: number, body: unknown): HttpResponse =>
+	jsonAnswer(status, body, { headers: { "referrer-policy": "no-referrer" } });
 const see = (location: string): HttpResponse => ({
 	status: 303,
 	headers: { ...noStore, location, "referrer-policy": "no-referrer" },
 });
 const stale = () => plain(400, "This request has expired or has already been used. Start again.");
+/** Each connection's round trip, by the name its cookie takes. */
+const tripName = (connection: string) => `federation-grants.${connection}`;
+/** What a connection's round trip carries for its callback: the grant, its intent and the session that decided. */
+const carried = z.strictObject({ grant: z.string(), intent: z.string(), session: z.string() });
+const withCookies = (answer: HttpResponse, cookies: readonly string[]): HttpResponse => ({
+	...answer,
+	cookies: [...(answer.cookies ?? []), ...cookies],
+});
 const invalid = () =>
 	json(400, { error: "invalid_request", error_description: "the request is not valid" });
 
@@ -138,7 +148,7 @@ export function connectWith(p: ConnectParts) {
 	};
 
 	/** The grant and its intent, while the intent is the grant's current one, not ended and within its time. */
-	const liveIntent = async (step: Step | undefined) => {
+	const liveIntent = async (step: Pick<Step, "grant" | "intent"> | undefined) => {
 		if (!step) return undefined;
 		const grant = records.grantOf(await p.grants.read(step.grant));
 		const intent = grant?.intent;
@@ -374,15 +384,18 @@ export function connectWith(p: ConnectParts) {
 			return fail(request, grant, intent, "access_denied");
 		}
 		const resource = connections.of(grant.connection)?.resource;
-		const state = secret();
-		const verifier = secret();
-		const nonce = secret();
-		// Built before the question is spent, so a start that cannot be asked now leaves it open.
+		// Begun, and its start built, before the question is spent, so a start that cannot be asked
+		// now leaves the question open; the round trip begun then is left to its lifetime.
+		const trip = await p.trips.begin({
+			name: tripName(grant.connection),
+			carried: { grant: grant.id, intent: intent.id, session: intent.session ?? "" },
+			lifetimeMs: Math.max(1, intent.endsAt - p.clock.now()),
+		});
 		const started = startOf(connections.configured(grant.connection)?.delegation, {
-			state,
-			nonce,
-			challenge: createHash("sha256").update(verifier).digest("base64url"),
-			challengeMethod: "S256",
+			state: trip.state,
+			nonce: trip.nonce,
+			challenge: trip.challenge,
+			challengeMethod: trip.challengeMethod,
 			redirectUri: callbackOf(grant.connection),
 			scopes: intent.scopes,
 			...(resource ? { resource } : {}),
@@ -399,26 +412,16 @@ export function connectWith(p: ConnectParts) {
 			// The upstream will not start this delegation: the intent ends, and the client is told.
 			return fail(request, grant, intent, "grant_not_authorizable", "upstream_refused_start");
 		}
-		const upstream = {
-			format: 1,
-			kind: "upstream",
-			grant: grant.id,
-			intent: intent.id,
-			session: intent.session ?? "",
-			verifier,
-			nonce,
-			connection: grant.connection,
-		} as const;
-		await p.steps.create(
-			state,
-			records.storedStep(upstream),
-			Math.max(1, intent.endsAt - p.clock.now()),
-		);
-		return see(started.location);
+		return withCookies(see(started.location), [trip.cookie]);
 	};
 
 	/** The checks a callback runs before it activates, each answering the error the browser is sent back with. */
-	const verified = async (request: HttpRequest, grant: Grant, intent: Intent, step: Step) => {
+	const verified = async (
+		request: HttpRequest,
+		grant: Grant,
+		intent: Intent,
+		step: Pick<Step, "session">,
+	) => {
 		const entry = await entered(request, grant);
 		if (entry.kind !== "entered" || entry.session.id !== step.session)
 			return "reauthentication_required";
@@ -427,10 +430,14 @@ export function connectWith(p: ConnectParts) {
 		return undefined;
 	};
 
-	const callback = async (request: HttpRequest, name: string): Promise<HttpResponse> => {
-		const state = request.query.single("state");
-		// Taken before any code is used, and only at the connection it was made for.
-		const step = state ? await take(state, "upstream", (s) => s.connection === name) : undefined;
+	/** A taken round trip's callback, at the connection it was made for. */
+	const callback = async (
+		request: HttpRequest,
+		name: string,
+		taken: Extract<Taken, { kind: "taken" }>,
+	): Promise<HttpResponse> => {
+		const kept = carried.safeParse(taken.carried);
+		const step = kept.success ? kept.data : undefined;
 		const found = step ? await liveIntent(step) : undefined;
 		if (!step || !found) return stale();
 		const { grant, intent } = found;
@@ -450,9 +457,9 @@ export function connectWith(p: ConnectParts) {
 		}
 		const exchanged = await exchangedBy(delegation, {
 			code,
-			verifier: step.verifier ?? "",
+			verifier: taken.verifier,
 			redirectUri: callbackOf(name),
-			nonce: step.nonce ?? "",
+			nonce: taken.nonce,
 			iss: request.query.single("iss"),
 			scopes: intent.scopes,
 			...(connection.resource ? { resource: connection.resource } : {}),
@@ -460,22 +467,8 @@ export function connectWith(p: ConnectParts) {
 		if (exchanged.kind === "failed") return fail(request, grant, intent, exchanged.error);
 		const { login } = exchanged;
 		const upstream = { issuer: String(login.issuer), subject: String(login.subject) };
-		const known = grant.upstream;
-		if (known && (known.issuer !== upstream.issuer || known.subject !== upstream.subject)) {
-			return fail(request, grant, intent, "account_mismatch");
-		}
-		if (intent.expectedUpstream !== undefined && intent.expectedUpstream !== upstream.subject) {
-			return fail(request, grant, intent, "account_mismatch");
-		}
-		if (settings["identity-check"] === "required") {
-			const holder = await p.users.byUpstream(connection.idp, upstream.subject).then(
-				(found) => (found.kind === "none" ? "nobody" : found.user.subject),
-				() => undefined,
-			);
-			if (holder === undefined) return fail(request, grant, intent, "identity_unverifiable");
-			if (holder !== "nobody" && holder !== grant.subject)
-				return fail(request, grant, intent, "identity_conflict");
-		}
+		const account = await p.upstreamAccount.refusal(grant, intent, connection.idp, upstream);
+		if (account) return fail(request, grant, intent, account);
 		const now = p.clock.now();
 		const read = credentialsFrom(login.tokens, {
 			now,
@@ -492,6 +485,7 @@ export function connectWith(p: ConnectParts) {
 				!was?.intent ||
 				was.intent.id !== intent.id ||
 				was.intent.ended ||
+				was.intent.endsAt <= now ||
 				was.status === "revoked"
 			)
 				return undefined;
@@ -518,9 +512,6 @@ export function connectWith(p: ConnectParts) {
 		) {
 			return fail(request, grant, intent, "grant_not_authorizable");
 		}
-		if (intent.kind === "initial")
-			await p.pending.remove(`${grant.client}\n${grant.subject}`, grant.id);
-		await p.listed(grant, intent.lifetimeMs + retentionMs);
 		const from = determinedSource(request);
 		const kind =
 			intent.kind === "initial" ? "federation.grant.authorized" : "federation.grant.reauthorized";
@@ -529,10 +520,20 @@ export function connectWith(p: ConnectParts) {
 			attributes: {
 				client: grant.client,
 				connection: grant.connection,
-				outcome: settings["identity-check"],
+				outcome: p.upstreamAccount.check,
 				...(from ? { source: from } : {}),
 			},
 		});
+		// The grant is active: what is left only tidies, and does not undo it.
+		if (intent.kind === "initial") {
+			try {
+				await p.pending.remove(`${grant.client}\n${grant.subject}`, grant.id);
+			} catch (error) {
+				const failure = error instanceof Error ? error.name : typeof error;
+				p.log.warn("federation-grants.pending_remove_failed", { kind: failure });
+			}
+		}
+		await p.listed(grant, intent.lifetimeMs + retentionMs);
 		if (!returnsTo(await p.clients.find(grant.client), intent.returnUri)) return stale();
 		return back(intent, grant);
 	};
@@ -546,6 +547,13 @@ export function connectWith(p: ConnectParts) {
 			} catch (error) {
 				if (!isUnavailable(error)) throw error;
 				p.log.error("federation-grants.browser_unavailable", { path: request.path.slice(0, 100) });
+				// Audited as a failed connection, though which grant is not known here; best effort.
+				try {
+					const from = determinedSource(request);
+					audited.record("federation.grant.authorization_failed", {
+						attributes: { outcome: "unavailable", ...(from ? { source: from } : {}) },
+					});
+				} catch {}
 				return plain(503, "This service is unavailable. Try again later.");
 			}
 		};
@@ -556,7 +564,12 @@ export function connectWith(p: ConnectParts) {
 		callback: guarded(async (request) => {
 			const name = request.path.slice(`${browserBase}/callback/`.length);
 			if (!connectionName.safeParse(name).success) return plain(404, "Not found.");
-			return callback(request, name);
+			// Taken before any code is used, and only at the connection it was made for.
+			const state = request.query.single("state");
+			const taken = await p.trips.take(request, tripName(name), state);
+			if (taken.kind === "none") return stale();
+			// Spent from here on: its cookie goes with every answer, unavailable included.
+			return withCookies(await guarded((r) => callback(r, name, taken))(request), taken.cleared);
 		}),
 	};
 }
@@ -570,10 +583,11 @@ export const connectOver = async (c: BuildContext<Settings>) =>
 		...(await c.get(shared)),
 		sessions: await c.get(sessions),
 		clients: await c.get(clients),
-		users: await c.get(users),
+		upstreamAccount: await upstreamAccountOver(c),
 		upstreams: await c.get(upstreams),
 		grants: await c.get(grantStore),
 		steps: await c.get(stepStore),
+		trips: await c.get(roundTrips),
 		pending: await c.get(pendingIntents),
 		audit: await c.get(audit),
 		settings: c.section,

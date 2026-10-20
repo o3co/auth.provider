@@ -1,12 +1,7 @@
 import type { ExternalJwt } from "@mod/external-jwt";
 import type { Clock, Log } from "@mod/kernel";
-import {
-	jsonObjectOf,
-	type Outbound,
-	type OutboundRefusals,
-	type OutboundResponse,
-	withinHosts,
-} from "@mod/outbound";
+import { jsonObjectOf, type Outbound, type OutboundResponse } from "@mod/outbound";
+import { destinationRefusal, type OutboundRefusals, withinHosts } from "@mod/outbound-policy";
 import {
 	answerOf,
 	authorizationUrl,
@@ -80,10 +75,8 @@ async function discovered(s: Settings, { outbound, refusals }: Reach, hosts: rea
 	// The two this server sends to; a refusal here would fail every login.
 	const sent = { token_endpoint: described.token_endpoint, jwks_uri: described.jwks_uri };
 	for (const [name, url] of Object.entries(sent)) {
-		const refused = refusals.explained(url, { hosts });
-		if (refused !== undefined) {
-			throw mismatch(`outbound's destination policy refuses the description's ${name}: ${refused}`);
-		}
+		const refused = destinationRefusal(refusals, url, { hosts }, `the description's ${name}`);
+		if (refused !== undefined) throw mismatch(refused);
 	}
 	const endpoints: Endpoints = {
 		authorization: described.authorization_endpoint,

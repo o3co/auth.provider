@@ -28,6 +28,8 @@
 		"@mod/sender-binding": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/session-lifecycle": "workspace:*",
+		"@mod/session-participants": "workspace:*",
+		"@mod/session-requirements": "workspace:*",
 		"@mod/session-store": "workspace:*",
 		"@mod/session-tokens": "workspace:*",
 		"@mod/session-tokens-store": "workspace:*",

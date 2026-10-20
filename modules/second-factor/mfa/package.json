@@ -14,6 +14,7 @@
 	"dependencies": {
 		"@mod/audit": "workspace:*",
 		"@mod/kernel": "workspace:*",
+		"@mod/labels": "workspace:*",
 		"@mod/login-gates": "workspace:*",
 		"@mod/mfa-extensions": "workspace:*",
 		"@mod/mfa-witness": "workspace:*",
@@ -29,5 +30,10 @@
 	},
 	"peerDependencies": {
 		"vitest": "5.0.4"
+	},
+	"peerDependenciesMeta": {
+		"vitest": {
+			"optional": true
+		}
 	}
 }

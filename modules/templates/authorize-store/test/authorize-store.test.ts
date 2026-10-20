@@ -1,7 +1,7 @@
-import { reauthStore } from "@mod/authorize";
-import { reauthStoreContract } from "@mod/authorize/testing";
 import { assemble, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
+import { reauthStore } from "@mod/reauth";
+import { reauthStoreContract } from "@mod/reauth/testing";
 import { simulatedStore } from "@mod/store/testing";
 import wiring from "../src/module.ts";
 

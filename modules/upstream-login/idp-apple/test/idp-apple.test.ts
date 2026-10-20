@@ -14,12 +14,11 @@ import { quietRuntime } from "@mod/kernel/testing";
 import {
 	type Narrower,
 	type Outbound,
-	type OutboundRefusals,
 	type OutboundRequest,
 	type OutboundResponse,
 	outbound,
-	outboundRefusals,
 } from "@mod/outbound";
+import { type OutboundRefusals, outboundRefusals } from "@mod/outbound-policy";
 import {
 	type AuthorizationStart,
 	type CodeExchange,

@@ -528,6 +528,51 @@ describe("guard", () => {
 		expect(g16([capability, reaching])).toEqual(["@t/reaching"]);
 	});
 
+	it("G16 refuses a feature depending on what declares forWiring, as on a capability, save its tests using the stand-in", () => {
+		const files = {
+			"src/contract.ts": "export const s = 1;\n",
+			"src/testing.ts": "export const t = 1;\n",
+		};
+		const exports = { ".": "./src/contract.ts", "./testing": "./src/testing.ts" };
+		const storage = pkg("@w/store", files, { exports, forWiring: true }, "foundation");
+		const on = (name: string, kind: string, file: string, text: string, deps: object) =>
+			pkg(name, { [file]: text }, { exports: { ".": "./src/contract.ts" }, ...deps }, kind);
+		const runtime = on(
+			"@w/feat",
+			"feature",
+			"src/contract.ts",
+			`import { s } from "@w/store";\nexport const f = s;\n`,
+			{ dependencies: { "@w/store": "*" } },
+		);
+		const standIn = on(
+			"@w/tested",
+			"feature",
+			"test/a.test.ts",
+			`import { t } from "@w/store/testing";\nexport const x = t;\n`,
+			{ devDependencies: { "@w/store": "*" } },
+		);
+		const whole = on(
+			"@w/whole",
+			"feature",
+			"test/a.test.ts",
+			`import { s } from "@w/store";\nexport const x = s;\n`,
+			{ devDependencies: { "@w/store": "*" } },
+		);
+		const wiring = on(
+			"@w/feat-store",
+			"wiring",
+			"src/module.ts",
+			`import { s } from "@w/store";\nexport const w = s;\n`,
+			{ dependencies: { "@w/store": "*" } },
+		);
+		const loose = pkg("@w/loose", files, { exports, forWiring: "yes" }, "foundation");
+		expect(
+			check([storage, runtime, standIn, whole, wiring, loose], budget)
+				.filter((v) => v.rule.startsWith("G16"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual(["@w/feat @w/store", "@w/whole @w/store", "@w/loose forWiring is true only"]);
+	});
+
 	it("G10 lets only tests reach up to a wiring module, and no other higher kind", () => {
 		const { capability, feature, wired, tested, shipped, testedUp, tool } = kinds();
 		const g10 = (packages: Pkg[]) =>
@@ -782,6 +827,166 @@ describe("guard", () => {
 				.filter((v) => v.rule.startsWith("G24"))
 				.map((v) => `${v.where} ${v.detail}`),
 		).toEqual(["@t/g @t/g-store keys no guarantee by them"]);
+	});
+
+	it("G28 refuses a contract or an extension point imported from a dependency named as helpers", () => {
+		const mail = pkg("@t/mail", {
+			"src/contract.ts": `import { contract, extensionPoint } from "@t/kernel";\nexport { senders } from "./points.ts";\nexport const isAddress = (s: string) => s.includes("@");\nexport const mailer = contract<Mailer>("mail");\nexport interface Mailer { send(): void }\n`,
+			"src/points.ts": `import { extensionPoint } from "@t/kernel";\nexport const senders = extensionPoint<string>("mail.senders", { multiplicity: "many" });\n`,
+		});
+		const users = pkg(
+			"@t/users",
+			{
+				"src/contract.ts": `import { isAddress, type Mailer } from "@t/mail";\nexport const ok = (m: Mailer) => isAddress(String(m));\n`,
+				"src/module.ts": `import { mailer as m, senders } from "@t/mail";\nimport * as all from "@t/mail";\nexport const used = [m, senders, all];\n`,
+				"src/module.test.ts": `import { mailer } from "@t/mail";\nexport const t = mailer;\n`,
+			},
+			{
+				exports: { ".": "./src/contract.ts" },
+				dependencies: { "@t/mail": "*" },
+				helpers: ["@t/mail"],
+			},
+		);
+		// A dependency not named as helpers lends its contracts as ever.
+		const session = pkg(
+			"@t/session",
+			{ "src/contract.ts": `import { mailer } from "@t/mail";\nexport const s = mailer;\n` },
+			{ exports: { ".": "./src/contract.ts" }, dependencies: { "@t/mail": "*" } },
+		);
+		expect(
+			check([mail, users, session], budget)
+				.filter((v) => v.rule.startsWith("G28"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual([
+			"@t/users/src/module.ts mailer (@t/mail)",
+			"@t/users/src/module.ts senders (@t/mail)",
+			"@t/users/src/module.ts * (@t/mail)",
+		]);
+	});
+
+	it("G29 refuses a test composing a feature bridge's modules and a module contributing to it, without the bridge", () => {
+		const session = pkg(
+			"@b/session",
+			{
+				"src/contract.ts": "export const session = 1;\n",
+				"src/testing.ts": "export const sessionStandIn = 1;\nexport const sessionRecords = 2;\n",
+			},
+			{ exports: { ".": "./src/contract.ts", "./testing": "./src/testing.ts" } },
+		);
+		const reqs = pkg(
+			"@b/reqs",
+			{
+				"src/contract.ts": `import { extensionPoint } from "@b/kernel";\nexport const entryRequirements = extensionPoint("r");\nexport const helper = 1;\n`,
+				"src/module.ts": "export default 1;\n",
+			},
+			{
+				exports: { ".": "./src/contract.ts", "./module": "./src/module.ts" },
+				joins: ["@b/session"],
+			},
+		);
+		const lifecycle = pkg(
+			"@b/lifecycle",
+			{ "src/module.ts": "export default 1;\n" },
+			{ exports: { "./module": "./src/module.ts" }, replaces: "@b/session" },
+			"adapter",
+		);
+		const entry = pkg(
+			"@b/entry",
+			{
+				"src/module.ts": `import { entryRequirements } from "@b/reqs";\nexport default entryRequirements;\n`,
+				// Its own test composes it by path, beside a stand-in for the bridge's module.
+				"test/own.test.ts": `import { sessionStandIn } from "@b/session/testing";\nimport entry from "../src/module.ts";\nexport const m = [entry, sessionStandIn];\n`,
+			},
+			{ exports: { "./module": "./src/module.ts" }, dependencies: { "@b/reqs": "*" } },
+		);
+		// A foundation bridge collects what decides no answer a test reads, such as counts.
+		const meter = pkg(
+			"@b/meter",
+			{
+				"src/contract.ts": `import { extensionPoint } from "@b/kernel";\nexport const meters = extensionPoint("m");\n`,
+				"src/module.ts": "export default 1;\n",
+			},
+			{
+				exports: { ".": "./src/contract.ts", "./module": "./src/module.ts" },
+				joins: ["@b/session"],
+			},
+			"foundation",
+		);
+		const counted = pkg(
+			"@b/counted",
+			{ "src/module.ts": `import { meters } from "@b/meter";\nexport default meters;\n` },
+			{ exports: { "./module": "./src/module.ts" }, dependencies: { "@b/meter": "*" } },
+		);
+		// Takes a helper from the bridge, never its point: it contributes nothing.
+		const plain = pkg(
+			"@b/plain",
+			{ "src/module.ts": `import { helper } from "@b/reqs";\nexport default helper;\n` },
+			{ exports: { "./module": "./src/module.ts" }, dependencies: { "@b/reqs": "*" } },
+		);
+		const app = pkg("@b/app", {
+			"test/missing.test.ts": `import { sessionStandIn } from "@b/session/testing";\nimport entry from "@b/entry/module";\nexport const m = [entry, sessionStandIn];\n`,
+			"test/adapter.test.ts": `import entry from "@b/entry/module";\nimport lifecycle from "@b/lifecycle/module";\nexport const m = [entry, lifecycle];\n`,
+			"test/composed.test.ts": `import { sessionStandIn } from "@b/session/testing";\nimport entry from "@b/entry/module";\nimport reqs from "@b/reqs/module";\nexport const m = [entry, reqs, sessionStandIn];\n`,
+			"test/no-session.test.ts": `import entry from "@b/entry/module";\nexport const m = [entry];\n`,
+			"test/not-a-stand-in.test.ts": `import { sessionRecords } from "@b/session/testing";\nimport entry from "@b/entry/module";\nexport const m = [entry, sessionRecords];\n`,
+			"test/plain.test.ts": `import { sessionStandIn } from "@b/session/testing";\nimport plain from "@b/plain/module";\nexport const m = [plain, sessionStandIn];\n`,
+			"test/counted.test.ts": `import { sessionStandIn } from "@b/session/testing";\nimport counted from "@b/counted/module";\nexport const m = [counted, sessionStandIn];\n`,
+		});
+		expect(
+			check([session, reqs, meter, counted, lifecycle, entry, plain, app], budget)
+				.filter((v) => v.rule.startsWith("G29"))
+				.map((v) => `${v.where} ${v.detail}`)
+				.sort(),
+		).toEqual([
+			"@b/app/test/adapter.test.ts @b/reqs (@b/entry)",
+			"@b/app/test/missing.test.ts @b/reqs (@b/entry)",
+			"@b/entry/test/own.test.ts @b/reqs (@b/entry)",
+		]);
+	});
+
+	it("G30 refuses an audit event recorded on the audit contract itself, outside the package and its tests", () => {
+		const contract = [
+			"export interface AuditRecord { readonly kind: string }",
+			"export interface Audit { record(event: AuditRecord): void; lost(): number }",
+			"export const auditEvents = <E>(events: E) => events;",
+			'export function declaredAudit<E>(recorder: Pick<Audit, "record">, events: E) {',
+			"\treturn { record(kind: keyof E & string): void { recorder.record({ kind }); } };",
+			"}",
+		].join("\n");
+		const audit = pkg("@c/audit", {
+			"src/contract.ts": `${contract}\n`,
+			// The package itself hands events on: its own calls are not counted.
+			"src/hub.ts": `import type { Audit } from "./contract.ts";\nexport const on = (a: Audit) => a.record({ kind: "x" });\n`,
+		});
+		const feature = pkg(
+			"@c/feature",
+			{
+				"src/audit-events.ts": `import { auditEvents } from "@c/audit";\nexport default auditEvents({ "f.done": {} });\n`,
+				"src/module.ts": [
+					`import { type Audit, declaredAudit } from "@c/audit";`,
+					`import events from "./audit-events.ts";`,
+					`const records = { record: (n: number) => n };`,
+					`export const raw = (audit: Audit) => audit.record({ kind: "f.done" });`,
+					`export const picked = (p: { audit: Pick<Audit, "record"> }) => p.audit.record({ kind: "f.done" });`,
+					`export const declared = (audit: Audit) => declaredAudit(audit, events).record("f.done");`,
+					`export const other = () => records.record(1);`,
+					`export const lost = (audit: Audit) => (audit as any).record({ kind: "f.done" });`,
+				].join("\n"),
+				"test/module.test.ts": `import type { Audit } from "@c/audit";\nexport const t = (a: Audit) => a.record({ kind: "f.done" });\n`,
+			},
+			{
+				exports: { ".": "./src/module.ts", "./audit-events": "./src/audit-events.ts" },
+				dependencies: { "@c/audit": "*" },
+			},
+		);
+		expect(
+			check([audit, feature], budget)
+				.filter((v) => v.rule.startsWith("G30"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual([
+			"@c/feature/src/module.ts:4 audit.record",
+			"@c/feature/src/module.ts:5 p.audit.record",
+		]);
 	});
 
 	it("G11 refuses line numbers in comments and documents, and G12 files outside a document's directory", () => {

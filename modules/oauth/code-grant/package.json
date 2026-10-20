@@ -26,6 +26,8 @@
 		"@mod/issuer": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
+		"@mod/session-participants": "workspace:*",
+		"@mod/session-requirements": "workspace:*",
 		"@mod/session-tokens": "workspace:*",
 		"@mod/store": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
@@ -34,5 +36,10 @@
 	},
 	"peerDependencies": {
 		"vitest": "5.0.4"
+	},
+	"peerDependenciesMeta": {
+		"vitest": {
+			"optional": true
+		}
 	}
 }

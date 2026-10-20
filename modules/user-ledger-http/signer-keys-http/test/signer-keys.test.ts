@@ -24,8 +24,7 @@ import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import outboundModule from "@mod/outbound/module";
 import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
-import storeModule from "@mod/store/module";
-import { storeConfig } from "@mod/store/testing";
+import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
@@ -261,7 +260,7 @@ describe("signer-keys-http under jwt-bearer", () => {
 				clientAllowanceModule,
 				outboundModule,
 				externalJwtModule,
-				storeModule,
+				simulatedStore().module,
 				subjectRevocationStandIn,
 				jwtBearer,
 				spent,
@@ -271,7 +270,6 @@ describe("signer-keys-http under jwt-bearer", () => {
 				...kernelConfig(),
 				...httpConfig(),
 				...issuerConfig({ url: issuer }),
-				...storeConfig(),
 				outbound: { allow: ["127.0.0.1"], "plain-loopback": [pair] },
 				...clientsConfig([
 					confidentialClient({

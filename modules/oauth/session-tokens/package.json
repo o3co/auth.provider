@@ -19,11 +19,17 @@
 		"@mod/grants": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/session": "workspace:*",
+		"@mod/session-participants": "workspace:*",
 		"@mod/tokens": "workspace:*",
 		"zod": "4.6.7"
 	},
 	"peerDependencies": {
 		"vitest": "5.0.4"
+	},
+	"peerDependenciesMeta": {
+		"vitest": {
+			"optional": true
+		}
 	},
 	"devDependencies": {
 		"@mod/http": "workspace:*",

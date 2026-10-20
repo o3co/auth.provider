@@ -20,6 +20,9 @@ const secret = (idp: IdpScene) =>
 		.map(([key, value]) => `  ${key} = ${JSON.stringify(value)}\n`)
 		.join("");
 
+/** Where a login lands when it named no target: the scene's landing, else the origin's root. */
+const landingOf = (part: FederationPart) => part.landing ?? new URL("/", part.origin).href;
+
 function federations(part: FederationPart): string {
 	const entries = part.idps.map(
 		(idp) => `core.federations.${idp.name} {
@@ -28,8 +31,8 @@ function federations(part: FederationPart): string {
   clientId = ${JSON.stringify(idp.clientId)}
 ${secret(idp)}  callbackURL = ${JSON.stringify(`${part.origin}/session/oauth/federation/${idp.name}/callback`)}
   redirectAllowlist = ${JSON.stringify(part.returnTargets)}
-  authCallbackUrl = ${JSON.stringify(part.landing)}
-  clientUrl = ${JSON.stringify(part.landing)}
+  authCallbackUrl = ${JSON.stringify(landingOf(part))}
+  clientUrl = ${JSON.stringify(landingOf(part))}
 }
 `,
 	);
@@ -89,6 +92,9 @@ onLegacy(federationArea, {
 		"link-state-outlives-session",
 		"federation-returns-to-authorization",
 		"federation-auth-time-from-upstream",
+		// The legacy build ties a connection's callback to the session alone: another browser's is
+		// refused for its session, and spends the state.
+		"grants-round-trip-tied-to-browser",
 	],
 	map: (part) => {
 		// The legacy GitHub, Google and Apple types fix their hosts in code, and the standalone build

@@ -1,13 +1,9 @@
 import { assemble, BootRefused, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { type OutboundRefusals, outboundLimits, outboundRefusals } from "@mod/outbound-policy";
+import { configuredUrl } from "@mod/url-setting/testing";
 import { afterEach, expect, it, vi } from "vitest";
-import {
-	type Narrower,
-	type OutboundRefusals,
-	outbound,
-	outboundRefusals,
-	signedOutbound,
-} from "../src/contract.ts";
+import { type Narrower, outbound, signedOutbound } from "../src/contract.ts";
 import outboundModule, { section } from "../src/module.ts";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -213,6 +209,19 @@ it("boots without a proxy, and refuses a destination before sending", async () =
 	).rejects.toMatchObject({ reason: "special-address" });
 });
 
+it("answers at boot where a request is cut, as fetch cuts it: the caps narrowed, never widened", async () => {
+	onlyProxy();
+	const limits = (
+		await boot({ "allow-any-public": true, timeout: "2s", "max-response-size": "1KiB" })
+	).get(outboundLimits);
+	expect(limits.of()).toEqual({ timeoutMs: 2000, maxBytes: 1024 });
+	expect(limits.of({ timeoutMs: 500, maxBytes: 99_999 })).toEqual({
+		timeoutMs: 500,
+		maxBytes: 1024,
+	});
+	expect(() => limits.of({ timeoutMs: 0 })).toThrow(RangeError);
+});
+
 it("answers at boot why the policy refuses a URL, or nothing when it lets it through", async () => {
 	onlyProxy();
 	/** The reason an explanation leads with. */
@@ -250,10 +259,16 @@ it("answers at boot why the policy refuses a URL, or nothing when it lets it thr
 	const inside = (
 		await boot({ "allow-any-public": true, "internal-hosts": ["10.0.0.5", "127.0.0.1"] })
 	).get(outboundRefusals);
-	expect(reasonOf(inside, "https://10.0.0.5/", { internal: true })).toBeUndefined();
+	expect(
+		reasonOf(inside, "https://10.0.0.5/", { internal: configuredUrl("https://10.0.0.5/") }),
+	).toBeUndefined();
 	expect(reasonOf(inside, "https://10.0.0.5/")).toBe("special-address");
-	expect(reasonOf(inside, "https://10.0.0.6/", { internal: true })).toBe("special-address");
-	expect(reasonOf(inside, "https://127.0.0.1/", { internal: true })).toBe("special-address");
+	expect(
+		reasonOf(inside, "https://10.0.0.6/", { internal: configuredUrl("https://10.0.0.6/") }),
+	).toBe("special-address");
+	expect(
+		reasonOf(inside, "https://127.0.0.1/", { internal: configuredUrl("https://127.0.0.1/") }),
+	).toBe("special-address");
 });
 
 it("explains at boot why the policy refuses a URL by the keys that let it through, naming no value", async () => {
@@ -289,10 +304,12 @@ it("explains at boot why the policy refuses a URL by the keys that let it throug
 	expect(any.explained("https://10.0.0.6/")).toBe(
 		"special-address: the URL names a special-purpose address, which outbound never reaches",
 	);
-	expect(any.explained("https://10.0.0.6/", { internal: true })).toBe(
+	expect(any.explained("https://10.0.0.6/", { internal: configuredUrl("https://10.0.0.6/") })).toBe(
 		"special-address: the URL names a special-purpose address; a private one is reached only when outbound.internal-hosts names its host",
 	);
-	expect(any.explained("https://10.0.0.5/", { internal: true })).toBeUndefined();
+	expect(
+		any.explained("https://10.0.0.5/", { internal: configuredUrl("https://10.0.0.5/") }),
+	).toBeUndefined();
 	// The value is never told: no host, port or pair is in any explanation.
 	for (const url of Object.keys(expected)) {
 		for (const value of [

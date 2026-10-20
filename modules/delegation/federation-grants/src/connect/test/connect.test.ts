@@ -294,7 +294,8 @@ describe("the callback", () => {
 		};
 		const flow = await h.started();
 		const other = await h.login();
-		expect(errorOf(h, await h.callback(flow.state, other))).toBe("reauthentication_required");
+		// Another browser carries no round trip: nothing is taken, nothing asked.
+		expect((await h.callback(flow.state, other)).status).toBe(400);
 		expect(exchanges).toBe(0);
 		const second = await h.started();
 		const using = h.callback(second.state, second.browser);
@@ -303,6 +304,69 @@ describe("the callback", () => {
 		expect(again.status).toBe(400);
 		expect((await using).status).toBe(303);
 		expect(exchanges).toBe(1);
+	});
+
+	it("clears the round trip's cookie on every answer after its take, unavailable and unreadable included", async () => {
+		const h = await connector();
+		const tripOf = (answer: Answer) =>
+			(answer.cookies.find((c) => c.includes("federation-grants.cal=")) ?? "").split(";")[0] ?? "";
+		const cleared = (answer: Answer) =>
+			answer.cookies.some((c) => /^__Host-federation-grants\.cal=;.*Max-Age=0/.test(c));
+		const done = await h.started();
+		expect(cleared(await h.callback(done.state, done.browser))).toBe(true);
+		const down = await h.started();
+		h.stores.down.failNext("read");
+		const unavailable = await h.callback(down.state, down.browser);
+		expect([unavailable.status, cleared(unavailable)]).toEqual([503, true]);
+		const odd = await h.started();
+		const key = tripOf(odd.answered).split("=")[1] ?? "";
+		await h.trips.change(key, (record) => ({
+			value: { ...(record as object), carried: { unheard: 1 } } as never,
+		}));
+		const unread = await h.callback(odd.state, odd.browser);
+		expect([unread.status, cleared(unread)]).toEqual([400, true]);
+		// Spent, though unread: the browser's next callback finds nothing.
+		expect(cleared(await h.callback(odd.state, odd.browser))).toBe(false);
+	});
+
+	it("audits a browser route the store cannot answer as a failed connection, unavailable, whatever the record does", async () => {
+		const h = await connector();
+		const failed = () => h.events.filter((e) => e.kind === "federation.grant.authorization_failed");
+		const down = await h.started();
+		h.stores.down.failNext("read");
+		expect((await h.callback(down.state, down.browser)).status).toBe(503);
+		expect(failed().map((e) => e.attributes?.outcome)).toEqual(["unavailable"]);
+		// Recording is best effort: a record that throws leaves the answer a 503.
+		const push = h.events.push;
+		h.events.push = () => {
+			throw new Error("record failed");
+		};
+		const again = await h.started();
+		h.stores.down.failNext("read");
+		expect((await h.callback(again.state, again.browser)).status).toBe(503);
+		h.events.push = push;
+		// Anything else that throws is not an outage, and is not audited as one.
+		const broken = await h.started();
+		h.script.exchange = async () => {
+			throw new Error("broken");
+		};
+		await expect(h.callback(broken.state, broken.browser)).rejects.toThrow("broken");
+		expect(failed()).toHaveLength(1);
+	});
+
+	it("keeps only the later of two round trips of one connection begun in one browser", async () => {
+		const h = await connector();
+		const first = await h.started();
+		const second = await h.started({}, first.browser);
+		expect((await h.callback(first.state, first.browser)).status).toBe(400);
+		expect((await h.callback(second.state, second.browser)).status).toBe(303);
+	});
+
+	it("sets the round trip's cookie for the intent's time left in whole seconds, at least one", async () => {
+		const h = await connector();
+		const flow = await h.started({ endsAt: 1_800_000_000_000 + 1500 });
+		const set = flow.answered.cookies.find((c) => c.includes("federation-grants.cal=")) ?? "";
+		expect(set).toMatch(/Max-Age=2(;|$)/);
 	});
 
 	it("refuses an activation once the browser's session closed during the exchange", async () => {
@@ -316,6 +380,41 @@ describe("the callback", () => {
 		expect(errorOf(h, await h.callback(flow.state, flow.browser))).toBe(
 			"reauthentication_required",
 		);
+	});
+
+	it("keeps a connection the pending list cannot drop: audited as authorized, and the browser sent back", async () => {
+		const h = await connector();
+		const flow = await h.started();
+		h.stores.pending.remove = async () => {
+			throw new Unavailable("pending");
+		};
+		const done = await h.callback(flow.state, flow.browser);
+		expect([done.status, h.location(done).searchParams.get("grant_id"), errorOf(h, done)]).toEqual([
+			303,
+			flow.id,
+			null,
+		]);
+		expect(statusOf(h, flow.id)).toBe("active");
+		const authorized = h.events.filter((e) => e.kind === "federation.grant.authorized");
+		expect(authorized.map((e) => e.subject)).toEqual(["alice"]);
+		expect(failed(h)).toEqual([]);
+		expect(h.logs()).toContainEqual(
+			expect.objectContaining({
+				event: "federation-grants.pending_remove_failed",
+				fields: { kind: "Unavailable" },
+			}),
+		);
+	});
+
+	it("refuses an activation once the intent's time ran out during the exchange", async () => {
+		const h = await connector();
+		const flow = await h.started({ endsAt: h.now() + 1000 });
+		h.script.exchange = async () => {
+			h.advance(1000);
+			return upstreamLogin();
+		};
+		expect(errorOf(h, await h.callback(flow.state, flow.browser))).toBe("grant_not_authorizable");
+		expect(statusOf(h, flow.id)).toBe("pending");
 	});
 
 	it("activates only the intent it was for, and writes nothing over another", async () => {

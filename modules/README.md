@@ -38,10 +38,14 @@ What each module contains is described by that module's contract card (each modu
 | Public origin | setting | http |
 | Building and reading cookies | contract | cookies |
 | What a configured URL may hold (the schema part modules take theirs by) | contract | url-setting |
+| When a section's own check of the URLs it holds may read them (once every one parses), and putting what the check answers at its key | contract | url-setting |
+| What a module's check of a URL says, such as an outbound refusal | vocabulary | the module that checks |
 | Received values: a name's single value, and the names repeated | vocabulary | http |
 | Signing, verification, publishing public keys | contract | keys |
-| Outbound HTTP requests and the destination policy | contract / setting | outbound |
-| Fetching signed material (plain http from named hosts, its size cap) | contract / setting | outbound |
+| Sending outbound HTTP requests, and the operator's section `outbound` | contract / setting | outbound |
+| Where outbound requests may go: the destination policy, its boot questions and host lists | contract / setting | outbound-policy |
+| Fetching signed material | contract | outbound |
+| Which signed material is admitted (plain http from the named hosts) and its size cap | contract / setting | outbound-policy |
 | Which destinations a feature reaches | setting | the module that sends the request |
 | Rate limiting, lockout | contract | rate-limit |
 | Limiting attempts per source on a route | policy | rate-limit |
@@ -49,6 +53,7 @@ What each module contains is described by that module's contract card (each modu
 | Limit budgets and key names | setting / vocabulary | the module that calls the limit |
 | Sealing at rest (keyring) | contract / setting | seal |
 | Checking a secret against a stored hash (bcrypt, scrypt), with the same work when there is none to check | contract | secret-hash |
+| The rule for a name a user gives something that a page shows back as it is (a label) | contract | labels |
 | Sending mail (one address per send), preparing a message for a sender | contract | mail |
 | Mail purposes and mail templates | extension point kind | mail |
 | The logging-only mail sender | contract implementation / setting | mail |
@@ -66,12 +71,13 @@ What each module contains is described by that module's contract card (each modu
 | Wiring code-grant's store interface to records | wiring | code-grant-store |
 | Wiring session-lifecycle's store interfaces to records | wiring | session-store |
 | Wiring refresh's store interfaces to records | wiring | refresh-store |
-| Wiring authorize's store interface to records | wiring | authorize-store |
+| Wiring reauth's store interface to records | wiring | authorize-store |
 | Wiring client-assertion's store interface to records | wiring | client-assertion-store |
 | Wiring device-grant's store interfaces to records | wiring | device-grant-store |
 | Wiring dpop's store interface to records | wiring | dpop-store |
 | Wiring tokens' store interface to records | wiring | tokens-store |
-| Wiring federation's store interface to records | wiring | federation-store |
+| Wiring upstream-round-trip's store interface to records under a secret | wiring | upstream-round-trip-store |
+| Wiring upstream-handoff's store interface to records under a secret | wiring | upstream-handoff-store |
 | Wiring subject-revocation's store interface to records | wiring | subject-revocation-store |
 | Wiring consent's store interfaces to records | wiring | consent-store |
 | Wiring session-tokens' store interfaces to records' keyed sets, records and deferred work | wiring | session-tokens-store |
@@ -91,10 +97,12 @@ What each module contains is described by that module's contract card (each modu
 | User ledger, upstream identity, link, verified contact, claimed contact | vocabulary | users |
 | The names and value types of user attributes (the OIDC claim names), and a subject's shape | contract / vocabulary | users |
 | The HTTP user ledger (verifying passwords at the operator's URL), its request shape and credential | contribution / setting | users-http |
-| Logging in through an upstream IdP (start, callback, transaction) | contract | federation |
+| Logging in through an upstream IdP (start and callback) | contract | federation |
 | Linking an upstream identity to the account a browser is logged in as (start and callback) | contract | federation |
 | What an opened upstream is to the provider: its authorization URL, code exchange and what its login says | contract | upstreams |
-| Opening the configured IdPs through their types and handing their logins' tokens to the receivers, as `upstreams`' default | contract implementation | federation |
+| Opening the configured IdPs through their types, as `upstreams`' default | contract implementation | federation |
+| One authorization round trip to an upstream: its state, nonce, verifier and cookie, kept and taken once at its callback | contract | upstream-round-trip |
+| Handing a login's upstream tokens to the receivers once its session opens, a held login's kept sealed until then, and a link's join | contract | upstream-handoff |
 | Upstream IdP types | extension point kind | upstreams |
 | Receiving the upstream tokens of a login once its session opens, or once a link joins it | extension point kind | upstreams |
 | An upstream's refresh, end of session and offline delegation, by IdP name | contract | upstreams |
@@ -112,13 +120,16 @@ What each module contains is described by that module's contract card (each modu
 | Client authentication methods | extension point kind | clients |
 | `private_key_jwt` (client assertions), the client's keys (client metadata field) | contribution / vocabulary | client-assertion |
 | Client sources | extension point kind | clients |
-| Clients whose id is a URL: fetching and judging the metadata document there, keeping it, the ceiling they are allowed within | contribution / setting | clients-cimd |
+| Clients whose id is a URL: fetching and judging the metadata document there, building its record from the sections' copies, keeping it, the ceiling they are allowed within | contribution / setting | clients-cimd |
 | Client metadata sections | extension point kind | clients |
+| Checking a client record as a source's is held (`checkRecord`) | contract | clients |
+| Each section's copy from a client's metadata document (`fromDocument`, `reads`) | contribution | the module that contributes that section |
 | Each client metadata field | vocabulary | the module that reads that field |
 | Allowed grants, allowed scopes and audiences (client metadata fields), and what a client may be issued and may see | vocabulary / setting / contract | client-allowance |
 | The audience a request asks for: the one rule (none reads nothing), asked with each issuance's default and ceiling | extension point kind / contract | grants |
 | Resource indicators (RFC 8707): reading `resource` and narrowing the audience issued to it | contribution | resource-indicators |
-| Redirect URIs (a client metadata field), PKCE required of every client by S256, and the rule for URIs a client may register to be sent back to | vocabulary / setting / contract | authorize |
+| Redirect URIs (a client metadata field), the rule for URIs a client may register to be sent back to, and how a given one matches | vocabulary / setting / contract | redirect-uris |
+| PKCE required of every client by S256 | contract | authorize |
 | Paths to return to after login | extension point kind | login-gates |
 | Where a login may return (listed targets, the check) | contract / setting | login-gates |
 | first-party, and the name, page and verified host the consent page shows (client metadata fields) | vocabulary / setting | consent |
@@ -128,12 +139,13 @@ What each module contains is described by that module's contract card (each modu
 | Sessions' contract, entry | contract | session |
 | Session records, lifecycle | contract implementation / setting | session-lifecycle |
 | Session handle, and looking up a request's session | contract / vocabulary | session |
-| Entry requirements | extension point kind | session |
+| Entry requirements, and the one order they are asked in | extension point kind | session-requirements |
+| The seams an implementation asks the entry requirements and calls the participants through | extension point kind | session |
 | Raising authentication (step-up) and rotating the cookie secret | contract | session |
 | Login completion gates, and resuming a held login | extension point kind / contract | login-gates |
 | Telling the caller that a held login it asked for has opened | extension point kind | login-gates |
 | Declarations of the amr values this deployment can produce, and judging whether they can be produced | extension point kind / contract | login-gates |
-| Participants when a session closes | extension point kind | session |
+| Participants when a session closes, and the one order they are called in | extension point kind | session-participants |
 | Each subject's live sessions, and closing them when the subject is revoked | contract | session |
 | Closing a revoked subject's live sessions (a follower of subject-revocation) | contribution | session-lifecycle |
 | Authentication context | vocabulary | session |
@@ -173,7 +185,8 @@ What each module contains is described by that module's contract card (each modu
 | grant type names | vocabulary | the module that supplies that grant |
 | Kinds of revocable tokens | extension point kind | token-control |
 | Device Authorization Grant (device authorization, the verification interface, the device code grant) | contract / setting | device-grant |
-| Authorization endpoint, re-authentication requests, steering to the raise (step-up) screen | contract / setting | authorize |
+| Authorization endpoint, steering to the raise (step-up) screen | contract / setting | authorize |
+| Re-authentication requests: records asked for one authorization request, taken once, and whether a login is fresh enough | contract | reauth |
 | The acr table, and judging which acr values are known and which are satisfied | contract / setting | acr |
 | acr table entries | extension point kind | acr |
 | Contributed acr names and the amr values that satisfy them | vocabulary | the module that contributes that entry |
@@ -192,8 +205,9 @@ What each module contains is described by that module's contract card (each modu
 | Second factor kinds, with the types they take and give, and the amr a second factor's proof adds | extension point kind / vocabulary | mfa-extensions |
 | Steps that prove a factor at login | extension point kind | mfa |
 | A user's factor records, and judgments about them | contract / data | mfa |
-| Second factor transactions, contributions to the login completion gate and to step-up, enrollment routes, lockout numbers | contract / setting / data | mfa-flows |
-| An operator's reset of a subject's second factors | contract | mfa-flows |
+| Second factor transactions, contributions to the login completion gate and to step-up, the enrollment routes and their seam, lockout numbers | contract / setting / data | mfa-flows |
+| Binding a new second factor: enrollment, its binding proof, the recovery codes shown | contribution | mfa-enrollment |
+| An operator's reset of a subject's second factors | contract | mfa-reset |
 | A subject's own release of their second-factor lockout, after a proof guessing cannot beat | route | mfa-flows |
 | A session's management of its own factors (listing, naming and removing them, reissuing recovery codes), and its request budget | route / setting | mfa-management |
 | Each second factor kind | contribution | the module that contributes that kind |

@@ -294,18 +294,20 @@ describe("a user's own release of the second-factor lockout", () => {
 	it("is served, refusing a session that only a guessable factor let in", async () => {
 		const s = await serve();
 		const path = "/session/mfa/lock/release";
-		expect(await s.call("POST", path)).toEqual({ status: 401, body: { error: "login_required" } });
+		const refused = await s.call("POST", path);
+		expect([refused.status, refused.body]).toEqual([401, { error: "login_required" }]);
 		const { secret } = await s.enrollCode("ann");
 		const { tx, factor, jar } = await s.heldLogin("ann");
 		const proof = { transaction_id: tx, factor_id: factor(), proof: `${secret}:1` };
 		expect((await s.call("POST", "/session/mfa/verify", proof, { jar })).status).toBe(200);
-		expect(await s.call("POST", path, {}, { jar })).toEqual({
-			status: 403,
-			body: {
+		const exempt = await s.call("POST", path, {}, { jar });
+		expect([exempt.status, exempt.body]).toEqual([
+			403,
+			{
 				error: "mfa_exempt_proof_required",
 				error_description: "Verify a recovery code or a passkey first, then release",
 			},
-		});
+		]);
 	});
 
 	it("releases the real lockout for a session a recovery code let in, once, answering the same again", async () => {
@@ -332,7 +334,7 @@ describe("a user's own release of the second-factor lockout", () => {
 		expect((await s.call("POST", "/session/mfa/verify", proof, { jar })).status).toBe(200);
 		const path = "/session/mfa/lock/release";
 		const first = await s.call("POST", path, {}, { jar });
-		expect(first).toEqual({ status: 200, body: { lock: "released" } });
+		expect([first.status, first.body]).toEqual([200, { lock: "released" }]);
 		expect(await s.call("POST", path, {}, { jar })).toEqual(first);
 		expect(s.events.filter((e) => e.kind === "mfa.lock.recovered")).toHaveLength(1);
 	});

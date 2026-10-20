@@ -11,8 +11,10 @@
 		"@mod/external-jwt": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/outbound": "workspace:*",
+		"@mod/outbound-policy": "workspace:*",
 		"@mod/upstream-client": "workspace:*",
 		"@mod/upstreams": "workspace:*",
+		"@mod/url-setting": "workspace:*",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {

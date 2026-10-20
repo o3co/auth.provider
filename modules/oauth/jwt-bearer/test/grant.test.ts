@@ -23,8 +23,7 @@ import { type Narrower, type Outbound, outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
 import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
-import storeModule from "@mod/store/module";
-import { storeConfig } from "@mod/store/testing";
+import { simulatedStore } from "@mod/store/testing";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
@@ -97,7 +96,7 @@ async function serve(
 			clientAllowanceModule,
 			out,
 			externalJwtModule,
-			storeModule,
+			simulatedStore().module,
 			subjectRevocationStandIn,
 			jwtBearer,
 			spentOn(storeAheadMs),
@@ -107,7 +106,6 @@ async function serve(
 			...kernelConfig(),
 			...httpConfig(),
 			...issuerConfig({ url: named }),
-			...storeConfig(),
 			...clientsConfig([
 				confidentialClient({
 					id: "app",

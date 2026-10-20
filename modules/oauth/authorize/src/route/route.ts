@@ -1,16 +1,16 @@
-import { type Audit, audit } from "@mod/audit";
+import { type Audit, audit, declaredAudit } from "@mod/audit";
 import { type Clients, clients } from "@mod/clients";
 import { type TargetRule, targets } from "@mod/grants";
 import type { HttpRequest, HttpResponse, Route } from "@mod/http";
 import { noStore, site } from "@mod/http";
 import { issuer as named } from "@mod/issuer";
 import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
+import { answerTo, matches, redirects } from "@mod/redirect-uris";
 import { determinedSource } from "@mod/request-source";
 import { oauthError } from "@mod/token-endpoint";
-import { redirects } from "../contract.ts";
+import events from "../audit-events.ts";
 import { type Decision, refusal } from "../decision.ts";
 import { type Flow, flowOver, type Place } from "../flow/flow.ts";
-import { answerTo, matches } from "../redirect-uris/redirect-uris.ts";
 import type { Settings } from "../section.ts";
 
 export const path = "/oauth/authorize";
@@ -37,11 +37,12 @@ export function routeWith({
 	issuer,
 	self,
 	clients: known,
-	audit: audited,
+	audit: recorder,
 	flow,
 	log,
 	rule,
 }: RouteParts): Pick<Route, "handle" | "unavailable"> {
+	const audited = declaredAudit(recorder, events);
 	const urlWith = (params: Iterable<readonly [string, string]>) =>
 		`${self}?${new URLSearchParams([...params].map(([k, v]) => [k, v]))}`;
 
@@ -109,12 +110,12 @@ export function routeWith({
 			const decided = await flow({ client, redirectUri, one, params, request });
 			if (decided.kind === "code") {
 				const attributes = { ...by, response_type: "code" };
-				audited.record({ kind: "authorize.granted", subject: decided.subject, attributes });
+				audited.record("authorize.granted", { subject: decided.subject, attributes });
 			}
 			if (decided.kind === "refuse" && decided.reason !== undefined) {
 				const { reason, policy } = decided;
 				const attributes = { ...by, reason, ...(policy === undefined ? {} : { policy }) };
-				audited.record({ kind: "authorize.rejected", attributes });
+				audited.record("authorize.rejected", { attributes });
 			}
 			return reply(decided);
 		} catch (error) {

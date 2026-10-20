@@ -23,7 +23,7 @@ What auth-provider 0.18 guarantees, and what it leaves to the deployment. Each g
 Each promise below holds across every module composed. Each names what keeps it (a contract, a check at boot, a guard rule) and the conformance scenes that test it, by area and scene; where no scene tests a part yet, it says so. An exception is never silent: it is a declaration, in a package manifest or on a route, and the [route reference](routes.md) lists the routes' reasons.
 
 1. **Closing a session closes every path for the tokens issued from it.**
-   - Kept by: `session`'s participants, which `session-lifecycle` calls on every close; `session-tokens` and `refresh` take part, and `code-grant` voids a code whose session ended.
+   - Kept by: `session-participants`' participants, which `session-lifecycle` calls on every close through `session`'s `closingParticipants`, refusing to boot without it; `session-tokens` and `refresh` take part, and `code-grant` voids a code whose session ended.
    - Scenes: code ("tokens and logout", "refresh: what a token may do", "session grant", "OpenID Connect userinfo"), exchange ("token exchange of a session's token"), federation ("federation tokens: refusals").
    - A close left pending is not done: the session stays closing until every participant has finished. Each host sweeps every `session-lifecycle.sweep-interval`, and takes a pending close up again once its retry time comes: after half its age so far, from the sweep interval up to an hour, and `logout` and RP-initiated logout answer it `503`, never as logged out.
    - No scene yet for a device approval. A session that ends by expiry alone calls no participant.
@@ -31,7 +31,7 @@ Each promise below holds across every module composed. Each names what keeps it 
    - One exception: shortening `session-lifecycle.lifetime` ends the sessions it now covers when they are next read, without their participants, and the tokens issued before then keep their earlier expiry.
    - Bridges such as `session-tokens` come in every app composed through `combinations`; an app composed by hand must compose them itself, or the promise does not hold for what they join.
 2. **`prompt=login` and `max_age` are met only by a fresh authentication.**
-   - Kept by: `authorize`'s re-authentication record, taken once; `session` never counts an authentication time it does not know as fresh.
+   - Kept by: `reauth`'s re-authentication record, which `authorize` makes for the request and takes once; `session` never counts an authentication time it does not know as fresh.
    - Scenes: federation ("federation logins meeting a client's demand for a fresh login", and the freshness scenes through Google and Apple).
    - No scene yet for a password login.
 3. **A dependency that cannot answer never grants anything.**
@@ -45,7 +45,7 @@ Each promise below holds across every module composed. Each names what keeps it 
    - Does not hold for access tokens where `tokens.subject-check = none` is chosen: they live until they expire.
    - Does not hold for federation grants where `federation-grants.keep-on-subject-revocation` is set and a revocation asks to keep delegations: an established grant then answers only to the `delegations` boundary, which such a revocation leaves where it was.
    - A session opened before a revocation removes no factor and reissues no codes once the revocation is complete: `mfa-management` reads the subject's fence before the session's last check, and `mfa` compares it in the write. Recovery codes go out only after a last check of the revocation, with nothing waited on after it; a request past that check is one a revocation cannot stop, as for any request already past its checks. This holds as far as each check reads the boundary as it now stands.
-   - Bridges such as `mfa-revocation` come in every app composed through `combinations`; an app composed by hand must compose them itself, or an enrollment begun before a revocation may still bind. After an account is taken over, also reset the subject's second factors (`mfa-flows`' `mfaReset`): a revocation ends what was made before it, while a reset removes the factors themselves.
+   - Bridges such as `mfa-revocation` come in every app composed through `combinations`; an app composed by hand must compose them itself, or an enrollment begun before a revocation may still bind. After an account is taken over, also reset the subject's second factors (`mfa-reset`'s `mfaReset`): a revocation ends what was made before it, while a reset removes the factors themselves.
    - Scenes: code ("a subject the ledger revokes over HTTP"), federation ("federation grants: a subject the ledger revokes"), second factor ("a subject the ledger revokes").
    - No scene yet for a code not yet redeemed, a device code or a token exchange.
 5. **What is used once is used once, on any number of instances.**

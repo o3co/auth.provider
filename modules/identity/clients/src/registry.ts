@@ -9,6 +9,7 @@ import type {
 	ClientRecord,
 	ClientSource,
 	Clients,
+	RecordRefusal,
 	Section,
 } from "./contract.ts";
 import { none } from "./methods.ts";
@@ -84,14 +85,28 @@ export function registry(
 	methods: readonly AuthMethod[],
 	known: ReadonlyMap<string, Section<unknown>>,
 ): Clients {
-	const held = async (record: unknown, id: string): Promise<Client | "invalid"> => {
+	/** A record held to the registered rule, a known method and its sections, or where it fails. */
+	const checked = async (
+		record: unknown,
+	): Promise<{ client: Client } | { refusals: RecordRefusal[] }> => {
 		const parsed = clientRecord.safeParse(record);
-		if (!parsed.success) return "invalid";
+		if (!parsed.success) {
+			const paths = parsed.error.issues.flatMap((issue) =>
+				issue.code === "unrecognized_keys"
+					? issue.keys.map((key) => [...issue.path, key])
+					: [issue.path],
+			);
+			return { refusals: paths.map((path) => ({ path: path.map(String).join(".") })) };
+		}
 		const { data } = parsed;
-		if (data.id !== id) return "invalid";
-		if (!methods.some((m) => m.name === data.method)) return "invalid";
+		if (!methods.some((m) => m.name === data.method)) return { refusals: [{ path: "method" }] };
 		const read = await readRecord(data, known, "source");
-		return "client" in read ? read.client : "invalid";
+		if ("client" in read) return read;
+		return { refusals: read.issues.map((issue) => ({ path: `sections.${issue.path}` })) };
+	};
+	const held = async (record: unknown, id: string): Promise<Client | "invalid"> => {
+		const result = await checked(record);
+		return "client" in result && result.client.id === id ? result.client : "invalid";
 	};
 	/** A source's record held to the registered rule, a usable method and the id asked; one that throws while read is invalid. */
 	const sourced = (record: unknown, id: string) => held(record, id).catch(() => "invalid" as const);
@@ -109,6 +124,10 @@ export function registry(
 		return undefined;
 	};
 	return {
+		checkRecord: async (record) => {
+			const result = await checked(record);
+			return "refusals" in result ? result.refusals : undefined;
+		},
 		methods: () => methods.map((m) => m.name),
 		signingAlgorithms: () => [...new Set(methods.flatMap((m) => m.signingAlgorithms ?? []))],
 		find: async (id) => {

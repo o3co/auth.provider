@@ -15,7 +15,7 @@ import { type Session, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
-import { type Asked, clientSection, consents, displayed, isFirstParty } from "../src/contract.ts";
+import { type Asked, clientSection, consents, isFirstParty } from "../src/contract.ts";
 import consentModule from "../src/module.ts";
 import { section } from "../src/section.ts";
 import type { StoredAsk, StoredGrant } from "../src/store.ts";
@@ -93,7 +93,7 @@ const documents = defineModule({ name: "documents" }, (m) => [
 						id,
 						kind: "public" as const,
 						method: "none",
-						sections: { [clientSection.name]: displayed({ name: " Docs ", host: "docs.example" }) },
+						sections: { [clientSection.name]: { name: " Docs ", host: "docs.example" } },
 					}
 				: undefined,
 	})),
@@ -608,16 +608,16 @@ describe("consent's sections", () => {
 			const result = await clientSection.schema["~standard"].validate(value);
 			return result.issues ? "refused" : result.value;
 		};
-		expect(await check(displayed({ name: "\t Acme \n", host: "acme.example" }))).toEqual({
+		expect(await check({ name: "\t Acme \n", host: "acme.example" })).toEqual({
 			"first-party": false,
 			name: "Acme",
 			host: "acme.example",
 		});
-		const long = (await check(displayed({ name: "\u{1f600}".repeat(250), host: "a.example" }))) as {
+		const long = (await check({ name: "\u{1f600}".repeat(250), host: "a.example" })) as {
 			name: string;
 		};
 		expect([...long.name]).toEqual(Array(200).fill("\u{1f600}"));
-		const page = (uri: string) => check(displayed({ name: "Acme", uri, host: "acme.example" }));
+		const page = (uri: string) => check({ name: "Acme", uri, host: "acme.example" });
 		expect(await page("https://acme.example/about")).toMatchObject({
 			uri: "https://acme.example/about",
 		});
@@ -629,9 +629,37 @@ describe("consent's sections", () => {
 		]) {
 			expect(await page(uri), uri).toBe("refused");
 		}
-		expect(await check(displayed({ name: " \t ", host: "acme.example" }))).toBe("refused");
-		expect(await check(displayed({ name: "Acme", host: "" }))).toBe("refused");
-		expect(await check(displayed({ name: "Acme", host: "acme.example\r\n" }))).toBe("refused");
+		expect(await check({ name: " \t ", host: "acme.example" })).toBe("refused");
+		expect(await check({ name: "Acme", host: "" })).toBe("refused");
+		expect(await check({ name: "Acme", host: "acme.example\r\n" })).toBe("refused");
+	});
+
+	it("copies a metadata document's name, page and host, refusing a name absent, not a string or blank", async () => {
+		const from = { id: "https://acme.example/client.json", host: "acme.example" };
+		const copy = (document: Record<string, unknown>) =>
+			clientSection.fromDocument?.(document, from);
+		expect(clientSection.reads).toEqual(["client_name", "client_uri"]);
+		for (const name of [undefined, 7, " \t\n "]) {
+			expect(copy({ client_name: name }), String(name)).toEqual({ refused: "client_name" });
+		}
+		expect(copy({ client_name: " Acme ", client_uri: "http://acme.example/" })).toEqual({
+			value: { name: " Acme ", uri: "http://acme.example/", host: "acme.example" },
+		});
+		expect(copy({ client_name: "Acme", client_uri: 7 })).toEqual({
+			value: { name: "Acme", uri: 7, host: "acme.example" },
+		});
+		const copied = copy({
+			client_name: "Acme",
+			"first-party": true,
+			first_party: true,
+			host: "evil.example",
+			logo_uri: "https://acme.example/logo.png",
+		});
+		expect(copied).toEqual({ value: { name: "Acme", host: "acme.example" } });
+		const value = copied !== undefined && "value" in copied ? copied.value : undefined;
+		expect(await clientSection.schema["~standard"].validate(value)).toEqual({
+			value: { "first-party": false, name: "Acme", host: "acme.example" },
+		});
 	});
 
 	it("takes a challenge's time written with its unit, in whole seconds from 1m to 1h, 10m unless set", () => {

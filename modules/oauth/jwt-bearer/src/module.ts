@@ -5,7 +5,7 @@ import { grants } from "@mod/grants";
 import { issuer } from "@mod/issuer";
 import { defineModule, type Refusal, setting } from "@mod/kernel";
 import { publicPem } from "@mod/keys";
-import { withinHosts } from "@mod/outbound";
+import { withinHosts } from "@mod/outbound-policy";
 import { revocations } from "@mod/subject-revocation";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { z } from "zod";

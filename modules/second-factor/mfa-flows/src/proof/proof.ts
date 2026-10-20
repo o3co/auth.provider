@@ -15,6 +15,7 @@ import {
 	postedTransaction,
 	proofOf,
 	revokedSince,
+	unavailable,
 	unknownTransaction,
 } from "../routing.ts";
 import { lockoutName } from "../section.ts";
@@ -59,13 +60,42 @@ export interface ResumeParts {
 	readonly log: Pick<Log, "warn">;
 }
 
-/** Goes on with a held login after the gate `mfa`, adding `proved` to its amr; answers what it held, with `carried` once it opens. */
+/** What a resumed login's maker makes once it opens: the answer instead, or what it adds to `done`. */
+type Made = { readonly answer: HttpResponse } | { readonly adds: object };
+type Carried = () => Promise<Made>;
+
+/**
+ * Goes on with a held login after the gate `mfa`, adding `proved` to its amr; answers what it held,
+ * with what `carried` makes once it opens, and only then: an answer it makes instead closes the
+ * session and is answered, and a throw closes it as best it can and goes on, an unavailable part
+ * answering `503` as an answer.
+ */
 export function resumeOver(p: ResumeParts) {
+	/** What carried makes once the session opened; an answer it makes closes the session. */
+	const madeIn = async (handle: string, carried: Carried): Promise<Made> => {
+		let made: Made;
+		try {
+			made = await carried();
+		} catch (error) {
+			await p.sessions.close(handle).catch(() => undefined);
+			// Answered as an answer, so the transaction's cookie is cleared too.
+			if (isUnavailable(error)) return { answer: unavailable };
+			throw error;
+		}
+		if (!("answer" in made)) return made;
+		try {
+			await p.sessions.close(handle);
+		} catch (error) {
+			if (isUnavailable(error)) return { answer: unavailable };
+			throw error;
+		}
+		return made;
+	};
 	return async (
 		request: HttpRequest,
 		t: Transaction & { readonly purpose: "login" | "enroll-login" },
 		proved: readonly string[],
-		carried?: object,
+		carried?: Carried,
 		opened?: (handle: string) => Promise<void>,
 	) => {
 		const facts = t.facts ?? { subject: t.subject, amr: [] };
@@ -87,8 +117,14 @@ export function resumeOver(p: ResumeParts) {
 			return { ...loginRequired, cookies: [p.transactions.cleared()] };
 		}
 		await opened?.(resumed.session.id);
+		const made = carried === undefined ? undefined : await madeIn(resumed.session.id, carried);
+		// Its cookie never goes out: the session closed, or failing to, is no one's.
+		if (made !== undefined && "answer" in made) {
+			const { answer } = made;
+			return { ...answer, cookies: [...(answer.cookies ?? []), p.transactions.cleared()] };
+		}
 		const cookies = [...resumed.cookies, p.transactions.cleared()];
-		const done = carried ? { ...(t.done as object | undefined), ...carried } : (t.done ?? {});
+		const done = made ? { ...(t.done as object | undefined), ...made.adds } : (t.done ?? {});
 		return jsonAnswer(200, done, { cookies });
 	};
 }
@@ -267,11 +303,14 @@ export function proofOver(p: ProofParts) {
 	};
 
 	const transaction: Handler = async (request) => {
-		const txId = request.headers.get("mfa-transaction");
+		const named = request.headers.get("mfa-transaction");
+		// Named by no header, it is the browser's own, by its cookie: the page a navigation lands on asks so.
+		const txId = named ?? p.transactions.carried(request);
 		const found = await p.transactions.find(request, txId);
 		if (!found) return unknownTransaction;
 		if (await revokedSince(p.revocation, found.transaction)) return loginRequired;
 		return jsonAnswer(200, {
+			...(named === undefined && txId !== undefined ? { transaction: txId } : {}),
 			purpose: found.transaction.purpose,
 			factors: await p.factors.held(found.transaction.subject),
 			attempts_remaining: found.transaction.attemptsLeft,

@@ -126,19 +126,28 @@ describe("federation grants: refusals", () => {
 		expect((await t.open(bob, lodged.body.connect_uri)).opened.status).toBe(403);
 	});
 
-	it("refuses a callback that comes back in another browser, and spends its state", async () => {
-		const lodged = await t.lodge();
-		const first = await t.loggedIn();
-		const { challenge } = await t.open(first, lodged.body.connect_uri);
-		const accepted = await t.answer(first, { challenge, decision: "accept" });
-		const query = t.corp.authorize(accepted.location, {
-			subject: "u-alice",
-			tokens: { scope: scopes.join(" ") },
-		});
-		const elsewhere = await t.callback(await t.loggedIn(), query);
-		expect(t.returned(elsewhere).get("error")).toBe("reauthentication_required");
-		expect((await t.callback(first, query)).status).toBe(400);
-	});
+	// Ours ties a connection's round trip to the browser that began it, as well as to its session.
+	it.skipIf(areaTarget().differs("grants-round-trip-tied-to-browser"))(
+		"takes nothing for a callback that comes back in another browser, leaving the round trip to its own",
+		async () => {
+			const lodged = await t.lodge();
+			const first = await t.loggedIn();
+			const { challenge } = await t.open(first, lodged.body.connect_uri);
+			const accepted = await t.answer(first, { challenge, decision: "accept" });
+			const query = t.corp.authorize(accepted.location, {
+				subject: "u-alice",
+				tokens: { scope: scopes.join(" ") },
+			});
+			expect((await t.callback(await t.loggedIn(), query)).status).toBe(400);
+			// A failure is sent back by 303 too: the connection is made, with no error, and the grant serves.
+			const done = await t.callback(first, query);
+			expect(done.status).toBe(303);
+			expect(t.returned(done).get("error")).toBeNull();
+			const id = String(lodged.body.grant_id);
+			expect(t.returned(done).get("grant_id")).toBe(id);
+			expect((await t.grantCall(id, "status")).body.status).toBe("active");
+		},
+	);
 
 	it("holds no token that is not a bearer, nor one without a refresh token, nor one wider than shown", async () => {
 		for (const [tokens, error] of [
@@ -205,6 +214,20 @@ describe("federation grants: refreshing upstream tokens", () => {
 			expect([token.status, token.body.error]).toEqual([410, "reauthorization_required"]);
 		}
 		expect((await t.grantCall(id, "status")).body.status).toBe("reauthorization_required");
+	});
+
+	it("asks for reauthorization when the upstream wants the user at a refresh: 410 from then on", async () => {
+		const { id } = await due();
+		t.corp.answerRefresh({ status: 400, json: { error: "interaction_required" } });
+		for (const _ of [1, 2]) {
+			const token = await t.grantCall(id, "token");
+			expect([token.status, token.body.error]).toEqual([410, "reauthorization_required"]);
+		}
+		const status = (await t.grantCall(id, "status")).body;
+		expect([status.status, status.reason]).toEqual([
+			"reauthorization_required",
+			"upstream_interaction_required",
+		]);
 	});
 
 	it("keeps the credential while the upstream is down, even with invalid_grant in its body", async () => {

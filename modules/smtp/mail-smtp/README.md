@@ -7,7 +7,7 @@
 ## Not here
 - Purposes, wording and locale (the sending side and mail's templates). Checking and rendering a message (mail's `preparer`; only what it returns is sent). The address rule (mail's `isAddress`). Counting sends (the relay's limits).
 
-## Interface
+## Offers
 - Composition definition only (provides `mail`); it cannot be composed beside mail's logging-only sender.
 - Operator section: `host` (required), `port` (default 587), `security` (`starttls` by default, `tls` or `none`), `from` (one address mail's `isAddress` takes, a display name allowed), `user` and `password` (both or neither), `deadline` (the whole send, 100ms–10m, default `40s`, written with its unit), `concurrent-sends` (sends at once on a host, 1–1000, default 20).
 
@@ -26,6 +26,13 @@
 - Errors and log lines carry the stage, the reply codes and a listed connection code, never the relay's words, the password, the address or values.
 - Connecting, the greeting, each silence and the whole send have deadlines, each logged as its own stage; a relay answering bit by bit cannot extend the whole one. A failed QUIT after sending keeps sent.
 - Boot refuses a missing host, a `from` that is not one mailbox or whose address mail refuses, half an account and control characters, naming the key and never the value.
+
+## Deployment
+- A relay at `host` and `port` offering STARTTLS, or TLS from the first byte with `security` `tls`, with a certificate valid for `host` at TLS 1.2 or later.
+- Plain SMTP only from a relay on this host's loopback, with `security` `none`.
+- SMTPUTF8 on the relay, where an address beyond ASCII must be delivered.
+- An account in `user` and `password`, where the relay asks for AUTH.
+- The relay's sending limits, its reputation and what it does after it takes a message are the operator's.
 
 ## Depends on
 - `kernel`, `mail` (the contract, `preparer`, `isAddress`). `nodemailer` (pinned) only inside the internal module `relay`.

@@ -94,5 +94,7 @@ onLegacy(oauthArea, {
 		"email-refusal-description",
 		"resource-repeated",
 		"resource-client-id",
+		// A refused client authentication is recorded, by its reason and the source alone.
+		"client-authentication-failure-recorded",
 	],
 });

@@ -1,4 +1,3 @@
-import { redirects } from "@mod/authorize";
 import { clientAllowance } from "@mod/client-allowance";
 import { type Client, clients, metadataSections } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
@@ -12,6 +11,7 @@ import {
 	contract,
 	defineModule,
 	kernelConfig,
+	type Module,
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
@@ -23,6 +23,8 @@ import {
 	OutboundUnavailable,
 	outbound,
 } from "@mod/outbound";
+import { type Limits, outboundLimits } from "@mod/outbound-policy";
+import { redirects } from "@mod/redirect-uris";
 import secretHashModule from "@mod/secret-hash/module";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -55,15 +57,20 @@ function json(body: unknown, headers: Record<string, string> = {}, status = 200)
 	};
 }
 
-/** Outbound as a test stand-in: it records each request and answers from the script. */
-const outboundStandIn = defineModule({ name: "outbound" }, (m) => [
-	m.provide(outbound).by(() => ({
-		fetch: async (url, request, narrower) => {
-			sent.push({ url, request, narrower });
-			return answer(url);
-		},
-	})),
-]);
+/** The operator's caps outbound answers: wide enough for the defaults, unless a test narrows them. */
+const wideCaps: Limits = { maxBytes: 65_536, timeoutMs: 5_000 };
+
+/** Outbound as a test stand-in: it records each request and answers from the script, under the caps given. */
+const outboundStandIn = (caps: Limits = wideCaps) =>
+	defineModule({ name: "outbound" }, (m) => [
+		m.provide(outbound).by(() => ({
+			fetch: async (url, request, narrower) => {
+				sent.push({ url, request, narrower });
+				return answer(url);
+			},
+		})),
+		m.provide(outboundLimits).by(() => ({ of: () => caps })),
+	]);
 
 /** The sections a document record carries, as their owners contribute them; client-allowance's taken as written. */
 const owners = defineModule({ name: "owners" }, (m) => [
@@ -88,18 +95,25 @@ const collector = defineModule({ name: "test-collector" }, (m) => [
 
 async function boot(
 	settings: Record<string, unknown> = {},
-	options: { code?: boolean; registered?: unknown[] } = {},
+	options: {
+		code?: boolean;
+		registered?: unknown[];
+		caps?: Limits;
+		extra?: Module[];
+		owners?: Module;
+	} = {},
 ) {
 	const recording = recordingLog();
 	const app = await assemble({
 		modules: [
-			outboundStandIn,
+			outboundStandIn(options.caps),
 			clientsModule,
 			secretHashModule,
-			owners,
+			options.owners ?? owners,
 			tokenEndpointStandIn(options.code === false ? [] : ["authorization_code"]),
 			clientsCimd,
 			collector,
+			...(options.extra ?? []),
 		],
 		config: {
 			...kernelConfig(),
@@ -261,14 +275,36 @@ describe("clients-cimd: a refused document", () => {
 		expect(await (await boot()).find()).toBeUndefined();
 	});
 
-	it("is kept as found when only an owner's schema refuses it, none on every find, unlogged", async () => {
+	it("is none when an owner's schema refuses its record, logged with where and remembered for the refusal time", async () => {
 		answer = () => json({ ...document, redirect_uris: ["http://app.example/cb"] });
 		const app = await boot();
 		expect(await app.find()).toBeUndefined();
-		now += 599_999;
+		now += 59_999;
 		expect(await app.find()).toBeUndefined();
 		expect(sent).toHaveLength(1);
-		expect(app.lines()).toEqual([]);
+		now += 1;
+		await app.find();
+		expect(sent).toHaveLength(2);
+		expect(app.lines()[0]).toEqual({
+			level: "warn",
+			event: "clients-cimd.document_refused",
+			fields: { client: id, reason: "record at sections.authorize.redirect-uris.0" },
+		});
+	});
+
+	it("is none and forgotten, as a failed fetch, when checking its record throws", async () => {
+		const throwing = defineModule({ name: "throwing-owner" }, (m) => [
+			m.contribute(metadataSections).by(() => ({
+				name: "throwing",
+				schema: z.unknown().transform(() => {
+					throw new Error("unreadable");
+				}),
+			})),
+		]);
+		const app = await boot({}, { extra: [throwing] });
+		expect(await app.find()).toBeUndefined();
+		expect(await app.find()).toBeUndefined();
+		expect(sent).toHaveLength(2);
 	});
 
 	it("takes a JSON media type with parameters or a +json suffix", async () => {
@@ -298,6 +334,48 @@ describe("clients-cimd: a refused document", () => {
 		expect(line).toMatchObject({ level: "warn", event: "clients-cimd.document_refused" });
 		expect(line?.fields).toEqual({ client: long.slice(0, 200), reason: "client_id" });
 		expect(app.lines()[1]?.fields).toEqual({ client: id, reason: "client_id" });
+	});
+});
+
+describe("clients-cimd: the sections a document's record is built from", () => {
+	const allowanceStandIn = (copied: boolean) => ({
+		name: "client-allowance",
+		schema: z.record(z.string(), z.unknown()),
+		...(copied ? { fromDocument: () => ({ value: { grants: ["password"] } }) } : {}),
+	});
+	const ownersOf = (...sections: object[]) =>
+		defineModule({ name: "owners" }, (m) =>
+			sections.map((one) => m.contribute(metadataSections).by(() => one as never)),
+		);
+	const refusedBoot = (owners: Module) =>
+		boot({}, { owners }).then(
+			() => [],
+			(error: BootRefused) => error.refusals.map((r) => r.reason),
+		);
+
+	it("refuses boot where no composed section copies a field a document client needs", async () => {
+		expect(await refusedBoot(ownersOf(redirects, allowanceStandIn(false)))).toEqual([
+			"no composed section reads a document's client_name",
+		]);
+		expect(await refusedBoot(ownersOf(clientSection, allowanceStandIn(false)))).toEqual([
+			"no composed section reads a document's redirect_uris",
+		]);
+	});
+
+	it("refuses boot where a section it computes is copied from a document by its owner", async () => {
+		expect(await refusedBoot(ownersOf(redirects, clientSection, allowanceStandIn(true)))).toEqual([
+			"client-allowance is computed here, and copied from a document by its owner too",
+		]);
+	});
+
+	it("is none, logged with where, for a page the consent section refuses", async () => {
+		answer = () => json({ ...document, client_uri: "http://app.example/" });
+		const app = await boot();
+		expect(await app.find()).toBeUndefined();
+		expect(app.lines()[0]?.fields).toEqual({
+			client: id,
+			reason: "record at sections.consent.uri",
+		});
 	});
 });
 
@@ -375,6 +453,27 @@ describe("clients-cimd: the operator's section", () => {
 		const error = await boot(settings).catch((e: unknown) => e);
 		expect(error).toBeInstanceOf(BootRefused);
 		expect((error as BootRefused).refusals.map((r) => r.where)).toContain(where);
+	});
+
+	it("refuses boot where the size or the timeout is above outbound's cap, naming the key and no value", async () => {
+		const caps = { maxBytes: 4096, timeoutMs: 1000 };
+		const error = await boot({ "max-size": "5KiB", timeout: "2s" }, { caps }).catch(
+			(e: unknown) => e,
+		);
+		expect(error).toBeInstanceOf(BootRefused);
+		const refusals = (error as BootRefused).refusals;
+		expect(refusals.map((r) => r.where)).toEqual(["clients-cimd.max-size", "clients-cimd.timeout"]);
+		expect(refusals.map((r) => r.reason)).toEqual([
+			"is above outbound's cap: lower it, or raise outbound.max-response-size",
+			"is above outbound's cap: lower it, or raise outbound.timeout",
+		]);
+		expect(JSON.stringify(refusals)).not.toMatch(/4096|5120|1000|2000/);
+	});
+
+	it("boots with the size and the timeout at outbound's cap or below it", async () => {
+		const caps = { maxBytes: 5120, timeoutMs: 5000 };
+		await expect(boot({}, { caps })).resolves.toBeDefined();
+		await expect(boot({ "max-size": "1KiB", timeout: "1s" }, { caps })).resolves.toBeDefined();
 	});
 
 	it("takes host names, one beyond ASCII by its punycode, as outbound's hosts", async () => {

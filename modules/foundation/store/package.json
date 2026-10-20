@@ -4,6 +4,7 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "foundation",
+	"forWiring": true,
 	"exports": {
 		".": "./src/contract.ts",
 		"./testing": "./src/testing.ts",
@@ -15,6 +16,11 @@
 	},
 	"peerDependencies": {
 		"vitest": "5.0.4"
+	},
+	"peerDependenciesMeta": {
+		"vitest": {
+			"optional": true
+		}
 	},
 	"devDependencies": {
 		"vitest": "5.0.4"

@@ -1,8 +1,11 @@
+import { type Audit, declaredAudit } from "@mod/audit";
 import type { Client, Clients } from "@mod/clients";
 import type { OAuthError } from "@mod/grants";
-import { type HttpRequest, type HttpResponse, noStore } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import { contract } from "@mod/kernel";
-import { challenged } from "./challenges.ts";
+import { determinedSource } from "@mod/request-source";
+import events from "./audit-events.ts";
+import { challenged } from "./route/challenges.ts";
 
 /** The built-in grant's type (RFC 6749 §4.4). */
 export const clientCredentialsGrantType = "client_credentials";
@@ -40,26 +43,22 @@ export function oauthError(
 	/** More members of the body, read by nobody here; a reserved name or a malformed `error_uri` is dropped. */
 	members?: Readonly<Record<string, unknown>>,
 ): HttpResponse {
-	return {
-		status,
-		headers: noStore,
-		body: {
-			json: {
-				...Object.fromEntries(
-					Object.entries(members ?? {}).filter(
-						([name, value]) => !reserved.has(name) && (name !== "error_uri" || isErrorUri(value)),
-					),
-				),
-				error,
-				...(description ? { error_description: printable(description) } : {}),
-			},
-		},
-	};
+	return jsonAnswer(status, {
+		...Object.fromEntries(
+			Object.entries(members ?? {}).filter(
+				([name, value]) => !reserved.has(name) && (name !== "error_uri" || isErrorUri(value)),
+			),
+		),
+		error,
+		...(description ? { error_description: printable(description) } : {}),
+	});
 }
 
+/** Authenticates the request's client; a refusal is recorded on `audit` once, by its reason and the source alone. */
 export async function authenticateClient(
 	clients: Clients,
 	request: HttpRequest,
+	audit: Pick<Audit, "record">,
 ): Promise<
 	| {
 			readonly kind: "client";
@@ -73,6 +72,10 @@ export async function authenticateClient(
 	if (authenticated.kind === "authenticated") {
 		return { kind: "client", client: authenticated.client, challenges: authenticated.challenges };
 	}
+	const source = determinedSource(request);
+	declaredAudit(audit, events).record("client.authentication.failure", {
+		attributes: { ...(source === undefined ? {} : { source }), reason: authenticated.reason },
+	});
 	if (authenticated.reason === "multiple_methods") {
 		return {
 			kind: "refused",

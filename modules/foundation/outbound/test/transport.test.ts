@@ -11,10 +11,15 @@ import {
 	setDefaultAutoSelectFamily,
 } from "node:net";
 import { isUnavailable } from "@mod/kernel";
+import { policyOf, policySettings } from "@mod/outbound-policy";
+import { configuredUrl } from "@mod/url-setting/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DestinationRefused, type OutboundUnavailable } from "../src/contract.ts";
 import { outboundOver, section } from "../src/module.ts";
 import { type Resolver, send } from "../src/transport.ts";
+
+/** The operator's policy at its plainest, checking the addresses a test's admitted URL reaches. */
+const anyPublic = policyOf(policySettings.parse({ "allow-any-public": true }));
 
 let server: Server;
 let port = 0;
@@ -190,7 +195,8 @@ describe("outbound", () => {
 	it("reaches a private address for an internal host the caller names as its operator's, and nowhere else", async () => {
 		const { resolve } = table({ "alb.corp": ["10.255.255.1"], "other.corp": ["10.255.255.1"] });
 		const out = over(resolve, { "internal-hosts": ["alb.corp"] });
-		const quick = { internal: true as const, timeoutMs: 100 };
+		// Named by the operator's URL at alb.corp: no other origin is reached at a private address.
+		const quick = { internal: configuredUrl("https://alb.corp/"), timeoutMs: 100 };
 		// Past the address check, the request goes on to connect, where no one answers.
 		expect(await failure(out.fetch("https://alb.corp/", {}, quick))).toMatch(
 			/^unavailable: (timeout|unreachable)$/,
@@ -199,6 +205,8 @@ describe("outbound", () => {
 			"special-address",
 		);
 		expect(await failure(out.fetch("https://other.corp/", {}, quick))).toBe("special-address");
+		// The same host at another port is another service: its private answer is refused.
+		expect(await failure(out.fetch("https://alb.corp:8443/", {}, quick))).toBe("special-address");
 		expect(
 			await failure(out.fetch(`https://127.0.0.1:${port}/ok`, {}, quick)),
 			"loopback stays refused",
@@ -248,6 +256,10 @@ describe("outbound", () => {
 	it("never follows a redirect, and answers a 304 as it is", async () => {
 		const { resolve } = svcResolver();
 		expect(await failure(over(resolve).fetch(svc("/moved")))).toBe("redirect");
+		// Nor for the operator's own URL: a request reaches no origin but the one admitted.
+		const inside = over(resolve, { "internal-hosts": ["svc.test"] });
+		const own = { internal: configuredUrl(svc("/moved")) };
+		expect(await failure(inside.fetch(svc("/moved"), {}, own))).toBe("redirect");
 		expect((await over(resolve).fetch(svc("/same"))).status).toBe(304);
 	});
 
@@ -485,8 +497,10 @@ describe("outbound", () => {
 		const atOnce: Resolver = () => {
 			throw new Error("resolver");
 		};
-		expect(await failure(send(admitted, {}, limits, atOnce))).toBe("unavailable: unreachable");
-		expect(await failure(send(admitted, {}, limits, async () => atOnce("")))).toBe(
+		expect(await failure(send(admitted, {}, limits, atOnce, anyPublic))).toBe(
+			"unavailable: unreachable",
+		);
+		expect(await failure(send(admitted, {}, limits, async () => atOnce(""), anyPublic))).toBe(
 			"unavailable: unreachable",
 		);
 	});
@@ -518,7 +532,7 @@ describe("outbound", () => {
 			internal: false,
 		};
 		const limits = { maxBytes: 1000, timeoutMs: 1000 };
-		const answer = send(admitted, {}, limits, async () => ["127.0.0.1"]);
+		const answer = send(admitted, {}, limits, async () => ["127.0.0.1"], anyPublic);
 		expect(await failure(answer)).toBe("unavailable: unreachable");
 		raw.close();
 		// A TLS handshake record, naming the host, never plain text.

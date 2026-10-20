@@ -3,14 +3,13 @@ import auditModule from "@mod/audit/module";
 import { assemble, BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import {
-	credentialPolicy,
 	DestinationRefused,
 	type Narrower,
 	type OutboundRequest,
 	type OutboundResponse,
 	outbound,
-	outboundRefusals,
 } from "@mod/outbound";
+import { credentialPolicy, outboundRefusals } from "@mod/outbound-policy";
 import { beforeEach, expect, it } from "vitest";
 import auditHttp from "../src/module.ts";
 import { auditHttpConfig } from "../src/testing.ts";
@@ -90,8 +89,8 @@ it("names its URL as the operator's own, at boot and on each post, so a collecto
 	const a = await boot(status(204), { url });
 	a.record({ kind: "login.failed" });
 	await settled();
-	expect(checked).toEqual([{ internal: true }]);
-	expect(sent.map((s) => s.narrower)).toEqual([{ internal: true }]);
+	expect(checked).toEqual([{ internal: url }]);
+	expect(sent.map((s) => s.narrower)).toEqual([{ internal: url }]);
 });
 
 it("sends the collector's Authorization header where the operator gives one, and only then", async () => {

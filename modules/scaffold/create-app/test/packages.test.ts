@@ -13,16 +13,18 @@ const indexed = () => {
 		package: `@o3co/auth-provider-${bundle}`,
 		entry: `@o3co/auth-provider-${bundle}/${name}`,
 		manifest: { name: `@mod/${name}` },
-		...(fragment ? { fragment } : {}),
+		...(fragment ? { fragment, references: true } : {}),
 	});
 	writeFileSync(
 		file,
 		JSON.stringify({
 			version: "0.18.0",
+			repository: "https://github.com/o3co/auth.provider",
 			packages: [
 				entry("kernel", "foundation", 'kernel {\n  deployment = "REPLACE-DEPLOYMENT"\n}\n'),
 				entry("tokens", "oauth"),
 				entry("authorize", "oauth", 'authorize {\n  login-page = "REPLACE-LOGIN-PAGE"\n}\n'),
+				{ ...entry("redis", "store-redis"), deployment: true },
 			],
 		}),
 	);
@@ -59,3 +61,40 @@ it("takes the workspace it lies in, with no index and no workspace given", async
 	expect(packages.dependencies(["@mod/kernel"])).toEqual({ "@mod/kernel": "*" });
 	expect((await packages.fragments(["@mod/kernel"])).map((f) => f.section)).toEqual(["kernel"]);
 }, 30_000);
+
+it("points at each composed module's card, section defaults and Deployment section where it installs them, and names the release", () => {
+	const published = packagesFor({}, indexed());
+	expect(published.cards(["@mod/kernel", "@mod/tokens", "@mod/redis"])).toEqual([
+		{
+			name: "@mod/kernel",
+			card: "node_modules/@o3co/auth-provider-foundation/kernel/README.md",
+			references: "node_modules/@o3co/auth-provider-foundation/kernel/reference.conf",
+		},
+		{ name: "@mod/tokens", card: "node_modules/@o3co/auth-provider-oauth/tokens/README.md" },
+		{
+			name: "@mod/redis",
+			card: "node_modules/@o3co/auth-provider-store-redis/redis/README.md",
+			deployment: "node_modules/@o3co/auth-provider-store-redis/redis/README.md#deployment",
+		},
+	]);
+	expect(published.release()).toEqual({
+		version: "0.18.0",
+		repository: "https://github.com/o3co/auth.provider",
+	});
+	const root = join(import.meta.dirname, "..", "..", "..", "..");
+	const linked = packagesFor({ workspace: root }, join(tmpdir(), "no-index.json"));
+	expect(linked.cards(["@mod/kernel", "@mod/redis"])).toEqual([
+		{
+			name: "@mod/kernel",
+			card: "node_modules/@mod/kernel/README.md",
+			references: "node_modules/@mod/kernel/reference.conf",
+		},
+		{
+			name: "@mod/redis",
+			card: "node_modules/@mod/redis/README.md",
+			references: "node_modules/@mod/redis/reference.conf",
+			deployment: "node_modules/@mod/redis/README.md#deployment",
+		},
+	]);
+	expect(linked.release()).toMatchObject({ repository: "https://github.com/o3co/auth.provider" });
+});

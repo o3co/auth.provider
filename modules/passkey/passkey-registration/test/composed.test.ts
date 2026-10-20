@@ -17,6 +17,7 @@ import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import sessionRequirements from "@mod/session-requirements/module";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import webauthn from "@mod/webauthn/module";
@@ -48,21 +49,21 @@ async function serve(
 	{ withMfa = false } = {},
 ) {
 	const store = simulatedStore();
-	const mfa = withMfa
-		? [auditStandIn().module, sealModule, loginGates, mfaStore, mfaModule, mfaEntry, step]
-		: [];
+	const mfa = withMfa ? [sealModule, loginGates, mfaStore, mfaModule, mfaEntry, step] : [];
 	const app = await assemble({
 		modules: [
 			http,
 			csrfStandIn,
 			cookiesModule,
 			sessionStandIn,
+			sessionRequirements,
 			subjectRevocationStandIn,
 			rateLimitStandIn,
 			store.module,
 			webauthnStore,
 			webauthn,
 			registration,
+			auditStandIn().module,
 			...mfa,
 		],
 		config: {
@@ -100,7 +101,7 @@ async function serve(
 			return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 		};
 	};
-	return { store, browser };
+	return { store, browser, sessions: app.get(sessions) };
 }
 
 type Post = Awaited<ReturnType<Awaited<ReturnType<typeof serve>>["browser"]>>;
@@ -178,6 +179,21 @@ it("refuses a session whose sign-in time is unknown where mfa judges entry, befo
 	expect(await unknown("options")).toEqual({ status: 403, body: { error: "step_up_required" } });
 	const known = await browser("sam");
 	expect((await known("options")).status).toBe(200);
+});
+
+it("leaves the credentials entry to mfa's requirement where mfa is composed, not to session's floor", async () => {
+	const { sessions: open } = await serve({}, { withMfa: true });
+	const facts = { subject: "dee", amr: ["pwd"], authenticatedAt: "unknown" as const };
+	const { cookies } = await open.complete(testRequest(), facts);
+	const cookie = cookies.map((c) => c.split(";")[0]).join("; ");
+	const request = testRequest({
+		headers: new Map([["cookie", cookie]]),
+		source: { scheme: "https" },
+	});
+	expect(await open.enterFor(request, "credentials")).toMatchObject({
+		kind: "short",
+		requirement: "mfa",
+	});
 });
 
 it("needs a recent sign-in at a known time where nothing judges entry", async () => {

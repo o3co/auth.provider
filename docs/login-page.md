@@ -6,6 +6,8 @@ The provider has no login screen of its own. When a browser asks the authorizati
 
 Serve the page from the provider's public origin (`http.public-origin`), for example behind the same reverse proxy. The login is refused unless it carries same-origin evidence (an `Origin` that is the public origin) or the double-submit token, and any cross-origin evidence refuses it; the cookies both requests set belong to that origin. Where the deployment can make cookies secure, a request over plain http is refused.
 
+The page a login through an upstream goes on from, when a second factor holds it (`federation.held-page`), is served from the same origin: `federation` refuses to boot where it is not. See [A login through an upstream that a second factor holds](#a-login-through-an-upstream-that-a-second-factor-holds).
+
 ## 1. Get a CSRF token
 
 ```http
@@ -55,6 +57,18 @@ Every answer is never cached.
 | `503` `temporarily_unavailable` or `service_unavailable` | The provider cannot answer now; try again later. |
 
 After a `200`, the browser holds the session cookie, and the authorization endpoint it returns to goes on to consent or straight to the client.
+
+## A login through an upstream that a second factor holds
+
+A login through an upstream (`federation`) ends in the upstream's callback, a navigation of the browser rather than a request your page makes. When a second factor holds that login, the provider sends the browser to `federation.held-page` (`303`, with no query). Without that setting the callback answers the held login's `403` JSON, which a browser cannot act on: set it wherever a second factor is composed beside `federation`.
+
+That page goes on with the login:
+
+1. `GET /session/mfa/transaction` with no `MFA-Transaction` header. The browser's cookie names its transaction, and the answer carries `transaction`, `purpose` and `factors`. A `400` means none is in progress: start the sign-in again.
+2. With `purpose` `login`, prove a factor as the [second-factor recipe](recipe-mfa-page.md) does after a password login: `challenge` where the factor needs one, then `verify`, naming `transaction` in each body. With `enroll-login`, the user has no second factor yet and binds a first one through `enrollment` and `enrollment/complete`, as the recipe's first steps show; `verify` refuses that transaction.
+3. Send the browser to the answer's `redirect_to`: where the login was going, else `federation.landing`, else the public origin's root. A first factor bound without a binding proof counts only from the next sign-in: its answer carries the factor and its recovery codes but no `redirect_to`, and no session opens, so show the codes, then start the sign-in through the upstream again.
+
+The transaction's identifier never goes in a URL; only this `GET` takes it from the cookie alone.
 
 ## Related
 

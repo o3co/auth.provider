@@ -67,6 +67,8 @@ export function issuedInMemory(size = 1000) {
 		});
 		return found.sort();
 	};
+	/** Takes the session off the list, as a sweep that found nothing awaiting does. */
+	const sweptDone = (session: string) => pending.done(session);
 	const stopAfterNextAdd = () => {
 		stopping = true;
 	};
@@ -81,6 +83,7 @@ export function issuedInMemory(size = 1000) {
 		records,
 		down,
 		pendingListed,
+		sweptDone,
 		stopAfterNextAdd,
 		beforeNextSettle,
 	};

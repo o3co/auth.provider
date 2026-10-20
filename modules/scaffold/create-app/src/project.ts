@@ -56,6 +56,9 @@ export function dependenciesOf(
 /** The pnpm the workspace builds with, so the lockfile reads alike in the image. */
 const pnpm = "pnpm@11.3.0";
 
+/** The zod the packages take, so a section the app writes is read by the same copy. */
+const zod = "4.6.7";
+
 /** The project's manifest, starting the app with `start`, and resealing with `reseal` when given. */
 export const manifestOf = (start: string, dependencies: Record<string, string>, reseal?: string) =>
 	`${JSON.stringify(
@@ -65,7 +68,7 @@ export const manifestOf = (start: string, dependencies: Record<string, string>, 
 			type: "module",
 			packageManager: pnpm,
 			scripts: reseal === undefined ? { start } : { start, reseal },
-			dependencies,
+			dependencies: { ...dependencies, zod },
 		},
 		null,
 		"\t",

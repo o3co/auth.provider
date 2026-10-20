@@ -65,6 +65,29 @@ export function importedNames(path: string): Set<string> {
 	return names;
 }
 
+/** The names a file takes from `from` as values, by their exported names; `*` for the whole module. */
+export function valuesFrom(path: string, from: string): string[] {
+	const names: string[] = [];
+	for (const statement of parse(path).statements) {
+		const clause = ts.isImportDeclaration(statement)
+			? statement.importClause
+			: ts.isExportDeclaration(statement)
+				? statement
+				: undefined;
+		const specifier = (statement as ts.ImportDeclaration | ts.ExportDeclaration).moduleSpecifier;
+		if (!clause || clause.isTypeOnly || !specifier || !ts.isStringLiteral(specifier)) continue;
+		if (specifier.text !== from) continue;
+		if (ts.isImportClause(clause) && clause.name) names.push("default");
+		const bound = ts.isImportClause(clause) ? clause.namedBindings : clause.exportClause;
+		if (!bound || ts.isNamespaceImport(bound) || ts.isNamespaceExport(bound)) names.push("*");
+		else
+			for (const element of bound.elements) {
+				if (!element.isTypeOnly) names.push((element.propertyName ?? element.name).text);
+			}
+	}
+	return names;
+}
+
 /** The names imported from `from` that a `keyof typeof` of the file keys by. */
 export function keyedByImports(path: string, from: string): string[] {
 	const file = parse(path);

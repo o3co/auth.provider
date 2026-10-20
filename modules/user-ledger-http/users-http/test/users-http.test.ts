@@ -10,8 +10,9 @@ import {
 	kernelConfig,
 	type Runtime,
 } from "@mod/kernel";
-import { credentialPolicy, type Narrower, outbound, outboundRefusals } from "@mod/outbound";
+import { type Narrower, outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
+import { credentialPolicy, outboundRefusals } from "@mod/outbound-policy";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Ledger, ledgers, userAttribute, users } from "@mod/users";
 import usersModule from "@mod/users/module";
@@ -623,8 +624,10 @@ describe("users-http", () => {
 			runtime,
 		});
 		await app.get(collected)[0]?.verify("alice", "correct horse");
-		expect(checked).toMatchObject([{ internal: true }]);
-		expect(sent).toMatchObject([{ internal: true }]);
+		// Named by the URL itself, so only its origin is reached at a private address.
+		const own = { internal: settings()["verify-url"] };
+		expect(checked).toMatchObject([own]);
+		expect(sent).toMatchObject([own]);
 	});
 
 	it("refuses to start on a verify-url outbound's policy refuses, saying which of its keys to set", async () => {

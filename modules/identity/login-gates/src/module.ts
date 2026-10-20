@@ -29,7 +29,7 @@ export default defineModule({ name: "login-gates", section, replicaSafe: true },
 		// By name in code units, not locale, so every host runs them alike. Names are keyed, never equal.
 		const gates = (await c.collect(loginGates)).toSorted((a, b) => (a.name < b.name ? -1 : 1));
 		const provable = new Set((await c.collect(amrSources)).flatMap((source) => source.amr));
-		const targets = new Set(c.section["return-targets"]);
+		const targets = new Set<string>(c.section["return-targets"]);
 		const origin = (await c.get(site)).origin;
 		const paths = new Set((await c.collect(returnPaths)).map((p) => p.path));
 		const returnAllowed = (target: string) => {

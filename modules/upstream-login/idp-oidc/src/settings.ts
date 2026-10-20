@@ -1,11 +1,12 @@
 import type { Algorithm } from "@mod/external-jwt";
 import { setting } from "@mod/kernel";
-import { hostEntryOf, type OutboundRefusals } from "@mod/outbound";
+import { destinationRefusal, hostEntryOf, type OutboundRefusals } from "@mod/outbound-policy";
 import {
 	clientSetting,
 	endpointSetting as endpoint,
 	scopeSetting as scope,
 } from "@mod/upstream-client";
+import { urlsChecked } from "@mod/url-setting";
 import { z } from "zod";
 
 /** Where the issuer describes itself. */
@@ -99,20 +100,17 @@ export const settingsOf = (asymmetric: readonly Algorithm[], refusals: OutboundR
 				path: ["discovery"],
 			},
 		)
-		.superRefine((s, context) => {
-			// A value that is no URL is refused already, and zod still runs this: it is passed over.
-			const urls = [s.issuer, s["authorization-endpoint"], s["token-endpoint"], s["jwks-uri"]];
-			if (!urls.every((url) => url === undefined || URL.canParse(url))) return;
-			const sent = s.discovery
-				? { issuer: descriptionUrl(s.issuer) }
-				: { "token-endpoint": s["token-endpoint"], "jwks-uri": s["jwks-uri"] };
-			const hosts = hostsOf(s);
-			for (const [key, url] of Object.entries(sent)) {
-				const refused = url === undefined ? undefined : refusals.explained(url, { hosts });
-				if (refused === undefined) continue;
-				const message = `outbound's destination policy refuses it: ${refused}`;
-				context.addIssue({ code: "custom", path: [key], message });
-			}
-		});
+		.superRefine(
+			urlsChecked((url, hosts) => destinationRefusal(refusals, url, { hosts }), {
+				urls: (s) => [s.issuer, s["authorization-endpoint"], s["token-endpoint"], s["jwks-uri"]],
+				sent: (s) =>
+					s.discovery
+						? { issuer: { url: descriptionUrl(s.issuer), hosts: hostsOf(s) } }
+						: {
+								"token-endpoint": { url: s["token-endpoint"], hosts: hostsOf(s) },
+								"jwks-uri": { url: s["jwks-uri"], hosts: hostsOf(s) },
+							},
+			}),
+		);
 
 export type Settings = z.output<ReturnType<typeof settingsOf>>;

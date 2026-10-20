@@ -6,11 +6,11 @@ import { revocationFollowers, subjectRevocation } from "@mod/subject-revocation"
 import { describe, expect, it } from "vitest";
 import {
 	type AuthContext,
+	closingParticipants,
 	type Entry,
 	type EntryLevel,
-	entryRequirements,
+	entryJudge,
 	type LoginFacts,
-	participants,
 	type Session,
 	type Sessions,
 	sessionRules,
@@ -53,6 +53,11 @@ export interface SessionsPlace {
 	/** Subjects whose sessions the participant finished closing. */
 	readonly closed: readonly string[];
 	failClosing(on: boolean): void;
+	/**
+	 * Runs `meanwhile` once, after the next entry by cookie has read which session the cookie opens
+	 * and before it reads that session; a place whose entry is one read leaves it out.
+	 */
+	readonly betweenCookieAndSession?: (meanwhile: () => Promise<unknown>) => void;
 }
 
 /** How a place opens: with a requirement that judges changing credentials (the default), or with none. */
@@ -215,6 +220,27 @@ export function sessionsContract(
 			expect(raised?.raised).toBe(true);
 			const afterRaise = place.request(raised?.cookies);
 			expect((await place.sessions.enterFor(afterRaise, "credentials")).kind).toBe("entered");
+		});
+
+		it("lets the cookie a raise retires into no raised session, even where the raise lands between reading the cookie and the session", async (test) => {
+			const place = await open();
+			const between = place.betweenCookieAndSession;
+			if (!between) return test.skip();
+			for (const enter of [
+				async (asked: HttpRequest) => (await place.sessions.enter(asked)) !== undefined,
+				async (asked: HttpRequest) =>
+					(await place.sessions.enterFor(asked, "credentials")).kind !== "absent",
+			]) {
+				const done = await place.sessions.complete(place.request(), facts(place));
+				const asked = place.request(done.cookies);
+				let raised: Awaited<ReturnType<Sessions["raise"]>>;
+				between(async () => {
+					raised = await place.sessions.raise(asked, ["strong"]);
+				});
+				expect(await enter(asked)).toBe(false);
+				expect(raised?.raised).toBe(true);
+				expect(await enter(place.request(raised?.cookies))).toBe(true);
+			}
 		});
 
 		it("raises under a new cookie, keeping the session and its authentication time", async () => {
@@ -595,8 +621,10 @@ export function failStandInListing(stand: Sessions): void {
 
 /**
  * A stand-in for tests of the modules that use sessions: records kept in memory on the
- * composition's clock, behind cookies by `cookies`' rule. It asks the contributed entry requirements and
- * subject revocation as the contract has it, and calls the participants when a session closes. A
+ * composition's clock, behind cookies by `cookies`' rule. It asks the entry requirements and subject
+ * revocation as the contract has it, and calls the participants when a session closes, through
+ * `session`'s seams where a module contributes them; none contributed is no requirement and no
+ * participant, the credentials floor still kept. A
  * pending close goes on only when it is asked again: there is no sweep. It lists each subject's
  * sessions as the contract has it, up to `standInListingCap`, and closes them through `close`
  * when the listing pushes one out or the subject is revoked.
@@ -605,8 +633,12 @@ export const sessionStandIn = defineModule({ name: "session" }, (m) => [
 	m.provide(sessions).by(async (c) => {
 		const jar = cookiesFor((await c.get(site)).secureCookies);
 		const revocation = await c.get(subjectRevocation);
-		const shortOf = sessionRules.entryShortOf(await c.collect(entryRequirements), c.clock.now);
-		const closers = await c.collect(participants);
+		// `session`'s seams, where a module keeps them; none is taken as no requirement and no participant.
+		const [judge] = await c.collect(entryJudge);
+		const [closing] = await c.collect(closingParticipants);
+		const recentMs = sessionRules.credentialsSecondsDefault * 1000;
+		const recent = (at: number) => c.clock.now() - at <= recentMs;
+		const shortOf = sessionRules.judgedShortOf(judge, recent);
 		const lifetimeMs = standInLifetimeSeconds * 1000;
 		type Kept = {
 			context: AuthContext;
@@ -683,7 +715,7 @@ export const sessionStandIn = defineModule({ name: "session" }, (m) => [
 			const from = found.state;
 			if (found.state !== "closed") {
 				found.state = "closing";
-				const failed = await sessionRules.failedParticipants(closers, sessionOf(handle, found));
+				const failed = closing ? await closing.closing(sessionOf(handle, found)) : [];
 				for (const failure of failed) c.log.warn("session.participant_failed", failure);
 				if (failed.length > 0) return { kind: "pending" as const, cookies: removed, session, from };
 			}
@@ -694,7 +726,7 @@ export const sessionStandIn = defineModule({ name: "session" }, (m) => [
 			return { kind: "closed" as const, cookies: removed, session, from };
 		};
 		const stand: Sessions = {
-			recent: (at) => c.clock.now() - at <= sessionRules.credentialsSecondsDefault * 1000,
+			recent,
 			enter: async (request) => (await enteredAt(handleIn(request)))?.session,
 			enterFor: (request, level) => enterAt(handleIn(request), level),
 			entryOf: (handle, level = "use") => enterAt(handle, level),

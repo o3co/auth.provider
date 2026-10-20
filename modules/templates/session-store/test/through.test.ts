@@ -3,9 +3,12 @@ import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
-import { participants, type Session, sessions } from "@mod/session";
+import { type Session, sessions } from "@mod/session";
 import sessionLifecycle from "@mod/session-lifecycle/module";
 import { sessionLifecycleConfig } from "@mod/session-lifecycle/testing";
+import { participants } from "@mod/session-participants";
+import sessionParticipants from "@mod/session-participants/module";
+import sessionRequirements from "@mod/session-requirements/module";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { expect, it } from "vitest";
@@ -32,6 +35,8 @@ async function boot() {
 		modules: [
 			http,
 			sessionLifecycle,
+			sessionRequirements,
+			sessionParticipants,
 			cookiesModule,
 			wiring,
 			subjectRevocationStandIn,

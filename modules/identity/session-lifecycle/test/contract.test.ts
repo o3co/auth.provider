@@ -3,8 +3,12 @@ import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
-import { entryRequirements, participants, sessions } from "@mod/session";
+import { sessions } from "@mod/session";
 import { type PlaceOptions, type SessionsPlace, sessionsContract } from "@mod/session/testing";
+import { participants } from "@mod/session-participants";
+import sessionParticipants from "@mod/session-participants/module";
+import { entryRequirements } from "@mod/session-requirements";
+import sessionRequirements from "@mod/session-requirements/module";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { describe, expect, it } from "vitest";
@@ -49,6 +53,8 @@ async function placeOver(
 			http,
 			cookiesModule,
 			sessionLifecycle,
+			sessionRequirements,
+			sessionParticipants,
 			stores.module,
 			subjectRevocationStandIn,
 			...modules,
@@ -80,6 +86,9 @@ async function placeOver(
 		},
 		listingCap: stores.listingCap,
 		failNextListing: () => stores.down.listed.failNext("add"),
+		betweenCookieAndSession: (meanwhile) => {
+			stores.afterIndexRead.next = meanwhile;
+		},
 	};
 }
 

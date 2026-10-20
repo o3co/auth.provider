@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { audit, declaredAudit } from "@mod/audit";
 import { csrfChecked } from "@mod/csrf";
-import { type HttpRequest, type HttpResponse, noStore, routes, use } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer, routes, use } from "@mod/http";
 import { defineModule, isUnavailable, setting } from "@mod/kernel";
 import { loginSource } from "@mod/login-attributes";
 import { amrSources, logins } from "@mod/login-gates";
@@ -60,12 +60,8 @@ const accountKey = (identifier: string) =>
 	createHash("sha256").update(identifier.normalize("NFKC").toLowerCase()).digest("base64url");
 
 /** A JSON answer that is never cached, setting the cookies given. */
-const answer = (status: number, json: unknown, cookies?: readonly string[]): HttpResponse => ({
-	status,
-	headers: noStore,
-	body: { json },
-	...(cookies ? { cookies } : {}),
-});
+const answer = (status: number, json: unknown, cookies?: readonly string[]): HttpResponse =>
+	jsonAnswer(status, json, cookies ? { cookies } : {});
 
 /** What a password login proves. */
 const proves: readonly string[] = ["pwd"];
@@ -131,10 +127,11 @@ export default defineModule({ name: "login-password", section }, (m) => [
 			if (!reserved) return answer(503, { error: "service_unavailable" });
 			if (reserved.kind === "held") {
 				const seconds = Math.max(1, Math.ceil((reserved.retryAfterMs ?? windowMs) / 1000));
-				return {
-					...answer(429, { error: "too_many_attempts" }),
-					headers: { ...noStore, "retry-after": String(seconds) },
-				};
+				return jsonAnswer(
+					429,
+					{ error: "too_many_attempts" },
+					{ headers: { "retry-after": String(seconds) } },
+				);
 			}
 			const verified = await known.verify(username, password).catch(async (error) => {
 				// A guess never judged is handed back; the run goes on without it.

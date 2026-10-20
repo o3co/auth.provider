@@ -11,12 +11,13 @@
 - `Source`: the address, the scheme, whether it was determined, and the client's certificate as `client-certificate` reads it.
 - `sourceSettings`: a schema part with `trusted-proxies` and `proxy-hops`, its keys in the settings list.
 - `proxiesOf`: those settings → the trusted proxies.
-- `addressList`: a schema for a setting holding IP addresses or CIDR blocks, as `trusted-proxies` takes them; `addressesOf`: such entries → whether an address is among them (none for one that is not an address).
+- `addressList`: a schema for a setting holding IP addresses or CIDR blocks, as `trusted-proxies` takes them, a block of every address included; `addressesOf`: such entries → whether an address is among them (none for one that is not an address).
 - `sourceOf`: the trusted proxies, the direct peer and the headers → `Source`.
 - `determinedSource`: a request → its source address, only when it was determined.
 - `ignoredForwarding`: whether to warn now of `X-Forwarded-For` from a peer not trusted.
 
 ## Invariants
+- A trusted proxy covering every address of a family (`/0` however written, or every IPv4 address mapped into IPv6, as `::ffff:0:0/96` or `::/1`, since a mapped peer is checked as IPv4) refuses boot at its entry: every client would be a proxy, so every source would be undetermined.
 - A trusted proxy is an IP address without a zone, or a CIDR block with one decimal prefix length without a leading zero.
 - No proxy is trusted by default.
 - `proxy-hops` is a whole number from 1 to 10, and 1 by default.

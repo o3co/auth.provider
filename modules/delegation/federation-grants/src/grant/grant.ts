@@ -80,13 +80,10 @@ const credentialsShape = z
 const stepShape = z
 	.strictObject({
 		format: z.literal(1),
-		kind: z.enum(["link", "question", "upstream"]),
+		kind: z.enum(["link", "question"]),
 		grant: z.string().min(1),
 		intent: z.string().min(1),
 		session: z.string().min(1).optional(),
-		verifier: z.string().min(1).optional(),
-		nonce: z.string().min(1).optional(),
-		connection: z.string().min(1).optional(),
 		taken: z.boolean().optional(),
 	})
 	.readonly();

@@ -4,7 +4,8 @@ import { type HttpRequest, type HttpResponse, routes, site, use } from "@mod/htt
 import { metadata } from "@mod/issuer";
 import { contract, defineModule } from "@mod/kernel";
 import { requestsPerSource } from "@mod/rate-limit";
-import { participants, sessions } from "@mod/session";
+import { sessions } from "@mod/session";
+import { participants } from "@mod/session-participants";
 import { upstreamEnds } from "./contract.ts";
 import { endingFrom } from "./ending/ending.ts";
 import { type Notices, noticesFrom } from "./notices/notices.ts";

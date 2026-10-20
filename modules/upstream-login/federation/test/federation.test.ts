@@ -2,10 +2,17 @@ import { createHash } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import cookiesModule from "@mod/cookies/module";
 import { csrfStandIn } from "@mod/csrf/testing";
-import { listening } from "@mod/http";
+import { listening, type Route, requestEnds, routes } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
-import { assemble, BootRefused, defineModule, kernelConfig, type Module } from "@mod/kernel";
+import {
+	assemble,
+	BootRefused,
+	contract,
+	defineModule,
+	kernelConfig,
+	type Module,
+} from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { loginSource } from "@mod/login-attributes";
 import { type LoginFrom, loginGates, logins, openedAfterHold, returnPaths } from "@mod/login-gates";
@@ -19,6 +26,10 @@ import { type LoginFacts, type Session, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
+import { heldLoginStore, type StoredHeldLogin } from "@mod/upstream-handoff";
+import handoffModule from "@mod/upstream-handoff/module";
+import { roundTripStore, type StoredRoundTrip } from "@mod/upstream-round-trip";
+import roundTripModule from "@mod/upstream-round-trip/module";
 import {
 	type Delegation,
 	idpType,
@@ -35,7 +46,6 @@ import { afterEach, beforeEach, describe, expect, expectTypeOf, it } from "vites
 import { z } from "zod";
 import federationModule from "../src/module.ts";
 import { section } from "../src/section.ts";
-import { type StoredTransaction, transactionStore } from "../src/store.ts";
 import { federationConfig, testIdpType } from "../src/testing.ts";
 
 /** The time every test starts at; a test that moves the clock moves it only for itself. */
@@ -90,7 +100,10 @@ interface Setup {
 	readonly federation?: Record<string, unknown>;
 	readonly extra?: Module[];
 	readonly answers?: Map<string, Answer>;
-	readonly store?: Module;
+	/** In place of the held logins' store. */
+	readonly held?: Module;
+	/** In place of the round trips' store. */
+	readonly trips?: Module;
 	readonly origin?: string | null;
 	/** Modules that receive upstream tokens; seal comes with them. */
 	readonly receivers?: Module[];
@@ -102,16 +115,26 @@ interface Setup {
 
 async function serve(setup: Setup = {}) {
 	const idp = testIdpType(setup.answers ?? answering(["good", alice]), setup.more);
-	const kept = memoryRecords<StoredTransaction>(() => now, { shards: 1, perShard: 1 });
 	const saved: string[] = [];
-	const store = defineModule({ name: "transactions" }, (m) => [
-		m.provide(transactionStore).by(() => ({
+	const keptHeld = memoryRecords<StoredHeldLogin>(() => now, { shards: 1, perShard: 1 });
+	const held = defineModule({ name: "held" }, (m) => [
+		m.provide(heldLoginStore).by(() => ({
 			save: async (key, value, lifetimeMs) => {
 				saved.push(JSON.stringify(value));
-				return kept.records.create(key, value, lifetimeMs);
+				return keptHeld.records.create(key, value, lifetimeMs);
 			},
-			update: kept.records.change,
-			remove: kept.records.remove,
+			update: keptHeld.records.change,
+			remove: keptHeld.records.remove,
+		})),
+	]);
+	const keptTrips = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
+	const trips = defineModule({ name: "trips" }, (m) => [
+		m.provide(roundTripStore).by(() => ({
+			save: async (key, value, lifetimeMs) => {
+				saved.push(JSON.stringify(value));
+				return keptTrips.records.create(key, value, lifetimeMs);
+			},
+			update: keptTrips.records.change,
 		})),
 	]);
 	const receiving = setup.receivers ?? [];
@@ -131,7 +154,10 @@ async function serve(setup: Setup = {}) {
 			simulatedStore().module,
 			federationModule,
 			idp.module,
-			setup.store ?? store,
+			handoffModule,
+			setup.held ?? held,
+			roundTripModule,
+			setup.trips ?? trips,
 			...(setup.extra ?? []),
 			...(receiving.length > 0 ? [sealModule, ...receiving] : []),
 		],
@@ -214,6 +240,7 @@ async function serve(setup: Setup = {}) {
 	};
 	return {
 		saved,
+		declared: <T>(of: ReturnType<typeof contract<T>>) => app.get(of),
 		resume,
 		login,
 		upstreams: () => app.get(upstreams),
@@ -685,6 +712,61 @@ describe("federation", () => {
 		]);
 	});
 
+	it("sends a browser whose login a gate holds to the held page, by 303 with no query, and its cookies", async () => {
+		const gate = defineModule({ name: "gate" }, (m) => [
+			m.contribute(loginGates).by(() => ({
+				name: "second",
+				hold: async () => ({
+					kind: "held" as const,
+					answer: { step: "next" },
+					cookies: ["step=1; Path=/"],
+				}),
+			})),
+		]);
+		const page = `${origin}/continue`;
+		for (const mode of [undefined, "form_post"] as const) {
+			const corp = { type: "test", issuer: "https://idp.example", ...(mode ? { mode } : {}) };
+			const s = await serve({
+				extra: [gate],
+				federation: { "held-page": page, idps: { corp } },
+			});
+			const started = await s.begin();
+			const query = `code=good&state=${started.state}`;
+			const held = mode
+				? await s.post(`${base}/corp/callback`, query, started.cookie)
+				: await s.callback(query, started.cookie);
+			expect([held.status, held.location], mode).toEqual([303, page]);
+			expect(held.cookies, mode).toContain("step=1");
+			expect(held.cookies, mode).toContain(clearedOf(started.cookie));
+			await stop();
+		}
+	});
+
+	it("carries where a held login lands, as asked, else the landing, else the public origin's root", async () => {
+		const target = `${origin}/oauth/authorize?client_id=app`;
+		for (const [federation, query, lands] of [
+			[{}, `?redirect_to=${encodeURIComponent(target)}`, target],
+			[{ landing: "https://app.example/home" }, "", "https://app.example/home"],
+			[{}, "", `${origin}/`],
+		] as const) {
+			const gate = holdingGate();
+			const s = await serve({ extra: [gate.module, returnTo("/oauth/authorize")], federation });
+			await s.roundTrip("code=good", query);
+			expect(gate.held.map((h) => h.done)).toEqual([{ redirect_to: lands }]);
+			await stop();
+		}
+	});
+
+	it("refuses to boot on a held page off the public origin, naming its key", async () => {
+		await expect(
+			serve({ federation: { "held-page": "https://app.example/continue" } }),
+		).rejects.toSatisfy(
+			(error: unknown) =>
+				error instanceof BootRefused &&
+				error.refusals.some((r) => r.where === "federation.held-page"),
+		);
+	});
+
 	it("takes an answer in form_post only by POST, behind a cross-site cookie, and one in a query only by GET", async () => {
 		const s = await serve({
 			federation: {
@@ -727,15 +809,36 @@ describe("federation", () => {
 		expect((await s.get(`${base}/corp?max_age=123456789`)).status).toBe(302);
 	});
 
-	it("is unavailable when it cannot keep a transaction", async () => {
-		const alwaysExists = defineModule({ name: "transactions" }, (m) => [
-			m.provide(transactionStore).by(() => ({
-				save: async () => "exists" as const,
-				update: async () => undefined,
-				remove: async () => {},
+	it("answers a round trip carrying what it does not know as invalid_state, spent and its cookie cleared", async () => {
+		const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
+		const odd = defineModule({ name: "trips" }, (m) => [
+			m.provide(roundTripStore).by(() => ({
+				save: (key, value, lifetimeMs) =>
+					kept.records.create(
+						key,
+						{ ...(value as object), carried: { unheard: 1 } } as unknown as StoredRoundTrip,
+						lifetimeMs,
+					),
+				update: kept.records.change,
 			})),
 		]);
-		const s = await serve({ store: alwaysExists });
+		const s = await serve({ trips: odd });
+		const started = await s.begin();
+		const back = await s.callback(`code=good&state=${started.state}`, started.cookie);
+		expect([back.status, back.body]).toEqual([400, { error: "invalid_state" }]);
+		expect(back.cookies).toContain(clearedOf(started.cookie));
+		const again = await s.callback(`code=good&state=${started.state}`, started.cookie);
+		expect([again.status, again.cookies]).toEqual([400, []]);
+	});
+
+	it("is unavailable when it cannot keep a round trip", async () => {
+		const alwaysExists = defineModule({ name: "trips" }, (m) => [
+			m.provide(roundTripStore).by(() => ({
+				save: async () => "exists" as const,
+				update: async () => undefined,
+			})),
+		]);
+		const s = await serve({ trips: alwaysExists });
 		const res = await s.begin();
 		expect([res.status, res.body]).toEqual([503, { error: "temporarily_unavailable" }]);
 	});
@@ -769,6 +872,40 @@ describe("federation", () => {
 		for (const name of ["other", "constructor", "__proto__", "Corp"]) {
 			expect(of(name), name).toBeUndefined();
 		}
+	});
+
+	it("declares its start and its callback apart, each with its own reason and its rate limit, and each reaches its own", async () => {
+		const declared = contract<readonly Route[]>("test.declared");
+		const reached: string[] = [];
+		const probe = defineModule({ name: "probe" }, (m) => [
+			m.provide(declared).by((c) => c.collect(routes)),
+			m.contribute(requestEnds).by(() => ({ ended: (end) => void reached.push(end.route ?? "") })),
+		]);
+		const s = await serve({ extra: [probe] });
+		const ours = s.declared(declared).filter((r) => r.path.startsWith(`${base}/`));
+		expect(ours.map((r) => `${r.method} ${r.path}`).sort()).toEqual([
+			`GET ${base}/*`,
+			`GET ${base}/*/callback`,
+			`POST ${base}/*/callback`,
+		]);
+		const reasonOf = (path: string) =>
+			new Set(ours.filter((r) => r.path === path).map((r) => r.crossSite));
+		expect([...reasonOf(`${base}/*`)]).toEqual([
+			expect.stringMatching(/^A start is the user's own navigation/),
+		]);
+		expect([...reasonOf(`${base}/*/callback`)]).toEqual([
+			expect.stringMatching(/^A callback is the IdP's redirect or form_post/),
+		]);
+		for (const route of ours) {
+			// A GET says it changes state; any other method does.
+			if (route.method === "GET") expect(route.changesState, route.path).toBe(true);
+			expect(route.uses?.length, route.path).toBe(1);
+		}
+		const started = await s.begin();
+		await s.callback(`code=good&state=${started.state}`, started.cookie);
+		await s.post(`${base}/corp/callback`, "code=good");
+		await expect.poll(() => reached.length).toBe(3);
+		expect(reached).toEqual([`${base}/*`, `${base}/*/callback`, `${base}/*/callback`]);
 	});
 
 	it("limits starts and callbacks per source", async () => {
@@ -977,7 +1114,9 @@ describe("upstream tokens", () => {
 		const s = await serve({ answers, receivers: told.modules });
 		expect((await s.roundTrip("code=tokens")).status).toBe(302);
 		expect(told.told.map((t) => t.receiver)).toEqual(["a", "b"]);
-		expect(logged()).toContain('federation.receiver_failed {"receiver":"a","kind":"RangeError"}');
+		expect(logged()).toContain(
+			'upstream-handoff.receiver_failed {"receiver":"a","kind":"RangeError"}',
+		);
 		expect(logged().join()).not.toContain("secret");
 	});
 
@@ -992,19 +1131,15 @@ describe("upstream tokens", () => {
 
 	it("is unavailable when it cannot keep the tokens of a held login", async () => {
 		const gate = holdingGate();
-		const kept = memoryRecords<StoredTransaction>(() => now, { shards: 1, perShard: 1 });
-		const full = defineModule({ name: "transactions" }, (m) => [
-			m.provide(transactionStore).by(() => ({
-				save: async (key, value, lifetimeMs) =>
-					JSON.stringify(value).includes("sealed")
-						? "exists"
-						: kept.records.create(key, value, lifetimeMs),
-				update: kept.records.change,
-				remove: kept.records.remove,
+		const full = defineModule({ name: "held" }, (m) => [
+			m.provide(heldLoginStore).by(() => ({
+				save: async () => "exists" as const,
+				update: async () => undefined,
+				remove: async () => {},
 			})),
 		]);
 		const told = receivers(["a"]);
-		const s = await serve({ answers, extra: [gate.module], receivers: told.modules, store: full });
+		const s = await serve({ answers, extra: [gate.module], receivers: told.modules, held: full });
 		const res = await s.roundTrip("code=tokens");
 		expect([res.status, res.body]).toEqual([503, { error: "temporarily_unavailable" }]);
 		expect(res.cookies).toContain(clearedOf(res.started.cookie));

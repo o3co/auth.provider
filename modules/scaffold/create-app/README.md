@@ -12,26 +12,24 @@
 ## Not here
 - What each module's configuration means, and its fragment (`config.example` beside its package.json): each module's.
 - What the full template and a selection compose: `combinations`.
+- The local layer that boots a generated app for a test or a conformance run: `trial`.
 
 ## Offers
 - `generate`, and the `create-app` command around it (also `run`, the command on given arguments, answering its exit status, for a package that runs it): packages listed make their app; none makes a pattern's, `--pattern` naming it (default `full`), `--add` naming features to add, `--axis <owner>=<module>` an axis's choice and `--<group>` a group's features, comma-separated (not for full).
+- `--list` names, one a line, what `--add` takes: `combinations`' `addable`.
 - `patterns()`: each pattern's name, use, conformance areas and what conformance adds for its run.
 - The configuration reference and each package's `reference.conf` (its section's defaults as HOCON, for reading only), from each section's schema and fragment, written by `pnpm --filter @mod/create-app run configuration`; their tests check each key's description and default, how time and size are written, and that no `.default()` is left (internal module `references`).
 - The audit event reference beside it: each module's events as its `./audit-events` declares them through `audit`, written by the same command and held to the committed file the same way.
 - A kind two modules declare must be declared alike in the audit event reference.
-- `trialSettings(target, { redisUrl, port?, deployment?, leave?, allow?, plainLoopback?, clients? })`: for a generated app, by the modules its manifest depends on, an environment and a local layer that boot it for a test or a conformance run.
-  - Its hosts are under `.invalid` and its keys made fresh, never a deployment's values.
-  - The sections in `leave` get neither a variable nor a block.
-  - The lists given (`allow`, `plainLoopback`, `clients`) join the trial's one block for each.
-  - `mfa` is optional where composed.
-  - `webauthn`'s relying party is the trial's public origin.
-  - Where `subject-revocation-http` is composed, `http` trusts one proxy no request comes through: the module boots, and every source stays as sent.
-- For full and a pattern: the project's manifest and app, the configuration file, the local layer's and the environment's examples, a Dockerfile, a `.dockerignore` and a README; a pattern's README opens with its use and carries its card.
+- For full and a pattern: the project's manifest and app, the configuration file, the local layer's and the environment's examples, a Dockerfile, a `.dockerignore`, a README and `AGENTS.md`; a pattern's README opens with its use and carries its card.
+  - The README lists each composed module's card as installed, and points at the `## Deployment` section of each card that has one (the index marks those when published).
+  - The README tells how to try the app over plain http on this machine, and that a deployment keeps an https origin.
+  - `AGENTS.md` indexes where each composed module's card and section defaults lie as installed, and where the release's configuration and route references lie; it states nothing of its own.
 
 ## Invariants
 - A target that holds anything is refused, never overwritten; a missing or empty one is taken.
 - A module, sink, added feature or axis choice not named as an npm package is refused, before anything is written; so is a name the workspace lacks, one that is not a feature, a pattern or group not known, and axes or groups for full.
-- With a workspace, each dependency links to the workspace's package; a module the workspace does not hold is refused. Built into a bundle and given none, it reads the bundle's index: the app depends on each public bundle at the index's version, imports public entries, and takes the fragments the index holds; a module it does not hold is refused.
+- With a workspace, each dependency links to the workspace's package; a module the workspace does not hold is refused. The app also depends on `zod` at the packages' version. Built into a bundle and given none, it reads the bundle's index: the app depends on each public bundle at the index's version, imports public entries, and takes the fragments the index holds; a module it does not hold is refused.
 - A listed app's configuration file holds `kernel`'s section only, and no secret values.
 - A pattern whose store is kept in memory says in its README that the deployment runs as one instance.
 - The full template's and a pattern's configuration file reads the collected fragments' scalar keys from env only, holding no values; each variable is the section and key path joined by `_`, upper-cased, `-` as `_`.
@@ -48,7 +46,7 @@
 - Writes the target only; reads the workspace's package list, and the fragments of the modules the full template composes.
 
 ## Depends on
-- `kernel`, `combinations` (the modules it assembles become dependencies of the output); the HOCON library, to read the fragments.
+- `kernel`, `combinations` (the modules it assembles become dependencies of the output), `trial` (the references assemble on its layer); the HOCON library, to read the fragments.
 
 ## Vocabulary
 - output: a project created from the template.

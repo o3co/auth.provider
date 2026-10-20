@@ -1,25 +1,23 @@
 import { signerKeys } from "@mod/jwt-bearer";
 import { defineModule } from "@mod/kernel";
-import { credentialPolicy, outbound, outboundRefusals } from "@mod/outbound";
+import { outbound } from "@mod/outbound";
+import { credentialPolicy, destinationRefusal, outboundRefusals } from "@mod/outbound-policy";
 import { keysAt } from "./lookup.ts";
 import { section } from "./section.ts";
 
 export default defineModule({ name: "signer-keys-http", section, replicaSafe: true }, (m) => [
 	m.contribute(signerKeys).by(async (c) => {
 		const { "keys-url": url, "max-response-size": maxBytes, timeout: timeoutMs } = c.section;
-		// The operator's own URL: a host in `internal-hosts` is reached at a private address.
+		// The operator's own URL: a host in `internal-hosts` is reached at a private address at its origin.
 		const narrower = {
 			hosts: [new URL(url).hostname],
-			internal: true as const,
+			internal: url,
 			...(maxBytes === undefined ? {} : { maxBytes }),
 			...(timeoutMs === undefined ? {} : { timeoutMs }),
 		};
-		const refused = (await c.get(outboundRefusals)).explained(url, narrower);
+		const refused = destinationRefusal(await c.get(outboundRefusals), url, narrower);
 		if (refused !== undefined) {
-			return c.refuse(
-				"signer-keys-http.keys-url",
-				`outbound's destination policy refuses it: ${refused}`,
-			);
+			return c.refuse("signer-keys-http.keys-url", refused);
 		}
 		const { credential } = c.section;
 		if (credential !== undefined && (await c.get(credentialPolicy)).refusalOf([url])) {

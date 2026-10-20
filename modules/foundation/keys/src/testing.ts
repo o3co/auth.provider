@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
 import type { z } from "zod";
-import type { section } from "./section.ts";
+import type { section } from "./signing/section.ts";
 
 export type KeysSettings = z.input<typeof section>;
 

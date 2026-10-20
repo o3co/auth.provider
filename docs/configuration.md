@@ -158,6 +158,7 @@ From `@mod/federation`.
 |---|---|---|---|---|---|---|
 | `federation.idps` | map | `{}` |  |  |  | Each IdP by name (1 to 32 lowercase letters, digits and `-`, not starting with `-`): its `type`, `upstream-amr` (the upstream's amr values mapped to ours; none by default; mapping one to `mfa`, say, trusts the upstream's claim for that amr and any acr it satisfies, such as `urn:o3co:acr:mfa`) and the type's own settings. |
 | `federation.landing` | string |  |  |  |  | The https URL a login lands on when it named no return target; the public origin's root by default. |
+| `federation.held-page` | string |  |  |  |  | The page a browser goes to when a gate holds its login, to go on there: on the public origin, as it reads the held login with this deployment's cookies; https, or http on a loopback host. Without it, a held login is answered 403 with the gate's answer. |
 | `federation.transaction-lifetime` | string | `10m` |  |  |  | How long a round trip, or a held login's tokens, may wait, from 1m to 1h. |
 | `federation.requests` | integer (1–1000) | `60` |  |  |  | Starts and callbacks allowed per source in each window. |
 | `federation.window` | string | `1m` |  |  |  | The window `requests` counts in, from 1s to 1h. |
@@ -353,7 +354,7 @@ From `@mod/mfa-email`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `mfa-email.adds-second-factor` | boolean | `false` |  |  |  | Whether a code by mail adds `mfa`; by default it is a second factor of its own amr only. |
+| `mfa-email.adds-second-factor` | boolean | `false` |  |  |  | Whether a code by mail adds `mfa` and so meets a required second factor; by default it is a way back of its own amr only. |
 | `mfa-email.code-lifetime` | string | `10m` |  |  |  | How long a code by mail lives, from 1m to 30m, for an enrolment or a sign-in; the proof before a first binding keeps its ten minutes. |
 
 ## mfa-flows
@@ -402,7 +403,7 @@ From `@mod/mfa-witness-http`.
 | `mfa-witness-http.enroll-url` | string |  | yes | `MFA_WITNESS_HTTP_ENROLL_URL` | `https://ledger.example.invalid/mfa-witness/enroll` | Where the mark is set to a token unless one is set. At the same origin as the other two URLs. Plain http is reached only where outbound's policy names it. |
 | `mfa-witness-http.clear-url` | string |  | yes | `MFA_WITNESS_HTTP_CLEAR_URL` | `https://ledger.example.invalid/mfa-witness/clear` | Where the mark is removed. At the same origin as the other two URLs. Plain http is reached only where outbound's policy names it. |
 | `mfa-witness-http.credential` | string |  | yes | `MFA_WITNESS_HTTP_CREDENTIAL` | `REPLACE-RANDOM-BEARER-TOKEN-32-BYTES` | A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material, sent on every call. |
-| `mfa-witness-http.timeout` | string | `5s` |  |  |  | How long a call may take, from 1ms to 1m, narrowing outbound's cap; a write's deadline is its sending time plus this. |
+| `mfa-witness-http.timeout` | string | `5s` |  |  |  | How long a call may take, from 1ms to 1m, narrowing outbound's cap; a write's deadline is its sending time plus the time outbound holds the call to. |
 | `mfa-witness-http.max-response-size` | string |  |  |  |  | The largest answer read, from 1B to 16MiB, narrowing outbound's cap. |
 
 ## mtls
@@ -449,12 +450,12 @@ From `@mod/outbound`.
 | `outbound.max-response-size` | string | `64KiB` |  |  |  | The largest response body a request takes, from 1B to 16MiB. |
 | `outbound.signed-max-response-size` | string | `1MiB` |  |  |  | The largest response body a request for signed material takes, from 1B to 16MiB. |
 | `outbound.timeout` | string | `5s` |  |  |  | The one deadline covering a request's resolving, connecting, headers and body, from 1ms to 1m. |
+| `outbound.internal-hosts` | list of string | `[]` |  |  |  | The hosts a URL from the operator's own configuration may reach at a private address (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7); `.name` covers the name and the names under it. |
 | `outbound.max-concurrent` | integer (1–1024) | `16` |  |  |  | Requests under way at once; one more is unavailable at once. |
 | `outbound.direct-despite-proxy` | boolean | `false` |  |  |  | Whether to boot while a proxy variable is set and no proxy is configured; the variables are never read. |
 | `outbound.proxy` | string |  |  |  |  | The proxy every https request goes through by CONNECT, but to direct hosts; it resolves names and checks their addresses. |
 | `outbound.proxy-authorization` | string |  |  |  |  | The Proxy-Authorization value the proxy asks for, such as `Basic …`: printable ASCII on one line. |
 | `outbound.direct-hosts` | list of string | `[]` |  |  |  | The hosts reached directly while a proxy is set; `.name` covers the name and the names under it. |
-| `outbound.internal-hosts` | list of string | `[]` |  |  |  | The hosts a URL from the operator's own configuration may reach at a private address (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7); `.name` covers the name and the names under it. |
 
 ## passkey-registration
 
@@ -793,7 +794,7 @@ From `@mod/rp-logout`.
 
 | Key | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `sections.rp-logout.post-logout-redirect-uris` | list of string | `[]` |  | Where a logout may send the browser back to, each a URI `authorize` lets a client register; a return asked for is used only when it matches one exactly. |
+| `sections.rp-logout.post-logout-redirect-uris` | list of string | `[]` |  | Where a logout may send the browser back to, each a URI `redirect-uris` lets a client register; a return asked for is used only when it matches one exactly. |
 | `sections.rp-logout.frontchannel-logout-uri` | string |  |  | The page framed after a logout (OpenID Connect Front-Channel Logout 1.0): an http or https URL without userinfo, a fragment, or iss or sid in its query, at one of the client's redirect URIs' origins. |
 | `sections.rp-logout.frontchannel-logout-session-required` | boolean | `true` |  | Whether the framed page's URL gets the session's sid beside iss. |
 | `sections.rp-logout.backchannel-logout-uri` | string |  |  | Where the logout token is posted after a logout (OpenID Connect Back-Channel Logout 1.0): an http or https URL without userinfo or a fragment. |

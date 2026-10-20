@@ -20,6 +20,7 @@ describe("federation: linking an upstream identity to the account logged in", ()
 	beforeAll(async () => {
 		upstream = await fakeUpstream(client);
 		const scene = federationScene({
+			links: true,
 			origin,
 			keys: {
 				signing: {

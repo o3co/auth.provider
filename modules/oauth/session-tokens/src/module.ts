@@ -1,4 +1,4 @@
-import { sessionIssuances } from "@mod/grants";
+import { sessionIssuances, type TokenTie, tokenTies } from "@mod/grants";
 import {
 	type BuildContext,
 	contract,
@@ -7,7 +7,8 @@ import {
 	setting,
 	Unavailable,
 } from "@mod/kernel";
-import { participants } from "@mod/session";
+import { type Sessions, sessions } from "@mod/session";
+import { participants } from "@mod/session-participants";
 import { referenceOf, type Tokens, tokens } from "@mod/tokens";
 import { z } from "zod";
 import { sessionTokens } from "./contract.ts";
@@ -82,8 +83,10 @@ const recorder =
 		const { pushedOut } = await kept.add(session, referenceOf(token), keepMs);
 		if (pushedOut.length === 0) return;
 		parts.log.info("session-tokens.pushed_out", { count: pushedOut.length });
-		// Adds at once past the margin pushed one out unlisted: listed now, the window left.
-		if (!near) await sessions.add(session);
+		// Listed again whether or not it was before: adds at once past the margin pushed one out
+		// unlisted, and a sweep finding nothing awaiting may have taken it off before the add. The
+		// window left is a host stopping between the add and this.
+		await sessions.add(session);
 		await settler(parts)(session);
 	};
 
@@ -106,6 +109,28 @@ const partsOf = async (c: BuildContext<z.output<typeof section>>): Promise<Parts
 	};
 };
 
+/**
+ * The `session` tie: the session a token was issued from, while the session lets it in. A token
+ * issued from it is recorded there by `issue`; joining it only checks the session again.
+ */
+const sessionTie = (index: TokenIndex, open: Pick<Sessions, "entryOf">): TokenTie => ({
+	name: "session",
+	tieOf: async (tokenId) => {
+		const handle = await index.read(tokenId);
+		if (handle === undefined) return { kind: "none" };
+		const entry = await open.entryOf(handle);
+		if (entry.kind === "absent") return { kind: "ended", reason: "session has ended" };
+		if (entry.kind === "short") {
+			return { kind: "ended", reason: "session is short of a requirement" };
+		}
+		return {
+			kind: "held",
+			session: handle,
+			join: async () => (await open.entryOf(handle)).kind === "entered",
+		};
+	},
+});
+
 /** The parts built once, so the margin is checked once. */
 const built = contract<Parts>("session-tokens.parts");
 
@@ -126,6 +151,9 @@ export default defineModule({ name: "session-tokens", section }, (m) => [
 		};
 	}),
 	m.contribute(sessionIssuances).by(async (c) => ({ issued: recorder(await c.get(built)) })),
+	m
+		.contribute(tokenTies)
+		.by(async (c) => sessionTie((await c.get(built)).index, await c.get(sessions))),
 	m.contribute(participants).by(async (c) => {
 		const kept = await c.get(issuedTokens);
 		const revoking = await c.get(tokens);

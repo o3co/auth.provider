@@ -1,25 +1,8 @@
 import { contract, deepFreeze, Unavailable } from "@mod/kernel";
+import type { Narrower } from "@mod/outbound-policy";
 
-/** Why a destination was refused before anything was sent, or why its answer was. */
-export type RefusalReason =
-	| "scheme"
-	| "userinfo"
-	| "port"
-	| "denied"
-	| "not-allowed"
-	| "special-address"
-	| "redirect"
-	/** A credential where none may go: material fetched for its signature. */
-	| "credential";
-
-export class DestinationRefused extends Error {
-	readonly reason: RefusalReason;
-	constructor(reason: RefusalReason) {
-		super(`outbound destination refused: ${reason}`);
-		this.name = "DestinationRefused";
-		this.reason = reason;
-	}
-}
+// The destination policy's own, as `fetch` takes and throws them.
+export { DestinationRefused, type Narrower, type RefusalReason } from "@mod/outbound-policy";
 
 /** Why no usable answer came, for a caller to log by; it carries no value and no body. */
 export type OutboundFailure =
@@ -47,19 +30,6 @@ export interface OutboundRequest {
 	readonly credential?: string;
 }
 
-/** What a caller narrows for its own calls; it never widens the operator's policy. */
-export interface Narrower {
-	/** Hosts as an operator lists them: `.name` is the name and every name under it. */
-	readonly hosts?: readonly string[];
-	readonly maxBytes?: number;
-	readonly timeoutMs?: number;
-	/**
-	 * The URL is the operator's, from their configuration, never one given from outside; its host may
-	 * then reach a private address when `internal-hosts` lists it.
-	 */
-	readonly internal?: true;
-}
-
 export interface OutboundResponse {
 	readonly status: number;
 	/** By lowercased name; repeated headers are joined with ", ". */
@@ -76,28 +46,6 @@ export interface Outbound {
 }
 
 export const outbound = contract<Outbound>("outbound");
-
-/** The destination policy's refusals, as an operator reads them at boot, apart from sending: no name is resolved. */
-export interface OutboundRefusals {
-	/**
-	 * Why the policy refuses the URL and what to set, `<reason>: <what to set>`, naming keys alone and
-	 * never the URL's host, port or any other value; undefined when the policy lets it through.
-	 */
-	explained(url: string, narrower?: Narrower): string | undefined;
-}
-
-export const outboundRefusals = contract<OutboundRefusals>("outbound.refusals");
-
-/** Why a credential must not go to a set of URLs: more than one origin, or a URL neither https nor a named plain-loopback pair. */
-export type CredentialRefusal = "origins" | "scheme";
-
-/** Where a caller's credential may go, answered at boot, apart from sending. */
-export interface CredentialPolicy {
-	/** Why a credential must not be sent to these URLs, or undefined when it may go to every one. */
-	refusalOf(urls: readonly string[]): CredentialRefusal | undefined;
-}
-
-export const credentialPolicy = contract<CredentialPolicy>("outbound.credentials");
 
 /** An answer read as JSON: one object from the status asked for (`200` unless named), frozen, or any other answer with its status. */
 export type JsonAnswer =
@@ -119,8 +67,6 @@ export function jsonObjectOf(answer: OutboundResponse, status = 200): JsonAnswer
 		return other;
 	}
 }
-
-export { type HostEntry, hostEntryOf, withinHosts } from "./policy.ts";
 
 /** What a caller of signed material narrows: the hosts it fetches from are always named. */
 export interface SignedNarrower extends Narrower {

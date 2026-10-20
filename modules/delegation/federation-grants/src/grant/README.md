@@ -26,7 +26,7 @@ Internal module of `federation-grants`: what a grant and a browser step are, and
 
 ## Data
 - Grant format 1: client, subject, connection, status and reason, scopes shown, times, upstream account, current intent, sealed credentials, version, rotations of the window.
-- Step format 1: kind, grant, intent, session, and an upstream round trip's verifier and nonce.
+- Step format 1: kind (`link` or `question`), grant, intent, session, and whether it was taken. An upstream round trip's verifier and nonce are `upstream-round-trip`'s.
 
 ## Depends on
-- `kernel`, `http` (the public origin), `seal`, `subject-revocation`, `clients`, `federation`; the package's store interfaces
+- `kernel`, `http` (the public origin), `seal`, `subject-revocation`, `clients`, `upstreams` (the connections' delegations); the package's store interfaces

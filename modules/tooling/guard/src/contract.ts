@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { budgetRules, dependencyCards } from "./budget/budget.ts";
 import { laidOut } from "./documents.ts";
 import { networkRules } from "./network/network.ts";
+import { declaredRecordRules } from "./recorded/recorded.ts";
 import { foreignFiles, namesLine } from "./references.ts";
 import {
 	branchesOf,
@@ -13,6 +14,7 @@ import {
 	keyedByImports,
 	packageOf,
 	randomReads,
+	valuesFrom,
 } from "./source.ts";
 import { type Surface, surfaceOf } from "./surface.ts";
 import { budgetsAsTest, type Scope, scopeOf } from "./units.ts";
@@ -131,18 +133,22 @@ function dependencyRules(s: Scope, p: Pkg) {
 			}
 		}
 	}
-	// G16: a feature never depends on a capability; its tests may use a capability's stand-in.
+	// G16: a feature never depends on a capability, nor on what declares forWiring; its tests may use the stand-in.
+	const g16 = "G16 a feature depends on no capability, nor on what declares forWiring";
+	if (p.manifest.forWiring !== undefined && p.manifest.forWiring !== true) {
+		report(g16, p.name, "forWiring is true only");
+	}
 	if (budget.capabilityBlind.includes(kindOf(p))) {
 		for (const dep of workspaceDeps(p, true)) {
-			if (kindOf(byName.get(dep) as Pkg) !== budget.capabilityKind) continue;
+			const target = byName.get(dep) as Pkg;
+			if (kindOf(target) !== budget.capabilityKind && target.manifest.forWiring !== true) continue;
 			const beyondStandIn = s.sources(p).some((file) =>
 				importsOf(join(p.dir, file)).some((use) => {
 					const target = packageOf(use.specifier);
 					return target?.name === dep && target.subpath !== "testing";
 				}),
 			);
-			if (runtime.has(dep) || beyondStandIn)
-				report("G16 a feature depends on no capability", p.name, dep);
+			if (runtime.has(dep) || beyondStandIn) report(g16, p.name, dep);
 		}
 	}
 }
@@ -215,6 +221,90 @@ function commonVocabulary(s: Scope, p: Pkg, surfaces: ReadonlyMap<string, Surfac
 		for (const name of importedNames(join(p.dir, file))) {
 			const owner = foreign.get(name);
 			if (owner) s.report(rule, `${p.name}/${file}`, `${name} (${owner})`);
+		}
+	}
+}
+
+/** G28: a dependency named as helpers lends functions and types, never a contract or an extension point. */
+function helperRules(s: Scope, p: Pkg, surfaces: ReadonlyMap<string, Surface>) {
+	const helpers = Array.isArray(p.manifest.helpers) ? p.manifest.helpers : [];
+	for (const file of s.sources(p).filter((f) => !s.isTest(f))) {
+		for (const helper of helpers) {
+			const tokens = surfaces.get(helper)?.tokens ?? new Set<string>();
+			for (const name of valuesFrom(join(p.dir, file), helper)) {
+				if (tokens.has(name) || (name === "*" && tokens.size > 0)) {
+					s.report(
+						"G28 a helpers dependency lends no contract",
+						`${p.name}/${file}`,
+						`${name} (${helper})`,
+					);
+				}
+			}
+		}
+	}
+}
+
+/** G29: a test composing every module a feature bridge joins, and a module contributing to its points, composes the bridge. */
+function bridgeRules(s: Scope, surfaces: ReadonlyMap<string, Surface>) {
+	const rule =
+		"G29 a test composing a bridge's modules and a module contributing to it composes the bridge";
+	// A feature bridge's points collect what decides answers; a foundation bridge's, operational counts.
+	const bridges = s.packages.filter(
+		(p) => Array.isArray(p.manifest.joins) && s.kindOf(p) === s.budget.featureKind,
+	);
+	const text = (path: string) => readFileSync(path, "utf8");
+	// A package contributes to a bridge when its shipped code takes one of the bridge's points.
+	const contributes = new Map<string, Pkg[]>();
+	for (const p of s.packages) {
+		const shipped = s.sources(p).filter((file) => !s.isTest(file));
+		const takes = (b: Pkg) => {
+			const points = surfaces.get(b.name)?.points ?? new Set<string>();
+			return shipped.some((file) => {
+				const path = join(p.dir, file);
+				if (!text(path).includes(`"${b.name}"`)) return false;
+				return valuesFrom(path, b.name).some((name) => points.has(name));
+			});
+		};
+		contributes.set(
+			p.name,
+			bridges.filter((b) => b !== p && takes(b)),
+		);
+	}
+	const ownerOf = ({ manifest: { replaces, adapts } }: Pkg) =>
+		typeof replaces === "string" ? replaces : typeof adapts === "string" ? adapts : undefined;
+	for (const p of s.packages) {
+		const own = p.manifest.exports?.["./module"];
+		for (const file of s.sources(p).filter((f) => s.isTest(f))) {
+			const path = join(p.dir, file);
+			const composed = new Set<string>();
+			const compose = (name: string) => {
+				composed.add(name);
+				const q = s.byName.get(name);
+				const owner = q && ownerOf(q);
+				if (owner) composed.add(owner);
+			};
+			for (const use of importsOf(path)) {
+				if (use.specifier.startsWith(".")) {
+					if (own && resolve(dirname(path), use.specifier) === resolve(p.dir, own)) compose(p.name);
+					continue;
+				}
+				const target = packageOf(use.specifier);
+				if (!target || !s.byName.has(target.name)) continue;
+				if (target.subpath === "module") compose(target.name);
+				// A stand-in is a value a package's `./testing` names `…StandIn`.
+				const standIn = (name: string) => name.endsWith("StandIn");
+				if (target.subpath === "testing" && valuesFrom(path, use.specifier).some(standIn)) {
+					compose(target.name);
+				}
+			}
+			for (const name of composed) {
+				for (const b of contributes.get(name) ?? []) {
+					const joins = b.manifest.joins as readonly unknown[];
+					const all = joins.every((j) => typeof j === "string" && composed.has(j));
+					if (all && !composed.has(b.name))
+						s.report(rule, `${p.name}/${file}`, `${b.name} (${name})`);
+				}
+			}
 		}
 	}
 }
@@ -336,10 +426,13 @@ export function check(
 		sourceRules(s, p);
 		networkRules(s, p);
 		commonVocabulary(s, p, surfaces);
+		helperRules(s, p, surfaces);
 		budgetRules(s, p, surfaces, importedCards);
 	}
 	wiringRules(s);
 	axisRules(s);
+	bridgeRules(s, surfaces);
+	declaredRecordRules(s);
 	documentRules(s, documents);
 	return violations;
 }

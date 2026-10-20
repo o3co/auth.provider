@@ -75,11 +75,11 @@ it("boots on the test configuration against a Redis, answers liveness and readin
 	const target = await installed();
 	// With a reachable Redis the composition boots as a multi deployment.
 	const port = await freePort();
-	const env = await configured(target, { deployment: "multi", redisUrl, port });
+	await configured(target, { deployment: "multi", redisUrl, port });
 	let output = "";
 	const child = spawn(process.execPath, ["src/main.ts"], {
 		cwd: target,
-		env: { ...env, APP_CONFIG: "config/local.conf,config/application.conf" },
+		env: { APP_CONFIG: "config/local.conf,config/application.conf" },
 	});
 	app = child;
 	child.stdout.on("data", (chunk) => {

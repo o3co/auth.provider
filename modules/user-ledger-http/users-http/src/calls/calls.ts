@@ -7,20 +7,21 @@ import {
 	type OutboundResponse,
 	OutboundUnavailable,
 } from "@mod/outbound";
+import type { ConfiguredUrl } from "@mod/url-setting";
 import { isWellFormedSubject, userAttribute, type Verified } from "@mod/users";
 
 /** What the calls are made with: outbound, the credential if any, the narrower of each URL, and the log. */
 export interface CallParts {
 	readonly out: Outbound;
 	readonly credential: string | undefined;
-	readonly narrowerOf: (url: string) => Narrower;
+	readonly narrowerOf: (url: ConfiguredUrl) => Narrower;
 	readonly warn: (event: string, fields: LogFields) => void;
 }
 
 /** The ledger's calls: the password call, and a lookup that posts what it looks up. */
 export interface Calls {
-	verify(url: string, identifier: string, password: string): Promise<Verified>;
-	lookup(url: string, asked: Readonly<Record<string, string>>): Promise<Verified>;
+	verify(url: ConfiguredUrl, identifier: string, password: string): Promise<Verified>;
+	lookup(url: ConfiguredUrl, asked: Readonly<Record<string, string>>): Promise<Verified>;
 }
 
 const none: Verified = deepFreeze({ kind: "none" });
@@ -72,7 +73,7 @@ export function calls(parts: CallParts): Calls {
 	};
 	const headers = deepFreeze({ accept: "application/json", "content-type": "application/json" });
 	const sent = credential === undefined ? {} : { credential: `Bearer ${credential}` };
-	const post = (url: string, body: unknown) =>
+	const post = (url: ConfiguredUrl, body: unknown) =>
 		out
 			.fetch(url, { method: "POST", headers, body: JSON.stringify(body), ...sent }, narrowerOf(url))
 			.catch((error: unknown) => {

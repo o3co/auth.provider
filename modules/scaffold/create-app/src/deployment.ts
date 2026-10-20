@@ -9,7 +9,7 @@ import {
 	type Written,
 	writtenOf,
 } from "./fragments.ts";
-import { packagesFor } from "./packages.ts";
+import { type Card, packagesFor, type Release } from "./packages.ts";
 import {
 	filled,
 	mainSource,
@@ -82,18 +82,84 @@ export async function writeDeployment(
 		[paths.application]: applicationConf(fragments),
 		[paths.localExample]: localConfExample(fragments),
 		".env.example": envExample(settings),
+		"AGENTS.md": agentsIndex(packages.cards(names), packages.release()),
 		Dockerfile: dockerfile(),
 		".dockerignore": lines(dockerIgnored),
 		".gitignore": lines(gitIgnored),
 		"README.md": await filled(readme.template, {
 			...paths,
 			...guideLists(settings, writtenOf(fragments)),
+			cards: cardLines(packages.cards(names)),
+			askedOfDeployment: deploymentLines(packages.cards(names)),
+			firstLogin: firstLoginLine(packages.release()),
 			port: String(httpPort),
 			hostEnv: envName("http.host"),
 			portEnv: envName("http.port"),
 			...readme.fill,
 		}),
 	});
+}
+
+/** Each composed module's card, where the app installs it. */
+const cardLines = (cards: readonly Card[]) =>
+	cards.map((c) => `- \`${c.name}\`: \`${c.card}\``).join("\n");
+
+/** The Deployment section of each composed module whose card has one; nothing when none has. */
+function deploymentLines(cards: readonly Card[]): string {
+	const asking = cards.flatMap((c) =>
+		c.deployment ? [`- \`${c.name}\`: \`${c.deployment}\``] : [],
+	);
+	if (asking.length === 0) return "";
+	return [
+		"",
+		"## What the composed modules ask of the deployment",
+		"",
+		"Each of these modules talks to a server the deployment provides; the Deployment section of its card says what that server must offer.",
+		"",
+		...asking,
+		"",
+	].join("\n");
+}
+
+/** The release's walk to a first login, where its repository is stated; nothing otherwise. */
+function firstLoginLine(release: Release): string {
+	const at = atRelease(release, "docs/recipe-first-login.md");
+	return at ? `A first login, step by step: ${at}\n\n` : "";
+}
+
+/** Where a document of the release lies, at its version's tag; none without a repository. */
+const atRelease = (release: Release, path: string) =>
+	release.repository ? `${release.repository}/blob/v${release.version}/${path}` : undefined;
+
+/**
+ * The index for an agent working on the app: where each composed module's card and section
+ * defaults lie as installed, which are the truth; it states no fact of its own.
+ */
+function agentsIndex(cards: readonly Card[], release: Release): string {
+	const whole = ["docs/configuration.md", "docs/routes.md"].flatMap((path) => {
+		const at = atRelease(release, path);
+		return at ? [`- \`${path}\` of the release: ${at}`] : [];
+	});
+	return `${[
+		"# Index for agents",
+		"",
+		"Each composed module's card is the truth about it; this index only points where the cards lie, as installed, and states nothing of its own.",
+		"A module's configuration keys, their defaults and descriptions, are in its `reference.conf`; its routes, client metadata sections and what it asks of a deployment are in its card.",
+		"",
+		"| Module | Card | Section defaults |",
+		"|---|---|---|",
+		...cards.map(
+			(c) => `| \`${c.name}\` | \`${c.card}\` | ${c.references ? `\`${c.references}\`` : ""} |`,
+		),
+		...(whole.length > 0
+			? [
+					"",
+					`Every module and route of the release (${release.version}), beyond this app:`,
+					"",
+					...whole,
+				]
+			: []),
+	].join("\n")}\n`;
 }
 
 /** The guide's lists: the keys read from env as table rows, and those written in the local layer. */
@@ -122,7 +188,7 @@ RUN apk add --no-cache tini && npm install --global corepack@${corepack} && core
 WORKDIR /app
 
 FROM base AS deps
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yam[l] ./
 RUN pnpm install --frozen-lockfile --prod
 
 FROM base AS runtime

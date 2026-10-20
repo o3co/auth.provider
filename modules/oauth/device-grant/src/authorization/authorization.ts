@@ -1,7 +1,8 @@
+import { type Audit, audit } from "@mod/audit";
 import { clientAllowance } from "@mod/client-allowance";
 import { type Clients, clients } from "@mod/clients";
 import { type TargetRule, targets } from "@mod/grants";
-import { type HttpRequest, type HttpResponse, noStore, type Route } from "@mod/http";
+import { type HttpRequest, type HttpResponse, jsonAnswer, type Route } from "@mod/http";
 import { issuer } from "@mod/issuer";
 import { type BuildContext, type Runtime, Unavailable } from "@mod/kernel";
 import { authenticateClient, oauthError } from "@mod/token-endpoint";
@@ -13,6 +14,8 @@ import { type DeviceStore, deviceStore, type UserCodes, userCodes } from "../sto
 
 export interface Authorizing {
 	readonly clients: Clients;
+	/** Where a refused client authentication is recorded. */
+	readonly audit: Audit;
 	/** Asked, as for a grant that takes no audience, whether the request may ask one. */
 	readonly targets: TargetRule;
 	readonly devices: DeviceStore;
@@ -44,7 +47,7 @@ export function authorizationWith(a: Authorizing): Pick<Route, "handle" | "unava
 		throw new Unavailable("device-grant");
 	};
 	const answer = async (request: HttpRequest): Promise<HttpResponse> => {
-		const authenticated = await authenticateClient(a.clients, request);
+		const authenticated = await authenticateClient(a.clients, request, a.audit);
 		if (authenticated.kind === "refused") return authenticated.response;
 		const { client } = authenticated;
 		if (request.form.repeated().length > 0) {
@@ -74,22 +77,16 @@ export function authorizationWith(a: Authorizing): Pick<Route, "handle" | "unava
 		}
 		const userCode = await keepUserCode(name);
 		const page = a.settings["verification-uri"];
-		return {
-			status: 200,
-			headers: noStore,
-			body: {
-				json: {
-					device_code: deviceCode,
-					user_code: userCode,
-					verification_uri: page,
-					...(a.settings["complete-uri"]
-						? { verification_uri_complete: withUserCode(page, userCode) }
-						: {}),
-					expires_in: a.settings["code-lifetime"],
-					interval: a.settings.interval,
-				},
-			},
-		};
+		return jsonAnswer(200, {
+			device_code: deviceCode,
+			user_code: userCode,
+			verification_uri: page,
+			...(a.settings["complete-uri"]
+				? { verification_uri_complete: withUserCode(page, userCode) }
+				: {}),
+			expires_in: a.settings["code-lifetime"],
+			interval: a.settings.interval,
+		});
 	};
 	return { handle: answer, unavailable: { response: oauthError(503, "temporarily_unavailable") } };
 }
@@ -98,6 +95,7 @@ export function authorizationWith(a: Authorizing): Pick<Route, "handle" | "unava
 export const authorizationOver = async (c: BuildContext<Settings>) =>
 	authorizationWith({
 		clients: await c.get(clients),
+		audit: await c.get(audit),
 		targets: await c.get(targets),
 		devices: await c.get(deviceStore),
 		userCodes: await c.get(userCodes),

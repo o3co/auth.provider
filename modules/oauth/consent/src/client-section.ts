@@ -43,20 +43,15 @@ export const clientSection: Section<ClientShown> = {
 				"The host the client's source verified, shown only for a client the operator did not register.",
 			),
 	}),
+	// A document never sets first-party: its client is no client the operator runs.
+	fromDocument(document, from) {
+		const name = document.client_name;
+		if (typeof name !== "string" || name.trim() === "") return { refused: "client_name" };
+		const uri = document.client_uri;
+		return { value: { name, ...(uri === undefined ? {} : { uri }), host: from.host } };
+	},
+	reads: ["client_name", "client_uri"],
 };
-
-/** What a source puts in consent's section of a client it found, for the consent page to show. */
-export function displayed(shown: {
-	readonly name: string;
-	readonly uri?: string | undefined;
-	readonly host: string;
-}): unknown {
-	return {
-		name: shown.name,
-		host: shown.host,
-		...(shown.uri === undefined ? {} : { uri: shown.uri }),
-	};
-}
 
 /** Whether the client needs no consent: only one the operator registered can be first-party. */
 export function isFirstParty(client: Client): boolean {

@@ -13,6 +13,8 @@ export interface UrlRules {
 	readonly query?: boolean;
 	/** Whether plain `http` is taken beside the schemes, on a loopback host only (default false). */
 	readonly loopbackHttp?: boolean;
+	/** An origin alone: a scheme, a host and a port, with no path, not even `/`, and no query. */
+	readonly origin?: true;
 }
 
 /** Why a value is not a URL these rules take; undefined when it is one. Names no part of the value. */
@@ -39,6 +41,9 @@ function refusal(value: string, rules: UrlRules): string | undefined {
 	if (value.includes("#")) return "a URL: no fragment";
 	if (rules.query === false && value.includes("?")) return "a URL: no query";
 	const path = rest.slice(authority.length).split("?", 1)[0] ?? "";
+	if (rules.origin && (path !== "" || value.includes("?"))) {
+		return "a URL: an origin alone, with no path (not even a trailing `/`) and no query";
+	}
 	if (rules.trailingSlash === "refused" && path.endsWith("/")) return "a URL: no trailing /";
 	const url = new URL(value);
 	const kind = difference(url, authority, path, value);
@@ -112,9 +117,40 @@ function percentEncoded(value: string, written: string): boolean {
  * A configured URL: one of the schemes, a host, no userinfo, no fragment, no whitespace or control
  * characters, in the form the URL parser writes it; kept exactly as written.
  */
-export function urlSetting(rules: UrlRules): z.ZodType<string> {
-	return z.string().superRefine((value, context) => {
+const configured = z.string().brand<"ConfiguredUrl">();
+/** A URL url-setting read from an operator's configuration; nothing else makes one, so a caller holding one holds the operator's URL. */
+export type ConfiguredUrl = z.output<typeof configured>;
+
+export function urlSetting(rules: UrlRules) {
+	return configured.superRefine((value, context) => {
 		const reason = refusal(value, rules);
 		if (reason) context.addIssue({ code: "custom", message: reason });
 	});
+}
+
+/**
+ * A section's check of the URLs it sends to, as `superRefine` takes it: once every URL of `urls`
+ * parses, `explain` is asked of each URL of `sent` with its hosts, and what it answers is put at
+ * that key. While one is no URL nothing is asked: that is its own key's refusal, and zod may run a
+ * section's refinement past a field it refused. What a refusal says is `explain`'s alone.
+ */
+export function urlsChecked<S>(
+	explain: (url: string, hosts: readonly string[]) => string | undefined,
+	parts: {
+		readonly urls: (section: S) => readonly (string | undefined)[];
+		readonly sent: (
+			section: S,
+		) => Readonly<
+			Record<string, { readonly url?: string | undefined; readonly hosts: readonly string[] }>
+		>;
+	},
+): (section: S, context: z.RefinementCtx) => void {
+	return (section, context) => {
+		if (!parts.urls(section).every((url) => url === undefined || URL.canParse(url))) return;
+		for (const [key, { url, hosts }] of Object.entries(parts.sent(section))) {
+			const refused = url === undefined ? undefined : explain(url, hosts);
+			if (refused !== undefined)
+				context.addIssue({ code: "custom", path: [key], message: refused });
+		}
+	};
 }

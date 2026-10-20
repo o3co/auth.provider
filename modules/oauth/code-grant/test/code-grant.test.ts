@@ -20,12 +20,14 @@ import {
 import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
 import { crowdingFor, memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
-import { entryRequirements, sessions } from "@mod/session";
+import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import sessionParticipants from "@mod/session-participants/module";
+import { entryRequirements } from "@mod/session-requirements";
+import sessionRequirements from "@mod/session-requirements/module";
 import { sessionTokens } from "@mod/session-tokens";
 import bridgeModule from "@mod/session-tokens/module";
 import { sessionTokensInMemory } from "@mod/session-tokens/testing";
-import { simulatedStore } from "@mod/store/testing";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { grantCaller, grantCalls, grantInput } from "@mod/token-endpoint/testing";
@@ -94,7 +96,7 @@ codeStoreContract("records stand-in", async () => {
 			now += ms;
 		},
 		raceNextUpdate: (_name, change) => stand.raceNextChange(change),
-		crowd: { limit: size.perShard, hashes: crowdingFor(size).jobs },
+		crowd: { limit: size.perShard, names: crowdingFor(size).jobs },
 	};
 });
 const verifier = "v".repeat(43);
@@ -140,7 +142,6 @@ async function serve(
 		codeGrant?: Parameters<typeof codeGrantConfig>[0];
 	} = {},
 ) {
-	const simulated = simulatedStore();
 	const stores = memoryStores();
 	const app = await assemble({
 		modules: [
@@ -152,8 +153,9 @@ async function serve(
 			grantCaller,
 			clientAllowanceModule,
 			sessionStandIn,
+			sessionParticipants,
+			sessionRequirements,
 			subjectRevocationStandIn,
-			simulated.module,
 			stores.module,
 			bridgeModule,
 			sessionTokensInMemory().module,
@@ -222,7 +224,7 @@ async function serve(
 		const described = outcome.description ? { error_description: outcome.description } : {};
 		return { status: 400, body: { error: outcome.error, ...described } };
 	};
-	return { app, simulated, stores, issue, redeem, session, cookies, facts };
+	return { app, stores, issue, redeem, session, cookies, facts };
 }
 /** A request carrying the session cookies given. */
 const carrying = (setCookies: readonly string[]) =>
@@ -321,6 +323,14 @@ it("has the access token recorded to the code's session", async () => {
 		kind: "bound",
 		handle: s.session.id,
 	});
+});
+
+it("revokes the code's access token when its session closes, through session-tokens' participant", async () => {
+	const s = await serve();
+	const token = String((await s.redeem(await s.issue())).body.access_token);
+	expect(await revoked(s, token)).toBe(false);
+	await s.app.get(sessions).close(s.session.id, carrying(s.cookies));
+	expect(await revoked(s, token)).toBe(true);
 });
 
 it("ends the access token no later than its session, when the session ends first", async () => {

@@ -12,7 +12,15 @@ import {
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { type EnrollmentWitness, enrollmentWitnesses } from "@mod/mfa-witness";
 import { enrollmentWitnessContract, witnessProblems } from "@mod/mfa-witness/testing";
+import { type Narrower, outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
+import {
+	credentialPolicy,
+	outboundLimits,
+	outboundRefusals,
+	policyOf,
+	policySettings,
+} from "@mod/outbound-policy";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import witnessHttp from "../src/module.ts";
 
@@ -111,13 +119,13 @@ const collected = contract<readonly EnrollmentWitness[]>("test.witnesses");
 const collector = defineModule({ name: "test-collector" }, (m) => [
 	m.provide(collected).by((c) => c.collect(enrollmentWitnesses)),
 ]);
-async function open(section: unknown = settings()) {
+async function open(section: unknown = settings(), outbound: Record<string, unknown> = {}) {
 	const logged = recordingLog();
 	const app = await assemble({
 		modules: [outboundModule, witnessHttp, collector],
 		config: {
 			...kernelConfig(),
-			outbound: { allow: ["127.0.0.1"], "plain-loopback": [pair, otherPair] },
+			outbound: { allow: ["127.0.0.1"], "plain-loopback": [pair, otherPair], ...outbound },
 			"mfa-witness-http": section,
 		},
 		runtime: quietRuntime({ log: logged.log, clock: { now: () => now } }),
@@ -130,6 +138,59 @@ async function open(section: unknown = settings()) {
 enrollmentWitnessContract("mfa-witness-http over a ledger keeping its promises", async () => {
 	script = keepingLedger();
 	return (await open()).witness;
+});
+
+describe("mfa-witness-http at a private address", () => {
+	it("names the operator's URL as internal on each of its three calls, so each reaches a ledger at a private address", async () => {
+		const asked: { url: string; narrower: Narrower | undefined }[] = [];
+		const answers: Record<string, { status: number; body?: unknown }> = {
+			"/w/read": { status: 200, body: { enrolled: false } },
+			"/w/enroll": { status: 200, body: { owner: true } },
+			"/w/clear": { status: 204 },
+		};
+		const recording = defineModule({ name: "outbound" }, (m) => [
+			m.provide(outbound).by(() => ({
+				fetch: async (url, _request, narrower) => {
+					asked.push({ url, narrower });
+					const { status, body } = answers[new URL(url).pathname] ?? { status: 404 };
+					const bytes = new TextEncoder().encode(body === undefined ? "" : JSON.stringify(body));
+					return { status, headers: new Map([["content-type", "application/json"]]), body: bytes };
+				},
+			})),
+			m.provide(outboundRefusals).by(() => ({ explained: () => undefined })),
+			m.provide(credentialPolicy).by(() => ({ refusalOf: () => undefined })),
+			m.provide(outboundLimits).by(() => ({ of: () => ({ timeoutMs: 1000, maxBytes: 1024 }) })),
+		]);
+		const ledger = (path: string) => `https://ledger.corp${path}`;
+		const app = await assemble({
+			modules: [recording, witnessHttp, collector],
+			config: {
+				...kernelConfig(),
+				"mfa-witness-http": settings({
+					"read-url": ledger("/w/read"),
+					"enroll-url": ledger("/w/enroll"),
+					"clear-url": ledger("/w/clear"),
+				}),
+			},
+			runtime: quietRuntime({ clock: { now: () => now } }),
+		});
+		const [witness] = app.get(collected);
+		await witness?.read("alice");
+		await witness?.enroll("alice", "t-1");
+		await witness?.clear("alice");
+		// The operator's policy, with the ledger's host among its internal hosts.
+		const policy = policyOf(
+			policySettings.parse({ "allow-any-public": true, "internal-hosts": ["ledger.corp"] }),
+		);
+		expect(asked.map(({ url }) => new URL(url).pathname)).toEqual([
+			"/w/read",
+			"/w/enroll",
+			"/w/clear",
+		]);
+		for (const { url, narrower } of asked) {
+			expect(policy.admit(url, narrower).internal, url).toBe(true);
+		}
+	});
 });
 
 describe("mfa-witness-http", () => {
@@ -159,6 +220,15 @@ describe("mfa-witness-http", () => {
 			{ subject: "alice", token: "t-1", deadline: now + 2000 },
 			{ subject: "alice", deadline: now + 2000 },
 		]);
+	});
+
+	it("gives a write the deadline outbound holds the call to, where outbound's timeout is the shorter", async () => {
+		const { witness } = await open(settings({ timeout: "2s" }), { timeout: "500ms" });
+		script = (asked) =>
+			asked.path === "/w/clear" ? { status: 204 } : { status: 200, json: { owner: true } };
+		await witness.enroll("alice", "t-1");
+		await witness.clear("alice");
+		expect(received.map((r) => JSON.parse(r.body).deadline)).toEqual([now + 500, now + 500]);
 	});
 
 	it("reads the mark and the ownership the ledger answers", async () => {

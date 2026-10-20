@@ -14,8 +14,11 @@ import { sealConfig } from "@mod/seal/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { senderBindings } from "@mod/sender-binding";
 import senderBindingModule from "@mod/sender-binding/module";
-import { entryRequirements, type Session, sessions } from "@mod/session";
+import { type Session, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import sessionParticipants from "@mod/session-participants/module";
+import { entryRequirements } from "@mod/session-requirements";
+import sessionRequirements from "@mod/session-requirements/module";
 import { sessionTokens } from "@mod/session-tokens";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { accessConditions, tokens } from "@mod/tokens";
@@ -121,6 +124,8 @@ export async function harness(
 			senderBindingModule,
 			tokensStandIn(),
 			sessionStandIn,
+			sessionRequirements,
+			sessionParticipants,
 			subjectRevocationStandIn,
 			rateLimitStandIn,
 			recorded.module,

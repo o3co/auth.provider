@@ -1,6 +1,6 @@
 # lineage
 
-Internal module of `refresh`: the `lineage` contract, and `tokens`' access condition on a family's end.
+Internal module of `refresh`: the families (`of`, `adopt`, `start`) behind the `lineage` contract and the `family` tie, and `tokens`' access condition on a family's end.
 
 ## Responsibilities
 - Answers an access token's family, adopts tokens into a live family, and starts families bound to no session.
@@ -9,7 +9,7 @@ Internal module of `refresh`: the `lineage` contract, and `tokens`' access condi
 - Revoking (`settle`). Founding a family (`grant`'s founding).
 
 ## Offers
-- `lineageIn` (the build context) → the contract; `conditionOver` → the access condition, built on the stores alone, as `tokens` asks it while it is being built itself; `familyReader` (stores, clock) → a token's family and whether it has ended.
+- `lineageIn` (the build context) → the families, provided inside the package as `families`, from which `lineage` and the tie are given; `conditionOver` → the access condition, built on the stores alone, as `tokens` asks it while it is being built itself; `familyReader` (stores, clock) → a token's family and whether it has ended; `familyTie` (the contract) → the `family` tie.
 
 ## Invariants
 - `of` answers only for a token the caller verified, reads the record every time, and names the token asked for, never the family.

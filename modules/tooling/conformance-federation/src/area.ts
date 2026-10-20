@@ -46,14 +46,18 @@ export interface GrantsPart {
 export interface FederationPart {
 	readonly origin: string;
 	readonly idps: readonly IdpScene[];
-	/** Where a login lands when it named no target. */
-	readonly landing: string;
+	/** Where a login lands when it named no target; the origin's root without one. */
+	readonly landing?: string;
 	/** Where a login may return to. */
 	readonly returnTargets: readonly string[];
+	/** The page a browser goes on at when a gate holds its login, on the origin. */
+	readonly heldPage?: string;
 	/** The deployment keeps the upstream tokens of logins and hands them to receiving clients. */
 	readonly keepsUpstreamTokens?: boolean;
 	/** The deployment holds upstream credentials for clients, as federation grants. */
 	readonly grants?: GrantsPart;
+	/** The scene links an upstream identity to the account logged in, from the deployment's own page. */
+	readonly links?: boolean;
 }
 
 export const federationArea = area<FederationPart>("federation");
@@ -90,10 +94,12 @@ export function federationScene(scene: FederationScene): AreaScene {
 		federationArea.part({
 			origin: scene.origin,
 			idps: scene.idps,
-			landing: scene.landing,
+			...(scene.landing ? { landing: scene.landing } : {}),
 			returnTargets: scene.returnTargets,
+			...(scene.heldPage ? { heldPage: scene.heldPage } : {}),
 			...(scene.keepsUpstreamTokens ? { keepsUpstreamTokens: true } : {}),
 			...(scene.grants ? { grants: scene.grants } : {}),
+			...(scene.links ? { links: true } : {}),
 		}),
 	);
 }

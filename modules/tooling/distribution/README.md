@@ -12,7 +12,7 @@
 
 ## Offers
 - `pnpm distribution`: prints each problem and exits 1, or prints `distribution: ok`.
-- `pnpm bundles`: builds each shipped bundle into `dist/bundles/<concern directory>` at the workspace's `version`: its members compiled to JS and declarations (tests and test tools left out), named publicly, with their other files, and its manifest. Prints each problem and exits 1, or how many it built.
+- `pnpm bundles`: builds each shipped bundle into `dist/bundles/<concern directory>` at the workspace's `version`: its members compiled to JS and declarations (tests and test tools, a trial file among them, left out), named publicly, with their other files, and its manifest. Prints each problem and exits 1, or how many it built.
 - `pnpm release:check`: packs every bundle and entrance, makes an app of each pattern with the packed `create-auth-provider`, installs it from the tarballs alone, type-checks it, and boots it to `/readyz` or to its refusals, each told. It also assembles an app by hand, as one keeping its own composition root does: `combinations`' full names, made published, installed from the tarballs, each module imported, and assembled to the kernel's refusals. Exits 1 on any problem.
 
 ## Invariants
@@ -27,13 +27,14 @@
 - A missing or unreadable manifest is reported as missing, and only once.
 - A cycle is reported along its path, from the first bundle it is reached by.
 - Module code never names a bundle; a built file names each member as `<bundle's public name>/<member's directory>[/<entry>]`, and a declaration's own imports point at built `.js` files.
-- A bundle depends on other bundles at its own version, and on an outside package at the one version its members state; two versions refuse it. Members' peers are optional, as only test builders read them.
+- A bundle depends on other bundles at its own version, and on an outside package at the one version its members state; two versions refuse it. Members' peers are offered as each states them, optional where its `peerDependenciesMeta` says so (a test builder's).
+- An outside package a member requires as a peer is a required peer, in that range, of every bundle depending on it, not a dependency: the app then holds the one copy the public types name, where a bundle's own copy beside the app's would make two types of one name and fail the app's type check.
 
 ## Depends on
-- `create-app` (its patterns and trial settings, for the release check); it asks pnpm for the workspace packages, reads their manifests, and compiles with TypeScript; the release check builds and runs images with Docker.
+- `create-app` (its patterns, for the release check), `trial` (the layer the release check boots each image on); it asks pnpm for the workspace packages, reads their manifests, and compiles with TypeScript; the release check builds and runs images with Docker.
 
 ## Vocabulary
 - bundle: the distribution unit of one concern directory.
 - concern directory: the parent directory of the packages the workspace definition places.
 - bundle manifest: the `package.json` directly in the concern directory; `"private": false` ships the bundle, `description` and `keywords` say what it is on the registry, `index` asks for the index at a path in it, and `entrances` declares packages of their own name, each a command (`bin`) that calls the `run` of a member (`runs`) with its arguments, its answer the exit status, and its own `description` and `keywords`.
-- index: every shipped member's manifest as written, its public package and entry, and its section's example (`config.example`), for a module that composes them from a bundle.
+- index: every shipped member's manifest as written, its public package and entry, its section's example (`config.example`), whether it ships its section's defaults (`reference.conf`), and whether its card has a `## Deployment` section, with the release's version and repository, for a module that composes them from a bundle.

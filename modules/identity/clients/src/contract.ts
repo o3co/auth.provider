@@ -12,6 +12,25 @@ export interface Section<T> {
 	 * configuration value.
 	 */
 	checkAtBoot?(value: T, client: Client): string | undefined;
+	/**
+	 * The section's value from a client's metadata document, before the schema checks it: nothing
+	 * when the section takes nothing from it, or `refused` naming the field (RFC 7591's word) that
+	 * refuses the client, never its text. The value holds the section's own keys alone, never the
+	 * document's, so where a check fails holds no document text. A section that widens what a
+	 * client may do takes from a document only what a document may say.
+	 */
+	fromDocument?(
+		document: Readonly<Record<string, unknown>>,
+		from: DocumentSource,
+	): { readonly value: unknown } | { readonly refused: string } | undefined;
+	/** The document's fields (RFC 7591's words) `fromDocument` reads. */
+	readonly reads?: readonly string[];
+}
+
+/** Where a client's metadata document came from: its client id, and the host its source checked. */
+export interface DocumentSource {
+	readonly id: string;
+	readonly host: string;
 }
 
 export interface Client {
@@ -30,6 +49,11 @@ export interface ClientRecord {
 	readonly kind: "public" | "confidential";
 	readonly method: string;
 	readonly sections: Readonly<Record<string, unknown>>;
+}
+
+/** Where a record fails, from its root (`method`, `sections.consent.uri`); never a value. */
+export interface RecordRefusal {
+	readonly path: string;
 }
 
 export interface ClientSource {
@@ -72,6 +96,12 @@ export type Authentication =
 
 export interface Clients {
 	find(id: string): Promise<Client | undefined>;
+	/**
+	 * Checks a record as `find` holds a source's: the rule for a registered one, a known method and
+	 * each section's schema. Answers where each part fails, nothing when it fits; rejects when a
+	 * schema throws.
+	 */
+	checkRecord(record: ClientRecord): Promise<readonly RecordRefusal[] | undefined>;
 	authenticate(request: HttpRequest): Promise<Authentication>;
 	/** The names of the ways a client can authenticate here, built in and contributed. */
 	methods(): readonly string[];

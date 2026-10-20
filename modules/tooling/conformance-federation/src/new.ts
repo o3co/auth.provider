@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { onNew } from "@mod/conformance";
-import { federationArea, type GrantsPart, type IdpScene } from "./area.ts";
+import { type NewPart, onNew, type PatternPart } from "@mod/conformance";
+import { type FederationPart, federationArea, type GrantsPart, type IdpScene } from "./area.ts";
 
 /**
  * An IdP's own settings, by the type that serves it on the new target: its type's endpoints at the
@@ -60,7 +60,7 @@ const grantsSection = (at: GrantsPart) => ({
 	...(at.lodges ? { lodges: at.lodges.limit, "lodge-window": `${at.lodges.windowSeconds}s` } : {}),
 });
 
-onNew(federationArea, (part) => ({
+const setUp = (part: FederationPart, _: unknown, modules: readonly string[]): NewPart => ({
 	modules: [
 		"@mod/outbound",
 		"@mod/external-jwt",
@@ -69,7 +69,6 @@ onNew(federationArea, (part) => ({
 		...(part.idps.some((idp) => idp.type === "github") ? ["@mod/idp-github"] : []),
 		...(part.idps.some((idp) => idp.type === "google") ? ["@mod/idp-google"] : []),
 		...(part.idps.some((idp) => idp.type === "apple") ? ["@mod/idp-apple"] : []),
-		"@mod/seal",
 		...(part.keepsUpstreamTokens ? ["@mod/federation-tokens"] : []),
 		...(part.grants ? ["@mod/federation-grants"] : []),
 	],
@@ -77,10 +76,13 @@ onNew(federationArea, (part) => ({
 	config: {
 		federation: {
 			idps: Object.fromEntries(part.idps.map((idp) => [idp.name, settingsOf(idp)])),
-			landing: part.landing,
+			...(part.landing ? { landing: part.landing } : {}),
+			...(part.heldPage ? { "held-page": part.heldPage } : {}),
 		},
-		// Sealing, kept tokens' or a handoff's, takes a key of the scene's own.
-		seal: { current: { id: "scene", key: randomBytes(32).toString("base64") } },
+		// Sealing, where what is composed brings it (kept tokens, grants), takes a key of the scene's own.
+		...(modules.includes("@mod/seal")
+			? { seal: { current: { id: "scene", key: randomBytes(32).toString("base64") } } }
+			: {}),
 		...(part.grants ? { "federation-grants": grantsSection(part.grants) } : {}),
 		// Every upstream is named so outbound reaches it, and those on plain http at loopback as such.
 		outbound: {
@@ -91,4 +93,21 @@ onNew(federationArea, (part) => ({
 				.map((url) => url.host),
 		},
 	},
-}));
+});
+
+/** Where a ledger looks users up by upstream identity, it holds the links: users' `link` then answers already or conflict. */
+export function onPattern(
+	part: FederationPart,
+	scene: unknown,
+	modules: readonly string[],
+): PatternPart {
+	if (part.links && modules.includes("@mod/users-http")) {
+		return {
+			leaveOut:
+				"links from the deployment: a ledger looking users up by upstream identity holds the links, so a link answers already or conflict",
+		};
+	}
+	return setUp(part, scene, modules);
+}
+
+onNew(federationArea, setUp, onPattern);

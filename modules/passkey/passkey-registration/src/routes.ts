@@ -1,14 +1,19 @@
+import { type Audit, declaredAudit } from "@mod/audit";
 import { csrfChecked } from "@mod/csrf";
 import { type HttpRequest, type HttpResponse, jsonAnswer, type Route, use } from "@mod/http";
 import { isUnavailable } from "@mod/kernel";
+import { isLabel } from "@mod/labels";
 import { requestsPerSource, type Window } from "@mod/rate-limit";
+import { determinedSource } from "@mod/request-source";
 import type { Sessions } from "@mod/session";
 import type { RegistrationRefusal, Registrations } from "@mod/webauthn";
+import events from "./audit-events.ts";
 
 export interface RouteParts {
 	readonly sessions: Sessions;
 	readonly registrations: Registrations;
 	readonly window: Window;
+	readonly audit: Audit;
 }
 
 /** Each refusal in the words clients of these routes know. */
@@ -36,10 +41,6 @@ const descriptionOf: Partial<Record<RegistrationRefusal, string>> = {
 
 const invalid = (description: string) =>
 	jsonAnswer(400, { error: "invalid_request", error_description: description });
-
-/** A nickname is 1 to 64 UTF-16 code units. */
-const isNickname = (value: unknown): value is string =>
-	typeof value === "string" && value.length >= 1 && value.length <= 64;
 
 export function registrationRoutes(p: RouteParts): {
 	readonly options: Route;
@@ -78,7 +79,8 @@ export function registrationRoutes(p: RouteParts): {
 		if (typeof response !== "object" || response === null || Array.isArray(response)) {
 			return invalid("response must be an object");
 		}
-		if (nickname !== undefined && !isNickname(nickname)) return invalid("invalid nickname");
+		if (nickname !== undefined && (typeof nickname !== "string" || !isLabel(nickname)))
+			return invalid("invalid nickname");
 		const kept = await p.registrations.register(subject, response, nickname);
 		if (kept.kind === "refused") {
 			const description = descriptionOf[kept.reason];
@@ -87,6 +89,11 @@ export function registrationRoutes(p: RouteParts): {
 				...(description ? { error_description: description } : {}),
 			});
 		}
+		const source = determinedSource(request);
+		declaredAudit(p.audit, events).record("passkey.registered", {
+			subject,
+			attributes: source === undefined ? {} : { source },
+		});
 		const { credential } = kept;
 		return jsonAnswer(200, {
 			credentialId: credential.id,

@@ -33,6 +33,15 @@ export function auditReceiversOf(composed: (module: string) => boolean): string[
 	return named.length > 0 ? named : ["log"];
 }
 
+/** The receivers `audit.receivers` names, as the README writes them. */
+export function auditReceiversLine(modules: readonly string[]): string {
+	return auditReceiversOf((m) => modules.includes(m))
+		.map((name) =>
+			name === "log" ? "`log`, audit's own, writing events to the log" : `\`${name}\``,
+		)
+		.join(", ");
+}
+
 /** One line for each choice the composed modules show. */
 export function chosenLines(modules: readonly string[]): string[] {
 	return [
@@ -43,6 +52,11 @@ export function chosenLines(modules: readonly string[]): string[] {
 		...(modules.includes("@mod/federation") && modules.includes("@mod/users-http")
 			? [
 					"- A federation login finds its user through the ledger's lookup by subject (`users-http.subject-url`), or by upstream identity (`users-http.upstream-url`).",
+				]
+			: []),
+		...(modules.includes("@mod/federation") && modules.includes("@mod/mfa-flows")
+			? [
+					"- A federation login a second factor holds goes on at `federation.held-page`, a page on the public origin; without it, the browser stops at the factor's answer.",
 				]
 			: []),
 		...(modules.includes("@mod/audit")

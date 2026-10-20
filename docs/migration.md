@@ -15,6 +15,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 - [Newly refused at boot](#newly-refused-at-boot)
 - [Behavior changes](#behavior-changes)
 - [From 0.18.0-rc.1](#from-0180-rc1)
+- [From 0.18.0-rc.2](#from-0180-rc2)
 - [Operational notes](#operational-notes)
 
 ## Before you start
@@ -50,6 +51,8 @@ Where each 0.17 package went:
 | `@o3co/auth-provider-standard` (mail senders) | `-smtp` (`/mail-smtp`); logging-only mail is `-foundation` (`/mail`) |
 | `@o3co/auth-provider-test-kit` | each package's `/<module>/testing` |
 | `@o3co/create-auth-provider` and the standalone template | `@o3co/create-auth-provider` (runs `-scaffold`'s create-app) and `-scaffold` |
+
+The packages take `zod` 4.6.7. An app that writes sections of its own uses that version too, or pins it for every package with a pnpm `overrides` entry, so one copy of zod reads every section.
 
 New in 0.18, with no 0.17 package: `-audit-receivers` (audit to stdout or HTTP), `-log-sinks`, `-metrics-publishers` (Prometheus) and `-templates` (the stores' wirings).
 
@@ -129,7 +132,7 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 | `logging.level` | `kernel.logging.level` | |
 | `http.port` (default 3000) | `http.port` (default 8080) | |
 | (all interfaces) | `http.host` (default `127.0.0.1`) | Set `0.0.0.0` in a container |
-| `http.trustProxy` | `http.trusted-proxies` (IPs or CIDRs), `http.proxy-hops` | Named ranges and `true` are gone; list addresses |
+| `http.trustProxy` | `http.trusted-proxies` (IPs or CIDRs), `http.proxy-hops` | Named ranges and `true` are gone; list addresses. A block of every address of a family (any `/0`, or every IPv4 address mapped into IPv6, as `::ffff:0:0/96` or `::/1`) refuses boot, as every source would be undetermined |
 | `http.readinessTimeoutMs` | `http-ops.readiness-deadline` | |
 | `http.cors.allowedOrigins` | `http.cors-origins` | Exact https origins, as a HOCON list |
 | (from the issuer) | `http.public-origin` | Cookies are `__Host-` and `Secure` when it is https |
@@ -199,7 +202,7 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 | `session.redirectAllowlist`, per-IdP `redirectAllowlist` | `login-gates.return-targets` | Exact https URLs, one list |
 | `session.csrf.trustedOrigins` | removed | Same-origin evidence is checked against `http.public-origin` |
 | `users.yaml` | `users.registered` (`identifier`, `subject`, `password-hash`, `attributes`, `upstream`) | Hashes are bcrypt or scrypt; plain passwords are refused |
-| `repositories.user.http.*` | `users-http.verify-url`, `credential`, `timeout` | [Some answers read differently](#user-ledger-over-http) |
+| `repositories.user.http.*` | `users-http.verify-url`, `subject-url`, `upstream-url`, `credential`, `timeout` | [Some answers read differently](#user-ledger-over-http); `subject-url` and `upstream-url` are new: a user by subject, and by upstream identity (then the ledger, not `users`, holds the links) |
 
 ### MFA and passkeys
 
@@ -422,12 +425,12 @@ For a second factor by mail alone, with no other factor to enrol, set `mfa-email
 |---|---|---|
 | `adapters.auditSink` | `audit.receivers` (names, or `none`) | Required; compose `audit-stdout` or `audit-http` for those receivers |
 | `standard-smtp-mail-sender.*` | `mail-smtp.host`, `port`, `security`, `user`, `password`, `from` | `secure` is now `security` |
-| (development mail sender) | the `mail` module with `mail.accept-unsent = true` | |
+| (development mail sender) | the `mail` module with `mail.accept-unsent = true` | It sends nothing and logs the purpose and a hash of the address alone: a code or link in the message is never logged, unlike 0.17's |
 | `core.outbound.allowedHosts` | `outbound.allow`, or `outbound.allow-any-public = true` | An empty list now reaches nothing. Entries as before: a host, or `.name` for the name and the names under it |
 | `core.outbound.deniedHosts`, `timeoutMs`, `maxResponseBytes` | `outbound.deny`, `timeout`, `max-response-size` | `deny` takes entries as `allow` does |
 | `core.outbound.internalHosts` | `outbound.internal-hosts`; `outbound.plain-loopback` (`host:port`) for plain http at loopback | `internal-hosts` reaches private addresses (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7) for the users-http ledger and the audit-http collector only; a client's URLs (key sets, back-channel logout) never reach a private, loopback or link-local address. `.name` still covers the name and the names under it |
 | `core.outbound.egress = direct` | `outbound.direct-despite-proxy = true` | Only while every request goes direct; with a proxy, write `outbound.proxy` instead |
-| `HTTPS_PROXY` with `NODE_USE_ENV_PROXY` | `outbound.proxy` (an http origin), `outbound.proxy-authorization` | Every https request goes through it by CONNECT, key sets and back-channel notices included; the variables are never read |
+| `HTTPS_PROXY` with `NODE_USE_ENV_PROXY` | `outbound.proxy` (an http origin alone, such as `http://proxy:3128`), `outbound.proxy-authorization` | Every https request goes through it by CONNECT, key sets and back-channel notices included; the variables are never read |
 | `NO_PROXY` | `outbound.direct-hosts` | The variable is never read: list each host here, as written (no `*`, `_`, spaces or short IPv4 forms); `.name` covers the name and the names under it |
 | `/metrics` | compose `metrics-prometheus`; `metrics-prometheus.path` | |
 
@@ -575,7 +578,7 @@ These are requests 0.17 accepted, or answered differently, that 0.18 refuses or 
 |---|---|---|
 | Verify a password | `POST {authenticateUrl}` with `{"email","password"}` | `POST {verify-url}` with `{"email","password"}`, `Content-Type` and `Accept: application/json` |
 | Credential | | `Authorization: Bearer {credential}` when `credential` is set; none sent otherwise |
-| Find a user by subject | none | none: the ledger is never asked, and `users-http` answers every lookup by subject as one it cannot answer |
+| Find a user by subject | none | `POST {subject-url}` with `{"subject"}`: `200` with the user, its `id` the subject asked; `404` or `410`: no such user; anything else is unavailable. Without `subject-url`, every lookup by subject is one it cannot answer |
 | Success | any `2xx` with the user | `200` with a JSON object: `id` (the subject) and a non-empty `username`; `email`, `name`, `picture`, `groups` and a boolean `emailVerified` (only beside `email`) are kept as attributes, other fields dropped |
 | No such user, or a wrong password | `401` or `403` | `401` alone, unless a `credential` was sent and the answer carries a Bearer challenge: that refuses the credential, and reads as unavailable. A `403` reads as unavailable (`503`): answer a wrong password `401` |
 | Anything else | | Any other status, `404` and other `2xx` included, or a `200` that is not such an object: the ledger is unavailable, and the login answers `503` |
@@ -630,6 +633,8 @@ A ledger can also be asked for a user by subject, so a user who signs in upstrea
 
 ## From 0.18.0-rc.1
 
+Coming from rc.1, read this section, then [From 0.18.0-rc.2](#from-0180-rc2).
+
 - **Sealing keys**: `seal.keys` is refused at boot; write its first key as `seal.current` and the rest as `seal.previous`. Rotating a key now has a procedure, in the [runbook](runbook.md#rotating-the-sealing-key).
 - **MFA factor lists written by rc.1** hold no subject, so `reseal` cannot seal their secrets again and counts them as left (exit 2) until the user next proves or changes a factor, which writes the subject. While such lists remain, do not retire a `previous` key that sealed them.
 - **Times and sizes**: every time and size key lost its unit suffix and is written with a unit (`30m`, `64KiB`); a number without one refuses boot. The renamed keys are in [Times and sizes](#times-and-sizes), among them `federation-grants.connections.<name>.max-access-token-lifetime`, which was `max-access-token-seconds`.
@@ -673,6 +678,36 @@ A ledger can also be asked for a user by subject, so a user who signs in upstrea
 - **Second factors and revocation**: `mfa-revocation` is new, a bridge of `mfa` and `subject-revocation` that `combinations` composes with them: a revocation is complete only once no second factor's enrollment begun before it can bind, and `503 incomplete` while `mfa`'s store cannot answer. An app composed by hand must add it. `mfa`'s `bind` answers `fenced` (a reset or a revocation since the binding began) where rc.1 had no such answer.
 - **Second factors and sessions**: `mfa-entry` is new, a bridge of `mfa` and `session` that `combinations` composes with them; it now sets the entry requirement `mfa` (same name, same answers) and offers `secondFactors.provenRecently`. A module of your own that called `factors.provenRecently` takes it from `mfa-entry`, one that called `factors.recent` takes `session`'s `recent`, and `countingHeld` takes where it is asked (`login`, `binding` or `credentials`). Every credentials entry now reads the subject's factors first, so a factor store that cannot answer makes credentials routes unavailable. An app composed by hand must add `mfa-entry`: `mfa` refuses to boot without it.
 - **Removing a factor or reissuing codes from a module of your own**: `factors.remove` and `factors.reissue` take the fence `factors.fenceOf` answered before the change was allowed, and answer `fenced`, changing nothing, once a reset or a revocation moved it since.
+
+## From 0.18.0-rc.2
+
+What changed since rc.2. Coming from rc.1, read [From 0.18.0-rc.1](#from-0180-rc1) first.
+
+- **Trusted proxies**: a `http.trusted-proxies` entry covering every address of a family (any `/0`, or every IPv4 address mapped into IPv6, as `::ffff:0:0/96` or `::/1`) now refuses boot at that entry, as it would make every client a proxy; list the proxies' own addresses.
+- **zod**: the packages take `zod` as a required peer (`^4.6.0`); an app depends on `zod` itself, at the version the packages take.
+- **Sessions in an app composed by hand, and an entry requirement or closing participant of your own**: `session`'s points for entry requirements and closing participants are gone; they are the bridges `session-requirements` and `session-participants`, which `combinations` composes with `session`, and `session-lifecycle` refuses to boot without them. Contribute to their points, importing the types from them.
+- **`authorize` in an app composed by hand**: its redirect-URI rules and its re-authentication records are the packages `redirect-uris` and `reauth`, which `combinations` composes with it. `authorize` no longer re-exports `redirects`, `registrable` and `redirectsAt`, nor its store interface: import them from `redirect-uris` and `reauth`. The `authorize-store` template wires `reauth`'s store in the same space, so records written before carry over. The client metadata section keeps its name `authorize`.
+- **outbound's destination policy in a module of your own**: `outboundRefusals`, `credentialPolicy`, their types and the host list readers come from `@mod/outbound-policy`, which `combinations` composes with `outbound`, and `outboundLimits` is new there; `@mod/outbound` keeps `DestinationRefused`, `Narrower` and `RefusalReason`.
+- **A grant of your own that authenticates its client**: `token-endpoint`'s `authenticateClient` takes the audit (`Pick<Audit, "record">`) as its third argument, and records a refusal as `client.authentication.failure`; pass the `audit` your module takes.
+- **outbound.proxy** is written as an origin alone, as the URL parser writes it: no path, not even a trailing `/`, no default port, the host in lower case (`http://proxy:3128`). Earlier release candidates also took a trailing `/` and other spellings, which now refuse boot at `outbound.proxy`.
+- **A code by mail as a second factor**: it counts only where `mfa-email.adds-second-factor = true`; by default it is a way back only, as the [mapping](#configuration-mapping) says. Earlier release candidates counted it whatever that setting, so a user whose only factor is a code by mail no longer holds one that counts. An app generated from the `mfa-web` pattern does not set it; set it to keep a code by mail counting.
+- **A code store of your own**: the place it gives `codeStoreContract` (`@mod/code-grant/testing`) names its void list's crowd `crowd.names`, no longer `crowd.hashes`; rename it.
+- **A token-exchange verifier of your own**: its answer now says its `kind`. `own`: a token naming the client by issued-to or audience, with its own scope and audience (and binding, actor chain, `may_act`). `foreign`: another issuer's token for an app, with `clients` (at least one) and an optional `holderDigest`, its scope and audience the client's allowance; it never acts. `ceiling` is gone, and an answer without a `kind` is invalid.
+- **A module of your own that reaches a private address through outbound**: a narrower's `internal: true` is gone; read your URL setting with `url-setting`'s `urlSetting` and pass that URL as `internal` (`{ internal: c.section["my-url"] }`). A private address in `outbound.internal-hosts` is then reached only at that URL's origin (scheme, host and port), not at another port of the same host.
+- **A module of your own that reads refresh's families**: `lineage`'s `of` and `adopt`, with `FamilyHandle` and `TokenFamily`, are gone from `@mod/refresh`, and `lineage` offers `start` alone. What a token this provider issued is tied to is asked through `grants`' `tokenTies`: `refresh`'s `family` tie and `session-tokens`' `session` tie, each with a `join` for a token issued from it.
+- **token-exchange in an app composed by hand**: it reads a token's family and session through those ties, so composing it no longer brings `refresh`, `session-tokens` and `session`; where they are composed, each contributes its tie and the checks are as before.
+- **Client metadata documents** (`clients-cimd`): a document whose record a section's schema refuses (a redirect URI the redirects section refuses, a `client_uri` that is not https) is now logged as `clients-cimd.document_refused` with where the record fails (`record at sections.consent.uri`) and remembered for `refused-lifetime`; earlier release candidates kept it for `cache-lifetime` and logged nothing. A `client_uri` that is not a string is now refused that way too, no longer with the reason `client_uri`.
+- **`clients-cimd` without `authorize` or `consent`**: each section now copies its own fields from a document, and boot is refused where no composed section copies `redirect_uris` (`authorize`'s) or `client_name` (`consent`'s). With the `a2a` pattern, add `@mod/authorize` beside `--add @mod/clients-cimd`.
+- **A client source of your own that gave consent's section**: `displayed` is gone from `@mod/consent`; write the section's value (`name`, `uri` if any, `host`) yourself, or take it from `clientSection.fromDocument`.
+- **A `Clients` of your own** (a stand-in of the contract): it offers `checkRecord`, which checks a record as `find` holds a source's. A metadata section of your own may give `fromDocument` and `reads` to be copied from a client's metadata document; nothing else changes.
+- **Passkey nicknames**: a nickname is now 1 to 64 code points, well formed, with no control character, line separator or bidirectional control, the same rule as a second factor's label. A registration whose nickname breaks it gets `400 invalid_request`; earlier release candidates took any 1 to 64 UTF-16 units. Passkeys already kept keep their nicknames.
+- **Binding a factor from a module of your own**: `factors.bind` writes no recovery codes and no longer answers `recoveryCodes` or `recoveryCodesFactor`; it answers the `fence` the binding began under and `codesDue`. Where `codesDue`, call `factors.reissue(subject, fence)` once the codes can be shown, and show what it answers: `reissue` writes the first set too, and answers `full` where another factor took the place the binding kept for them.
+- **Recovery codes at enrollment**: a first factor's codes are written only as they go out, once its login opened or its session's raise was written. Where either fails, none are written, where earlier release candidates wrote them and took them back; a raise not written answers the factor alone, and `POST /session/mfa/recovery-codes` issues the codes later. That route answers `409 mfa_factor_limit` to a first set past `max-factors`.
+- **An operator's reset of second factors**: `mfaReset` now comes from `mfa-reset`, a bridge of `mfa-flows` that `combinations` composes with it; import it from the `mfa-reset` subpath instead of `mfa-flows`. Binding a factor now comes from `mfa-enrollment`, composed alike; its routes and answers are unchanged. An app composed by hand must compose both beside `mfa-flows`, which refuses to boot without `mfa-enrollment`. `reset` answers only the number of factors it removed. The kinds removed are in the `mfa.reset` audit event (`kinds`, `count`), and where an unfinished run stopped is in its log line `mfa-flows.reset_incomplete` (`stoppedAt`); 0.17's report of where it stopped and whether it overran its deadline is not returned. A run that stops rejects, and running it again finishes it.
+- **Upstream round trips** (a federation login or link, a federation grant's connection) are kept by the new `upstream-round-trip`, in a new space, `upstream-round-trip-store.round-trips`, which the store must replicate. Round trips in progress when the provider is upgraded are lost and start again. A federation grant's connection now sets a cookie of its own for its round trip: its callback is taken only in the browser that began it (another browser's takes nothing and spends nothing, where earlier release candidates refused it for the session and spent it), and starting a second connection to the same upstream in one browser ends the first one's.
+- **Held logins** (a federation login a gate holds, its upstream tokens sealed until it opens) are kept by the new `upstream-handoff`, in a new space, `upstream-handoff-store.held-logins`, which the store must replicate; `federation-store.transactions` is no longer used. A login held before the upgrade and resumed after it, before its deadline, opens without handing its upstream tokens over; one resumed past its deadline is refused, as before. The log events of handing tokens over are renamed from `federation.*` to `upstream-handoff.*`: `receiver_failed`, `link_join_failed`, `link_join_undo_failed` and `held_login_refused`.
+- **A login through an upstream that a second factor holds** used to answer the upstream's callback with JSON a browser cannot act on. Set `federation.held-page`, a page on the public origin that goes on with it, as the [login page guide](login-page.md#a-login-through-an-upstream-that-a-second-factor-holds) describes; `federation` refuses to boot where its origin is another. During a rolling upgrade, set it only once every instance runs this version: an earlier one answers that page's read `400`. Rolling back makes the logins held meanwhile answer `400` until their transactions end, 30 minutes at most.
+- **An app generated with an earlier release candidate that composes `federation`**: its `src/main.ts` imports `federation-store` and none of `upstream-round-trip`, `upstream-round-trip-store`, `upstream-handoff` and `upstream-handoff-store`, and `federation` now refuses to boot without the round trips. Generate the app again, or add those four modules and remove `federation-store`. Its configuration is unchanged.
 
 ## Operational notes
 
@@ -741,6 +776,19 @@ The proxy resolves the names it carries and checks their addresses itself, and b
 Behind a TLS-terminating proxy, set `http.trusted-proxies` and `http.proxy-hops`. Only `X-Forwarded-For` and the forwarded scheme are read from a trusted proxy; `Forwarded` is ignored. With an https public origin, browser requests that change state must arrive over https, so a missing proxy setting refuses them.
 
 No setting trusts a proxy by its hop count alone: `http.proxy-hops` only bounds how many trusted proxies a request passes through. List the load balancer's subnet as CIDRs in `http.trusted-proxies`, and let only the load balancer reach the app's port.
+
+Behind a CDN in front of the load balancer, list both: the load balancer's subnet and the ranges the CDN reaches the origin from, and set `http.proxy-hops = 2`:
+
+```hocon
+http.trusted-proxies = [
+  "10.0.1.0/24",        // the load balancer's subnet
+  "203.0.113.0/24",     // the CDN's ranges toward the origin, as the CDN publishes them
+  "2001:db8:cd::/48",
+]
+http.proxy-hops = 2
+```
+
+A block of every address of a family (`0.0.0.0/0`, `::/0`, or every IPv4 address mapped into IPv6, as `::ffff:0:0/96`) refuses boot: it would trust every client as a proxy, so no source could be told. To pass a long list per environment, put it in its own file and name that file in `APP_CONFIG`, or `include file("trusted-proxies.conf")` it from the environment's file. An array is replaced from one file to the next, never added to, so the file that wins holds the whole list.
 
 ### Redis
 

@@ -22,12 +22,8 @@ export interface Shown {
 	readonly label?: string;
 }
 
-/** Controls and line separators break a line; directional marks and bidi controls reorder text. */
-const unshowable = /[\p{Cc}\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/u;
-
-/** Whether a page can show `text` as a factor's label: 1 to 64 code points, well formed. */
-export const isLabel = (text: string): boolean =>
-	text.length > 0 && [...text].length <= 64 && text.isWellFormed() && !unshowable.test(text);
+/** Whether a page can show `text` as a factor's label; `labels` owns the rule. */
+export { isLabel } from "@mod/labels";
 
 export type Proved =
 	/** `amr` is what this proof adds. */
@@ -102,7 +98,7 @@ export interface Factors {
 		| { readonly kind: "valid"; readonly state: unknown; readonly amr: readonly string[] }
 		| { readonly kind: "invalid" | "unknown" }
 	>;
-	/** Binds a proved binding; recovery codes come with the first counting factor, once. One begun as the first counting factor, or asked from a login, binds only while no other counts by then (`first-binding-closed`). The caller passes `from` as it passed it to `begin`. */
+	/** Binds a proved binding, writing no recovery codes: `reissue` writes them. One begun as the first counting factor, or asked from a login, binds only while no other counts by then (`first-binding-closed`). The caller passes `from` as it passed it to `begin`. */
 	bind(
 		subject: string,
 		pending: string,
@@ -113,9 +109,10 @@ export interface Factors {
 		| {
 				readonly kind: "bound";
 				readonly factor: Shown;
-				readonly recoveryCodes?: unknown;
-				/** The codes' own factor, so a caller that cannot show them can take them back with `remove`. */
-				readonly recoveryCodesFactor?: string;
+				/** The fence the binding began under, unmoved when it was written: what `reissue` is given. */
+				readonly fence: Fence;
+				/** True when the subject held no recovery codes once written, and a way back is composed. */
+				readonly codesDue: boolean;
 		  }
 		| {
 				readonly kind:
@@ -145,13 +142,13 @@ export interface Factors {
 	): Promise<"removed" | "unknown" | "last" | "fenced">;
 	/** Removes every factor of the subject, of any kind, and answers how many and of which kinds; nothing is recorded. */
 	clear(subject: string): Promise<{ readonly count: number; readonly kinds: readonly string[] }>;
-	/** Replaces the recovery codes, for a subject holding a counting factor; nothing once the fence moved past `fence`. */
+	/** Writes the recovery codes, the first set or replacing the old, for a subject holding a counting factor; nothing once the fence moved past `fence`, and no first set past `max-factors` (`full`). */
 	reissue(
 		subject: string,
 		fence: Fence,
 	): Promise<
 		| { readonly kind: "reissued"; readonly codes: unknown }
-		| { readonly kind: "no-qualifying-factor" | "unknown-kind" | "fenced" }
+		| { readonly kind: "no-qualifying-factor" | "unknown-kind" | "fenced" | "full" }
 	>;
 }
 

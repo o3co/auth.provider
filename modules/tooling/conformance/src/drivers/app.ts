@@ -2,7 +2,8 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { generate, type Plan, trialSettings } from "@mod/create-app";
+import { generate, type Plan } from "@mod/create-app";
+import { trialLayer } from "@mod/trial";
 import type { AreaScene, NewPart, Party } from "../areas.ts";
 import { auditSink } from "../audit/audit.ts";
 import { baseEnv, launch, type Started, startRedis, untilPortHeld } from "../driver.ts";
@@ -50,13 +51,17 @@ export function sectionsOf(parts: readonly NewPart[], fallback = true): Sections
 	return config;
 }
 
+/** The files the app reads, first winning: the scene's sections, the parts' own files, the trial's layer, the generated file. */
+export const appConfig = (scene: string, layers: readonly string[], local?: string) =>
+	[scene, ...layers, ...(local ? [local] : []), "config/application.conf"].join(",");
+
 /** Tries at a new port when another process takes the one chosen before the app binds it. */
 const portAttempts = 3;
 
 /**
  * Starts the generated app at `dir` on the scene's sections, its audit sink and its store. With
- * `trial`, `create-app`'s trial settings fill the keys the scene leaves unset, except in the sections
- * it leaves: its environment, and its local layer between the scene and the generated configuration.
+ * `trial`, `trial`'s layer fills the keys the scene leaves unset, except in the sections it leaves:
+ * a local layer between the scene and the generated configuration.
  * With `trial.smtp`, a fake relay takes the app's mail.
  */
 export async function started(
@@ -69,6 +74,7 @@ export async function started(
 		readonly parties?: readonly Party[];
 		readonly smtp?: boolean;
 	},
+	layers: readonly string[] = [],
 ): Promise<Started> {
 	const parties = trial?.parties ?? [];
 	const stopParties = () => Promise.all(parties.map((p) => p.stop()));
@@ -124,27 +130,41 @@ export async function started(
 		const scratch = await mkdtemp(join(tmpdir(), "conformance-scene-"));
 		const file = join(scratch, "scene.conf");
 		await writeFile(file, JSON.stringify(settings));
-		const layers = [file];
-		let env: Record<string, string> = {};
+		const written = await Promise.all(
+			layers.map(async (text, i) => {
+				const layer = join(scratch, `layer-${i}.conf`);
+				await writeFile(layer, text);
+				return layer;
+			}),
+		);
+		let local: string | undefined;
 		if (trial) {
+			const appended = (key: string, values: readonly unknown[]) =>
+				values.map((value) => `${key} += ${JSON.stringify(value)}`);
 			// No Redis in the scene leaves the trial's URL unread: the app composes no Redis store.
-			const given = await trialSettings(dir, {
+			const given = await trialLayer(dir, {
 				redisUrl: redis?.url ?? "redis://127.0.0.1:1",
-				port,
 				leave: trial.leave,
-				...(trialLists ? reach : {}),
-				...(trialClients && Array.isArray(registered) ? { clients: registered } : {}),
+				layer: [
+					...(trialLists
+						? [
+								...appended("outbound.allow", reach.allow),
+								...appended("outbound.plain-loopback", reach.plainLoopback),
+							]
+						: []),
+					...(trialClients && Array.isArray(registered)
+						? appended("clients.registered", registered)
+						: []),
+				].join("\n"),
 			});
-			const local = join(scratch, "local.conf");
-			await writeFile(local, given.local);
-			layers.push(local);
-			env = given.env;
+			local = join(scratch, "local.conf");
+			await writeFile(local, given);
 		}
 		return launch({
 			command: process.execPath,
 			args: ["src/main.ts"],
 			cwd: dir,
-			env: { ...env, ...baseEnv(), APP_CONFIG: [...layers, "config/application.conf"].join(",") },
+			env: { ...baseEnv(), APP_CONFIG: appConfig(file, written, local) },
 			port,
 		});
 	};

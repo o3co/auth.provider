@@ -1,5 +1,11 @@
 import type { AllowanceLists } from "@mod/client-allowance";
-import type { ClientRecord } from "@mod/clients";
+import {
+	type ClientRecord,
+	clients,
+	metadataSections,
+	type RecordRefusal,
+	type Section,
+} from "@mod/clients";
 import type { BuildContext, Log } from "@mod/kernel";
 import {
 	DestinationRefused,
@@ -13,7 +19,7 @@ import {
 } from "@mod/outbound";
 import type { Fetched } from "../fetching/fetching.ts";
 import type { Settings } from "../section.ts";
-import { recordOf } from "./document.ts";
+import { computedSections, neededFields, recordOf } from "./document.ts";
 
 /** A client id for one log field: no control characters, at most 200 characters (ids reach 256). */
 const loggable = (text: string) => [...text.replace(/[\p{Cc}\p{Cf}]/gu, "")].slice(0, 200).join("");
@@ -41,10 +47,21 @@ export interface ReadingParts {
 	readonly narrower: Narrower;
 	readonly ceiling: Omit<AllowanceLists, "grants">;
 	readonly log: Log;
+	/** The sections their owners copy from a document. */
+	readonly copies: readonly Section<unknown>[];
+	/** Where a record fails the checks `clients` holds a source's to, as `checkRecord` answers. */
+	readonly check: (record: ClientRecord) => Promise<readonly RecordRefusal[] | undefined>;
 }
 
 /** Fetches and judges one document; a refusal is remembered, a failure is not. */
-export function readingWith({ outbound: out, narrower, ceiling, log }: ReadingParts) {
+export function readingWith({
+	outbound: out,
+	narrower,
+	ceiling,
+	log,
+	copies,
+	check,
+}: ReadingParts) {
 	const refused = (id: string, reason: string): Fetched<ClientRecord> => {
 		log.warn("clients-cimd.document_refused", { client: loggable(id), reason });
 		return { kind: "refused" };
@@ -73,15 +90,40 @@ export function readingWith({ outbound: out, narrower, ceiling, log }: ReadingPa
 		if (!isJson(answer)) return refused(id, "not a JSON object");
 		const read = jsonObjectOf(answer);
 		if (read.kind !== "object") return refused(id, "not a JSON object");
-		const record = recordOf(new URL(id), read.value, ceiling);
+		const record = recordOf(new URL(id), read.value, ceiling, copies);
 		if ("refused" in record) return refused(id, record.refused);
+		// Checked before it is kept: one that throws is not remembered, as a failed fetch is not.
+		const refusals = await check(record);
+		if (refusals) return refused(id, `record at ${refusals.map((r) => r.path).join(", ")}`);
 		return { kind: "found", value: record, maxAgeMs: maxAgeMsOf(answer) };
 	};
+}
+
+/**
+ * The sections whose owners copy them from a document. Boot is refused where no composed section
+ * reads a field a document client needs, or where a section this module computes is copied too.
+ */
+async function copiesIn(c: BuildContext<Settings>) {
+	const copies = (await c.collect(metadataSections)).filter((one) => one.fromDocument);
+	const read = new Set(copies.flatMap((one) => one.reads ?? []));
+	const refusals = [
+		...neededFields
+			.filter((field) => !read.has(field))
+			.map((field) => `no composed section reads a document's ${field}`),
+		...copies
+			.filter((one) => computedSections.includes(one.name))
+			.map((one) => `${one.name} is computed here, and copied from a document by its owner too`),
+	];
+	if (refusals.length > 0)
+		c.refuseAll(refusals.map((reason) => ({ where: "clients-cimd", reason })));
+	return copies;
 }
 
 /** The reading over `outbound` and the operator's section. */
 export async function readingOver(c: BuildContext<Settings>) {
 	const s = c.section;
+	const copies = await copiesIn(c);
+	const known = c.late(clients);
 	return readingWith({
 		outbound: await c.get(outbound),
 		narrower: {
@@ -91,5 +133,8 @@ export async function readingOver(c: BuildContext<Settings>) {
 		},
 		ceiling: { scopes: s.scopes, audiences: s.audiences },
 		log: c.log,
+		copies,
+		// Late: `clients` is built from the sources, this one among them.
+		check: (record) => known().checkRecord(record),
 	});
 }

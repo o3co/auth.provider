@@ -9,7 +9,7 @@ Internal module of `clients-cimd`: how often a document is fetched, and how long
 - What is fetched and how an answer is judged (`document`).
 
 ## Offers
-- `fetchingOver` (a loader, the limits, the clock) → `find(id)` → the value, or none.
+- `fetchingWith` (a loader, the limits, the clock) → `find(id)` → the value, or none.
 - A loader answers found (with the answer's own max age, if any), refused, or failed.
 
 ## Invariants

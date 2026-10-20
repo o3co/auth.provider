@@ -1,12 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { full, optIns } from "@mod/combinations";
-import { parseString } from "@o3co/ts.hocon";
+import { trialLayer } from "@mod/trial";
 import { expect, it, vi } from "vitest";
-import { generate, trialSettings } from "../src/contract.ts";
+import { generate } from "../src/contract.ts";
 import {
 	boot,
 	kernel,
@@ -36,7 +36,16 @@ it("assembles what combinations composes in full, each axis with one adapter, an
 	const modules = full();
 	expect(await imports(target)).toEqual(modules);
 	const pkg = JSON.parse(await read(target, "package.json"));
-	expect(Object.keys(pkg.dependencies)).toEqual([kernel, ...modules]);
+	expect(Object.keys(pkg.dependencies)).toEqual([kernel, ...modules, "zod"]);
+	// An app writing sections of its own holds the one zod the kernel asks of it as a peer: the
+	// version the workspace tests with, within the kernel's range.
+	const kernelManifest = manifest(kernel) as {
+		readonly peerDependencies?: Record<string, string>;
+		readonly devDependencies?: Record<string, string>;
+	};
+	expect(pkg.dependencies.zod).toBe(kernelManifest.devDependencies?.zod);
+	const [major, minor] = String(pkg.dependencies.zod).split(".");
+	expect(kernelManifest.peerDependencies?.zod).toBe(`^${major}.${minor}.0`);
 	expect(pkg.scripts).toEqual({
 		start: "node --env-file-if-exists=.env src/main.ts",
 		reseal: "node --env-file-if-exists=.env src/reseal.ts",
@@ -59,6 +68,7 @@ it("names by hand only the keys no module's example holds", async () => {
 	const section = readme.split("## Keys no example holds")[1]?.split("\n## ")[0] ?? "";
 	expect([...section.matchAll(/^- `([a-z0-9.-]+)`/gm)].map((m) => m[1])).toEqual([
 		"authorize.step-up-page",
+		"federation.held-page",
 		"http.trusted-proxies",
 		"http.client-certificate",
 		"users.registered",
@@ -130,6 +140,8 @@ it("writes the image, and what git and the image leave out", async () => {
 	);
 	expect(docker).toMatch(/^ENTRYPOINT \["\/sbin\/tini", "--"\]$/m);
 	expect(docker).toContain("pnpm install --frozen-lockfile --prod");
+	// The workspace file, where the operator writes one, installs as pnpm reads it; none is needed.
+	expect(docker).toMatch(/^COPY package\.json pnpm-lock\.yaml pnpm-workspace\.yam\[l\] \.\/$/m);
 	expect(docker).toMatch(
 		/^HEALTHCHECK --interval=30s --timeout=5s --start-period=\d+s --retries=3 .*\/_healthcheck/m,
 	);
@@ -195,8 +207,8 @@ it("refuses the generated configuration alone only for keys the guide names", as
 it("boots on the generated configuration with the environment and local layer filled, refused only for an unreachable Redis", async () => {
 	const target = await installed();
 	// Nothing listens on port 1.
-	const env = await configured(target, { deployment: "single", redisUrl: "redis://127.0.0.1:1" });
-	const run = boot(target, "config/local.conf,config/application.conf", env);
+	await configured(target, { deployment: "single", redisUrl: "redis://127.0.0.1:1" });
+	const run = boot(target, "config/local.conf,config/application.conf");
 	expect(run.status, run.stderr).toBe(78);
 	expect(run.refused, run.stderr).toEqual(["redis.url"]);
 });
@@ -225,173 +237,28 @@ it("makes the full template from the command with features added, and the listed
 	}
 });
 
-it("writes the clients given into the trial's one clients.registered, and no block for none or for clients left", async () => {
+it("gives a generated app a trial layer by its own modules, with hosts under .invalid, leaving the sections the caller names", async () => {
 	const target = await generated();
-	const redisUrl = "redis://127.0.0.1:1";
-	const clients = [
-		{ id: "app", kind: "public", method: "none" },
-		{
-			id: "svc",
-			kind: "confidential",
-			method: "client_secret_basic",
-			sections: { x: { "a.b": "${c}" } },
-		},
-	];
-	const given = await trialSettings(target, { redisUrl, clients });
-	expect(parseString(given.local).get("clients.registered")).toEqual(clients);
-	for (const settings of [{ redisUrl }, { redisUrl, clients, leave: ["clients"] }]) {
-		expect((await trialSettings(target, settings)).local).not.toMatch(/^clients /m);
-	}
-});
-
-it("gives signer-keys-http an issuer and keys-url of the trial's own, its host allowed", async () => {
-	const target = await mkdtemp(join(tmpdir(), "create-app-trial-"));
-	mkdirSync(join(target, "src"));
-	await writeFile(
-		join(target, "src", "main.ts"),
-		'import o from "@mod/outbound/module";\nimport s from "@mod/signer-keys-http/module";\n',
-	);
-	const local = parseString(
-		(await trialSettings(target, { redisUrl: "redis://127.0.0.1:1" })).local,
-	);
-	expect(local.get("signer-keys-http")).toEqual({
-		issuer: "https://devices.example.invalid",
-		"keys-url": "https://ledger.example.invalid/signer-keys",
-	});
-	expect(local.get("outbound.allow")).toEqual(["ledger.example.invalid"]);
-	expect(local.get("jwt-bearer")).toBeUndefined();
-});
-
-it("gives mfa-witness-http three URLs of the trial's own at one origin, its host allowed, and a credential", async () => {
-	const target = await mkdtemp(join(tmpdir(), "create-app-trial-"));
-	mkdirSync(join(target, "src"));
-	await writeFile(
-		join(target, "src", "main.ts"),
-		'import o from "@mod/outbound/module";\nimport w from "@mod/mfa-witness-http/module";\n',
-	);
-	const trial = await trialSettings(target, { redisUrl: "redis://127.0.0.1:1" });
-	const local = parseString(trial.local);
-	expect(local.get("mfa-witness-http")).toEqual({
-		"read-url": "https://ledger.example.invalid/mfa-witness/read",
-		"enroll-url": "https://ledger.example.invalid/mfa-witness/enroll",
-		"clear-url": "https://ledger.example.invalid/mfa-witness/clear",
-	});
-	expect(local.get("outbound.allow")).toEqual(["ledger.example.invalid"]);
-	expect(trial.env.MFA_WITNESS_HTTP_CREDENTIAL).toMatch(/^[A-Za-z0-9_-]{43}$/);
-});
-
-it("names signer-keys-http's issuer among jwt-bearer's issuers where both are composed, its keys contributed", async () => {
-	const target = await mkdtemp(join(tmpdir(), "create-app-trial-"));
-	mkdirSync(join(target, "src"));
-	await writeFile(
-		join(target, "src", "main.ts"),
-		[
-			'import o from "@mod/outbound/module";',
-			'import j from "@mod/jwt-bearer/module";',
-			'import s from "@mod/signer-keys-http/module";',
-			"",
-		].join("\n"),
-	);
-	const redisUrl = "redis://127.0.0.1:1";
-	const local = parseString((await trialSettings(target, { redisUrl })).local);
-	expect(local.get("jwt-bearer.issuers")).toEqual([
-		{ issuer: "https://devices.example.invalid", subject: "as-is" },
-	]);
-	const left = parseString(
-		(await trialSettings(target, { redisUrl, leave: ["jwt-bearer"] })).local,
-	);
-	expect(left.get("jwt-bearer")).toBeUndefined();
-});
-
-it("gives subject-revocation-http a fresh credential, its sources and a trusted proxy no request comes through", async () => {
-	const target = await mkdtemp(join(tmpdir(), "create-app-trial-"));
-	mkdirSync(join(target, "src"));
-	await writeFile(
-		join(target, "src", "main.ts"),
-		[
-			'import h from "@mod/http/module";',
-			'import r from "@mod/subject-revocation-http/module";',
-			"",
-		].join("\n"),
-	);
-	const redisUrl = "redis://127.0.0.1:1";
-	const given = await trialSettings(target, { redisUrl });
-	const local = parseString(given.local);
-	expect(local.get("subject-revocation-http.sources")).toEqual(["192.0.2.0/24"]);
-	expect(local.get("http.trusted-proxies")).toEqual(["192.0.2.1"]);
-	const credential = given.env.SUBJECT_REVOCATION_HTTP_CREDENTIAL ?? "";
-	expect(Buffer.from(credential, "base64url").length).toBe(32);
-	const again = await trialSettings(target, { redisUrl });
-	expect(again.env.SUBJECT_REVOCATION_HTTP_CREDENTIAL).not.toBe(credential);
-	const left = parseString(
-		(await trialSettings(target, { redisUrl, leave: ["http", "subject-revocation-http"] })).local,
-	);
-	expect(left.get("http")).toBeUndefined();
-	expect(left.get("subject-revocation-http")).toBeUndefined();
-});
-
-it("gives exchange-id-tokens one upstream for a client of the trial's own, registered beside the clients given", async () => {
-	const redisUrl = "redis://127.0.0.1:1";
-	const given = [{ id: "app", kind: "public", method: "none" }];
-	/** An app whose entry imports these modules, as far as the trial settings read it. */
-	const importing = async (names: readonly string[]) => {
-		const target = await mkdtemp(join(tmpdir(), "create-app-trial-"));
-		mkdirSync(join(target, "src"));
-		const lines = names.map((name, i) => `import m${i} from "@mod/${name}/module";`);
-		await writeFile(join(target, "src", "main.ts"), `${lines.join("\n")}\n`);
-		return target;
-	};
-	const target = await importing(["clients", "exchange-id-tokens"]);
-	const local = parseString((await trialSettings(target, { redisUrl, clients: given })).local);
-	const registered = local.get("clients.registered") as { id: string }[];
-	expect(registered.map((c) => c.id)).toEqual(["app", "trial-id-tokens"]);
-	expect(local.get("exchange-id-tokens.google.clients")).toEqual({
-		"trial-id-tokens": { audiences: ["trial-google-server-client-id"] },
-	});
-	const plain = (await trialSettings(await importing(["clients"]), { redisUrl, clients: given }))
-		.local;
-	expect(plain).not.toMatch(/^exchange-id-tokens /m);
-	expect(parseString(plain).get("clients.registered")).toEqual(given);
-});
-
-it("gives a generated app trial settings by its own modules, with hosts under .invalid and keys made fresh", async () => {
-	const target = await generated();
-	const [one, other] = [
-		await trialSettings(target, { redisUrl: "redis://127.0.0.1:1", port: 1234 }),
-		await trialSettings(target, { redisUrl: "redis://127.0.0.1:1", deployment: "multi" }),
-	];
-	expect(one.local).toMatch(/^kernel \{ deployment = single \}$/m);
-	expect(other.local).toMatch(/^kernel \{ deployment = multi \}$/m);
-	expect(one.local).toContain("port = 1234");
-	expect(one.env.KEYS_SIGNING_PRIVATE_KEY).not.toBe(other.env.KEYS_SIGNING_PRIVATE_KEY);
-	const hosts = [
-		...`${one.local}${Object.values(one.env).join("\n")}`.matchAll(
-			/[a-z0-9-]+(?:\.[a-z0-9-]+)+(?=[/:"\s,\]]|$)/gm,
-		),
-	]
+	const all = JSON.parse(await trialLayer(target, { redisUrl: "redis://127.0.0.1:1" }));
+	const hosts = [...JSON.stringify(all).matchAll(/[a-z0-9-]+(?:\.[a-z0-9-]+)+(?=[/:"\s,\]]|$)/gm)]
 		.map((m) => m[0])
 		.filter((host) => /[a-z]/.test(host) && !/^\d/.test(host));
 	expect(hosts.length).toBeGreaterThan(0);
 	for (const host of hosts) expect(host, host).toMatch(/\.invalid$/);
-});
-
-it("leaves out of the trial settings every variable and block of the sections the caller names", async () => {
-	const target = await generated();
-	const all = await trialSettings(target, { redisUrl: "redis://127.0.0.1:1" });
-	const left = await trialSettings(target, {
-		redisUrl: "redis://127.0.0.1:1",
-		leave: ["keys", "http"],
-	});
-	expect(Object.keys(all.env).filter((name) => name.startsWith("KEYS_")).length).toBeGreaterThan(0);
-	expect(Object.keys(left.env).filter((name) => name.startsWith("KEYS_"))).toEqual([]);
-	expect(Object.keys(left.env).sort()).toEqual(
-		Object.keys(all.env)
-			.filter((name) => !name.startsWith("KEYS_"))
+	const left = JSON.parse(
+		await trialLayer(target, { redisUrl: "redis://127.0.0.1:1", leave: ["keys", "http"] }),
+	);
+	expect(Object.keys(left).sort()).toEqual(
+		Object.keys(all)
+			.filter((section) => section !== "keys" && section !== "http")
 			.sort(),
 	);
-	expect(all.local).toMatch(/^http \{/m);
-	expect(left.local).not.toMatch(/^http \{/m);
-	expect(left.local).toMatch(/^kernel \{/m);
+});
+
+it("tells the operator to set the page a federation login a second factor holds goes on at", async () => {
+	expect(await read(await generated(), "README.md")).toContain(
+		"- `federation.held-page`: the page a federation login a second factor holds goes on at, on the public origin; without it, the browser stops at the factor's answer.",
+	);
 });
 
 it("stops within the kernel's own deadline, and tells the operator to give the orchestrator longer", async () => {
@@ -404,55 +271,37 @@ it("stops within the kernel's own deadline, and tells the operator to give the o
 	);
 });
 
-it("merges the hosts a caller adds into the one trial outbound block, and makes mfa optional where it is composed", async () => {
-	const target = await generated();
-	const { local } = await trialSettings(target, {
-		redisUrl: "redis://127.0.0.1:1",
-		allow: ["sink.example.invalid"],
-		plainLoopback: ["127.0.0.1:4318"],
-	});
-	expect(local.match(/^outbound \{/gm)).toHaveLength(1);
-	expect(local).toMatch(
-		/^outbound \{ allow = \[ledger\.example\.invalid, audit\.example\.invalid, sink\.example\.invalid\], plain-loopback = \["127\.0\.0\.1:4318"\] \}$/m,
+it("indexes for agents each composed module's card and section defaults as installed, and the release's whole lists", async () => {
+	const target = await installed();
+	const index = await read(target, "AGENTS.md");
+	const pkg = JSON.parse(await read(target, "package.json"));
+	// zod, beside the modules, is no module: the index lists modules alone.
+	const composed = Object.keys(pkg.dependencies).filter((name) => name !== "zod");
+	const rows = [...index.matchAll(/^\| `(@[^`]+)` \| `([^`]+)` \| (?:`([^`]+)`)? \|$/gm)];
+	expect(rows.map((r) => r[1])).toEqual(composed);
+	for (const [, name, card, references] of rows) {
+		expect(existsSync(join(target, String(card))), String(name)).toBe(true);
+		if (references) expect(existsSync(join(target, references)), String(name)).toBe(true);
+	}
+	expect(rows.some((r) => r[3] !== undefined)).toBe(true);
+	expect(index).toMatch(/is the truth about it/);
+	expect(index).toMatch(
+		/https:\/\/github\.com\/o3co\/auth\.provider\/blob\/v[^/]+\/docs\/configuration\.md/,
 	);
-	expect(local).toMatch(/^mfa \{ mode = optional \}$/m);
-	const left = await trialSettings(target, {
-		redisUrl: "redis://127.0.0.1:1",
-		leave: ["mfa", "outbound"],
-	});
-	expect(left.local).not.toMatch(/^(mfa|outbound) \{/m);
+	const readme = await read(target, "README.md");
+	for (const name of composed)
+		expect(readme).toContain(`- \`${name}\`: \`node_modules/${name}/README.md\``);
 });
 
-it("gives webauthn the trial's public origin where it is composed, and leaves it to a caller deciding it", async () => {
-	const withPasskeys = await generated(["@mod/webauthn"]);
-	const { local } = await trialSettings(withPasskeys, { redisUrl: "redis://127.0.0.1:1" });
-	expect(local).toMatch(
-		/^webauthn \{ rp-id = login\.example\.invalid, rp-name = "Trial", origins = \["https:\/\/login\.example\.invalid"\] \}$/m,
+it("tells in the full template's README the command's name, how to try it over plain http on this machine, and where to see what --add takes", async () => {
+	const readme = await read(await generated(), "README.md");
+	expect(readme).toContain("Generated by `create-auth-provider` from the full template");
+	expect(readme).not.toContain("`create-app`");
+	expect(readme).toMatch(
+		/`http\.public-origin` to `http:\/\/localhost:8080` and `http\.insecure-origin` to `true`/,
 	);
-	const left = await trialSettings(withPasskeys, {
-		redisUrl: "redis://127.0.0.1:1",
-		leave: ["webauthn"],
-	});
-	expect(left.local).not.toMatch(/^webauthn \{/m);
-	expect(
-		(await trialSettings(await generated(), { redisUrl: "redis://127.0.0.1:1" })).local,
-	).not.toMatch(/^webauthn \{/m);
-});
-
-it("reads the modules an app composes from its entry, whatever names it imports them under", async () => {
-	const target = mkdtempSync(join(tmpdir(), "trial-"));
-	mkdirSync(join(target, "src"));
-	writeFileSync(join(target, "package.json"), JSON.stringify({ dependencies: {} }));
-	writeFileSync(
-		join(target, "src/main.ts"),
-		[
-			'import { assemble } from "@o3co/auth-provider-foundation/kernel";',
-			'import m0 from "@o3co/auth-provider-oauth/authorize/module";',
-			'import m1 from "@o3co/auth-provider-foundation/http/module";',
-		].join("\n"),
+	expect(readme).toContain("`create-auth-provider --list`");
+	expect(readme).toMatch(
+		/A first login, step by step: https:\/\/github\.com\/o3co\/auth\.provider\/blob\/v[^/]+\/docs\/recipe-first-login\.md/,
 	);
-	const { local } = await trialSettings(target, { redisUrl: "redis://127.0.0.1:1" });
-	expect(local).toContain("authorize { login-page");
-	expect(local).toContain("http { public-origin");
-	expect(local).not.toContain("users-http");
 });

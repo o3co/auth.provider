@@ -20,7 +20,8 @@
 
 ## Invariants
 - A login's attributes are kept as `login-attributes` keeps them, a frozen copy taken at login, kept unchanged (a raise included) until the session closes.
-- Where no entry requirement judges `credentials`, `sessionRules` holds entry there to a sign-in within `recent-authentication`.
+- It asks the entry requirements through `session`'s `entryJudge` and calls the participants through its `closingParticipants`; boot is refused, naming each, where either has no contribution, never taken as no rule.
+- Where nothing judges `credentials`, `sessionRules` holds entry there to a sign-in within `recent-authentication`.
 - `recent(at)` answers whether a time on `kernel`'s clock is within `recent-authentication`, the one window every recent-authentication check counts in.
 - A host that cannot read a record (one a newer host wrote, during a rolling upgrade) lets nobody in on it and answers a login or close over its cookie Unavailable; the cookie stays.
 

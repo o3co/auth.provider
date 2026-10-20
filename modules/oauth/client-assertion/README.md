@@ -40,7 +40,7 @@
 - Spent assertions, named by a hash of the client id and the `jti` together, so no two clients' names meet.
 
 ## Depends on
-- `kernel`, `http`, `url-setting`, `clients`, `issuer`, `token-endpoint`, `external-jwt`, `keys`, `outbound`
+- `kernel`, `http`, `url-setting`, `clients`, `issuer`, `token-endpoint`, `external-jwt`, `keys`, `outbound`, `outbound-policy`
 
 ## Vocabulary
 - assertion: a JWT the client signed with its own key to prove itself.

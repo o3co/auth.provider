@@ -1,5 +1,5 @@
 import { cookies } from "@mod/cookies";
-import { noStore, routes } from "@mod/http";
+import { jsonAnswer, routes } from "@mod/http";
 import { defineModule } from "@mod/kernel";
 import { carried, keptToken, newToken } from "./check.ts";
 import { deciding } from "./deciding.ts";
@@ -17,19 +17,16 @@ export default defineModule({ name: "csrf" }, (m) => [
 			handle: (request) => {
 				// A valid token is kept, so forms open in other tabs stay usable.
 				const token = keptToken(jar, request) ?? newToken(c.random);
-				return {
-					status: 200,
-					headers: noStore,
-					cookies: [jar.write(carried.cookie, token, tokenSeconds)],
-					body: {
-						json: {
-							csrf_token: token,
-							header_name: carried.header,
-							body_field: carried.field,
-							expires_in: tokenSeconds,
-						},
+				return jsonAnswer(
+					200,
+					{
+						csrf_token: token,
+						header_name: carried.header,
+						body_field: carried.field,
+						expires_in: tokenSeconds,
 					},
-				};
+					{ cookies: [jar.write(carried.cookie, token, tokenSeconds)] },
+				);
 			},
 		};
 	}),

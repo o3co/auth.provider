@@ -18,6 +18,6 @@ export default auditEvents({
 	},
 	"mfa.recovery_codes.generated": {
 		attributes: ["kind", "regenerated"],
-		when: "recovery codes come with a first counting factor, or are reissued (`regenerated`)",
+		when: "recovery codes are written by a reissue: a first set after a first counting factor, or one replacing the set held (`regenerated`)",
 	},
 });

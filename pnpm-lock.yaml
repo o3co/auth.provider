@@ -32,6 +32,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../../foundation/url-setting
@@ -70,6 +73,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../../oauth/sender-binding
@@ -122,6 +128,9 @@ importers:
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
+      '@mod/upstream-round-trip':
+        specifier: workspace:*
+        version: link:../../upstream-login/upstream-round-trip
       '@mod/upstreams':
         specifier: workspace:*
         version: link:../../upstream-login/upstreams
@@ -144,6 +153,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
@@ -213,6 +225,9 @@ importers:
       '@mod/request-source':
         specifier: workspace:*
         version: link:../request-source
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../url-setting
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -237,6 +252,7 @@ importers:
       '@o3co/ts.hocon':
         specifier: 1.14.3
         version: 1.14.3(zod@4.6.7)
+    devDependencies:
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -255,6 +271,12 @@ importers:
       zod:
         specifier: 4.6.7
         version: 4.6.7
+
+  modules/foundation/labels:
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
 
   modules/foundation/mail:
     dependencies:
@@ -284,6 +306,28 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../kernel
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../outbound-policy
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../url-setting
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
+  modules/foundation/outbound-policy:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../url-setting
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -547,6 +591,38 @@ importers:
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../session-participants
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../session-requirements
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
+  modules/identity/session-participants:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../session
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
+  modules/identity/session-requirements:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../session
+    devDependencies:
       vitest:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
@@ -700,6 +776,12 @@ importers:
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
+      '@mod/reauth':
+        specifier: workspace:*
+        version: link:../reauth
+      '@mod/redirect-uris':
+        specifier: workspace:*
+        version: link:../redirect-uris
       '@mod/request-source':
         specifier: workspace:*
         version: link:../../foundation/request-source
@@ -734,6 +816,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       '@mod/session-tokens':
         specifier: workspace:*
         version: link:../session-tokens
@@ -789,6 +874,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/token-endpoint':
         specifier: workspace:*
         version: link:../token-endpoint
@@ -814,9 +902,6 @@ importers:
 
   modules/oauth/clients-cimd:
     dependencies:
-      '@mod/authorize':
-        specifier: workspace:*
-        version: link:../authorize
       '@mod/client-allowance':
         specifier: workspace:*
         version: link:../client-allowance
@@ -826,9 +911,6 @@ importers:
       '@mod/code-grant':
         specifier: workspace:*
         version: link:../code-grant
-      '@mod/consent':
-        specifier: workspace:*
-        version: link:../consent
       '@mod/grants':
         specifier: workspace:*
         version: link:../grants
@@ -841,6 +923,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/refresh':
         specifier: workspace:*
         version: link:../refresh
@@ -848,6 +933,12 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/consent':
+        specifier: workspace:*
+        version: link:../consent
+      '@mod/redirect-uris':
+        specifier: workspace:*
+        version: link:../redirect-uris
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
@@ -894,6 +985,12 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/session-tokens':
         specifier: workspace:*
         version: link:../session-tokens
@@ -1016,6 +1113,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
@@ -1118,21 +1218,12 @@ importers:
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
-      '@mod/refresh':
-        specifier: workspace:*
-        version: link:../refresh
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../sender-binding
-      '@mod/session':
-        specifier: workspace:*
-        version: link:../../identity/session
-      '@mod/session-tokens':
-        specifier: workspace:*
-        version: link:../session-tokens
       '@mod/token-endpoint':
         specifier: workspace:*
         version: link:../token-endpoint
@@ -1200,6 +1291,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -1278,6 +1372,9 @@ importers:
       '@mod/cookies':
         specifier: workspace:*
         version: link:../../foundation/cookies
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -1331,8 +1428,43 @@ importers:
         specifier: workspace:*
         version: link:../../identity/session
 
+  modules/oauth/reauth:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
+  modules/oauth/redirect-uris:
+    dependencies:
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../../identity/clients
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
   modules/oauth/refresh:
     dependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
       '@mod/client-allowance':
         specifier: workspace:*
         version: link:../client-allowance
@@ -1357,6 +1489,9 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -1370,9 +1505,6 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@mod/audit':
-        specifier: workspace:*
-        version: link:../../foundation/audit
       '@mod/code-grant-store':
         specifier: workspace:*
         version: link:../../templates/code-grant-store
@@ -1388,6 +1520,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/session-tokens':
         specifier: workspace:*
         version: link:../session-tokens
@@ -1397,6 +1532,9 @@ importers:
       '@mod/token-endpoint':
         specifier: workspace:*
         version: link:../token-endpoint
+      '@mod/token-exchange':
+        specifier: workspace:*
+        version: link:../token-exchange
       vitest:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
@@ -1419,9 +1557,6 @@ importers:
       '@mod/audit':
         specifier: workspace:*
         version: link:../../foundation/audit
-      '@mod/authorize':
-        specifier: workspace:*
-        version: link:../authorize
       '@mod/clients':
         specifier: workspace:*
         version: link:../../identity/clients
@@ -1449,12 +1584,18 @@ importers:
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
+      '@mod/redirect-uris':
+        specifier: workspace:*
+        version: link:../redirect-uris
       '@mod/request-source':
         specifier: workspace:*
         version: link:../../foundation/request-source
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -1465,6 +1606,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/subject-attributes':
         specifier: workspace:*
         version: link:../../identity/subject-attributes
@@ -1554,6 +1698,9 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       '@mod/tokens':
         specifier: workspace:*
         version: link:../tokens
@@ -1705,18 +1852,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
-      '@mod/refresh':
-        specifier: workspace:*
-        version: link:../refresh
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../sender-binding
-      '@mod/session':
-        specifier: workspace:*
-        version: link:../../identity/session
-      '@mod/session-tokens':
-        specifier: workspace:*
-        version: link:../session-tokens
       '@mod/tokens':
         specifier: workspace:*
         version: link:../tokens
@@ -1730,6 +1868,12 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
+      '@mod/session-tokens':
+        specifier: workspace:*
+        version: link:../session-tokens
       '@mod/token-endpoint':
         specifier: workspace:*
         version: link:../token-endpoint
@@ -1854,6 +1998,9 @@ importers:
 
   modules/passkey/passkey-registration:
     dependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
       '@mod/csrf':
         specifier: workspace:*
         version: link:../../identity/csrf
@@ -1863,9 +2010,15 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/labels':
+        specifier: workspace:*
+        version: link:../../foundation/labels
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
+      '@mod/request-source':
+        specifier: workspace:*
+        version: link:../../foundation/request-source
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
@@ -1876,9 +2029,6 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@mod/audit':
-        specifier: workspace:*
-        version: link:../../foundation/audit
       '@mod/cookies':
         specifier: workspace:*
         version: link:../../foundation/cookies
@@ -1897,6 +2047,9 @@ importers:
       '@mod/seal':
         specifier: workspace:*
         version: link:../../foundation/seal
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
@@ -2004,6 +2157,19 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/trial':
+        specifier: workspace:*
+        version: link:../trial
+      '@o3co/ts.hocon':
+        specifier: 1.14.3
+        version: 1.14.3(zod@4.6.7)
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
+  modules/scaffold/trial:
+    dependencies:
       '@o3co/ts.hocon':
         specifier: 1.14.3
         version: 1.14.3(zod@4.6.7)
@@ -2020,6 +2186,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/labels':
+        specifier: workspace:*
+        version: link:../../foundation/labels
       '@mod/login-gates':
         specifier: workspace:*
         version: link:../../identity/login-gates
@@ -2088,6 +2257,9 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -2142,6 +2314,79 @@ importers:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
 
+  modules/second-factor/mfa-enrollment:
+    dependencies:
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mfa':
+        specifier: workspace:*
+        version: link:../mfa
+      '@mod/mfa-binding-proof':
+        specifier: workspace:*
+        version: link:../mfa-binding-proof
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
+      '@mod/mfa-flows':
+        specifier: workspace:*
+        version: link:../mfa-flows
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
+    devDependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
+      '@mod/cookies':
+        specifier: workspace:*
+        version: link:../../foundation/cookies
+      '@mod/csrf':
+        specifier: workspace:*
+        version: link:../../identity/csrf
+      '@mod/login-attributes':
+        specifier: workspace:*
+        version: link:../../identity/login-attributes
+      '@mod/login-gates':
+        specifier: workspace:*
+        version: link:../../identity/login-gates
+      '@mod/mfa-entry':
+        specifier: workspace:*
+        version: link:../mfa-entry
+      '@mod/rate-limit':
+        specifier: workspace:*
+        version: link:../../foundation/rate-limit
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      '@mod/request-source':
+        specifier: workspace:*
+        version: link:../../foundation/request-source
+      '@mod/seal':
+        specifier: workspace:*
+        version: link:../../foundation/seal
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+      '@mod/subject-attributes':
+        specifier: workspace:*
+        version: link:../../identity/subject-attributes
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+
   modules/second-factor/mfa-entry:
     dependencies:
       '@mod/kernel':
@@ -2156,6 +2401,9 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
     devDependencies:
       '@mod/http':
         specifier: workspace:*
@@ -2200,9 +2448,6 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../mfa
-      '@mod/mfa-binding-proof':
-        specifier: workspace:*
-        version: link:../mfa-binding-proof
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
@@ -2228,6 +2473,9 @@ importers:
       '@mod/login-attributes':
         specifier: workspace:*
         version: link:../../identity/login-attributes
+      '@mod/mfa-binding-proof':
+        specifier: workspace:*
+        version: link:../mfa-binding-proof
       '@mod/mfa-entry':
         specifier: workspace:*
         version: link:../mfa-entry
@@ -2237,6 +2485,9 @@ importers:
       '@mod/seal':
         specifier: workspace:*
         version: link:../../foundation/seal
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
@@ -2292,6 +2543,9 @@ importers:
       '@mod/seal':
         specifier: workspace:*
         version: link:../../foundation/seal
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -2310,6 +2564,82 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+
+  modules/second-factor/mfa-reset:
+    dependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mfa':
+        specifier: workspace:*
+        version: link:../mfa
+      '@mod/mfa-flows':
+        specifier: workspace:*
+        version: link:../mfa-flows
+      '@mod/rate-limit':
+        specifier: workspace:*
+        version: link:../../foundation/rate-limit
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
+    devDependencies:
+      '@mod/cookies':
+        specifier: workspace:*
+        version: link:../../foundation/cookies
+      '@mod/csrf':
+        specifier: workspace:*
+        version: link:../../identity/csrf
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/login-attributes':
+        specifier: workspace:*
+        version: link:../../identity/login-attributes
+      '@mod/login-gates':
+        specifier: workspace:*
+        version: link:../../identity/login-gates
+      '@mod/mfa-binding-proof':
+        specifier: workspace:*
+        version: link:../mfa-binding-proof
+      '@mod/mfa-enrollment':
+        specifier: workspace:*
+        version: link:../mfa-enrollment
+      '@mod/mfa-entry':
+        specifier: workspace:*
+        version: link:../mfa-entry
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      '@mod/request-source':
+        specifier: workspace:*
+        version: link:../../foundation/request-source
+      '@mod/seal':
+        specifier: workspace:*
+        version: link:../../foundation/seal
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+      '@mod/subject-attributes':
+        specifier: workspace:*
+        version: link:../../identity/subject-attributes
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
   modules/second-factor/mfa-revocation:
     dependencies:
@@ -2392,12 +2722,12 @@ importers:
 
   modules/templates/authorize-store:
     dependencies:
-      '@mod/authorize':
-        specifier: workspace:*
-        version: link:../../oauth/authorize
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/reauth':
+        specifier: workspace:*
+        version: link:../../oauth/reauth
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -2474,6 +2804,12 @@ importers:
       '@mod/session-lifecycle':
         specifier: workspace:*
         version: link:../../identity/session-lifecycle
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/session-store':
         specifier: workspace:*
         version: link:../session-store
@@ -2580,21 +2916,6 @@ importers:
       vitest:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
-
-  modules/templates/federation-store:
-    dependencies:
-      '@mod/federation':
-        specifier: workspace:*
-        version: link:../../upstream-login/federation
-      '@mod/kernel':
-        specifier: workspace:*
-        version: link:../../foundation/kernel
-      '@mod/records':
-        specifier: workspace:*
-        version: link:../../foundation/records
-      '@mod/store':
-        specifier: workspace:*
-        version: link:../../foundation/store
 
   modules/templates/federation-tokens-store:
     dependencies:
@@ -2705,6 +3026,9 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -2767,6 +3091,12 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -2832,6 +3162,44 @@ importers:
         specifier: workspace:*
         version: link:../../oauth/sender-binding
 
+  modules/templates/upstream-handoff-store:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+      '@mod/upstream-handoff':
+        specifier: workspace:*
+        version: link:../../upstream-login/upstream-handoff
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
+  modules/templates/upstream-round-trip-store:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+      '@mod/upstream-round-trip':
+        specifier: workspace:*
+        version: link:../../upstream-login/upstream-round-trip
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
   modules/templates/users-store:
     dependencies:
       '@mod/kernel':
@@ -2870,6 +3238,9 @@ importers:
       '@mod/create-app':
         specifier: workspace:*
         version: link:../../scaffold/create-app
+      '@mod/trial':
+        specifier: workspace:*
+        version: link:../../scaffold/trial
       vitest:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
@@ -3154,6 +3525,9 @@ importers:
       '@mod/conformance-second-factor':
         specifier: workspace:*
         version: link:../conformance-second-factor
+      '@mod/trial':
+        specifier: workspace:*
+        version: link:../../scaffold/trial
       '@mod/users-http':
         specifier: workspace:*
         version: link:../../user-ledger-http/users-http
@@ -3182,6 +3556,9 @@ importers:
       '@mod/create-app':
         specifier: workspace:*
         version: link:../../scaffold/create-app
+      '@mod/trial':
+        specifier: workspace:*
+        version: link:../../scaffold/trial
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -3200,9 +3577,6 @@ importers:
       '@mod/audit':
         specifier: workspace:*
         version: link:../../foundation/audit
-      '@mod/cookies':
-        specifier: workspace:*
-        version: link:../../foundation/cookies
       '@mod/csrf':
         specifier: workspace:*
         version: link:../../identity/csrf
@@ -3224,12 +3598,15 @@ importers:
       '@mod/request-source':
         specifier: workspace:*
         version: link:../../foundation/request-source
-      '@mod/seal':
-        specifier: workspace:*
-        version: link:../../foundation/seal
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/upstream-handoff':
+        specifier: workspace:*
+        version: link:../upstream-handoff
+      '@mod/upstream-round-trip':
+        specifier: workspace:*
+        version: link:../upstream-round-trip
       '@mod/upstreams':
         specifier: workspace:*
         version: link:../upstreams
@@ -3243,9 +3620,15 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/cookies':
+        specifier: workspace:*
+        version: link:../../foundation/cookies
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
+      '@mod/seal':
+        specifier: workspace:*
+        version: link:../../foundation/seal
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
@@ -3288,6 +3671,9 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
+      '@mod/session-participants':
+        specifier: workspace:*
+        version: link:../../identity/session-participants
       '@mod/session-tokens':
         specifier: workspace:*
         version: link:../../oauth/session-tokens
@@ -3310,6 +3696,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
@@ -3331,12 +3720,18 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/upstream-client':
         specifier: workspace:*
         version: link:../upstream-client
       '@mod/upstreams':
         specifier: workspace:*
         version: link:../upstreams
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../../foundation/url-setting
       jose:
         specifier: 6.2.12
         version: 6.2.12
@@ -3356,12 +3751,18 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/upstream-client':
         specifier: workspace:*
         version: link:../upstream-client
       '@mod/upstreams':
         specifier: workspace:*
         version: link:../upstreams
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../../foundation/url-setting
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -3381,12 +3782,18 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/upstream-client':
         specifier: workspace:*
         version: link:../upstream-client
       '@mod/upstreams':
         specifier: workspace:*
         version: link:../upstreams
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../../foundation/url-setting
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -3406,12 +3813,18 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/upstream-client':
         specifier: workspace:*
         version: link:../upstream-client
       '@mod/upstreams':
         specifier: workspace:*
         version: link:../upstreams
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../../foundation/url-setting
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -3464,6 +3877,53 @@ importers:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
 
+  modules/upstream-login/upstream-handoff:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/login-gates':
+        specifier: workspace:*
+        version: link:../../identity/login-gates
+      '@mod/seal':
+        specifier: workspace:*
+        version: link:../../foundation/seal
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
+      '@mod/upstreams':
+        specifier: workspace:*
+        version: link:../upstreams
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
+  modules/upstream-login/upstream-round-trip:
+    dependencies:
+      '@mod/cookies':
+        specifier: workspace:*
+        version: link:../../foundation/cookies
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
   modules/upstream-login/upstreams:
     dependencies:
       '@mod/kernel':
@@ -3490,6 +3950,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../../foundation/url-setting
@@ -3515,6 +3978,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../../foundation/url-setting
@@ -3604,6 +4070,9 @@ importers:
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
+      '@mod/outbound-policy':
+        specifier: workspace:*
+        version: link:../../foundation/outbound-policy
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../../foundation/url-setting

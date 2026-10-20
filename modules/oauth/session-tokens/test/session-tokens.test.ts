@@ -1,4 +1,4 @@
-import { type SessionIssuance, sessionIssuances } from "@mod/grants";
+import { type SessionIssuance, sessionIssuances, type TokenTie, tokenTies } from "@mod/grants";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import {
@@ -12,8 +12,9 @@ import {
 	type Module,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
-import { sessions } from "@mod/session";
+import { entryJudge, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import sessionParticipants from "@mod/session-participants/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { referenceOf, type Tokens, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
@@ -71,6 +72,7 @@ async function boot(
 		size?: number;
 		margin?: number;
 		tokens?: Module;
+		extra?: Module[];
 	} = {},
 ) {
 	const issued = issuedInMemory(options.size);
@@ -85,10 +87,12 @@ async function boot(
 					down,
 				),
 			sessionStandIn,
+			sessionParticipants,
 			subjectRevocationStandIn,
 			issued.module,
 			sessionTokensModule,
 			telling,
+			...(options.extra ?? []),
 		],
 		config: {
 			...kernelConfig(),
@@ -214,6 +218,22 @@ it("lists a session before an add within the margin of its cap, and not before o
 	// The fourth add found three of four: within a margin of one, so the session was listed first.
 	expect(listedAtAdd).toEqual([[], [], [], [s.session.id]]);
 	expect(await s.issued.pendingListed()).toEqual([s.session.id]);
+});
+
+it("lists the session again after an add pushed one out, though a sweep took it off between the listing and the add", async () => {
+	const s = await boot({ size: 2, margin: 1 });
+	const first = await s.issue();
+	now += 1000;
+	await s.issue();
+	now += 1000;
+	// Listed before the add, near the cap; a sweep finding nothing awaiting takes it off before the add.
+	s.issued.beforeNextAdd(() => s.issued.sweptDone(s.session.id));
+	s.down.failNext("revokeReferenced");
+	await expect(s.issue()).rejects.toSatisfy(isUnavailable);
+	// The pushed-out token awaits with its session listed, so the sweep revokes it.
+	expect(await s.issued.pendingListed()).toEqual([s.session.id]);
+	await new Promise((resolve) => setTimeout(resolve, 1300));
+	expect(await s.t.verifyAccess(first.token)).toEqual({ kind: "invalid", reason: "revoked" });
 });
 
 it("refuses to start with a margin that is not below the cap, telling neither number", async () => {
@@ -350,6 +370,43 @@ it("answers the session a recorded token was issued for, and unbound for any oth
 	const bound = s.app.get(sessionTokens);
 	expect(await bound.sessionOf(a.id)).toEqual({ kind: "bound", handle: s.session.id });
 	expect(await bound.sessionOf(other.id)).toEqual({ kind: "unbound" });
+});
+
+it("ties a token to its session as `session` while the session lets it in, and joins one issued from it only then, recording nothing", async () => {
+	let short = false;
+	const judge = defineModule({ name: "judge" }, (m) => [
+		m.contribute(entryJudge).by(() => ({
+			judge: async () =>
+				short
+					? { kind: "short" as const, requirement: "test", answer: { error: "short" } }
+					: { kind: "admit" as const, judged: true },
+		})),
+	]);
+	const tied = contract<readonly TokenTie[]>("ties");
+	const reader = defineModule({ name: "tie-reader" }, (m) => [
+		m.provide(tied).by((c) => c.collect(tokenTies)),
+	]);
+	const s = await boot({ extra: [judge, reader] });
+	expect(s.app.get(tied).map((t) => t.name)).toEqual(["session"]);
+	const [tie] = s.app.get(tied) as [TokenTie];
+	const a = await s.issue();
+	expect(await tie.tieOf((await issuedAccess(s.t)).id)).toEqual({ kind: "none" });
+	const held = await tie.tieOf(a.id);
+	if (held.kind !== "held") throw new Error(`not held: ${held.kind}`);
+	expect([held.session, held.ends]).toEqual([s.session.id, undefined]);
+	const from = await issuedAccess(s.t);
+	expect(await held.join(from)).toBe(true);
+	expect(await s.app.get(sessionTokens).sessionOf(from.id)).toEqual({ kind: "unbound" });
+	short = true;
+	expect(await tie.tieOf(a.id)).toEqual({
+		kind: "ended",
+		reason: "session is short of a requirement",
+	});
+	expect(await held.join(from)).toBe(false);
+	short = false;
+	expect((await s.opened.close(s.session.id)).kind).toBe("closed");
+	expect(await tie.tieOf(a.id)).toEqual({ kind: "ended", reason: "session has ended" });
+	expect(await held.join(from)).toBe(false);
 });
 
 it("keeps a token bound to its session after the session closes", async () => {

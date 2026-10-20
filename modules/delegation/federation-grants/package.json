@@ -23,6 +23,7 @@
 		"@mod/seal": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
+		"@mod/upstream-round-trip": "workspace:*",
 		"@mod/upstreams": "workspace:*",
 		"@mod/url-setting": "workspace:*",
 		"@mod/users": "workspace:*",
@@ -31,10 +32,16 @@
 	"peerDependencies": {
 		"vitest": "5.0.4"
 	},
+	"peerDependenciesMeta": {
+		"vitest": {
+			"optional": true
+		}
+	},
 	"devDependencies": {
 		"@mod/cookies": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/secret-hash": "workspace:*",
+		"@mod/session-requirements": "workspace:*",
 		"@mod/store": "workspace:*",
 		"vitest": "5.0.4"
 	}

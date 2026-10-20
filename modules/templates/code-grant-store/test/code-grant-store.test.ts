@@ -33,7 +33,7 @@ codeStoreContract("code-grant-store on records, on a simulated replicated store"
 			simulated.beforeNext("replaceIf", "code-grant-store.codes", async () => {
 				await codes.update(hash, (record) => ({ value: change(record) }));
 			}),
-		crowd: { limit: voidsSize.perShard, hashes: crowdingFor(voidsSize).jobs },
+		crowd: { limit: voidsSize.perShard, names: crowdingFor(voidsSize).jobs },
 		loseNextAnswer: () => simulated.loseNextReply(),
 		failover: () => simulated.failover(),
 		restart: () => simulated.restart(),

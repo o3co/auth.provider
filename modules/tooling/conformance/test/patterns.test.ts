@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { areaResult, runPatterns, runsOf } from "../src/patterns/patterns.ts";
+import { areaResult, patternNames, runPatterns, runsOf } from "../src/patterns/patterns.ts";
 
 const summaries = [
 	{ name: "simple-web", use: "", areas: ["keys", "ops"] },
@@ -22,6 +22,10 @@ describe("the runs over the patterns", () => {
 			{ pattern: "full+opt-ins", areas: ["keys", "oauth"] },
 		]);
 		expect(runsOf(summaries, ["a2a"])).toEqual([{ pattern: "a2a", areas: [] }]);
+	});
+
+	it("names every run's pattern, full+opt-ins included, for a job to run each on its own", () => {
+		expect(patternNames(summaries)).toEqual(["simple-web", "a2a", "full", "full+opt-ins"]);
 	});
 
 	it("refuses a pattern not known, naming those that are", () => {

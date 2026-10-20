@@ -13,10 +13,10 @@ import type { HttpRequest } from "@mod/http";
 import { contract, deepFreeze, defineModule } from "@mod/kernel";
 import type { Binding } from "@mod/sender-binding";
 import { type Tokens, tokens } from "@mod/tokens";
-import { answeredBody } from "./answer.ts";
-import { grantInputOf, mistypedRefusal, tokenPath } from "./endpoint.ts";
-import { refusedAnswer } from "./issuance.ts";
-import { composedRule, unread } from "./targets.ts";
+import { composedRule, unread } from "./built-in/targets.ts";
+import { answeredBody } from "./route/answer.ts";
+import { grantInputOf, mistypedRefusal, tokenPath } from "./route/endpoint.ts";
+import { refusedAnswer } from "./route/issuance.ts";
 
 /** Calls a contributed grant directly, as the token endpoint does once the request has passed it. */
 export interface GrantCalls {

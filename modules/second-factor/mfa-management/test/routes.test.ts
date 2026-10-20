@@ -7,6 +7,7 @@ import {
 	clock,
 	factorsDown,
 	onNextRead,
+	raceNextChange,
 	serve,
 } from "./harness.ts";
 
@@ -110,6 +111,20 @@ describe("a session's own factors", () => {
 		expect(answers).toEqual(
 			Array(4).fill({ status: 503, body: { error: "temporarily_unavailable" } }),
 		);
+	});
+
+	it("answers 409 to a first set of codes past the factors' limit", async () => {
+		const s = await serve({ "max-factors": 2 });
+		await s.bindCode("fay");
+		await s.signIn("fay", { proved: true });
+		// Another factor takes the codes' place before the reissue writes.
+		raceNextChange.change = (record) => {
+			const { factors: all } = record as unknown as { factors: { id: string; kind: string }[] };
+			const codes = all.filter((f) => f.kind === "code");
+			return { ...record, factors: [...codes, { ...codes[0], id: "other" }] } as never;
+		};
+		const full = await s.call("POST", "/session/mfa/recovery-codes");
+		expect([full.status, full.body]).toEqual([409, { error: "mfa_factor_limit" }]);
 	});
 
 	it("asks a recent proof to change factors, and keeps the last counting factor under required mode", async () => {

@@ -12,7 +12,7 @@
 - `GET factors` answers `200 {factors}`, the session's factors as `mfa` shows them (`id`, `kind`, and `label` where one is set).
 - `POST factors/rename` takes `factor_id` and `label`, `POST factors/remove` takes `factor_id`; each answers `200 {}`, or `404 unknown_factor` for a factor the subject does not hold. A label refused is `400 invalid_request` (`invalid label`).
 - `POST factors/remove` of the last counting factor under `mfa`'s required mode is `409 mfa_last_factor`.
-- `POST recovery-codes` answers `200 {recovery_codes}`; without a counting factor `409 mfa_no_qualifying_factor`, and `404 unknown_kind` when no kind of recovery codes is composed.
+- `POST recovery-codes` answers `200 {recovery_codes}`; without a counting factor `409 mfa_no_qualifying_factor`, a first set past `max-factors` `409 mfa_factor_limit`, and `404 unknown_kind` when no kind of recovery codes is composed.
 - Without a live session, `401 login_required`; a session short of the level is `403` with the requirement's answer. A store that cannot answer is `503 temporarily_unavailable`. Every answer is `no-store`.
 - Operator section: `requests` (POSTs per source in each window, over the three POSTs, 1–100000, default 60), `window` (1s–1d, default `5m`, written with its unit).
 

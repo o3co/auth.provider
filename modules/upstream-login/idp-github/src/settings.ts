@@ -1,9 +1,10 @@
-import type { OutboundRefusals } from "@mod/outbound";
+import { destinationRefusal, type OutboundRefusals } from "@mod/outbound-policy";
 import {
 	clientSetting,
 	endpointSetting as endpoint,
 	scopeSetting as scope,
 } from "@mod/upstream-client";
+import { urlsChecked } from "@mod/url-setting";
 import { z } from "zod";
 
 /** Where the user is read. */
@@ -38,16 +39,14 @@ const section = clientSetting.extend({
 
 /** The section; boot is refused on a URL it sends to that outbound's destination policy refuses. */
 export const settingsOf = (refusals: OutboundRefusals) =>
-	section.superRefine((s, context) => {
-		// A value that is no URL is refused already, and zod still runs this: it is passed over.
-		if (![s["token-endpoint"], s.api].every((url) => URL.canParse(url))) return;
-		const sent = { "token-endpoint": s["token-endpoint"], api: userUrl(s.api) };
-		for (const [key, url] of Object.entries(sent)) {
-			const refused = refusals.explained(url, { hosts: hostsOf(s) });
-			if (refused === undefined) continue;
-			const message = `outbound's destination policy refuses it: ${refused}`;
-			context.addIssue({ code: "custom", path: [key], message });
-		}
-	});
+	section.superRefine(
+		urlsChecked((url, hosts) => destinationRefusal(refusals, url, { hosts }), {
+			urls: (s) => [s["token-endpoint"], s.api],
+			sent: (s) => ({
+				"token-endpoint": { url: s["token-endpoint"], hosts: hostsOf(s) },
+				api: { url: userUrl(s.api), hosts: hostsOf(s) },
+			}),
+		}),
+	);
 
 export type Settings = z.output<typeof section>;

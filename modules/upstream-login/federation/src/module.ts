@@ -2,12 +2,12 @@ import { type Route, routes, use } from "@mod/http";
 import { contract, defineModule } from "@mod/kernel";
 import { amrSources, openedAfterHold } from "@mod/login-gates";
 import { requestsPerSource } from "@mod/rate-limit";
+import { handoff } from "@mod/upstream-handoff";
 import { upstreams } from "@mod/upstreams";
 import { upstreamNames } from "@mod/users";
-import { handoff, handoffIn, openedIn } from "./handoff/handoff.ts";
 import { amrSourceIn, idpsIn, upstreamNamesIn, upstreamsIn } from "./idps/idps.ts";
 import { linkIn } from "./link/link.ts";
-import { loginIn } from "./round-trip/login.ts";
+import { loginCaller, loginIn } from "./round-trip/login.ts";
 import { base, federationIdps, roundTripIn } from "./round-trip/round-trip.ts";
 import { section } from "./section.ts";
 
@@ -19,8 +19,11 @@ export default defineModule({ name: "federation", section }, (m) => [
 	m.provide(federationIdps).by(idpsIn),
 	m.provide(upstreams).by(upstreamsIn),
 	m.contribute(upstreamNames).by(upstreamNamesIn),
-	m.provide(handoff).by(handoffIn),
-	m.contribute(openedAfterHold).by(openedIn),
+	// login-gates tells federation of a held login that opened; upstream-handoff keeps its tokens.
+	m.contribute(openedAfterHold).by(async (c) => ({
+		caller: loginCaller,
+		opened: (await c.get(handoff)).opened,
+	})),
 	m.provide(federationRoute).by(async (c) => {
 		const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 		const login = await loginIn(c);
@@ -30,13 +33,21 @@ export default defineModule({ name: "federation", section }, (m) => [
 			handle: await roundTripIn(c, { login, link }),
 		};
 	}),
+	m.contribute(routes).by(async (c) => ({
+		method: "GET",
+		path: `${base}/*`,
+		changesState: true,
+		crossSite:
+			"A start is the user's own navigation. A link's start checks its origin before any transaction is made; a login's start takes a navigation from another site, its state bound to its cookie and taken once.",
+		...(await c.get(federationRoute)),
+	})),
 	...(["GET", "POST"] as const).map((method) =>
 		m.contribute(routes).by(async (c) => ({
 			method,
-			path: `${base}/*`,
+			path: `${base}/*/callback`,
 			...(method === "GET" ? { changesState: true } : {}),
 			crossSite:
-				"Its start is the user's own navigation and its callback the IdP's redirect or form_post. A link's start checks its origin before any transaction is made; a login's start takes a navigation from another site, its state bound to its cookie and taken once.",
+				"A callback is the IdP's redirect or form_post, from the IdP's own site. It takes a transaction only at that IdP, with the transaction's state, and only once.",
 			...(await c.get(federationRoute)),
 		})),
 	),

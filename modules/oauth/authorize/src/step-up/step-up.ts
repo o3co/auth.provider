@@ -1,8 +1,7 @@
 import { type Acr, acr } from "@mod/acr";
 import type { BuildContext } from "@mod/kernel";
+import type { Reauth, Reauths } from "@mod/reauth";
 import { type Again, type Decision, refusal } from "../decision.ts";
-import type { Reauth } from "../reauth/reauth.ts";
-import type { Reauths } from "../reauth/reauths.ts";
 import type { Settings } from "../section.ts";
 
 const isObject = (value: unknown): value is Record<string, unknown> =>

@@ -103,11 +103,12 @@ export function patternDriver(name: string): AreaDriver {
 			if (typeof origin === "string" && !config.issuer && modules.includes("@mod/issuer")) {
 				config.issuer = { url: origin };
 			}
-			// The pattern's app reads what a deployment would give it: create-app's trial settings.
+			// The pattern's app reads what a deployment would give it: trial's layer.
 			const leave = [...new Set(parts.flatMap((p) => p.whole ?? []))];
 			// The app's mail goes to a fake relay, unless the scene names its own.
 			const smtp = modules.includes("@mod/mail-smtp") && !config["mail-smtp"];
-			return started(dir, config, scene, store, { leave, parties, smtp });
+			const layers = parts.flatMap((p) => (p.layer === undefined ? [] : [p.layer]));
+			return started(dir, config, scene, store, { leave, parties, smtp }, layers);
 		},
 	};
 }

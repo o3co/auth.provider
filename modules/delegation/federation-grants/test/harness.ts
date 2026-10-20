@@ -15,13 +15,18 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
+import { memoryRecords } from "@mod/records/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import secretHashModule from "@mod/secret-hash/module";
-import { type EntryRequirement, entryRequirements, sessions } from "@mod/session";
+import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import { type EntryRequirement, entryRequirements } from "@mod/session-requirements";
+import sessionRequirements from "@mod/session-requirements/module";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
+import { roundTripStore, type StoredRoundTrip } from "@mod/upstream-round-trip";
+import roundTripModule from "@mod/upstream-round-trip/module";
 import {
 	type DelegatedExchange,
 	type Delegation,
@@ -89,6 +94,7 @@ type Answer = {
 	headers: Record<string, string>;
 	json?: Record<string, unknown> | undefined;
 	text?: string;
+	cookies: readonly string[];
 };
 /** An answer in a line: its status, the token handed or the error and its description, any retry-after. */
 export const said = (answer: Answer) =>
@@ -107,6 +113,7 @@ const read = (response: HttpResponse): Answer => {
 		status: response.status,
 		headers: { ...response.headers },
 		...(typeof body === "string" ? { text: body } : { json: body?.json }),
+		cookies: response.cookies ?? [],
 	};
 };
 
@@ -186,14 +193,24 @@ export async function harness(
 			method: "client_secret_basic",
 			sections: { "federation-grants": { connections: ["cal"], "return-uris": [back] } },
 		});
+	const keptTrips = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
+	const tripStore = defineModule({ name: "trips" }, (m) => [
+		m.provide(roundTripStore).by(() => ({
+			save: keptTrips.records.create,
+			update: keptTrips.records.change,
+		})),
+	]);
 	const app = await assemble({
 		modules: [
 			http,
 			clientsModule,
 			secretHashModule,
 			sessionStandIn,
+			sessionRequirements,
 			csrfStandIn,
 			cookiesModule,
+			tripStore,
+			roundTripModule,
 			subjectRevocationStandIn,
 			rateLimitStandIn,
 			recorded.module,
@@ -307,12 +324,16 @@ export async function harness(
 			challenge: location(opened).searchParams.get("challenge") ?? "",
 		};
 	};
+	/** The round trip's cookie each browser holds, by its session cookie, as a browser keeps the last set. */
+	const jar = new Map<string, string>();
 	/** Decides a challenge in a browser: the answer, and the upstream state it carries. */
 	const decide = async (challenge: string, cookie: string, decision = "accept") => {
 		const answered = await browse("POST", "/session/federation-grants/consent", cookie, {
 			challenge,
 			decision,
 		});
+		const set = answered.cookies.find((c) => c.includes("federation-grants."));
+		if (set) jar.set(cookie, set.split(";")[0] ?? "");
 		return { answered, state: location(answered).searchParams.get("state") ?? "" };
 	};
 
@@ -327,7 +348,12 @@ export async function harness(
 	};
 	/** The upstream's return to the callback, as the browser brings it. */
 	const callback = (state: string, browser: string, code = "code-1") =>
-		browse("GET", "/session/federation-grants/callback/cal", browser, { state, code });
+		browse(
+			"GET",
+			"/session/federation-grants/callback/cal",
+			[browser, jar.get(browser) ?? ""].filter(Boolean).join("; "),
+			{ state, code },
+		);
 	/** A grant made active: the whole flow with what the upstream's exchange answers. */
 	const connected = async (tokens: Partial<Record<keyof UpstreamTokens, unknown>> = {}) => {
 		script.exchange = async () => upstreamLogin(upstreamTokens(tokens));

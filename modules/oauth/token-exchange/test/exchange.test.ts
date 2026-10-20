@@ -3,7 +3,14 @@ import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, confidentialClient, publicClient } from "@mod/clients/testing";
-import { type GrantOutcome, sessionIssuances, targetRules } from "@mod/grants";
+import {
+	type GrantOutcome,
+	sessionIssuances,
+	type TokenTie,
+	type TokenTieAnswer,
+	targetRules,
+	tokenTies,
+} from "@mod/grants";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import issuerModule from "@mod/issuer/module";
@@ -17,7 +24,6 @@ import {
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
-import { type FamilyHandle, type Lineage, lineage } from "@mod/refresh";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Binding, senderBindings } from "@mod/sender-binding";
 import { sessions } from "@mod/session";
@@ -54,8 +60,8 @@ const allowed = allowancesFor({
 });
 
 /**
- * Families and sessions in memory; `during` runs while a token is being recorded to a session.
- * Looser than refresh's lineage: `adopt` revokes nothing it refuses, and a family always ends 60 s on.
+ * Families and sessions in memory, as the `family` and `session` ties answer them; `during` runs
+ * while a token is being recorded to a session. Looser than refresh: a family always ends 60 s on.
  */
 function ties(during: () => void = () => {}) {
 	const families = new Map<string, { ended: boolean }>();
@@ -64,22 +70,42 @@ function ties(during: () => void = () => {}) {
 	const open = new Set<string>();
 	/** Sessions that are open but short of a requirement to be used. */
 	const short = new Set<string>();
-	const handle = (name: string) => name as unknown as FamilyHandle;
-	const kept: Lineage = {
-		of: async (id) => {
+	/** The ties joined, in order. */
+	const joined: string[] = [];
+	const family: TokenTie = {
+		name: "family",
+		tieOf: async (id) => {
 			const name = memberOf.get(id);
 			if (name === undefined) return { kind: "none" };
-			return families.get(name)?.ended
-				? { kind: "ended" }
-				: { kind: "family", family: handle(name), expiresAt: now + 60_000 };
+			if (families.get(name)?.ended) return { kind: "ended", reason: "family has ended" };
+			return {
+				kind: "held",
+				ends: now + 60_000,
+				join: async (issued) => {
+					joined.push("family");
+					if (families.get(name)?.ended) return false;
+					memberOf.set(issued.id, name);
+					return true;
+				},
+			};
 		},
-		adopt: async (family, issued) => {
-			const name = family as unknown as string;
-			if (families.get(name)?.ended) return "ended";
-			memberOf.set(issued.id, name);
-			return "adopted";
+	};
+	const session: TokenTie = {
+		name: "session",
+		tieOf: async (id) => {
+			const handle = sessionOf.get(id);
+			if (handle === undefined) return { kind: "none" };
+			if (short.has(handle)) return { kind: "ended", reason: "session is short of a requirement" };
+			if (!open.has(handle)) return { kind: "ended", reason: "session has ended" };
+			return {
+				kind: "held",
+				session: handle,
+				join: async () => {
+					joined.push("session");
+					return open.has(handle);
+				},
+			};
 		},
-		start: async () => undefined,
 	};
 	return {
 		families,
@@ -87,8 +113,9 @@ function ties(during: () => void = () => {}) {
 		sessionOf,
 		open,
 		short,
+		joined,
 		module: defineModule({ name: "ties" }, (m) => [
-			m.provide(lineage).by(() => kept),
+			m.contribute(tokenTies).by(() => family),
 			m.provide(sessions).by(() =>
 				stubSessions({
 					entryOf: async (h) =>
@@ -104,17 +131,12 @@ function ties(during: () => void = () => {}) {
 				}),
 			),
 		]),
-		/** session-tokens in memory, recording what token-endpoint tells it. */
+		/** session-tokens in memory: its tie, and recording what token-endpoint tells it. */
 		recording: defineModule({ name: "recording" }, (m) => [
-			m.provide(sessionTokens).by(() => ({
-				sessionOf: async (id) => {
-					const session = sessionOf.get(id);
-					return session === undefined ? { kind: "unbound" } : { kind: "bound", handle: session };
-				},
-			})),
+			m.contribute(tokenTies).by(() => session),
 			m.contribute(sessionIssuances).by(() => ({
-				issued: async (session, issued) => {
-					sessionOf.set(issued.id, session);
+				issued: async (handle, issued) => {
+					sessionOf.set(issued.id, handle);
 					during();
 				},
 			})),
@@ -128,6 +150,7 @@ const outside = (answer: (call: number) => unknown): ExchangeVerifier => {
 	return { tokenType: outsideType, verify: async () => answer(++calls) as never };
 };
 const outsideAnswer = {
+	kind: "own",
 	subject: "erin",
 	issuer: "https://idp.example",
 	issuedTo: "app",
@@ -151,6 +174,8 @@ async function serve(
 		extra?: Module[];
 		/** In place of the tied session-tokens. */
 		sessionTokens?: Module[];
+		/** The session's tie composed before the family's. */
+		reversed?: boolean;
 	} = {},
 ) {
 	const tied = options.tied ?? ties();
@@ -183,8 +208,9 @@ async function serve(
 			secretHashModule,
 			grantCaller,
 			clientAllowanceModule,
-			tied.module,
-			...(options.sessionTokens ?? [tied.recording]),
+			...(options.reversed
+				? [...(options.sessionTokens ?? [tied.recording]), tied.module]
+				: [tied.module, ...(options.sessionTokens ?? [tied.recording])]),
 			dpopKind,
 			...(verifier
 				? [
@@ -254,6 +280,14 @@ const subjectOf = (token: string, type = accessTokenType) => ({
 });
 const said = (outcome: GrantOutcome) =>
 	outcome.kind === "error" ? [outcome.error, outcome.description] : ["issued"];
+/** A tie named `name`, answering what `answer` gives for each token id. */
+const tieModule = (
+	name: string,
+	answer: (id: string) => TokenTieAnswer | Promise<TokenTieAnswer>,
+) =>
+	defineModule({ name: `tie-${name}` }, (m) => [
+		m.contribute(tokenTies).by(() => ({ name, tieOf: async (id) => answer(id) })),
+	]);
 
 describe("token-exchange", () => {
 	it("issues an access token for the subject, narrowed to the scope asked, with no actor", async () => {
@@ -720,6 +754,147 @@ describe("token-exchange: how the issued token ends", () => {
 		expect(await s.issuing.verifyAccess(s.revoked[0] ?? "")).toMatchObject({ reason: "revoked" });
 	});
 
+	it("refuses an ended family or session of the actor token too, after the subject's, and never issues from the actor's session", async () => {
+		const s = await serve();
+		const subject = await s.issue();
+		const actor = await s.issue({ subject: "carol" });
+		const pair = {
+			...subjectOf(subject.token),
+			actor_token: actor.token,
+			actor_token_type: accessTokenType,
+		};
+		s.tied.families.set("f", { ended: true });
+		s.tied.memberOf.set(subject.id, "f");
+		s.tied.memberOf.set(actor.id, "f");
+		expect(said(await s.exchange("app", pair))).toEqual([
+			"invalid_request",
+			"subject_token family has ended",
+		]);
+		s.tied.memberOf.delete(subject.id);
+		expect(said(await s.exchange("app", pair))).toEqual([
+			"invalid_request",
+			"actor_token family has ended",
+		]);
+		s.tied.memberOf.delete(actor.id);
+		s.tied.short.add("short");
+		s.tied.sessionOf.set(actor.id, "short");
+		expect(said(await s.exchange("app", pair))).toEqual([
+			"invalid_request",
+			"actor_token session is short of a requirement",
+		]);
+		s.tied.open.add("h");
+		s.tied.sessionOf.set(actor.id, "h");
+		const issued = await s.issued(await s.exchange("app", pair));
+		expect([s.tied.sessionOf.get(issued.id), s.tied.joined]).toEqual([undefined, []]);
+	});
+
+	it("ends the token by the earliest end its subject token's ties give", async () => {
+		let marked = "";
+		const limit = tieModule("limit", (id) =>
+			id === marked
+				? { kind: "held", ends: now + 30_000, join: async () => true }
+				: { kind: "none" },
+		);
+		const s = await serve({ extra: [limit] });
+		const subject = await s.issue();
+		marked = subject.id;
+		s.tied.families.set("f", { ended: false });
+		s.tied.memberOf.set(subject.id, "f");
+		const outcome = await s.exchange("app", subjectOf(subject.token));
+		expect([outcome.kind === "issued" && outcome.body.expires_in]).toEqual([30]);
+	});
+
+	it("revokes the token it issued when a tie it joins has ended meanwhile, whichever tie", async () => {
+		let marked = "";
+		const late = tieModule("limit", (id) =>
+			id === marked ? { kind: "held", join: async () => false } : { kind: "none" },
+		);
+		const s = await serve({ extra: [late] });
+		const subject = await s.issue();
+		marked = subject.id;
+		expect(said(await s.exchange("app", subjectOf(subject.token)))).toEqual([
+			"invalid_request",
+			"subject_token has ended",
+		]);
+		expect(s.revoked).toHaveLength(1);
+		expect(await s.issuing.verifyAccess(s.revoked[0] ?? "")).toMatchObject({ reason: "revoked" });
+	});
+
+	it("reads and joins a family before a session, however they are composed, stopping at the first that ended", async () => {
+		for (const reversed of [false, true]) {
+			const s = await serve({ reversed });
+			const subject = await s.issue();
+			s.tied.families.set("f", { ended: true });
+			s.tied.memberOf.set(subject.id, "f");
+			s.tied.sessionOf.set(subject.id, "closed");
+			expect(said(await s.exchange("app", subjectOf(subject.token)))).toEqual([
+				"invalid_request",
+				"subject_token family has ended",
+			]);
+			s.tied.families.set("f", { ended: false });
+			s.tied.open.add("h");
+			s.tied.sessionOf.set(subject.id, "h");
+			await s.issued(await s.exchange("app", subjectOf(subject.token)));
+			expect(s.tied.joined).toEqual(["family", "session"]);
+		}
+		const tied = ties(() => tied.families.set("f", { ended: true }));
+		const s = await serve({ tied, reversed: true });
+		const subject = await s.issue();
+		tied.families.set("f", { ended: false });
+		tied.memberOf.set(subject.id, "f");
+		tied.open.add("h");
+		tied.sessionOf.set(subject.id, "h");
+		expect(said(await s.exchange("app", subjectOf(subject.token)))).toEqual([
+			"invalid_request",
+			"subject_token has ended",
+		]);
+		expect(tied.joined).toEqual(["family"]);
+	});
+
+	it("takes the ties from the check right before issuing", async () => {
+		let calls = 0;
+		let marked = "";
+		const changing = tieModule("limit", (id) =>
+			id !== marked
+				? { kind: "none" }
+				: ++calls === 1
+					? { kind: "held", join: async () => true }
+					: { kind: "ended", reason: "limit has ended" },
+		);
+		const s = await serve({ extra: [changing] });
+		const subject = await s.issue();
+		marked = subject.id;
+		expect(said(await s.exchange("app", subjectOf(subject.token)))).toEqual([
+			"invalid_request",
+			"subject_token limit has ended",
+		]);
+		expect(calls).toBe(2);
+	});
+
+	it("is unavailable where two ties name two sessions, and where a tie cannot tell", async () => {
+		let marked = "";
+		const elsewhere = tieModule("elsewhere", (id) =>
+			id === marked ? { kind: "held", session: "h2", join: async () => true } : { kind: "none" },
+		);
+		const s = await serve({ extra: [elsewhere] });
+		const subject = await s.issue();
+		marked = subject.id;
+		s.tied.open.add("h");
+		s.tied.sessionOf.set(subject.id, "h");
+		await expect(s.exchange("app", subjectOf(subject.token))).rejects.toThrow(Unavailable);
+		const blind = await serve({
+			extra: [
+				tieModule("blind", () => {
+					throw new Unavailable("blind");
+				}),
+			],
+		});
+		await expect(blind.exchange("app", subjectOf((await blind.issue()).token))).rejects.toThrow(
+			Unavailable,
+		);
+		expect(blind.revoked).toEqual([]);
+	});
+
 	it("checks the tokens again right before issuing", async () => {
 		const s = await serve({
 			verifier: outside((call) => (call === 1 ? outsideAnswer : { kind: "invalid" })),
@@ -798,7 +973,12 @@ describe("token-exchange: what any verifier may answer", () => {
 			tokenType: outsideType,
 			verify: async () => {
 				calls.push("verify");
-				return { ...outsideAnswer, issuedTo: "nobody", audience: [], scope: [], ...more } as never;
+				const { subject, issuer, expiresAt } = outsideAnswer;
+				return (
+					(more as { kind?: string }).kind === "foreign"
+						? { subject, issuer, expiresAt, ...more }
+						: { ...outsideAnswer, issuedTo: "nobody", audience: [], scope: [], ...more }
+				) as never;
 			},
 			...(consume
 				? {
@@ -816,7 +996,7 @@ describe("token-exchange: what any verifier may answer", () => {
 	const dpop = (jkt: string): Binding => ({ member: "jkt", confirmation: jkt, tokenType: "DPoP" });
 
 	it("lets only the clients a verifier names exchange its token, whatever names the client otherwise", async () => {
-		const { verifier } = answering({ issuedTo: "app", clients: ["gate"], ceiling: "client" });
+		const { verifier } = answering({ kind: "foreign", clients: ["gate"] });
 		const s = await serve({ verifier });
 		expect(said(await s.exchange("app", outsider))).toEqual([
 			"invalid_request",
@@ -824,7 +1004,7 @@ describe("token-exchange: what any verifier may answer", () => {
 		]);
 		expect(said(await s.exchange("gate", outsider))).toEqual(["issued"]);
 		const listed = await serve({
-			verifier: answering({ clients: ["app"], ceiling: "client" }).verifier,
+			verifier: answering({ kind: "foreign", clients: ["app"] }).verifier,
 		});
 		expect(said(await listed.exchange("gate", outsider))).toEqual([
 			"invalid_request",
@@ -832,8 +1012,8 @@ describe("token-exchange: what any verifier may answer", () => {
 		]);
 	});
 
-	it("takes the scope and audience from the client's allowance alone under the client's ceiling", async () => {
-		const { verifier } = answering({ clients: ["app"], ceiling: "client" });
+	it("takes the scope and audience of a foreign token from the client's allowance alone", async () => {
+		const { verifier } = answering({ kind: "foreign", clients: ["app"] });
 		const s = await serve({ verifier });
 		const grant = (await s.issued(await s.exchange("app", { ...outsider, scope: "write" }))).grant;
 		expect([grant.subject, grant.scope, grant.audience]).toEqual(["erin", ["write"], [api]]);
@@ -851,7 +1031,7 @@ describe("token-exchange: what any verifier may answer", () => {
 
 	it("uses a once-only token up after it is checked twice and the policies admit it, issuing only once", async () => {
 		let left = 1;
-		const { verifier, calls } = answering({ clients: ["app"], ceiling: "client" }, async () =>
+		const { verifier, calls } = answering({ kind: "foreign", clients: ["app"] }, async () =>
 			left-- > 0 ? "consumed" : "replayed",
 		);
 		const s = await serve({ verifier });
@@ -861,6 +1041,29 @@ describe("token-exchange: what any verifier may answer", () => {
 			"invalid_request",
 			"subject_token has been used",
 		]);
+	});
+
+	it("leaves a once-only token unused when the actor token's tie cannot tell", async () => {
+		const { verifier, calls } = answering(
+			{ kind: "foreign", clients: ["app"] },
+			async () => "consumed",
+		);
+		let marked = "";
+		const blind = tieModule("blind", (id) => {
+			if (id === marked) throw new Unavailable("blind");
+			return { kind: "none" };
+		});
+		const s = await serve({ verifier, extra: [blind] });
+		const actor = await s.issue({ subject: "carol" });
+		marked = actor.id;
+		await expect(
+			s.exchange("app", {
+				...outsider,
+				actor_token: actor.token,
+				actor_token_type: accessTokenType,
+			}),
+		).rejects.toThrow(Unavailable);
+		expect(calls.filter((call) => call.startsWith("consume"))).toEqual([]);
 	});
 
 	it("leaves a once-only token unused when the policies refuse or a check cannot tell", async () => {
@@ -873,7 +1076,7 @@ describe("token-exchange: what any verifier may answer", () => {
 						: { kind: "allowed" },
 			})),
 		]);
-		const once = answering({ clients: ["app"], ceiling: "client" }, async () => "consumed");
+		const once = answering({ kind: "foreign", clients: ["app"] }, async () => "consumed");
 		const s = await serve({ verifier: once.verifier, extra: [refusing] });
 		expect(said(await s.exchange("app", outsider))[0]).not.toBe("issued");
 		expect(once.calls.filter((call) => call.startsWith("consume"))).toEqual([]);
@@ -882,7 +1085,8 @@ describe("token-exchange: what any verifier may answer", () => {
 			tokenType: outsideType,
 			verify: outside((call) => {
 				if (call > 1) throw new Unavailable("outside");
-				return { ...outsideAnswer, clients: ["app"], ceiling: "client" };
+				const { subject, issuer, expiresAt } = outsideAnswer;
+				return { kind: "foreign", subject, issuer, expiresAt, clients: ["app"] };
 			}).verify,
 			consume: async () => {
 				consumed += 1;
@@ -892,15 +1096,15 @@ describe("token-exchange: what any verifier may answer", () => {
 		const t = await serve({ verifier: failing });
 		await expect(t.exchange("app", outsider)).rejects.toThrow(Unavailable);
 		expect(consumed).toBe(0);
-		const odd = answering({ clients: ["app"], ceiling: "client" }, async () => "maybe" as never);
+		const odd = answering({ kind: "foreign", clients: ["app"] }, async () => "maybe" as never);
 		const u = await serve({ verifier: odd.verifier });
 		await expect(u.exchange("app", outsider)).rejects.toThrow(Unavailable);
 	});
 
-	it("refuses a once-only token, or one under the client's ceiling, as the actor", async () => {
+	it("refuses a once-only token, or a foreign one, as the actor", async () => {
 		for (const [more, consume] of [
 			[{}, async () => "consumed" as const],
-			[{ ceiling: "client" }, undefined],
+			[{ kind: "foreign", clients: ["app"] }, undefined],
 		] as const) {
 			const { verifier } = answering({ issuedTo: "app", ...more }, consume);
 			const s = await serve({ verifier });
@@ -913,8 +1117,8 @@ describe("token-exchange: what any verifier may answer", () => {
 
 	it("lets a public client exchange only when it opts in and proves by DPoP the key the token names", async () => {
 		const { verifier } = answering({
+			kind: "foreign",
 			clients: ["device", "spa"],
-			ceiling: "client",
 			holderDigest: digestOf("k1"),
 		});
 		const s = await serve({ verifier });
@@ -930,31 +1134,84 @@ describe("token-exchange: what any verifier may answer", () => {
 		const issued = await s.issued(await s.exchange("device", outsider, dpop("k1")));
 		expect(issued.binding).toEqual(dpop("k1"));
 		const bare = await serve({
-			verifier: answering({ clients: ["device"], ceiling: "client" }).verifier,
+			verifier: answering({ kind: "foreign", clients: ["device"] }).verifier,
 		});
 		expect(said(await bare.exchange("device", outsider, dpop("k1")))).toEqual(refusal);
 	});
 
 	it("reads no holder digest for a confidential client", async () => {
 		const { verifier } = answering({
+			kind: "foreign",
 			clients: ["app"],
-			ceiling: "client",
 			holderDigest: digestOf("k1"),
 		});
 		const s = await serve({ verifier });
 		expect(said(await s.exchange("app", outsider))).toEqual(["issued"]);
 	});
 
-	it("takes an answer's clients, ceiling and holder digest only in their shape", async () => {
+	it("takes a foreign answer's clients and holder digest only in their shape, and no kind it does not know", async () => {
 		for (const more of [
-			{ clients: [] },
-			{ clients: [""] },
-			{ ceiling: "token" },
-			{ holderDigest: "short" },
-			{ holderDigest: `${digestOf("k1")}=` },
+			{ kind: "foreign", clients: [] },
+			{ kind: "foreign", clients: [""] },
+			{ kind: "foreign", clients: ["app"], holderDigest: "short" },
+			{ kind: "foreign", clients: ["app"], holderDigest: `${digestOf("k1")}=` },
+			{ kind: "other", issuedTo: "app" },
 		]) {
-			const s = await serve({ verifier: answering({ issuedTo: "app", ...more }).verifier });
+			const s = await serve({ verifier: answering(more).verifier });
 			expect(said(await s.exchange("app", outsider)), JSON.stringify(more)).toEqual([
+				"invalid_request",
+				"subject_token validation failed",
+			]);
+		}
+	});
+});
+
+describe("token-exchange: an answer told by its kind", () => {
+	/** An outside verifier answering exactly `answer`. */
+	const exactly = (answer: object): ExchangeVerifier => ({
+		tokenType: outsideType,
+		verify: async () => answer as never,
+	});
+	const outsider = { ...subjectOf("outside", outsideType), scope: "read" };
+	const base = { subject: "erin", issuer: "https://idp.example", expiresAt: now + 60_000 };
+
+	it("lets only the clients a foreign token lists exchange it, within their allowance alone", async () => {
+		const s = await serve({ verifier: exactly({ ...base, kind: "foreign", clients: ["gate"] }) });
+		expect(said(await s.exchange("app", outsider))).toEqual([
+			"invalid_request",
+			"subject_token does not name this client",
+		]);
+		const grant = (await s.issued(await s.exchange("gate", { ...outsider, scope: "write" }))).grant;
+		expect([grant.subject, grant.scope, grant.audience]).toEqual(["erin", ["write"], [api]]);
+	});
+
+	it("never lets a foreign token act", async () => {
+		const s = await serve({ verifier: exactly({ ...base, kind: "foreign", clients: ["app"] }) });
+		const actor = { actor_token: "outside", actor_token_type: outsideType };
+		expect(
+			said(await s.exchange("app", { ...subjectOf((await s.issue()).token), ...actor })),
+		).toEqual(["invalid_request", "actor_token cannot act"]);
+	});
+
+	it("names the client of an own token by issued-to or audience, within the token's scope", async () => {
+		const s = await serve({ verifier: exactly({ ...outsideAnswer, kind: "own" }) });
+		expect(said(await s.exchange("app", outsider))).toEqual(["issued"]);
+		expect(said(await s.exchange("app", { ...outsider, scope: "write" }))[0]).toBe("invalid_scope");
+	});
+
+	it("takes an answer without a kind as no answer", async () => {
+		const { kind: _, ...unkinded } = outsideAnswer;
+		const s = await serve({ verifier: exactly(unkinded) });
+		expect(said(await s.exchange("app", outsider))).toEqual([
+			"invalid_request",
+			"subject_token validation failed",
+		]);
+	});
+
+	it("takes a foreign answer listing no client as no answer", async () => {
+		for (const clients of [[], undefined]) {
+			const s = await serve({ verifier: exactly({ ...base, kind: "foreign", clients }) });
+			expect(said(await s.exchange("app", outsider))).toEqual([
 				"invalid_request",
 				"subject_token validation failed",
 			]);

@@ -20,7 +20,7 @@ export const section = z.strictObject({
 		.pipe(z.number().int().min(1).max(60_000))
 		.prefault("5s")
 		.describe(
-			"How long a call may take, from 1ms to 1m, narrowing outbound's cap; a write's deadline is its sending time plus this.",
+			"How long a call may take, from 1ms to 1m, narrowing outbound's cap; a write's deadline is its sending time plus the time outbound holds the call to.",
 		),
 	"max-response-size": setting
 		.size()

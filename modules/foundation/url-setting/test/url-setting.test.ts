@@ -1,7 +1,8 @@
 import { assemble, BootRefused, defineModule, kernelConfig } from "@mod/kernel";
-import { expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
-import { urlSetting } from "../src/contract.ts";
+import { type ConfiguredUrl, urlSetting, urlsChecked } from "../src/contract.ts";
+import { configuredUrl } from "../src/testing.ts";
 
 const https = urlSetting({ schemes: ["https"] });
 const takes = (schema: typeof https, value: string) => schema.safeParse(value).success;
@@ -281,4 +282,78 @@ it("names no part of a plain http URL it refuses for its host", async () => {
 	expect((refused as BootRefused).refusals).toEqual([
 		{ where: "using.page", reason: "a URL: http only on a loopback host" },
 	]);
+});
+
+it("takes an origin alone where the rules ask one: no path, not even /, and no query", () => {
+	const origin = urlSetting({ schemes: ["https", "http"], origin: true });
+	for (const value of ["https://a.example", "http://a.example:8080"]) {
+		expect(takes(origin, value), value).toBe(true);
+	}
+	for (const value of ["https://a.example/", "https://a.example/x", "https://a.example?x"]) {
+		expect(
+			origin.safeParse(value).error?.issues.map((i) => i.message),
+			value,
+		).toEqual(["a URL: an origin alone, with no path (not even a trailing `/`) and no query"]);
+	}
+});
+
+describe("URLs a section checks once they all parse", () => {
+	const section = z.strictObject({
+		token: urlSetting({ schemes: ["https"] }),
+		keys: urlSetting({ schemes: ["https"] }).optional(),
+	});
+	const asked: { url: string; hosts: readonly string[] }[] = [];
+	const checked = section.superRefine(
+		urlsChecked(
+			(url, hosts) => {
+				asked.push({ url, hosts });
+				return new URL(url).hostname === "bad.example" ? "refused here" : undefined;
+			},
+			{
+				urls: (s) => [s.token, s.keys],
+				sent: (s) => ({
+					token: { url: s.token, hosts: [new URL(s.token).hostname] },
+					keys: { url: s.keys, hosts: ["any.example"] },
+				}),
+			},
+		),
+	);
+	const issues = (value: unknown) =>
+		checked.safeParse(value).error?.issues.map((i) => [i.path.join("."), i.message]);
+
+	it("puts what the check answers at each key it refuses, and asks of each URL sent", () => {
+		asked.length = 0;
+		expect(issues({ token: "https://bad.example/t", keys: "https://ok.example/k" })).toEqual([
+			["token", "refused here"],
+		]);
+		expect(asked).toEqual([
+			{ url: "https://bad.example/t", hosts: ["bad.example"] },
+			{ url: "https://ok.example/k", hosts: ["any.example"] },
+		]);
+		expect(issues({ token: "https://ok.example/t" })).toBeUndefined();
+	});
+
+	it("asks nothing while a URL is no URL, leaving that to its key's own refusal", () => {
+		asked.length = 0;
+		const refused = urlsChecked(
+			() => {
+				throw new Error("asked");
+			},
+			{ urls: (s: { a: string }) => [s.a], sent: (s) => ({ a: { url: s.a, hosts: [] } }) },
+		);
+		const issued: unknown[] = [];
+		refused({ a: "no url" }, { addIssue: (i: unknown) => issued.push(i) } as never);
+		expect(issued).toEqual([]);
+	});
+});
+
+it("reads a URL as a ConfiguredUrl, the type only url-setting makes, and keeps it as written", () => {
+	const read = urlSetting({ schemes: ["https"] }).parse("https://ledger.example/verify");
+	expectTypeOf(read).toEqualTypeOf<ConfiguredUrl>();
+	expect(read).toBe("https://ledger.example/verify");
+	// A test makes one through ./testing, never by a cast.
+	const made = configuredUrl("https://ledger.example/verify");
+	expectTypeOf(made).toEqualTypeOf<ConfiguredUrl>();
+	expect(made).toBe(read);
+	expect(() => configuredUrl("not a url")).toThrow();
 });

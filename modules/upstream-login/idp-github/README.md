@@ -31,4 +31,4 @@
 - Anything else that fails refuses the login, without the library's or GitHub's text.
 
 ## Depends on
-- `kernel`, `upstreams`, `upstream-client`, `outbound`
+- `kernel`, `upstreams`, `upstream-client`, `outbound`, `outbound-policy`

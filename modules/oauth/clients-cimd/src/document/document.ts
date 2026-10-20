@@ -1,9 +1,7 @@
 import { isIP } from "node:net";
-import { redirects } from "@mod/authorize";
 import { type AllowanceLists, clientAllowance } from "@mod/client-allowance";
-import type { ClientRecord } from "@mod/clients";
+import type { ClientRecord, Section } from "@mod/clients";
 import { codeGrantType } from "@mod/code-grant";
-import { clientSection, displayed } from "@mod/consent";
 import { refreshGrantType } from "@mod/refresh";
 
 /** The grants a document client may hold: the code, and refresh when its document names it. */
@@ -29,9 +27,8 @@ export interface Refused {
 	readonly refused: string;
 }
 
-/** An https URL kept as written, so nothing the parser would drop (whitespace, control characters). */
-const isHttps = (text: string) =>
-	!/[\s\p{Cc}]/u.test(text) && URL.parse(text)?.protocol === "https:";
+/** The fields a document client cannot do without, in RFC 7591's words: a composed section must copy each. */
+export const neededFields = ["redirect_uris", "client_name"] as const;
 
 const strings = (value: unknown): value is readonly string[] =>
 	Array.isArray(value) && value.every((item) => typeof item === "string");
@@ -47,47 +44,36 @@ function askedOf(doc: Readonly<Record<string, unknown>>): Partial<AllowanceLists
 	return scopes === undefined ? { refused: "scope" } : { grants: grantTypes, scopes };
 }
 
-/** The fields this module reads itself, as checked; the owners' schemas check the rest. */
-interface Checked {
-	readonly redirectUris: readonly string[];
-	readonly name: string;
-	readonly uri: string | undefined;
-}
-
-/** The fields this module reads itself, once checked, or why the document is refused. */
-function checkedOf(url: URL, doc: Readonly<Record<string, unknown>>): Checked | Refused {
+/** Why the document is refused by CIMD's own rules, or nothing; the owners' copies and schemas take the rest. */
+function refusalOf(url: URL, doc: Readonly<Record<string, unknown>>): Refused | undefined {
 	if (doc.client_id !== url.href) return { refused: "client_id" };
 	if ("client_secret" in doc || "client_secret_expires_at" in doc) {
 		return { refused: "client_secret" };
 	}
 	const method = doc.token_endpoint_auth_method;
 	if (method !== undefined && method !== "none") return { refused: "token_endpoint_auth_method" };
+	// The section takes an empty list; a document client, which has the code flow alone, needs one.
 	const redirectUris = doc.redirect_uris;
 	if (!strings(redirectUris) || redirectUris.length === 0) return { refused: "redirect_uris" };
 	const types = doc.response_types;
 	if (types !== undefined && !(strings(types) && types.includes("code"))) {
 		return { refused: "response_types" };
 	}
-	const name = doc.client_name;
-	if (typeof name !== "string" || name.trim() === "") return { refused: "client_name" };
-	const uri = doc.client_uri;
-	if (uri !== undefined && !(typeof uri === "string" && isHttps(uri))) {
-		return { refused: "client_uri" };
-	}
-	return { redirectUris, name, uri };
+	return undefined;
 }
 
 /**
- * The public client a document describes, its sections put as each owner takes them, or why it is
+ * The public client a document describes, each section as its owner copies it, or why it is
  * refused. The ceiling's grants are the code and refresh; its scopes and audiences the operator's.
  */
 export function recordOf(
 	url: URL,
 	doc: Readonly<Record<string, unknown>>,
 	ceiling: Omit<AllowanceLists, "grants">,
+	copies: readonly Section<unknown>[],
 ): ClientRecord | Refused {
-	const checked = checkedOf(url, doc);
-	if ("refused" in checked) return checked;
+	const refused = refusalOf(url, doc);
+	if (refused) return refused;
 	const asked = askedOf(doc);
 	if ("refused" in asked) return asked;
 	const allowances = clientAllowance.allowancesWithin(
@@ -96,14 +82,18 @@ export function recordOf(
 	);
 	// A document never asks audiences, so this guards only the contract's undefined.
 	if (allowances === undefined) return { refused: "audiences" };
-	return {
-		id: url.href,
-		kind: "public",
-		method: "none",
-		sections: {
-			[redirects.name]: { "redirect-uris": checked.redirectUris },
-			...allowances,
-			[clientSection.name]: displayed({ name: checked.name, uri: checked.uri, host: url.hostname }),
-		},
-	};
+	const copied: Record<string, unknown> = {};
+	const from = { id: url.href, host: url.hostname };
+	for (const section of copies) {
+		const copy = section.fromDocument?.(doc, from);
+		if (copy === undefined) continue;
+		if ("refused" in copy) return { refused: copy.refused };
+		copied[section.name] = copy.value;
+	}
+	return { id: url.href, kind: "public", method: "none", sections: { ...copied, ...allowances } };
 }
+
+/** The names of the sections this module computes itself, which no copy may give. */
+export const computedSections = Object.keys(
+	clientAllowance.allowancesWithin({ grants: [], scopes: [], audiences: [] }, {}) ?? {},
+);

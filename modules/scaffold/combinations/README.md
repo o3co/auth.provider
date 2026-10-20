@@ -18,6 +18,7 @@
 - `composed` refuses, naming each: a name the workspace lacks, a group value that is not a feature, an addition that is not a feature or adapter with a module, an axis key that owns no axis, an axis value that is neither its adapter nor its owner, and an owner chosen for its own axis that has no module.
 - `needed` (modules): the modules given, what they need to run, then `completed`, as `composed` reaches them but with no axis default other than one declared to replace its owner; owners a reached adapter replaces are left out. It refuses, naming each, a name the workspace lacks, as `composed` does.
 - `full` (modules added): every foundation and feature with a module that does not opt in, composed alike. `optIns`: the features that opt in.
+- `addable`: the names a selection or the full template may add (a feature or an adapter, with a module), in code point order; `composed` and `full` refuse any other.
 - `published` (modules): built into a bundle, each name given as published, in the order given: `{ name, package, entry }`, the bundle to depend on and the path its entries import under (a module at `<entry>/module`), read from the index's entries. It refuses, naming each, a name no bundle publishes; in the workspace, where nothing is published, it refuses every name.
 - `kinds`: the kinds a package's manifest may name, the one place their words are written.
 
@@ -25,6 +26,7 @@
 - A wiring names the feature it `wires`; it comes with the feature, whether given or brought in.
 - A bridge names the modules it `joins`, a non-empty list of names; it comes once every one of them is composed, whether given or brought in. An axis owner reached counts, with a module or not.
 - A `joins` that is not a non-empty list of names, or a `wires` that is not a name, is refused, naming each such package.
+- A dependency a manifest names in `helpers` (functions and types alone) or `optional` (contracts used only where something contributes, which brings it) is not needed to run; either, when not a non-empty list of its dependencies, is refused, naming each package.
 - Wirings of one feature, and bridges, come in code point order of name.
 - An axis is its owner's: an adapter `replaces` the owner (composed instead of its module) or `adapts` it (beside it). Its default is the one adapter declaring `default`, or its only one.
 - An axis's default comes only where its owner is composed (reached among what runs, with a module or not, as the kernel), and not where another adapter of that axis is already composed. A default declared to replace its owner comes wherever that owner would, whether the owner has a module or not, so the owner's module is never composed beside it.

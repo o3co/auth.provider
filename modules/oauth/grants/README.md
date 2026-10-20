@@ -24,6 +24,7 @@
 - A grant that takes its audience from the request declares `targets`; any other is first asked the rule's `untargeted`, and its refusal is answered before the grant runs.
 - A grant declares `readsAmbient`: `cookie` when it reads the session's cookie, which a browser sends by itself, and then checks the request's origin itself; `none` otherwise. The token endpoint's route has no own-site policy and relies on it; it is a declaration, never a proof.
 - Extension point `sessionIssuances`: told the session and the token's id and expiry by `issue` given a session. One failing revokes the token, and `issue` throws it on.
+- Extension point `tokenTies`, one per `name`, asked of a token this provider issued and verified: `tieOf` answers `none`, `ended` (a `reason` read after the token's name: `family has ended`), or `held`: an end, a session to issue from, and `join`, adding a token issued from it, false once the tie ended.
 - Extension point `targetRules`: at most one rule; two refuse boot.
 - A rule's `target` is given the request's parameters, the default audience and whether the issuance may have another; it answers the audience, or `invalid_target` with a description, which is the answer.
 - A rule may answer `untargeted` (the request's parameters, for a grant or endpoint that takes no audience) and `repeated` (a parameter's name, sent more than once) with `invalid_target`, which is then the answer.
@@ -35,3 +36,4 @@
 
 ## Vocabulary
 - grant: a procedure that issues tokens, chosen by grant type name.
+- tie: what a token ends with besides itself, kept by its owner (its family, its session).

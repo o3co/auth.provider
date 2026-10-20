@@ -19,7 +19,6 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/login-gates": "workspace:*",
 		"@mod/mfa": "workspace:*",
-		"@mod/mfa-binding-proof": "workspace:*",
 		"@mod/mfa-extensions": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
 		"@mod/request-source": "workspace:*",
@@ -30,13 +29,20 @@
 	},
 	"devDependencies": {
 		"@mod/login-attributes": "workspace:*",
+		"@mod/mfa-binding-proof": "workspace:*",
 		"@mod/mfa-entry": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/seal": "workspace:*",
+		"@mod/session-requirements": "workspace:*",
 		"@mod/store": "workspace:*",
 		"vitest": "5.0.4"
 	},
 	"peerDependencies": {
 		"vitest": "5.0.4"
+	},
+	"peerDependenciesMeta": {
+		"vitest": {
+			"optional": true
+		}
 	}
 }

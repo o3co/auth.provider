@@ -49,7 +49,10 @@ async function open() {
 		simulated,
 		logged,
 		place,
-		records: recordsIn<Counted>(place),
+		// Opened when a test takes them, so a test opening the space for secret records may.
+		get records() {
+			return recordsIn<Counted>(place);
+		},
 		deferred: deferredIn({ ...place, ...size }),
 	};
 }
@@ -872,4 +875,20 @@ it("looks up any string under a secret, empty or odd, and refuses none for its s
 		expect(await records.read(secret)).toEqual({ n: secret.length });
 		expect(records.nameOf(secret)).toMatch(/^1\.[A-Za-z0-9_-]{43}$/);
 	}
+});
+
+it("refuses a space opened for records and for secret records on one store, in either order", async () => {
+	const refusal = "a space holds records or secret records, not both: records-test";
+	const first = await open();
+	recordsIn<Counted>(first.place);
+	recordsIn<Counted>(first.place);
+	expect(() => secretRecordsIn<Counted>(first.place)).toThrow(refusal);
+	const second = await open();
+	// Secret records keep their names as records of the same space: that is not a second kind.
+	secretRecordsIn<Counted>(second.place).named;
+	secretRecordsIn<Counted>(second.place);
+	expect(() => recordsIn<Counted>(second.place)).toThrow(refusal);
+	// Another store, or another space, holds its own kind.
+	secretRecordsIn<Counted>((await open()).place);
+	recordsIn<Counted>({ ...second.place, space: { ...space, name: "records-test.other" } });
 });

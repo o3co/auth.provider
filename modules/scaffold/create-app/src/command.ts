@@ -1,8 +1,9 @@
 import { parseArgs } from "node:util";
+import { addable } from "@mod/combinations";
 import { generate, type Plan } from "./generate.ts";
 import { type Group, groups } from "./patterns/pattern.ts";
 
-/** Runs the command on its arguments, writing to `io`: 0 once the project is written or `--help` told, 64 for a usage error, 1 for a plan it cannot make. */
+/** Runs the command on its arguments, writing to `io`: 0 once the project is written or `--help` or `--list` told, 64 for a usage error, 1 for a plan it cannot make. */
 export async function run(
 	args: readonly string[],
 	io: { readonly out: (text: string) => void; readonly err: (text: string) => void } = {
@@ -14,7 +15,8 @@ export async function run(
 		"usage: create-auth-provider <target> [--workspace <root>] [--pattern <name>] [--add <feature>]...\n" +
 		"         [--axis <owner>=<module>]... [--<group> <feature>,...]...\n" +
 		`         groups: ${groups.join(", ")}; axes and groups need a pattern other than full\n` +
-		"       create-auth-provider <target> [--workspace <root>] [--sink <package>] <package>...\n";
+		"       create-auth-provider <target> [--workspace <root>] [--sink <package>] <package>...\n" +
+		"       create-auth-provider --list   (each name --add takes)\n";
 	const usage = (): number => {
 		io.err(usageText);
 		return 64;
@@ -25,6 +27,7 @@ export async function run(
 	) as Record<Group, { type: "string" }>;
 	const options = {
 		help: { type: "boolean", short: "h" },
+		list: { type: "boolean" },
 		workspace: { type: "string" },
 		sink: { type: "string" },
 		pattern: { type: "string" },
@@ -44,6 +47,11 @@ export async function run(
 	const { values, positionals } = parsed;
 	if (values.help) {
 		io.out(usageText);
+		return 0;
+	}
+	if (values.list) {
+		if (positionals.length > 0) return usage();
+		io.out(`${addable().join("\n")}\n`);
 		return 0;
 	}
 	const [target, ...modules] = positionals;

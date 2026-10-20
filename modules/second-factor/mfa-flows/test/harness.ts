@@ -22,13 +22,14 @@ import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
 import { type Sessions, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import sessionRequirements from "@mod/session-requirements/module";
 import { simulatedStore } from "@mod/store/testing";
 import { type Revocations, revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach } from "vitest";
 import flowsModule from "../src/module.ts";
-import { section } from "../src/section.ts";
-import { type FlowSettings, flowsConfig } from "../src/testing.ts";
+import { type FlowSettings, flowKeys, flowsConfig } from "../src/testing.ts";
+import { testEnrollment } from "./enrolling.ts";
 import { memoryTransactions } from "./stores.ts";
 
 /** How far the kernel's clock runs ahead of the host's; it goes back after each test. */
@@ -196,9 +197,13 @@ interface Call {
 
 /** Settings for both sections; each goes to the module that reads it. */
 type Settings = Partial<MfaSettings> & Partial<FlowSettings>;
-const flowKeys = Object.keys(section.shape);
 
-export async function serve(settings: Settings = {}, extra: Module[] = []) {
+/** The package over its parts; `enrolling` is the enrollment flow composed (the test one unless given, none with `null`). */
+export async function serve(
+	settings: Settings = {},
+	extra: Module[] = [],
+	enrolling: Module | null = testEnrollment,
+) {
 	const pick = (own: boolean) =>
 		Object.fromEntries(Object.entries(settings).filter(([k]) => flowKeys.includes(k) === own));
 	const simulated = simulatedStore();
@@ -217,6 +222,7 @@ export async function serve(settings: Settings = {}, extra: Module[] = []) {
 			csrfStandIn,
 			cookiesModule,
 			switchedModule(sessionStandIn, sessions, entering),
+			sessionRequirements,
 			switchedModule(subjectRevocationStandIn, revocations, recording),
 			simulated.module,
 			factorStand(),
@@ -228,13 +234,19 @@ export async function serve(settings: Settings = {}, extra: Module[] = []) {
 			mfaEntry,
 			bindingProofModule,
 			flowsModule,
+			...(enrolling ? [enrolling] : []),
 			code,
 			backup,
 			...extra,
 		],
 		config: {
 			...kernelConfig(),
-			...httpConfig({ "trusted-proxies": ["127.0.0.1"], "public-origin": "https://as.example" }),
+			// `app.example` is an origin the deployment lets read the routes that declare CORS.
+			...httpConfig({
+				"trusted-proxies": ["127.0.0.1"],
+				"public-origin": "https://as.example",
+				"cors-origins": ["https://app.example"],
+			}),
 			...sealConfig(),
 			...mfaConfig(pick(false)),
 			...flowsConfig(pick(true)),
@@ -283,7 +295,11 @@ export async function serve(settings: Settings = {}, extra: Module[] = []) {
 				: {}),
 		});
 		keep(res.headers.getSetCookie(), use);
-		return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+		return {
+			status: res.status,
+			headers: res.headers,
+			body: (await res.json()) as Record<string, unknown>,
+		};
 	};
 	/** A fresh browser, signed in by password. */
 	const signIn = async (subject = "alice") => {

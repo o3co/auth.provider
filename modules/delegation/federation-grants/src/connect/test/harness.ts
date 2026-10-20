@@ -1,16 +1,22 @@
 import { audit } from "@mod/audit";
 import { auditStandIn } from "@mod/audit/testing";
 import type { Clients } from "@mod/clients";
+import cookiesModule from "@mod/cookies/module";
 import type { HttpResponse } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { memoryRecords } from "@mod/records/testing";
 import type { Seal } from "@mod/seal";
-import { type EntryRequirement, entryRequirements, sessions } from "@mod/session";
+import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
+import { type EntryRequirement, entryRequirements } from "@mod/session-requirements";
+import sessionRequirements from "@mod/session-requirements/module";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
+import { roundTripStore, roundTrips, type StoredRoundTrip } from "@mod/upstream-round-trip";
+import roundTripModule from "@mod/upstream-round-trip/module";
 import type {
 	DelegatedExchange,
 	Delegation,
@@ -29,6 +35,7 @@ import {
 	retentionMs,
 } from "../../grant/grant.ts";
 import { section } from "../../section.ts";
+import { upstreamAccountWith } from "../../upstream-account/upstream-account.ts";
 import { browserBase, connectWith } from "../connect.ts";
 
 export const origin = "https://issuer.example";
@@ -78,6 +85,7 @@ export type Answer = {
 	headers: Record<string, string>;
 	json?: Record<string, unknown> | undefined;
 	text?: string;
+	cookies: readonly string[];
 };
 const read = (response: HttpResponse): Answer => {
 	const body = response.body as { json?: Record<string, unknown> } | string | undefined;
@@ -85,6 +93,7 @@ const read = (response: HttpResponse): Answer => {
 		status: response.status,
 		headers: { ...response.headers },
 		...(typeof body === "string" ? { text: body } : { json: body?.json }),
+		cookies: response.cookies ?? [],
 	};
 };
 
@@ -151,8 +160,27 @@ export async function connector(
 	const requirements = defineModule({ name: "requirements" }, (m) =>
 		(options.requirements ?? []).map((r) => m.contribute(entryRequirements).by(() => r)),
 	);
+	const kept = memoryRecords<StoredRoundTrip>(() => runtime.clock.now(), {
+		shards: 1,
+		perShard: 1,
+	});
+	const tripStore = defineModule({ name: "trips" }, (m) => [
+		m
+			.provide(roundTripStore)
+			.by(() => ({ save: kept.records.create, update: kept.records.change })),
+	]);
 	const app = await assemble({
-		modules: [http, sessionStandIn, subjectRevocationStandIn, recorded.module, requirements],
+		modules: [
+			http,
+			cookiesModule,
+			tripStore,
+			roundTripModule,
+			sessionStandIn,
+			sessionRequirements,
+			subjectRevocationStandIn,
+			recorded.module,
+			requirements,
+		],
 		config: { ...kernelConfig(), ...httpConfig({ "public-origin": origin }) },
 		runtime,
 	});
@@ -167,10 +195,11 @@ export async function connector(
 	const browser = connectWith({
 		sessions: app.get(sessions),
 		clients,
-		users,
+		upstreamAccount: upstreamAccountWith({ users, check: settings["identity-check"] }),
 		upstreams,
 		grants: stores.grants,
 		steps: stores.steps,
+		trips: app.get(roundTrips),
 		pending: stores.pending,
 		records,
 		judge: judgeWith(app.get(revocations), {
@@ -253,15 +282,19 @@ export async function connector(
 		const opened = await step("connect", cookie, { request: link });
 		return { opened, challenge: location(opened).searchParams.get("challenge") ?? "" };
 	};
+	/** The round trip's cookie each browser holds, by its session cookie, as a browser keeps the last set. */
+	const jar = new Map<string, string>();
 	/** Decides a challenge in a browser: the answer, and the upstream state it carries. */
 	const decide = async (challenge: string, cookie: string, decision = "accept") => {
 		const answered = await step("decide", cookie, { challenge, decision });
+		const set = answered.cookies.find((c) => c.includes("federation-grants."));
+		if (set) jar.set(cookie, set.split(";")[0] ?? "");
 		return { answered, state: location(answered).searchParams.get("state") ?? "" };
 	};
 	/** Lodges an intent, and walks a browser of `alice` through the link and the question to the upstream. */
-	const started = async (more: Partial<Intent> = {}) => {
+	const started = async (more: Partial<Intent> = {}, cookie?: string) => {
 		const { id, link } = await lodge(more);
-		const browser = await login();
+		const browser = cookie ?? (await login());
 		const { opened, challenge } = await open(link, browser);
 		const { answered, state } = await decide(challenge, browser);
 		return { id, link, browser, opened, challenge, answered, state };
@@ -271,14 +304,22 @@ export async function connector(
 		state: string,
 		browser: string,
 		query: Record<string, readonly string[]> = {},
-	) => step("callback", browser, { state: [state], code: ["code-1"], ...query });
+	) =>
+		step("callback", [browser, jar.get(browser) ?? ""].filter(Boolean).join("; "), {
+			state: [state],
+			code: ["code-1"],
+			...query,
+		});
 
 	return {
 		app,
 		stores,
+		/** The round trips kept, by their cookie's value. */
+		trips: kept.records,
 		script,
 		asked,
 		events: recorded.events,
+		logs: () => logged.lines(),
 		relist: (connections: string[], returns: string[]) => {
 			listed.connections = connections;
 			listed.returns = returns;

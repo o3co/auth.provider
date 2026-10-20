@@ -7,7 +7,7 @@ Internal module of `mail-smtp`: one SMTP conversation per send, over a pinned `n
 - Sends to the address as it is given (the package hands it in mail's canonical form); it checks no address.
 - Maps the relay's answers and the library's failures to limited, or to a failure with a stage and codes.
 
-## Interface
+## Offers
 - `relayOver(settings, open?)` gives a function from a letter (one checked address in mail's canonical form, subject, text) to sent or limited; it throws `RelayFailure` (stage, codes). No library type crosses it.
 - `mailboxOf(from)` (splits off a display name; the section checks the address), `isLoopback(address)` and `isLoopbackHost(host)`, for the section's checks.
 
