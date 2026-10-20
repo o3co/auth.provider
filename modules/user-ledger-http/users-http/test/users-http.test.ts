@@ -12,7 +12,7 @@ import {
 } from "@mod/kernel";
 import { type Narrower, outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
-import { credentialPolicy, outboundRefusals } from "@mod/outbound-policy";
+import { credentialPolicy, outboundRefusals, policyOf, policySettings } from "@mod/outbound-policy";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Ledger, ledgers, userAttribute, users } from "@mod/users";
 import usersModule from "@mod/users/module";
@@ -640,7 +640,10 @@ describe("users-http", () => {
 			[
 				["127.0.0.1"],
 				"http://127.0.0.1:8/ledger/authenticate",
-				"scheme: plain http reaches only a host:port that outbound.plain-loopback names; otherwise write the URL with https",
+				// The policy's own words for plain http, which outbound-policy's tests hold.
+				policyOf(policySettings.parse({ allow: ["127.0.0.1"] })).explain(
+					"http://127.0.0.1:8/ledger/authenticate",
+				),
 			],
 		] as const;
 		for (const [allow, url, reason] of refused) {
