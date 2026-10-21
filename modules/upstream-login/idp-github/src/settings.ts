@@ -1,4 +1,8 @@
-import { destinationRefusal, type Narrower, type OutboundRefusals } from "@mod/outbound-policy";
+import {
+	browsedRefusalText,
+	destinationRefusal,
+	type OutboundRefusals,
+} from "@mod/outbound-policy";
 import {
 	clientSetting,
 	endpointSetting as endpoint,
@@ -38,19 +42,6 @@ const section = clientSetting.extend({
 });
 
 /**
- * Why outbound's policy for a URL the browser goes to refuses it, as boot says it; a policy that
- * does not say refuses all but https.
- */
-function browsedRefusal(refusals: OutboundRefusals, url: string, narrower: Narrower) {
-	const reason = refusals.browsedRefusal
-		? refusals.browsedRefusal(url, narrower)
-		: URL.parse(url)?.protocol === "https:"
-			? undefined
-			: "not https";
-	return reason && `outbound's policy for what the browser goes to refuses it: ${reason}`;
-}
-
-/**
  * The section; boot is refused on a URL it sends to that outbound's destination policy refuses,
  * and on an authorization endpoint its policy for the browser refuses.
  */
@@ -78,7 +69,7 @@ export const settingsOf = (refusals: OutboundRefusals) =>
 			const url = s["authorization-endpoint"];
 			// Its own schema refuses a URL that does not parse; the endpoint is the operator's URL for itself.
 			if (!URL.canParse(url)) return;
-			const refused = browsedRefusal(refusals, url, { internal: url });
+			const refused = browsedRefusalText(refusals, url, { internal: url });
 			if (refused)
 				context.addIssue({ code: "custom", path: ["authorization-endpoint"], message: refused });
 		});
