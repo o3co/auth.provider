@@ -70,6 +70,15 @@ it("takes a server failing, busy or timed out, or no answer in time, as an outag
 			throw new DestinationRefused("not-allowed");
 		}),
 	).toBe("refused");
+	// A refusal a second bundled copy of outbound-policy throws: another class, the same mark.
+	expect(
+		await kindOf(async () => {
+			throw Object.assign(new Error("outbound destination refused: not-allowed"), {
+				[Symbol.for("@mod/outbound-policy.destination-refused")]: true,
+				reason: "not-allowed",
+			});
+		}),
+	).toBe("refused");
 	await expect(
 		kindOf(async () => {
 			throw new TypeError("a fault");

@@ -32,7 +32,7 @@ export function sourcesOver(
 				answer.status === 408;
 			return down ? { kind: "outage" } : { kind: "refused" };
 		} catch (error) {
-			if (error instanceof DestinationRefused) return { kind: "refused" };
+			if (DestinationRefused.is(error)) return { kind: "refused" };
 			if (isUnavailable(error)) return { kind: "outage" };
 			throw error;
 		}
