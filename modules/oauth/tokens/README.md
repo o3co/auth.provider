@@ -18,10 +18,10 @@
 - Issued-to, for the revoking side to check the owner: answered for revoked tokens and within the allowance past expiry too; never for authorization.
 - Revocation, directly or by a reference to an issued token (its shape is `tokens`' own), within the allowance past expiry; or unsupported, which `revocable` tells.
 - Extension points: issuance policies (request → allowed / refused with an audit reason and a client description); access conditions, and exactly one subject check (token id, subject, issue time → holds / revoked; unavailable when unknown); a revoked answer fails the token as revoked. A policy reads session-built state late (`c.late`), else boot cycles.
-- Store interface for revoked tokens (id, lifetime → created / exists; id → kept), with its needs: never evicted, survives a crash, does not come back on failover.
+- `token-denylist`'s store interface for revoked tokens and its needs, passed on: a store wiring wires `tokens` and implements it.
 - `jwks_uri` among `issuer`'s metadata: `keys`' key set path on `http`'s public origin; left out without one.
 - Operator section: `access-token-lifetime` (written with its unit, `1s` to `1d` in whole seconds, default `1h`), `revocation` (`denylist` or `unsupported`), `issuance-timeout` (written with its unit, `1s` to `1m`, default `10s`), `subject-check` (`none` states that no module checks subjects).
-- `./testing`: the contract test every implementation passes, the store interface's contract test, configuration builders, and a stand-in: in memory, unsigned, ending and reading bindings as `tokens` does.
+- `./testing`: the contract test every implementation passes, configuration builders, and a stand-in: in memory, unsigned, ending and reading bindings as `tokens` does.
 
 ## Invariants
 - A token without `typ`, with several bindings, or with a binding no kind of the composition writes is refused.
@@ -32,11 +32,8 @@
 - An added claim follows `added-claims`' rules, its shape, reserved names and limits; one outside them is the grant's maker's mistake (TypeError at `issue` and `admits`, a 500 with no audit), and a token read back with one is refused as `shape`.
 - A token over 16 KiB, or an actor chain over 16, is neither issued (TypeError) nor read.
 
-## Data
-- Revoked tokens by id, through the store interface, kept by `denylist`.
-
 ## Depends on
-- `kernel`, `http`, `keys`, `issuer`, `sender-binding`, `added-claims`
+- `kernel`, `http`, `keys`, `issuer`, `sender-binding`, `added-claims`, `token-denylist`
 
 ## Vocabulary
 - scope / audience: the range of permission a token grants, and the token's recipient.
