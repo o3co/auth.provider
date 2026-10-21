@@ -52,6 +52,11 @@ beforeAll(async () => {
 		backchannelLogoutUri: `${told.base}/bc`,
 	});
 	const far = client("far", { backchannelLogoutUri: `${unlisted.base}/bc` });
+	// A second front channel, at another origin, that does not ask for the session.
+	const side = client("side", {
+		frontchannelLogoutUri: "https://side.example/fc",
+		frontchannelLogoutSessionRequired: false,
+	});
 	// Clients that say outright whether their back channel needs the session.
 	const keen = client("keen", {
 		backchannelLogoutUri: `${told.base}/keen`,
@@ -61,7 +66,9 @@ beforeAll(async () => {
 		backchannelLogoutUri: `${told.base}/lean`,
 		backchannelLogoutSessionRequired: false,
 	});
-	running = await areaTarget().start(codeScene(sceneWith([app, far, keen, lean], [told.base])));
+	running = await areaTarget().start(
+		codeScene(sceneWith([app, far, keen, lean, side], [told.base])),
+	);
 	if (running.kind !== "running") throw new Error(`refused:\n${running.output}`);
 	base = running.baseUrl;
 });
@@ -146,6 +153,29 @@ async function logout(
 /** Whether the browser's session still gives a code. */
 const stillSignedIn = async (at: SignedIn) =>
 	(await at.browser.authorize(codeRequest("app"))).at?.searchParams.get("code") != null;
+
+const unescaped = (text: string) =>
+	text.replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code))).replace(/&amp;/g, "&");
+/** What a front-channel page frames, what it runs, where it moves on to, and its policy by directive. */
+const pageOf = (page: Awaited<ReturnType<typeof logout>>) => ({
+	frames: [...page.text.matchAll(/<iframe[^>]*\ssrc="([^"]+)"/g)].map(
+		(m) => new URL(unescaped(m[1] ?? "")),
+	),
+	scripts: [...page.text.matchAll(/<script([^>]*)>([^<]*)<\/script>/g)].map((m) => ({
+		attributes: m[1] ?? "",
+		text: m[2] ?? "",
+	})),
+	target: unescaped(page.text.match(/\sdata-target="([^"]*)"/)?.[1] ?? "") || undefined,
+	policy: new Map(
+		(page.headers.get("content-security-policy") ?? "")
+			.split(";")
+			.map((directive) => directive.trim().split(/\s+/))
+			.filter(([name]) => name)
+			.map(([name = "", ...values]) => [name, values]),
+	),
+});
+const hashOf = (script: string) =>
+	`'sha256-${createHash("sha256").update(script).digest("base64")}'`;
 
 describe("a logout the client starts", () => {
 	it("ends the session the hint names and sends the browser back with its state, by GET or POST", async () => {
@@ -263,6 +293,60 @@ describe("telling the session's clients", () => {
 		const policy = page.headers.get("content-security-policy") ?? "";
 		expect(policy).toMatch(/frame-src [^;]*https:\/\/app\.example/);
 		expect(policy).toContain("frame-ancestors 'none'");
+	});
+
+	// Stored XSS through a front channel: the page frames only the URLs the session's clients registered,
+	// and loads nothing but their origins and its one script.
+	it("frames only the front channels the session's clients registered, under a policy naming their origins and the page's one script", async () => {
+		const at = await signedIn();
+		await at.tokensFor("side");
+		await at.tokensFor("keen");
+		const params = { id_token_hint: at.idToken, post_logout_redirect_uri: back, state: "s" };
+		const answer = await logout(at, "GET", params, { accept: "text/html" });
+		expect(answer.status).toBe(200);
+		const page = pageOf(answer);
+		const framed = page.frames.map((url) => url.origin + url.pathname).sort();
+		expect(framed).toEqual(["https://app.example/fc", "https://side.example/fc"]);
+		const sideFrame = page.frames.find((url) => url.origin === "https://side.example");
+		expect(sideFrame?.searchParams.get("iss")).toBe(issuer);
+		expect(sideFrame?.searchParams.has("sid")).toBe(false);
+		expect(page.target).toBe(`${back}?state=s`);
+		expect(page.scripts).toHaveLength(1);
+		const [script] = page.scripts;
+		expect(script?.attributes).not.toMatch(/\ssrc=/);
+		expect(script?.text).not.toContain(back);
+		expect([...(page.policy.get("frame-src") ?? [])].sort()).toEqual([
+			"https://app.example",
+			"https://side.example",
+		]);
+		expect(page.policy.get("script-src")).toEqual([hashOf(script?.text ?? "")]);
+		expect(page.policy.get("default-src")).toEqual(["'none'"]);
+		expect(page.policy.get("frame-ancestors")).toEqual(["'none'"]);
+	});
+
+	// Open redirect and XSS through a return: a page with no return to follow has no script and moves nowhere.
+	it("gives a page with no script when there is no registered return to move on to", async () => {
+		for (const asked of [undefined, "https://other.example/after"]) {
+			const at = await signedIn();
+			const params = {
+				id_token_hint: at.idToken,
+				...(asked ? { post_logout_redirect_uri: asked } : {}),
+			};
+			const answer = await logout(at, "GET", params, { accept: "text/html" });
+			expect(answer.status, asked).toBe(200);
+			const page = pageOf(answer);
+			expect(page.frames.map((url) => url.origin + url.pathname)).toEqual([
+				"https://app.example/fc",
+			]);
+			expect([page.scripts, page.target, page.policy.has("script-src")], asked).toEqual([
+				[],
+				undefined,
+				false,
+			]);
+			expect(page.policy.get("default-src")).toEqual(["'none'"]);
+			if (asked) expect(answer.text).not.toContain("other.example");
+			expect(await stillSignedIn(at)).toBe(false);
+		}
 	});
 
 	it("posts each client of the session a logout token signed by the provider", async () => {
