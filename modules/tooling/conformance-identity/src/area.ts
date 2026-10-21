@@ -56,6 +56,8 @@ export interface IdentityPart {
 		readonly accountMaxWaitSeconds?: number;
 	};
 	readonly revocations?: RevocationScene;
+	/** How recent a sign-in a step that changes credentials asks, in seconds (`recentAuthenticationWindow`). */
+	readonly recentAuthenticationSeconds?: number;
 	/** The https origins whose pages may read the routes that take cross-origin requests. */
 	readonly corsOrigins?: readonly string[];
 }
@@ -68,3 +70,5 @@ export const httpLedger = "identity:http-ledger";
 export const ledgerBesideUsers = "identity:ledger-beside-users";
 /** The need for a ledger that revokes subjects over HTTP. */
 export const ledgerRevocation = "identity:ledger-revocation";
+/** The need for a recent-authentication window the scene sets. */
+export const recentAuthenticationWindow = "identity:recent-authentication-window";
