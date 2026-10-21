@@ -2,7 +2,7 @@ import type { Client, Section } from "@mod/clients";
 import type { Log, Random } from "@mod/kernel";
 import type { Seal } from "@mod/seal";
 import type { BoundaryKind, Revocations } from "@mod/subject-revocation";
-import type { Upstreams } from "@mod/upstreams";
+import { refreshedExpiry, type Upstreams } from "@mod/upstreams";
 import { z } from "zod";
 import type { Connection, Settings } from "../section.ts";
 import type { StoredGrant, StoredStep, SubjectGrants } from "../store.ts";
@@ -324,10 +324,10 @@ export function credentialsFrom(
 			accessToken: said.accessToken,
 			tokenType: said.tokenType,
 			refreshToken,
-			expiresAt:
-				said.accessToken === at.kept?.accessToken
-					? Math.min(at.now + life * 1000, at.kept.expiresAt)
-					: at.now + life * 1000,
+			expiresAt: refreshedExpiry(
+				{ accessToken: said.accessToken, expiresAt: at.now + life * 1000 },
+				at.kept,
+			),
 			obtainedAt: at.now,
 			scope,
 		},
