@@ -15,7 +15,7 @@
   - Passkeys: credentials and subjects, each by a key passkeys makes, saved once, read, changed from what they hold, kept without end. Needs: no eviction, survives a crash, never rolled back by failover, confirmed reads.
   - Challenges: opened for a lifetime, taken by putting a mark in place. Needs: survives a crash, never rolled back by failover, names derived from the challenge.
 - Operator section: `user-verification` (default `preferred`), `max-credentials` (per subject, default 10).
-- `./testing`: the section's test configuration builder.
+- `./testing`: the section's test configuration builder, and the contract tests of both store interfaces.
 
 ## Invariants
 - A challenge is taken once, within `webauthn`'s `lifetimeMs` on `kernel`'s clock, whatever the store's expiry; a taken mark stays for the rest of it. An assertion's challenge is redeemed by its requester alone; any other is `challenge`, after the challenge is taken. Its record keeps the requester's SHA-256, never the requester.
@@ -26,10 +26,10 @@
 - A store that cannot tell is unavailable (`passkeys`), never a refusal.
 
 ## Data
-- Passkeys and subjects through `webauthn`'s passkey store; challenges through its challenge store. Their keys are the ones `webauthn` made before this package, so the records kept stay readable.
+- Passkeys and subjects through the passkey store; challenges through the challenge store. Their keys are the ones `webauthn` made before this package, so the records kept stay readable.
 
 ## Depends on
-- `kernel`, `webauthn` (the ceremonies, the credential's form, the stores)
+- `kernel`, `webauthn` (the ceremonies, the credential's form)
 
 ## Vocabulary
 - holder: a subject's user handle and the ids of its passkeys. passkey: a credential this package keeps for a subject.

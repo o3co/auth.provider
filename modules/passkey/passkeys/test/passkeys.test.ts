@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { isUnavailable } from "@mod/kernel";
-import type { Credential, StoredChallenge } from "@mod/webauthn";
+import type { Credential } from "@mod/webauthn";
 import {
 	type CreationOptions,
 	testCeremonies as ceremoniesFor,
@@ -11,6 +11,7 @@ import {
 import { expect, it } from "vitest";
 import { passkeysOver } from "../src/passkeys.ts";
 import { keptChallenges, keptPasskeys } from "../src/records.ts";
+import type { StoredChallenge } from "../src/store.ts";
 import { memoryStores } from "./stores.ts";
 
 const at = { origin: testOrigin };

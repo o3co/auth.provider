@@ -1,16 +1,8 @@
 import { createHash } from "node:crypto";
 import { Unavailable } from "@mod/kernel";
-import {
-	type ChallengeStore,
-	type Credential,
-	credentialLimits,
-	credentialOf,
-	isCanonical,
-	type PasskeyStore,
-	type StoredChallenge,
-	type StoredPasskey,
-} from "@mod/webauthn";
+import { type Credential, credentialLimits, credentialOf, isCanonical } from "@mod/webauthn";
 import { z } from "zod";
+import type { ChallengeStore, PasskeyStore, StoredChallenge, StoredPasskey } from "./store.ts";
 
 const { handleBytes, idBytes } = credentialLimits;
 

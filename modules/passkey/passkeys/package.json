@@ -19,5 +19,13 @@
 		"@mod/http": "workspace:*",
 		"@mod/records": "workspace:*",
 		"vitest": "5.0.5"
+	},
+	"peerDependencies": {
+		"vitest": "5.0.5"
+	},
+	"peerDependenciesMeta": {
+		"vitest": {
+			"optional": true
+		}
 	}
 }

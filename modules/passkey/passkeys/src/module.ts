@@ -1,6 +1,6 @@
 import { type BuildContext, defineModule } from "@mod/kernel";
-import { ceremonies, challengeStore, freshHandle, passkeyStore } from "@mod/webauthn";
-import { passkeys, registrations } from "./contract.ts";
+import { ceremonies, freshHandle } from "@mod/webauthn";
+import { challengeStore, passkeyStore, passkeys, registrations } from "./contract.ts";
 import { passkeysOver } from "./passkeys.ts";
 import { keptChallenges, keptPasskeys } from "./records.ts";
 import { registrationsOver } from "./registration/registrations.ts";

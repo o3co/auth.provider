@@ -9,9 +9,9 @@ import {
 	passkeyStore,
 	type StoredChallenge,
 	type StoredPasskey,
-} from "@mod/webauthn";
+} from "../src/store.ts";
 
-/** webauthn's stores on the records stand-in, on the given clock, each behind a switch. */
+/** passkeys' stores on the records stand-in, on the given clock, each behind a switch. */
 export function memoryStores(now: () => number = () => 0) {
 	const size = { shards: 1, perShard: 1 };
 	const keyed = () => {
