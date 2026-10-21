@@ -66,6 +66,12 @@ export interface OutboundRefusals {
 	 * is resolved: the sender still checks every address is private. Absent, read it as false.
 	 */
 	plainInternal?(url: string, narrower?: Narrower): boolean;
+	/**
+	 * Why the URL may not be one the browser is sent to, which outbound never reaches: plain http
+	 * other than at a loopback name or as `plainInternal` takes it for the narrower's own `internal`
+	 * URL, `<reason>: <what to set>`, naming keys alone; undefined for https. Absent, read it as refusing plain http.
+	 */
+	browsedRefusal?(url: string, narrower?: Narrower): string | undefined;
 }
 
 export const outboundRefusals = contract<OutboundRefusals>("outbound.refusals");
@@ -148,6 +154,8 @@ export interface Policy {
 	explain(url: string, narrower?: Narrower): string | undefined;
 	/** Whether the URL is taken as plain http to a pair `plain-internal` names, resolving no name. */
 	plainInternal(url: string, narrower?: Narrower): boolean;
+	/** Why the URL may not be one the browser is sent to, resolving no name; undefined when it may. */
+	browsedRefusal(url: string, narrower?: Narrower): string | undefined;
 	credentialRefusal(urls: readonly string[]): CredentialRefusal | undefined;
 	/** Whether a host is among an operator's list entries. */
 	listed(host: string, entries: readonly string[]): boolean;

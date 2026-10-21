@@ -5,6 +5,7 @@ import {
 	isPrivateAddress,
 	isSpecialAddress,
 } from "@mod/address-reach";
+import { isLoopbackName } from "@mod/url-setting";
 import {
 	type Admitted,
 	type CredentialRefusal,
@@ -265,6 +266,11 @@ const narrowing = (value: number | undefined): number => {
 	throw new RangeError("outbound: a narrower's numbers are positive and finite");
 };
 
+/** Why a URL the browser goes to is refused, and what to set; neither names the URL. */
+const refusedBrowsed =
+	"plain http the browser goes to: name it over https, at a loopback name, or at the origin of the caller's own URL whose host:port outbound.plain-internal names";
+const unreadableBrowsed = "not a URL the browser can be sent to: name an absolute https URL";
+
 /** The operator's destination policy and caps, as the settings give them, for sending and for boot alike. */
 export function policyOf(settings: PolicySettings): Policy {
 	const rules: Rules = {
@@ -304,6 +310,18 @@ export function policyOf(settings: PolicySettings): Policy {
 			throw error;
 		}
 	};
+	const plainInternal = (url: string, narrower: Narrower = {}) => {
+		try {
+			const admitted = admitUrl(url, rules, narrower, false);
+			if (admitted.plainInternal !== true) return false;
+			// As `explain`: an address written in the URL is checked now, a name's when sent.
+			if (admitted.address !== undefined) admitAddresses([admitted.address], admitted);
+			return true;
+		} catch (error) {
+			if (DestinationRefused.is(error)) return false;
+			throw error;
+		}
+	};
 	return {
 		admit: (url, narrower = {}, signed = false) => admitUrl(url, rules, narrower, signed),
 		admitAddresses: checkedAddresses,
@@ -311,17 +329,15 @@ export function policyOf(settings: PolicySettings): Policy {
 			const reason = refusalOf(url, narrower);
 			return reason && `${reason}: ${remedyOf(reason, url, rules, narrower)}`;
 		},
-		plainInternal: (url, narrower = {}) => {
-			try {
-				const admitted = admitUrl(url, rules, narrower, false);
-				if (admitted.plainInternal !== true) return false;
-				// As `explain`: an address written in the URL is checked now, a name's when sent.
-				if (admitted.address !== undefined) admitAddresses([admitted.address], admitted);
-				return true;
-			} catch (error) {
-				if (DestinationRefused.is(error)) return false;
-				throw error;
-			}
+		plainInternal,
+		browsedRefusal: (url, narrower = {}) => {
+			const target = URL.parse(url);
+			if (target === null) return unreadableBrowsed;
+			if (target.protocol === "https:") return undefined;
+			const plain = target.protocol === "http:";
+			if (plain && (isLoopbackName(target.hostname) || plainInternal(url, narrower)))
+				return undefined;
+			return refusedBrowsed;
 		},
 		credentialRefusal: (urls) => credentialRefusal(urls, rules.plainLoopback, rules.plainInternal),
 		listed,

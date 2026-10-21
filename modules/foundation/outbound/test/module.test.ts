@@ -317,6 +317,22 @@ it("answers at boot whether a URL is taken as plain-internal, for the caller's o
 	]).toEqual([true, false, false, false]);
 });
 
+it("answers at boot why a URL the browser goes to is refused, as the policy judges it", async () => {
+	onlyProxy();
+	const refusals = (
+		await boot({ "allow-any-public": true, "plain-internal": ["idp.internal:8080"] })
+	).get(outboundRefusals);
+	const own = { internal: configuredUrl("http://idp.internal:8080/") };
+	expect([
+		refusals.browsedRefusal?.("https://idp.example/auth"),
+		refusals.browsedRefusal?.("http://localhost:9000/auth"),
+		refusals.browsedRefusal?.("http://idp.internal:8080/auth", own),
+	]).toEqual([undefined, undefined, undefined]);
+	expect(refusals.browsedRefusal?.("http://idp.example/auth")).toMatch(
+		/^plain http the browser goes to: /,
+	);
+});
+
 it("explains at boot why the policy refuses a URL by the keys that let it through, naming no value", async () => {
 	onlyProxy();
 	const rules = {
