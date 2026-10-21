@@ -172,6 +172,12 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
+  modules/foundation/address-reach:
+    dependencies:
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../url-setting
+
   modules/foundation/audit:
     dependencies:
       '@mod/kernel':
