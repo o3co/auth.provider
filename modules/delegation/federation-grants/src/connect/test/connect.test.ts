@@ -446,7 +446,7 @@ const callbackCases: readonly {
 	readonly expectedUpstream?: string;
 	readonly tokens?: Readonly<Record<string, unknown>>;
 	/** The exchange throws the upstream being unavailable, or refusing. */
-	readonly thrown?: "unavailable" | "refused";
+	readonly thrown?: "unavailable" | "refused" | "copied";
 	/** The callback's query over the state and `code=code-1`. */
 	readonly query?: Readonly<Record<string, readonly string[]>>;
 	readonly error: string | null;
@@ -515,6 +515,11 @@ const callbackCases: readonly {
 	},
 	{ name: "answers an upstream that refuses the code", thrown: "refused", error: "upstream_error" },
 	{
+		name: "answers an upstream refusal from another copy of upstreams as a refusal",
+		thrown: "copied",
+		error: "upstream_error",
+	},
+	{
 		name: "answers the upstream's error",
 		query: { error: ["access_denied"] },
 		error: "access_denied",
@@ -528,6 +533,12 @@ describe("a first connection's callback", () => {
 		it(c.name, async () => {
 			const h = await connector({ settings: c.settings ?? {}, holders: c.holders ?? {} });
 			h.script.exchange = async () => {
+				if (c.thrown === "copied") {
+					// As another copy of upstreams in the bundle would throw it: another class, the same mark.
+					throw Object.assign(new Error("upstream refused"), {
+						[Symbol.for("@mod/upstreams.refused")]: true,
+					});
+				}
 				if (c.thrown) throw c.thrown === "refused" ? new UpstreamRefused() : new Unavailable("up");
 				return upstreamLogin(upstreamTokens(c.tokens ?? {}));
 			};

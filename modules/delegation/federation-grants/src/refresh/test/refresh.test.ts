@@ -49,6 +49,7 @@ type Upstream =
 	| UpstreamRefresh
 	| "unreachable"
 	| "refused"
+	| "copied"
 	| (() => UpstreamRefresh | Promise<UpstreamRefresh>);
 
 /**
@@ -82,6 +83,12 @@ async function refresher(life: number, settings: { rotations?: number; windowMs?
 			const next = upstream.shift();
 			if (next === "unreachable") throw new Unavailable("test upstream");
 			if (next === "refused") throw new UpstreamRefused();
+			// As another copy of upstreams in the bundle would throw it: another class, the same mark.
+			if (next === "copied") {
+				throw Object.assign(new Error("upstream refused"), {
+					[Symbol.for("@mod/upstreams.refused")]: true,
+				});
+			}
 			if (typeof next === "function") return next();
 			const fresh = upstreamTokens({ accessToken: `up-${asked.length + 1}` });
 			return next ?? ({ kind: "refreshed", tokens: fresh } as UpstreamRefresh);
@@ -250,6 +257,12 @@ const refreshCases: readonly {
 		name: "answers the upstream refused once the held token has ended",
 		life: 4,
 		upstream: ["refused"],
+		calls: [{ advance: 4100, said: "refused" }],
+	},
+	{
+		name: "answers the upstream refused by another copy of upstreams as refused",
+		life: 4,
+		upstream: ["copied"],
 		calls: [{ advance: 4100, said: "refused" }],
 	},
 	{

@@ -120,8 +120,7 @@ const exchangedBy = async (delegation: Delegation, exchange: DelegatedExchange) 
 		return { kind: "login", login: await delegation.exchange(exchange) } as const;
 	} catch (error) {
 		if (isUnavailable(error)) return { kind: "failed", error: "temporarily_unavailable" } as const;
-		if (error instanceof UpstreamRefused)
-			return { kind: "failed", error: "upstream_error" } as const;
+		if (UpstreamRefused.is(error)) return { kind: "failed", error: "upstream_error" } as const;
 		throw error;
 	}
 };

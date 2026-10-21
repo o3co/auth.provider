@@ -225,8 +225,7 @@ export function refreshWith(parts: Parts) {
 		} catch (error) {
 			// The upstream down or refusing says nothing of the credential, which stays.
 			if (isUnavailable(error)) return heldOr(grant.id, held, asked, { kind: "unavailable" });
-			if (error instanceof UpstreamRefused)
-				return heldOr(grant.id, held, asked, { kind: "refused" });
+			if (UpstreamRefused.is(error)) return heldOr(grant.id, held, asked, { kind: "refused" });
 			throw error;
 		}
 		// A grant ended, or its subject revoked, while the upstream was asked gets nothing, written or
