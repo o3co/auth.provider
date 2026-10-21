@@ -1,4 +1,12 @@
 import { defineModule } from "@mod/kernel";
+import {
+	type ChallengeStore as KeptChallenges,
+	type PasskeyStore as KeptPasskeys,
+	type challengeStoreNeeds as keptChallengeNeeds,
+	type passkeyStoreNeeds as keptPasskeyNeeds,
+	challengeStore as passkeysChallengeStore,
+	passkeyStore as passkeysPasskeyStore,
+} from "@mod/passkeys";
 import { recordsIn, secretRecordsIn } from "@mod/records";
 import { type Guarantee, type Space, spaces, store } from "@mod/store";
 import {
@@ -25,6 +33,12 @@ const { namesFromSecret: challengeRecordsFor, ...challengeGuaranteeFor } = {
 	survivesFailover: "replicated",
 	namesFromSecret: secretRecordsIn,
 } satisfies Record<keyof typeof challengeStoreNeeds, Guarantee | typeof secretRecordsIn>;
+// passkeys states the same needs: the same spaces meet them.
+guaranteeFor satisfies Record<keyof typeof keptPasskeyNeeds, Guarantee>;
+challengeGuaranteeFor satisfies Record<
+	Exclude<keyof typeof keptChallengeNeeds, "namesFromSecret">,
+	Guarantee
+>;
 const passkeySpace = (name: string): Space => ({ name, guarantees: Object.values(guaranteeFor) });
 const credentials = passkeySpace("webauthn-store.credentials");
 const subjects = passkeySpace("webauthn-store.subjects");
@@ -33,29 +47,47 @@ const challenges: Space = {
 	guarantees: Object.values(challengeGuaranteeFor),
 };
 
+type Place = Parameters<typeof recordsIn>[0];
+
+/** One space's records, kept as long as the keeper says. */
+const passkeyRecordsIn = (place: Omit<Place, "space">, space: Space) => {
+	const records = recordsIn<StoredPasskey>({ ...place, space });
+	return { save: records.create, read: records.read, update: records.change };
+};
+const challengeRecordsIn = (place: Omit<Place, "space">) => {
+	const records = challengeRecordsFor<StoredChallenge>({ ...place, space: challenges });
+	return {
+		open: records.create,
+		take: (challenge: string, mark: StoredChallenge) =>
+			records.change(challenge, () => ({ value: mark })),
+	};
+};
+
 export default defineModule({ name: "webauthn-store" }, (m) => [
 	m.contribute(spaces).by(() => credentials),
 	m.contribute(spaces).by(() => subjects),
 	m.contribute(spaces).by(() => challenges),
 	m.provide(passkeyStore).by(async (c): Promise<PasskeyStore> => {
 		const place = { store: await c.get(store), log: c.log, random: c.random };
-		/** One space's records, kept as long as webauthn says. */
-		const passkeyRecordsIn = (space: Space) => {
-			const records = recordsIn<StoredPasskey>({ ...place, space });
-			return {
-				save: records.create,
-				read: records.read,
-				update: records.change,
-			};
+		return {
+			credentials: passkeyRecordsIn(place, credentials),
+			subjects: passkeyRecordsIn(place, subjects),
 		};
-		return { credentials: passkeyRecordsIn(credentials), subjects: passkeyRecordsIn(subjects) };
 	}),
 	m.provide(challengeStore).by(async (c): Promise<ChallengeStore> => {
-		const place = { store: await c.get(store), space: challenges, log: c.log, random: c.random };
-		const records = challengeRecordsFor<StoredChallenge>(place);
+		const place = { store: await c.get(store), log: c.log, random: c.random };
+		return challengeRecordsIn(place);
+	}),
+	// The same records, through the interfaces passkeys states: its records are webauthn's, kept as they were.
+	m.provide(passkeysPasskeyStore).by(async (c): Promise<KeptPasskeys> => {
+		const place = { store: await c.get(store), log: c.log, random: c.random };
 		return {
-			open: records.create,
-			take: (challenge, mark) => records.change(challenge, () => ({ value: mark })),
-		};
+			credentials: passkeyRecordsIn(place, credentials),
+			subjects: passkeyRecordsIn(place, subjects),
+		} as unknown as KeptPasskeys;
+	}),
+	m.provide(passkeysChallengeStore).by(async (c): Promise<KeptChallenges> => {
+		const place = { store: await c.get(store), log: c.log, random: c.random };
+		return challengeRecordsIn(place) as unknown as KeptChallenges;
 	}),
 ]);
