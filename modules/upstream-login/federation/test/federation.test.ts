@@ -77,7 +77,7 @@ const skewMs = 30_000;
 /** Headers as the trusted proxy forwards a request over https. */
 const viaProxy = { "x-forwarded-proto": "https", "x-forwarded-for": "198.51.100.1" };
 
-type Answer = UpstreamLogin | "unreachable" | "broken";
+type Answer = UpstreamLogin | "unreachable" | "broken" | "copied";
 /** What the test type's upstream answers for each code. */
 const answering = (...pairs: (readonly [string, Answer])[]) => new Map<string, Answer>(pairs);
 /** An upstream login of alice, made at `ms`. */
@@ -499,6 +499,7 @@ describe("federation", () => {
 				["good", alice],
 				["down", "unreachable"],
 				["broken", "broken"],
+				["copied", "copied"],
 				["stranger", { subject: "u-nobody", amr: [] }],
 			),
 		});
@@ -508,6 +509,7 @@ describe("federation", () => {
 			["x=1", 400, "upstream_refused"],
 			["code=bad", 502, "exchange_failed"],
 			["code=broken", 502, "exchange_failed"],
+			["code=copied", 502, "exchange_failed"],
 			["code=down", 503, "temporarily_unavailable"],
 			["code=stranger", 401, "unknown_user"],
 		] as const) {
@@ -520,6 +522,8 @@ describe("federation", () => {
 		expect(logged().filter((line) => line.startsWith("federation.exchange_failed"))).toEqual([
 			'federation.exchange_failed {"idp":"corp","kind":"refused"}',
 			'federation.exchange_failed {"idp":"corp","kind":"failed"}',
+			// Refused by another copy of upstreams in the bundle: still a refusal.
+			'federation.exchange_failed {"idp":"corp","kind":"refused"}',
 		]);
 	});
 
@@ -958,6 +962,13 @@ describe("federation", () => {
 			federation: { idps: { a: { type: "test", issuer: "https://misdescribed.example" } } },
 		}).catch((error: BootRefused) => error.refusals);
 		expect(told).toEqual([
+			{ where: "federation.idps.a.issuer", reason: "the description names another issuer" },
+		]);
+		// Thrown by another copy of upstreams in the bundle: still the type's own reason, under its key.
+		const copied = await serve({
+			federation: { idps: { a: { type: "test", issuer: "https://copied.example" } } },
+		}).catch((error: BootRefused) => error.refusals);
+		expect(copied).toEqual([
 			{ where: "federation.idps.a.issuer", reason: "the description names another issuer" },
 		]);
 		// A type's own settings are read as a section is: a string from the environment converts.
