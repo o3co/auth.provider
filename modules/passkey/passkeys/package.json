@@ -5,6 +5,7 @@
 	"type": "module",
 	"kind": "feature",
 	"optIn": true,
+	"storeWiring": true,
 	"exports": {
 		".": "./src/contract.ts",
 		"./testing": "./src/testing.ts",
