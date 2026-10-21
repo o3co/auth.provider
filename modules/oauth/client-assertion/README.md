@@ -2,7 +2,7 @@
 
 ## Responsibilities
 - Contributes `private_key_jwt` (RFC 7523) to `clients`: the client signs a JWT with one of its keys, used once.
-- Contributes the client metadata section that holds the client's keys.
+- Contributes the client metadata section that holds the client's keys, its internal module `keys`.
 
 ## Not here
 - Client records, lookup, and choosing among methods: `clients`. OAuth error responses: `token-endpoint`.

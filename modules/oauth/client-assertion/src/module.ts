@@ -2,15 +2,14 @@ import { authMethods, metadataSections } from "@mod/clients";
 import { externalJwt } from "@mod/external-jwt";
 import { issuer } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
-import { outboundRefusals } from "@mod/outbound-policy";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
-import { clientKeysUnder } from "./keys.ts";
+import { clientKeysIn } from "./keys/keys.ts";
 import { assertionMethod } from "./method.ts";
 import { section } from "./section.ts";
 import { spentAssertions } from "./store.ts";
 
 export default defineModule({ name: "client-assertion", section }, (m) => [
-	m.contribute(metadataSections).by(async (c) => clientKeysUnder(await c.get(outboundRefusals))),
+	m.contribute(metadataSections).by((c) => clientKeysIn(c)),
 	m.contribute(authMethods).by(async (c) => {
 		const { url } = await c.get(tokenEndpointLocation);
 		if (url === undefined) {

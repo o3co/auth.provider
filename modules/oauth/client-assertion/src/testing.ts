@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
-import { clientKeys, type Jwk } from "./keys.ts";
+import { clientKeys, type Jwk } from "./keys/keys.ts";
 import type { section } from "./section.ts";
 import type { SpentAssertions } from "./store.ts";
 
