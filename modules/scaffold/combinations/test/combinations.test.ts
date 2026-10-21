@@ -51,6 +51,7 @@ it("composes the default that replaces an owner in the owner's place, needed or 
 		"@mod/code-grant",
 		"@mod/users",
 		"@mod/webauthn",
+		"@mod/passkeys",
 	]);
 	expect(byDefault).toEqual(
 		expect.arrayContaining([
