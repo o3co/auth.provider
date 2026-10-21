@@ -61,6 +61,31 @@ it("fills no mark for a factor whose binding ends as a duplicate, read before it
 	expect(witness.marks.has("bob")).toBe(false);
 });
 
+it("fills no mark for a factor not yet claimed, whose value another then binds first", async () => {
+	const { app, decided, place, witness } = await witnessed({}, [card]);
+	const proved = async (subject: string, proof: string) => {
+		const begun = await decided.begin(subject, "card");
+		if (begun.kind !== "begun") throw new Error(begun.kind);
+		const valid = await decided.provePending(subject, begun.pending, proof);
+		if (valid.kind !== "valid") throw new Error(valid.kind);
+		return () => decided.bind(subject, begun.pending, valid.state);
+	};
+	const [bob, ann] = [await proved("bob", "c1"), await proved("ann", "c1")];
+	// Bob's factor is written and stops before its claim: a backfill runs, then Ann binds the value.
+	let filled: string | undefined;
+	let paused = false;
+	place.hooks.beforeSave = async (key) => {
+		if (!key.startsWith("u-") || paused) return;
+		paused = true;
+		filled = await app.get(witnessBackfill).settle("bob");
+		expect(await ann()).toMatchObject({ kind: "bound" });
+	};
+	expect(await bob()).toEqual({ kind: "duplicate" });
+	expect(filled).toBe("none");
+	expect(witness.marks.has("bob")).toBe(false);
+	expect(witness.marks.has("ann")).toBe(true);
+});
+
 it("marks the subject once a counting factor is written, a binding filling a mark that is missing", async () => {
 	const { bindCode, witness } = await witnessed();
 	await bindCode("ana");

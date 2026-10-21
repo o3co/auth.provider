@@ -127,13 +127,18 @@ export function factorDecisions(p: FactorParts): Factors {
 			: counts
 				? ("held" as const)
 				: ("none" as const);
-	/** A counting factor whose unique value another factor holds is left out: its binding ends as a duplicate. */
+	/**
+	 * A counting factor with a unique value counts once its claim names it: before, its binding may
+	 * still end as a duplicate. One written before claims were kept counts unless another holds it.
+	 */
 	const countsNow = async (subject: string) => {
 		for (const factor of counting(await records.list(subject), p.kinds)) {
 			const unique = p.kinds
 				.get(factor.kind)
 				?.uniqueSecret?.({ secret: secretOf(subject, factor), state: factor.state });
 			if (unique === undefined) return true;
+			if (await records.claimedFor(subject, factor.kind, unique, factor.id)) return true;
+			if (factor.claims) continue;
 			if (!(await records.heldByAnother(subject, factor.kind, unique, factor.id))) return true;
 		}
 		return false;
@@ -291,6 +296,7 @@ export function factorDecisions(p: FactorParts): Factors {
 				secret: p.seal.seal(found.secret, sealContext(subject, fid)),
 				state,
 				boundAt: p.now(),
+				...(unique !== undefined ? { claims: true as const } : {}),
 			};
 			const backed = [...p.kinds.values()].some(isWayBack);
 			// Decided on the factors as written: of two first bindings at once, one binds.

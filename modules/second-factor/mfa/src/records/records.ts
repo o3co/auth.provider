@@ -10,6 +10,8 @@ export interface Factor {
 	readonly secret: string;
 	readonly state: unknown;
 	readonly boundAt?: number;
+	/** Written with a factor whose kind gives a unique value: it holds that value only through its claim. One written before claims were kept carries none. */
+	readonly claims?: true;
 }
 
 export interface Decision<T> {
@@ -101,6 +103,12 @@ export function factorRecords(store: FactorStore) {
 			const held = claimOf(await store.read(claimKey(kind, value)));
 			return held !== undefined && (await holding(held));
 		},
+		/** Whether the kind's unique value is claimed for `factor` of the subject. */
+		claimedFor: async (subject: string, kind: string, value: string, factor: string) =>
+			sameClaim(claimOf(await store.read(claimKey(kind, value))), {
+				listKey: keyOf(subject),
+				factor,
+			}),
 		/** Whether a factor other than `factor` holds the kind's unique value: a binding of it ends as a duplicate. */
 		heldByAnother: async (subject: string, kind: string, value: string, factor: string) => {
 			const held = claimOf(await store.read(claimKey(kind, value)));

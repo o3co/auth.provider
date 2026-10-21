@@ -35,6 +35,7 @@ import { enforcers, factors, proofSteps, type Witnessing, witnessing } from "../
 import mfaModule from "../src/module.ts";
 import { listKeyOf, storedList } from "../src/records/records.ts";
 import { section } from "../src/section.ts";
+import type { StoredFactors } from "../src/store.ts";
 import { type MfaSettings, mfaConfig } from "../src/testing.ts";
 import { memoryFactors } from "./stores.ts";
 
@@ -903,25 +904,44 @@ describe("values no two factors may hold", () => {
 		expect(await bindKind("bob", "card", "c1")).toMatchObject({ kind: "bound" });
 	});
 
-	it("counts as written a factor before its claim, but not one whose value another factor holds", async () => {
+	it("counts a factor of a unique value once its claim names it; one written before claims, unless another holds it", async () => {
 		const { decided, bindKind, place } = await serve({}, { kinds: [card, backup] });
 		await bindKind("ann", "card", "c1");
 		// Read between a binding's write of its factor and its claim on the value.
 		const seen: Record<string, boolean> = {};
+		let reading: string | undefined;
 		place.hooks.beforeSave = async (key) => {
-			if (!key.startsWith("u-")) return;
-			for (const subject of ["bob", "cid"])
-				seen[subject] ??= await decided.countingWritten(subject);
+			if (key.startsWith("u-") && reading) seen[reading] = await decided.countingWritten(reading);
 		};
+		reading = "bob";
 		expect(await bindKind("bob", "card", "c1")).toEqual({ kind: "duplicate" });
 		expect(seen.bob).toBe(false);
-		delete seen.cid;
+		reading = "cid";
 		expect(await bindKind("cid", "card", "c2")).toMatchObject({ kind: "bound" });
-		expect(seen.cid).toBe(true);
-		expect([await decided.countingWritten("ann"), await decided.countingWritten("bob")]).toEqual([
+		// Not yet claimed, its binding could still end as a duplicate.
+		expect(seen.cid).toBe(false);
+		reading = undefined;
+		expect([await decided.countingWritten("ann"), await decided.countingWritten("cid")]).toEqual([
 			true,
-			false,
+			true,
 		]);
+		// A factor written before claims were kept carries no mark: it counts unless another holds its value.
+		const unmarked = (record: StoredFactors) => {
+			const list = record as unknown as { factors: { claims?: true }[] };
+			const factors = list.factors.map(({ claims: _, ...rest }) => rest);
+			return { value: { ...list, factors } as unknown as StoredFactors };
+		};
+		reading = "dee";
+		place.hooks.beforeSave = async (key) => {
+			if (!key.startsWith("u-") || !reading) return;
+			await place.factors.update(listKeyOf(reading), unmarked);
+			seen[reading] = await decided.countingWritten(reading);
+		};
+		expect(await bindKind("dee", "card", "c3")).toMatchObject({ kind: "bound" });
+		expect(seen.dee).toBe(true);
+		reading = "eve";
+		expect(await bindKind("eve", "card", "c1")).toEqual({ kind: "duplicate" });
+		expect(seen.eve).toBe(false);
 	});
 
 	it("refuses a first binding another counting factor beat to the subject, binding nothing and recording it", async () => {

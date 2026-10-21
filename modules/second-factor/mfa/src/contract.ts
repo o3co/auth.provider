@@ -60,7 +60,7 @@ export interface Factors {
 	 * recorded with where it was asked.
 	 */
 	countingHeld(subject: string, at: Asked): Promise<boolean>;
-	/** Whether the subject holds a counting factor as written, not judged against the witness; one whose unique value another factor holds is left out, as its binding ends as a duplicate. */
+	/** Whether the subject holds a counting factor as written, not judged against the witness. One of a unique value counts once its claim names it, as before that its binding may still end as a duplicate; one written before claims were kept, unless another holds its value. */
 	countingWritten(subject: string): Promise<boolean>;
 	/** Whether every session needs a second factor to be used (`mode = required`). */
 	secondFactorRequired(): boolean;
