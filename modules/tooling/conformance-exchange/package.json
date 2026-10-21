@@ -13,6 +13,7 @@
 	"dependencies": {
 		"@mod/conformance": "workspace:*",
 		"@mod/conformance-code": "workspace:*",
+		"@mod/conformance-device": "workspace:*",
 		"@mod/conformance-identity": "workspace:*",
 		"@mod/conformance-keys": "workspace:*",
 		"@mod/conformance-legacy": "workspace:*",
