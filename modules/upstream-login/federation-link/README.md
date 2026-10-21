@@ -17,9 +17,9 @@
 - Without `mfa`, `credentials` asks a sign-in within `session-lifecycle.recent-authentication` (5 minutes by default), at the start and again at the callback: a link whose upstream step takes longer is refused.
 - The callback links only while that session enters at `credentials` with the same subject, and the browser is in no other session; never by email.
 - The session is checked before the link, right after it (before any token is handed over), and after the tokens' hand-off.
-- A session closed, short of a requirement or logged in as someone else meanwhile is `401 login_required`, recorded `session_closed_during_link`; one that cannot be read is unavailable. Either way, what this request wrote is undone: the tokens it handed over are withdrawn, and a link it wrote is unlinked.
+- A session closed, short of a requirement or logged in as someone else meanwhile is `401 login_required`, recorded `session_closed_during_link`; one that cannot be read is unavailable. Either way, what this request wrote is undone: the tokens it handed over are withdrawn, and a link it wrote is unlinked. A step of the undoing that is unavailable makes the answer unavailable, before any refusal is recorded.
 - A hand-off that fails while the session still holds is unavailable, the link kept; one that fails as the session closes or cannot be read undoes the link, then is unavailable.
-- An identity the account holds already is not linked again: nothing is recorded for it, and it is never undone. One another account holds is `409 identity_conflict`.
+- An identity the account holds already is not linked again: no `linked` event is recorded for it (a refusal after may be), and it is never undone. One another account holds is `409 identity_conflict`.
 - A link the configuration fixes is kept when undoing, logged `federation.link_kept_fixed` (warn).
 - Undoing is best effort: a session closed after the last check keeps the link, and the unlink, having no generation, also removes the same link another request of that subject wrote meanwhile.
 - A link creates no session and changes no session cookie.
