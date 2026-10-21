@@ -143,7 +143,5 @@ export interface Policy {
 	limitsOf(narrower?: Narrower, signed?: boolean): Limits;
 }
 
-// address-reach's, until outbound and mail-smtp take it there.
-export { isLoopbackAddress } from "@mod/address-reach";
 export { type HostEntry, hostEntryOf, policyOf, withinHosts } from "./policy.ts";
 export { hostList, type PolicySettings, policySettings } from "./settings.ts";
