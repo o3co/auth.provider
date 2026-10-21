@@ -8,7 +8,9 @@
 		".": "./src/contract.ts"
 	},
 	"dependencies": {
-		"@o3co/ts.hocon": "1.14.3"
+		"@o3co/ts.hocon": "1.14.3",
+		"semver": "7.8.5",
+		"yaml": "2.9.1"
 	},
 	"devDependencies": {
 		"vitest": "5.0.5"
