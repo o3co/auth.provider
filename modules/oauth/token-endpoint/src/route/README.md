@@ -13,7 +13,7 @@ Internal module of `token-endpoint`: the handler of `POST /oauth/token`, from th
 - `endpointIn` (the build context, the grants composed) → the handler, taking the contracts below from the assembly.
 - `tokenEndpoint` (clients, tokens, session issuances, binding readers, required bindings, grants by type, the audience rule, audit) → the handler and its answer to Unavailable; `tokenPath`.
 - `grantInputOf` (what a grant is handed: its parameters' reader, the audience rule, `admits` and `issue`), `readerOf` and `mistypedRefusal`, which the internal module `caller` uses too.
-- `issuanceFor` (tokens, grant type, binding, session issuances) → a grant's `admits` and `issue`; `refusedAnswer`, the one answer to a refused issuance.
+- `issuanceFor` (tokens, grant type, binding, session issuances, a sink for the names of added claims) → a grant's `admits` and `issue`, which tells the sink the names `tokens` answers for each token issued, never the grant read again; `refusedAnswer`, the one answer to a refused issuance.
 - `answeredBody` (a grant's issued body as answered); `challenged` (a response with `WWW-Authenticate` challenges, which `authenticateClient` uses too).
 
 ## Invariants

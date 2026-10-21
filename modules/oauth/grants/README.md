@@ -18,7 +18,7 @@
 - Other members of a grant's refusal pass through unread, but a member named as in the error or a success answer is dropped, and so is an `error_uri` that is not a URI of printable characters.
 - A grant is given the request sender's binding.
 - `admits`: whether `tokens`' issuance policies allow a grant now, under the grant type, the session it comes from and `tokens`' `continuing`.
-- `issue`: asks again, then issues with the binding, and the expiry cap and lifetime the grant gives.
+- `issue`: asks again, then issues with the binding, and the expiry cap and lifetime the grant gives. A grant may add claims (`AccessGrant.claims`, under `added-claims`' rules).
 - A refused issuance is a value the grant returns unread; it is answered for every grant as `400 invalid_grant` with the policy's description.
 - `target`: the audience `targets` answers within the grant's ceiling.
 - A grant that takes its audience from the request declares `targets`; any other is first asked the rule's `untargeted`, and its refusal is answered before the grant runs.

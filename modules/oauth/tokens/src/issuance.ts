@@ -1,3 +1,4 @@
+import { addedClaimsOf } from "@mod/added-claims";
 import { deepFreeze, Unavailable } from "@mod/kernel";
 import type {
 	Admitted,
@@ -7,6 +8,7 @@ import type {
 	IssueLimits,
 	Tokens,
 } from "./contract.ts";
+import { actorSnapshot } from "./limits.ts";
 
 /** How far ahead of the clock an authentication time may be, as 0.17 allowed. */
 export const authenticatedAheadMs = 300_000;
@@ -68,17 +70,34 @@ export type IssueAccess = (
 	limits?: IssueLimits,
 ) => Promise<IssuedAccess>;
 
+/**
+ * The request with the claims its grant adds checked and copied, before anything else reads them;
+ * an empty set is none. Throws TypeError, the grant's maker's mistake, on claims outside the rules
+ * or an actor chain deeper than tokens reads, counted before anything copies it.
+ */
+function checkedRequest(request: IssuanceRequest): IssuanceRequest {
+	// Each of the caller's properties is read once: what is checked is what is copied and signed.
+	const { grant: given, ...rest } = request;
+	const { claims: added, actor: chain, ...grant } = given;
+	const actor = actorSnapshot(chain);
+	const claims = addedClaimsOf(added);
+	return {
+		...rest,
+		grant: { ...grant, ...(actor ? { actor } : {}), ...(claims ? { claims } : {}) },
+	};
+}
+
 /** `admits` and `issue` over the judgment and the issuing, alike for tokens and its stand-in. */
 export function issuing(
 	judge: (request: IssuanceRequest) => Promise<Admitted>,
 	issueAccess: IssueAccess,
 ): Pick<Tokens, "admits" | "issue"> {
 	return {
-		admits: judge,
+		admits: async (request) => judge(checkedRequest(request)),
 		issue: async (request, limits) => {
 			// One frozen copy, taken before anything waits, is both what the policies judge and what is
 			// signed: a caller changing its own grant or limits meanwhile changes neither.
-			const taken = deepFreeze(structuredClone({ request, limits }));
+			const taken = deepFreeze(structuredClone({ request: checkedRequest(request), limits }));
 			const judged = await judge(taken.request);
 			if (judged.kind === "refused") return judged;
 			return { kind: "issued", access: await issueAccess(taken.request.grant, taken.limits) };

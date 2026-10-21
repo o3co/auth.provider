@@ -1,5 +1,5 @@
 import type { Random } from "@mod/kernel";
-import type { AccessGrant } from "./contract.ts";
+import type { AccessGrant, Actor } from "./contract.ts";
 
 /** An access token's lifetime where the section does not set one. */
 export const defaultLifetimeSeconds = 3600;
@@ -15,6 +15,38 @@ export function expiryOf(nowMs: number, lifetimeSeconds: number, notAfter?: numb
 	const iat = Math.floor(nowMs / 1000);
 	const cap = notAfter === undefined ? Number.POSITIVE_INFINITY : Math.floor(notAfter / 1000);
 	return { iat, exp: Math.max(iat, Math.min(iat + lifetimeSeconds, cap)) };
+}
+
+/** How deep an actor chain may go: past token-exchange's deepest (10), so every one issued is read. */
+const actorDepth = 16;
+
+/** Whether a chain, each link to the next by `next`, is within the actor depth, counted before it is read recursively. */
+export function chainWithin(start: unknown, next: (link: object) => unknown): boolean {
+	let depth = 0;
+	for (let at = start; at !== undefined; at = next(at as object)) {
+		if (at === null || typeof at !== "object" || ++depth > actorDepth) return false;
+	}
+	return true;
+}
+
+/**
+ * A grant's actor chain as plain links, each of the caller's read once, within the actor depth;
+ * none for none. Throws TypeError, the caller's mistake, on a chain deeper or holding what is no actor.
+ */
+export function actorSnapshot(actor: unknown): Actor | undefined {
+	const subjects: unknown[] = [];
+	for (let at = actor; at !== undefined; ) {
+		if (at === null || typeof at !== "object" || subjects.length === actorDepth) {
+			throw new TypeError("tokens: an actor chain is over 16 deep, or holds what is no actor");
+		}
+		const { subject, actor: next } = at as Actor;
+		subjects.push(subject);
+		at = next;
+	}
+	return subjects.reduceRight<Actor | undefined>(
+		(inner, subject) => ({ subject, ...(inner ? { actor: inner } : {}) }) as Actor,
+		undefined,
+	);
 }
 
 /** A token's id: 16 random bytes in base64url. */

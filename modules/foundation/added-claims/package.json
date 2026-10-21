@@ -1,0 +1,13 @@
+{
+	"name": "@mod/added-claims",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "foundation",
+	"exports": {
+		".": "./src/contract.ts"
+	},
+	"devDependencies": {
+		"vitest": "5.0.5"
+	}
+}
