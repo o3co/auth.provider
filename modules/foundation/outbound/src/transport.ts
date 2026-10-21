@@ -11,6 +11,7 @@ import { isIP, connect as plainConnect } from "node:net";
 import { connect as tlsConnect } from "node:tls";
 import { type Admitted, DestinationRefused, type Limits, type Policy } from "@mod/outbound-policy";
 import {
+	isOutboundUnavailable,
 	type OutboundFailure,
 	type OutboundRequest,
 	type OutboundResponse,
@@ -62,7 +63,7 @@ const unavailable = (failure: OutboundFailure) => new OutboundUnavailable(failur
 
 /** A failure of the connection, past the deadline or not; Node's error for headers past its cap. */
 const failedAs = (error: unknown, signal: AbortSignal) => {
-	if (error instanceof OutboundUnavailable) return error;
+	if (isOutboundUnavailable(error)) return error;
 	if (signal.aborted) return unavailable("timeout");
 	const code = (error as { code?: unknown } | undefined)?.code;
 	return unavailable(code === "HPE_HEADER_OVERFLOW" ? "too-large" : "unreachable");

@@ -14,12 +14,25 @@ export type OutboundFailure =
 	/** The proxy would not open the tunnel. */
 	| "proxy-refused";
 
+/** One mark for every copy of outbound, so a second bundled copy's failure is still told apart. */
+const outboundUnavailableMark = Symbol.for("@mod/outbound.unavailable");
+
 export class OutboundUnavailable extends Unavailable {
 	readonly failure: OutboundFailure;
+	readonly [outboundUnavailableMark] = true;
 	constructor(failure: OutboundFailure) {
 		super("outbound");
 		this.failure = failure;
 	}
+}
+
+/** Whether an error is outbound's no usable answer, by its mark rather than its class. */
+export function isOutboundUnavailable(error: unknown): error is OutboundUnavailable {
+	return (
+		typeof error === "object" &&
+		error !== null &&
+		(error as { readonly [outboundUnavailableMark]?: unknown })[outboundUnavailableMark] === true
+	);
 }
 
 export interface OutboundRequest {
