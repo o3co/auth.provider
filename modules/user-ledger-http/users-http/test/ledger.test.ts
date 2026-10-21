@@ -10,6 +10,9 @@ const alice = {
 	upstream: { idp: "corp", subject: "up-1" },
 };
 
+/** A lookup's answer for a user it does not know, saying so. */
+const notFound = { status: 404, json: { error: "not_found" } };
+
 describe("a fake ledger speaking users-http's calls", () => {
 	const ledger = usersLedger([alice]);
 	const section = ledger.section("http://127.0.0.1:1")["users-http"];
@@ -38,7 +41,7 @@ describe("a fake ledger speaking users-http's calls", () => {
 			status: 401,
 		});
 		expect(ledger.answer(call("/subject", { subject: "u-1" }))).toEqual({ json: user });
-		expect(ledger.answer(call("/subject", { subject: "u-2" }))).toEqual({ status: 404 });
+		expect(ledger.answer(call("/subject", { subject: "u-2" }))).toEqual(notFound);
 	});
 
 	it("looks a user up by upstream identity, the IdP and its subject both matching", () => {
@@ -46,15 +49,11 @@ describe("a fake ledger speaking users-http's calls", () => {
 		expect(ledger.answer(call("/upstream", { idp: "corp", subject: "up-1" }))).toEqual({
 			json: user,
 		});
-		expect(ledger.answer(call("/upstream", { idp: "other", subject: "up-1" }))).toEqual({
-			status: 404,
-		});
-		expect(ledger.answer(call("/upstream", { idp: "corp", subject: "u-1" }))).toEqual({
-			status: 404,
-		});
+		expect(ledger.answer(call("/upstream", { idp: "other", subject: "up-1" }))).toEqual(notFound);
+		expect(ledger.answer(call("/upstream", { idp: "corp", subject: "u-1" }))).toEqual(notFound);
 	});
 
-	it("answers 404 to its calls without its credential, and nothing to a call not its own", () => {
+	it("answers a bare 404 to its calls without its credential, which says no user is not known, and nothing to a call not its own", () => {
 		expect(ledger.answer(call("/verify", { email: "alice", password: "right" }, "other"))).toEqual({
 			status: 404,
 		});

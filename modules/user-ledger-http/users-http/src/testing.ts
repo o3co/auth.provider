@@ -52,7 +52,11 @@ export function usersLedger(users: readonly LedgerUser[]) {
 								(u) => u.upstream?.idp === given.idp && u.upstream?.subject === given.subject,
 							)
 						: users.find((u) => u.identifier === given.email && u.password === given.password);
-			if (!user) return { status: call.path === "/verify" ? 401 : 404 };
+			// A lookup says it knows no such user; a bare 404 above is a wrong set-up.
+			if (!user)
+				return call.path === "/verify"
+					? { status: 401 }
+					: { status: 404, json: { error: "not_found" } };
 			return {
 				json: {
 					id: user.subject ?? user.identifier,

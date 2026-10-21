@@ -25,6 +25,8 @@ export interface Calls {
 }
 
 const none: Verified = deepFreeze({ kind: "none" });
+/** What a lookup's 404 and 410 must say in their body to mean no such user. */
+const noneSaid: Readonly<Record<number, string>> = { 404: "not_found", 410: "gone" };
 /** The ledger's fields kept as given, each with users' name for it. */
 const keptFields = [
 	["email", userAttribute.email],
@@ -67,7 +69,7 @@ function userOf(answer: Readonly<Record<string, unknown>>) {
 export function calls(parts: CallParts): Calls {
 	const { out, credential, narrowerOf, warn } = parts;
 	/** Logs why the ledger failed, by its kind or status alone, and answers unavailable. */
-	const failed = (why: { reason: string } | { status: number }) => {
+	const failed = (why: { reason: string } | { status: number; reason?: string }) => {
 		warn("users-http.ledger_failed", why);
 		return new Unavailable("users-http");
 	};
@@ -103,8 +105,14 @@ export function calls(parts: CallParts): Calls {
 		},
 		async lookup(url, asked) {
 			const answer = await post(url, asked);
-			// Not known, or known and refused: both are no user here.
-			if (answer.status === 404 || answer.status === 410) return none;
+			// Not known, or known and refused, only where the ledger says so: a bare 404 may be a wrong
+			// path, a gateway or a ledger hiding itself, never no such user.
+			const said = noneSaid[answer.status];
+			if (said !== undefined) {
+				const read = jsonObjectOf(answer, answer.status);
+				if (read.kind === "object" && read.value.error === said) return none;
+				throw failed({ status: answer.status, reason: "unmarked" });
+			}
 			return userIn(answer, () => true);
 		},
 	};
