@@ -22,9 +22,6 @@ export interface Shown {
 	readonly label?: string;
 }
 
-/** Whether a page can show `text` as a factor's label; `labels` owns the rule. */
-export { isLabel } from "@mod/labels";
-
 export type Proved =
 	/** `amr` is what this proof adds. */
 	| { readonly kind: "valid"; readonly amr: readonly string[] }
