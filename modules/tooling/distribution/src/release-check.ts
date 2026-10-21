@@ -116,7 +116,7 @@ const modules = await Promise.all(${JSON.stringify(modules)}.map(async (m) => (a
 try {
 	await assemble({ modules, config: {} });
 } catch (error) {
-	if (!(error instanceof BootRefused)) throw error;
+	if (!BootRefused.is(error)) throw error;
 	process.stdout.write(\`\${modules.length} modules imported, refused at boot\`);
 	process.exit(0);
 }

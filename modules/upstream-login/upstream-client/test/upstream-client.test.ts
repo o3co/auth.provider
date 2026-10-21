@@ -88,6 +88,11 @@ describe("upstream-client", () => {
 		await expect(guarded(async () => 7)).resolves.toBe(7);
 		await expect(guarded(() => Promise.reject(refused))).rejects.toBe(refused);
 		await expect(guarded(() => Promise.reject(down))).rejects.toBe(down);
+		// A refusal another copy of upstreams in the bundle threw: another class, the same mark.
+		const copied = Object.assign(new Error("upstream refused"), {
+			[Symbol.for("@mod/upstreams.refused")]: true,
+		});
+		await expect(guarded(() => Promise.reject(copied))).rejects.toBe(copied);
 		// Any other error refuses without its text.
 		const others: Record<string, () => Promise<never>> = {
 			"rejected later": () => Promise.reject(new TypeError("library text")),
@@ -97,7 +102,7 @@ describe("upstream-client", () => {
 		};
 		for (const [label, run] of Object.entries(others)) {
 			await expect(guarded(run), label).rejects.toSatisfy(
-				(error) => error instanceof UpstreamRefused && !String(error).includes("library"),
+				(error) => UpstreamRefused.is(error) && !String(error).includes("library"),
 			);
 		}
 	});

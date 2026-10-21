@@ -229,7 +229,7 @@ const outcome = (run: Promise<unknown>) =>
 	run.then(
 		(value) => value,
 		(error) =>
-			error instanceof UpstreamRefused ? "refused" : isUnavailable(error) ? "unavailable" : error,
+			UpstreamRefused.is(error) ? "refused" : isUnavailable(error) ? "unavailable" : error,
 	);
 /** An upstream whose token endpoint hands over `idToken`, with what `world` changes. */
 const answering = (idToken: string, world: Omit<World, "token"> = {}) =>

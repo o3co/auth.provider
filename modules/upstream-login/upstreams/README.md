@@ -17,6 +17,7 @@
 - An upstream: its issuer, how it answers (in the query or a posted form), its clock allowance, authorization URL, and code exchange → upstream login, with its tokens and profile if the type gives them
   - The code exchange gets the verifier, nonce, redirect URI and the callback's `iss`.
 - An upstream's exchanges and refreshes throw `UpstreamRefused` for an answer that does not hold, and `Unavailable` when it cannot be reached or fails (5xx); a delegation's start is refused as a value, never thrown.
+- `UpstreamRefused.is` and `UpstreamMismatch.is` tell each by a mark, which every copy of upstreams in a bundle shares; a caller tells them so, never by its class.
 - An upstream may also offer a refresh, an end-session URL and an offline delegation
 - A refresh answers new tokens, `invalid_grant` (the grant is gone), `interaction_required` (the grant stands, but the user must act at the upstream first) or `limited` (with when to ask again, where said).
 - `refreshedExpiry` (the answer's access token and end, what was held): where the upstream hands the same access token again, the earlier of the two ends, so a refresh never lengthens a token; else the answer's end. Every holder of refreshed tokens reads them by it.

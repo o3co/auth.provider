@@ -71,7 +71,7 @@ async function openUpstream(
 	try {
 		return { upstream: await idpType.open(settings, at) };
 	} catch (error) {
-		if (error instanceof UpstreamMismatch) {
+		if (UpstreamMismatch.is(error)) {
 			return { refusal: { where: [at.where, ...error.at].join("."), reason: error.message } };
 		}
 		const reason = isUnavailable(error)

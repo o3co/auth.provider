@@ -265,7 +265,7 @@ async function exchanged(flow: Flow, { name, idp, params }: At, trip: Trip, code
 	} catch (error) {
 		if (isUnavailable(error)) throw error;
 		// Only the kind: an upstream's text and its tokens never reach logs or the browser.
-		const kind = error instanceof UpstreamRefused ? "refused" : "failed";
+		const kind = UpstreamRefused.is(error) ? "refused" : "failed";
 		flow.log.warn("federation.exchange_failed", { idp: name, kind });
 		return undefined;
 	}

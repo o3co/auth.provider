@@ -42,7 +42,7 @@ describe("upstream-client's id_token reader", () => {
 		run.then(
 			(value) => value,
 			(error) =>
-				error instanceof UpstreamRefused ? "refused" : isUnavailable(error) ? error.what : error,
+				UpstreamRefused.is(error) ? "refused" : isUnavailable(error) ? error.what : error,
 		);
 
 	it("asks external-jwt for the type's keys, algorithms, issuer and client", () => {

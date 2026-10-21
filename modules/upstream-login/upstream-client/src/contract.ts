@@ -38,7 +38,7 @@ export async function guarded<T>(run: () => Promise<T>): Promise<T> {
 	try {
 		return await run();
 	} catch (error) {
-		if (isUnavailable(error) || error instanceof UpstreamRefused) throw error;
+		if (isUnavailable(error) || UpstreamRefused.is(error)) throw error;
 		// Anything else, such as a destination outbound refuses, is the upstream refusing.
 		throw new UpstreamRefused();
 	}

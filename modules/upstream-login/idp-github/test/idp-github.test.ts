@@ -65,7 +65,7 @@ const outcome = (run: Promise<unknown>) =>
 	run.then(
 		(value) => value,
 		(error) =>
-			error instanceof UpstreamRefused ? "refused" : isUnavailable(error) ? "unavailable" : error,
+			UpstreamRefused.is(error) ? "refused" : isUnavailable(error) ? "unavailable" : error,
 	);
 
 describe("idp-github", () => {
