@@ -364,6 +364,74 @@ describe("federation", () => {
 		expect(again.cookies.filter((c) => c.includes("federation.corp"))).toHaveLength(1);
 	});
 
+	describe("a round trip an earlier version wrote, carrying a link's session as its own field", () => {
+		/**
+		 * A round trip store writing each record in that earlier shape: a link's session as `link`, a
+		 * login's with none; `forced` gives a login's one too, and `mixed` keeps the name beside it.
+		 */
+		const earlier = ({ mixed = false, forced = false } = {}) => {
+			const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
+			return defineModule({ name: "trips" }, (m) => [
+				m.provide(roundTripStore).by(() => ({
+					save: async (key, value, lifetimeMs) => {
+						const { carried: was, ...rest } = value as unknown as {
+							carried: { by?: string; kept?: unknown };
+						};
+						const { by, kept: link, ...left } = was;
+						const old =
+							by !== undefined || forced
+								? { ...left, link: link ?? { session: "s-old", subject: "alice" } }
+								: left;
+						if (mixed) Object.assign(old, { by: "link" });
+						return kept.records.create(key, { ...rest, carried: old } as never, lifetimeMs);
+					},
+					update: kept.records.change,
+				})),
+			]);
+		};
+		/** A session of alice's, and a link begun from it, as the earlier version kept it. */
+		const linkStarted = async (s: Awaited<ReturnType<typeof serve>>) => {
+			const first = await s.begin();
+			const loggedIn = await s.callback(
+				`code=good&state=${first.state}&iss=https://idp.example`,
+				first.cookie,
+			);
+			const session = loggedIn.cookies.filter((c) => !c.includes("federation.corp=")).join("; ");
+			const linking = await s.get(`${base}/corp?link=1`, session, {
+				"sec-fetch-site": "same-origin",
+			});
+			const state = new URL(linking.location).searchParams.get("state") ?? "";
+			const cookie = linking.cookies.find((c) => c.includes("federation.corp")) ?? "";
+			return { session, linking, state, cookie: `${session}; ${cookie}` };
+		};
+
+		it("ends in the link, and a start from another site goes on with it", async () => {
+			const s = await serve({ trips: earlier() });
+			const { linking, state, cookie } = await linkStarted(s);
+			const again = await s.get(`${base}/corp`, cookie, { "sec-fetch-site": "cross-site" });
+			expect([again.status, again.location, again.cookies]).toEqual([302, linking.location, []]);
+			const before = s.events.length;
+			const back = await s.callback(`code=good&state=${state}&iss=https://idp.example`, cookie);
+			// Alice holds that identity already: it ends in the link, which records nothing for it, never a login.
+			expect(back.status).toBe(302);
+			expect(s.events.slice(before).filter((e) => e.kind.startsWith("federation.login."))).toEqual(
+				[],
+			);
+		});
+
+		it("is refused, warned, where no link is composed, and refused as a round trip it cannot read where it mixes both shapes", async () => {
+			const s = await serve({ trips: earlier({ forced: true }), withoutLink: true });
+			const started = await s.begin();
+			const back = await s.callback(`code=good&state=${started.state}`, started.cookie);
+			expect([back.status, back.body]).toEqual([400, { error: "continuation_unavailable" }]);
+			expect(logged()).toContain('federation.continuation_missing {"idp":"corp","name":"link"}');
+			const mixed = await serve({ trips: earlier({ mixed: true, forced: true }) });
+			const begun = await mixed.begin();
+			const refused = await mixed.callback(`code=good&state=${begun.state}`, begun.cookie);
+			expect([refused.status, refused.body]).toEqual([400, { error: "invalid_state" }]);
+		});
+	});
+
 	it("refuses a callback whose round trip goes on to a continuation not composed, clearing its cookie and warning", async () => {
 		const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
 		const trips = defineModule({ name: "trips" }, (m) => [

@@ -33,6 +33,7 @@ Internal module of `federation`: one round trip through an upstream IdP, a login
 
 ## Data
 - What a round trip carries for federation: the return target, `prompt` and max age, and the continuation it goes on to with what that kept. Read back by its own shape: another is none.
+- An earlier version's shape, a link's session and subject as a field of their own, which instances not yet upgraded still write, is read as the continuation `link` with them kept; it is never written. A record mixing both shapes is none.
 
 ## Depends on
 - `http` (the site for the landing, the request and answer, no-store, the JSON answer); `upstream-round-trip` (round trips); `request-source` (the source); `kernel` (the runtime, unavailable); `login-gates` (the return check); `audit`; `upstreams` (the upstream, its login, its refusal); `csrf` (origin evidence); `federation`'s section

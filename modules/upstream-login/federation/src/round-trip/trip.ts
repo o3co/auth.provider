@@ -29,12 +29,27 @@ const carried = z.strictObject({
 	kept: z.json().optional(),
 });
 
+/**
+ * What an earlier version carried, which instances not yet upgraded still write: the continuation
+ * named `link`, its session and subject as a field of their own. Read only, never written.
+ */
+const earlier = z.strictObject({
+	redirectTo: z.string().optional(),
+	prompt: z.literal("login").optional(),
+	maxAgeSeconds: z.number().optional(),
+	link: z.strictObject({ session: z.string(), subject: z.string() }),
+});
+
 export const toCarried = (trip: TripCarried) => trip as unknown as Carried;
-/** What a round trip carried for federation; nothing for a shape this does not know. */
+/** What a round trip carried for federation, the earlier shape read as this one; nothing for another. */
 export const carriedOf = (value: Carried): TripCarried | undefined => {
 	const read = carried.safeParse(value);
 	// The shape checked is the type's own; zod's output loses only its readonly marks.
-	return read.success ? (read.data as TripCarried) : undefined;
+	if (read.success) return read.data as TripCarried;
+	const was = earlier.safeParse(value);
+	if (!was.success) return undefined;
+	const { link, ...rest } = was.data;
+	return { ...rest, by: "link", kept: link } as TripCarried;
 };
 /** The trip a taken round trip carried; nothing for a shape this does not know. */
 export const tripOf = (taken: Extract<Taken, { kind: "taken" }>): Trip | undefined => {
