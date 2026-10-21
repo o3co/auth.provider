@@ -34,7 +34,7 @@
 		"@mod/session-requirements": "workspace:*",
 		"@mod/store": "workspace:*",
 		"@mod/subject-attributes": "workspace:*",
-		"vitest": "5.0.4",
+		"vitest": "5.0.5",
 		"zod": "4.6.7"
 	}
 }
