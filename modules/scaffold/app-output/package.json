@@ -8,7 +8,6 @@
 		".": "./src/contract.ts"
 	},
 	"dependencies": {
-		"@mod/kernel": "workspace:*",
 		"@o3co/ts.hocon": "1.14.3"
 	},
 	"devDependencies": {

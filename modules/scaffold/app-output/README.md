@@ -1,7 +1,7 @@
 # app-output
 
 ## Responsibilities
-- Writes a generated project: a deployment of the modules it is given, with its configuration from their fragments, the environment's and the local layer's examples, an image and the operator's guide; or a listed app of them.
+- Writes a generated project: a deployment of the modules it is given, with its configuration from their fragments, the environment's and the local layer's examples, an image and the operator's guide.
 - Maps each fragment's keys to the environment and the local layer: the boundary that keeps module words out of the environment's.
 - Holds what every generated project shares: the target's check, the package name check, the manifest, the app's entry and its `reseal` entry.
 - States what it takes from where the packages come from (`Packages`); the caller implements it.
@@ -18,7 +18,6 @@
   - The README lists each composed module's card as installed, and points at the `## Deployment` section of each card that has one, and at the release's walk to a first login where its repository is stated.
   - `AGENTS.md` indexes where each composed module's card and section defaults lie as installed, and where the release's configuration and route references lie; it states nothing of its own.
 - `Packages`: each name's fragments, the app's dependencies for the names, what the app imports a name under, each name's card as installed (`Card`), and the release (`Release`).
-- `writeListed(target, modules, packages)`: writes a listed app, the modules' entry and manifest, and `kernel`'s section alone as its configuration file.
 - `namesPackages` and `vacant`, for a caller to refuse a plan before it composes; `mainSource`, the app's entry; `kernel` and `configFiles`, the packages every app depends on (its entry reads its configuration files through `config-files`).
 - The fragments: `fragmentsIn` and `fragmentsOf` read them (`fragmentFile` names the file), and `settingsOf` names each scalar key's environment variable.
 
@@ -42,7 +41,7 @@
 - Writes the target only; reads its templates and the fragment files it is pointed at.
 
 ## Depends on
-- `kernel`, for a listed app's configuration file (its section's defaults); the HOCON library, to read the fragments.
+- The HOCON library, to read the fragments.
 
 ## Vocabulary
 - output: a project written from the templates.
