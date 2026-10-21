@@ -7,7 +7,7 @@ import { upstreams } from "@mod/upstreams";
 import { upstreamNames } from "@mod/users";
 import { amrSourceIn, idpsIn, upstreamNamesIn, upstreamsIn } from "./idps/idps.ts";
 import { linkIn } from "./link/link.ts";
-import { loginCaller, loginIn } from "./round-trip/login.ts";
+import { loginCaller, loginIn } from "./login/login.ts";
 import { base, federationIdps, roundTripIn } from "./round-trip/round-trip.ts";
 import { section } from "./section.ts";
 

@@ -6,7 +6,6 @@ import { type Logins, logins } from "@mod/login-gates";
 import { type Handoff, handoff } from "@mod/upstream-handoff";
 import type { UpstreamLogin } from "@mod/upstreams";
 import { type Users, userAttribute, users } from "@mod/users";
-import type { Settings } from "../section.ts";
 import {
 	type Continuation,
 	type Idp,
@@ -15,7 +14,8 @@ import {
 	recorderOf,
 	secondOf,
 	sent,
-} from "./round-trip.ts";
+} from "../round-trip/round-trip.ts";
+import type { Settings } from "../section.ts";
 
 export interface LoginParts {
 	readonly logins: Pick<Logins, "login">;
