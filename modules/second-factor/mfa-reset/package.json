@@ -30,6 +30,7 @@
 		"@mod/mfa-enrollment": "workspace:*",
 		"@mod/mfa-entry": "workspace:*",
 		"@mod/mfa-extensions": "workspace:*",
+		"@mod/mfa-revocation": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/request-source": "workspace:*",
 		"@mod/seal": "workspace:*",

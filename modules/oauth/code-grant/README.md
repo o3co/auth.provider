@@ -26,6 +26,7 @@
 - A record that vanished during a redemption is refused and never written back (the code would be unused again). A record of a format or shape not known is a code that cannot be used: refused (not unavailable), or logged and removed from the list.
 - The code is voided when a session redemption, the ID token or an addition fails, however it fails. Issuing that fails leaves it used up, giving nothing.
 - A configuration that cannot revoke access tokens refuses boot.
+- Boot is refused where nothing contributes to `grants`' session issuances: its tokens are issued from the code's session and must be recorded there, so that a logout ends them; `combinations` composes `session-tokens` for it.
 - Trade-offs: whoever holds a leaked code can revoke the legitimate tokens while the code lives; a client that resends a redemption by itself fails it.
 
 ## Data

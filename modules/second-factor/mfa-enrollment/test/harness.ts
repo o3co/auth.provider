@@ -5,7 +5,13 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
-import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
+import {
+	assemble,
+	defineModule,
+	type ExtensionPoint,
+	kernelConfig,
+	type Module,
+} from "@mod/kernel";
 import { quietRuntime, recordingLog, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import { type LoginFrom, logins } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
@@ -17,6 +23,7 @@ import mfaEntry from "@mod/mfa-entry/module";
 import { factorKinds } from "@mod/mfa-extensions";
 import flowsModule from "@mod/mfa-flows/module";
 import { type FlowSettings, flowKeys, flowsConfig } from "@mod/mfa-flows/testing";
+import mfaRevocation from "@mod/mfa-revocation/module";
 import { type Lockouts, lockouts } from "@mod/rate-limit";
 import rateLimitModule from "@mod/rate-limit/module";
 import { memoryRecords } from "@mod/records/testing";
@@ -26,7 +33,12 @@ import { type Sessions, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import sessionRequirements from "@mod/session-requirements/module";
 import { simulatedStore } from "@mod/store/testing";
-import { type Revocations, revocations } from "@mod/subject-revocation";
+import {
+	type RevocationFollower,
+	type Revocations,
+	revocationFollowers,
+	revocations,
+} from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach } from "vitest";
 import enrollmentModule from "../src/module.ts";
@@ -52,6 +64,8 @@ export const during = {
 	code: undefined as (() => Promise<void>) | undefined,
 	/** Runs once after the factor store's next write, before it answers, as a slow store would. */
 	written: undefined as (() => Promise<void>) | undefined,
+	/** Runs once before mfa's fence follows the next revocation, its record already written, as a slow follower would. */
+	follow: undefined as (() => Promise<void>) | undefined,
 	/** Runs once after the next session raised or opened, before it answers, as a slow store would. */
 	entered: undefined as (() => Promise<void>) | undefined,
 	/** Changes the next raise's answer once, as a raise not written would. */
@@ -100,6 +114,29 @@ const entering = {
 		});
 	},
 };
+/** mfa-revocation, its follower holding the fence's move while `during.follow` runs once. */
+const heldFollower: Module = Object.freeze({
+	...mfaRevocation,
+	contributes: (mfaRevocation.contributes ?? []).map((part) =>
+		part.point !== (revocationFollowers as ExtensionPoint<unknown>)
+			? part
+			: {
+					point: part.point,
+					create: async (context: Parameters<typeof part.create>[0]) => {
+						const follower = (await part.create(context)) as RevocationFollower;
+						return {
+							...follower,
+							follow: async (...args: Parameters<RevocationFollower["follow"]>) => {
+								const run = during.follow;
+								during.follow = undefined;
+								await run?.();
+								return follower.follow(...args);
+							},
+						};
+					},
+				},
+	),
+});
 const recording = {
 	...revocationsDown,
 	wrap: (kept: Revocations): Revocations =>
@@ -135,6 +172,7 @@ afterEach(async () => {
 	during.raised = undefined;
 	during.rewrite = undefined;
 	during.unfinishedRecords = 0;
+	during.follow = undefined;
 	await stop();
 });
 
@@ -252,6 +290,8 @@ export async function serve(settings: Settings = {}, extra: Module[] = []) {
 			switchedModule(rateLimitModule, lockouts, releasing),
 			sealModule,
 			mfaModule,
+			// What moves the fence on a revocation, as combinations composes it beside mfa-flows.
+			heldFollower,
 			mfaEntry,
 			bindingProofModule,
 			flowsModule,

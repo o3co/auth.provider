@@ -138,6 +138,8 @@ const policy = (allows: (request: IssuanceRequest) => boolean) =>
 async function serve(
 	options: {
 		revocation?: "denylist" | "unsupported";
+		/** Whether session-tokens records the tokens issued from a session (as combinations composes it). */
+		recorded?: boolean;
 		extra?: Module[];
 		codeGrant?: Parameters<typeof codeGrantConfig>[0];
 	} = {},
@@ -157,8 +159,7 @@ async function serve(
 			sessionRequirements,
 			subjectRevocationStandIn,
 			stores.module,
-			bridgeModule,
-			sessionTokensInMemory().module,
+			...(options.recorded === false ? [] : [bridgeModule, sessionTokensInMemory().module]),
 			codeGrantModule,
 			reader,
 			...(options.extra ?? []),
@@ -692,7 +693,7 @@ it("names no ID token scope without a maker", async () => {
 	expect((await serve()).app.get(codes).idTokenScope()).toBeUndefined();
 });
 
-it("refuses to start with two ID token makers, without revocable tokens, or with an addition on a response field", async () => {
+it("refuses to start with two ID token makers, without revocable tokens, without its tokens recorded to their session, or with an addition on a response field", async () => {
 	const onAccessToken = defineModule({ name: "adds-access_token" }, (m) => [
 		m.contribute(additions).by(() => ({ field: "access_token", issue: async () => "x" })),
 	]);
@@ -701,6 +702,10 @@ it("refuses to start with two ID token makers, without revocable tokens, or with
 	);
 	await expect(serve({ revocation: "unsupported" })).rejects.toEqual(
 		refusedFor("a configuration that cannot revoke access tokens cannot handle codes"),
+	);
+	// Composed by hand without session-tokens, a logout would leave the code's tokens alive.
+	await expect(serve({ recorded: false })).rejects.toEqual(
+		refusedFor("its tokens must be recorded to their session, so that a logout ends them"),
 	);
 	await expect(serve({ extra: [onAccessToken] })).rejects.toEqual(
 		refusedFor("the response field access_token already exists"),

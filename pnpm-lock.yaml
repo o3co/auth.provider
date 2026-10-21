@@ -2415,6 +2415,9 @@ importers:
       '@mod/mfa-entry':
         specifier: workspace:*
         version: link:../mfa-entry
+      '@mod/mfa-revocation':
+        specifier: workspace:*
+        version: link:../mfa-revocation
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -2535,6 +2538,9 @@ importers:
       '@mod/mfa-entry':
         specifier: workspace:*
         version: link:../mfa-entry
+      '@mod/mfa-revocation':
+        specifier: workspace:*
+        version: link:../mfa-revocation
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -2669,6 +2675,9 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-revocation':
+        specifier: workspace:*
+        version: link:../mfa-revocation
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records

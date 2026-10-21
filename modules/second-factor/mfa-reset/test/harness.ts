@@ -18,6 +18,7 @@ import mfaEntry from "@mod/mfa-entry/module";
 import { factorKinds } from "@mod/mfa-extensions";
 import flowsModule from "@mod/mfa-flows/module";
 import { type FlowSettings, flowKeys, flowsConfig } from "@mod/mfa-flows/testing";
+import mfaRevocation from "@mod/mfa-revocation/module";
 import { type Lockouts, lockouts } from "@mod/rate-limit";
 import rateLimitModule from "@mod/rate-limit/module";
 import { memoryRecords } from "@mod/records/testing";
@@ -221,6 +222,8 @@ export async function serve(settings: Settings = {}, extra: Module[] = []) {
 			switchedModule(rateLimitModule, lockouts, releasing),
 			sealModule,
 			mfaModule,
+			// What moves the fence on a revocation, as combinations composes it beside mfa-flows.
+			mfaRevocation,
 			mfaEntry,
 			bindingProofModule,
 			flowsModule,

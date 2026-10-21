@@ -31,6 +31,7 @@
 		"@mod/login-attributes": "workspace:*",
 		"@mod/mfa-binding-proof": "workspace:*",
 		"@mod/mfa-entry": "workspace:*",
+		"@mod/mfa-revocation": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/seal": "workspace:*",
 		"@mod/session-requirements": "workspace:*",
