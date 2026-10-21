@@ -18,6 +18,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 - [From 0.18.0-rc.2](#from-0180-rc2)
 - [From 0.18.0-rc.3](#from-0180-rc3)
 - [From 0.18.0-rc.4](#from-0180-rc4)
+- [From 0.18.0-rc.5](#from-0180-rc5)
 - [Operational notes](#operational-notes)
 
 ## Before you start
@@ -102,7 +103,7 @@ MFA factors and upstream tokens are sealed, so dumping them needs 0.17's sealing
 
 1. Generate the app with `create-auth-provider`, naming the modules you use (for example `@mod/authorize`, `@mod/code-grant`, `@mod/refresh`, `@mod/oidc`). Their default wirings and bridges are added for you, and one log sink (`log-stdout`) unless you name another.
 2. Write the app's `application.conf`, in its `config` directory, from your 0.17 settings, section by section, with the [mapping](#configuration-mapping) below. Start from the file `create-auth-provider` writes.
-3. Remove 0.17's environment variables. 0.18 reads a variable only where your HOCON writes `${?VAR}`, so a 0.17 variable left in the environment is ignored without a word, and the setting it controlled takes its 0.18 default: `OAUTH_ACCESS_TOKEN_EXPIRES_IN` left set, say, changes no access token's lifetime. Before you upgrade, delete every 0.17 variable from the environment, the orchestrator's manifests and the secret store, and write each value you keep into `application.conf`, or bind it there with `${?VAR}` under a name of your own. Boot does not tell you of one left set.
+3. Remove 0.17's environment variables. 0.18 reads a variable only where your HOCON writes `${?VAR}`, so a 0.17 variable left in the environment has no effect, and the setting it controlled takes its 0.18 default: `OAUTH_ACCESS_TOKEN_EXPIRES_IN` left set, say, changes no access token's lifetime. Before you upgrade, delete every 0.17 variable from the environment, the orchestrator's manifests and the secret store, and write each value you keep into `application.conf`, or bind it there with `${?VAR}` under a name of your own. A generated app's entry warns once at boot of each 0.17 variable left set that no configuration file reads (`warn config-files: N variables named in 0.17 are set and never read: …`), naming it, never its value, and boot goes on; an entry you wrote yourself warns only where it calls `config-files`' `legacyVariablesWarning`.
 4. Move `clients.yaml` entries into `clients.registered` and `users.yaml` entries into `users.registered`, keeping client secrets as their bcrypt hashes.
 5. Point the app at an empty Redis (or a new `redis.prefix`) that meets the [requirements](#redis).
 6. Start the app. A refused boot exits with status 78 and prints one `refused <where>: <reason>` line per problem on standard error; fix them and start again. Refusals name the setting, never its value.
@@ -750,7 +751,7 @@ What changed since rc.3. Coming from an earlier release candidate, read the sect
 - **A request carrying a re-authentication record that is not its own** (spent, unknown, or made for other parameters, as when a demand was taken out of its return): it is refused with `login_required`. A login page that returns to `redirect_to` as it was given is not affected.
 - **A request back from its login still not new enough**: it is refused with `login_required` whether the session's authentication time is known or not. rc.3 sent it to the login page again.
 - **Discovery**: the metadata says `authorization_response_iss_parameter_supported: true`; every redirect answer already carried `iss`.
-- **0.17's environment variables** are not read, and nothing warns of one left set: if the environment or secret store you carried from 0.17 still holds them, remove them as [Migration steps](#migration-steps) says, writing the values you keep into the configuration.
+- **0.17's environment variables** are not read: if the environment or secret store you carried from 0.17 still holds them, remove them as [Migration steps](#migration-steps) says, writing the values you keep into the configuration.
 - **A user ledger's lookups** read a `404` as no such user, whatever sent it: refuse a caller the ledger does not accept with `401` or `403`, never `404`, and check that each URL reaches the route itself, as [User ledger over HTTP](#user-ledger-over-http) says.
 - **Log and audit lines** have the shape they had in earlier release candidates, but no earlier guide described it, nor how 0.17's filters stop matching: see [Log and audit lines](#log-and-audit-lines).
 - **An HS256 secret carried from 0.17**: 0.18 decodes `keys.signing.secret` and takes the decoded bytes as the key, where 0.17 took the string's own bytes; a value copied as written signs with another key. The [mapping](#issuer-and-signing-keys) says how to keep 0.17's.
@@ -774,7 +775,7 @@ After upgrading an app with a second-factor witness, run its `witness-backfill` 
 ### A running deployment
 
 - **A user ledger over HTTP**: every unknown user's federated login and lookup answers `503` until the ledger marks its "not found". users-http now reads a lookup's (`subject-url`, `upstream-url`) `404` as no such user only with the JSON object `{"error":"not_found"}`, and a `410` only with `{"error":"gone"}`. A `404` or `410` saying neither (a mistyped URL, a route not deployed, a gateway's unknown route, a ledger hiding itself) is unavailable, logged as `users-http.ledger_failed` with its status and `reason: "unmarked"`. Change the ledger before upgrading: rc.4 reads the marked answers as it reads bare ones. To keep logins working: have the ledger answer a user it does not know `404` with `{"error":"not_found"}` (`Content-Type: application/json`), and a user it knows but refuses `410` with `{"error":"gone"}`; refuse a caller it does not accept with `401` or `403`, never `404`. See [User ledger over HTTP](#user-ledger-over-http).
-- **A Redis store on a managed service**: boot sends the commands the store needs once and is refused, naming the command, where the service refuses one (`WAIT`, `ROLE`, `INFO`, `EVAL`, or a command a script calls); rc.4 booted and answered 503 to every replicated write. Allow the commands the [runbook](runbook.md#managed-redisvalkey-with-replicas) lists before upgrading: a deployment rc.4 ran refuses boot under this version until they are allowed. Boot is also refused where the confirming connection reaches another server than the operations, or where the service cannot run the store's scripts, as the [runbook](runbook.md#managed-redisvalkey-with-replicas) says; rc.4 answered 503 to the writes instead.
+- **A Redis store on a managed service**: boot sends the commands the store needs once and is refused, naming the command, where the service refuses one (`WAIT`, `ROLE`, `INFO`, `EVAL`, or a command a script calls); rc.4 booted and answered 503 to every replicated write. Allow the commands the [runbook](runbook.md#managed-redisvalkey-with-replicas) lists before upgrading: a deployment rc.4 ran refuses boot under this version until they are allowed.
 - **An HS256 secret**: `keys.signing.secret-encoding` names how `secret` is read (`hex`, `base64`, or `utf8`, the text's own bytes); unset, it is read as before, and a value not of the reading named refuses boot. To keep 0.17's key, or to share the secret with policy-verifier, which takes the text's own bytes, set `utf8`.
 - **Linking an upstream identity**: the callback now checks the session at `credentials`, as the start did. Without `mfa`, that is a sign-in within 300 s, so a user who spends longer at the IdP is refused `401 login_required`; they sign in again and start the link anew. Nothing is written for the refused link.
 - **A link under way during the upgrade**: its round trip, begun under rc.4, is read as `invalid_state` at the callback; the user starts the link again.
@@ -806,6 +807,14 @@ After upgrading an app with a second-factor witness, run its `witness-backfill` 
 - **A store of your own for revoked access tokens**: it still imports `revokedTokens` and `revokedTokensNeeds` from `tokens`, which passes on `token-denylist`'s; the contract test it runs, `revokedTokensContract`, moved from `tokens`' `./testing` to `token-denylist`'s. A boot with no such store names the contract `token-denylist.revoked-tokens`, where it named `tokens.revoked-tokens`.
 - **A passkey assertion whose request named no credential needs the user handle**, as WebAuthn asks: `webauthn`'s ceremony refuses one without it (`user-handle`). Registered passkeys and second factors need no change. A module of your own that calls `ceremonies` directly keeps the challenge `request` returns on the server and hands it back as kept, never one the client sent. A second factor's challenge made before the update and answered without a handle is refused once; a new one passes.
 - **`isLabel` is no longer exported by `mfa`**: a module of your own imports it from `labels` (`@mod/labels` in the workspace, `@o3co/auth-provider-foundation/labels` on the published packages), with the same rule.
+
+## From 0.18.0-rc.5
+
+What changed since rc.5. Coming from an earlier release candidate, read the sections above first.
+
+- **A Redis store with replication**: boot is refused, named, where the confirming connection reaches another server than the operations, as a DNS name or a load balancer in front of several servers may send it; point both at one server. rc.5 booted and answered 503 to every replicated write.
+- **A Redis server that cannot run the store's scripts**: boot runs one of them once and is refused, naming a store script, where the server cannot run it, as one whose Lua lacks `cjson`; rc.5 booted and failed the writes with 503. The [runbook](runbook.md#managed-redisvalkey-with-replicas) says what the server must offer.
+- After boot, `/readyz` answers `503`, warning `redis.settings_unmet`, while either holds; a probe that finds them right again answers ready.
 
 ## Operational notes
 
