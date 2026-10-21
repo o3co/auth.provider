@@ -259,6 +259,55 @@ describe("whether a URL is taken as plain-internal, asked at boot", () => {
 	});
 });
 
+describe("why a URL the browser goes to is refused, asked at boot", () => {
+	const policy = policyOf(
+		policySettings.parse({
+			allow: ["idp.internal", "idp.example"],
+			"plain-internal": ["idp.internal:8080"],
+			deny: ["denied.example"],
+		}),
+	);
+	const own = configuredUrl("http://idp.internal:8080/");
+
+	it("takes https anywhere, and plain http at a loopback name, whatever the policy allows", () => {
+		for (const url of [
+			"https://idp.example/auth",
+			"https://denied.example/auth",
+			"http://localhost:9000/auth",
+			"http://127.0.0.1:9000/auth",
+			"http://[::1]/auth",
+		]) {
+			expect(policy.browsedRefusal(url), url).toBeUndefined();
+		}
+	});
+
+	it("takes plain http at the caller's own URL's origin where plain-internal names its pair", () => {
+		expect(
+			policy.browsedRefusal("http://idp.internal:8080/auth", { internal: own }),
+		).toBeUndefined();
+	});
+
+	it("refuses any other plain http, saying what to set and never the URL's host or port", () => {
+		const refused = {
+			"no configured URL": policy.browsedRefusal("http://idp.internal:8080/auth"),
+			"another origin's URL": policy.browsedRefusal("http://idp.internal:8080/auth", {
+				internal: configuredUrl("http://idp.internal:9090/"),
+			}),
+			"a pair not listed": policy.browsedRefusal("http://idp.example/auth", {
+				internal: configuredUrl("http://idp.example/"),
+			}),
+		};
+		for (const [name, reason] of Object.entries(refused)) {
+			expect(reason, name).toMatch(/^plain http the browser goes to: .*outbound\.plain-internal/);
+			expect(reason, name).not.toMatch(/idp\.|8080|9090/);
+		}
+	});
+
+	it("refuses what is no URL apart, saying what to set", () => {
+		expect(policy.browsedRefusal("not a url")).toMatch(/^not a URL the browser can be sent to: /);
+	});
+});
+
 describe("a private address, as a connection reaches it", () => {
 	it("is IPv4 mapped into IPv6 as the IPv4 one, but no other IPv6 form that carries one", () => {
 		const plainInternal = { loopback: false, internal: false, plainInternal: true };
