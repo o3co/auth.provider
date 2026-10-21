@@ -6,7 +6,12 @@ import {
 	type Outbound,
 	type OutboundResponse,
 } from "@mod/outbound";
-import { destinationRefusal, type OutboundRefusals, withinHosts } from "@mod/outbound-policy";
+import {
+	browsedRefusalText,
+	destinationRefusal,
+	type OutboundRefusals,
+	withinHosts,
+} from "@mod/outbound-policy";
 import {
 	answerOf,
 	authorizationUrl,
@@ -26,14 +31,7 @@ import {
 	UpstreamRefused,
 } from "@mod/upstreams";
 import { z } from "zod";
-import {
-	browsedRefusal,
-	descriptionUrl,
-	hostsOf,
-	narrowerOf,
-	type Settings,
-	sentFor,
-} from "./settings.ts";
+import { descriptionUrl, hostsOf, narrowerOf, type Settings, sentFor } from "./settings.ts";
 
 const description = z.looseObject({
 	issuer: z.string(),
@@ -93,7 +91,7 @@ async function discovered(s: Settings, { outbound, refusals }: Reach, hosts: rea
 	};
 	for (const [name, url] of Object.entries(browsed)) {
 		const narrowed = narrowerOf(hosts, s.issuer);
-		const refused = browsedRefusal(refusals, url, narrowed, `the description's ${name}`);
+		const refused = browsedRefusalText(refusals, url, narrowed, `the description's ${name}`);
 		if (refused !== undefined) throw mismatch(refused);
 	}
 	// The two this server sends to; a refusal here would fail every login.

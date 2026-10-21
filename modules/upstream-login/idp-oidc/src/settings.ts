@@ -1,9 +1,9 @@
 import type { Algorithm } from "@mod/external-jwt";
 import { setting } from "@mod/kernel";
 import {
+	browsedRefusalText,
 	destinationRefusal,
 	hostEntryOf,
-	type Narrower,
 	type OutboundRefusals,
 } from "@mod/outbound-policy";
 import {
@@ -40,24 +40,6 @@ export const narrowerOf = (hosts: readonly string[], internal: ConfiguredUrl | u
 });
 
 /** The hosts requests to the upstream are narrowed to: the issuer's, the named ones, the given endpoints'. */
-/**
- * Why outbound's policy for a URL the browser goes to refuses it, as boot says it, naming `what`;
- * a policy that does not say refuses all but https.
- */
-export function browsedRefusal(
-	refusals: OutboundRefusals,
-	url: string,
-	narrower: Narrower,
-	what: string,
-): string | undefined {
-	const reason = refusals.browsedRefusal
-		? refusals.browsedRefusal(url, narrower)
-		: URL.parse(url)?.protocol === "https:"
-			? undefined
-			: "not https";
-	return reason && `outbound's policy for what the browser goes to refuses ${what}: ${reason}`;
-}
-
 export function hostsOf(s: {
 	readonly issuer: string;
 	readonly "endpoint-hosts": readonly string[];
@@ -170,7 +152,7 @@ export const settingsOf = (asymmetric: readonly Algorithm[], refusals: OutboundR
 				const url = s[key];
 				// Its own schema refuses a URL that does not parse.
 				if (url === undefined || !URL.canParse(url)) continue;
-				const refused = browsedRefusal(refusals, url, { internal: url }, "it");
+				const refused = browsedRefusalText(refusals, url, { internal: url });
 				if (refused) context.addIssue({ code: "custom", path: [key], message: refused });
 			}
 		});

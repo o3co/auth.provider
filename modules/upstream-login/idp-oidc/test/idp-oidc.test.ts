@@ -519,6 +519,19 @@ describe("idp-oidc", () => {
 		expect(await outcome(upstream.exchange(codeExchange({ iss: other })))).toBe("refused");
 	});
 
+	it("refuses, asking the token endpoint nothing, an iss of the issuer's origin in another form", async () => {
+		const token = await idToken({ iss: loopbackIssuer });
+		const { upstream, asked } = await open({
+			settings: { issuer: loopbackIssuer },
+			more: { ...servedAt(loopbackIssuer), [`${loopbackIssuer}/token`]: () => granted(token) },
+			refusals: loopbackRefusals(),
+		});
+		for (const iss of [`${loopbackIssuer}/`, `${loopbackIssuer}/other`, "HTTP://127.0.0.1:9100"]) {
+			expect(await outcome(upstream.exchange(codeExchange({ iss }))), iss).toBe("refused");
+		}
+		expect(asked.some((a) => a.url === `${loopbackIssuer}/token`)).toBe(false);
+	});
+
 	it("refuses at boot, at its key, an endpoint outbound's policy refuses, asking with the hosts it sends to", async () => {
 		const settings = settingsOf(asymmetric, policyRefusing(["idp.example"]));
 		const base = { issuer, "client-id": "c", "client-secret": "s" };
