@@ -141,7 +141,10 @@ export async function assemble(input: AssemblyInput): Promise<Assembly> {
 		if (takenBy === undefined || takenBy.includes(item.module.name)) return;
 		refusals.push({
 			where: item.module.name,
-			reason: `${contract.label} is taken by ${takenBy.join(", ")} alone`,
+			reason:
+				takenBy.length === 0
+					? `${contract.label} is taken by no module`
+					: `${contract.label} is taken by ${takenBy.join(", ")} alone`,
 		});
 		throw new DependencyFailed();
 	};

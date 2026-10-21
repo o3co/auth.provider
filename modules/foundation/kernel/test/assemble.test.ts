@@ -712,6 +712,34 @@ describe("takenBy", () => {
 		}
 	});
 
+	it("lets no module take a contract whose takenBy is empty", async () => {
+		const sealed = contract<object>("sealed", { takenBy: [] });
+		const holder = defineModule({ name: "holder" }, (m) => [m.provide(sealed).by(() => ({}))]);
+		const reader = defineModule({ name: "reader" }, (m) => [
+			m.provide(contract<object>("read")).by(async (c) => c.get(sealed)),
+		]);
+		expect(await refusalsOf(assemble({ modules: [holder, reader], config: single }))).toEqual([
+			{ where: "reader", reason: "sealed is taken by no module" },
+		]);
+	});
+
+	it("keeps the takers it was given, whatever later becomes of the list", async () => {
+		const takers = ["issuer"];
+		const kept = contract<{ sign(): string }>("kept", { takenBy: takers });
+		takers.push("tokens");
+		expect(kept.takenBy).toEqual(["issuer"]);
+		expect(Object.isFrozen(kept.takenBy)).toBe(true);
+		const holder = defineModule({ name: "holder" }, (m) => [
+			m.provide(kept).by(() => ({ sign: () => "signed" })),
+		]);
+		const tokens = defineModule({ name: "tokens" }, (m) => [
+			m.provide(contract<object>("tokens-out")).by(async (c) => c.get(kept)),
+		]);
+		expect(await refusalsOf(assemble({ modules: [holder, tokens], config: single }))).toEqual([
+			{ where: "tokens", reason: "kept is taken by issuer alone" },
+		]);
+	});
+
 	it("binds only the contracts that name their takers", async () => {
 		const open = contract<object>("open");
 		const anyone = defineModule({ name: "anyone" }, (m) => [m.provide(open).by(() => ({}))]);
