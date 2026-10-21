@@ -28,6 +28,7 @@
 		"@mod/login-attributes": "workspace:*",
 		"@mod/login-gates": "workspace:*",
 		"@mod/mfa-entry": "workspace:*",
+		"@mod/mfa-revocation": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/request-source": "workspace:*",

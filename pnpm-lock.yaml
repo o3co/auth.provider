@@ -2415,6 +2415,9 @@ importers:
       '@mod/mfa-entry':
         specifier: workspace:*
         version: link:../mfa-entry
+      '@mod/mfa-revocation':
+        specifier: workspace:*
+        version: link:../mfa-revocation
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit

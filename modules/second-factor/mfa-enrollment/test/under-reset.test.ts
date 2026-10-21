@@ -77,7 +77,7 @@ describe("a binding a reset or a revocation comes into", () => {
 		]);
 	});
 
-	it("writes no recovery codes once a revocation completed after the factor was written", async () => {
+	it("writes no factor and no recovery codes once a revocation completes as the binding is written", async () => {
 		const s = await serve();
 		await s.signIn("uma");
 		const begun = await s.call("POST", "/session/mfa/enrollment", { kind: "code" });
@@ -98,7 +98,8 @@ describe("a binding a reset or a revocation comes into", () => {
 			"login_required",
 			undefined,
 		]);
-		expect((await s.app.get(factors).held("uma")).map((f) => f.kind)).toEqual(["code"]);
+		// mfa-revocation moves the fence as the revocation completes, so the write is fenced.
+		expect((await s.app.get(factors).held("uma")).map((f) => f.kind)).toEqual([]);
 		expect(s.events.some((e) => e.kind === "mfa.recovery_codes.generated")).toBe(false);
 	});
 });
