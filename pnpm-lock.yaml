@@ -1823,6 +1823,19 @@ importers:
         specifier: workspace:*
         version: link:../../foundation/store
 
+  modules/oauth/token-denylist:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+    devDependencies:
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+
   modules/oauth/token-endpoint:
     dependencies:
       '@mod/audit':
