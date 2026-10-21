@@ -68,7 +68,7 @@ export function readingWith({
 	};
 	/** What a fetch that threw says of the id: a refusal to remember, or a failure to forget. */
 	const missed = (id: string, error: unknown): Fetched<ClientRecord> => {
-		if (error instanceof DestinationRefused) return refused(id, error.reason);
+		if (DestinationRefused.is(error)) return refused(id, error.reason);
 		// Running out of time or places says nothing of the id, so it is fetched again next time.
 		if (isOutboundUnavailable(error) && !forgotten.has(error.failure)) {
 			return refused(id, error.failure);

@@ -253,6 +253,16 @@ describe("clients-cimd: a refused document", () => {
 		["not one object", () => json([document])],
 		["a refused field", () => json({ ...document, client_secret: "s" })],
 		["a refused destination", () => Promise.reject(new DestinationRefused("special-address"))],
+		[
+			"a refused destination, from a second bundled copy of outbound-policy",
+			() =>
+				Promise.reject(
+					Object.assign(new Error("outbound destination refused: special-address"), {
+						[Symbol.for("@mod/outbound-policy.destination-refused")]: true,
+						reason: "special-address",
+					}),
+				),
+		],
 		["an answer past the size", () => Promise.reject(new OutboundUnavailable("too-large"))],
 		["a host not reached", () => Promise.reject(new OutboundUnavailable("unreachable"))],
 		[
