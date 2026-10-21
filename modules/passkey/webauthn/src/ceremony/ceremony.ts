@@ -109,6 +109,7 @@ export function ceremoniesFor(
 		requireUserVerification: v === "required",
 	});
 	return {
+		lifetimeMs: rp.timeoutMs,
 		creation: (user, exclude, v, asked = {}) => {
 			const discoverable = asked.discoverable ?? true;
 			const { challenge, until } = fresh();

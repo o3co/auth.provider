@@ -16,6 +16,9 @@ export type WebauthnSettings = z.input<typeof section>;
 
 export const testOrigin = "https://rp.example";
 
+/** The ceremonies over a relying party, randomness and a clock a test gives, as the module builds them. */
+export { ceremoniesFor as testCeremonies } from "./ceremony/ceremony.ts";
+
 /** The webauthn part of a test's configuration: a relying party at `rp.example`. */
 export function webauthnConfig(settings: Partial<WebauthnSettings> = {}) {
 	return {

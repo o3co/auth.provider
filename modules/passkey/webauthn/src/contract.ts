@@ -34,6 +34,8 @@ export type Asserted =
 
 /** Ceremonies whose challenge, its end (`until`, on `kernel`'s clock) and credential the caller keeps and hands over once. */
 export interface Ceremonies {
+	/** How long a challenge can be answered after it was made: the relying party's `challenge-lifetime`, in ms. */
+	readonly lifetimeMs: number;
 	/** Options for a new credential, and the challenge to keep for its answer; a discoverable one unless told otherwise. */
 	creation(
 		user: { readonly handle: string; readonly name: string },
@@ -116,5 +118,6 @@ export interface Registrations {
 
 export const registrations = contract<Registrations>("webauthn.registrations");
 
-export { credentialOf, freshHandle } from "./records.ts";
+export { challengeOf } from "./ceremony/ceremony.ts";
+export { credentialLimits, credentialOf, freshHandle, isCanonical } from "./records.ts";
 export * from "./store.ts";

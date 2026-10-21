@@ -395,6 +395,7 @@ describe("the challenge's end", () => {
 	it("answers when a challenge ends, its lifetime after it was made, on the clock", () => {
 		expect(ceremonies.creation({ handle, name: "sam" }, [], "preferred").until).toBe(now + 120_000);
 		expect(ceremonies.request([], "preferred").until).toBe(now + 120_000);
+		expect(ceremonies.lifetimeMs).toBe(120_000);
 	});
 
 	it("refuses an answer at or past the end it is given as `challenge`, and takes one before it", async () => {

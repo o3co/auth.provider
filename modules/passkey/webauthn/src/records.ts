@@ -13,6 +13,8 @@ export function isCanonical(text: unknown, max: number): text is string {
 
 export const handleBytes = 64;
 export const idBytes = 1023;
+/** The most bytes a credential's id and a user handle may hold, as `isCanonical` takes them. */
+export const credentialLimits = { idBytes, handleBytes } as const;
 
 export interface Holder {
 	readonly handle: string;
