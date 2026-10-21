@@ -720,8 +720,6 @@ From `@mod/webauthn`.
 | `webauthn.origins` | list of string |  | yes |  | `["https://login.example.invalid"]` | The origins ceremonies may come from, matched exactly: https web origins (http only on localhost), or Android app origins. |
 | `webauthn.top-origins` | list of string | `[]` |  |  |  | The pages that may frame a ceremony; none by default, so any ceremony in a frame is refused. |
 | `webauthn.challenge-lifetime` | string | `2m` |  |  |  | How long a ceremony's challenge can be answered, from 10s to 10m. |
-| `webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  | Whether the authenticator is asked to verify its user, as WebAuthn says it. |
-| `webauthn.max-credentials` | integer (1–100) | `10` |  |  |  | The most passkeys a subject may hold, from 1 to 100. |
 
 ## webauthn-login
 

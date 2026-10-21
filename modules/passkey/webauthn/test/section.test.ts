@@ -75,13 +75,22 @@ it("takes a challenge lifetime from 10s to 10m, written with its unit", () => {
 	]);
 });
 
-it("frames nothing, prefers verification, keeps 10 passkeys and a challenge 2m where nothing is set", () => {
-	expect(parsed({}).data).toMatchObject({
+it("frames nothing and keeps a challenge 2m where nothing is set", () => {
+	expect(parsed({}).data).toEqual({
+		"rp-id": "rp.example",
+		"rp-name": "RP",
+		origins: ["https://rp.example"],
 		"top-origins": [],
 		"challenge-lifetime": 120,
-		"user-verification": "preferred",
-		"max-credentials": 10,
 	});
+});
+
+it("refuses the keys passkeys keeps now, naming each", () => {
+	for (const key of ["user-verification", "max-credentials"]) {
+		expect(parsed({ [key]: key === "max-credentials" ? 10 : "preferred" }).success, key).toBe(
+			false,
+		);
+	}
 });
 
 it("refuses the challenge lifetime by its name in seconds", () => {

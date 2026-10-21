@@ -43,17 +43,6 @@ export const section = z
 			.pipe(z.number().int().min(10).max(600))
 			.prefault("2m")
 			.describe("How long a ceremony's challenge can be answered, from 10s to 10m."),
-		"user-verification": z
-			.enum(["required", "preferred", "discouraged"])
-			.prefault("preferred")
-			.describe("Whether the authenticator is asked to verify its user, as WebAuthn says it."),
-		"max-credentials": z
-			.number()
-			.int()
-			.min(1)
-			.max(100)
-			.prefault(10)
-			.describe("The most passkeys a subject may hold, from 1 to 100."),
 	})
 	// An entry that is no URL is the origins' own refusal: this never reads one, whether or not zod
 	// runs it past a field that failed.
