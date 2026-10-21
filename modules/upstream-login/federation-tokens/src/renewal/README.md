@@ -15,7 +15,7 @@ Internal module of `federation-tokens`: keeping each session's upstream tokens a
 
 ## Invariants
 - When a token ends is judged here only, on `kernel`'s clock, capped at the longest lifetime. At login, an end not a positive number is due now, and none stays none unless a refresh token can renew it. At a refresh, none is the cap and one not a positive number refuses the answer.
-- A refresh answering the same access token keeps the earlier of the two ends; its life is counted from the refresh, so it is not due again at once.
+- A refresh's end is `upstreams`' `refreshedExpiry`: the same access token keeps the earlier of the two ends. Its life is counted from the refresh, so it is not due again at once.
 - A token is due within `refresh-before` of its end, once half its life is spent; at once with less than a second left, or no time it was obtained.
 - A token with less than a second left is unavailable, never handed.
 - The lock is taken per session and IdP for `lock-lifetime`, under a mark of 128 random bits; a request waits for it at most that long, then reads the entry again. While the refresh runs, it is kept for its lifetime again every half of it, only under that mark; once lost, nothing the refresh answered is written, and a store that cannot answer stops the keeping. It is kept no longer, then let go (ending a millisecond later) only while it holds that mark.

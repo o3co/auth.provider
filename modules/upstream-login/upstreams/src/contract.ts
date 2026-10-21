@@ -2,6 +2,19 @@ import { contract, extensionPoint } from "@mod/kernel";
 import type { Session } from "@mod/session";
 import type { z } from "zod";
 
+/**
+ * When a refreshed access token ends: where the upstream hands the same token again, the earlier of
+ * its new end and the end it held, so a refresh never lengthens a token; else its new end.
+ */
+export function refreshedExpiry(
+	answered: { readonly accessToken: string; readonly expiresAt: number },
+	held: { readonly accessToken: string; readonly expiresAt?: number | undefined } | undefined,
+): number {
+	return held?.expiresAt !== undefined && held.accessToken === answered.accessToken
+		? Math.min(answered.expiresAt, held.expiresAt)
+		: answered.expiresAt;
+}
+
 /** What the implementation asks an upstream to authorize, for one login. */
 export interface AuthorizationStart {
 	readonly state: string;
