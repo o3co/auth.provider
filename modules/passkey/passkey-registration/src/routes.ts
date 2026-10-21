@@ -3,10 +3,10 @@ import { csrfChecked } from "@mod/csrf";
 import { type HttpRequest, type HttpResponse, jsonAnswer, type Route, use } from "@mod/http";
 import { isUnavailable } from "@mod/kernel";
 import { isLabel } from "@mod/labels";
+import type { RegistrationRefusal, Registrations } from "@mod/passkeys";
 import { requestsPerSource, type Window } from "@mod/rate-limit";
 import { determinedSource } from "@mod/request-source";
 import type { Sessions } from "@mod/session";
-import type { RegistrationRefusal, Registrations } from "@mod/webauthn";
 import events from "./audit-events.ts";
 
 export interface RouteParts {

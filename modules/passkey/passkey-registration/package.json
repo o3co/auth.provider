@@ -21,6 +21,7 @@
 		"@mod/labels": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
 		"@mod/request-source": "workspace:*",
+		"@mod/passkeys": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/webauthn": "workspace:*",
 		"zod": "4.6.7"

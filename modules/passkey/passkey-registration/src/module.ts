@@ -1,8 +1,8 @@
 import { audit } from "@mod/audit";
 import { routes } from "@mod/http";
 import { defineModule } from "@mod/kernel";
+import { registrations } from "@mod/passkeys";
 import { sessions } from "@mod/session";
-import { registrations } from "@mod/webauthn";
 import { registrationRoutes } from "./routes.ts";
 import { section } from "./section.ts";
 

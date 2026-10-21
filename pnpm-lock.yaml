@@ -2088,6 +2088,9 @@ importers:
       '@mod/labels':
         specifier: workspace:*
         version: link:../../foundation/labels
+      '@mod/passkeys':
+        specifier: workspace:*
+        version: link:../passkeys
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit

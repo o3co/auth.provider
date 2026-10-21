@@ -12,6 +12,8 @@ import mfaModule from "@mod/mfa/module";
 import { mfaConfig } from "@mod/mfa/testing";
 import mfaEntry from "@mod/mfa-entry/module";
 import mfaStore from "@mod/mfa-store/module";
+import passkeys from "@mod/passkeys/module";
+import { passkeysConfig } from "@mod/passkeys/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
@@ -45,7 +47,7 @@ const step = defineModule({ name: "step" }, (m) => [
 
 /** The routes over webauthn on a simulated store, with mfa judging entry when asked; `browser` signs in a subject. */
 async function serve(
-	settings: Parameters<typeof webauthnConfig>[0] = {},
+	settings: Parameters<typeof passkeysConfig>[0] = {},
 	{ withMfa = false } = {},
 ) {
 	const store = simulatedStore();
@@ -62,6 +64,7 @@ async function serve(
 			store.module,
 			webauthnStore,
 			webauthn,
+			passkeys,
 			registration,
 			auditStandIn().module,
 			...mfa,
@@ -69,7 +72,8 @@ async function serve(
 		config: {
 			...kernelConfig(),
 			...httpConfig({ "public-origin": testOrigin, "trusted-proxies": ["127.0.0.1"] }),
-			...webauthnConfig(settings),
+			...webauthnConfig(),
+			...passkeysConfig(settings),
 			...(withMfa ? { ...sealConfig(), ...mfaConfig() } : {}),
 		},
 		runtime,
