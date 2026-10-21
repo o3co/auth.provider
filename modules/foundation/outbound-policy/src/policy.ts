@@ -300,7 +300,7 @@ export function policyOf(settings: PolicySettings): Policy {
 			if (admitted.address !== undefined) admitAddresses([admitted.address], admitted);
 			return undefined;
 		} catch (error) {
-			if (error instanceof DestinationRefused) return error.reason;
+			if (DestinationRefused.is(error)) return error.reason;
 			throw error;
 		}
 	};
@@ -319,7 +319,7 @@ export function policyOf(settings: PolicySettings): Policy {
 				if (admitted.address !== undefined) admitAddresses([admitted.address], admitted);
 				return true;
 			} catch (error) {
-				if (error instanceof DestinationRefused) return false;
+				if (DestinationRefused.is(error)) return false;
 				throw error;
 			}
 		},
