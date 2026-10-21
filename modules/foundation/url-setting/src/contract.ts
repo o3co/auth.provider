@@ -143,25 +143,34 @@ export function urlSetting(rules: UrlRules) {
 
 /**
  * A section's check of the URLs it sends to, as `superRefine` takes it: once every URL of `urls`
- * parses, `explain` is asked of each URL of `sent` with its hosts, and what it answers is put at
- * that key. While one is no URL nothing is asked: that is its own key's refusal, and zod may run a
+ * parses, `explain` is asked of each URL of `sent` with its hosts, and the configured URL it is sent
+ * for where the key names one, and what it answers is put at that key. While one is no URL nothing is asked: that is its own key's refusal, and zod may run a
  * section's refinement past a field it refused. What a refusal says is `explain`'s alone.
  */
 export function urlsChecked<S>(
-	explain: (url: string, hosts: readonly string[]) => string | undefined,
+	explain: (
+		url: string,
+		hosts: readonly string[],
+		internal: ConfiguredUrl | undefined,
+	) => string | undefined,
 	parts: {
 		readonly urls: (section: S) => readonly (string | undefined)[];
-		readonly sent: (
-			section: S,
-		) => Readonly<
-			Record<string, { readonly url?: string | undefined; readonly hosts: readonly string[] }>
+		readonly sent: (section: S) => Readonly<
+			Record<
+				string,
+				{
+					readonly url?: string | undefined;
+					readonly hosts: readonly string[];
+					readonly internal?: ConfiguredUrl | undefined;
+				}
+			>
 		>;
 	},
 ): (section: S, context: z.RefinementCtx) => void {
 	return (section, context) => {
 		if (!parts.urls(section).every((url) => url === undefined || URL.canParse(url))) return;
-		for (const [key, { url, hosts }] of Object.entries(parts.sent(section))) {
-			const refused = url === undefined ? undefined : explain(url, hosts);
+		for (const [key, { url, hosts, internal }] of Object.entries(parts.sent(section))) {
+			const refused = url === undefined ? undefined : explain(url, hosts, internal);
 			if (refused !== undefined)
 				context.addIssue({ code: "custom", path: [key], message: refused });
 		}

@@ -1,3 +1,4 @@
+import type { HttpRequest, HttpResponse } from "@mod/http";
 import { contract, extensionPoint } from "@mod/kernel";
 import type { Session } from "@mod/session";
 import type { z } from "zod";
@@ -211,6 +212,50 @@ export interface UpstreamLoginReceiver {
 export const upstreamLoginReceivers = extensionPoint<UpstreamLoginReceiver>(
 	"upstreams.upstream-login-receivers",
 	{ multiplicity: "keyed", keyOf: (receiver) => receiver.name },
+);
+
+/** What a continuation keeps in a round trip at its start, as JSON, read back by it alone. */
+export type Kept = z.infer<ReturnType<typeof z.json>>;
+
+/** What a continuation is handed once the upstream's login is taken, exchanged and found fresh. */
+export interface Continued {
+	readonly request: HttpRequest;
+	readonly idp: string;
+	readonly upstreamLogin: UpstreamLogin;
+	/** What its `begin` kept, or none. */
+	readonly kept: Kept | undefined;
+	/** Where the browser lands: the return target its start named, else the implementation's landing. */
+	readonly lands: string;
+	readonly source?: string | undefined;
+	readonly userAgent?: string | undefined;
+	/** The round trip's cookie, cleared: every answer from here on carries it. */
+	readonly cleared: readonly string[];
+}
+
+/**
+ * Where a browser's round trip through an upstream goes besides a login, chosen by name at its
+ * start: it may refuse the start, keeps what its end reads, and answers the browser at the end.
+ */
+export interface UpstreamContinuation {
+	readonly name: string;
+	begin(
+		request: HttpRequest,
+		idp: string,
+	): Promise<{ readonly answer: HttpResponse } | { readonly kept?: Kept }>;
+	complete(at: Continued): Promise<HttpResponse>;
+	/** A refusal after the take and before `complete`, recorded as this continuation records them. */
+	failed(at: {
+		readonly idp: string;
+		readonly reason: string;
+		readonly kept: Kept | undefined;
+		readonly source?: string | undefined;
+		readonly userAgent?: string | undefined;
+	}): void;
+}
+
+export const upstreamContinuations = extensionPoint<UpstreamContinuation>(
+	"upstreams.continuations",
+	{ multiplicity: "keyed", keyOf: (continuation) => continuation.name },
 );
 
 /** The upstreams of the configured IdPs, by name. */

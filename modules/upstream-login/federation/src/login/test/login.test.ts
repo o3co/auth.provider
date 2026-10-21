@@ -2,8 +2,8 @@ import { testRequest } from "@mod/http/testing";
 import type { LoginFacts } from "@mod/session";
 import type { UpstreamLogin } from "@mod/upstreams";
 import { expect, it } from "vitest";
+import type { Completing, Idp } from "../../round-trip/round-trip.ts";
 import { loginWith } from "../login.ts";
-import type { Completing, Idp } from "../round-trip.ts";
 
 /** A round trip started at 1_800_000_000_500 ms, to an upstream whose clock may be 30 s off ours. */
 const startedAt = 1_800_000_000_500;

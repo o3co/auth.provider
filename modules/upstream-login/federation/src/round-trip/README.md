@@ -1,23 +1,23 @@
 # round-trip
 
-Internal module of `federation`: one round trip through an upstream IdP, a login's or a link's, from its start to its callback.
+Internal module of `federation`: one round trip through an upstream IdP, a login's or a continuation's, from its start to its callback.
 
 ## Responsibilities
-- Answers a start: checks what the browser asked, asks the continuation (the link when `link` is `1` or `true`, else the login), begins an `upstream-round-trip` round trip, and sends the browser to the upstream.
-- Answers a callback: takes the round trip once, has the upstream exchange its code, and hands the upstream login to the continuation the round trip names (the link when it records a session, else the login), so neither ends in the other; the login (`login.ts`) hands it to `login-gates`.
-- Decides whether an upstream login is fresh enough, finds the local user, and maps the amr and the profile.
+- Answers a start: checks what the browser asked, asks the continuation it chooses (the one named `link` when `link` is `1` or `true`, from `upstreams`' continuations; else the login; one not composed is `400 continuation_unavailable`, warned `federation.continuation_missing`), begins an `upstream-round-trip` round trip (or, from another site, goes on with the browser's live one), and sends the browser to the upstream.
+- Answers a callback: takes the round trip once, has the upstream exchange its code, and hands the upstream login to the continuation the round trip names (else the login), with what it kept and where the browser lands, so neither ends in the other; one no longer composed is `continuation_unavailable` too.
+- Decides whether an upstream login is fresh enough.
 - Freshness is judged here on `kernel`'s clock, never by a type.
 - Records each callback that took its round trip to `audit`.
 
 ## Not here
-- Opening the IdPs at boot (`idps`). Handing over the upstream tokens (`upstream-handoff`). The route's declaration and its rate limit (the package's). What differs per IdP (the type). Keeping a round trip and taking it once (`upstream-round-trip`).
+- The login itself: the local user, the amr, the profile and `login-gates` (`login`). Opening the IdPs at boot (`idps`). Handing over the upstream tokens (`upstream-handoff`). The route's declaration and its rate limit (the package's). What differs per IdP (the type). Keeping a round trip and taking it once (`upstream-round-trip`).
 
 ## Offers
-- `roundTripIn` (the build context, the login and link continuations) → the round trip's handler; `landingIn`: the landing, or the public origin's root; `federationIdps`: the opened IdPs' contract.
-- `federated` (the opened IdPs, `upstream-round-trip`'s round trips, `login-gates`' return check, the login and link continuations, `kernel`'s clock and log, the landing, the round trip's lifetime) → a request under the federation path → its answer.
+- `roundTripIn` (the build context, the login; it collects the continuations itself) → the round trip's handler; `landingIn`: the landing, or the public origin's root; `federationIdps`: the opened IdPs' contract.
+- `federated` (the opened IdPs, `upstream-round-trip`'s round trips, `login-gates`' return check, the login and the continuations by name, `kernel`'s clock and log, the landing, the round trip's lifetime) → a request under the federation path → its answer.
 - `recorderOf` (`audit`, kind prefix): records a federation event in federation's words: `idp`, then `source`, `userAgent` and `reason` when known.
-- `Continuation`: at the start, a refusal or what the round trip carries; after the take, exchange and freshness, the answer; a refusal in between, recorded its way. `loginWith` (`login-gates`' logins, `users`, `audit`, `upstream-handoff`'s handoff, the landing, the held login's lifetime) is the first; `loginIn` builds it from the build context.
-- `Completing`, `Carried`, `Recorded`, `Flow`, `sent` and `secondOf`: what the continuations take, carry, record and answer with, and the whole second a time falls in. `Trip` (`trip.ts`): what a round trip carries for federation, read back from a take.
+- `Continuation`: at the start, a refusal or what the round trip carries; after the take, exchange and freshness, the answer; a refusal in between, recorded its way.
+- `Completing`, `Recorded`, `Flow`, `sent` and `secondOf`: what the continuations take, carry, record and answer with, and the whole second a time falls in. `Trip` (`trip.ts`): what a round trip carries for federation, read back from a take.
 - `Idp`: what an opened IdP gives the round trip. `base` and `callbackPath` (IdP name → its callback's path). `proves`: what every federation login proves.
 
 ## Invariants
@@ -29,14 +29,11 @@ Internal module of `federation`: one round trip through an upstream IdP, a login
 - An `error` or no code is `upstream_refused`, with no exchange. The exchange gets the take's verifier and nonce, the redirect URI and the callback's `iss`.
 - A failed exchange is `exchange_failed`, logged with the IdP and its kind (`refused` or `failed`) only. An unavailable upstream is 503.
 - With `prompt=login` or `max_age`, the upstream must say when the user logged in. That time, plus the type's clock allowance, is not before the start's whole second and is within the max age of now.
-- The local user is found by the IdP's name and the upstream subject only. The amr is `fed` plus the mapped upstream values, once each.
-- The session gets the upstream profile's email (verified only where the type says so), name and picture under `login-attributes`' source name for the IdP, nothing else of it.
 - Audit records come only after the take, with `idp` and the source when `request-source` determined it: the local subject on success or hold, the reason on failure. None records an unavailable answer.
-- Success is a 302 to the round trip's return target or the landing. A held login carries that same return in its `done`, and is a 303 to `held-page`, with no query, and the cookies; without one, a 403 with the gate's answer and cookies.
-- `loginIn` refuses boot for a `held-page` off the public origin.
 
 ## Data
-- What a round trip carries for federation: the return target, `prompt` and max age, and for a link the session entered at its start and its subject. Read back by its own shape: another is none.
+- What a round trip carries for federation: the return target, `prompt` and max age, and the continuation it goes on to with what that kept. Read back by its own shape: another is none.
+- An earlier version's shape, a link's session and subject as a field of their own, which instances not yet upgraded still write, is read as the continuation `link` with them kept; it is never written. A record mixing both shapes is none.
 
 ## Depends on
-- `http` (the site for the landing, the request and answer, no-store, the JSON answer); `upstream-round-trip` (round trips); `request-source` (the source); `kernel` (the runtime, unavailable); `login-attributes` (the source name); `login-gates` (logins); `users` (the lookup); `audit`; `upstream-handoff`; `upstreams` (the upstream, its login, its refusal); `federation`'s section
+- `http` (the site for the landing, the request and answer, no-store, the JSON answer); `upstream-round-trip` (round trips); `request-source` (the source); `kernel` (the runtime, unavailable); `login-gates` (the return check); `audit`; `upstreams` (the upstream, its login, its refusal, the continuations); `csrf` (origin evidence); `federation`'s section

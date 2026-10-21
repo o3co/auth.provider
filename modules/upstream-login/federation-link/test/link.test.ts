@@ -5,11 +5,9 @@ import { isUnavailable, Unavailable } from "@mod/kernel";
 import { recordingLog } from "@mod/kernel/testing";
 import type { AuthContext, Entry, Session } from "@mod/session";
 import type { Joined } from "@mod/upstream-handoff";
-import type { UpstreamLogin } from "@mod/upstreams";
+import type { Continued, UpstreamLogin } from "@mod/upstreams";
 import { expect, it } from "vitest";
-import type { Completing, Idp } from "../../round-trip/round-trip.ts";
-import type { Trip } from "../../round-trip/trip.ts";
-import { linkWith } from "../link.ts";
+import { linkWith } from "../src/link.ts";
 
 const alice: AuthContext = { subject: "alice", amr: ["pwd"], authenticatedAt: 0 };
 const s1: Session = { id: "s1", context: alice };
@@ -32,6 +30,13 @@ function standIn() {
 		linked: "linked" as "linked" | "already" | "conflict",
 		/** What changes while the tokens join the session. */
 		onJoin: undefined as (() => void) | undefined,
+		/** What changes while the identity is linked. */
+		onLink: undefined as (() => void) | undefined,
+		unlinked: "unlinked" as "unlinked" | "none" | "fixed",
+		/** The join throws, after what changes while it runs. */
+		joinThrows: false,
+		/** Taking the tokens back throws. */
+		withdrawThrows: false,
 		down: undefined as "users" | "entering" | "session" | "handoff" | undefined,
 	};
 	const levels: unknown[] = [];
@@ -41,6 +46,7 @@ function standIn() {
 	const links: unknown[] = [];
 	const joined: unknown[] = [];
 	const withdrawn: unknown[] = [];
+	const unlinks: unknown[] = [];
 	const logged = recordingLog();
 	const link = linkWith({
 		origin: { sameOrigin: () => set.sameOrigin },
@@ -63,34 +69,38 @@ function standIn() {
 			link: async (subject, upstream) => {
 				if (set.down === "users") throw new Unavailable("users");
 				links.push([subject, upstream]);
+				set.onLink?.();
 				return set.linked;
+			},
+			unlink: async (subject, upstream) => {
+				unlinks.push([subject, upstream]);
+				return set.unlinked;
 			},
 		},
 		audit: { record: (event) => void events.push(event) },
 		handoff: {
 			joined: async (session, idp, tokens) => {
 				if (set.down === "handoff") throw new Unavailable("federation");
-				joined.push([session.id, idp, tokens.accessToken]);
 				set.onJoin?.();
+				if (set.joinThrows) throw new Unavailable("federation");
+				joined.push([session.id, idp, tokens.accessToken]);
 				return `joined ${session.id} ${idp}` as unknown as Joined;
 			},
-			withdrawn: async (session, idp, given) => void withdrawn.push([session, idp, given]),
+			withdrawn: async (session, idp, given) => {
+				if (set.withdrawThrows) throw new Unavailable("federation");
+				withdrawn.push([session, idp, given]);
+			},
 		},
 		log: logged.log,
-		landing,
 	});
-	const trip: Trip = {
-		nonce: "n",
-		verifier: "v",
-		startedAt: 0,
-		link: { session: "s1", subject: "alice" },
-	};
-	const completing = (more: Partial<Completing> = {}): Completing => ({
+	/** What this link's start kept. */
+	const kept = { session: "s1", subject: "alice" };
+	const completing = (more: Partial<Continued> = {}): Continued => ({
 		request: testRequest(),
-		name: "corp",
-		idp: { upstreamAmr: new Map() } as Pick<Idp, "upstreamAmr"> as Idp,
+		idp: "corp",
 		upstreamLogin,
-		trip,
+		kept,
+		lands: landing,
 		source: "127.0.0.1",
 		userAgent: "ua/1",
 		cleared: ["federation.corp=; Max-Age=0"],
@@ -104,9 +114,10 @@ function standIn() {
 		links,
 		joined,
 		withdrawn,
+		unlinks,
 		logged,
 		link,
-		trip,
+		kept,
 		completing,
 	};
 }
@@ -123,7 +134,7 @@ const refusedAt = async (s: ReturnType<typeof standIn>, request: HttpRequest = t
 it("starts only for a session entered at the credentials level, recording it and its subject", async () => {
 	const s = standIn();
 	expect(await s.link.begin(testRequest(), "corp")).toEqual({
-		carried: { link: { session: "s1", subject: "alice" } },
+		kept: { session: "s1", subject: "alice" },
 	});
 	expect(s.levels).toEqual(["credentials"]);
 	s.set.entry = { kind: "absent" };
@@ -160,8 +171,13 @@ it("links the identity to the session's subject, hands the tokens to that sessio
 	]);
 	expect(s.links).toEqual([["alice", { idp: "corp", subject: "u-1" }]]);
 	expect(s.joined).toEqual([["s1", "corp", "up-1"]]);
-	// The recorded session, at use, before the link and again after the join.
-	expect(s.asked).toEqual(["s1", "s1"]);
+	// The recorded session, at credentials as its start was: before the link, after it, and after the join.
+	expect(s.asked).toEqual([
+		["s1", "credentials"],
+		["s1", "credentials"],
+		["s1", "credentials"],
+	]);
+	expect(s.unlinks).toEqual([]);
 	expect(s.events).toEqual([
 		{
 			kind: "federation.identity.linked",
@@ -178,12 +194,12 @@ it("lets the recorded session decide for a browser in none, as a posted answer c
 	expect(s.links).toHaveLength(1);
 });
 
-it("returns to the target the start named, and hands nothing on when the upstream gave no tokens", async () => {
+it("lands where the round trip says, and hands nothing on when the upstream gave no tokens", async () => {
 	const s = standIn();
 	const { tokens: _, ...tokenless } = upstreamLogin;
 	const done = await s.link.complete(
 		s.completing({
-			trip: { ...s.trip, redirectTo: "https://app.example/back" },
+			lands: "https://app.example/back",
 			upstreamLogin: tokenless,
 		}),
 	);
@@ -276,7 +292,10 @@ it("fails as unavailable when the tokens cannot be handed over, the link and its
 	expect(s.events.map((e) => e.kind)).toEqual(["federation.identity.linked"]);
 });
 
-it("answers a session closed, short of a requirement or logged in as someone else while joining as one before: 401, the link and its record kept, the tokens taken back", async () => {
+const upstream = { idp: "corp", subject: "u-1" };
+const undone = ["federation.identity.linked", "federation.identity.link_refused"];
+
+it("undoes a link it wrote, and takes the tokens back, when the session closed, fell short or changed hands meanwhile: 401", async () => {
 	const changes: Record<string, (set: Settings) => void> = {
 		closed: (set) => {
 			set.byHandle = { kind: "absent" };
@@ -288,47 +307,109 @@ it("answers a session closed, short of a requirement or logged in as someone els
 			set.byHandle = enteredAs("bob");
 		},
 	};
-	for (const [change, onJoin] of Object.entries(changes)) {
-		const s = standIn();
-		s.set.onJoin = () => onJoin(s.set);
-		const done = await s.link.complete(s.completing());
-		expect([...answered(done), done.cookies], change).toEqual([
-			401,
-			{ error: "login_required" },
-			["federation.corp=; Max-Age=0"],
-		]);
-		expect([s.links.length, s.joined, s.withdrawn], change).toEqual([
-			1,
-			[["s1", "corp", "up-1"]],
-			[["s1", "corp", "joined s1 corp"]],
-		]);
-		expect(
-			s.events.map((e) => e.kind),
-			change,
-		).toEqual(["federation.identity.linked"]);
+	for (const [change, apply] of Object.entries(changes)) {
+		for (const during of ["onJoin", "onLink"] as const) {
+			const s = standIn();
+			s.set[during] = () => apply(s.set);
+			const done = await s.link.complete(s.completing());
+			expect([...answered(done), done.cookies], change).toEqual([
+				401,
+				{ error: "login_required" },
+				["federation.corp=; Max-Age=0"],
+			]);
+			// Checked right after the link, the tokens are never handed to a session closed by then.
+			const handed = during === "onJoin" ? [["s1", "corp", "joined s1 corp"]] : [];
+			expect([s.unlinks, s.withdrawn], change).toEqual([[["alice", upstream]], handed]);
+			expect(s.joined.length, change).toBe(handed.length);
+			expect(
+				s.events.map((e) => [e.kind, e.attributes?.reason]),
+				change,
+			).toEqual([
+				[undone[0], undefined],
+				[undone[1], "session_closed_during_link"],
+			]);
+		}
 	}
 });
 
-it("takes the tokens back before failing as unavailable when the session cannot tell after the join", async () => {
+it("undoes no link the account held already, and no tokens it was not given, when the session closed meanwhile", async () => {
+	const s = standIn();
+	s.set.linked = "already";
+	const { tokens: _, ...tokenless } = upstreamLogin;
+	s.set.onLink = () => {
+		s.set.byHandle = { kind: "absent" };
+	};
+	expect(answered(await s.link.complete(s.completing({ upstreamLogin: tokenless })))).toEqual([
+		401,
+		{ error: "login_required" },
+	]);
+	expect([s.unlinks, s.withdrawn]).toEqual([[], []]);
+	expect(s.events.map((e) => e.attributes?.reason)).toEqual(["session_closed_during_link"]);
+});
+
+it("undoes the link when the join fails while the session is closed or cannot be read, and keeps it while it is open", async () => {
+	const closings: Record<string, (set: Settings) => void> = {
+		closed: (set) => {
+			set.byHandle = { kind: "absent" };
+		},
+		unreadable: (set) => {
+			set.down = "session";
+		},
+		open: () => {},
+	};
+	for (const [closing, apply] of Object.entries(closings)) {
+		const s = standIn();
+		s.set.joinThrows = true;
+		s.set.onJoin = () => apply(s.set);
+		await expect(s.link.complete(s.completing()), closing).rejects.toSatisfy(isUnavailable);
+		expect(s.unlinks, closing).toEqual(closing === "open" ? [] : [["alice", upstream]]);
+		expect(s.withdrawn, closing).toEqual([]);
+	}
+});
+
+it("unlinks even where taking the tokens back fails, then fails with that", async () => {
+	const s = standIn();
+	s.set.withdrawThrows = true;
+	s.set.onJoin = () => {
+		s.set.byHandle = { kind: "absent" };
+	};
+	await expect(s.link.complete(s.completing())).rejects.toSatisfy(isUnavailable);
+	expect(s.unlinks).toEqual([["alice", upstream]]);
+});
+
+it("logs a link it cannot undo, as one the configuration fixes", async () => {
+	const s = standIn();
+	s.set.unlinked = "fixed";
+	s.set.onLink = () => {
+		s.set.byHandle = { kind: "absent" };
+	};
+	expect((await s.link.complete(s.completing())).status).toBe(401);
+	expect(s.logged.lines().map((line) => [line.level, line.event])).toContainEqual([
+		"warn",
+		"federation.link_kept_fixed",
+	]);
+});
+
+it("undoes the link and takes the tokens back before failing as unavailable when the session cannot tell after them", async () => {
 	const s = standIn();
 	s.set.onJoin = () => {
 		s.set.down = "session";
 	};
 	await expect(s.link.complete(s.completing())).rejects.toSatisfy(isUnavailable);
-	expect([s.links.length, s.joined, s.withdrawn]).toEqual([
+	expect([s.links.length, s.unlinks, s.withdrawn]).toEqual([
 		1,
-		[["s1", "corp", "up-1"]],
+		[["alice", upstream]],
 		[["s1", "corp", "joined s1 corp"]],
 	]);
 	expect(s.events.map((e) => e.kind)).toEqual(["federation.identity.linked"]);
 });
 
-it("records a refusal after the take for the subject a link started for, and nothing for a login's", () => {
+it("records a refusal after the take for the subject its start kept, and nothing for what it cannot read", () => {
 	const s = standIn();
-	const at = { name: "corp", reason: "exchange_failed", source: "127.0.0.1", userAgent: "ua/1" };
-	s.link.failed({ ...at, trip: s.trip });
-	const { link: _, ...login } = s.trip;
-	s.link.failed({ ...at, trip: login });
+	const at = { idp: "corp", reason: "exchange_failed", source: "127.0.0.1", userAgent: "ua/1" };
+	s.link.failed({ ...at, kept: s.kept });
+	s.link.failed({ ...at, kept: undefined });
+	s.link.failed({ ...at, kept: { unheard: 1 } });
 	expect(s.events).toEqual([
 		{
 			kind: "federation.identity.link_refused",

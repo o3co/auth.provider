@@ -38,8 +38,6 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `federation.identity.link_refused` | `idp`, `source`, `userAgent`, `reason` | a link's callback refused to tie it, with the subject it started for and why (`reason`) |
-| `federation.identity.linked` | `idp`, `source`, `userAgent` | a link's callback tied the upstream identity to the subject it started for |
 | `federation.login.failed` | `idp`, `source`, `reason` | the callback refused the login, with why (`reason`) |
 | `federation.login.held` | `idp`, `source` | a gate held the login, with the local subject |
 | `federation.login.succeeded` | `idp`, `source` | a login through the IdP opened, with the local subject |
@@ -57,6 +55,13 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | `federation.grant.revoked` | `client`, `connection`, `outcome`, `source` | a grant ends, revoked by its client or by the subject's revocation (`outcome`) |
 | `federation.grant.token.denied` | `client`, `connection`, `reason`, `source` | a client is refused a grant's token or renewal, with why (`reason`); by the client only before the grant is found |
 | `federation.grant.token.success` | `client`, `connection`, `refreshed`, `source` | a client is handed a grant's upstream token, refreshed first or not (`refreshed`) |
+
+## @mod/federation-link
+
+| Kind | Attributes | Recorded when |
+|---|---|---|
+| `federation.identity.link_refused` | `idp`, `source`, `userAgent`, `reason` | a link's callback refused to tie it, with the subject it started for and why (`reason`) |
+| `federation.identity.linked` | `idp`, `source`, `userAgent` | a link's callback tied the upstream identity to the subject it started for |
 
 ## @mod/federation-tokens
 

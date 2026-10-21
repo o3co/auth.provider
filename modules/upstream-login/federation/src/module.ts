@@ -6,8 +6,7 @@ import { handoff } from "@mod/upstream-handoff";
 import { upstreams } from "@mod/upstreams";
 import { upstreamNames } from "@mod/users";
 import { amrSourceIn, idpsIn, upstreamNamesIn, upstreamsIn } from "./idps/idps.ts";
-import { linkIn } from "./link/link.ts";
-import { loginCaller, loginIn } from "./round-trip/login.ts";
+import { loginCaller, loginIn } from "./login/login.ts";
 import { base, federationIdps, roundTripIn } from "./round-trip/round-trip.ts";
 import { section } from "./section.ts";
 
@@ -27,10 +26,9 @@ export default defineModule({ name: "federation", section }, (m) => [
 	m.provide(federationRoute).by(async (c) => {
 		const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 		const login = await loginIn(c);
-		const link = await linkIn(c);
 		return {
 			uses: [use(requestsPerSource, { name: "federation", window })],
-			handle: await roundTripIn(c, { login, link }),
+			handle: await roundTripIn(c, { login }),
 		};
 	}),
 	m.contribute(routes).by(async (c) => ({
@@ -38,7 +36,7 @@ export default defineModule({ name: "federation", section }, (m) => [
 		path: `${base}/*`,
 		changesState: true,
 		crossSite:
-			"A start is the user's own navigation. A link's start checks its origin before any transaction is made; a login's start takes a navigation from another site, its state bound to its cookie and taken once.",
+			"A start is the user's own navigation. A continuation's start checks what it asks before any transaction is made; a login's start takes a navigation from another site, its state bound to its cookie and taken once.",
 		...(await c.get(federationRoute)),
 	})),
 	...(["GET", "POST"] as const).map((method) =>

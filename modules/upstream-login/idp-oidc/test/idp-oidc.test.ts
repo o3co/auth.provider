@@ -18,6 +18,7 @@ import {
 	type OutboundResponse,
 	outbound,
 } from "@mod/outbound";
+import { outboundOver, section as outboundSection } from "@mod/outbound/module";
 import { type OutboundRefusals, outboundRefusals, withinHosts } from "@mod/outbound-policy";
 import {
 	type AuthorizationStart,
@@ -65,10 +66,20 @@ const granted = (idToken: string, more: Record<string, unknown> = {}) =>
 
 /** An outbound that answers from a table of handlers by URL, keeping what it was asked. */
 function stubOutbound(handlers: Record<string, Handler>) {
-	const asked: { url: string; request: OutboundRequest; hosts?: readonly string[] }[] = [];
+	const asked: {
+		url: string;
+		request: OutboundRequest;
+		hosts?: readonly string[];
+		internal?: string;
+	}[] = [];
 	const outbound: Outbound = {
 		fetch: async (url, request = {}, narrower = {}) => {
-			asked.push({ url, request, ...(narrower.hosts ? { hosts: narrower.hosts } : {}) });
+			asked.push({
+				url,
+				request,
+				...(narrower.hosts ? { hosts: narrower.hosts } : {}),
+				...(narrower.internal ? { internal: narrower.internal } : {}),
+			});
 			if (narrower.hosts && !withinHosts(url, narrower.hosts)) {
 				throw new Error("outside the narrowed hosts");
 			}
@@ -150,6 +161,8 @@ interface World {
 	readonly refused?: readonly string[];
 	/** How the issuer's description answers, in place of the usual one. */
 	readonly describes?: Handler;
+	/** A real outbound and its refusals, in place of the table of answers. */
+	readonly reach?: { readonly outbound: Outbound; readonly refusals: OutboundRefusals };
 }
 
 async function open(world: World = {}) {
@@ -177,7 +190,7 @@ async function open(world: World = {}) {
 		runtime,
 	});
 	const jwt = app.get(externalJwt);
-	const refusals = policyRefusing(world.refused);
+	const refusals = world.reach?.refusals ?? policyRefusing(world.refused);
 	const settings = settingsOf(jwt.algorithms, refusals);
 	const read = settings.parse({
 		issuer,
@@ -186,11 +199,16 @@ async function open(world: World = {}) {
 		...world.settings,
 	});
 	const recorded = recordingLog();
-	const upstream = await opened(read, { outbound: stub.outbound, refusals }, jwt, {
-		clock,
-		log: recorded.log,
-		idp: "corp",
-	});
+	const upstream = await opened(
+		read,
+		{ outbound: world.reach?.outbound ?? stub.outbound, refusals },
+		jwt,
+		{
+			clock,
+			log: recorded.log,
+			idp: "corp",
+		},
+	);
 	/** The warn lines while it opened. */
 	const warned = recorded
 		.lines()
@@ -386,7 +404,7 @@ describe("idp-oidc", () => {
 		expect(policyAsked).toEqual([
 			{
 				url: `${issuer}/.well-known/openid-configuration`,
-				narrower: { hosts: ["idp.example", "x.example"] },
+				narrower: { hosts: ["idp.example", "x.example"], internal: issuer },
 			},
 		]);
 		const elsewhere = "https://keys.other.example/jwks";
@@ -396,8 +414,8 @@ describe("idp-oidc", () => {
 		]);
 		const hosts = ["idp.example", "keys.other.example"];
 		expect(policyAsked).toEqual([
-			{ url: `${issuer}/token`, narrower: { hosts } },
-			{ url: elsewhere, narrower: { hosts } },
+			{ url: `${issuer}/token`, narrower: { hosts, internal: `${issuer}/token` } },
+			{ url: elsewhere, narrower: { hosts, internal: elsewhere } },
 		]);
 		expect(refusalsOf(givenEndpoints)).toEqual([refused("token-endpoint"), refused("jwks-uri")]);
 	});
@@ -458,6 +476,46 @@ describe("idp-oidc", () => {
 		// An issuer that cannot be reached is not one that does not match.
 		const unreachable = await open({ describes: () => "unreachable" }).catch((e) => e);
 		expect(isUnavailable(unreachable)).toBe(true);
+	});
+
+	it("reaches as the operator's URL the issuer for all its description names, and each given endpoint for itself", async () => {
+		const described = await answering(await idToken());
+		await described.upstream.exchange(codeExchange());
+		expect(described.asked.map((a) => [a.url, a.internal])).toEqual([
+			[`${issuer}/.well-known/openid-configuration`, issuer],
+			[`${issuer}/token`, issuer],
+			[`${issuer}/jwks`, issuer],
+		]);
+		const elsewhere = "https://keys.other.example/jwks";
+		const given = await answering(await idToken(), {
+			settings: { ...givenEndpoints, "jwks-uri": elsewhere },
+			more: { [elsewhere]: () => ok({ keys: [rsa.jwk] }) },
+		});
+		await given.upstream.exchange(codeExchange());
+		expect(given.asked.map((a) => [a.url, a.internal])).toEqual([
+			[`${issuer}/token`, `${issuer}/token`],
+			[elsewhere, elsewhere],
+		]);
+	});
+
+	it("reaches an issuer at a private address as the operator's URL, only where outbound.internal-hosts lists its host", async () => {
+		const corp = "https://idp.corp";
+		/** outbound itself, every name resolving to a private address, a request ending fast. */
+		const reachOf = (internal: readonly string[]) => {
+			const settings = { allow: ["idp.corp"], "internal-hosts": internal, timeout: "300ms" };
+			const paths = outboundOver(outboundSection.parse(settings), async () => ["10.0.0.5"]);
+			return {
+				outbound: { fetch: paths.fetch } as Outbound,
+				refusals: { explained: paths.explained },
+			};
+		};
+		const settings = { issuer: corp };
+		// Unlisted, the address refuses the description at the issuer, as an upstream that does not match.
+		const refused = await open({ settings, reach: reachOf([]) }).catch((e) => e);
+		expect([refused instanceof UpstreamMismatch, refused.at]).toEqual([true, ["issuer"]]);
+		// Listed, it gets past the address to the connection, which cannot be made here.
+		const reached = await open({ settings, reach: reachOf(["idp.corp"]) }).catch((e) => e);
+		expect(isUnavailable(reached)).toBe(true);
 	});
 
 	it("reaches an endpoint the operator gives on another host", async () => {

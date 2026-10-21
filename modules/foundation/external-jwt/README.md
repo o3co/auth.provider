@@ -10,7 +10,7 @@
 
 ## Offers
 - The `externalJwt` contract: a verifier from a key source and the caller's policy, and the asymmetric algorithms it knows, typed as `Algorithm` (`keys`' `VerifyAlgorithm`).
-  - Key sources: JWKs written in; PEM keys, each for the algorithm it is given for; a key set at a URL, fetched through `outbound` from the caller's hosts.
+  - Key sources: JWKs written in; PEM keys, each for the algorithm it is given for; a key set at a URL, fetched through `outbound` from the caller's hosts, and as the operator's configured URL where the caller names one (`internal`).
   - Verifying answers valid (the header and claims, frozen), invalid with a reason, or unavailable when no key set can be had.
   - Reasons: `malformed`, `algorithm`, `no-key`, `ambiguous-key`, `signature`, `expired`, `not-yet`, `future-iat`, `too-long`, `issuer`, `audience`, `subject`. A caller maps them to its own words.
 - Composition definition, with the operator section `key-set-max-age` (written with its unit, `1h` to `30d`, default `1d`), how long after its fetch a key set is used while no new one can be had.
@@ -32,7 +32,7 @@
 - A refused destination, an unreachable host, or an answer that is no JSON is an outage; any other error is thrown.
 
 ## Data
-- Key sets, one per URL and set of hosts, held in the process; nothing is stored.
+- Key sets, one per URL, set of hosts and configured URL (one fetched as the operator's URL is never shared with one that is not), held in the process; nothing is stored.
 
 ## Depends on
 - `kernel`, `keys`, `outbound`

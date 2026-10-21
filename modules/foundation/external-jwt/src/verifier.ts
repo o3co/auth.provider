@@ -5,6 +5,7 @@ import { compactVerify, decodeProtectedHeader } from "jose";
 import type {
 	Algorithm,
 	ExternalJwt,
+	JwksSource,
 	KeySource,
 	Policy,
 	Reason,
@@ -38,21 +39,22 @@ export function externalJwtOver(deps: {
 	readonly keySetMaxAgeMs: number;
 }): ExternalJwt {
 	const sets = new Map<string, KeySet>();
-	const setAt = (url: string, written: readonly string[]) => {
+	const setAt = ({ url, hosts: written, internal }: JwksSource) => {
 		// A host is one name whatever its case or the root's trailing dot.
 		const hosts = [...new Set(written.map((h) => h.toLowerCase().replace(/\.$/, "")))].sort();
-		const key = JSON.stringify([url, hosts]);
+		// One fetched as the operator's URL is never shared with one that is not.
+		const key = JSON.stringify([url, hosts, internal ?? null]);
 		const kept = sets.get(key);
 		if (kept) return kept;
 		const made = jwksAt(
-			{ url, hosts },
+			{ url, hosts, ...(internal === undefined ? {} : { internal }) },
 			{ clock: deps.clock, outbound: deps.outbound, maxAgeMs: deps.keySetMaxAgeMs },
 		);
 		sets.set(key, made);
 		return made;
 	};
 	const chooserOf = (keys: KeySource): Choose => {
-		if ("jwks" in keys) return fromSet(setAt(keys.jwks.url, keys.jwks.hosts));
+		if ("jwks" in keys) return fromSet(setAt(keys.jwks));
 		const written =
 			"inline" in keys
 				? keys.inline.flatMap((jwk) => fromJwk(jwk) ?? [])

@@ -62,14 +62,20 @@ export function opened(s: Settings, outbound: Outbound): Upstream {
 				body: form.toString(),
 			};
 			return guarded(async () => {
-				const granted = await outbound.fetch(s["token-endpoint"], tokenRequest, { hosts });
+				const granted = await outbound.fetch(s["token-endpoint"], tokenRequest, {
+					hosts,
+					internal: s["token-endpoint"],
+				});
 				// GitHub answers a refused code with 200 and an error, so the token itself is required.
 				const { access_token } = answerOf(jsonObjectOf(granted), tokenAnswer);
 				const userRequest: OutboundRequest = {
 					headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
 					credential: `Bearer ${access_token}`,
 				};
-				const found = await outbound.fetch(userUrl(s.api), userRequest, { hosts });
+				const found = await outbound.fetch(userUrl(s.api), userRequest, {
+					hosts,
+					internal: s.api,
+				});
 				const read = answerOf(jsonObjectOf(found), user);
 				return { subject: String(read.id), amr: [], ...profileOf(read) };
 			});

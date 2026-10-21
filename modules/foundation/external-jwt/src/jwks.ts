@@ -35,7 +35,10 @@ export function jwksAt(
 			response = await deps.outbound.fetch(
 				source.url,
 				{ headers: { accept: "application/json" } },
-				{ hosts: source.hosts },
+				{
+					hosts: source.hosts,
+					...(source.internal === undefined ? {} : { internal: source.internal }),
+				},
 			);
 		} catch (error) {
 			if (isUnavailable(error) || DestinationRefused.is(error)) return;

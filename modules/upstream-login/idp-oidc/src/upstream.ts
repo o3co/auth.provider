@@ -26,7 +26,7 @@ import {
 	UpstreamRefused,
 } from "@mod/upstreams";
 import { z } from "zod";
-import { descriptionUrl, hostsOf, type Settings } from "./settings.ts";
+import { descriptionUrl, hostsOf, narrowerOf, type Settings, sentFor } from "./settings.ts";
 
 const description = z.looseObject({
 	issuer: z.string(),
@@ -59,10 +59,12 @@ const mismatch = (reason: string) => new UpstreamMismatch(reason, ["issuer"]);
 async function discovered(s: Settings, { outbound, refusals }: Reach, hosts: readonly string[]) {
 	const where = descriptionUrl(s.issuer);
 	// A destination outbound refuses, as an answer that does not hold, refuses boot under the issuer.
-	const fetched = await outbound.fetch(where, {}, { hosts }).catch((error: unknown) => {
-		if (!DestinationRefused.is(error)) throw error;
-		throw mismatch(`outbound's destination policy refuses the description: ${error.reason}`);
-	});
+	const fetched = await outbound
+		.fetch(where, {}, narrowerOf(hosts, s.issuer))
+		.catch((error: unknown) => {
+			if (!DestinationRefused.is(error)) throw error;
+			throw mismatch(`outbound's destination policy refuses the description: ${error.reason}`);
+		});
 	// Refused as the upstream's answer, which at boot refuses boot.
 	const described = answerOf(jsonObjectOf(fetched), description);
 	if (described.issuer !== s.issuer) throw mismatch("the description names another issuer");
@@ -85,7 +87,8 @@ async function discovered(s: Settings, { outbound, refusals }: Reach, hosts: rea
 	// The two this server sends to; a refusal here would fail every login.
 	const sent = { token_endpoint: described.token_endpoint, jwks_uri: described.jwks_uri };
 	for (const [name, url] of Object.entries(sent)) {
-		const refused = destinationRefusal(refusals, url, { hosts }, `the description's ${name}`);
+		const narrowed = narrowerOf(hosts, s.issuer);
+		const refused = destinationRefusal(refusals, url, narrowed, `the description's ${name}`);
 		if (refused !== undefined) throw mismatch(refused);
 	}
 	const endpoints: Endpoints = {
@@ -117,6 +120,7 @@ export async function opened(
 ): Promise<Upstream> {
 	const { outbound } = reach;
 	const hosts = hostsOf(s);
+	const from = sentFor(s);
 	const { endpoints, offersIss } = s.discovery
 		? await discovered(s, reach, hosts)
 		: { endpoints: given(s), offersIss: false };
@@ -129,7 +133,7 @@ export async function opened(
 		{
 			issuer: s.issuer,
 			client,
-			jwks: { url: endpoints.jwks, hosts },
+			jwks: { url: endpoints.jwks, ...narrowerOf(hosts, from.jwks) },
 			algorithms: s.algorithms,
 			skewMs,
 			emailVerified: [true],
@@ -159,7 +163,7 @@ export async function opened(
 		return outbound.fetch(
 			endpoints.token,
 			{ method: "POST", headers, body: form.toString(), ...sent },
-			{ hosts },
+			narrowerOf(hosts, from.token),
 		);
 	};
 	/** The login and the tokens of a code; its scopes are what an answer without a scope stands for. */
