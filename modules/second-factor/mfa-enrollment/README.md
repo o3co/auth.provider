@@ -25,4 +25,4 @@
 - What a binding keeps (the binding begun, the binding proof's challenge and pass, whether a proof passed) is what the transaction holds, each change made by `transactions`' `keep` from what it holds.
 
 ## Depends on
-- `kernel`, `http`, `mfa` (factor decisions, the label's shape), `mfa-binding-proof` (the binding proof), `mfa-extensions` (whom `mfa` is asked for), `session` (entry, raising), `subject-revocation`, `mfa-flows` (`flowParts`, `enrollmentFlow`).
+- `kernel`, `http`, `mfa` (factor decisions), `labels` (the label's shape), `mfa-binding-proof` (the binding proof), `mfa-extensions` (whom `mfa` is asked for), `session` (entry, raising), `subject-revocation`, `mfa-flows` (`flowParts`, `enrollmentFlow`).
