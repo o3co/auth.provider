@@ -8,7 +8,7 @@ It continues the [login page guide](login-page.md): a password login, then a one
 
 <!-- generated:command -->
 ```sh
-npx @o3co/create-auth-provider@next my-provider --pattern simple-web --axis @mod/store=@mod/redis --axis @mod/users=@mod/users-http --second-factor @mod/mfa,@mod/mfa-flows,@mod/mfa-totp
+npx @o3co/create-auth-provider my-provider --pattern simple-web --axis @mod/store=@mod/redis --axis @mod/users=@mod/users-http --second-factor @mod/mfa,@mod/mfa-flows,@mod/mfa-totp
 ```
 <!-- end generated -->
 
