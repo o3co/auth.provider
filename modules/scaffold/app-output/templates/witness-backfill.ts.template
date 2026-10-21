@@ -1,0 +1,85 @@
+import { randomBytes } from "node:crypto";
+import { loadConfig } from "{{configFiles}}";
+import { assemble, BootRefused, isUnavailable } from "{{kernel}}";
+import { witnessBackfill } from "{{entry}}";
+{{imports}}
+
+/** A refused boot: each refusal on its own line of standard error, then exit 78. */
+const refused = (error: unknown): never => {
+	if (!(error instanceof BootRefused)) throw error;
+	for (const refusal of error.refusals) {
+		process.stderr.write(`refused ${refusal.where}: ${refusal.reason}\n`);
+	}
+	process.exit(78);
+};
+
+/** The longest subject, in bytes. */
+const longest = 255;
+
+/**
+ * Each line of standard input as it was sent, without its line ending, or undefined for a line
+ * longer than a subject may be. No more of a line than that is ever held.
+ */
+async function* lines(input: AsyncIterable<Buffer>): AsyncGenerator<string | undefined> {
+	let held: Buffer[] = [];
+	let size = 0;
+	// One byte more, for a carriage return before the line feed.
+	const hold = (part: Buffer) => {
+		size += part.length;
+		held = size > longest + 1 ? [] : [...held, part];
+	};
+	const line = () => {
+		const text = size > longest + 1 ? undefined : Buffer.concat(held).toString("utf8").replace(/\r$/, "");
+		held = [];
+		size = 0;
+		return text === undefined || Buffer.byteLength(text) > longest ? undefined : text;
+	};
+	for await (const chunk of input) {
+		let from = 0;
+		for (let at = chunk.indexOf(10); at !== -1; at = chunk.indexOf(10, from)) {
+			hold(chunk.subarray(from, at));
+			yield line();
+			from = at + 1;
+		}
+		hold(chunk.subarray(from));
+	}
+	if (size > 0) yield line();
+}
+
+// The script tells only its counts, so it writes no log line, which could carry a subject.
+const quiet = () => undefined;
+const runtime = {
+	clock: { now: () => Date.now() },
+	random: { bytes: (length: number) => new Uint8Array(randomBytes(length)) },
+	log: { trace: quiet, debug: quiet, info: quiet, warn: quiet, error: quiet, fatal: quiet },
+};
+
+// The app as `start` builds it, never started: no route is served while marks are filled.
+const files = (process.env.APP_CONFIG ?? "config/application.conf").split(",");
+const app = await loadConfig({ files, env: process.env })
+	.then((config) => assemble({ modules: [{{modules}}], config, runtime }))
+	.catch(refused);
+const backfill = app.get(witnessBackfill);
+const counts = { marked: 0, held: 0, none: 0, inconsistent: 0, failed: 0 };
+// One subject a line, used as sent; only an empty line is skipped. No subject is ever written out.
+for await (const subject of lines(process.stdin)) {
+	if (subject === "") continue;
+	if (subject === undefined) {
+		counts.failed += 1;
+		continue;
+	}
+	try {
+		counts[await backfill.settle(subject)] += 1;
+	} catch (error) {
+		counts.failed += 1;
+		// Anything but an outage may come again for every subject, and may carry one: stop, telling none of it.
+		if (!isUnavailable(error)) break;
+	}
+}
+process.stdout.write(
+	`marked ${counts.marked} held ${counts.held} none ${counts.none} inconsistent ${counts.inconsistent} failed ${counts.failed}\n`,
+);
+// Stopped, though never started, so its stop hooks run; a stop that fails keeps the code.
+await app.stop().catch(() => undefined);
+// An inconsistent subject is counted, not failed: only a subject that could not be settled is 1.
+process.exit(counts.failed === 0 ? 0 : 1);

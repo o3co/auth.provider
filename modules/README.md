@@ -215,6 +215,7 @@ What each module contains is described by that module's contract card (each modu
 | What `begin` asks before a subject's first counting factor | extension point kind | mfa-extensions |
 | The enrollment witness: who remembers, apart from mfa's store, that a subject holds a counting factor, and its promises | extension point kind / contract | mfa-witness |
 | The enrollment witness kept at the operator's HTTP ledger, its request shape, deadline and credential | contribution / setting | mfa-witness-http |
+| Keeping the enrollment witness in line with mfa's counting factors, and filling a missing mark | contribution / contract | mfa-witnessing |
 | WebAuthn ceremonies (options and when their challenge ends, verifying responses, the signature count, the user handle) | contract | webauthn |
 | Passkeys (each subject's user handle and credentials), assertions by them, registering them for a subject, reading a credential and making a user handle | contract / setting / data | webauthn |
 | Registering passkeys from a session (the registration routes), and their request budget | route / setting | passkey-registration |

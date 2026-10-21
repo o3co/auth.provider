@@ -1,0 +1,29 @@
+{
+	"name": "@mod/mfa-witnessing",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"optIn": true,
+	"joins": [
+		"@mod/mfa",
+		"@mod/mfa-witness-http"
+	],
+	"exports": {
+		".": "./src/contract.ts",
+		"./module": "./src/module.ts",
+		"./audit-events": "./src/audit-events.ts"
+	},
+	"dependencies": {
+		"@mod/audit": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/mfa": "workspace:*",
+		"@mod/mfa-witness": "workspace:*"
+	},
+	"devDependencies": {
+		"@mod/mfa-extensions": "workspace:*",
+		"@mod/records": "workspace:*",
+		"@mod/seal": "workspace:*",
+		"vitest": "5.0.4"
+	}
+}

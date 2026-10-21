@@ -90,6 +90,18 @@ it("adds the reseal entry when seal is composed", async () => {
 	expect(await read(target, "src/reseal.ts")).toContain('from "@o3co/x-seal"');
 });
 
+it("adds the witness-backfill entry when mfa-witnessing is composed", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/mfa-witnessing"], fakePackages(), readme);
+
+	const manifest = JSON.parse(await read(target, "package.json"));
+	expect(manifest.scripts["witness-backfill"]).toBe(
+		"node --env-file-if-exists=.env src/witness-backfill.ts",
+	);
+	expect(manifest.scripts.reseal).toBeUndefined();
+	expect(await read(target, "src/witness-backfill.ts")).toContain('from "@o3co/x-mfa-witnessing"');
+});
+
 it("refuses a target that holds anything, and writes nothing", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
 	await writeFile(join(target, "kept"), "");

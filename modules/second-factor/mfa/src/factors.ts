@@ -7,13 +7,11 @@ import {
 	type Opened,
 	secondFactorAmr,
 } from "@mod/mfa-extensions";
-import type { EnrollmentWitness } from "@mod/mfa-witness";
 import type { Seal } from "@mod/seal";
 import events from "./audit-events.ts";
-import type { Factors, Fence, Shown } from "./contract.ts";
+import type { Asked, Factors, Fence, Shown, Witnessing } from "./contract.ts";
 import { type Factor, factorRecords, sealContext } from "./records/records.ts";
 import type { FactorStore } from "./store.ts";
-import { settlingOf, standingOf } from "./witness/witness.ts";
 
 export interface FactorParts {
 	readonly stored: FactorStore;
@@ -25,8 +23,8 @@ export interface FactorParts {
 	readonly random: (n: number) => Uint8Array;
 	readonly now: () => number;
 	readonly audit: Audit;
-	/** Who remembers, apart from the store, that a subject enrolled; none composed leaves the store alone to tell. */
-	readonly witness: EnrollmentWitness | undefined;
+	/** Who tells, apart from the store, that a subject enrolled; none leaves the store alone to tell. */
+	readonly witnessing: Witnessing | undefined;
 	readonly log: Pick<Log, "warn">;
 }
 
@@ -123,12 +121,35 @@ export function factorDecisions(p: FactorParts): Factors {
 		};
 		return { factor, show: enrolled.show };
 	};
-	const standing = standingOf(p);
-	const settle = settlingOf({
-		witness: p.witness,
-		counting: async (subject) => counting(await records.list(subject), p.kinds).length > 0,
-		token: id,
-	});
+	const standing = async (subject: string, counts: boolean, at: Asked) =>
+		p.witnessing
+			? p.witnessing.standing(subject, counts, at)
+			: counts
+				? ("held" as const)
+				: ("none" as const);
+	/**
+	 * A counting factor with a unique value counts once its claim names it: before, its binding may
+	 * still end as a duplicate. One written before claims were kept counts unless another holds it.
+	 */
+	const stands = async (subject: string, factor: Factor) => {
+		const unique = p.kinds
+			.get(factor.kind)
+			?.uniqueSecret?.({ secret: secretOf(subject, factor), state: factor.state });
+		if (unique === undefined) return true;
+		if (await records.claimedFor(subject, factor.kind, unique, factor.id)) return true;
+		if (factor.claims) return false;
+		return !(await records.heldByAnother(subject, factor.kind, unique, factor.id));
+	};
+	/** The ids of the subject's counting factors that stand, as `stands` reads them. */
+	const standingIds = async (subject: string) => {
+		const ids = new Set<string>();
+		for (const factor of counting(await records.list(subject), p.kinds)) {
+			if (await stands(subject, factor)) ids.add(factor.id);
+		}
+		return ids;
+	};
+	const countsNow = async (subject: string) => (await standingIds(subject)).size > 0;
+	const settle = async (subject: string) => p.witnessing?.settle(subject, () => countsNow(subject));
 	/** A first binding refused, recorded with why; nothing of it is kept. */
 	const closed = (subject: string, kind: string, reason: "competing" | "reset-cleared") => {
 		audited.record("mfa.first_binding_conflict", { subject, attributes: { kind, reason } });
@@ -142,7 +163,7 @@ export function factorDecisions(p: FactorParts): Factors {
 			fence: true,
 			verdict: { count: all.length, kinds: [...new Set(all.map((f) => f.kind))].sort() },
 		}));
-		await p.witness?.clear(subject);
+		await p.witnessing?.cleared(subject);
 		return cleared;
 	};
 	return {
@@ -151,6 +172,7 @@ export function factorDecisions(p: FactorParts): Factors {
 			const counts = counting(await records.list(subject), p.kinds).length > 0;
 			return (await standing(subject, counts, at)) === "held";
 		},
+		countingWritten: (subject) => countsNow(subject),
 		secondFactorRequired: () => p.required,
 		asks: async (subject) => {
 			const all = await records.list(subject);
@@ -267,7 +289,7 @@ export function factorDecisions(p: FactorParts): Factors {
 			// Asked from a login, it binds only as the first, whenever and however it began.
 			const asFirst = found.first || from?.kind === "login";
 			// A mark beside nothing counting is a store that lost its factors: no first binding refills it.
-			if (asFirst && p.witness) {
+			if (asFirst && p.witnessing) {
 				const counts = counting(await records.list(subject), p.kinds).length > 0;
 				await standing(subject, counts, "binding");
 			}
@@ -280,6 +302,7 @@ export function factorDecisions(p: FactorParts): Factors {
 				secret: p.seal.seal(found.secret, sealContext(subject, fid)),
 				state,
 				boundAt: p.now(),
+				...(unique !== undefined ? { claims: true as const } : {}),
 			};
 			const backed = [...p.kinds.values()].some(isWayBack);
 			// Decided on the factors as written: of two first bindings at once, one binds.
@@ -331,6 +354,8 @@ export function factorDecisions(p: FactorParts): Factors {
 			);
 		},
 		remove: async (subject, target, fence) => {
+			// Read before the write: a factor written since, not read here, does not stand for the subject.
+			const stood = p.required || p.witnessing ? await standingIds(subject) : new Set<string>();
 			const removed = await records.decide<"unknown" | "last" | "fenced" | { kind: string }>(
 				subject,
 				(all, fences) => {
@@ -340,7 +365,9 @@ export function factorDecisions(p: FactorParts): Factors {
 					const rest = all.filter((f) => f.id !== target);
 					const counted = counting(rest, p.kinds).length > 0;
 					// Under a witness only a reset ends an enrollment: its mark stays, so no factor would stand for it.
-					if ((p.required || p.witness) && !counted) return { verdict: "last" };
+					// One not yet claimed may still end as a duplicate, so it does not stand for the subject.
+					const stays = rest.some((f) => stood.has(f.id));
+					if ((p.required || p.witnessing) && !stays) return { verdict: "last" };
 					// A way back left alone would hold every login once its codes run out: it goes with the last counting factor.
 					return { next: counted ? rest : rest.filter((f) => !wayBack(f)), verdict: { kind } };
 				},

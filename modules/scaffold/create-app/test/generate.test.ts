@@ -128,6 +128,7 @@ it("reads its fragments' scalars from env and writes their lists locally, with a
 	expect(ignored).toContain(".env");
 	expect(ignored).toContain("!.env.example");
 	await expect(readFile(join(target, "src", "reseal.ts"), "utf8")).rejects.toThrow();
+	await expect(readFile(join(target, "src", "witness-backfill.ts"), "utf8")).rejects.toThrow();
 	const guide = await readFile(join(target, "README.md"), "utf8");
 	expect(guide).toContain("from the modules listed: `@mod/tokens`.");
 	expect(guide).toContain("- `tokens.revocation`:");
@@ -161,6 +162,30 @@ it("boots a listed app on its generated configuration filled, holding what its m
 	const run = await startsAndStops(target);
 	expect(run.output).toContain('"event":"http.listening"');
 	expect(run.code, run.output).toBe(0);
+});
+
+it("writes a witness-backfill script for an app that keeps the enrollment witness, settling each subject it reads", async () => {
+	const target = await mkdtemp(join(tmpdir(), "create-app-"));
+	await generate({ target, modules: ["@mod/mfa-witnessing", "@mod/log-stdout"], workspace: root });
+	const manifest = JSON.parse(await readFile(join(target, "package.json"), "utf8"));
+	expect(manifest.scripts["witness-backfill"]).toBe(
+		"node --env-file-if-exists=.env src/witness-backfill.ts",
+	);
+	const source = await readFile(join(target, "src", "witness-backfill.ts"), "utf8");
+	// The app built and never started, a subject a line from standard input, and only counts told.
+	for (const part of [/witnessBackfill/, /\.settle\(/, /process\.stdin/, /await app\.stop\(\)/]) {
+		expect(source).toMatch(part);
+	}
+	expect(source).not.toMatch(/app\.start\(/);
+	await linked(target);
+	const run = spawnSync(process.execPath, ["src/witness-backfill.ts"], {
+		cwd: target,
+		env: { ...process.env, APP_CONFIG: "config/application.conf" },
+		input: "alice\n",
+		encoding: "utf8",
+	});
+	// Its sections unset, boot is refused as the app's is, telling no subject.
+	expect([run.status, run.stdout]).toEqual([78, ""]);
 });
 
 it("writes a reseal script for an app that seals, which seals again through each holder and tells the counts", async () => {

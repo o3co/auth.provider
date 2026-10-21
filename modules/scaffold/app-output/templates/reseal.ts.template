@@ -1,6 +1,6 @@
 import { loadConfig } from "{{configFiles}}";
 import { assemble, BootRefused } from "{{kernel}}";
-import { resealing } from "{{seal}}";
+import { resealing } from "{{entry}}";
 {{imports}}
 
 /** A refused boot: each refusal on its own line of standard error, then exit 78. */

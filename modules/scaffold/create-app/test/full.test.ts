@@ -84,6 +84,17 @@ it("names by hand only the keys no module's example holds", async () => {
 	}
 });
 
+it("writes a witness-backfill script where the enrollment witness is kept, and none where it is not", async () => {
+	const kept = await generated(["@mod/mfa-witness-http"]);
+	const pkg = JSON.parse(await read(kept, "package.json"));
+	expect(pkg.scripts["witness-backfill"]).toBe(
+		"node --env-file-if-exists=.env src/witness-backfill.ts",
+	);
+	expect(await read(kept, "src/witness-backfill.ts")).toMatch(/witnessBackfill/);
+	const plain = JSON.parse(await read(await generated(), "package.json"));
+	expect(plain.scripts["witness-backfill"]).toBeUndefined();
+});
+
 it("assembles the features added, with their wirings, bridges and default adapters", async () => {
 	const add = ["@mod/device-grant", "@mod/mfa-email"];
 	const target = await generated(add);
