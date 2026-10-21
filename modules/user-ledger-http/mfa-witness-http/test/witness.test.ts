@@ -16,6 +16,7 @@ import { type Narrower, outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
 import {
 	credentialPolicy,
+	credentialRefusalText,
 	outboundLimits,
 	outboundRefusals,
 	policyOf,
@@ -364,6 +365,32 @@ describe("mfa-witness-http", () => {
 			const refusals = (error as BootRefused).refusals;
 			expect(refusals.map((r) => r.where)).toEqual([where]);
 			expect(JSON.stringify(refusals)).not.toContain(credential);
+		}
+	});
+
+	it("says why its credential may not go in outbound-policy's words, for the scheme and for its URLs' one origin", async () => {
+		const refusedFor = async (refusal: "origins" | "scheme") => {
+			const standIn = defineModule({ name: "outbound" }, (m) => [
+				m.provide(outbound).by(() => ({
+					fetch: async () => {
+						throw new Error("never sent");
+					},
+				})),
+				m.provide(outboundRefusals).by(() => ({ explained: () => undefined })),
+				m.provide(credentialPolicy).by(() => ({ refusalOf: () => refusal })),
+				m.provide(outboundLimits).by(() => ({ of: () => ({ timeoutMs: 1000, maxBytes: 1024 }) })),
+			]);
+			const error = await assemble({
+				modules: [standIn, witnessHttp, collector],
+				config: { ...kernelConfig(), "mfa-witness-http": settings() },
+				runtime: quietRuntime({ clock: { now: () => now } }),
+			}).catch((e: unknown) => e);
+			return (error as BootRefused).refusals;
+		};
+		for (const refusal of ["scheme", "origins"] as const) {
+			expect(await refusedFor(refusal), refusal).toEqual([
+				{ where: "mfa-witness-http.credential", reason: credentialRefusalText(refusal) },
+			]);
 		}
 	});
 

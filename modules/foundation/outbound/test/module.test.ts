@@ -1,6 +1,12 @@
 import { assemble, BootRefused, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
-import { type OutboundRefusals, outboundLimits, outboundRefusals } from "@mod/outbound-policy";
+import {
+	type OutboundRefusals,
+	outboundLimits,
+	outboundRefusals,
+	policyOf,
+	policySettings,
+} from "@mod/outbound-policy";
 import { configuredUrl } from "@mod/url-setting/testing";
 import { afterEach, expect, it, vi } from "vitest";
 import { type Narrower, outbound, signedOutbound } from "../src/contract.ts";
@@ -21,19 +27,12 @@ const onlyProxy = (name?: string) => {
 const boot = (settings: Record<string, unknown> = {}) =>
 	assemble({ modules: [outboundModule], config: { ...kernelConfig(), outbound: settings } });
 
-it("holds to the defaults", () => {
+it("holds to the defaults: outbound-policy's for its keys, and outbound's own", () => {
 	expect(section.parse({})).toEqual({
-		allow: [],
-		"allow-any-public": false,
-		deny: [],
-		"plain-loopback": [],
-		"max-response-size": 65_536,
-		"signed-max-response-size": 1_048_576,
-		timeout: 5000,
+		...policySettings.parse({}),
 		"max-concurrent": 16,
 		"direct-despite-proxy": false,
 		"direct-hosts": [],
-		"internal-hosts": [],
 	});
 });
 
@@ -185,6 +184,23 @@ it("boots with a proxy configured whatever the variables say, and warns what it 
 	expect(JSON.stringify(recorded.lines())).not.toContain("dGVzdA==");
 });
 
+it("warns at each boot that names plain-internal pairs, telling their count alone", async () => {
+	const recorded = recordingLog();
+	const booted = (outboundSettings: Record<string, unknown>) =>
+		assemble({
+			modules: [outboundModule],
+			config: { ...kernelConfig(), outbound: outboundSettings },
+			runtime: quietRuntime({ log: recorded.log }),
+		});
+	await booted({});
+	expect(recorded.lines()).toEqual([]);
+	await booted({ "plain-internal": ["ledger.internal:9092", "keys.internal:8080"] });
+	expect(recorded.lines().map((line) => [line.level, line.event, line.fields])).toEqual([
+		["warn", "outbound.plain_internal", { count: 2 }],
+	]);
+	expect(JSON.stringify(recorded.lines())).not.toContain("internal:");
+});
+
 it("boots on many instances, holding nothing they would need to share", async () => {
 	const config = { ...kernelConfig({ deployment: "multi" }), outbound: {} };
 	await expect(assemble({ modules: [outboundModule], config })).resolves.toBeDefined();
@@ -273,16 +289,15 @@ it("answers at boot why the policy refuses a URL, or nothing when it lets it thr
 
 it("explains at boot why the policy refuses a URL by the keys that let it through, naming no value", async () => {
 	onlyProxy();
-	const named = (
-		await boot({
-			allow: ["api.example", "127.0.0.1"],
-			"plain-loopback": ["127.0.0.1:8080"],
-			deny: ["bad.example"],
-		})
-	).get(outboundRefusals);
+	const rules = {
+		allow: ["api.example", "127.0.0.1"],
+		"plain-loopback": ["127.0.0.1:8080"],
+		deny: ["bad.example"],
+	};
+	const named = (await boot(rules)).get(outboundRefusals);
 	const allow = "not-allowed: name the host in outbound.allow, or set outbound.allow-any-public";
-	const plain =
-		"scheme: plain http reaches only a host:port that outbound.plain-loopback names; otherwise write the URL with https";
+	// The policy's own words for plain http, which outbound-policy's tests hold: outbound hands them on.
+	const plain = policyOf(policySettings.parse(rules)).explain("http://api.example/");
 	const expected: Record<string, string | undefined> = {
 		"https://api.example/x": undefined,
 		"https://other.example/": allow,

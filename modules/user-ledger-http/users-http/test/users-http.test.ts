@@ -12,7 +12,13 @@ import {
 } from "@mod/kernel";
 import { type Narrower, outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
-import { credentialPolicy, outboundRefusals } from "@mod/outbound-policy";
+import {
+	credentialPolicy,
+	credentialRefusalText,
+	outboundRefusals,
+	policyOf,
+	policySettings,
+} from "@mod/outbound-policy";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Ledger, ledgers, userAttribute, users } from "@mod/users";
 import usersModule from "@mod/users/module";
@@ -640,7 +646,10 @@ describe("users-http", () => {
 			[
 				["127.0.0.1"],
 				"http://127.0.0.1:8/ledger/authenticate",
-				"scheme: plain http reaches only a host:port that outbound.plain-loopback names; otherwise write the URL with https",
+				// The policy's own words for plain http, which outbound-policy's tests hold.
+				policyOf(policySettings.parse({ allow: ["127.0.0.1"] })).explain(
+					"http://127.0.0.1:8/ledger/authenticate",
+				),
 			],
 		] as const;
 		for (const [allow, url, reason] of refused) {
@@ -781,6 +790,59 @@ describe("users-http looking a user up by subject", () => {
 		await expect(
 			bootBoth({ "verify-url": `http://${pair}/ledger/authenticate`, "subject-url": other }),
 		).resolves.toBeDefined();
+	});
+
+	it("starts with its credential to a ledger at a plain-internal pair, and says how to name one where plain http is refused", async () => {
+		const internal = "ledger.internal:9092";
+		const at = (pairs: readonly string[]) =>
+			assemble({
+				modules: [
+					outboundModule,
+					usersModule,
+					secretHashModule,
+					memoryUsersStores().module,
+					usersHttp,
+				],
+				config: {
+					...kernelConfig(),
+					outbound: { allow: ["ledger.internal"], "plain-internal": pairs },
+					"users-http": { "verify-url": `http://${internal}/verify`, credential },
+				},
+				runtime,
+			});
+		await expect(at([internal])).resolves.toBeDefined();
+		await expect(at([])).rejects.toMatchObject({
+			refusals: [
+				{
+					where: "users-http.verify-url",
+					reason: expect.stringContaining("outbound.plain-internal"),
+				},
+			],
+		});
+	});
+
+	it("says why its credential may not go in outbound-policy's words", async () => {
+		for (const refusal of ["origins", "scheme"] as const) {
+			const standIn = defineModule({ name: "outbound" }, (m) => [
+				m.provide(outbound).by(() => ({
+					fetch: async () => {
+						throw new Error("never sent");
+					},
+				})),
+				m.provide(outboundRefusals).by(() => ({ explained: () => undefined })),
+				m.provide(credentialPolicy).by(() => ({ refusalOf: () => refusal })),
+			]);
+			await expect(
+				assemble({
+					modules: [standIn, usersModule, secretHashModule, memoryUsersStores().module, usersHttp],
+					config: { ...kernelConfig(), "users-http": settings() },
+					runtime,
+				}),
+				refusal,
+			).rejects.toMatchObject({
+				refusals: [{ where: "users-http.credential", reason: credentialRefusalText(refusal) }],
+			});
+		}
 	});
 
 	it("refuses to start on a subject-url outbound's policy refuses, saying why", async () => {

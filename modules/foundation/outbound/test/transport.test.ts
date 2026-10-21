@@ -13,10 +13,32 @@ import {
 import { isUnavailable } from "@mod/kernel";
 import { policyOf, policySettings } from "@mod/outbound-policy";
 import { configuredUrl } from "@mod/url-setting/testing";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { DestinationRefused, type OutboundUnavailable } from "../src/contract.ts";
 import { lookupsAtOnce, outboundOver, section } from "../src/module.ts";
 import { type Resolver, send } from "../src/transport.ts";
+
+// A connection to `rerouted.from` reaches a local server instead, and is recorded: a private address
+// the transport checked is dialed, and nothing is sent anywhere else.
+const rerouted = vi.hoisted(() => ({
+	from: "",
+	to: 0,
+	dials: [] as { host: string | undefined; port: number | undefined }[],
+}));
+vi.mock("node:net", async (original) => {
+	const real = await original<typeof import("node:net")>();
+	return {
+		...real,
+		connect: (...args: unknown[]) => {
+			const options = args[0] as { host?: unknown; port?: number } | null;
+			if (typeof options === "object" && options?.host === rerouted.from) {
+				rerouted.dials.push({ host: rerouted.from, port: options.port });
+				return real.connect({ host: "127.0.0.1", port: rerouted.to });
+			}
+			return (real.connect as (...a: unknown[]) => ReturnType<typeof real.connect>)(...args);
+		},
+	};
+});
 
 /** The operator's policy at its plainest, checking the addresses a test's admitted URL reaches. */
 const anyPublic = policyOf(policySettings.parse({ "allow-any-public": true }));
@@ -439,6 +461,72 @@ describe("outbound", () => {
 		expect((await own).status).toBe(200);
 		settles.get("a.svc.test")?.(["127.0.0.1"]);
 		await resolving;
+	});
+
+	it("sends plain http to a plain-internal pair only where every address is private, checked on each request", async () => {
+		let answer: readonly string[] = [];
+		const resolve: Resolver = async () => answer;
+		const received: { authorization?: string; body: string }[] = [];
+		const ledgerServer = createServer((req, res) => {
+			const chunks: Buffer[] = [];
+			req.on("data", (chunk: Buffer) => chunks.push(chunk));
+			req.on("end", () => {
+				received.push({
+					...(req.headers.authorization ? { authorization: req.headers.authorization } : {}),
+					body: Buffer.concat(chunks).toString(),
+				});
+				res.end("ok");
+			});
+		});
+		await new Promise<void>((ready) => ledgerServer.listen(0, "127.0.0.1", ready));
+		Object.assign(rerouted, {
+			from: "10.255.255.1",
+			to: (ledgerServer.address() as AddressInfo).port,
+			dials: [],
+		});
+		const pair = "ledger.internal:9092";
+		const outbound = over(resolve, { "plain-internal": [pair] });
+		const ledger = `http://${pair}/verify`;
+		const own = { internal: configuredUrl(ledger) };
+		for (const [addresses, reason] of [
+			[["93.184.216.34"], "plain-public"],
+			[["10.1.2.3", "93.184.216.34"], "plain-public"],
+			[["93.184.216.34", "10.1.2.3"], "plain-public"],
+			[[], "special-address"],
+			[["127.0.0.1"], "special-address"],
+			[["169.254.169.254"], "special-address"],
+			[["::ffff:100.100.100.200"], "special-address"],
+			[["fd00:ec2::254"], "special-address"],
+			[["fe80::1"], "special-address"],
+			[["64:ff9b::a01:203"], "special-address"],
+		] as const) {
+			answer = addresses;
+			expect(await failure(outbound.fetch(ledger, {}, own)), addresses.join()).toBe(reason);
+		}
+		// Private alone: the request, its credential and its body, goes to the checked address itself.
+		answer = ["10.255.255.1"];
+		const asked = {
+			method: "POST",
+			credential: "Bearer s3cret",
+			body: '{"subject":"alice"}',
+		} as const;
+		const answered = await outbound.fetch(ledger, asked, own);
+		expect([answered.status, rerouted.dials, received]).toEqual([
+			200,
+			[{ host: "10.255.255.1", port: 9092 }],
+			[{ authorization: "Bearer s3cret", body: '{"subject":"alice"}' }],
+		]);
+		// The next request asks again: a name turned public is refused, with no second connection
+		// and no credential sent.
+		answer = ["93.184.216.34"];
+		expect(await failure(outbound.fetch(ledger, asked, own))).toBe("plain-public");
+		expect([rerouted.dials.length, received.length]).toEqual([1, 1]);
+		// Without the caller's own URL, or for an outside party's choice, plain http is not taken at all.
+		expect(await failure(outbound.fetch(ledger))).toBe("scheme");
+		expect(await failure(outbound.fetch(ledger, {}, { ...own, outsideChosen: true }))).toBe(
+			"scheme",
+		);
+		await new Promise((closed) => ledgerServer.close(closed));
 	});
 
 	it("answers how many names a caller may resolve at once, the outside party's share apart", () => {

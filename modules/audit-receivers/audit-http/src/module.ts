@@ -1,23 +1,29 @@
 import { auditReceivers } from "@mod/audit";
 import { defineModule } from "@mod/kernel";
 import { outbound } from "@mod/outbound";
-import { credentialPolicy, destinationRefusal, outboundRefusals } from "@mod/outbound-policy";
+import {
+	credentialPolicy,
+	credentialRefusalText,
+	destinationRefusal,
+	outboundRefusals,
+} from "@mod/outbound-policy";
 import { section } from "./section.ts";
 
 export default defineModule({ name: "audit-http", section, replicaSafe: true }, (m) => [
 	m.contribute(auditReceivers).by(async (c) => {
 		const { url, authorization } = c.section;
-		// The operator's own URL: a collector at a host in `internal-hosts` is reached at a private address at its origin.
+		// The operator's own URL: a collector is reached at a private address at its origin, for a
+		// host in `internal-hosts` or a `plain-internal` pair.
 		const own = { internal: url };
 		const refused = destinationRefusal(await c.get(outboundRefusals), url, own);
 		if (refused !== undefined) {
 			return c.refuse("audit-http.url", refused);
 		}
-		if (authorization !== undefined && (await c.get(credentialPolicy)).refusalOf([url])) {
-			return c.refuse(
-				"audit-http.url",
-				"a secret Authorization value goes over https alone, or to a named plain-loopback pair",
-			);
+		const credentialRefused =
+			authorization === undefined ? undefined : (await c.get(credentialPolicy)).refusalOf([url]);
+		if (credentialRefused !== undefined) {
+			const reason = `a secret Authorization value ${credentialRefusalText(credentialRefused)}`;
+			return c.refuse("audit-http.url", reason);
 		}
 		const out = await c.get(outbound);
 		const headers = { "content-type": "application/json" };

@@ -11,7 +11,14 @@ import {
 	type Rules,
 } from "../src/policy.ts";
 
-const open: Rules = { allow: [], anyPublic: true, deny: [], plainLoopback: [], internal: [] };
+const open: Rules = {
+	allow: [],
+	anyPublic: true,
+	deny: [],
+	plainLoopback: [],
+	internal: [],
+	plainInternal: [],
+};
 const reasonOf = (run: () => unknown): RefusalReason | "admitted" => {
 	try {
 		run();

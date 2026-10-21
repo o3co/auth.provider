@@ -170,7 +170,7 @@ Compose `mfa-witness-http` to have the outside user ledger remember which subjec
 
 **Setting it up.**
 
-- Serve `read-url`, `enroll-url` and `clear-url` on one origin, over https (or a plain-http `host:port` at loopback named in `outbound.plain-loopback`). Boot is refused on URLs at two origins. Allow the host in `outbound.allow`, and in `outbound.internal-hosts` when it has a private address.
+- Serve `read-url`, `enroll-url` and `clear-url` on one origin, over https (or plain http at a `host:port` named in `outbound.plain-loopback`, at loopback, or in `outbound.plain-internal`, at private addresses on a network you trust). Boot is refused on URLs at two origins. Allow the host in `outbound.allow`; over https, list it in `outbound.internal-hosts` too when it has a private address. A `plain-internal` pair needs no `internal-hosts` entry.
 - Make the credential random, at least 32 bytes (for example `openssl rand -base64 32`), and set it as `mfa-witness-http.credential`. The provider sends it as `Authorization: Bearer` on every call.
 
 **What the ledger must do.** The provider cannot check any of this; it is yours to keep.

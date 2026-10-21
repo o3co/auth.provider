@@ -12,7 +12,9 @@ export type RefusalReason =
 	/** A 3xx answer, which the sender refuses as this rule says: a redirect is never followed. */
 	| "redirect"
 	/** A credential where none may go: material fetched for its signature. */
-	| "credential";
+	| "credential"
+	/** A pair plain-internal names that resolved to a public address: plain http reaches only private ones. */
+	| "plain-public";
 
 export class DestinationRefused extends Error {
 	readonly reason: RefusalReason;
@@ -31,7 +33,8 @@ export interface Narrower {
 	readonly timeoutMs?: number;
 	/**
 	 * The operator's URL, as url-setting read it from their configuration: a request at its origin
-	 * may reach a private address when `internal-hosts` lists the host.
+	 * may reach a private address when `internal-hosts` lists the host, or over plain http when
+	 * `plain-internal` names its host:port.
 	 */
 	readonly internal?: ConfiguredUrl;
 	/** An outside party chooses the destination (a client's metadata document, say): its name lookups take a share apart, so they never hold every lookup. */
@@ -64,7 +67,14 @@ export function destinationRefusal(
 	return explained && `outbound's destination policy refuses ${what}: ${explained}`;
 }
 
-/** Why a credential must not go to a set of URLs: more than one origin, or a URL neither https nor a named plain-loopback pair. */
+/** Why a credential may not go, in words every caller of `outbound.credentials` gives the operator alike. */
+export function credentialRefusalText(refusal: CredentialRefusal): string {
+	return refusal === "scheme"
+		? "goes over https alone, or to a host:port outbound.plain-loopback or outbound.plain-internal names"
+		: "is sent to one origin alone, but the URLs name more than one";
+}
+
+/** Why a credential must not go to a set of URLs: more than one origin, or a URL neither https nor a named plain-loopback or plain-internal pair. */
 export type CredentialRefusal = "origins" | "scheme";
 
 /** Where a caller's credential may go, answered at boot, apart from sending. */
@@ -101,6 +111,8 @@ export interface Admitted {
 	readonly loopback: boolean;
 	/** The caller's URL is the operator's and `internal` lists its host: private addresses are reached. */
 	readonly internal: boolean;
+	/** Plain http to a pair `plain-internal` names, for the operator's own URL there: every address must be private. */
+	readonly plainInternal?: boolean;
 }
 
 /** The operator's destination policy and caps, made once from the settings, for the sender and for boot alike. */

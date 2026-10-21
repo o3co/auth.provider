@@ -21,7 +21,9 @@ import {
 	kernelConfig,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
+import { credentialPolicy, credentialRefusalText, outboundRefusals } from "@mod/outbound-policy";
 import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { simulatedStore } from "@mod/store/testing";
@@ -238,6 +240,26 @@ it("says which of outbound's keys lets a keys-url it refuses through, naming no 
 			reason:
 				"outbound's destination policy refuses it: not-allowed: name the host in outbound.allow, or set outbound.allow-any-public",
 		},
+	]);
+});
+
+it("says why its credential may not go to keys-url in outbound-policy's words", async () => {
+	const standIn = defineModule({ name: "outbound" }, (m) => [
+		m.provide(outbound).by(() => ({
+			fetch: async () => {
+				throw new Error("never sent");
+			},
+		})),
+		m.provide(outboundRefusals).by(() => ({ explained: () => undefined })),
+		m.provide(credentialPolicy).by(() => ({ refusalOf: () => "scheme" as const })),
+	]);
+	const error = await assemble({
+		modules: [standIn, signerKeysHttp, collector],
+		config: { ...kernelConfig(), "signer-keys-http": settings() },
+		runtime: quietRuntime(),
+	}).catch((e: unknown) => e);
+	expect((error as BootRefused).refusals).toEqual([
+		{ where: "signer-keys-http.credential", reason: credentialRefusalText("scheme") },
 	]);
 });
 

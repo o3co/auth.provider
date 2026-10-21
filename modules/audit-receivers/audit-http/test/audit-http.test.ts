@@ -9,7 +9,7 @@ import {
 	type OutboundResponse,
 	outbound,
 } from "@mod/outbound";
-import { credentialPolicy, outboundRefusals } from "@mod/outbound-policy";
+import { credentialPolicy, credentialRefusalText, outboundRefusals } from "@mod/outbound-policy";
 import { beforeEach, expect, it } from "vitest";
 import auditHttp from "../src/module.ts";
 import { auditHttpConfig } from "../src/testing.ts";
@@ -151,8 +151,7 @@ it("refuses a secret Authorization value with a URL outbound will not send a cre
 		refusals: [
 			{
 				where: "audit-http.url",
-				reason:
-					"a secret Authorization value goes over https alone, or to a named plain-loopback pair",
+				reason: `a secret Authorization value ${credentialRefusalText("scheme")}`,
 			},
 		],
 	});

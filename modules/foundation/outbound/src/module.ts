@@ -192,6 +192,9 @@ const paths = contract<Paths>("outbound.paths");
 export default defineModule({ name: "outbound", section, replicaSafe: true }, (m) => [
 	m.provide(paths).by((c) => {
 		const { proxy } = c.section;
+		// Their count alone: what goes to them, passwords, tokens, credentials and keys, is in the clear.
+		const plainInternal = c.section["plain-internal"].length;
+		if (plainInternal > 0) c.log.warn("outbound.plain_internal", { count: plainInternal });
 		if (proxy !== undefined) {
 			const host = new URL(proxy).hostname;
 			c.log.warn("outbound.proxy_checks_addresses", { host });

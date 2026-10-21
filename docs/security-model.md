@@ -168,11 +168,12 @@ Each promise below holds across every module composed. Each names what keeps it 
   - No host is reached by name unless `outbound.allow` lists it or `outbound.allow-any-public` is set. `outbound.deny` is checked first.
   - A name is resolved once, every address it resolves to is checked, and the request connects only to a checked address.
   - Loopback, link-local, the cloud metadata addresses and other special-purpose addresses are never reached, but for a `plain-loopback` pair the operator names.
-  - Private addresses are reached only by URLs a module takes from your own configuration and names so (the audit-http collector, the users-http ledger), at hosts in `outbound.internal-hosts`.
-  - Redirects are refused, and only https is used, except plain http to a named `plain-loopback` pair, and signed material (whose signature is checked), fetched from its caller's named hosts.
+  - Private addresses are reached only by URLs a module takes from your own configuration and names so (the audit-http collector, the users-http ledger), at hosts in `outbound.internal-hosts`, or over plain http at a `host:port` in `outbound.plain-internal`, where every address the name resolves to must be private.
+  - Redirects are refused, and only https is used, except plain http to a named `plain-loopback` or `plain-internal` pair, and signed material (whose signature is checked), fetched from its caller's named hosts.
   - Proxy environment variables are never read.
 - **Left to you:**
   - With `outbound.proxy` set, the proxy resolves names and checks where they lead (boot warns so).
+  - What goes to a `plain-internal` pair, passwords, tokens and credentials among it, is in the clear: name only peers on a network trusted against reading and changing it (each boot warns `outbound.plain_internal`).
   - Network egress filtering is still expected.
 
 ## Storage
