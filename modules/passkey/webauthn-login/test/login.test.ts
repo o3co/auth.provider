@@ -29,7 +29,7 @@ import { tokensStandIn } from "@mod/tokens/testing";
 import { type Passkeys, passkeys } from "@mod/webauthn";
 import { afterEach, describe, expect, it } from "vitest";
 import { passkeyAmr, webauthnGrantType } from "../src/contract.ts";
-import { type LoginParts, passkeyGrant } from "../src/grant.ts";
+import { type LoginParts, passkeyGrant } from "../src/grant/grant.ts";
 import login from "../src/module.ts";
 import { section as loginSection } from "../src/section.ts";
 

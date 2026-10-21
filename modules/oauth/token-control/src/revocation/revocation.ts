@@ -1,11 +1,12 @@
-import { type Audit, declaredAudit } from "@mod/audit";
-import type { Clients } from "@mod/clients";
+import { type Audit, audit, declaredAudit } from "@mod/audit";
+import { type Clients, clients } from "@mod/clients";
 import { type HttpRequest, type HttpResponse, noStore, type Route } from "@mod/http";
+import type { BuildContext } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
 import { authenticateClient, oauthError } from "@mod/token-endpoint";
-import type { Tokens } from "@mod/tokens";
-import events from "./audit-events.ts";
-import type { RevocableKind } from "./contract.ts";
+import { type Tokens, tokens } from "@mod/tokens";
+import events from "../audit-events.ts";
+import type { RevocableKind } from "../contract.ts";
 
 /** RFC 7009 §2.2: 200 with no body, whatever was or was not revoked. */
 const answered: HttpResponse = { status: 200, headers: noStore };
@@ -29,6 +30,17 @@ export function accessKind(tokens: Tokens): RevocableKind {
  * refused outright, so the answer tells a caller nothing about tokens it did not receive.
  * The hint only says which kind to try first (§2.1); a hint no kind answers to is ignored.
  */
+/** The revocation handler over the contracts the assembly gives, for access tokens and the kinds contributed. */
+export const revocationIn = async (
+	c: BuildContext<unknown>,
+	contributed: readonly RevocableKind[],
+) =>
+	revocation(
+		await c.get(clients),
+		[accessKind(await c.get(tokens)), ...contributed],
+		await c.get(audit),
+	);
+
 export function revocation(
 	clients: Clients,
 	kinds: readonly RevocableKind[],
