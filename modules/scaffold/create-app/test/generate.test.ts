@@ -220,6 +220,40 @@ it("writes a reseal script for an app that seals, which seals again through each
 	expect(reseal("config/application.conf").status).toBe(78);
 });
 
+it("warns once as it boots of the 0.17 variables set and never read, by name and count, never by value", async () => {
+	const target = await mkdtemp(join(tmpdir(), "create-app-"));
+	await generate({ target, modules: ["@mod/seal", "@mod/log-stdout"], workspace: root });
+	await linked(target);
+	const key = Buffer.from(Array.from({ length: 32 }, (_, i) => i * 7 + 1)).toString("base64");
+	await writeFile(
+		join(target, "config", "seal.conf"),
+		JSON.stringify({ seal: { current: { id: "now", key } } }),
+	);
+	await writeFile(
+		join(target, "config", "local.conf"),
+		await trialLayer(target, { redisUrl: "redis://127.0.0.1:1", leave: ["seal"] }),
+	);
+	const run = (legacy: Record<string, string>) =>
+		spawnSync(process.execPath, ["src/reseal.ts"], {
+			cwd: target,
+			env: {
+				...process.env,
+				KERNEL_DEPLOYMENT: "single",
+				APP_CONFIG: "config/seal.conf,config/local.conf,config/application.conf",
+				...legacy,
+			},
+			encoding: "utf8",
+		});
+	const left = run({ OAUTH_ACCESS_TOKEN_EXPIRES_IN: "61937", CORE_DEPLOYMENT_MODE: "multi-q7" });
+	expect(left.status).toBe(0);
+	const warned = left.stderr.split("\n").filter((line) => line.startsWith("warn "));
+	expect(warned).toEqual([
+		"warn config-files: 2 variables named in 0.17 are set and never read: CORE_DEPLOYMENT_MODE, OAUTH_ACCESS_TOKEN_EXPIRES_IN; see docs/migration.md",
+	]);
+	expect(`${left.stdout}${left.stderr}`).not.toMatch(/61937|multi-q7/);
+	expect(run({}).stderr).not.toMatch(/^warn /m);
+});
+
 it("links each dependency to the workspace when given one, and refuses a module it does not hold", async () => {
 	const target = await mkdtemp(join(tmpdir(), "create-app-"));
 	await generate({ target, modules: ["@mod/log-stdout"], workspace: root });

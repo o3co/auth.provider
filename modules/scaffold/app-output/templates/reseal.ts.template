@@ -1,4 +1,4 @@
-import { loadConfig } from "{{configFiles}}";
+import { legacyVariablesWarning, loadConfig, unreadLegacyVariables } from "{{configFiles}}";
 import { assemble, BootRefused } from "{{kernel}}";
 import { resealing } from "{{entry}}";
 {{imports}}
@@ -14,8 +14,14 @@ const refused = (error: unknown): never => {
 
 // The app as `start` builds it, never started: no route is served while values are sealed again.
 const files = (process.env.APP_CONFIG ?? "config/application.conf").split(",");
-const app = await loadConfig({ files, env: process.env })
-	.then((config) => assemble({ modules: [{{modules}}], config }))
+const source = { files, env: process.env };
+const app = await loadConfig(source)
+	.then(async (config) => {
+		// A variable 0.17 read, left in the environment, is named once; boot goes on.
+		const told = legacyVariablesWarning(await unreadLegacyVariables(source));
+		if (told !== undefined) process.stderr.write(`warn config-files: ${told}\n`);
+		return assemble({ modules: [{{modules}}], config });
+	})
 	.catch(refused);
 const told = await app.get(resealing).reseal();
 for (const holder of told) {

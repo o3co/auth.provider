@@ -44,6 +44,9 @@ it("writes the deployment of the modules from the packages given", async () => {
 	expect(manifest.scripts).toEqual({ start: "node --env-file-if-exists=.env src/main.ts" });
 	const main = await read(target, "src/main.ts");
 	expect(main).toContain('from "@o3co/x-kernel"');
+	// It names, once as it boots, the variables 0.17 read that its configuration never reads.
+	expect(main).toContain("unreadLegacyVariables");
+	expect(main).toContain("warn config-files: ");
 	expect(main).toContain('import m0 from "@o3co/x-http/module";');
 	expect(main).toContain('import m1 from "@o3co/x-clients/module";');
 

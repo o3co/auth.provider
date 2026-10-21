@@ -37,6 +37,7 @@
 - Only an app composing `http` is given its port and interface in the image and the guide, and only one composing `http-ops` is checked for liveness (`/_healthcheck`, after a start period) or told of its endpoints.
 - The app reads the configuration files `APP_CONFIG` lists, comma-separated, layered in order; the generated configuration file when unset.
 - The app exits 78 on a refused boot, writing each refusal on standard error.
+- The app's entries name once as they boot, on standard error as `warn config-files:`, the variables 0.17 read that the environment sets and no configuration file reads (`config-files`); boot goes on.
 - SIGTERM or SIGINT stops the app, draining; one that comes while it starts stops it once started.
 
 ## Data
