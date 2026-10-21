@@ -1,8 +1,8 @@
 import { assemble, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { simulatedStore } from "@mod/store/testing";
+import { revokedTokensContract } from "@mod/token-denylist/testing";
 import { revokedTokens } from "@mod/tokens";
-import { revokedTokensContract } from "@mod/tokens/testing";
 import wiring from "../src/module.ts";
 
 const runtime = quietRuntime({ clock: { now: () => 1_800_000_000_000 } });

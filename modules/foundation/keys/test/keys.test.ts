@@ -64,7 +64,7 @@ function withLastBitsFlipped(token: string): string {
 }
 
 /** A token signed as another holder of a key would sign it. */
-const signedBy = (privatePem: string, kid: string, payload: string, typ = "at+jwt") =>
+const signedBy = (privatePem: string, kid: string, payload: string, typ = "JWT") =>
 	new CompactSign(new TextEncoder().encode(payload))
 		.setProtectedHeader({ alg: "EdDSA", typ, kid })
 		.sign(createPrivateKey(privatePem));
@@ -87,31 +87,31 @@ describe("keys", () => {
 
 	it("signs and verifies with the current key, for the typ it was signed for", async () => {
 		const k = (await boot(rotated())).app.get(keys);
-		const token = await k.sign({ sub: "a" }, "at+jwt");
-		const verified = await k.verify(token, "at+jwt");
+		const token = await k.sign({ sub: "a" }, "JWT");
+		const verified = await k.verify(token, "JWT");
 		expect(verified).toEqual({ kind: "valid", claims: { sub: "a" } });
 		expect(verified.kind === "valid" && Object.isFrozen(verified.claims)).toBe(true);
 		expect(await k.verify(token, "rt+jwt")).toEqual({ kind: "invalid", reason: "typ" });
-		expect(await k.verify("not a jws", "at+jwt")).toEqual({ kind: "invalid", reason: "malformed" });
+		expect(await k.verify("not a jws", "JWT")).toEqual({ kind: "invalid", reason: "malformed" });
 	});
 
 	it("verifies what the previous key signed until it expires, and tells an unknown kid", async () => {
 		const k = (await boot(rotated())).app.get(keys);
 		const byOld = await signedBy(old.priv, "old", JSON.stringify({ sub: "a" }));
-		expect(await k.verify(byOld, "at+jwt")).toEqual({ kind: "valid", claims: { sub: "a" } });
-		const token = await k.sign({ sub: "a" }, "at+jwt");
-		expect(await k.verify(withKid(token, "nobody"), "at+jwt")).toEqual({
+		expect(await k.verify(byOld, "JWT")).toEqual({ kind: "valid", claims: { sub: "a" } });
+		const token = await k.sign({ sub: "a" }, "JWT");
+		expect(await k.verify(withKid(token, "nobody"), "JWT")).toEqual({
 			kind: "invalid",
 			reason: "kid_unknown",
 		});
-		expect(await k.verify(withKid(token, "old"), "at+jwt")).toEqual({
+		expect(await k.verify(withKid(token, "old"), "JWT")).toEqual({
 			kind: "invalid",
 			reason: "signature",
 		});
 		now = Date.parse("2026-06-01T00:00:00Z") - 1;
-		expect((await k.verify(byOld, "at+jwt")).kind).toBe("valid");
+		expect((await k.verify(byOld, "JWT")).kind).toBe("valid");
 		now += 1;
-		expect(await k.verify(byOld, "at+jwt")).toEqual({ kind: "invalid", reason: "kid_expired" });
+		expect(await k.verify(byOld, "JWT")).toEqual({ kind: "invalid", reason: "kid_expired" });
 	});
 
 	it("publishes and verifies the next key, but never signs with it", async () => {
@@ -121,12 +121,12 @@ describe("keys", () => {
 			next: { kid: "next", alg: "EdDSA", "public-key": coming.priv },
 		});
 		const k = app.get(keys);
-		const signed = await k.sign({ sub: "a" }, "at+jwt");
+		const signed = await k.sign({ sub: "a" }, "JWT");
 		expect(
 			JSON.parse(Buffer.from(signed.split(".")[0] as string, "base64url").toString()).kid,
 		).toBe("now");
 		const byNext = await signedBy(coming.priv, "next", JSON.stringify({ sub: "a" }));
-		expect(await k.verify(byNext, "at+jwt")).toEqual({ kind: "valid", claims: { sub: "a" } });
+		expect(await k.verify(byNext, "JWT")).toEqual({ kind: "valid", claims: { sub: "a" } });
 		const published = (await (await fetch(`${base}/.well-known/jwks.json`)).json()) as {
 			keys: Record<string, unknown>[];
 		};
@@ -137,7 +137,7 @@ describe("keys", () => {
 	it("takes a previous key written as a private PEM for its public half alone", async () => {
 		const { app, base } = await boot(rotated(old.priv));
 		const byOld = await signedBy(old.priv, "old", JSON.stringify({ sub: "a" }));
-		expect((await app.get(keys).verify(byOld, "at+jwt")).kind).toBe("valid");
+		expect((await app.get(keys).verify(byOld, "JWT")).kind).toBe("valid");
 		const published = (await (await fetch(`${base}/.well-known/jwks.json`)).json()) as {
 			keys: Record<string, unknown>[];
 		};
@@ -146,15 +146,15 @@ describe("keys", () => {
 
 	it("refuses a token whose signature is written in a form other than its one form", async () => {
 		const k = (await boot(rotated())).app.get(keys);
-		const token = await k.sign({ sub: "a" }, "at+jwt");
+		const token = await k.sign({ sub: "a" }, "JWT");
 		const variant = withLastBitsFlipped(token);
 		expect(variant).not.toBe(token);
-		expect(await k.verify(variant, "at+jwt")).toEqual({ kind: "invalid", reason: "malformed" });
+		expect(await k.verify(variant, "JWT")).toEqual({ kind: "invalid", reason: "malformed" });
 	});
 
 	it("answers a payload the key signed that is no JSON as a bad signature", async () => {
 		const k = (await boot(rotated())).app.get(keys);
-		expect(await k.verify(await signedBy(current.priv, "now", "{no json"), "at+jwt")).toEqual({
+		expect(await k.verify(await signedBy(current.priv, "now", "{no json"), "JWT")).toEqual({
 			kind: "invalid",
 			reason: "signature",
 		});
@@ -299,7 +299,7 @@ describe("keys", () => {
 		});
 		expect(hs.app.get(keys).asymmetric()).toBe(false);
 		expect(hs.app.get(keys).algorithm()).toBe("HS256");
-		const token = await hs.app.get(keys).sign({ sub: "a" }, "at+jwt");
-		expect((await hs.app.get(keys).verify(token, "at+jwt")).kind).toBe("valid");
+		const token = await hs.app.get(keys).sign({ sub: "a" }, "JWT");
+		expect((await hs.app.get(keys).verify(token, "JWT")).kind).toBe("valid");
 	});
 });

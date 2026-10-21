@@ -1,6 +1,6 @@
 import { defineModule, Unavailable } from "@mod/kernel";
 import { memoryRecords } from "@mod/records/testing";
-import { revokedTokens } from "../src/store.ts";
+import { revokedTokens } from "@mod/token-denylist";
 
 /** Revoked tokens kept in memory, on a place clock that may run apart from the composition's, and that can stop answering. */
 export function revokedInMemory(now: () => number) {

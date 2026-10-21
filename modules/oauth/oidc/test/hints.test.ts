@@ -1,5 +1,5 @@
 import { quietRuntime } from "@mod/kernel/testing";
-import { keys } from "@mod/keys";
+import { accessTokenSigning, keys } from "@mod/keys";
 import { afterEach, expect, it } from "vitest";
 import { idTokenHints } from "../src/contract.ts";
 import { booted } from "./parts.ts";
@@ -18,7 +18,9 @@ async function serve() {
 	/** A token signed with the provider's own key, the core claims written over by `over`. */
 	const signed = (over: Record<string, unknown> = {}, typ = "JWT") =>
 		app.get(keys).sign({ ...core, sid: "s1", ...over }, typ);
-	return { check: app.get(idTokenHints).check, signed };
+	/** An access token the provider signed, the same claims under the access token type. */
+	const access = () => app.get(accessTokenSigning).sign({ ...core, sid: "s1" });
+	return { check: app.get(idTokenHints).check, signed, access };
 }
 
 it("answers the subject, session, client and issue time of an ID token the provider signed", async () => {
@@ -47,9 +49,10 @@ it("takes the client from azp when the audience names it, else from a single aud
 });
 
 it("refuses a token of another kind, issuer or key, or one that does not read", async () => {
-	const { check, signed } = await serve();
+	const { check, signed, access } = await serve();
 	const refused: Record<string, string> = {
-		"another typ": await signed({}, "at+jwt"),
+		"another typ": await signed({}, "logout+jwt"),
+		"an access token": await access(),
 		"another issuer": await signed({ iss: "https://other.example" }),
 		"an empty sub": await signed({ sub: "" }),
 		"a sub that is not a string": await signed({ sub: 7 }),

@@ -8,6 +8,7 @@ import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
 import { senderBindings } from "@mod/sender-binding";
 import senderBindingModule from "@mod/sender-binding/module";
+import { denylistAllowanceMs } from "@mod/token-denylist";
 import { expect, it } from "vitest";
 import {
 	type AccessGrant,
@@ -18,7 +19,6 @@ import {
 	type Tokens,
 	tokens,
 } from "../src/contract.ts";
-import { denylistAllowanceMs } from "../src/denylist/denylist.ts";
 import tokensModule from "../src/module.ts";
 import {
 	type TokensUnderTest,

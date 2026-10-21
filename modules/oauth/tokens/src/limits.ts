@@ -4,9 +4,14 @@ import type { AccessGrant, Actor } from "./contract.ts";
 /** An access token's lifetime where the section does not set one. */
 export const defaultLifetimeSeconds = 3600;
 
+/** The longest lifetime an access token is issued with, a day. */
+const maxLifetimeSeconds = 86_400;
+/** How far ahead of the clock a token's iat is taken, for clocks that differ between hosts. */
+const iatAheadMs = 60_000;
+
 export function lifetimeOf(asked: number | undefined, configured: number): number {
 	if (asked === undefined) return configured;
-	if (Number.isInteger(asked) && asked >= 1 && asked <= 86_400) return asked;
+	if (Number.isInteger(asked) && asked >= 1 && asked <= maxLifetimeSeconds) return asked;
 	throw new RangeError("tokens: a lifetime asked is 1 to 86400 whole seconds");
 }
 
@@ -47,6 +52,11 @@ export function actorSnapshot(actor: unknown): Actor | undefined {
 		(inner, subject) => ({ subject, ...(inner ? { actor: inner } : {}) }) as Actor,
 		undefined,
 	);
+}
+
+/** Whether a token's iat and exp are as tokens issues them: exp not before iat, iat at most a minute ahead, a day at most between them. */
+export function issuedWithin(iat: number, exp: number, nowMs: number): boolean {
+	return exp >= iat && iat * 1000 <= nowMs + iatAheadMs && exp - iat <= maxLifetimeSeconds;
 }
 
 /** A token's id: 16 random bytes in base64url. */

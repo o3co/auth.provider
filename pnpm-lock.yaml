@@ -1835,6 +1835,19 @@ importers:
         specifier: workspace:*
         version: link:../../foundation/store
 
+  modules/oauth/token-denylist:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+    devDependencies:
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+
   modules/oauth/token-endpoint:
     dependencies:
       '@mod/audit':
@@ -1950,6 +1963,9 @@ importers:
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../sender-binding
+      '@mod/token-denylist':
+        specifier: workspace:*
+        version: link:../token-denylist
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -3272,6 +3288,9 @@ importers:
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../../oauth/sender-binding
+      '@mod/token-denylist':
+        specifier: workspace:*
+        version: link:../../oauth/token-denylist
 
   modules/templates/upstream-handoff-store:
     dependencies:

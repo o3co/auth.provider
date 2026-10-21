@@ -18,6 +18,7 @@
 		"@mod/http": "workspace:*",
 		"@mod/issuer": "workspace:*",
 		"@mod/keys": "workspace:*",
-		"@mod/sender-binding": "workspace:*"
+		"@mod/sender-binding": "workspace:*",
+		"@mod/token-denylist": "workspace:*"
 	}
 }
