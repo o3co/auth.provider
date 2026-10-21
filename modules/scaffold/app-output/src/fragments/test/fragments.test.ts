@@ -8,7 +8,7 @@ import {
 	localConfExample,
 	settingsOf,
 	writtenOf,
-} from "../src/fragments.ts";
+} from "../contract.ts";
 
 const fixtures = join(import.meta.dirname, "fixtures", "collide");
 
@@ -54,7 +54,7 @@ it("keeps a value its owner's example gives in several lines out of the env exam
 
 /** Each fragment the workspace's packages ship, by its package's directory. */
 const shipped = () => {
-	const root = join(import.meta.dirname, "..", "..", "..");
+	const root = join(import.meta.dirname, "..", "..", "..", "..", "..");
 	const groups = readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory());
 	return groups.flatMap((group) =>
 		readdirSync(join(root, group.name), { withFileTypes: true })

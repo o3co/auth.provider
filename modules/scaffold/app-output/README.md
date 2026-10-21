@@ -2,7 +2,7 @@
 
 ## Responsibilities
 - Writes a generated project: a deployment of the modules it is given, with its configuration from their fragments, the environment's and the local layer's examples, an image and the operator's guide.
-- Maps each fragment's keys to the environment and the local layer: the boundary that keeps module words out of the environment's.
+- Maps each fragment's keys to the environment and the local layer, through the internal module `fragments`: the boundary that keeps module words out of the environment's.
 - Holds what every generated project shares: the target's check, the package name check, the manifest, the app's entry and its entries besides `start` (`reseal`, `witness-backfill`).
 - States what it takes from where the packages come from (`Packages`); the caller implements it.
 
@@ -19,17 +19,12 @@
   - `AGENTS.md` indexes where each composed module's card and section defaults lie as installed, and where the release's configuration and route references lie; it states nothing of its own.
 - `Packages`: each name's fragments, the app's dependencies for the names, what the app imports a name under, each name's card as installed (`Card`), and the release (`Release`).
 - `namesPackages` and `vacant`, for a caller to refuse a plan before it composes; `mainSource`, the app's entry; `kernel` and `configFiles`, the packages every app depends on (its entry reads its configuration files through `config-files`).
-- The fragments: `fragmentsIn` and `fragmentsOf` read them (`fragmentFile` names the file), and `settingsOf` names each scalar key's environment variable.
+- `fragmentsIn`, `fragmentsOf`, `fragmentFile` and `settingsOf`: the internal module `fragments`'s.
 
 ## Invariants
 - A target that holds anything is refused, never overwritten; a missing or empty one is taken. Every file is made before any is written.
 - A name not an npm package is refused by `namesPackages`, before anything is written.
 - The manifest names the pnpm the workspace builds with, and the app also depends on `zod` at the packages' version.
-- A fragment holds exactly one section, and no section has two fragments; either is refused, naming the fragment.
-- A fragment is read as data, refused by name otherwise: no substitution or include, no backtick or control character but a line break in a key or value, at most 64 KiB, and 32 KiB of keys and values; nothing is read from env or files.
-- The configuration file reads the fragments' scalar keys from env only, holding no values; each variable is the section and key path joined by `_`, upper-cased, `-` as `_`.
-- Two keys reading one variable, or a key no variable can name, refuse generation, naming both or it.
-- Neither example holds a live value line: the local layer's holds each fragment list with its placeholders and each value spanning sections (`audit.receivers`), the environment's each variable, all as comments; a copy sets nothing. A value spanning sections never goes to env.
 - A scalar its owner's example gives in several lines is still read from env, but left out of the env example and listed among the keys written in the local layer; the guide and the env example say such a value goes in the local layer.
 - With `seal` composed, the project has a `reseal` script: the same modules, built and never started, running their resealers.
 - With `mfa-witnessing` composed, the project has a `witness-backfill` script, built and never started the same way. It settles each subject read from standard input, one a line, empty lines skipped, each other line used as sent, through `witnessBackfill`, and writes only how many were marked, held, none, inconsistent and failed (unavailable), never a subject. It exits 0 where none failed, else 1, and 78 on a refused boot.
@@ -45,7 +40,7 @@
 - Writes the target only; reads its templates and the fragment files it is pointed at.
 
 ## Depends on
-- The HOCON library, to read the fragments.
+- The HOCON library, through `fragments`.
 
 ## Vocabulary
 - output: a project written from the templates.

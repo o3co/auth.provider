@@ -2,7 +2,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse } from "@o3co/ts.hocon";
-import { missingAs } from "./project.ts";
 
 /** The file beside a package's manifest that holds its section's example. */
 export const fragmentFile = "config.example";
@@ -93,7 +92,10 @@ export async function fragmentsIn(dirs: readonly string[]): Promise<Fragment[]> 
 	const read: { from: string; text: string }[] = [];
 	for (const dir of dirs) {
 		const file = join(dir, fragmentFile);
-		const text = await readFile(file, "utf8").catch(missingAs(undefined));
+		const text = await readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {
+			if (error.code === "ENOENT") return undefined;
+			throw error;
+		});
 		if (text !== undefined) read.push({ from: file, text });
 	}
 	return fragmentsOf(read);
