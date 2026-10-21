@@ -68,8 +68,12 @@ function memoryFactors() {
 	const fresh = () => memoryRecords<StoredFactors>(() => 0, { shards: 1, perShard: 1 });
 	let stand = fresh();
 	const down = unavailableSwitch<FactorStore>("factor-store");
+	const hooks: { beforeSave?: (key: string) => Promise<void> } = {};
 	const store = down.wrap({
-		save: (key, record) => stand.records.create(key, record, "endless"),
+		save: async (key, record) => {
+			await hooks.beforeSave?.(key);
+			return stand.records.create(key, record, "endless");
+		},
 		read: (key) => stand.records.read(key),
 		update: (key, change) => stand.records.change(key, change),
 		scan: (...given: Parameters<typeof stand.records.scan>) => stand.records.scan(...given),
@@ -80,6 +84,8 @@ function memoryFactors() {
 	return {
 		module,
 		down,
+		/** `beforeSave` runs before each save, as a request racing it would. */
+		hooks,
 		wipe: () => {
 			stand = fresh();
 		},

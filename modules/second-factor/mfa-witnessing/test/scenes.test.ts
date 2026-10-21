@@ -2,6 +2,7 @@ import { BootRefused, defineModule, isUnavailable } from "@mod/kernel";
 import { factorKinds } from "@mod/mfa-extensions";
 import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { expect, it } from "vitest";
+import { witnessBackfill } from "../src/contract.ts";
 import { witnessed } from "./harness.ts";
 
 /** A counting kind whose first proof names a credential no two factors may hold. */
@@ -38,6 +39,26 @@ it("marks no subject whose first binding another subject's factor already holds 
 	expect(witness.marks.has("bob")).toBe(false);
 	expect(await decided.asks("bob")).not.toBe(undefined);
 	expect(await bindCard("bob", "c2")).toMatchObject({ kind: "bound" });
+});
+
+it("fills no mark for a factor whose binding ends as a duplicate, read before its claim", async () => {
+	const { app, decided, place, witness } = await witnessed({}, [card]);
+	const bindCard = async (subject: string, proof: string) => {
+		const begun = await decided.begin(subject, "card");
+		if (begun.kind !== "begun") throw new Error(begun.kind);
+		const proved = await decided.provePending(subject, begun.pending, proof);
+		if (proved.kind !== "valid") throw new Error(proved.kind);
+		return decided.bind(subject, begun.pending, proved.state);
+	};
+	expect(await bindCard("ann", "c1")).toMatchObject({ kind: "bound" });
+	// A backfill reads bob's factor once it is written, before its claim on ann's value fails.
+	let filled: string | undefined;
+	place.hooks.beforeSave = async (key) => {
+		if (key.startsWith("u-")) filled ??= await app.get(witnessBackfill).settle("bob");
+	};
+	expect(await bindCard("bob", "c1")).toEqual({ kind: "duplicate" });
+	expect(filled).toBe("none");
+	expect(witness.marks.has("bob")).toBe(false);
 });
 
 it("marks the subject once a counting factor is written, a binding filling a mark that is missing", async () => {

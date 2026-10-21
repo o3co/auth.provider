@@ -1,7 +1,6 @@
 import { audit } from "@mod/audit";
 import { defineModule } from "@mod/kernel";
 import { factors, witnessing } from "@mod/mfa";
-import { factorKinds } from "@mod/mfa-extensions";
 import { enrollmentWitnesses } from "@mod/mfa-witness";
 import { witnessBackfill } from "./contract.ts";
 import { backfillWith, witnessingWith } from "./witnessing.ts";
@@ -20,14 +19,13 @@ export default defineModule({ name: "mfa-witnessing" }, (m) => [
 		if (!witness || more.length > 0) {
 			return c.refuse("mfa-witnessing", "needs exactly one enrollment witness composed");
 		}
-		const counts = new Map((await c.collect(factorKinds)).map((k) => [k.kind, k.counts]));
 		const decided = c.late(factors);
 		const token = () => Buffer.from(c.random.bytes(16)).toString("base64url");
 		return {
 			settle: backfillWith({
 				witness,
-				counting: async (subject) =>
-					(await decided().held(subject)).some((f) => counts.get(f.kind) === true),
+				// As written, leaving out a factor whose binding ends as a duplicate.
+				counting: (subject) => decided().countingWritten(subject),
 				token,
 			}),
 		};

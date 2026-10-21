@@ -9,7 +9,6 @@ import {
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { type Factors, factors, type Witnessing, witnessing } from "@mod/mfa";
-import { factorKinds } from "@mod/mfa-extensions";
 import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { expect, it } from "vitest";
 import { witnessBackfill } from "../src/contract.ts";
@@ -19,20 +18,18 @@ const seen = contract<readonly Witnessing[]>("seen");
 const reader = defineModule({ name: "reader" }, (m) => [
 	m.provide(seen).by(async (c) => c.collect(witnessing)),
 ]);
-/** Two kinds, one counting; the subject holds what `held` names, by kind. */
-const kinds = defineModule({ name: "kinds" }, (m) => [
-	m.contribute(factorKinds).by(() => ({ kind: "code", counts: true }) as never),
-	m.contribute(factorKinds).by(() => ({ kind: "backup", counts: false }) as never),
-]);
-/** `afterRead` runs after the n-th read of the factors has taken its answer, as a request racing it would. */
+/**
+ * The subject holds what `held` names, by kind, of which only `code` counts. `afterRead` runs after
+ * the n-th read of the factors has taken its answer, as a request racing it would.
+ */
 const holding = (held: Record<string, string[]>, afterRead?: (n: number) => void) => {
 	let reads = 0;
 	return defineModule({ name: "factors-stand-in" }, (m) => [
 		m.provide(factors).by(
 			() =>
 				({
-					held: async (subject: string) => {
-						const answer = (held[subject] ?? []).map((kind, i) => ({ id: `${i}`, kind }));
+					countingWritten: async (subject: string) => {
+						const answer = (held[subject] ?? []).includes("code");
 						reads += 1;
 						afterRead?.(reads);
 						return answer;
@@ -52,7 +49,6 @@ async function boot(
 	const app = await assemble({
 		modules: [
 			...witnesses.map((w) => w.module),
-			kinds,
 			holding(held, afterRead),
 			recorded.module,
 			bridge,

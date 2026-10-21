@@ -18,10 +18,10 @@
 		"@mod/audit": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/mfa": "workspace:*",
-		"@mod/mfa-extensions": "workspace:*",
 		"@mod/mfa-witness": "workspace:*"
 	},
 	"devDependencies": {
+		"@mod/mfa-extensions": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/seal": "workspace:*",
 		"vitest": "5.0.4"
