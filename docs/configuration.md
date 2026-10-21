@@ -470,6 +470,15 @@ From `@mod/passkey-registration`.
 | `passkey-registration.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over both registration routes. |
 | `passkey-registration.window` | string | `5m` |  |  |  | The window requests are counted over, from 1s to 1d. |
 
+## passkeys
+
+From `@mod/passkeys`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `passkeys.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  | Whether the authenticator is asked to verify its user, as WebAuthn says it. |
+| `passkeys.max-credentials` | integer (1–100) | `10` |  |  |  | The most passkeys a subject may hold, from 1 to 100. |
+
 ## rate-limit
 
 From `@mod/rate-limit`.
