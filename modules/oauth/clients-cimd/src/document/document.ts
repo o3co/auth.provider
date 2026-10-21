@@ -10,8 +10,8 @@ const documentGrants = [codeGrantType, refreshGrantType];
 
 /**
  * The id as a document URL: https, a path other than `/`, no query, fragment, user information,
- * IP literal or loopback host (url-setting's `isLoopbackName`), written exactly as the URL parser writes it (so no trailing dot, default
- * port, upper case or other encoding).
+ * IP literal, empty label or loopback host (url-setting's `isLoopbackName`), written exactly as the
+ * URL parser writes it (so no default port, upper case or other encoding).
  */
 export function documentUrl(id: string): URL | undefined {
 	const url = URL.parse(id);
@@ -19,7 +19,8 @@ export function documentUrl(id: string): URL | undefined {
 	if (url.pathname === "/" || id.includes("?") || id.includes("#")) return undefined;
 	if (url.username !== "" || url.password !== "") return undefined;
 	const host = url.hostname;
-	if (host.startsWith("[") || isIP(host) !== 0 || host.endsWith(".")) return undefined;
+	// A host that is no DNS name, with an empty label anywhere, is refused before asking whether it is loopback.
+	if (host.startsWith("[") || isIP(host) !== 0 || host.split(".").includes("")) return undefined;
 	return isLoopbackName(host) ? undefined : url;
 }
 
