@@ -334,6 +334,9 @@ importers:
 
   modules/foundation/outbound:
     dependencies:
+      '@mod/address-reach':
+        specifier: workspace:*
+        version: link:../address-reach
       '@mod/kernel':
         specifier: workspace:*
         version: link:../kernel

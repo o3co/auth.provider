@@ -10,6 +10,7 @@
 		"./module": "./src/module.ts"
 	},
 	"dependencies": {
+		"@mod/address-reach": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/outbound-policy": "workspace:*",
 		"@mod/url-setting": "workspace:*",
