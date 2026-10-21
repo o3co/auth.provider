@@ -9,12 +9,12 @@ import {
 import type { BuildContext, Log } from "@mod/kernel";
 import {
 	DestinationRefused,
+	isOutboundUnavailable,
 	jsonObjectOf,
 	type Narrower,
 	type Outbound,
 	type OutboundFailure,
 	type OutboundResponse,
-	OutboundUnavailable,
 	outbound,
 } from "@mod/outbound";
 import type { Fetched } from "../fetching/fetching.ts";
@@ -70,7 +70,7 @@ export function readingWith({
 	const missed = (id: string, error: unknown): Fetched<ClientRecord> => {
 		if (error instanceof DestinationRefused) return refused(id, error.reason);
 		// Running out of time or places says nothing of the id, so it is fetched again next time.
-		if (error instanceof OutboundUnavailable && !forgotten.has(error.failure)) {
+		if (isOutboundUnavailable(error) && !forgotten.has(error.failure)) {
 			return refused(id, error.failure);
 		}
 		log.warn("clients-cimd.fetch_failed", { client: loggable(id) });

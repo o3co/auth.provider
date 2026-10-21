@@ -259,6 +259,16 @@ describe("clients-cimd: a refused document", () => {
 			"an answer outbound does not take",
 			() => Promise.reject(new OutboundUnavailable("unsupported-answer")),
 		],
+		[
+			"an answer past the size, from a second bundled copy of outbound",
+			() =>
+				Promise.reject(
+					Object.assign(new Error("outbound unavailable"), {
+						[Symbol.for("@mod/outbound.unavailable")]: true,
+						failure: "too-large",
+					}),
+				),
+		],
 	])("is none for %s, remembered for the refusal time", async (_, given) => {
 		answer = given;
 		const app = await boot();
