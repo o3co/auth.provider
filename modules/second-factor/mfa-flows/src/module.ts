@@ -2,8 +2,9 @@ import { csrfChecked } from "@mod/csrf";
 import { type Route, routes, use } from "@mod/http";
 import { defineModule, isUnavailable } from "@mod/kernel";
 import { loginGates } from "@mod/login-gates";
-import { factors, proofSteps } from "@mod/mfa";
+import { factors, fenceFollower, proofSteps } from "@mod/mfa";
 import { lockoutProblem, requestsPerSource } from "@mod/rate-limit";
+import { revocationFollowers } from "@mod/subject-revocation";
 import { flowParts } from "./contract.ts";
 import { gateOver } from "./proof/proof.ts";
 import { type Handler, unavailable } from "./routing.ts";
@@ -37,7 +38,16 @@ const withUnavailable =
 
 export default defineModule({ name: "mfa-flows", section, replicaSafe: true }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "mfa-flows" })),
-	m.provide(flowParts).by(partsIn),
+	m.provide(flowParts).by(async (c) => {
+		// A completed revocation stops a binding begun before it only where something moves mfa's fence.
+		if (!(await c.collect(revocationFollowers)).some((f) => f.name === fenceFollower)) {
+			return c.refuse(
+				"mfa-flows",
+				"a binding begun before a revocation would bind: compose mfa-revocation",
+			);
+		}
+		return partsIn(c);
+	}),
 	m.contribute(loginGates).by(async (c) => ({
 		name: "mfa",
 		hold: gateOver({

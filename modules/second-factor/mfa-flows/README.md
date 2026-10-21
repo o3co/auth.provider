@@ -25,6 +25,7 @@
 
 ## Invariants
 - Internal modules, and what each is given: `wiring`'s card. The package's module declares the routes.
+- Boot is refused where no revocation follower goes by `mfa`'s `fenceFollower` (`mfa-revocation`): a binding begun before a revocation would bind.
 - Every POST declares `csrf`'s policy, then `rate-limit`'s requests per source, and takes a form or JSON body read by name, a JSON member that is not a string being absent.
 - A `proof` sent as a JSON object (a WebAuthn response, say) reaches the kind as its JSON text; an array, number or other non-string is absent.
 - The gate asks `mfa` what login requires: nothing lets the login through; a proof or a first enrollment starts a transaction and holds it.
