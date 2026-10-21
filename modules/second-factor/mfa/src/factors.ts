@@ -127,8 +127,17 @@ export function factorDecisions(p: FactorParts): Factors {
 			: counts
 				? ("held" as const)
 				: ("none" as const);
-	const countsNow = async (subject: string) =>
-		counting(await records.list(subject), p.kinds).length > 0;
+	/** A counting factor whose unique value another factor holds is left out: its binding ends as a duplicate. */
+	const countsNow = async (subject: string) => {
+		for (const factor of counting(await records.list(subject), p.kinds)) {
+			const unique = p.kinds
+				.get(factor.kind)
+				?.uniqueSecret?.({ secret: secretOf(subject, factor), state: factor.state });
+			if (unique === undefined) return true;
+			if (!(await records.heldByAnother(subject, factor.kind, unique, factor.id))) return true;
+		}
+		return false;
+	};
 	const settle = async (subject: string) => p.witnessing?.settle(subject, () => countsNow(subject));
 	/** A first binding refused, recorded with why; nothing of it is kept. */
 	const closed = (subject: string, kind: string, reason: "competing" | "reset-cleared") => {
@@ -152,6 +161,7 @@ export function factorDecisions(p: FactorParts): Factors {
 			const counts = counting(await records.list(subject), p.kinds).length > 0;
 			return (await standing(subject, counts, at)) === "held";
 		},
+		countingWritten: (subject) => countsNow(subject),
 		secondFactorRequired: () => p.required,
 		asks: async (subject) => {
 			const all = await records.list(subject);

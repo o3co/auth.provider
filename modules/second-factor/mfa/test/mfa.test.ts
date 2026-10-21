@@ -903,6 +903,27 @@ describe("values no two factors may hold", () => {
 		expect(await bindKind("bob", "card", "c1")).toMatchObject({ kind: "bound" });
 	});
 
+	it("counts as written a factor before its claim, but not one whose value another factor holds", async () => {
+		const { decided, bindKind, place } = await serve({}, { kinds: [card, backup] });
+		await bindKind("ann", "card", "c1");
+		// Read between a binding's write of its factor and its claim on the value.
+		const seen: Record<string, boolean> = {};
+		place.hooks.beforeSave = async (key) => {
+			if (!key.startsWith("u-")) return;
+			for (const subject of ["bob", "cid"])
+				seen[subject] ??= await decided.countingWritten(subject);
+		};
+		expect(await bindKind("bob", "card", "c1")).toEqual({ kind: "duplicate" });
+		expect(seen.bob).toBe(false);
+		delete seen.cid;
+		expect(await bindKind("cid", "card", "c2")).toMatchObject({ kind: "bound" });
+		expect(seen.cid).toBe(true);
+		expect([await decided.countingWritten("ann"), await decided.countingWritten("bob")]).toEqual([
+			true,
+			false,
+		]);
+	});
+
 	it("refuses a first binding another counting factor beat to the subject, binding nothing and recording it", async () => {
 		const { decided, provedCode, bindCode, events } = await serve({ mode: "required" });
 		const beaten = await provedCode("liz");

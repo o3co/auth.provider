@@ -101,6 +101,12 @@ export function factorRecords(store: FactorStore) {
 			const held = claimOf(await store.read(claimKey(kind, value)));
 			return held !== undefined && (await holding(held));
 		},
+		/** Whether a factor other than `factor` holds the kind's unique value: a binding of it ends as a duplicate. */
+		heldByAnother: async (subject: string, kind: string, value: string, factor: string) => {
+			const held = claimOf(await store.read(claimKey(kind, value)));
+			if (held === undefined || sameClaim(held, { listKey: keyOf(subject), factor })) return false;
+			return holding(held);
+		},
 		/** Claims a kind's unique value for a factor already written; answers whether the factor holds it. */
 		claim: async (subject: string, kind: string, value: string, factor: string) => {
 			const key = claimKey(kind, value);
