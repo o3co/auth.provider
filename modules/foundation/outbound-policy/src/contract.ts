@@ -112,6 +112,11 @@ export interface Admitted {
 	readonly url: URL;
 	readonly host: string;
 	readonly port: number;
+	/**
+	 * An address written in the URL, as written there without brackets; `host` is its spelling for
+	 * the lists. Its reach is judged on this, never on an IPv4 address it may carry.
+	 */
+	readonly address?: string;
 	readonly plain: boolean;
 	/** Reached at loopback addresses alone, as a named plain pair. */
 	readonly loopback: boolean;

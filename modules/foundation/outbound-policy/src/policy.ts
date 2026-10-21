@@ -222,7 +222,9 @@ export function admitUrl(
 		policy.plainInternal.some((listed) => pairOf(listed) === pair);
 	if (plain && !loopback && !plainInternal && !signed) throw new DestinationRefused("scheme");
 	const internal = own && listed(host, policy.internal);
-	return { url, host, port, plain, loopback, internal, plainInternal };
+	const written = unbracketed(url.hostname);
+	const address = isIP(written) !== 0 ? { address: written } : {};
+	return { url, host, port, ...address, plain, loopback, internal, plainInternal };
 }
 
 const isPrivate = (address: string) => {
@@ -369,8 +371,8 @@ export function policyOf(settings: PolicySettings): Policy {
 	const refusalOf = (url: string, narrower: Narrower): RefusalReason | undefined => {
 		try {
 			const admitted = admitUrl(url, rules, narrower, false);
-			// An address written in the URL is checked now; a name's, once resolved, when sent.
-			if (isIP(admitted.host) !== 0) admitAddresses([admitted.host], admitted);
+			// An address written in the URL is checked now, as written; a name's, once resolved, when sent.
+			if (admitted.address !== undefined) admitAddresses([admitted.address], admitted);
 			return undefined;
 		} catch (error) {
 			if (error instanceof DestinationRefused) return error.reason;
@@ -389,7 +391,7 @@ export function policyOf(settings: PolicySettings): Policy {
 				const admitted = admitUrl(url, rules, narrower, false);
 				if (admitted.plainInternal !== true) return false;
 				// As `explain`: an address written in the URL is checked now, a name's when sent.
-				if (isIP(admitted.host) !== 0) admitAddresses([admitted.host], admitted);
+				if (admitted.address !== undefined) admitAddresses([admitted.address], admitted);
 				return true;
 			} catch (error) {
 				if (error instanceof DestinationRefused) return false;
