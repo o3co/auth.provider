@@ -3350,6 +3350,9 @@ importers:
       '@mod/conformance-code':
         specifier: workspace:*
         version: link:../conformance-code
+      '@mod/conformance-device':
+        specifier: workspace:*
+        version: link:../conformance-device
       '@mod/conformance-identity':
         specifier: workspace:*
         version: link:../conformance-identity
