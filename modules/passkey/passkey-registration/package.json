@@ -6,7 +6,7 @@
 	"kind": "feature",
 	"optIn": true,
 	"joins": [
-		"@mod/webauthn",
+		"@mod/passkeys",
 		"@mod/session"
 	],
 	"exports": {
@@ -23,7 +23,6 @@
 		"@mod/request-source": "workspace:*",
 		"@mod/passkeys": "workspace:*",
 		"@mod/session": "workspace:*",
-		"@mod/webauthn": "workspace:*",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
@@ -36,6 +35,7 @@
 		"@mod/session-requirements": "workspace:*",
 		"@mod/store": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
+		"@mod/webauthn": "workspace:*",
 		"@mod/webauthn-store": "workspace:*",
 		"vitest": "5.0.5"
 	}

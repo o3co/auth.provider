@@ -2100,9 +2100,6 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
-      '@mod/webauthn':
-        specifier: workspace:*
-        version: link:../webauthn
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -2134,6 +2131,9 @@ importers:
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
+      '@mod/webauthn':
+        specifier: workspace:*
+        version: link:../webauthn
       '@mod/webauthn-store':
         specifier: workspace:*
         version: link:../../templates/webauthn-store

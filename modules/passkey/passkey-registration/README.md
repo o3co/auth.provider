@@ -7,7 +7,7 @@
 - The ceremonies (`webauthn`). The passkey records, the limit per subject and the user handle (`passkeys`). Whether a session may enter at `credentials` (the entry requirements `session` composes). Logging in with a passkey (`webauthn-login`).
 
 ## Offers
-- Composition definition. It comes wherever `webauthn` and `session` are both composed, so a deployment that adds a passkey feature gets it too; it brings `passkeys`.
+- Composition definition. It comes wherever `passkeys` and `session` are both composed, so a deployment that keeps passkeys gets it too.
 - Route `POST /oauth/webauthn/registration/options`: `passkeys`' creation options for the session's subject.
 - Route `POST /oauth/webauthn/registration/verify`: takes `{response, nickname?}`, answers `{credentialId, transports, backedUp}`, with `transports` only when the authenticator names some.
   - Both take JSON or no body, use `csrf`'s policy and `rate-limit`'s requests policy, and enter the session at level `credentials`. Every answer is `no-store`.
