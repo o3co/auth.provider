@@ -484,6 +484,14 @@ describe("a key set at a URL", () => {
 		const s = served();
 		s.fail(new DestinationRefused("not-allowed"));
 		expect(await fromUrl(s.outbound).verify(token)).toEqual({ kind: "unavailable" });
+		// A refusal a second bundled copy of outbound-policy throws: another class, the same mark.
+		s.fail(
+			Object.assign(new Error("outbound destination refused: not-allowed"), {
+				[Symbol.for("@mod/outbound-policy.destination-refused")]: true,
+				reason: "not-allowed",
+			}),
+		);
+		expect(await fromUrl(s.outbound).verify(token)).toEqual({ kind: "unavailable" });
 		s.answer(async () => ({
 			status: 200,
 			headers: new Map(),

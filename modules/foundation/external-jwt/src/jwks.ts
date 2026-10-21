@@ -38,7 +38,7 @@ export function jwksAt(
 				{ hosts: source.hosts },
 			);
 		} catch (error) {
-			if (isUnavailable(error) || error instanceof DestinationRefused) return;
+			if (isUnavailable(error) || DestinationRefused.is(error)) return;
 			throw error;
 		}
 		const answer = jsonObjectOf(response);
