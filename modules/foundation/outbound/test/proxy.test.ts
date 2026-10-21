@@ -150,13 +150,21 @@ it("connects directly to a host listed as direct, resolving it as without a prox
 it("sends plain http to a plain-internal pair directly, resolving it itself, never through the proxy", async () => {
 	resolved.length = 0;
 	const pair = "ledger.internal:9092";
-	const out = paths({
-		proxy: `http://127.0.0.1:${proxyPort}`,
-		allow: ["ledger.internal"],
-		"plain-internal": [pair],
-	});
+	const linkLocal = async (host: string): Promise<readonly string[]> => {
+		resolved.push(host);
+		return ["169.254.1.1"];
+	};
+	const out = outboundOver(
+		section.parse({
+			proxy: `http://127.0.0.1:${proxyPort}`,
+			allow: ["ledger.internal"],
+			"plain-internal": [pair],
+		}),
+		linkLocal,
+		{ ca: authority },
+	);
 	const url = `http://${pair}/verify`;
-	// The name resolves to the loopback, which a plain-internal pair never reaches: resolved here, not by the proxy.
+	// The name resolves to a link-local address, which a plain-internal pair never reaches: resolved here, not by the proxy.
 	await expect(out.fetch(url, {}, { internal: configuredUrl(url) })).rejects.toMatchObject({
 		reason: "special-address",
 	});

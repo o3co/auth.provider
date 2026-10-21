@@ -365,9 +365,13 @@ it("explains at boot why the policy refuses a URL by the keys that let it throug
 	expect(any.explained("https://10.0.0.6/")).toBe(
 		"special-address: the URL names a special-purpose address, which outbound never reaches",
 	);
-	expect(any.explained("https://10.0.0.6/", { internal: configuredUrl("https://10.0.0.6/") })).toBe(
-		"special-address: the URL names a special-purpose address; a private one is reached only when outbound.internal-hosts names its host",
-	);
+	// The operator's own URL is told what reaches a private address, in the policy's own words.
+	const own = { internal: configuredUrl("https://10.0.0.6/") };
+	const privately = policyOf(
+		policySettings.parse({ "allow-any-public": true, "internal-hosts": ["10.0.0.5"] }),
+	).explain("https://10.0.0.6/", own);
+	expect(privately).toMatch(/^special-address: /);
+	expect(any.explained("https://10.0.0.6/", own)).toBe(privately);
 	expect(
 		any.explained("https://10.0.0.5/", { internal: configuredUrl("https://10.0.0.5/") }),
 	).toBeUndefined();
