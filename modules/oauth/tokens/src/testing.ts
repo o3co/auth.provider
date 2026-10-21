@@ -327,7 +327,8 @@ export function tokensContract(
 			if (issued.kind !== "issued") throw new Error(issued.policy);
 			expect(none.reads()).toBe(1);
 			const checked = await place.tokens.verifyAccess(issued.access.token);
-			expect(checked.kind === "valid" && "actor" in checked.grant).toBe(false);
+			if (checked.kind !== "valid") throw new Error(checked.reason);
+			expect("actor" in checked.grant).toBe(false);
 			const admitted = shifting(undefined);
 			expect((await place.tokens.admits(admitted.request)).kind).toBe("allowed");
 			expect(admitted.reads()).toBe(1);
