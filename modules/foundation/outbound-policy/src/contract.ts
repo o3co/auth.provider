@@ -16,8 +16,20 @@ export type RefusalReason =
 	/** A pair plain-internal names that resolved to a public address: plain http reaches only private ones. */
 	| "plain-public";
 
+/** One mark for every copy of outbound-policy, so a second bundled copy's refusal is still told apart. */
+const destinationRefusedMark = Symbol.for("@mod/outbound-policy.destination-refused");
+
 export class DestinationRefused extends Error {
+	/** Whether an error is the destination policy's refusal, by its mark rather than its class. */
+	static is(error: unknown): error is DestinationRefused {
+		return (
+			typeof error === "object" &&
+			error !== null &&
+			(error as { readonly [destinationRefusedMark]?: unknown })[destinationRefusedMark] === true
+		);
+	}
 	readonly reason: RefusalReason;
+	readonly [destinationRefusedMark] = true;
 	constructor(reason: RefusalReason) {
 		super(`outbound destination refused: ${reason}`);
 		this.name = "DestinationRefused";

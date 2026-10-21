@@ -9,7 +9,7 @@ describe("a plain-loopback pair's addresses", () => {
 			admitAddresses(addresses, reach);
 			return "admitted";
 		} catch (error) {
-			if (error instanceof DestinationRefused) return error.reason;
+			if (DestinationRefused.is(error)) return error.reason;
 			throw error;
 		}
 	};

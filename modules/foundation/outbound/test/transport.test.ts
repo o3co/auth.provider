@@ -180,7 +180,7 @@ const failure = (run: Promise<unknown>) =>
 	run.then(
 		() => "answered",
 		(error) =>
-			error instanceof DestinationRefused
+			DestinationRefused.is(error)
 				? error.reason
 				: isUnavailable(error)
 					? `unavailable: ${(error as Partial<OutboundUnavailable>).failure}`
