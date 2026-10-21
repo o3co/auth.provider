@@ -1,6 +1,6 @@
 # login
 
-Internal module of `federation`: the login a round trip ends in when it is not a link.
+Internal module of `federation`: the login a round trip ends in when no continuation is chosen.
 
 ## Responsibilities
 - Finds the local user an upstream login names, maps its amr and profile, and hands the login to `login-gates`.
