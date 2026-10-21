@@ -10,6 +10,7 @@ import {
 } from "@mod/http";
 import { type BuildContext, isUnavailable, type Log } from "@mod/kernel";
 import { requestsPerSource } from "@mod/rate-limit";
+import { registrable } from "@mod/redirect-uris";
 import { determinedSource } from "@mod/request-source";
 import { type Upstreams, upstreams } from "@mod/upstreams";
 import { z } from "zod";
@@ -37,7 +38,7 @@ export const clientSection: Section<{
 				"Whether the client may be handed its sessions' upstream tokens; only a client the operator registers may.",
 			),
 		"post-logout-redirect-uris": z
-			.array(z.string().min(1))
+			.array(z.string().refine(registrable, "a URI a client may register to be sent back to"))
 			.prefault([])
 			.describe(
 				"Where an upstream logout this client asks may send the browser back, each matched exactly.",

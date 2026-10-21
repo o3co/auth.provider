@@ -3820,6 +3820,9 @@ importers:
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
+      '@mod/redirect-uris':
+        specifier: workspace:*
+        version: link:../../oauth/redirect-uris
       '@mod/request-source':
         specifier: workspace:*
         version: link:../../foundation/request-source

@@ -14,4 +14,4 @@ Internal module of `federation-tokens`: the token and logout routes clients call
 - `federationTokens` (the flow, a request) → the answer; `clientSection`; `base`.
 
 ## Depends on
-- `audit`, `clients`, `http`, `kernel`, `rate-limit`, `request-source`, `upstreams`; `caller`, `renewal`, the package's end of session, section and audit events
+- `audit`, `clients`, `http`, `kernel`, `rate-limit`, `redirect-uris`, `request-source`, `upstreams`; `caller`, `renewal`, the package's end of session, section and audit events
