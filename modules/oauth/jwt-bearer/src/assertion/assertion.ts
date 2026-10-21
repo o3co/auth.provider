@@ -2,8 +2,8 @@ import type { Reason } from "@mod/external-jwt";
 import { Unavailable } from "@mod/kernel";
 import { decodeJwt, decodeProtectedHeader } from "jose";
 import { z } from "zod";
-import { isSignerSubject } from "./contract.ts";
-import { isThumbprint, type Signers } from "./signers.ts";
+import { isSignerSubject } from "../contract.ts";
+import { isThumbprint, type Signers } from "../signers.ts";
 
 export type Checked =
 	| {

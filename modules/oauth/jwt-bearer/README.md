@@ -2,6 +2,7 @@
 
 ## Responsibilities
 - Contributes the grant by JWT assertion. Holds the list of trusted issuers.
+- Its internal module `assertion` checks an assertion, all but its single use.
 
 ## Not here
 - Client authentication (`token-endpoint`).
