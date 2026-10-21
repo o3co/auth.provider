@@ -14,6 +14,7 @@
 ## Offers
 - `writeDeployment(target, modules, packages, readme)`: writes the project assembling `modules`, the kernel and `config-files` first, from `packages` into `target`.
   - It writes the manifest and app, the configuration file, the local layer's and the environment's examples, a Dockerfile, a `.dockerignore`, a `.gitignore`, a README from `readme`'s template in `templates/` and values, and `AGENTS.md`.
+  - Its guide templates are `full-readme.md`, `pattern-readme.md` and `listed-readme.md`; the caller fills each one's own marks (the full template's opt-ins; a pattern's name, use, card, choices, receivers and deployment; a listed app's list, choices and the values the operator decides).
   - The README lists each composed module's card as installed, and points at the `## Deployment` section of each card that has one, and at the release's walk to a first login where its repository is stated.
   - `AGENTS.md` indexes where each composed module's card and section defaults lie as installed, and where the release's configuration and route references lie; it states nothing of its own.
 - `Packages`: each name's fragments, the app's dependencies for the names, what the app imports a name under, each name's card as installed (`Card`), and the release (`Release`).

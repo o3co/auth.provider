@@ -98,3 +98,21 @@ it("refuses a target that holds anything, and writes nothing", async () => {
 	);
 	expect(await readdir(target)).toEqual(["kept"]);
 });
+
+it("fills a listed app's guide with the modules listed and the caller's lines", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/http"], fakePackages(), {
+		template: "listed-readme.md",
+		fill: {
+			listed: "`@mod/http`",
+			chosen: "",
+			decided: "- `kernel.deployment`: `single` for one instance, `multi` for several.",
+		},
+	});
+
+	const guide = await read(target, "README.md");
+	expect(guide).toContain("from the modules listed: `@mod/http`.");
+	expect(guide).toContain("- `kernel.deployment`: `single` for one instance, `multi` for several.");
+	expect(guide).toContain("| `http.port` | `HTTP_PORT` | `8080` |");
+	expect(guide).not.toContain("{{");
+});
