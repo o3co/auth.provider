@@ -89,7 +89,7 @@ Generate the app as the README's quick start shows, add your package to its depe
 ```ts
 import exampleGrant from "example-grant/module";
 // …
-	.then((config) => assemble({ modules: [exampleGrant, m0, m1, …], config }))
+		return assemble({ modules: [exampleGrant, m0, m1, …], config });
 ```
 <!-- end generated -->
 
