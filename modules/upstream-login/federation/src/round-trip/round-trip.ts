@@ -6,7 +6,14 @@ import { type BuildContext, type Clock, contract, isUnavailable, type Log } from
 import { type Logins, logins } from "@mod/login-gates";
 import { determinedSource } from "@mod/request-source";
 import { type RoundTrips, roundTrips } from "@mod/upstream-round-trip";
-import { type Upstream, type UpstreamLogin, UpstreamRefused } from "@mod/upstreams";
+import {
+	type Kept,
+	type Upstream,
+	type UpstreamContinuation,
+	type UpstreamLogin,
+	UpstreamRefused,
+	upstreamContinuations,
+} from "@mod/upstreams";
 import events from "../audit-events.ts";
 import type { Settings } from "../section.ts";
 import { carriedOf, type Trip, type TripCarried, toCarried, tripOf } from "./trip.ts";
@@ -23,9 +30,6 @@ export interface Idp {
 	readonly upstreamAmr: ReadonlyMap<string, string>;
 }
 
-/** What a round trip carries from its start to the continuation that completes it. */
-export type Carried = Pick<Trip, "link">;
-
 /** What the round trip hands a continuation once the upstream's answer is taken, exchanged and fresh. */
 export interface Completing {
 	readonly request: HttpRequest;
@@ -39,13 +43,10 @@ export interface Completing {
 	readonly cleared: readonly string[];
 }
 
-/** Where a round trip goes once the upstream answers: a login, or a link to the account logged in. */
+/** Where a round trip goes once the upstream answers, when no continuation is chosen: the login. */
 export interface Continuation {
 	/** At the start: its refusal, or what the round trip carries for the callback. */
-	begin(
-		request: HttpRequest,
-		name: string,
-	): Promise<{ answer: HttpResponse } | { carried: Carried }>;
+	begin(request: HttpRequest, name: string): Promise<{ answer: HttpResponse } | { kept?: Kept }>;
 	complete(at: Completing): Promise<HttpResponse>;
 	/** A refusal after the take and before `complete`, recorded as this continuation records them. */
 	failed(at: {
@@ -64,7 +65,8 @@ export interface Flow {
 	/** The return targets a login may name. */
 	readonly logins: Pick<Logins, "returnAllowed">;
 	readonly login: Continuation;
-	readonly link: Continuation;
+	/** The continuations a start may choose, by name. */
+	readonly continuations: ReadonlyMap<string, UpstreamContinuation>;
 	readonly clock: Clock;
 	readonly log: Log;
 	readonly landing: string;
@@ -119,12 +121,15 @@ export const landingIn = async (c: BuildContext<Settings>) =>
 /** The round trip over the IdPs, ending in the continuation its start chose. */
 export async function roundTripIn(
 	c: BuildContext<Settings>,
-	ends: Pick<Flow, "login" | "link">,
+	ends: Pick<Flow, "login">,
 ): Promise<(request: HttpRequest) => Promise<HttpResponse>> {
 	const flow: Flow = {
 		...ends,
 		idps: await c.get(federationIdps),
 		trips: await c.get(roundTrips),
+		continuations: new Map(
+			(await c.collect(upstreamContinuations)).map((continued) => [continued.name, continued]),
+		),
 		origin: await c.get(originEvidence),
 		logins: await c.get(logins),
 		clock: c.clock,
@@ -183,9 +188,11 @@ async function start(flow: Flow, { name, idp, request, params }: At) {
 	if (maxAge !== undefined && !/^[0-9]{1,9}$/.test(maxAge)) {
 		return jsonAnswer(400, { error: "invalid_request" });
 	}
-	// Only a start asking for it links; any other value is a login.
-	const linking = ["1", "true"].includes(field("link") ?? "");
-	const begun = await (linking ? flow.link : flow.login).begin(request, name);
+	// The route's one word for a continuation: `link` (1 or true) chooses the one of that name.
+	const named = ["1", "true"].includes(field("link") ?? "") ? "link" : undefined;
+	const chosen = named === undefined ? undefined : flow.continuations.get(named);
+	if (named !== undefined && !chosen) return missing(flow, name, named);
+	const begun = await (chosen ?? flow.login).begin(request, name);
 	if ("answer" in begun) return begun.answer;
 	if (!flow.origin.sameOrigin(request)) {
 		const live = await flow.trips.current(request, tripName(name));
@@ -210,7 +217,8 @@ async function start(flow: Flow, { name, idp, request, params }: At) {
 	const trip = await flow.trips.begin({
 		name: tripName(name),
 		carried: toCarried({
-			...begun.carried,
+			...(chosen ? { by: chosen.name } : {}),
+			...(begun.kept === undefined ? {} : { kept: begun.kept }),
 			...(target === undefined ? {} : { redirectTo: target }),
 			...asked,
 		}),
@@ -252,11 +260,13 @@ async function finish(flow: Flow, at: At, trip: Trip, cleared: readonly string[]
 		...(from === undefined ? {} : { source: from }),
 		...(agent === undefined ? {} : { userAgent: agent }),
 	};
-	// A link's round trip never ends in a login, nor a login's in a link.
-	const continuation = trip.link ? flow.link : flow.login;
+	// A continuation's round trip never ends in a login, nor a login's in a continuation.
+	const chosen = trip.by === undefined ? undefined : flow.continuations.get(trip.by);
+	if (trip.by !== undefined && !chosen) return missing(flow, name, trip.by, cleared);
 	// A round trip taken this far failed for the reason its answer names.
 	const refused = (status: number, reason: string) => {
-		continuation.failed({ name, reason, trip, ...sender });
+		if (chosen) chosen.failed({ idp: name, reason, kept: trip.kept, ...sender });
+		else flow.login.failed({ name, reason, trip, ...sender });
 		return jsonAnswer(status, { error: reason }, { cookies: cleared });
 	};
 	const code = field("code");
@@ -266,15 +276,25 @@ async function finish(flow: Flow, at: At, trip: Trip, cleared: readonly string[]
 	if (!fresh(trip, upstreamLogin, idp.upstream.clockSkewMs ?? 0, flow.clock.now())) {
 		return refused(401, "login_required");
 	}
-	return continuation.complete({
-		request,
-		name,
-		idp,
-		upstreamLogin,
-		trip,
-		...sender,
-		cleared,
-	});
+	if (chosen) {
+		const lands = trip.redirectTo ?? flow.landing;
+		return chosen.complete({
+			request,
+			idp: name,
+			upstreamLogin,
+			kept: trip.kept,
+			lands,
+			...sender,
+			cleared,
+		});
+	}
+	return flow.login.complete({ request, name, idp, upstreamLogin, trip, ...sender, cleared });
+}
+
+/** A continuation chosen that is not composed: refused, and warned, at the start or at the end. */
+function missing(flow: Flow, idp: string, named: string, cleared: readonly string[] = []) {
+	flow.log.warn("federation.continuation_missing", { idp, name: named });
+	return jsonAnswer(400, { error: "continuation_unavailable" }, { cookies: cleared });
 }
 
 async function exchanged(flow: Flow, { name, idp, params }: At, trip: Trip, code: string) {

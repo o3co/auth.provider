@@ -1,13 +1,17 @@
 import type { Carried, Taken } from "@mod/upstream-round-trip";
+import type { Kept } from "@mod/upstreams";
 import { z } from "zod";
 
-/** What a round trip carries for federation, a login's or a link's, with what the take gives back. */
+/** What a round trip carries for federation, a login's or a continuation's, with what the take gives back. */
 export interface Trip {
 	readonly redirectTo?: string;
 	/** The browser asked the upstream to log in again. */
 	readonly prompt?: "login";
 	readonly maxAgeSeconds?: number;
-	readonly link?: { readonly session: string; readonly subject: string };
+	/** The continuation it goes on to, by name; none for a login. */
+	readonly by?: string;
+	/** What that continuation kept at the start. */
+	readonly kept?: Kept;
 	/** When the round trip started, on the kernel's clock. */
 	readonly startedAt: number;
 	readonly verifier: string;
@@ -15,13 +19,14 @@ export interface Trip {
 }
 
 /** What federation hands `upstream-round-trip` to carry. */
-export type TripCarried = Pick<Trip, "redirectTo" | "prompt" | "maxAgeSeconds" | "link">;
+export type TripCarried = Pick<Trip, "redirectTo" | "prompt" | "maxAgeSeconds" | "by" | "kept">;
 
 const carried = z.strictObject({
 	redirectTo: z.string().optional(),
 	prompt: z.literal("login").optional(),
 	maxAgeSeconds: z.number().optional(),
-	link: z.strictObject({ session: z.string(), subject: z.string() }).optional(),
+	by: z.string().optional(),
+	kept: z.json().optional(),
 });
 
 export const toCarried = (trip: TripCarried) => trip as unknown as Carried;

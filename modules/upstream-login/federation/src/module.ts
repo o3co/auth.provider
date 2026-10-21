@@ -3,7 +3,7 @@ import { contract, defineModule } from "@mod/kernel";
 import { amrSources, openedAfterHold } from "@mod/login-gates";
 import { requestsPerSource } from "@mod/rate-limit";
 import { handoff } from "@mod/upstream-handoff";
-import { upstreams } from "@mod/upstreams";
+import { upstreamContinuations, upstreams } from "@mod/upstreams";
 import { upstreamNames } from "@mod/users";
 import { amrSourceIn, idpsIn, upstreamNamesIn, upstreamsIn } from "./idps/idps.ts";
 import { linkIn } from "./link/link.ts";
@@ -19,6 +19,7 @@ export default defineModule({ name: "federation", section }, (m) => [
 	m.provide(federationIdps).by(idpsIn),
 	m.provide(upstreams).by(upstreamsIn),
 	m.contribute(upstreamNames).by(upstreamNamesIn),
+	m.contribute(upstreamContinuations).by(linkIn),
 	// login-gates tells federation of a held login that opened; upstream-handoff keeps its tokens.
 	m.contribute(openedAfterHold).by(async (c) => ({
 		caller: loginCaller,
@@ -27,10 +28,9 @@ export default defineModule({ name: "federation", section }, (m) => [
 	m.provide(federationRoute).by(async (c) => {
 		const window = { limit: c.section.requests, ms: c.section.window * 1000 };
 		const login = await loginIn(c);
-		const link = await linkIn(c);
 		return {
 			uses: [use(requestsPerSource, { name: "federation", window })],
-			handle: await roundTripIn(c, { login, link }),
+			handle: await roundTripIn(c, { login }),
 		};
 	}),
 	m.contribute(routes).by(async (c) => ({

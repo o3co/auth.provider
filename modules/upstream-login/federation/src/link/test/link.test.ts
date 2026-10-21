@@ -5,10 +5,8 @@ import { isUnavailable, Unavailable } from "@mod/kernel";
 import { recordingLog } from "@mod/kernel/testing";
 import type { AuthContext, Entry, Session } from "@mod/session";
 import type { Joined } from "@mod/upstream-handoff";
-import type { UpstreamLogin } from "@mod/upstreams";
+import type { Continued, UpstreamLogin } from "@mod/upstreams";
 import { expect, it } from "vitest";
-import type { Completing, Idp } from "../../round-trip/round-trip.ts";
-import type { Trip } from "../../round-trip/trip.ts";
 import { linkWith } from "../link.ts";
 
 const alice: AuthContext = { subject: "alice", amr: ["pwd"], authenticatedAt: 0 };
@@ -94,20 +92,15 @@ function standIn() {
 			},
 		},
 		log: logged.log,
-		landing,
 	});
-	const trip: Trip = {
-		nonce: "n",
-		verifier: "v",
-		startedAt: 0,
-		link: { session: "s1", subject: "alice" },
-	};
-	const completing = (more: Partial<Completing> = {}): Completing => ({
+	/** What this link's start kept. */
+	const kept = { session: "s1", subject: "alice" };
+	const completing = (more: Partial<Continued> = {}): Continued => ({
 		request: testRequest(),
-		name: "corp",
-		idp: { upstreamAmr: new Map() } as Pick<Idp, "upstreamAmr"> as Idp,
+		idp: "corp",
 		upstreamLogin,
-		trip,
+		kept,
+		lands: landing,
 		source: "127.0.0.1",
 		userAgent: "ua/1",
 		cleared: ["federation.corp=; Max-Age=0"],
@@ -124,7 +117,7 @@ function standIn() {
 		unlinks,
 		logged,
 		link,
-		trip,
+		kept,
 		completing,
 	};
 }
@@ -141,7 +134,7 @@ const refusedAt = async (s: ReturnType<typeof standIn>, request: HttpRequest = t
 it("starts only for a session entered at the credentials level, recording it and its subject", async () => {
 	const s = standIn();
 	expect(await s.link.begin(testRequest(), "corp")).toEqual({
-		carried: { link: { session: "s1", subject: "alice" } },
+		kept: { session: "s1", subject: "alice" },
 	});
 	expect(s.levels).toEqual(["credentials"]);
 	s.set.entry = { kind: "absent" };
@@ -201,12 +194,12 @@ it("lets the recorded session decide for a browser in none, as a posted answer c
 	expect(s.links).toHaveLength(1);
 });
 
-it("returns to the target the start named, and hands nothing on when the upstream gave no tokens", async () => {
+it("lands where the round trip says, and hands nothing on when the upstream gave no tokens", async () => {
 	const s = standIn();
 	const { tokens: _, ...tokenless } = upstreamLogin;
 	const done = await s.link.complete(
 		s.completing({
-			trip: { ...s.trip, redirectTo: "https://app.example/back" },
+			lands: "https://app.example/back",
 			upstreamLogin: tokenless,
 		}),
 	);
@@ -411,12 +404,12 @@ it("undoes the link and takes the tokens back before failing as unavailable when
 	expect(s.events.map((e) => e.kind)).toEqual(["federation.identity.linked"]);
 });
 
-it("records a refusal after the take for the subject a link started for, and nothing for a login's", () => {
+it("records a refusal after the take for the subject its start kept, and nothing for what it cannot read", () => {
 	const s = standIn();
-	const at = { name: "corp", reason: "exchange_failed", source: "127.0.0.1", userAgent: "ua/1" };
-	s.link.failed({ ...at, trip: s.trip });
-	const { link: _, ...login } = s.trip;
-	s.link.failed({ ...at, trip: login });
+	const at = { idp: "corp", reason: "exchange_failed", source: "127.0.0.1", userAgent: "ua/1" };
+	s.link.failed({ ...at, kept: s.kept });
+	s.link.failed({ ...at, kept: undefined });
+	s.link.failed({ ...at, kept: { unheard: 1 } });
 	expect(s.events).toEqual([
 		{
 			kind: "federation.identity.link_refused",

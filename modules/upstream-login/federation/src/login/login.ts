@@ -50,7 +50,7 @@ export async function loginIn(c: BuildContext<Settings>): Promise<Continuation> 
 export function loginWith(p: LoginParts): Continuation {
 	const record = recorderOf(p.audit, "federation.login");
 	return {
-		begin: async () => ({ carried: {} }),
+		begin: async () => ({}),
 		failed: ({ name, reason, source }) => record("failed", name, { reason, source }),
 		complete: async ({ request, name, idp, upstreamLogin, trip, source, cleared }) => {
 			const found = await p.users.byUpstream(name, upstreamLogin.subject);

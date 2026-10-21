@@ -359,6 +359,27 @@ describe("federation", () => {
 		expect(again.cookies.filter((c) => c.includes("federation.corp"))).toHaveLength(1);
 	});
 
+	it("refuses a callback whose round trip goes on to a continuation not composed, clearing its cookie and warning", async () => {
+		const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
+		const trips = defineModule({ name: "trips" }, (m) => [
+			m.provide(roundTripStore).by(() => ({
+				save: async (key, value, lifetimeMs) => {
+					// Carried as if a continuation of another name had begun it.
+					const by = { ...(value as unknown as { carried: object }).carried, by: "elsewhere" };
+					const record = { ...(value as object), carried: by } as never;
+					return kept.records.create(key, record, lifetimeMs);
+				},
+				update: kept.records.change,
+			})),
+		]);
+		const s = await serve({ trips });
+		const started = await s.begin();
+		const back = await s.callback(`code=good&state=${started.state}`, started.cookie);
+		expect([back.status, back.body]).toEqual([400, { error: "continuation_unavailable" }]);
+		expect(back.cookies).toContain("__Host-federation.corp=");
+		expect(logged()).toContain('federation.continuation_missing {"idp":"corp","name":"elsewhere"}');
+	});
+
 	it("begins anew on a start from this deployment's own page, or once the browser's round trip has ended or been taken", async () => {
 		const s = await serve({ federation: { "transaction-lifetime": "1m" } });
 		const fresh = (started: { location: string }) =>

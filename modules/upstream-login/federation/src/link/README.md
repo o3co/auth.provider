@@ -11,7 +11,7 @@ Internal module of `federation`: a round trip that links the upstream identity t
 
 ## Offers
 - `linkIn`: `linkWith` built from the build context.
-- `linkWith` (`csrf`'s origin evidence, `session`'s entry, `users`' link and unlink, `audit`, `upstream-handoff`'s join, `kernel`'s log, the landing) → the round trip's link continuation.
+- `linkWith` (`csrf`'s origin evidence, `session`'s entry, `users`' link and unlink, `audit`, `upstream-handoff`'s join, `kernel`'s log) → the continuation named `link`, contributed to `upstreams`' continuations; it keeps the session and subject at its start and lands where the round trip says.
 
 ## Invariants
 - The callback links only while the recorded session enters at `credentials`, as its start did, with the recorded subject, and the browser carries no other session; else `401 login_required`, recorded with reason `login_required`, or `session_short` where the session is short of a requirement.
@@ -25,4 +25,4 @@ Internal module of `federation`: a round trip that links the upstream identity t
 - That amends is best effort: a session closed after the second read keeps the link, and the unlink has no generation, so it also removes the same link another request of that subject relied on meanwhile.
 
 ## Depends on
-- `csrf` (origin evidence); `session` (entry); `users` (link, unlink); `audit`; `upstream-handoff` (join); `round-trip` (the continuation, the redirect, the landing); `http` (the JSON answer); `federation`'s section
+- `csrf` (origin evidence); `session` (entry); `users` (link, unlink); `audit`; `upstream-handoff` (join); `upstreams` (the continuation); `round-trip` (the recorder, the redirect); `http` (the JSON answer); `federation`'s section

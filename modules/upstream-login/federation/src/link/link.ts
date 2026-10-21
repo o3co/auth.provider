@@ -4,14 +4,10 @@ import { jsonAnswer } from "@mod/http";
 import type { BuildContext, Log } from "@mod/kernel";
 import { type Sessions, sessions } from "@mod/session";
 import { type Handoff, handoff, type Joined } from "@mod/upstream-handoff";
+import type { UpstreamContinuation } from "@mod/upstreams";
 import { type Users, users } from "@mod/users";
-import {
-	type Continuation,
-	landingIn,
-	type Recorded,
-	recorderOf,
-	sent,
-} from "../round-trip/round-trip.ts";
+import { z } from "zod";
+import { type Recorded, recorderOf, sent } from "../round-trip/round-trip.ts";
 import type { Settings } from "../section.ts";
 
 export interface LinkParts {
@@ -21,8 +17,14 @@ export interface LinkParts {
 	readonly audit: Pick<Audit, "record">;
 	readonly handoff: Pick<Handoff, "joined" | "withdrawn">;
 	readonly log: Pick<Log, "warn">;
-	readonly landing: string;
 }
+
+/** What a link keeps from its start: the session it is for, and its subject. */
+const kept = z.strictObject({ session: z.string(), subject: z.string() });
+const linkOf = (value: unknown) => {
+	const read = kept.safeParse(value);
+	return read.success ? read.data : undefined;
+};
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
@@ -30,7 +32,7 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 const loggable = (value: string | undefined) =>
 	(value ?? "").replace(/[^\x20-\x7e]/g, "").slice(0, 64);
 
-export async function linkIn(c: BuildContext<Settings>): Promise<Continuation> {
+export async function linkIn(c: BuildContext<Settings>): Promise<UpstreamContinuation> {
 	return linkWith({
 		origin: await c.get(originEvidence),
 		sessions: await c.get(sessions),
@@ -38,15 +40,15 @@ export async function linkIn(c: BuildContext<Settings>): Promise<Continuation> {
 		audit: await c.get(audit),
 		handoff: await c.get(handoff),
 		log: c.log,
-		landing: await landingIn(c),
 	});
 }
 
 /** A round trip that links the upstream identity to the account logged in when it started. */
-export function linkWith(p: LinkParts): Continuation {
+export function linkWith(p: LinkParts): UpstreamContinuation {
 	const record: (outcome: "linked" | "link_refused", name: string, at: Recorded) => void =
 		recorderOf(p.audit, "federation.identity");
 	return {
+		name: "link",
 		begin: async (request, name) => {
 			// Only a navigation from this deployment's own page: another site cannot tie its identity here.
 			if (!p.origin.sameOrigin(request)) {
@@ -62,23 +64,17 @@ export function linkWith(p: LinkParts): Continuation {
 				return { answer: jsonAnswer(403, { ...said, requirement: entry.requirement }) };
 			}
 			const { id, context } = entry.session;
-			return { carried: { link: { session: id, subject: context.subject } } };
+			return { kept: { session: id, subject: context.subject } };
 		},
-		failed: ({ name, reason, trip, source, userAgent }) => {
-			// The round trip hands this a link's trip only; a login's has no subject to record.
-			if (trip.link) {
-				record("link_refused", name, {
-					subject: trip.link.subject,
-					reason,
-					source,
-					userAgent,
-				});
-			}
+		failed: ({ idp: name, reason, kept: was, source, userAgent }) => {
+			const link = linkOf(was);
+			if (link) record("link_refused", name, { subject: link.subject, reason, source, userAgent });
 		},
-		complete: async ({ request, name, upstreamLogin, trip, source, userAgent, cleared }) => {
-			// Chosen by `trip.link`, so it is always there: a missing one is a broken round trip.
-			const link = trip.link;
-			if (!link) throw new Error("a link's trip names its session");
+		complete: async (at) => {
+			const { request, idp: name, upstreamLogin, lands, source, userAgent, cleared } = at;
+			// Kept by this link's own start, so it is always there: a missing one is a broken round trip.
+			const link = linkOf(at.kept);
+			if (!link) throw new Error("a link's round trip names its session");
 			const refused = (status: number, reason: string, error = reason) => {
 				record("link_refused", name, { subject: link.subject, reason, source, userAgent });
 				return jsonAnswer(status, { error }, { cookies: cleared });
@@ -151,7 +147,7 @@ export function linkWith(p: LinkParts): Continuation {
 			}
 			const closedAfter = await closedSince(joined);
 			if (closedAfter) return closedAfter;
-			return sent(trip.redirectTo ?? p.landing, cleared);
+			return sent(lands, cleared);
 		},
 	};
 }
