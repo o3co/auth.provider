@@ -24,6 +24,7 @@ import {
 } from "@mod/outbound-policy";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import witnessHttp from "../src/module.ts";
+import { section } from "../src/section.ts";
 
 const credential = randomBytes(32).toString("hex");
 const now = 1_800_000_000_000;
@@ -55,6 +56,10 @@ function keepingLedger() {
 		}
 		if (asked.path === "/w/clear") {
 			marks.delete(subject);
+			return { status: 204 };
+		}
+		if (asked.path === "/w/withdraw") {
+			if (marks.get(subject) === token) marks.delete(subject);
 			return { status: 204 };
 		}
 		return { status: 404 };
@@ -139,6 +144,122 @@ async function open(section: unknown = settings(), outbound: Record<string, unkn
 enrollmentWitnessContract("mfa-witness-http over a ledger keeping its promises", async () => {
 	script = keepingLedger();
 	return (await open()).witness;
+});
+enrollmentWitnessContract(
+	"mfa-witness-http over a ledger keeping its promises, withdraw included",
+	async () => {
+		script = keepingLedger();
+		return (await open(settings({ "withdraw-url": at("/w/withdraw") }))).witness;
+	},
+);
+
+describe("mfa-witness-http's withdraw", () => {
+	it("posts a withdraw to its URL with the subject, the token and a deadline", async () => {
+		const { witness, logged } = await open(settings({ "withdraw-url": at("/w/withdraw") }));
+		await witness.enroll("alice", "t1");
+		await witness.withdraw?.("alice", "t1");
+		const sent = received.find((r) => r.path === "/w/withdraw");
+		expect([sent?.method, JSON.parse(sent?.body ?? "{}")]).toEqual([
+			"POST",
+			{ subject: "alice", token: "t1", deadline: now + 5000 },
+		]);
+		expect(await witness.read("alice")).toBe(false);
+		expect(logged.lines().map((line) => line.event)).not.toContain(
+			"mfa-witness-http.withdraw_missing",
+		);
+	});
+
+	it("offers no withdraw without its URL, and warns so once at each boot, naming no value", async () => {
+		const { witness, logged } = await open();
+		expect(typeof witness.withdraw).toBe("undefined");
+		const warned = logged
+			.lines()
+			.filter((line) => line.event === "mfa-witness-http.withdraw_missing");
+		expect(warned.map((line) => [line.level, line.fields])).toEqual([["warn", {}]]);
+	});
+
+	it("answers unavailable to a withdraw answered anything but 204, a 404 included, and never clears instead", async () => {
+		const { witness, logged } = await open(settings({ "withdraw-url": at("/w/withdraw") }));
+		for (const status of [404, 200, 500]) {
+			script = (asked) => (asked.path === "/w/withdraw" ? { status } : keepingLedger()(asked));
+			await expect(witness.withdraw?.("alice", "t1"), String(status)).rejects.toSatisfy(
+				isUnavailable,
+			);
+		}
+		expect(received.filter((r) => r.path === "/w/clear")).toEqual([]);
+		expect(
+			logged
+				.lines()
+				.filter((line) => line.event === "mfa-witness-http.ledger_failed")
+				.map((line) => line.fields),
+		).toEqual([
+			{ call: "withdraw", status: 404 },
+			{ call: "withdraw", status: 200 },
+			{ call: "withdraw", status: 500 },
+		]);
+	});
+
+	it("refuses, at withdraw-url, the spellings of clear's target that url-setting never takes", () => {
+		const base = {
+			"read-url": "https://ledger.example/w/read",
+			"enroll-url": "https://ledger.example/w/enroll",
+			"clear-url": "https://ledger.example/w/clear",
+			credential,
+		};
+		for (const withdraw of [
+			"https://LEDGER.example/w/clear",
+			"https://ledger.example:443/w/clear",
+			"https://ledger.example/w/clear#x",
+			"https://ledger.example/w/./clear",
+		]) {
+			const parsed = section.safeParse({ ...base, "withdraw-url": withdraw });
+			expect(
+				parsed.error?.issues.map((issue) => issue.path.join(".")),
+				withdraw,
+			).toEqual(["withdraw-url"]);
+		}
+	});
+
+	it("takes a withdraw-url whose target differs from clear's, a reserved character encoded among them", async () => {
+		for (const [clear, withdraw] of [
+			["/w/clear", "/w/withdraw"],
+			["/w/a/clear", "/w/a%2Fclear"],
+			["/w/clear", "/w/clear?x=1"],
+		] as const) {
+			const { witness } = await open(
+				settings({ "clear-url": at(clear), "withdraw-url": at(withdraw) }),
+			);
+			expect(typeof witness.withdraw, withdraw).toBe("function");
+		}
+	});
+
+	it("refuses to start with its URL the same as clear-url, or at another origin", async () => {
+		const refusedAt = async (more: Record<string, unknown>) => {
+			const error = await open(settings(more)).catch((e: unknown) => e);
+			expect(error).toBeInstanceOf(BootRefused);
+			return (error as BootRefused).refusals.map((r) => r.where);
+		};
+		expect(await refusedAt({ "withdraw-url": at("/w/clear") })).toEqual([
+			"mfa-witness-http.withdraw-url",
+		]);
+		// Spelled otherwise, outbound still sends it to clear's target: an empty query, or a character
+		// RFC 3986 holds equivalent encoded or not, or the hex of an encoding in either case.
+		for (const [clear, withdraw] of [
+			["/w/clear", "/w/clear?"],
+			["/w/clear", "/w/%63%6C%65%61%72"],
+			["/w/~clear", "/w/%7Eclear"],
+			["/w/a%3Aclear", "/w/a%3aclear"],
+			["/w/clear?x=%7E", "/w/clear?x=~"],
+		] as const) {
+			expect(
+				await refusedAt({ "clear-url": at(clear), "withdraw-url": at(withdraw) }),
+				withdraw,
+			).toEqual(["mfa-witness-http.withdraw-url"]);
+		}
+		expect(await refusedAt({ "withdraw-url": at("/w/withdraw", otherPair) })).toEqual([
+			"mfa-witness-http.credential",
+		]);
+	});
 });
 
 describe("mfa-witness-http at a private address", () => {
