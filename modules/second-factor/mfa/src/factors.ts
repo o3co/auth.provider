@@ -131,18 +131,24 @@ export function factorDecisions(p: FactorParts): Factors {
 	 * A counting factor with a unique value counts once its claim names it: before, its binding may
 	 * still end as a duplicate. One written before claims were kept counts unless another holds it.
 	 */
-	const countsNow = async (subject: string) => {
-		for (const factor of counting(await records.list(subject), p.kinds)) {
-			const unique = p.kinds
-				.get(factor.kind)
-				?.uniqueSecret?.({ secret: secretOf(subject, factor), state: factor.state });
-			if (unique === undefined) return true;
-			if (await records.claimedFor(subject, factor.kind, unique, factor.id)) return true;
-			if (factor.claims) continue;
-			if (!(await records.heldByAnother(subject, factor.kind, unique, factor.id))) return true;
-		}
-		return false;
+	const stands = async (subject: string, factor: Factor) => {
+		const unique = p.kinds
+			.get(factor.kind)
+			?.uniqueSecret?.({ secret: secretOf(subject, factor), state: factor.state });
+		if (unique === undefined) return true;
+		if (await records.claimedFor(subject, factor.kind, unique, factor.id)) return true;
+		if (factor.claims) return false;
+		return !(await records.heldByAnother(subject, factor.kind, unique, factor.id));
 	};
+	/** The ids of the subject's counting factors that stand, as `stands` reads them. */
+	const standingIds = async (subject: string) => {
+		const ids = new Set<string>();
+		for (const factor of counting(await records.list(subject), p.kinds)) {
+			if (await stands(subject, factor)) ids.add(factor.id);
+		}
+		return ids;
+	};
+	const countsNow = async (subject: string) => (await standingIds(subject)).size > 0;
 	const settle = async (subject: string) => p.witnessing?.settle(subject, () => countsNow(subject));
 	/** A first binding refused, recorded with why; nothing of it is kept. */
 	const closed = (subject: string, kind: string, reason: "competing" | "reset-cleared") => {
@@ -348,6 +354,8 @@ export function factorDecisions(p: FactorParts): Factors {
 			);
 		},
 		remove: async (subject, target, fence) => {
+			// Read before the write: a factor written since, not read here, does not stand for the subject.
+			const stood = p.required || p.witnessing ? await standingIds(subject) : new Set<string>();
 			const removed = await records.decide<"unknown" | "last" | "fenced" | { kind: string }>(
 				subject,
 				(all, fences) => {
@@ -357,7 +365,9 @@ export function factorDecisions(p: FactorParts): Factors {
 					const rest = all.filter((f) => f.id !== target);
 					const counted = counting(rest, p.kinds).length > 0;
 					// Under a witness only a reset ends an enrollment: its mark stays, so no factor would stand for it.
-					if ((p.required || p.witnessing) && !counted) return { verdict: "last" };
+					// One not yet claimed may still end as a duplicate, so it does not stand for the subject.
+					const stays = rest.some((f) => stood.has(f.id));
+					if ((p.required || p.witnessing) && !stays) return { verdict: "last" };
 					// A way back left alone would hold every login once its codes run out: it goes with the last counting factor.
 					return { next: counted ? rest : rest.filter((f) => !wayBack(f)), verdict: { kind } };
 				},

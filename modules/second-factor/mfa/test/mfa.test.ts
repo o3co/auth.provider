@@ -944,6 +944,28 @@ describe("values no two factors may hold", () => {
 		expect(seen.eve).toBe(false);
 	});
 
+	it("refuses removing the last factor that stands while a binding beside it is not yet claimed, and ends as a duplicate", async () => {
+		const { decided, bindKind, bindCode, idOf, place } = await serve(
+			{ mode: "required" },
+			{ kinds: [code, backup, card] },
+		);
+		await bindKind("ann", "card", "c1");
+		await bindCode("zed");
+		// Zed's card is written and not yet claimed when zed's code is removed; ann holds its value.
+		let removed: string | undefined;
+		place.hooks.beforeSave = async (key) => {
+			if (!key.startsWith("u-") || removed !== undefined) return;
+			removed = await decided.remove(
+				"zed",
+				await idOf("zed", "code"),
+				await decided.fenceOf("zed"),
+			);
+		};
+		expect(await bindKind("zed", "card", "c1")).toEqual({ kind: "duplicate" });
+		expect(removed).toBe("last");
+		expect((await decided.held("zed")).map((f) => f.kind)).toContain("code");
+	});
+
 	it("refuses a first binding another counting factor beat to the subject, binding nothing and recording it", async () => {
 		const { decided, provedCode, bindCode, events } = await serve({ mode: "required" });
 		const beaten = await provedCode("liz");

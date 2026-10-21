@@ -26,7 +26,7 @@
 - Store interface `factorStore`: factor lists and claims on unique values, by keys mfa makes, contents opaque; save once, read, change from what it holds, kept without end. Needs: never evicted, survives a crash and a failover, reads only what is confirmed. `./testing`: its contract test, and a config builder.
 
 ## Invariants
-- A counting factor is one of a kind declared counting. "optional" stops only subjects holding a factor; "required" asks one with no counting factor for a first binding, and never removes the last (`last`).
+- A counting factor is one of a kind declared counting. "optional" stops only subjects holding a factor; "required" asks one with no counting factor for a first binding, and never removes the last (`last`), one of a unique value not yet claimed not counting as one.
 - "required" refuses to boot unless a composed kind counts.
 - Removing the last counting factor removes the recovery codes in the same write. Recovery codes are written by `reissue` alone, handed once in that call, and count toward `max-factors`: a binding of a subject holding none keeps them a place.
 - A factor's state is written only over the state judged, so one proof passes once; a factor gone meanwhile is raced. A store that cannot answer is unavailable, never a refusal.

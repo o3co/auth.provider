@@ -22,6 +22,7 @@
 ## Invariants
 - A mark follows a written factor: between a binding's write and its mark the factor stands unwitnessed, and a write that fails leaves no mark.
 - This package never decides to clear a mark it did not set, as it may be a store that lost its factors; a reset does. The witness's clear takes whatever mark stands, so its clear of its own may still take another's (below).
+- At either limit, a clear of its own mark is not followed by a mark anew: the call is unavailable, and the factor stands unmarked.
 - A clear of its own mark can take a binding's mark set just before it; where the store also loses that binding's factor before the next read, the subject reads as never enrolled.
 - Boot is refused without exactly one witness composed.
 - Comes once `mfa` and `mfa-witness-http` are both composed, through `combinations`; an app composed by hand with another witness composes it too.
