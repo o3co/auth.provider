@@ -1,7 +1,7 @@
 import { type HttpRequest, jsonAnswer, type Route, use } from "@mod/http";
 import type { BuildContext } from "@mod/kernel";
+import { type Passkeys, passkeys } from "@mod/passkeys";
 import { requestsPerSource, type Window } from "@mod/rate-limit";
-import { type Passkeys, passkeys } from "@mod/webauthn";
 import type { Settings } from "../section.ts";
 
 /** The client the options are for; false unless named as one non-empty string. */

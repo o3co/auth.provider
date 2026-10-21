@@ -17,6 +17,7 @@ import {
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
+import { type Passkeys, passkeys } from "@mod/passkeys";
 import rateLimitModule from "@mod/rate-limit/module";
 import { type Beginning, lineage } from "@mod/refresh";
 import secretHashModule from "@mod/secret-hash/module";
@@ -26,7 +27,6 @@ import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { grantCaller, grantCalls } from "@mod/token-endpoint/testing";
 import { type IssuanceRequest, issuancePolicies, tokens } from "@mod/tokens";
 import { tokensStandIn } from "@mod/tokens/testing";
-import { type Passkeys, passkeys } from "@mod/webauthn";
 import { afterEach, describe, expect, it } from "vitest";
 import { passkeyAmr, webauthnGrantType } from "../src/contract.ts";
 import { type LoginParts, passkeyGrant } from "../src/grant/grant.ts";
@@ -89,13 +89,13 @@ async function serve(section: Record<string, unknown> = {}, extra: Module[] = []
 		m.provide(passkeys).by(() => ({
 			challenge: async (requester) => {
 				requesters.asked.push(requester);
-				if (state.down) throw new Unavailable("webauthn");
+				if (state.down) throw new Unavailable("passkeys");
 				return { options };
 			},
 			assert: async (response, requester) => {
 				seen.push(response);
 				requesters.redeemed.push(requester);
-				if (state.down) throw new Unavailable("webauthn");
+				if (state.down) throw new Unavailable("passkeys");
 				return state.answer;
 			},
 		})),
