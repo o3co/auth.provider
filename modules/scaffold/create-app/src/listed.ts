@@ -34,7 +34,7 @@ export async function generateListed(
 function decidedLines(modules: readonly string[]): string[] {
 	return [
 		modules.includes(memoryStore)
-			? "- `kernel.deployment`: `single`: the store is kept in this process, so the deployment runs as one instance."
+			? "- `kernel.deployment`: `single`: the store is kept in this process, so the deployment runs as one instance; list `@mod/redis` to keep it in Redis and run several."
 			: "- `kernel.deployment`: `single` for one instance, `multi` for several.",
 		...(modules.includes("@mod/tokens")
 			? ["- `tokens.revocation`: `denylist`, or `unsupported` to answer revocation as unsupported."]

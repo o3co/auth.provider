@@ -131,6 +131,23 @@ it("reads its fragments' scalars from env and writes their lists locally, with a
 	const guide = await readFile(join(target, "README.md"), "utf8");
 	expect(guide).toContain("from the modules listed: `@mod/tokens`.");
 	expect(guide).toContain("- `tokens.revocation`:");
+	// Its store is kept in memory: accepted, one instance, and Redis named for more.
+	expect(guide).toContain("the memory store accepted (`store.accept-volatile = true`)");
+	expect(guide).toContain(
+		"- `kernel.deployment`: `single`: the store is kept in this process, so the deployment runs as one instance; list `@mod/redis` to keep it in Redis and run several.",
+	);
+});
+
+it("promises no http, port or health check to a listed app that composes no http", async () => {
+	const target = await mkdtemp(join(tmpdir(), "create-app-"));
+	await generate({ target, modules: ["@mod/redis"] });
+	expect(await importedModules(target)).not.toContain("@mod/http");
+	const docker = await readFile(join(target, "Dockerfile"), "utf8");
+	expect(docker).not.toContain("HEALTHCHECK");
+	expect(docker).not.toContain("EXPOSE");
+	const guide = await readFile(join(target, "README.md"), "utf8");
+	expect(guide).not.toContain("_healthcheck");
+	expect(guide).not.toContain("plain http");
 });
 
 it("boots a listed app on its generated configuration filled, holding what its modules need, and stops on SIGTERM", async () => {
