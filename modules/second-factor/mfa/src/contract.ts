@@ -12,6 +12,12 @@ export const proofSteps = extensionPoint<ProofStep>("mfa.proof-steps", { multipl
 /** Where a subject's fence stood when read: compared, never computed with. */
 export type Fence = number & { readonly __fence: never };
 
+/**
+ * The name that whatever moves a subject's fence when the subject is revoked goes by among the
+ * revocation's followers: a module that binds factors over revocations looks for it.
+ */
+export const fenceFollower = "mfa";
+
 /** Where a subject's standing is asked, as an inconsistency with the witness is recorded. */
 export type Asked = "login" | "binding" | "credentials";
 
