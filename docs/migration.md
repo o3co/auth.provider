@@ -31,7 +31,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 
 ## Packages
 
-0.18 is published as one package per concern, `@o3co/auth-provider-<concern>`, all at the same version. Each package offers its modules as subpaths named after them: `@o3co/auth-provider-oauth/authorize` (the contract), `/authorize/module` (what an app assembles), `/authorize/testing` (test builders and contract tests; vitest is an optional peer) and, where a module records audit events, `/authorize/audit-events`. You rarely name them yourself: generate the app (`npx @o3co/create-auth-provider@next <dir> …`, or `npm create @o3co/auth-provider@next -- <dir> …`), and it depends on the packages it composes.
+0.18 is published as one package per concern, `@o3co/auth-provider-<concern>`, all at the same version. Each package offers its modules as subpaths named after them: `@o3co/auth-provider-oauth/authorize` (the contract), `/authorize/module` (what an app assembles), `/authorize/testing` (test builders and contract tests; vitest is an optional peer) and, where a module records audit events, `/authorize/audit-events`. You rarely name them yourself: generate the app (`npx @o3co/create-auth-provider <dir> …`, or `npm create @o3co/auth-provider -- <dir> …`), and it depends on the packages it composes.
 
 Where each 0.17 package went:
 

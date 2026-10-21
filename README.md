@@ -62,7 +62,7 @@ Some patterns also need an HTTP user ledger, an audit collector, an SMTP relay o
 Start with `simple-web`. It keeps users in the configuration and state in memory, and gives you password login for web apps (authorization code flow, OIDC, refresh tokens) plus client credentials for services.
 
 ```sh
-npx @o3co/create-auth-provider@next my-provider --pattern simple-web
+npx @o3co/create-auth-provider my-provider --pattern simple-web
 cd my-provider
 pnpm install
 cp .env.example .env
@@ -174,10 +174,10 @@ If you leave out `--pattern`, you get `full`. Use `simple-web` to start without 
 Add features with `--add`, using module names of the form `@mod/<name>`, where `<name>` is the module's directory under `modules/`:
 
 ```sh
-npx @o3co/create-auth-provider@next my-provider-dpop --pattern simple-web --add @mod/dpop
+npx @o3co/create-auth-provider my-provider-dpop --pattern simple-web --add @mod/dpop
 ```
 
-Repeat `--add` for each feature. To keep `simple-web`'s store in Redis, add `--axis @mod/store=@mod/redis`. You can also replace a pattern's login methods, grants or other feature groups. Axis and group options need a pattern other than `full`. Run `npx @o3co/create-auth-provider@next --help` for all options.
+Repeat `--add` for each feature. To keep `simple-web`'s store in Redis, add `--axis @mod/store=@mod/redis`. You can also replace a pattern's login methods, grants or other feature groups. Axis and group options need a pattern other than `full`. Run `npx @o3co/create-auth-provider --help` for all options.
 
 You can also list modules yourself instead of choosing a pattern. The generator then adds what they need to connect, and you write the configuration. See [app-output](modules/scaffold/app-output/README.md) for what each kind of project contains.
 
