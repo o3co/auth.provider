@@ -1,10 +1,10 @@
+import { isLoopbackAddress } from "@mod/address-reach";
 import { contract, defineModule } from "@mod/kernel";
 import {
 	type CredentialPolicy,
 	credentialPolicy,
 	DestinationRefused,
 	hostList,
-	isLoopbackAddress,
 	type Narrower,
 	type OutboundLimits,
 	type OutboundRefusals,

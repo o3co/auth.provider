@@ -1,5 +1,10 @@
-import { BlockList, isIP } from "node:net";
-import { isLoopbackName } from "@mod/url-setting";
+import { isIP } from "node:net";
+import {
+	carriedIPv4,
+	isLoopbackAddress,
+	isPrivateAddress,
+	isSpecialAddress,
+} from "@mod/address-reach";
 import {
 	type Admitted,
 	type CredentialRefusal,
@@ -33,69 +38,6 @@ const badPorts = new Set([
 	6669, 6679, 6697, 10080,
 ]);
 
-const blockList = (family: "ipv4" | "ipv6", subnets: readonly (readonly [string, number])[]) => {
-	const list = new BlockList();
-	for (const [net, bits] of subnets) list.addSubnet(net, bits, family);
-	return list;
-};
-// IANA's special-purpose blocks, and IPv6 outside global unicast. A BlockList checks
-// IPv4-mapped IPv6 against IPv4 rules too.
-const specialIpv4 = blockList("ipv4", [
-	["0.0.0.0", 8],
-	["10.0.0.0", 8],
-	["100.64.0.0", 10],
-	["127.0.0.0", 8],
-	["169.254.0.0", 16],
-	["172.16.0.0", 12],
-	["192.0.0.0", 24],
-	["192.0.2.0", 24],
-	["192.88.99.0", 24],
-	["192.168.0.0", 16],
-	["198.18.0.0", 15],
-	["198.51.100.0", 24],
-	["203.0.113.0", 24],
-	["224.0.0.0", 4],
-	["240.0.0.0", 4],
-]);
-const globalUnicast = blockList("ipv6", [["2000::", 3]]);
-const specialInGlobalUnicast = blockList("ipv6", [
-	["2001::", 23],
-	["2001:db8::", 32],
-	["2002::", 16],
-	["3fff::", 20],
-]);
-// Private networks an operator's own hosts may reach; the cloud metadata addresses inside them are not.
-const privately = {
-	ipv4: blockList("ipv4", [
-		["10.0.0.0", 8],
-		["100.64.0.0", 10],
-		["172.16.0.0", 12],
-		["192.168.0.0", 16],
-	]),
-	ipv6: blockList("ipv6", [["fc00::", 7]]),
-};
-// Alibaba Cloud's, AWS's over IPv6, Google Cloud's over IPv6; the others sit in link-local, never reached.
-const metadata = { ipv4: new BlockList(), ipv6: new BlockList() };
-metadata.ipv4.addAddress("100.100.100.200", "ipv4");
-metadata.ipv6.addAddress("fd00:ec2::254", "ipv6");
-metadata.ipv6.addAddress("fd20:ce::254", "ipv6");
-
-const familyOf = (address: string) => (isIP(address) === 6 ? "ipv6" : "ipv4");
-const inList = (lists: Record<"ipv4" | "ipv6", BlockList>, address: string) =>
-	lists[familyOf(address)].check(address, familyOf(address));
-const isSpecial = (address: string) =>
-	familyOf(address) === "ipv6"
-		? !globalUnicast.check(address, "ipv6") || specialInGlobalUnicast.check(address, "ipv6")
-		: specialIpv4.check(address, "ipv4");
-
-/** The IPv4 address an IPv6 address carries (mapped, translated or compatible), if any. */
-function carried(address: string): string | undefined {
-	const found = /^::(?:ffff:(?:0:)?)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(address);
-	if (!found) return undefined;
-	const [high, low] = [Number.parseInt(found[1] ?? "", 16), Number.parseInt(found[2] ?? "", 16)];
-	return [high >> 8, high & 255, low >> 8, low & 255].join(".");
-}
-
 const unbracketed = (host: string) => host.replace(/^\[(.*)\]$/, "$1");
 
 /**
@@ -108,7 +50,7 @@ export function normalized(host: string): string | undefined {
 	if (!parsed) return undefined;
 	const name = unbracketed(parsed.hostname).replace(/\.$/, "");
 	if (name === "" || name.split(".").includes("")) return undefined;
-	return carried(name) ?? name;
+	return carriedIPv4(name) ?? name;
 }
 
 const isHost = (host: string) =>
@@ -227,41 +169,11 @@ export function admitUrl(
 	return { url, host, port, ...address, plain, loopback, internal, plainInternal };
 }
 
-/**
- * An address as a connection reaches it: an IPv4 address mapped into IPv6 is that IPv4 one, but no
- * other IPv6 form that carries one (compatible, translated), unlike the lists' spelling.
- */
-function reached(address: string): string {
-	const bare = unbracketed(address);
-	if (isIP(bare) !== 6) return bare;
-	const written = unbracketed(URL.parse(`https://[${bare}]`)?.hostname ?? "");
-	return /^::ffff:[0-9a-f]{1,4}:[0-9a-f]{1,4}$/.test(written)
-		? (carried(written) ?? written)
-		: written;
-}
-
-const isPrivate = (address: string) => {
-	const spelled = reached(address);
-	return inList(privately, spelled) && !inList(metadata, spelled);
-};
-
-/**
- * Whether an IP address, however written (bracketed, in any case, IPv4 mapped into IPv6), reaches
- * loopback: 127/8 or `::1`. A name is none; nor is an IPv6 form that carries 127/8 unmapped, which no
- * connection takes to loopback. The literal is judged as url-setting's `isLoopbackName` judges it.
- */
-export function isLoopbackAddress(address: string): boolean {
-	const bare = address.startsWith("[") && address.endsWith("]") ? address.slice(1, -1) : address;
-	const family = isIP(bare);
-	if (family === 0 || (family === 4 && bare !== address)) return false;
-	return isLoopbackName(address);
-}
-
 /** What refuses an address by reach: all but loopback (carried in IPv6 too) for a plain pair; special but private ones for an internal host. */
 function refusing(reach: Pick<Admitted, "loopback" | "internal">): (address: string) => boolean {
 	if (reach.loopback) return (address) => !isLoopbackAddress(address);
-	if (reach.internal) return (address) => isSpecial(address) && !isPrivate(address);
-	return isSpecial;
+	if (reach.internal) return (address) => isSpecialAddress(address) && !isPrivateAddress(address);
+	return isSpecialAddress;
 }
 
 /**
@@ -274,8 +186,8 @@ export function admitAddresses(
 	reach: Pick<Admitted, "loopback" | "internal" | "plainInternal">,
 ): readonly string[] {
 	if (reach.plainInternal) {
-		const outside = addresses.filter((address) => !isPrivate(address));
-		if (addresses.length === 0 || outside.some(isSpecial)) {
+		const outside = addresses.filter((address) => !isPrivateAddress(address));
+		if (addresses.length === 0 || outside.some(isSpecialAddress)) {
 			throw new DestinationRefused("special-address");
 		}
 		if (outside.length > 0) throw new DestinationRefused("plain-public");

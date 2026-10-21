@@ -17,7 +17,7 @@
 - Past `concurrent-sends`, a send is unavailable at once, opening no connection, logged as `mail-smtp.busy` with the purpose. A send ends at its answer or its deadline; a name lookup its deadline gave up on holds no socket and is bounded by the resolver's pool, not by this count.
 - `tls` is TLS from the first byte. `starttls` always uses STARTTLS and sends nothing more when it is missing or refused.
 - The certificate is always checked against `host`, at TLS 1.2 or later; no environment variable turns that off.
-- `none` boots only when `host` is a loopback host by its name (`url-setting`'s `isLoopbackName`), an address written without brackets, logs one warn line at boot, and sends nothing when the connected peer is not a loopback address (`outbound-policy`'s `isLoopbackAddress`).
+- `none` boots only when `host` is a loopback host by its name (`url-setting`'s `isLoopbackName`), an address written without brackets, logs one warn line at boot, and sends nothing when the connected peer is not a loopback address (`address-reach`'s `isLoopbackAddress`).
 - Neither plaintext nor the choice of this sender depends on the environment's name (`NODE_ENV`).
 - AUTH is sent only over the connection `security` asks for, and only when an account is set.
 - One recipient in the envelope and in `To`. No received string is read as a header.
@@ -35,7 +35,7 @@
 - The relay's sending limits, its reputation and what it does after it takes a message are the operator's.
 
 ## Depends on
-- `kernel`, `mail` (the contract, `preparer`, `isAddress`), `url-setting` (`isLoopbackName`), `outbound-policy` (`isLoopbackAddress`, inside `relay`). `nodemailer` (pinned) only inside the internal module `relay`.
+- `kernel`, `mail` (the contract, `preparer`, `isAddress`), `url-setting` (`isLoopbackName`), `address-reach` (`isLoopbackAddress`, inside `relay`). `nodemailer` (pinned) only inside the internal module `relay`.
 
 ## Vocabulary
 - relay: the SMTP server that takes the message from here.

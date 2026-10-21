@@ -1,5 +1,5 @@
 import { connect as netConnect, type Socket } from "node:net";
-import { isLoopbackAddress } from "@mod/outbound-policy";
+import { isLoopbackAddress } from "@mod/address-reach";
 import addressparser from "nodemailer/lib/addressparser";
 import MailComposer from "nodemailer/lib/mail-composer";
 import SMTPConnection from "nodemailer/lib/smtp-connection";
