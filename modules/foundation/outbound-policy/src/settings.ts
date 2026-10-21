@@ -32,7 +32,7 @@ export const policySettings = z
 			.array(z.string().refine(isPair, "not a host:port pair"))
 			.prefault([])
 			.describe(
-				"The `host:port` pairs plain http may reach for a URL of the operator's own configuration, at private addresses alone (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7, never a metadata address); every answer must be private, and the host is still checked against `deny` and `allow`. What goes there, passwords, tokens, credentials and keys, is in the clear: list only peers on a network trusted against reading and changing it.",
+				"The `host:port` pairs plain http may reach for a URL of the operator's own configuration, at private or loopback addresses alone (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7, 127/8, ::1, never a metadata address); every answer must be private or loopback, and the host is still checked against `deny` and `allow`. What goes there, passwords, tokens, credentials and keys, is in the clear: list only peers on a network trusted against reading and changing it.",
 			),
 		"max-response-size": setting
 			.size()
@@ -65,7 +65,7 @@ export const policySettings = z
 		},
 		{
 			message:
-				"a host:port is reached at loopback or at private addresses, not both: name it in plain-loopback or plain-internal",
+				"a host:port is named in one plain list alone: plain-loopback for loopback, or plain-internal for private or loopback addresses",
 			path: ["plain-internal"],
 		},
 	);

@@ -432,7 +432,7 @@ For a second factor by mail alone, with no other factor to enrol, set `mfa-email
 | (development mail sender) | the `mail` module with `mail.accept-unsent = true` | It sends nothing and logs the purpose and a hash of the address alone: a code or link in the message is never logged, unlike 0.17's |
 | `core.outbound.allowedHosts` | `outbound.allow`, or `outbound.allow-any-public = true` | An empty list now reaches nothing. Entries as before: a host, or `.name` for the name and the names under it |
 | `core.outbound.deniedHosts`, `timeoutMs`, `maxResponseBytes` | `outbound.deny`, `timeout`, `max-response-size` | `deny` takes entries as `allow` does |
-| `core.outbound.internalHosts` | `outbound.internal-hosts`; `outbound.plain-loopback` (`host:port`) for plain http at loopback, `outbound.plain-internal` (`host:port`) for plain http at private addresses | `internal-hosts` reaches private addresses (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7) for the users-http ledger and the audit-http collector only; a client's URLs (key sets, back-channel logout) never reach a private, loopback or link-local address. `.name` still covers the name and the names under it |
+| `core.outbound.internalHosts` | `outbound.internal-hosts`; `outbound.plain-loopback` (`host:port`) for plain http at loopback, `outbound.plain-internal` (`host:port`) for plain http at private or loopback addresses | `internal-hosts` reaches private addresses (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7) for the users-http ledger and the audit-http collector only; a client's URLs (key sets, back-channel logout) never reach a private, loopback or link-local address. `.name` still covers the name and the names under it |
 | `core.outbound.egress = direct` | `outbound.direct-despite-proxy = true` | Only while every request goes direct; with a proxy, write `outbound.proxy` instead |
 | `HTTPS_PROXY` with `NODE_USE_ENV_PROXY` | `outbound.proxy` (an http origin alone, such as `http://proxy:3128`), `outbound.proxy-authorization` | Every https request goes through it by CONNECT, key sets and back-channel notices included; the variables are never read |
 | `NO_PROXY` | `outbound.direct-hosts` | The variable is never read: list each host here, as written (no `*`, `_`, spaces or short IPv4 forms); `.name` covers the name and the names under it |
@@ -820,7 +820,7 @@ Without `mfa`, registering a passkey or linking an upstream account (`?link=1`) 
 
 ### Outbound requests
 
-Every host the app fetches from must be named in `outbound.allow` (or `allow-any-public = true`): IdP issuers and endpoints, key set URLs, the users-http ledger and the audit-http collector. Plain http is allowed only to a `host:port` named in `outbound.plain-loopback`, at loopback addresses, or in `outbound.plain-internal`, at private addresses and for a URL of your own configuration.
+Every host the app fetches from must be named in `outbound.allow` (or `allow-any-public = true`): IdP issuers and endpoints, key set URLs, the users-http ledger and the audit-http collector. Plain http is allowed only to a `host:port` named in `outbound.plain-loopback`, at loopback addresses, or in `outbound.plain-internal`, at private or loopback addresses and for a URL of your own configuration.
 
 A deployment that reached its IdP through a proxy and its ledger at an internal load balancer wrote, in 0.17:
 
@@ -860,7 +860,7 @@ outbound {
 users-http.verify-url = "http://users.corp.example:8080/authenticate"
 ```
 
-Plain http never goes through the proxy. Every address the name resolves to must be private, as `internal-hosts` takes them; one public address refuses the request (`plain-public`), and a loopback, link-local or metadata address refuses it as any special address. What goes there, users' passwords and the ledger's credential among it, is in the clear, and each boot warns `outbound.plain_internal` with the count of pairs. Prefer https with an internal CA and `internal-hosts` where the ledger can serve it.
+Plain http never goes through the proxy. Every address the name resolves to must be private, as `internal-hosts` takes them, or loopback, as for a sidecar on the same host; one public address refuses the request (`plain-public`), and a link-local or metadata address refuses it as any special address. What goes there, users' passwords and the ledger's credential among it, is in the clear, and each boot warns `outbound.plain_internal` with the count of pairs. Prefer https with an internal CA and `internal-hosts` where the ledger can serve it.
 
 ### Reverse proxy
 

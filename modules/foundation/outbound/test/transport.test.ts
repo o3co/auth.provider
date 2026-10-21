@@ -532,7 +532,7 @@ describe("outbound", () => {
 			[["10.1.2.3", "93.184.216.34"], "plain-public"],
 			[["93.184.216.34", "10.1.2.3"], "plain-public"],
 			[[], "special-address"],
-			[["127.0.0.1"], "special-address"],
+			[["::7f00:1"], "special-address"],
 			[["169.254.169.254"], "special-address"],
 			[["::ffff:100.100.100.200"], "special-address"],
 			[["fd00:ec2::254"], "special-address"],
