@@ -12,7 +12,8 @@ import { section } from "./section.ts";
 export default defineModule({ name: "audit-http", section, replicaSafe: true }, (m) => [
 	m.contribute(auditReceivers).by(async (c) => {
 		const { url, authorization } = c.section;
-		// The operator's own URL: a collector at a host in `internal-hosts` is reached at a private address at its origin.
+		// The operator's own URL: a collector is reached at a private address at its origin, for a
+		// host in `internal-hosts` or a `plain-internal` pair.
 		const own = { internal: url };
 		const refused = destinationRefusal(await c.get(outboundRefusals), url, own);
 		if (refused !== undefined) {
