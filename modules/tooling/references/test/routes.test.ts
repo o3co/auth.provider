@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, it, vi } from "vitest";
-import { root } from "../../../test/full-app.ts";
-import { routesFile, routesIn, routesOf } from "../routes.ts";
+import { routesFile, routesIn, routesOf } from "../src/routes.ts";
+import { root } from "./root.ts";
 
 // These tests assemble the whole workspace, which is slow when the machine is busy.
 vi.setConfig({ testTimeout: 60_000 });

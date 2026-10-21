@@ -2149,6 +2149,19 @@ importers:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
 
+  modules/scaffold/app-output:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@o3co/ts.hocon':
+        specifier: 1.14.3
+        version: 1.14.3(zod@4.6.7)
+    devDependencies:
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+
   modules/scaffold/combinations:
     devDependencies:
       vitest:
@@ -2157,9 +2170,13 @@ importers:
 
   modules/scaffold/create-app:
     dependencies:
+      '@mod/app-output':
+        specifier: workspace:*
+        version: link:../app-output
       '@mod/combinations':
         specifier: workspace:*
         version: link:../combinations
+    devDependencies:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
@@ -2169,7 +2186,6 @@ importers:
       '@o3co/ts.hocon':
         specifier: 1.14.3
         version: 1.14.3(zod@4.6.7)
-    devDependencies:
       vitest:
         specifier: 5.0.4
         version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
@@ -3577,6 +3593,31 @@ importers:
       typescript:
         specifier: 6.0.3
         version: 6.0.3
+
+  modules/tooling/references:
+    dependencies:
+      '@mod/app-output':
+        specifier: workspace:*
+        version: link:../../scaffold/app-output
+      '@mod/combinations':
+        specifier: workspace:*
+        version: link:../../scaffold/combinations
+      '@mod/create-app':
+        specifier: workspace:*
+        version: link:../../scaffold/create-app
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/trial':
+        specifier: workspace:*
+        version: link:../../scaffold/trial
+    devDependencies:
+      '@o3co/ts.hocon':
+        specifier: 1.14.3
+        version: 1.14.3(zod@4.6.7)
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
 
   modules/upstream-login/federation:
     dependencies:

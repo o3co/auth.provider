@@ -25,7 +25,7 @@ Thank you for helping. This guide covers how the repository is laid out, what a 
 | `pnpm conformance` | each module's conformance scenes against the assembled apps | the main and release branches |
 | `pnpm release:check` | packs every published package, generates each pattern from the packed tarballs, type-checks and boots it | the main and release branches, and each release |
 
-Generated documents (`docs/configuration.md`, `docs/audit-events.md`, `docs/routes.md` and each module's `reference.conf`) are written by `pnpm --filter @mod/create-app run configuration`; run it after changing a section, an audit event, a route or a route's policy, and commit the result. Their tests fail when the committed files are behind.
+Generated documents (`docs/configuration.md`, `docs/audit-events.md`, `docs/routes.md` and each module's `reference.conf`) are written by `pnpm --filter @mod/references run configuration`; run it after changing a section, an audit event, a route or a route's policy, and commit the result. Their tests fail when the committed files are behind.
 
 CI also checks, on each pull request, that every commit installs, and that no file or commit message holds a path into a local workspace or a reference to an unrelated project.
 

@@ -9,7 +9,7 @@ import {
 	type Written,
 	writtenOf,
 } from "./fragments.ts";
-import { type Card, packagesFor, type Release } from "./packages.ts";
+import type { Card, Packages, Release } from "./packages.ts";
 import {
 	filled,
 	mainSource,
@@ -59,19 +59,25 @@ const dockerIgnored = [
 ];
 const lines = (entries: readonly string[]) => `${entries.join("\n")}\n`;
 
-/** Writes the project assembling `modules` into an empty target, its guide from `readme`'s template and values. */
+/** A deployment's guide: a file of `templates/`, and the values for its marks beside those the output fills. */
+export interface Readme {
+	readonly template: string;
+	readonly fill: Readonly<Record<string, string>>;
+}
+
+/** Writes the project assembling `modules` from `packages` into an empty target, its guide from `readme`. */
 export async function writeDeployment(
-	plan: { readonly target: string; readonly workspace?: string },
+	target: string,
 	modules: readonly string[],
-	readme: { readonly template: string; readonly fill: Readonly<Record<string, string>> },
+	packages: Packages,
+	readme: Readme,
 ): Promise<void> {
-	await vacant(plan.target);
+	await vacant(target);
 	const names = withKernel(modules);
-	const packages = packagesFor(plan);
 	const fragments = await packages.fragments(names);
 	const settings = settingsOf(fragments);
 	const seals = names.includes(sealPackage);
-	await writeProject(plan.target, {
+	await writeProject(target, {
 		"package.json": manifestOf(
 			"node --env-file-if-exists=.env src/main.ts",
 			packages.dependencies(names),

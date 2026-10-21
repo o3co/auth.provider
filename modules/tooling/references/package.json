@@ -1,0 +1,21 @@
+{
+	"name": "@mod/references",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "assembly",
+	"scripts": {
+		"configuration": "node src/write-configuration.ts"
+	},
+	"dependencies": {
+		"@mod/app-output": "workspace:*",
+		"@mod/combinations": "workspace:*",
+		"@mod/create-app": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/trial": "workspace:*"
+	},
+	"devDependencies": {
+		"@o3co/ts.hocon": "1.14.3",
+		"vitest": "5.0.4"
+	}
+}

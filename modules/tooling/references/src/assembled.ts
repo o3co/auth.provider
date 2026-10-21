@@ -4,10 +4,10 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { full, optIns } from "@mod/combinations";
+import { generate } from "@mod/create-app";
 import { assemble, contract, defineModule, type ExtensionPoint, loadConfig } from "@mod/kernel";
 import { trialLayer } from "@mod/trial";
-import { generate } from "../generate.ts";
-import { workspacePackages } from "../project.ts";
+import { workspacePackages } from "./workspace.ts";
 
 /** A section's schema, as a module gives it: a Standard Schema that can describe itself. */
 export interface Schema {

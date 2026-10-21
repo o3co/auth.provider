@@ -2,11 +2,11 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { mainSource } from "@mod/app-output";
 import { addable, completed } from "@mod/combinations";
 import { kernelConfig } from "@mod/kernel";
 import { expect, it, vi } from "vitest";
 import { generate, run } from "../src/contract.ts";
-import { mainSource } from "../src/project.ts";
 import { importedModules, linked, root } from "./full-app.ts";
 
 // These tests read the whole workspace, which is slow when the machine is busy.

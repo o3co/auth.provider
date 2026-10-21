@@ -1,35 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { type Fragment, fragmentsIn, fragmentsOf } from "./fragments.ts";
+import { type Card, fragmentsIn, fragmentsOf, type Packages } from "@mod/app-output";
 import { dependenciesOf, workspacePackages } from "./project.ts";
-
-/** Where the packages an app assembles come from, and how the app names them. */
-export interface Packages {
-	/** Each name's section example, in the order given; a package without one is skipped. */
-	fragments(names: readonly string[]): Promise<Fragment[]>;
-	/** What the app depends on to have the names. */
-	dependencies(names: readonly string[]): Record<string, string>;
-	/** What the app imports a name's entries under. */
-	importOf(name: string): string;
-	/** Where the app installs each name's card, and its section's defaults where it ships them. */
-	cards(names: readonly string[]): Card[];
-	/** The release the packages are of, and its repository where stated. */
-	release(): Release;
-}
-
-/** A module's card and section defaults, as the app installs them, from the app's directory. */
-export interface Card {
-	readonly name: string;
-	readonly card: string;
-	readonly references?: string;
-	/** Its card's section on what it asks of the deployment, where the card has one. */
-	readonly deployment?: string;
-}
-
-export interface Release {
-	readonly version: string;
-	readonly repository?: string;
-}
 
 /** Where an entry's files lie in the app: under `node_modules`, the entry's own path. */
 const installed = (
@@ -78,14 +50,19 @@ export function packagesFor(plan: { readonly workspace?: string }, index = bundl
 		return publishedIn(JSON.parse(readFileSync(index, "utf8")) as Indexed);
 	}
 	const root = resolve(plan.workspace ?? ownWorkspace);
-	const dirs = workspacePackages(root);
+	let listed: Map<string, string> | undefined;
+	// Listed on first use: a target refused as it is written reads no workspace.
+	const dirs = () => {
+		listed ??= workspacePackages(root);
+		return listed;
+	};
 	return {
-		fragments: (names) => fragmentsIn(names.flatMap((name) => dirs.get(name) ?? [])),
-		dependencies: (names) => dependenciesOf(names, plan.workspace ? dirs : undefined),
+		fragments: (names) => fragmentsIn(names.flatMap((name) => dirs().get(name) ?? [])),
+		dependencies: (names) => dependenciesOf(names, plan.workspace ? dirs() : undefined),
 		importOf: (name) => name,
 		cards: (names) =>
 			names.map((name) => {
-				const dir = dirs.get(name);
+				const dir = dirs().get(name);
 				return {
 					name,
 					...installed(name, {

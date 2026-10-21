@@ -4,9 +4,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
+import { kernel } from "@mod/app-output";
 import { parse } from "@o3co/ts.hocon";
 import { expect } from "vitest";
-import { kernel } from "../src/project.ts";
 import { packageDirs as dirs, leaves, read, type Tree } from "./full-app.ts";
 
 export interface Manifest {

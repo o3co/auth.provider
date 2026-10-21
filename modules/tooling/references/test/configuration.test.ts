@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 import { expect, it, vi } from "vitest";
-import { root } from "../../../test/full-app.ts";
 import {
 	clientSectionsOf,
 	idpTypesOf,
@@ -9,7 +8,8 @@ import {
 	rowsOf,
 	sectionsIn,
 	unfixedKeys,
-} from "../configuration.ts";
+} from "../src/configuration.ts";
+import { root } from "./root.ts";
 
 // These tests read the whole workspace, which is slow when the machine is busy.
 vi.setConfig({ testTimeout: 60_000 });

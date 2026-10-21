@@ -12,7 +12,7 @@ type Tree = { readonly [key: string]: unknown };
 /** One section's example, as its owner wrote it: placeholders only. */
 export interface Fragment {
 	readonly section: string;
-	readonly tree: Tree;
+	readonly tree: { readonly [key: string]: unknown };
 }
 
 /** A scalar key of a fragment, read from the environment variable named for it. */

@@ -1,10 +1,10 @@
 /** A pattern's project: what `combinations` composes from the pattern's selection and the operator's choice. */
+import { namesPackages, writeDeployment } from "@mod/app-output";
 import { composed } from "@mod/combinations";
-import { writeDeployment } from "./deployment.ts";
+import { packagesFor } from "./packages.ts";
 import { auditReceiversLine, chosenLines } from "./patterns/chosen.ts";
 import { type Choice, oneInstance, type Pattern, selectionOf } from "./patterns/pattern.ts";
 import { cardOf, patternNamed } from "./patterns/patterns.ts";
-import { namesPackages } from "./project.ts";
 
 export interface PatternPlan extends Choice {
 	readonly target: string;
@@ -29,7 +29,7 @@ export async function generatePattern(
 		? "`single`: the store is kept in this process, so the deployment runs as one instance."
 		: "`single` for one instance, `multi` for several.";
 	const card = await cardOf(pattern.name);
-	await writeDeployment(plan, modules, {
+	await writeDeployment(plan.target, modules, packagesFor(plan), {
 		template: "pattern-readme.md",
 		fill: {
 			name: pattern.name,

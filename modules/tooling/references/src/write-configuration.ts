@@ -14,7 +14,7 @@ import {
 } from "./configuration.ts";
 import { routesFile, routesIn, routesOf } from "./routes.ts";
 
-const root = join(import.meta.dirname, "..", "..", "..", "..", "..");
+const root = join(import.meta.dirname, "..", "..", "..", "..");
 await mkdir(dirname(referenceFile(root)), { recursive: true });
 const sections = await sectionsIn(root);
 await writeFile(
