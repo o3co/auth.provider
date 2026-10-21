@@ -7,10 +7,52 @@ const strictBase64 =
 /** A key of fewer byte values is weak (all zero, a short repeated pattern); a random one is, with odds under 1e-36. */
 const fewestByteValues = 8;
 
-/** A secret setting's bytes: hex where `hex` is taken and the value is whole bytes of hex, else strict base64; none when neither. */
-export function bytesOf(value: string, { hex = false } = {}): Buffer | undefined {
-	if (hex && /^(?:[0-9a-fA-F]{2})+$/.test(value)) return Buffer.from(value, "hex");
+/** How a secret's text is read as its bytes, where the operator names it: hex, strict base64, or the text's own UTF-8 bytes. */
+export type SecretEncoding = "hex" | "base64" | "utf8";
+
+interface Reading {
+	/** Unnamed, hex is taken where the value is whole bytes of hex, else strict base64. */
+	readonly hex?: boolean;
+	/** Named, that reading alone. */
+	readonly encoding?: SecretEncoding | undefined;
+}
+
+const isHex = (value: string) => /^(?:[0-9a-fA-F]{2})+$/.test(value);
+
+/** A secret setting's bytes, as the reading takes them; none when the value is not of it. */
+export function bytesOf(
+	value: string,
+	{ hex = false, encoding }: Reading = {},
+): Buffer | undefined {
+	if (encoding === "utf8") return Buffer.from(value, "utf8");
+	if (encoding === "hex") return isHex(value) ? Buffer.from(value, "hex") : undefined;
+	if (encoding === undefined && hex && isHex(value)) return Buffer.from(value, "hex");
 	return strictBase64.test(value) ? Buffer.from(value, "base64") : undefined;
+}
+
+type Size = { readonly exactly: number } | { readonly atLeast: number };
+
+/**
+ * Why a secret is refused, read as `reading` takes it: a `REPLACE-` sample, not of the reading, of
+ * another size, or of fewer than 8 byte values; nothing when it is taken. Names the rule, never the value.
+ */
+export function secretProblem(
+	value: string,
+	size: Size,
+	reading: Reading = {},
+): string | undefined {
+	if (value.startsWith("REPLACE-")) return "a sample left in place: REPLACE- is never a secret";
+	const bytes = bytesOf(value, reading);
+	if (!bytes) {
+		if (reading.encoding !== undefined) return `not ${reading.encoding}`;
+		return reading.hex ? "not hex or base64" : "not base64";
+	}
+	if ("exactly" in size && bytes.length !== size.exactly) return `${size.exactly} bytes`;
+	if ("atLeast" in size && bytes.length < size.atLeast) return `at least ${size.atLeast} bytes`;
+	if (new Set(bytes).size < fewestByteValues) {
+		return `a weak key: fewer than ${fewestByteValues} byte values`;
+	}
+	return undefined;
 }
 
 /**
@@ -23,17 +65,8 @@ export function secretBytes(
 	{ hex = false } = {},
 ) {
 	return z.string().superRefine((value, ctx) => {
-		const refuse = (message: string) => ctx.addIssue({ code: "custom", message });
-		if (value.startsWith("REPLACE-"))
-			return refuse("a sample left in place: REPLACE- is never a secret");
-		const bytes = bytesOf(value, { hex });
-		if (!bytes) return refuse(hex ? "not hex or base64" : "not base64");
-		if ("exactly" in size && bytes.length !== size.exactly) return refuse(`${size.exactly} bytes`);
-		if ("atLeast" in size && bytes.length < size.atLeast)
-			return refuse(`at least ${size.atLeast} bytes`);
-		if (new Set(bytes).size < fewestByteValues) {
-			return refuse(`a weak key: fewer than ${fewestByteValues} byte values`);
-		}
+		const problem = secretProblem(value, size, { hex });
+		if (problem) ctx.addIssue({ code: "custom", message: problem });
 	});
 }
 
