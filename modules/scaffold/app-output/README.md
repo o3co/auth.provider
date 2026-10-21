@@ -32,7 +32,8 @@
 - A scalar its owner's example gives in several lines is still read from env, but left out of the env example and listed among the keys written in the local layer; the guide and the env example say such a value goes in the local layer.
 - With `seal` composed, the project has a `reseal` script: the same modules, built and never started, running their resealers.
 - Git leaves out every env file but `.env.example`, the local layer, `*.pem` and `*.key`; the image's build context leaves out those, `.env.example` and `.git`.
-- The image pins Node by version and digest and corepack by version, installs the locked production dependencies in a stage of their own, runs node under `tini` as a user other than root, and checks liveness (`/_healthcheck`, after a start period).
+- The image pins Node by version and digest and corepack by version, installs the locked production dependencies in a stage of their own, and runs node under `tini` as a user other than root.
+- Only an app composing `http` is given its port and interface in the image and the guide, and only one composing `http-ops` is checked for liveness (`/_healthcheck`, after a start period) or told of its endpoints.
 - The app reads the configuration files `APP_CONFIG` lists, comma-separated, layered in order; the generated configuration file when unset.
 - The app exits 78 on a refused boot, writing each refusal on standard error.
 - SIGTERM or SIGINT stops the app, draining; one that comes while it starts stops it once started.

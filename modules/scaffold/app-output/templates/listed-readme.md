@@ -15,8 +15,7 @@ Each key not written keeps its module's default.
 4. `APP_CONFIG={{local}},{{application}} pnpm start`
 
 Both examples hold every value in a comment: a copy left as it is sets nothing, and boot refuses each key still needed.
-Where it composes `http`, to try it on this machine over plain http, set `http.public-origin` to `http://localhost:{{port}}` and `http.insecure-origin` to `true`: an http public origin boots only with it, and its cookies cannot be made secure. A deployment keeps an https origin and leaves it `false`.
-A secret's placeholder begins `REPLACE-`; uncommented as it is, boot refuses it. Delete the line of an optional key left unset.
+{{tryHttp}}A secret's placeholder begins `REPLACE-`; uncommented as it is, boot refuses it. Delete the line of an optional key left unset.
 
 {{firstLogin}}Until every key the modules need is written, the app writes each refusal on standard error, one per line, and exits 78.
 SIGTERM or SIGINT stops it, draining what is under way, within `kernel.stop-deadline` (`30s` by default); give an orchestrator a grace period longer than `kernel.stop-deadline`.
@@ -24,14 +23,11 @@ SIGTERM or SIGINT stops it, draining what is under way, within `kernel.stop-dead
 ## Docker
 
 1. `docker build -t auth-provider .`
-2. `docker run --env-file .env -e {{hostEnv}}=0.0.0.0 -e {{portEnv}}={{port}} -e APP_CONFIG={{local}},{{application}} -v "$PWD/{{local}}:/app/{{local}}:ro" -p {{port}}:{{port}} auth-provider`
+2. `{{dockerRun}}`
 
-An `-e` after `--env-file` wins over it: the container listens on every interface at {{port}}, where `-p` reaches it, whatever `.env` names for a run on the host.
-
-Docker reads one line per variable from an env file: write a value of several lines, such as a PEM key, in the local layer instead.
+{{listening}}Docker reads one line per variable from an env file: write a value of several lines, such as a PEM key, in the local layer instead.
 The image runs as a user other than root and installs the locked production dependencies only. `tini` runs as process 1, so `docker stop` reaches the app and it stops cleanly.
-Its health check asks `/_healthcheck`, which answers while the process runs; `/readyz` answers readiness, for a load balancer.
-
+{{healthCheck}}
 ## The composed modules' cards
 
 Each module's card, as installed, is the truth about it: what it does, its routes, and what it asks of a deployment, a server's settings among them. `AGENTS.md` indexes them with each module's section defaults.
