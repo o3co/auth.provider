@@ -51,7 +51,7 @@ export interface Ceremonies {
 		| { readonly kind: "attested"; readonly credential: Credential }
 		| { readonly kind: "refused"; readonly reason: CeremonyRefusal }
 	>;
-	/** Options for an assertion by one of `allow`, and the challenge to keep for its answer. */
+	/** Options for an assertion by one of `allow`, and the challenge to keep for its answer: it carries whether `allow` named any, so `assert` asks for the user handle where none was named. */
 	request(
 		allow: readonly Credential[],
 		v: Verification,
