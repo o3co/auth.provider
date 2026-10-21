@@ -3,10 +3,9 @@ import { contract, defineModule } from "@mod/kernel";
 import { amrSources, openedAfterHold } from "@mod/login-gates";
 import { requestsPerSource } from "@mod/rate-limit";
 import { handoff } from "@mod/upstream-handoff";
-import { upstreamContinuations, upstreams } from "@mod/upstreams";
+import { upstreams } from "@mod/upstreams";
 import { upstreamNames } from "@mod/users";
 import { amrSourceIn, idpsIn, upstreamNamesIn, upstreamsIn } from "./idps/idps.ts";
-import { linkIn } from "./link/link.ts";
 import { loginCaller, loginIn } from "./login/login.ts";
 import { base, federationIdps, roundTripIn } from "./round-trip/round-trip.ts";
 import { section } from "./section.ts";
@@ -19,7 +18,6 @@ export default defineModule({ name: "federation", section }, (m) => [
 	m.provide(federationIdps).by(idpsIn),
 	m.provide(upstreams).by(upstreamsIn),
 	m.contribute(upstreamNames).by(upstreamNamesIn),
-	m.contribute(upstreamContinuations).by(linkIn),
 	// login-gates tells federation of a held login that opened; upstream-handoff keeps its tokens.
 	m.contribute(openedAfterHold).by(async (c) => ({
 		caller: loginCaller,
@@ -38,7 +36,7 @@ export default defineModule({ name: "federation", section }, (m) => [
 		path: `${base}/*`,
 		changesState: true,
 		crossSite:
-			"A start is the user's own navigation. A link's start checks its origin before any transaction is made; a login's start takes a navigation from another site, its state bound to its cookie and taken once.",
+			"A start is the user's own navigation. A continuation's start checks what it asks before any transaction is made; a login's start takes a navigation from another site, its state bound to its cookie and taken once.",
 		...(await c.get(federationRoute)),
 	})),
 	...(["GET", "POST"] as const).map((method) =>

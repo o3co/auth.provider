@@ -3763,9 +3763,6 @@ importers:
       '@mod/request-source':
         specifier: workspace:*
         version: link:../../foundation/request-source
-      '@mod/session':
-        specifier: workspace:*
-        version: link:../../identity/session
       '@mod/upstream-handoff':
         specifier: workspace:*
         version: link:../upstream-handoff
@@ -3788,6 +3785,9 @@ importers:
       '@mod/cookies':
         specifier: workspace:*
         version: link:../../foundation/cookies
+      '@mod/federation-link':
+        specifier: workspace:*
+        version: link:../federation-link
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -3797,6 +3797,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store

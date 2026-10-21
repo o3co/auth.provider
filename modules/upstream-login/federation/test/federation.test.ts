@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import cookiesModule from "@mod/cookies/module";
 import { csrfStandIn } from "@mod/csrf/testing";
+import linkModule from "@mod/federation-link/module";
 import { listening, type Route, requestEnds, routes } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
@@ -107,10 +108,12 @@ interface Setup {
 	readonly origin?: string | null;
 	/** Modules that receive upstream tokens; seal comes with them. */
 	readonly receivers?: Module[];
-	/** Leaves csrf out, which a link needs for its origin evidence. */
+	/** Leaves csrf out, whose origin evidence a start and a link need. */
 	readonly withoutCsrf?: true;
 	/** Gives alice no upstream identity, as a deployment with no IdP has none to name. */
 	readonly unlinked?: true;
+	/** Leaves out the link, which the bridge brings beside federation in a composed app. */
+	readonly withoutLink?: true;
 	/** What the test type's upstreams offer besides a login. */
 	readonly more?: Pick<Upstream, "refresh" | "endSession" | "delegation">;
 }
@@ -144,7 +147,8 @@ async function serve(setup: Setup = {}) {
 	const app = await assemble({
 		modules: [
 			http,
-			...(setup.withoutCsrf ? [] : [csrfStandIn, cookiesModule]),
+			...(setup.withoutCsrf ? [] : [csrfStandIn]),
+			cookiesModule,
 			gatesModule,
 			usersModule,
 			secretHashModule,
@@ -155,6 +159,7 @@ async function serve(setup: Setup = {}) {
 			audit.module,
 			simulatedStore().module,
 			federationModule,
+			...(setup.withoutLink ? [] : [linkModule]),
 			idp.module,
 			handoffModule,
 			setup.held ?? held,
@@ -400,6 +405,18 @@ describe("federation", () => {
 		expect(fresh(afterEnd)).not.toBe(third.state);
 	});
 
+	it("refuses a start asking a link where none is composed, and warns, writing nothing", async () => {
+		const s = await serve({ withoutLink: true });
+		const kept = s.saved.length;
+		const asked = await s.get(`${base}/corp?link=1`, "", { "sec-fetch-site": "same-origin" });
+		expect([asked.status, asked.body]).toEqual([400, { error: "continuation_unavailable" }]);
+		expect(asked.cookies.filter((c) => c.includes("federation.corp"))).toEqual([]);
+		expect(s.saved.length).toBe(kept);
+		expect(logged()).toContain('federation.continuation_missing {"idp":"corp","name":"link"}');
+		// A login is no continuation: it starts as ever.
+		expect((await s.begin()).status).toBe(302);
+	});
+
 	it("checks a link start's origin before it makes any transaction, so another site starts none", async () => {
 		const s = await serve();
 		const first = await s.begin();
@@ -468,12 +485,15 @@ describe("federation", () => {
 		expect(await linkFrom(recent)).toEqual(stepUp);
 	});
 
-	it("refuses to boot without csrf, whose origin evidence a link needs", async () => {
-		await expect(serve({ withoutCsrf: true })).rejects.toSatisfy(
-			(error) =>
-				error instanceof BootRefused &&
-				error.refusals.some((r) => r.where === "federation" && r.reason.includes("csrf")),
-		);
+	it("refuses to boot without csrf, whose origin evidence a start needs, as a link does", async () => {
+		const refusedAt = (setup: Setup) =>
+			serve(setup).then(
+				() => [],
+				(error: BootRefused) =>
+					error.refusals.filter((r) => r.reason.includes("csrf")).map((r) => r.where),
+			);
+		expect(await refusedAt({ withoutCsrf: true, withoutLink: true })).toEqual(["federation"]);
+		expect(await refusedAt({ withoutCsrf: true })).toContain("federation-link");
 	});
 
 	it("sends the browser upstream with PKCE, a state and a nonce, and logs it in on its way back", async () => {
