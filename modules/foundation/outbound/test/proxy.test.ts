@@ -195,6 +195,21 @@ it("checks a destination written as an address against that address, never the p
 	expect(await reached("public")).toBe(200);
 });
 
+it("asks the proxy for a destination written as an address as written, never its IPv4 spelling", async () => {
+	const out = outboundOver(
+		section.parse({
+			"allow-any-public": true,
+			proxy: `http://127.0.0.1:${proxyPort}`,
+			"internal-hosts": ["10.0.0.1"],
+		}),
+		noResolving,
+		{ ca: addressAuthority },
+	);
+	const url = "https://[::ffff:a00:1]:8443/";
+	await out.fetch(url, {}, { internal: configuredUrl(url) }).catch(() => undefined);
+	expect(asked.map((a) => a.target)).toEqual(["[::ffff:a00:1]:8443"]);
+});
+
 it("closes the tunnel when the request cannot be made over it, as for a header broken across lines", async () => {
 	await expect(
 		viaProxy().fetch(at("/jwks"), { headers: { "x-note": "a\r\nb" } }),

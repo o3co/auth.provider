@@ -241,6 +241,12 @@ describe("outbound", () => {
 		expect(calls).toEqual([]);
 	});
 
+	it("names the host as the URL writes an address, IPv4 mapped into IPv6 too", async () => {
+		const { resolve } = table({});
+		const answer = await over(resolve).fetch(`http://[::ffff:7f00:1]:${port}/ok`);
+		expect([answer.status, seen.at(-1)?.host]).toEqual([200, `[::ffff:7f00:1]:${port}`]);
+	});
+
 	it("refuses a name when any address it resolves to is special, before connecting", async () => {
 		const { resolve } = table({ "public.test": ["8.8.8.8", "10.0.0.1"], "inside.test": ["::1"] });
 		const before = seen.length;

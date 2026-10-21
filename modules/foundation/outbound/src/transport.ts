@@ -106,7 +106,8 @@ async function bodyOf(answer: IncomingMessage, maxBytes: number, signal: AbortSi
 
 /** A tunnel to the destination through the proxy, by CONNECT; the proxy resolves the name and checks its addresses. */
 function tunnel(route: Route, admitted: Admitted, signal: AbortSignal) {
-	const target = `${isIP(admitted.host) === 6 ? `[${admitted.host}]` : admitted.host}:${admitted.port}`;
+	const named = writtenAddress(admitted) ?? admitted.host;
+	const target = `${isIP(named) === 6 ? `[${named}]` : named}:${admitted.port}`;
 	return new Promise<Socket>((opened, failed) => {
 		const asking = plainRequest({
 			hostname: unbracketed(route.proxy.hostname),
@@ -202,7 +203,7 @@ export async function send(
 		let outgoing: ClientRequest;
 		try {
 			outgoing = (admitted.plain ? plainRequest : tlsRequest)({
-				hostname: admitted.host,
+				hostname: writtenAddress(admitted) ?? admitted.host,
 				port: admitted.port,
 				path: `${admitted.url.pathname}${admitted.url.search}`,
 				method: request.method ?? "GET",
