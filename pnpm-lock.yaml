@@ -4094,6 +4094,9 @@ importers:
 
   modules/upstream-login/upstreams:
     dependencies:
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
