@@ -120,6 +120,20 @@ describe("judging an upstream's tokens", () => {
 			refreshToken: "up-refresh-1",
 		});
 	});
+
+	it("keeps the earlier end for the access token it holds, its life counted from now; a new token as said", () => {
+		const kept = { accessToken: "up-1", expiresAt: at.now + 25_000 };
+		const ends = (tokens: Readonly<Record<string, unknown>>) => {
+			const read = credentialsFrom(upstreamTokens(tokens), { ...at, kept });
+			return read.kind === "held" ? [read.credentials.expiresAt, read.credentials.obtainedAt] : [];
+		};
+		expect(ends({ expiresInSeconds: 600 })).toEqual([at.now + 25_000, at.now]);
+		expect(ends({ expiresInSeconds: 10 })).toEqual([at.now + 10_000, at.now]);
+		expect(ends({ accessToken: "up-2", expiresInSeconds: 600 })).toEqual([
+			at.now + 600_000,
+			at.now,
+		]);
+	});
 });
 
 describe("a client's permission", () => {

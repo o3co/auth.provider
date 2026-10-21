@@ -30,6 +30,15 @@ export type Taken =
 	  }
 	| { readonly kind: "none" };
 
+/** A live round trip as its start made it: what rebuilds the same authorization request. */
+export interface Live {
+	readonly state: string;
+	readonly nonce: string;
+	readonly challenge: string;
+	readonly challengeMethod: "S256";
+	readonly carried: Carried;
+}
+
 /** One round trip to an upstream, from its start to its callback, taken once. */
 export interface RoundTrips {
 	begin(at: {
@@ -39,6 +48,8 @@ export interface RoundTrips {
 		readonly crossSite?: boolean;
 	}): Promise<Begun>;
 	take(request: HttpRequest, name: string, state: string | undefined): Promise<Taken>;
+	/** The browser's round trip of `name`, while it lives and is not taken; read only, never lengthened. */
+	current(request: HttpRequest, name: string): Promise<Live | undefined>;
 }
 
 const shape = z.strictObject({
@@ -96,6 +107,21 @@ export function roundTripsOver(parts: {
 				challengeMethod: "S256",
 				// Under a second would be a Max-Age of 0, which clears it.
 				cookie: cookieOf(name, id, Math.max(1, Math.ceil(lifetimeMs / 1000)), record.crossSite),
+			};
+		},
+		current: async (request, name) => {
+			const kept = parts.cookies.lookup(request, name);
+			if (kept.kind !== "found") return undefined;
+			// Read through a change that writes nothing, so its lifetime stays where its start put it.
+			const read = await parts.store.update(kept.value, () => undefined);
+			const live = fromStored(read?.before);
+			if (!live || live.name !== name || live.taken) return undefined;
+			return {
+				state: live.state,
+				nonce: live.nonce,
+				challenge: s256(live.verifier),
+				challengeMethod: "S256",
+				carried: live.carried,
 			};
 		},
 		take: async (request, name, state) => {

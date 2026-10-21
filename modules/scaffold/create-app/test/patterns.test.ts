@@ -1,7 +1,6 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { composed, full } from "@mod/combinations";
@@ -13,10 +12,13 @@ import { type Choice, selectionOf } from "../src/patterns/pattern.ts";
 import { patternNamed } from "../src/patterns/patterns.ts";
 import {
 	boot,
+	configFiles,
+	freePort,
 	kernel,
 	readsScalarsFromEnv,
 	refusesEmptyOnlyForSections,
 	refusesGeneratedOnlyForNamedKeys,
+	startsAndStops,
 	writesListsLocally,
 } from "./checks.ts";
 import {
@@ -71,36 +73,6 @@ it("tells a federation app whose logins a second factor holds to set the page th
 	expect(chosenLines(["@mod/mfa-flows"])).not.toContain(held);
 });
 
-async function freePort(): Promise<number> {
-	return new Promise((resolve) => {
-		const server = createServer().listen(0, "127.0.0.1", () => {
-			const address = server.address();
-			server.close(() => resolve(typeof address === "object" && address ? address.port : 0));
-		});
-	});
-}
-
-/** Runs the app until it says it listens, then stops it by SIGTERM: its exit code and output. */
-async function startsAndStops(target: string) {
-	const child = spawn(process.execPath, ["src/main.ts"], {
-		cwd: target,
-		env: { APP_CONFIG: "config/local.conf,config/application.conf" },
-	});
-	let output = "";
-	const exited = new Promise<number | null>((resolve) => child.once("exit", resolve));
-	const listening = new Promise<void>((resolve) => {
-		const seen = (chunk: Buffer) => {
-			output += chunk;
-			if (output.includes('"event":"http.listening"')) resolve();
-		};
-		child.stdout.on("data", seen);
-		child.stderr.on("data", seen);
-	});
-	await Promise.race([listening, exited]);
-	child.kill("SIGTERM");
-	return { code: await exited, output };
-}
-
 // http-ops comes only through its bridge to http: a manifest gone wrong would drop liveness,
 // readiness and the two instruments without a word.
 it("composes http-ops in the full template and in every pattern", () => {
@@ -114,7 +86,7 @@ describe.each(named)("the pattern %s", (name) => {
 		const modules = modulesOf(name);
 		expect(await imports(target)).toEqual(modules);
 		const pkg = JSON.parse(await read(target, "package.json"));
-		expect(Object.keys(pkg.dependencies)).toEqual([kernel, ...modules, "zod"]);
+		expect(Object.keys(pkg.dependencies)).toEqual([kernel, configFiles, ...modules, "zod"]);
 		const card = readFileSync(cardFile(name), "utf8");
 		expect(card.startsWith(`# ${name}\n`)).toBe(true);
 		expect(card.trimEnd().split("\n").length).toBeLessThanOrEqual(10);

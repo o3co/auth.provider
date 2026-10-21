@@ -2,7 +2,7 @@ import type { Client, Section } from "@mod/clients";
 import type { Log, Random } from "@mod/kernel";
 import type { Seal } from "@mod/seal";
 import type { BoundaryKind, Revocations } from "@mod/subject-revocation";
-import type { Upstreams } from "@mod/upstreams";
+import { refreshedExpiry, type Upstreams } from "@mod/upstreams";
 import { z } from "zod";
 import type { Connection, Settings } from "../section.ts";
 import type { StoredGrant, StoredStep, SubjectGrants } from "../store.ts";
@@ -300,6 +300,7 @@ export function credentialsFrom(
 		readonly maxAccessMs: number;
 		readonly shown: readonly string[];
 		readonly held?: string;
+		readonly kept?: Pick<Credentials, "accessToken" | "expiresAt">;
 	},
 ):
 	| { readonly kind: "held"; readonly credentials: Credentials }
@@ -323,7 +324,10 @@ export function credentialsFrom(
 			accessToken: said.accessToken,
 			tokenType: said.tokenType,
 			refreshToken,
-			expiresAt: at.now + life * 1000,
+			expiresAt: refreshedExpiry(
+				{ accessToken: said.accessToken, expiresAt: at.now + life * 1000 },
+				at.kept,
+			),
 			obtainedAt: at.now,
 			scope,
 		},

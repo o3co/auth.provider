@@ -17,12 +17,15 @@
 - An upstream: its issuer, how it answers (in the query or a posted form), its clock allowance, authorization URL, and code exchange → upstream login, with its tokens and profile if the type gives them
   - The code exchange gets the verifier, nonce, redirect URI and the callback's `iss`.
 - An upstream's exchanges and refreshes throw `UpstreamRefused` for an answer that does not hold, and `Unavailable` when it cannot be reached or fails (5xx); a delegation's start is refused as a value, never thrown.
+- `UpstreamRefused.is` and `UpstreamMismatch.is` tell each by a mark, which every copy of upstreams in a bundle shares; a caller tells them so, never by its class.
 - An upstream may also offer a refresh, an end-session URL and an offline delegation
 - A refresh answers new tokens, `invalid_grant` (the grant is gone), `interaction_required` (the grant stands, but the user must act at the upstream first) or `limited` (with when to ask again, where said).
+- `refreshedExpiry` (the answer's access token and end, what was held): where the upstream hands the same access token again, the earlier of the two ends, so a refresh never lengthens a token; else the answer's end. Every holder of refreshed tokens reads them by it.
 - An offline delegation: its authorization URL, or a refusal of the start as a value; its code exchange given the scopes and resource its start asked for; and its refresh
 - `upstreams.of` (IdP name → its upstream's refresh, end-session URL and delegation, where the type offers them / nothing)
 - Extension point `upstreamLoginReceivers` (name → `received` (session, IdP, upstream tokens) once the session opens, or once a link joins it to the session, answering a receipt of what it kept or none; `withdrawn` (session, IdP, the receipt) when a later step fails)
   - A receipt is the receiver's alone to read; a caller holds it and hands it back. `withdrawn` deletes only what that `received` kept, and nothing written since; with none, nothing.
+- Extension point `upstreamContinuations` (name → `begin` (request, IdP) refusing the start or keeping JSON in the round trip; `complete` (the request, IdP, upstream login, what it kept, where the browser lands, the source and user agent, the cookie cleared) answering the browser; `failed` for a refusal after the take): where a round trip goes besides a login, chosen by name at its start.
 
 ## Invariants
 - A login's receivers are told in name order; one that throws is logged by name and error kind, and the rest are still told.
@@ -30,7 +33,7 @@
 - A login's tokens are taken once and go only to a session of the subject that logged in; their lifetime counts from the hand-over.
 
 ## Depends on
-- `kernel`, `session` (the session a receiver is told); implemented by `federation`.
+- `kernel`, `session` (the session a receiver is told), `http` (what a continuation is asked and answers); implemented by `federation`.
 
 ## Vocabulary
 - IdP type: what one kind of upstream IdP does differently.

@@ -44,6 +44,9 @@ onLegacy(codeArea, {
 		"store-fault:session-grant",
 	],
 	differs: [
+		// A fresh login a client asks for: max_age=0 asks a new one, and a return that dropped its demand is refused.
+		"max-age-zero-asks-a-new-login",
+		"return-keeps-its-demand",
 		// An acr no way of logging in can meet is dropped at boot, and answered as one not known.
 		"unmeetable-acr-entry",
 		// Ours issues a session grant only to a request with same-origin evidence for its own origin.
@@ -55,7 +58,7 @@ onLegacy(codeArea, {
 		"back-channel-by-host-and-port",
 		// An expired logout hint is refused; and an old one on a GET gets a page that asks to confirm.
 		"expired-logout-hint",
-		"old-logout-hint-on-get",
+		"old-logout-hint",
 		// A resource the exchange refuses still uses the code up.
 		"resource-mismatch-keeps-code",
 		// Ours answers userinfo only for a token issued with openid.

@@ -24,7 +24,7 @@ Each promise below holds across every module composed. Each names what keeps it 
 
 1. **Closing a session closes every path for the tokens issued from it.**
    - Kept by: `session-participants`' participants, which `session-lifecycle` calls on every close through `session`'s `closingParticipants`, refusing to boot without it; `session-tokens` and `refresh` take part, and `code-grant` voids a code whose session ended.
-   - Scenes: code ("tokens and logout", "refresh: what a token may do", "session grant", "OpenID Connect userinfo"), exchange ("token exchange of a session's token"), federation ("federation tokens: refusals").
+   - Scenes: code ("tokens and logout", "a logout the client starts", "telling the session's clients", "refresh: what a token may do", "session grant", "OpenID Connect userinfo"), exchange ("token exchange of a session's token"), federation ("federation tokens: refusals").
    - A close left pending is not done: the session stays closing until every participant has finished. Each host sweeps every `session-lifecycle.sweep-interval`, and takes a pending close up again once its retry time comes: after half its age so far, from the sweep interval up to an hour, and `logout` and RP-initiated logout answer it `503`, never as logged out.
    - No scene yet for a device approval. A session that ends by expiry alone calls no participant.
    - A session that ends by its lifetime leaves no token past it: each token issued from a session expires no later than the session's end, as the lifetime in force when it is issued sets it.
@@ -32,8 +32,7 @@ Each promise below holds across every module composed. Each names what keeps it 
    - Bridges such as `session-tokens` come in every app composed through `combinations`; an app composed by hand must compose them itself, or the promise does not hold for what they join.
 2. **`prompt=login` and `max_age` are met only by a fresh authentication.**
    - Kept by: `reauth`'s re-authentication record, which `authorize` makes for the request and takes once; `session` never counts an authentication time it does not know as fresh.
-   - Scenes: federation ("federation logins meeting a client's demand for a fresh login", and the freshness scenes through Google and Apple).
-   - No scene yet for a password login.
+   - Scenes: code ("password logins meeting a client's demand for a fresh login"), federation ("federation logins meeting a client's demand for a fresh login", and the freshness scenes through Google and Apple).
    - One exception, through an upstream: a login the upstream says came within its clock allowance before the demand counts as fresh, even where the upstream did not authenticate again (`federation`'s card, "Fresh enough"). The login page hands `prompt=login` and `max_age` to the upstream, which asks the user again where it honours them. To narrow the allowance, lower `federation.idps.<name>.clock-skew` for that IdP.
 3. **A dependency that cannot answer never grants anything.**
    - It covers what an authorization decision waits on; a notice sent best effort, such as an audit event or a logout notice to a client, decides nothing.
@@ -47,14 +46,13 @@ Each promise below holds across every module composed. Each names what keeps it 
    - Does not hold for federation grants where `federation-grants.keep-on-subject-revocation` is set and a revocation asks to keep delegations: an established grant then answers only to the `delegations` boundary, which such a revocation leaves where it was.
    - A session opened before a revocation removes no factor and reissues no codes once the revocation is complete: `mfa-management` reads the subject's fence before the session's last check, and `mfa` compares it in the write. Recovery codes go out only after a last check of the revocation, with nothing waited on after it; a request past that check is one a revocation cannot stop, as for any request already past its checks. This holds as far as each check reads the boundary as it now stands.
    - Bridges such as `mfa-revocation` come in every app composed through `combinations`; an app composed by hand must compose them itself, or an enrollment begun before a revocation may still bind. After an account is taken over, also reset the subject's second factors (`mfa-reset`'s `mfaReset`): a revocation ends what was made before it, while a reset removes the factors themselves.
-   - Scenes: code ("a subject the ledger revokes over HTTP"), federation ("federation grants: a subject the ledger revokes"), second factor ("a subject the ledger revokes").
-   - No scene yet for a code not yet redeemed, a device code or a token exchange.
+   - Scenes: code ("a subject the ledger revokes over HTTP"), exchange ("a subject the ledger revokes: every way to a token", which covers a code redeemed and one not yet, refresh, token exchange, a device code polled and one not yet, and the back-channel logout token), federation ("federation grants: a subject the ledger revokes"), second factor ("second factor: a subject the ledger revokes").
 5. **What is used once is used once, on any number of instances.**
    - Kept by: `store`'s take-once writes and each store interface's declared needs; `kernel.deployment = multi` refuses a module that declares itself unsafe on several instances: `store`, the store kept in memory, and `mail`, which only logs mail (a module that declares nothing is taken as safe).
    - Does not hold where the operator accepts losing what was used: with a store that does not persist (`store.accept-volatile`), a restart forgets it; with `redis.durability = none`, a crash can lose the latest writes, spent assertion and proof ids and lockout records among them; with `redis.replication = none`, a failover would lose writes.
    - Upgrading from rc.1 leaves a window in which JWT bearer assertions spent and id_tokens exchanged under rc.1 are not seen, as [From 0.18.0-rc.1](migration.md#from-0180-rc1) says.
    - Scenes: code (a code redeemed once, a refresh token rotated once, two concurrent uses), oauth ("refuses a replayed assertion"), device ("decides a code once").
-   - No scene yet for an exchanged id_token or a recovery code used twice, and no scene runs several instances.
+   - No scene yet for an exchanged id_token used twice, and no scene runs several instances.
 6. **A token bound to a key or a certificate is never used as a bearer token.**
    - Kept by: `sender-binding`, which refuses a bound token presented in another scheme.
    - Scenes: code (userinfo with a DPoP-bound token and with an mTLS-bound one, "refresh: binding a public client's family"), exchange ("token exchange: a binding washed off").
@@ -72,7 +70,7 @@ Each promise below holds across every module composed. Each names what keeps it 
 9. **A browser route that changes state needs CSRF or origin evidence.**
    - Kept by: `csrf`'s policy, marked `own-site` in `http.marks`; a route declares whether it changes state and, without such a policy, why it takes other sites' requests, and `http` checks the declarations at boot.
    - Scenes: identity (login and logout without evidence), device (the verification interface), federation (the grant question, a link started from another site), code ("session grant: refusals").
-   - Declared exceptions: the route reference's "Other sites" reasons, among them RP-initiated logout, a navigation from the client's site that closes only the session a hint the provider signed names. No scene checks the boot check itself.
+   - Declared exceptions: the route reference's "Other sites" reasons, among them RP-initiated logout, a navigation from the client's site that closes only the session a hint the provider signed names, which code ("a logout the client starts") checks. No scene checks the boot check itself.
 10. **A `POST` taken before authentication is limited per source.**
     - Kept by: `rate-limit`'s policies, marked `per-source`; a route without one declares why it counts no source.
     - Scenes: oauth ("limits requests to the token endpoint per source"), identity (login attempts per sender), passkey ("passkey login: the options' limit"), ops (the operations routes and request counting).
@@ -133,6 +131,8 @@ Each promise below holds across every module composed. Each names what keeps it 
 - **Left to you:**
   - Choosing `tokens.revocation`. With `unsupported`, nothing issued can be revoked, and boot refuses a composition that issues refresh tokens or codes.
   - With `subject-check = none`, a revoked subject's access tokens live until they expire.
+- **Claims a grant adds:** a grant may add claims to the access tokens it issues (`AccessGrant.claims`). The signature covers the whole token, so a resource server cannot tell which claims the provider wrote and which a grant added. Reserved names only keep a grant from overwriting what the provider writes and what a specification gives a meaning; they make no added claim trustworthy. An added claim is what the grant composed asserts: composing a grant entrusts it with what its tokens say. Only `tokens` signs an access token (`at+jwt`); `keys.sign` refuses that type, and `keys.verify` too, so every access token is checked by `verifyAccess`. `verifyAccess` refuses as none of its own a token whose `exp` comes before its `iat`, whose `iat` is over 60 seconds ahead of the clock, or with over a day between them.
+  - A refreshed or exchanged token carries no added claim, so an added claim cannot carry a restriction that must hold on: a resource server never reads a missing one as no restriction.
 
 ## Sender-constrained tokens
 
@@ -169,11 +169,13 @@ Each promise below holds across every module composed. Each names what keeps it 
   - No host is reached by name unless `outbound.allow` lists it or `outbound.allow-any-public` is set. `outbound.deny` is checked first.
   - A name is resolved once, every address it resolves to is checked, and the request connects only to a checked address.
   - Loopback, link-local, the cloud metadata addresses and other special-purpose addresses are never reached, but for a `plain-loopback` pair the operator names.
-  - Private addresses are reached only by URLs a module takes from your own configuration and names so (the audit-http collector, the users-http ledger), at hosts in `outbound.internal-hosts`.
-  - Redirects are refused, and only https is used, except plain http to a named `plain-loopback` pair, and signed material (whose signature is checked), fetched from its caller's named hosts.
+  - Private addresses are reached only by URLs a module takes from your own configuration and names so (the audit-http collector, the users-http ledger, an OpenID Connect IdP's issuer and the endpoints you give it, a GitHub Enterprise's endpoints), at hosts in `outbound.internal-hosts`, or over plain http at a `host:port` in `outbound.plain-internal`, where every address the name resolves to must be private. Each is reached only at that URL's origin: an endpoint an IdP's description names on another origin reaches public addresses only.
+  - Redirects are refused, and only https is used, except plain http to a named `plain-loopback` or `plain-internal` pair, and signed material (whose signature is checked), fetched from its caller's named hosts.
   - Proxy environment variables are never read.
+  - An IdP's authorization and end-of-session endpoints, where the browser goes and outbound never does, are https, or plain http only at a loopback name or, for an OpenID Connect IdP or a GitHub Enterprise, at the origin of an issuer or endpoint of your own configuration that `outbound.plain-internal` names; any other refuses boot. Plain http there carries the user's password and the IdP's cookies in the clear between the browser and the IdP, which the browser reaches by its own resolver, outside any mesh.
 - **Left to you:**
   - With `outbound.proxy` set, the proxy resolves names and checks where they lead (boot warns so).
+  - What goes to a `plain-internal` pair, passwords, tokens and credentials among it, is in the clear: name only peers on a network trusted against reading and changing it (each boot warns `outbound.plain_internal`).
   - Network egress filtering is still expected.
 
 ## Storage

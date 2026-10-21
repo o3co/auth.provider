@@ -281,7 +281,11 @@ it("starts with a return target as http on a loopback host, and refuses http on 
 	const local = ["http://localhost:3000/", "http://127.0.0.1:3000/home", "http://[::1]:3000/"];
 	const l = await boot([], { "return-targets": local });
 	for (const target of local) expect(l.returnAllowed(target), target).toBe(true);
-	for (const target of ["http://app.example/", "http://localhost./", "http://0.0.0.0:3000/"]) {
+	for (const target of [
+		"http://app.example/",
+		"http://localhost.localdomain/",
+		"http://0.0.0.0:3000/",
+	]) {
 		const refused = await boot([], { "return-targets": [target] }).catch((e: unknown) => e);
 		expect(refused, target).toBeInstanceOf(BootRefused);
 		expect((refused as BootRefused).refusals, target).toEqual([

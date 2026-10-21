@@ -1,5 +1,6 @@
 import { contract } from "@mod/kernel";
 import type { VerifyAlgorithm } from "@mod/keys";
+import type { Narrower } from "@mod/outbound";
 
 export type Jwk = Readonly<Record<string, unknown>>;
 
@@ -10,6 +11,8 @@ export type Algorithm = VerifyAlgorithm;
 export interface JwksSource {
 	readonly url: string;
 	readonly hosts: readonly string[];
+	/** The operator's configured URL it is fetched for, so outbound may reach it as theirs. */
+	readonly internal?: Narrower["internal"];
 }
 
 /** A public key written as PEM, taken only for the algorithm it is given for. */

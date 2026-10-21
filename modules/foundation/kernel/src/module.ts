@@ -1,8 +1,8 @@
 import type { ZodType } from "zod";
 import type { Contract, ExtensionPoint } from "./handles.ts";
-import type { ReadinessReport } from "./readiness.ts";
+import type { ReadinessReport } from "./lifecycle/readiness.ts";
 import type { Refusal } from "./refusal.ts";
-import type { Runtime } from "./runtime.ts";
+import type { Runtime } from "./runtime/runtime.ts";
 
 export interface BuildContext<S> extends Runtime {
 	readonly section: S;

@@ -256,6 +256,67 @@ describe("redis", () => {
 		}
 	});
 
+	/** Boots as a user the server's ACL holds to `rules`: why boot was refused, or `booted`. */
+	const asUser = async (
+		rules: readonly string[],
+		extra = [durable],
+		replication: string | null = "replicas",
+		prefix?: string,
+	) => {
+		const user = `u${++opened}`;
+		cli(container, "acl", "setuser", user, "on", ">pw", ...rules);
+		try {
+			const through = url.replace("redis://", `redis://${user}:pw@`);
+			const booted = await open(extra, prefix, through, replication).catch((error) => error);
+			if (booted instanceof BootRefused) {
+				const reasons = booted.refusals.map((r) => r.reason).join("; ");
+				expect(reasons).not.toContain("pw@");
+				return reasons;
+			}
+			if (booted instanceof Error) throw booted;
+			await booted.stop(1000);
+			return "booted";
+		} finally {
+			cli(container, "acl", "deluser", user);
+		}
+	};
+	const every = ["~*", "&*", "+@all"];
+
+	it("refuses boot where the server refuses a command the store sends, naming it, in a script or not", async () => {
+		expect(await asUser([...every, "-wait"])).toContain("the server refuses WAIT");
+		expect(await asUser([...every, "-hset"])).toContain("the server refuses HSET");
+		expect(await asUser([...every, "-time"])).toContain("the server refuses TIME");
+		expect(await asUser([...every, "-scan"])).toContain("the server refuses SCAN");
+	});
+
+	it("names the store's keys where a script is refused one, though the command is allowed elsewhere", async () => {
+		expect(await asUser([...every, "-hset", "(+hset ~other:*)"], [], null)).toContain(
+			"the server refuses this user the store's keys",
+		);
+	});
+
+	it("boots a user held to the store's own keys, needing the confirmation key only where it confirms", async () => {
+		expect(await asUser(["~acl:{*", "&*", "+@all"], [], null, "acl")).toBe("booted");
+		expect(await asUser(["~acl:{*", "&*", "+@all"], [durable], "replicas", "acl")).toContain(
+			"acl:#confirm",
+		);
+	});
+
+	it("boots while no replica takes writes: that leaves the commands undetermined, never refused", async () => {
+		docker("pause", replica);
+		docker("pause", secondReplica);
+		try {
+			cli(container, "client", "kill", "type", "replica");
+			await waitFor(() => connectedReplicas() === 0 && !writable(), 20_000);
+			const app = await open();
+			await app.stop(1000);
+		} finally {
+			docker("unpause", replica);
+			docker("unpause", secondReplica);
+			await waitFor(() => connectedReplicas() === 2 && writable(), 60_000);
+		}
+	}, 90_000);
+
 	it("refuses a replica, a cluster node and a primary that would not refuse writes without replicas", async () => {
 		await expect(
 			open([durable], undefined, `redis://127.0.0.1:${replicaPort}`),
@@ -518,6 +579,32 @@ describe("redis", () => {
 			},
 		});
 		await expect(app).rejects.toBeInstanceOf(BootRefused);
+	});
+});
+
+describe("a Redis 7.0 server", () => {
+	let old = "";
+	let oldUrl = "";
+	beforeAll(async () => {
+		const port = await freePort();
+		old = docker("run", "-d", "--rm", "-p", `127.0.0.1:${port}:6379`, "redis:7.0-alpine");
+		oldUrl = `redis://u:pw@127.0.0.1:${port}`;
+		await waitFor(() => pings(old));
+	}, 60_000);
+	afterAll(() => {
+		if (old) docker("rm", "-f", old);
+	});
+
+	it("names the store's keys where a script is refused one, in 7.0's words", async () => {
+		docker("exec", old, "redis-cli", "acl", "setuser", "u", "on", ">pw", "~*", "&*", "+@all");
+		docker("exec", old, "redis-cli", "acl", "setuser", "u", "-hset", "(+hset ~other:*)");
+		const refused = await assemble({
+			modules: [redisModule],
+			config: { ...kernelConfig(), redis: { url: oldUrl, prefix: "old" } },
+		}).catch((error) => error);
+		expect(refused).toBeInstanceOf(BootRefused);
+		const reasons = (refused as BootRefused).refusals.map((r) => r.reason).join("; ");
+		expect(reasons).toContain("the server refuses this user the store's keys");
 	});
 });
 

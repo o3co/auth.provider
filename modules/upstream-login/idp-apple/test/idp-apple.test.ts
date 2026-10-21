@@ -18,6 +18,7 @@ import {
 	type OutboundResponse,
 	outbound,
 } from "@mod/outbound";
+import { outboundOver, section as outboundSection } from "@mod/outbound/module";
 import { type OutboundRefusals, outboundRefusals } from "@mod/outbound-policy";
 import {
 	type AuthorizationStart,
@@ -154,7 +155,7 @@ const outcome = (run: Promise<unknown> | undefined) =>
 	Promise.resolve(run).then(
 		(value) => value,
 		(error) =>
-			error instanceof UpstreamRefused ? "refused" : isUnavailable(error) ? "unavailable" : error,
+			UpstreamRefused.is(error) ? "refused" : isUnavailable(error) ? "unavailable" : error,
 	);
 const granted = async (more: Record<string, unknown> = {}, claims: Record<string, unknown> = {}) =>
 	answer({
@@ -203,6 +204,9 @@ describe("idp-apple", () => {
 			"https://localhost./cb",
 			"https://127.0.0.5/cb",
 			"https://[::1]/cb",
+			// A name under localhost and 127/8 mapped into IPv6 are loopback hosts too (isLoopbackName).
+			"https://a.localhost/cb",
+			"https://[::ffff:7f00:1]/cb",
 		]) {
 			await expect(open(undefined, undefined, at), at).rejects.toThrow();
 		}
@@ -318,6 +322,31 @@ describe("idp-apple", () => {
 				expect(JSON.stringify(read.error?.issues)).not.toContain("BEGIN");
 			}
 		}
+	});
+
+	it("takes the endpoints the browser goes to over plain http only at a loopback name, refusing another at its key", () => {
+		const paths = outboundOver(outboundSection.parse({ "allow-any-public": true }), async () => [
+			"93.184.216.34",
+		]);
+		const { explained, plainInternal, browsedRefusal } = paths;
+		const policy: OutboundRefusals = { explained, plainInternal, browsedRefusal };
+		const keysOf = (more: Record<string, unknown>) =>
+			settingsOf(policy)
+				.safeParse({ ...{ "client-id": "com.example.web", "client-secret": "x" }, ...more })
+				.error?.issues.map((i) => i.path.join("."));
+		expect(keysOf({})).toBeUndefined();
+		expect(
+			keysOf({
+				"authorization-endpoint": "http://127.0.0.1:9300/auth",
+				"end-session-endpoint": "http://localhost:9300/out",
+			}),
+		).toBeUndefined();
+		expect(keysOf({ "authorization-endpoint": "http://idp.example/auth" })).toEqual([
+			"authorization-endpoint",
+		]);
+		expect(keysOf({ "end-session-endpoint": "http://idp.example/out" })).toEqual([
+			"end-session-endpoint",
+		]);
 	});
 
 	it("refuses at boot, at its key, an endpoint outbound's policy refuses, Apple's own included", () => {

@@ -1,6 +1,12 @@
 import { assemble, BootRefused, kernelConfig } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
-import { type OutboundRefusals, outboundLimits, outboundRefusals } from "@mod/outbound-policy";
+import {
+	type OutboundRefusals,
+	outboundLimits,
+	outboundRefusals,
+	policyOf,
+	policySettings,
+} from "@mod/outbound-policy";
 import { configuredUrl } from "@mod/url-setting/testing";
 import { afterEach, expect, it, vi } from "vitest";
 import { type Narrower, outbound, signedOutbound } from "../src/contract.ts";
@@ -21,19 +27,12 @@ const onlyProxy = (name?: string) => {
 const boot = (settings: Record<string, unknown> = {}) =>
 	assemble({ modules: [outboundModule], config: { ...kernelConfig(), outbound: settings } });
 
-it("holds to the defaults", () => {
+it("holds to the defaults: outbound-policy's for its keys, and outbound's own", () => {
 	expect(section.parse({})).toEqual({
-		allow: [],
-		"allow-any-public": false,
-		deny: [],
-		"plain-loopback": [],
-		"max-response-size": 65_536,
-		"signed-max-response-size": 1_048_576,
-		timeout: 5000,
+		...policySettings.parse({}),
 		"max-concurrent": 16,
 		"direct-despite-proxy": false,
 		"direct-hosts": [],
-		"internal-hosts": [],
 	});
 });
 
@@ -182,7 +181,39 @@ it("boots with a proxy configured whatever the variables say, and warns what it 
 		"outbound.proxy_checks_addresses",
 		"outbound.proxy_credentials_in_clear",
 	]);
+	// The proxy's name is never resolved here, so only a loopback address written as one goes unwarned:
+	// a name, localhost and the names under it included, may resolve anywhere.
+	for (const host of ["localhost", "localhost.", "proxy.localhost"]) {
+		const from = warned().length;
+		await withProxy({ proxy: `http://${host}:3128`, "proxy-authorization": "Basic dGVzdA==" });
+		expect(warned().slice(from), host).toEqual([
+			"outbound.proxy_checks_addresses",
+			"outbound.proxy_credentials_in_clear",
+		]);
+	}
+	for (const host of ["[::1]", "127.0.0.2"]) {
+		const from = warned().length;
+		await withProxy({ proxy: `http://${host}:3128`, "proxy-authorization": "Basic dGVzdA==" });
+		expect(warned().slice(from), host).toEqual(["outbound.proxy_checks_addresses"]);
+	}
 	expect(JSON.stringify(recorded.lines())).not.toContain("dGVzdA==");
+});
+
+it("warns at each boot that names plain-internal pairs, telling their count alone", async () => {
+	const recorded = recordingLog();
+	const booted = (outboundSettings: Record<string, unknown>) =>
+		assemble({
+			modules: [outboundModule],
+			config: { ...kernelConfig(), outbound: outboundSettings },
+			runtime: quietRuntime({ log: recorded.log }),
+		});
+	await booted({});
+	expect(recorded.lines()).toEqual([]);
+	await booted({ "plain-internal": ["ledger.internal:9092", "keys.internal:8080"] });
+	expect(recorded.lines().map((line) => [line.level, line.event, line.fields])).toEqual([
+		["warn", "outbound.plain_internal", { count: 2 }],
+	]);
+	expect(JSON.stringify(recorded.lines())).not.toContain("internal:");
 });
 
 it("boots on many instances, holding nothing they would need to share", async () => {
@@ -271,18 +302,48 @@ it("answers at boot why the policy refuses a URL, or nothing when it lets it thr
 	).toBe("special-address");
 });
 
+it("answers at boot whether a URL is taken as plain-internal, for the caller's own URL alone", async () => {
+	onlyProxy();
+	const refusals = (
+		await boot({ "allow-any-public": true, "plain-internal": ["ledger.internal:9092"] })
+	).get(outboundRefusals);
+	const url = "http://ledger.internal:9092/verify";
+	const own = { internal: configuredUrl(url) };
+	expect([
+		refusals.plainInternal?.(url, own),
+		refusals.plainInternal?.(url),
+		refusals.plainInternal?.(url, { ...own, outsideChosen: true }),
+		refusals.plainInternal?.("http://ledger.internal:9093/verify", own),
+	]).toEqual([true, false, false, false]);
+});
+
+it("answers at boot why a URL the browser goes to is refused, as the policy judges it", async () => {
+	onlyProxy();
+	const refusals = (
+		await boot({ "allow-any-public": true, "plain-internal": ["idp.internal:8080"] })
+	).get(outboundRefusals);
+	const own = { internal: configuredUrl("http://idp.internal:8080/") };
+	expect([
+		refusals.browsedRefusal?.("https://idp.example/auth"),
+		refusals.browsedRefusal?.("http://localhost:9000/auth"),
+		refusals.browsedRefusal?.("http://idp.internal:8080/auth", own),
+	]).toEqual([undefined, undefined, undefined]);
+	expect(refusals.browsedRefusal?.("http://idp.example/auth")).toMatch(
+		/^plain http the browser goes to: /,
+	);
+});
+
 it("explains at boot why the policy refuses a URL by the keys that let it through, naming no value", async () => {
 	onlyProxy();
-	const named = (
-		await boot({
-			allow: ["api.example", "127.0.0.1"],
-			"plain-loopback": ["127.0.0.1:8080"],
-			deny: ["bad.example"],
-		})
-	).get(outboundRefusals);
+	const rules = {
+		allow: ["api.example", "127.0.0.1"],
+		"plain-loopback": ["127.0.0.1:8080"],
+		deny: ["bad.example"],
+	};
+	const named = (await boot(rules)).get(outboundRefusals);
 	const allow = "not-allowed: name the host in outbound.allow, or set outbound.allow-any-public";
-	const plain =
-		"scheme: plain http reaches only a host:port that outbound.plain-loopback names; otherwise write the URL with https";
+	// The policy's own words for plain http, which outbound-policy's tests hold: outbound hands them on.
+	const plain = policyOf(policySettings.parse(rules)).explain("http://api.example/");
 	const expected: Record<string, string | undefined> = {
 		"https://api.example/x": undefined,
 		"https://other.example/": allow,
@@ -304,9 +365,13 @@ it("explains at boot why the policy refuses a URL by the keys that let it throug
 	expect(any.explained("https://10.0.0.6/")).toBe(
 		"special-address: the URL names a special-purpose address, which outbound never reaches",
 	);
-	expect(any.explained("https://10.0.0.6/", { internal: configuredUrl("https://10.0.0.6/") })).toBe(
-		"special-address: the URL names a special-purpose address; a private one is reached only when outbound.internal-hosts names its host",
-	);
+	// The operator's own URL is told what reaches a private address, in the policy's own words.
+	const own = { internal: configuredUrl("https://10.0.0.6/") };
+	const privately = policyOf(
+		policySettings.parse({ "allow-any-public": true, "internal-hosts": ["10.0.0.5"] }),
+	).explain("https://10.0.0.6/", own);
+	expect(privately).toMatch(/^special-address: /);
+	expect(any.explained("https://10.0.0.6/", own)).toBe(privately);
 	expect(
 		any.explained("https://10.0.0.5/", { internal: configuredUrl("https://10.0.0.5/") }),
 	).toBeUndefined();

@@ -1,4 +1,4 @@
-import { isIP } from "node:net";
+import { isLoopbackAddress } from "@mod/address-reach";
 import { contract, defineModule } from "@mod/kernel";
 import {
 	type CredentialPolicy,
@@ -25,8 +25,6 @@ import {
 } from "./contract.ts";
 import { type Resolver, type Route, send, systemResolver, type Trust } from "./transport.ts";
 
-const isLoopbackHost = (host: string) =>
-	host === "localhost" || host === "[::1]" || (isIP(host) === 4 && host.startsWith("127."));
 export const section = policySettings
 	.safeExtend({
 		"max-concurrent": z
@@ -103,8 +101,11 @@ interface Paths {
 	readonly fetch: Outbound["fetch"];
 	readonly fetchSigned: SignedOutbound["fetch"];
 	readonly explained: OutboundRefusals["explained"];
+	readonly plainInternal: NonNullable<OutboundRefusals["plainInternal"]>;
+	readonly browsedRefusal: NonNullable<OutboundRefusals["browsedRefusal"]>;
 	readonly credentialRefusalOf: CredentialPolicy["refusalOf"];
 	readonly limitsOf: OutboundLimits["of"];
+	readonly lookupsOf: NonNullable<OutboundLimits["lookupsOf"]>;
 }
 
 /** One header value: printable ASCII on one line, no space at either end. */
@@ -147,14 +148,30 @@ export function outboundOver(
 					direct: (host) => policy.listed(host, direct),
 				};
 	const requestPlace = places(settings["max-concurrent"]);
-	const lookupPlace = places(lookups);
 	// A name lookup cannot be stopped at a deadline: one still running past it holds a lookup of its
-	// own, never a request's place, and no more run at once than half the threadpool.
-	const bounded: Resolver = (host) => lookupPlace(() => resolve(host));
+	// own, never a request's place, and no more run at once than half the threadpool. Names an outside
+	// party chose take half of those at most, so slow ones of theirs never hold every lookup.
+	const outsideLookups = Math.floor(lookups / 2);
+	const outsidePlace = places(outsideLookups);
+	const ownPlace = places(lookups - outsideLookups);
+	// A name already resolving is answered by that lookup, which takes one place for all who ask.
+	const resolving = new Map<string, Promise<readonly string[]>>();
+	const boundedBy =
+		(place: ReturnType<typeof places>): Resolver =>
+		(host) =>
+			resolving.get(host) ??
+			place(() => {
+				const lookup = resolve(host);
+				resolving.set(host, lookup);
+				return lookup.finally(() => resolving.delete(host));
+			});
+	const outsideChosen = boundedBy(outsidePlace);
+	const own = boundedBy(ownPlace);
 	const go = async (url: string, request: OutboundRequest, narrower: Narrower, signed: boolean) => {
 		const limits = policy.limitsOf(narrower, signed);
 		const sent = sentRequest(request, signed);
 		const admitted = policy.admit(url, narrower, signed);
+		const bounded = narrower.outsideChosen ? outsideChosen : own;
 		return requestPlace(() =>
 			send(admitted, sent, limits, bounded, policy, route, trust, deadlineOf),
 		);
@@ -164,8 +181,11 @@ export function outboundOver(
 		fetchSigned: (url, request, narrower) => go(url, request, narrower, true),
 		credentialRefusalOf: policy.credentialRefusal,
 		explained: policy.explain,
+		plainInternal: policy.plainInternal,
+		browsedRefusal: policy.browsedRefusal,
 		// The call `go` cuts a request by, for a plain request.
 		limitsOf: (narrower) => policy.limitsOf(narrower, false),
+		lookupsOf: (narrower) => (narrower?.outsideChosen ? outsideLookups : lookups - outsideLookups),
 	};
 }
 
@@ -174,10 +194,13 @@ const paths = contract<Paths>("outbound.paths");
 export default defineModule({ name: "outbound", section, replicaSafe: true }, (m) => [
 	m.provide(paths).by((c) => {
 		const { proxy } = c.section;
+		// Their count alone: what goes to them, passwords, tokens, credentials and keys, is in the clear.
+		const plainInternal = c.section["plain-internal"].length;
+		if (plainInternal > 0) c.log.warn("outbound.plain_internal", { count: plainInternal });
 		if (proxy !== undefined) {
 			const host = new URL(proxy).hostname;
 			c.log.warn("outbound.proxy_checks_addresses", { host });
-			if (c.section["proxy-authorization"] && !isLoopbackHost(host)) {
+			if (c.section["proxy-authorization"] && !isLoopbackAddress(host)) {
 				c.log.warn("outbound.proxy_credentials_in_clear", { host });
 			}
 		}
@@ -193,9 +216,15 @@ export default defineModule({ name: "outbound", section, replicaSafe: true }, (m
 	// One set of counts for both paths.
 	m.provide(outbound).by(async (c) => ({ fetch: (await c.get(paths)).fetch })),
 	m.provide(signedOutbound).by(async (c) => ({ fetch: (await c.get(paths)).fetchSigned })),
-	m.provide(outboundRefusals).by(async (c) => ({ explained: (await c.get(paths)).explained })),
+	m.provide(outboundRefusals).by(async (c) => {
+		const { explained, plainInternal, browsedRefusal } = await c.get(paths);
+		return { explained, plainInternal, browsedRefusal };
+	}),
 	m.provide(credentialPolicy).by(async (c) => ({
 		refusalOf: (await c.get(paths)).credentialRefusalOf,
 	})),
-	m.provide(outboundLimits).by(async (c) => ({ of: (await c.get(paths)).limitsOf })),
+	m.provide(outboundLimits).by(async (c) => {
+		const { limitsOf, lookupsOf } = await c.get(paths);
+		return { of: limitsOf, lookupsOf };
+	}),
 ]);

@@ -13,6 +13,7 @@
 	"dependencies": {
 		"@mod/http": "workspace:*",
 		"@mod/kernel": "workspace:*",
+		"@mod/labels": "workspace:*",
 		"@mod/mfa": "workspace:*",
 		"@mod/mfa-binding-proof": "workspace:*",
 		"@mod/mfa-extensions": "workspace:*",
@@ -27,6 +28,7 @@
 		"@mod/login-attributes": "workspace:*",
 		"@mod/login-gates": "workspace:*",
 		"@mod/mfa-entry": "workspace:*",
+		"@mod/mfa-revocation": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/request-source": "workspace:*",

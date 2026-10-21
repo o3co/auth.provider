@@ -34,7 +34,7 @@ const refused = (error: string, description: string) =>
 	jsonAnswer(400, { error, error_description: description });
 const unverified = refused("invalid_token", "id_token_hint verification failed");
 const unavailable = jsonAnswer(503, { error: "temporarily_unavailable" });
-/** On a GET, a hint issued longer ago than this is refused, as a logout another site may have started. */
+/** A hint issued longer ago than this is refused, by GET or POST, as a logout another site may have started. */
 const confirmAfterMs = 86_400_000;
 
 /** The q a media range gives `type`, the most specific range first; 0 when none names it. */
@@ -146,7 +146,7 @@ export function endingOver(p: EndingParts) {
 			return refused("invalid_request", "id_token_hint names no session");
 		}
 		if (checked.kind === "invalid") return unverified;
-		if (request.method === "GET" && p.now() - checked.issuedAt > confirmAfterMs) return unverified;
+		if (p.now() - checked.issuedAt > confirmAfterMs) return unverified;
 		const state = values.single("state") || undefined;
 		const back = await returnOf(checked.client, values.single("post_logout_redirect_uri"));
 		const sid = checked.session;

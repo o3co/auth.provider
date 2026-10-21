@@ -82,6 +82,38 @@ end
 `;
 
 /** KEYS: key, version key, mark key. ARGV: mode, value, expected, kind, arg, deadline, digest, has mark. */
+/**
+ * Calls, one by one, every command the scripts below call, on two keys of the store's own that
+ * expire at once, and answers each that failed with its error, so a refusal names the command.
+ */
+export const commands = `
+local failed = {}
+local function try(...)
+  local r = redis.pcall(...)
+  if type(r) == 'table' and r.err then
+    table.insert(failed, (select(1, ...)))
+    table.insert(failed, r.err)
+  end
+end
+try('TIME')
+try('INFO', 'server')
+try('INFO', 'replication')
+try('EXISTS', KEYS[1])
+try('GET', KEYS[2])
+try('HGET', KEYS[1], 'f')
+try('HMGET', KEYS[1], 'f')
+try('PTTL', KEYS[1])
+try('PEXPIRETIME', KEYS[1])
+try('SET', KEYS[2], '1', 'PX', '1000')
+try('INCR', KEYS[2])
+try('HSET', KEYS[1], 'f', '1')
+try('HINCRBY', KEYS[1], 'n', '1')
+try('PEXPIRE', KEYS[1], '1000')
+try('PEXPIREAT', KEYS[2], '1')
+try('DEL', KEYS[1], KEYS[2])
+return failed
+`;
+
 export const write = `${prelude}
 local key, vkey, ikey = KEYS[1], KEYS[2], ARGV[8] == '1' and KEYS[3] or ''
 local seen = guard(ikey, ARGV[7], ARGV[6])

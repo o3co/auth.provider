@@ -1,7 +1,7 @@
 import { assemble, BootRefused, defineModule, kernelConfig } from "@mod/kernel";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
-import { type ConfiguredUrl, urlSetting, urlsChecked } from "../src/contract.ts";
+import { type ConfiguredUrl, isLoopbackName, urlSetting, urlsChecked } from "../src/contract.ts";
 import { configuredUrl } from "../src/testing.ts";
 
 const https = urlSetting({ schemes: ["https"] });
@@ -203,6 +203,68 @@ it("refuses to boot with a configured URL it does not take", async () => {
 	await expect(boot("https://a.example")).resolves.toBeDefined();
 });
 
+describe("isLoopbackName", () => {
+	it("takes localhost and the names under it, with or without a trailing dot, in any case", () => {
+		for (const host of [
+			"localhost",
+			"LOCALHOST",
+			"localhost.",
+			"a.localhost",
+			"a.b.Localhost.",
+			"a_b.localhost",
+			"xn--bcher-kva.localhost",
+		]) {
+			expect(isLoopbackName(host), host).toBe(true);
+		}
+	});
+
+	it("takes 127/8 as the parser writes it, ::1 and 127/8 mapped into IPv6, bracketed or not", () => {
+		for (const host of [
+			"127.0.0.1",
+			"127.255.0.1",
+			"::1",
+			"[::1]",
+			"[0:0:0:0:0:0:0:1]",
+			"::ffff:127.0.0.1",
+			"[::ffff:7f00:1]",
+			"[::FFFF:7F01:203]",
+		]) {
+			expect(isLoopbackName(host), host).toBe(true);
+		}
+	});
+
+	it("refuses every other host, never resolving a name", () => {
+		for (const host of [
+			"",
+			"localhost..",
+			".localhost",
+			"localhost.localdomain",
+			"localhostx",
+			"127.0.0.1.nip.io",
+			"a.example",
+			"0.0.0.0",
+			"126.255.255.255",
+			"128.0.0.1",
+			"10.0.0.1",
+			// Not as the parser writes an IPv4 address.
+			"127.1",
+			"0177.0.0.1",
+			"2130706433",
+			"127.0.0.1.",
+			"[127.0.0.1]",
+			// Every address, and 127/8 carried in IPv6 unmapped, which no connection takes to loopback.
+			"::",
+			"[::]",
+			"::7f00:1",
+			"::ffff:0:7f00:1",
+			"[::ffff:a00:1]",
+			"[::1",
+		]) {
+			expect(isLoopbackName(host), host).toBe(false);
+		}
+	});
+});
+
 it("takes plain http beside the schemes only on a loopback host, where the rules allow it", () => {
 	const local = urlSetting({ schemes: ["https"], loopbackHttp: true });
 	for (const value of [
@@ -211,6 +273,10 @@ it("takes plain http beside the schemes only on a loopback host, where the rules
 		"http://127.0.0.1:3000/login?x=1",
 		"http://127.255.0.1/",
 		"http://[::1]:3000/login",
+		// Names under localhost, a trailing dot and a mapped loopback address, as isLoopbackName judges.
+		"http://localhost./",
+		"http://a.localhost:3000/login",
+		"http://[::ffff:7f00:1]/",
 		"https://a.example/login",
 	]) {
 		expect(local.parse(value)).toBe(value);
@@ -230,15 +296,12 @@ it("decides plain http's loopback host on the parser's form only, each edge refu
 			"a URL: http only on a loopback host",
 			[
 				// A name that only resolves to a loopback address, or may not.
-				"http://localhost./",
-				"http://a.localhost/",
 				"http://localhost.localdomain/",
 				"http://127.0.0.1.nip.io/",
-				// Every address, not a loopback one.
+				// Every address, not a loopback one, nor 127/8 carried in IPv6 unmapped.
 				"http://0.0.0.0/",
 				"http://[::]/",
-				// An IPv4-mapped IPv6 loopback address, in the parser's form.
-				"http://[::ffff:7f00:1]/",
+				"http://[::7f00:1]/",
 				"http://126.255.255.255/",
 				"http://128.0.0.1/",
 				"http://10.0.0.1/",
@@ -331,6 +394,30 @@ describe("URLs a section checks once they all parse", () => {
 			{ url: "https://ok.example/k", hosts: ["any.example"] },
 		]);
 		expect(issues({ token: "https://ok.example/t" })).toBeUndefined();
+	});
+
+	it("asks with the configured URL a key names as the one it is sent for, and with none where it names none", () => {
+		const seen: unknown[] = [];
+		const check = urlsChecked(
+			(url, _hosts, internal) => {
+				seen.push([url, internal]);
+				return undefined;
+			},
+			{
+				urls: (s: { a: string; b: string }) => [s.a, s.b],
+				sent: (s) => ({
+					a: { url: s.a, hosts: [], internal: configuredUrl(s.b) },
+					b: { url: s.b, hosts: [] },
+				}),
+			},
+		);
+		check({ a: "https://x.example/a", b: "https://x.example/b" }, {
+			addIssue: () => {},
+		} as never);
+		expect(seen).toEqual([
+			["https://x.example/a", "https://x.example/b"],
+			["https://x.example/b", undefined],
+		]);
 	});
 
 	it("asks nothing while a URL is no URL, leaving that to its key's own refusal", () => {

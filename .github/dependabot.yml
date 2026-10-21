@@ -9,6 +9,10 @@ updates:
   # Cooldown applies to version updates only: security updates stay immediate.
   - package-ecosystem: "npm"
     directory: "/"
+    # Updates go to develop, the working branch; main changes only with a
+    # release. Dependabot reads this file from the default branch, so this
+    # takes effect once it reaches main.
+    target-branch: "develop"
     schedule:
       interval: "weekly"
     cooldown:

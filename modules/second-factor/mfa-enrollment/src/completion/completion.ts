@@ -1,6 +1,7 @@
 import { type HttpResponse, jsonAnswer } from "@mod/http";
 import { isUnavailable } from "@mod/kernel";
-import { type Factors, isLabel } from "@mod/mfa";
+import { isLabel } from "@mod/labels";
+import type { Factors } from "@mod/mfa";
 import type { Handler } from "@mod/mfa-flows";
 import type { bindingProofOver } from "../binding-proof/binding-proof.ts";
 import { heldOf } from "../held.ts";

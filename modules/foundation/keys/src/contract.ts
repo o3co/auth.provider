@@ -20,6 +20,17 @@ export interface Keys {
 
 export const keys = contract<Keys>("keys");
 
+/** Signs and verifies access tokens (`at+jwt`) with the ring `keys` signs with. */
+export interface AccessTokenSigning {
+	sign(claims: Readonly<Record<string, unknown>>): Promise<string>;
+	verify(token: string): Promise<VerifyResult>;
+}
+
+/** Taken by `tokens` alone, so no other module of a composition signs or verifies an access token. */
+export const accessTokenSigning = contract<AccessTokenSigning>("keys.access-signing", {
+	takenBy: ["tokens"],
+});
+
 export { isCanonicalJws } from "./material/jws.ts";
 export {
 	isVerifyAlgorithm,

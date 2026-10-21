@@ -44,6 +44,7 @@ What each module contains is described by that module's contract card (each modu
 | Signing, verification, publishing public keys | contract | keys |
 | Sending outbound HTTP requests, and the operator's section `outbound` | contract / setting | outbound |
 | Where outbound requests may go: the destination policy, its boot questions and host lists | contract / setting | outbound-policy |
+| What an IP address reaches by its kind: special-purpose, private, loopback | contract | address-reach |
 | Fetching signed material | contract | outbound |
 | Which signed material is admitted (plain http from the named hosts) and its size cap | contract / setting | outbound-policy |
 | Which destinations a feature reaches | setting | the module that sends the request |
@@ -215,6 +216,7 @@ What each module contains is described by that module's contract card (each modu
 | What `begin` asks before a subject's first counting factor | extension point kind | mfa-extensions |
 | The enrollment witness: who remembers, apart from mfa's store, that a subject holds a counting factor, and its promises | extension point kind / contract | mfa-witness |
 | The enrollment witness kept at the operator's HTTP ledger, its request shape, deadline and credential | contribution / setting | mfa-witness-http |
+| Keeping the enrollment witness in line with mfa's counting factors, and filling a missing mark | contribution / contract | mfa-witnessing |
 | WebAuthn ceremonies (options and when their challenge ends, verifying responses, the signature count, the user handle) | contract | webauthn |
 | Passkeys (each subject's user handle and credentials), assertions by them, registering them for a subject, reading a credential and making a user handle | contract / setting / data | webauthn |
 | Registering passkeys from a session (the registration routes), and their request budget | route / setting | passkey-registration |
@@ -230,8 +232,10 @@ What each module contains is described by that module's contract card (each modu
 | Starting the legacy build, and registering legacy set-ups | contract | conformance-legacy |
 | Each area's scene terms, scenes, set-ups for legacy and new | vocabulary / contribution | each area's conformance module |
 | Repo layout (where packages go) | setting | the workspace definition |
-| A generated deployment (full or a pattern: the module list, configuration gathered from the modules' fragments, env and local examples, Dockerfile, README) | template | create-app |
+| Generating a project: the command, the plan, and where the packages come from (the workspace or a bundle's index) | contract | create-app |
+| A generated project's files (a listed app, or a deployment of full or a pattern: the module list, configuration gathered from the modules' fragments, env and local examples, Dockerfile, README) | template | app-output |
 | The patterns: each one's use, selection, conformance areas and card, and the operator's choice over them | template | create-app (`patterns`) |
+| The generated references: the configuration reference, each package's `reference.conf`, the audit event reference and the route reference | contract | references |
 | What is composed together by default (a feature's wiring, the bridges between features), a selection's composition (what it needs to run, each axis's adapter), the full template, and the features that opt in | contract | combinations |
 | Declaring that a feature's store interfaces must be wired (`storeWiring` in the feature's package.json, checked by guard) | setting | the feature whose store interfaces must be wired |
 | How distribution is bundled | setting | distribution |

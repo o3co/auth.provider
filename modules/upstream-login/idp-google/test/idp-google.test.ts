@@ -11,6 +11,7 @@ import {
 	type OutboundResponse,
 	outbound,
 } from "@mod/outbound";
+import { outboundOver, section as outboundSection } from "@mod/outbound/module";
 import type { OutboundRefusals } from "@mod/outbound-policy";
 import { type AuthorizationStart, type CodeExchange, UpstreamRefused } from "@mod/upstreams";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -130,7 +131,7 @@ const outcome = (run: Promise<unknown>) =>
 	run.then(
 		(value) => value,
 		(error) =>
-			error instanceof UpstreamRefused ? "refused" : isUnavailable(error) ? "unavailable" : error,
+			UpstreamRefused.is(error) ? "refused" : isUnavailable(error) ? "unavailable" : error,
 	);
 const granted = async (more: Record<string, unknown> = {}, claims: Record<string, unknown> = {}) =>
 	answer({
@@ -232,6 +233,31 @@ describe("idp-google", () => {
 		const kindOf = (key: { _zod: { def: { type: string } } }) => key._zod.def.type;
 		const byDefault = Object.entries(settings.shape).filter(([, key]) => kindOf(key) === "default");
 		expect(byDefault.map(([name]) => name)).toEqual([]);
+	});
+
+	it("takes the endpoints the browser goes to over plain http only at a loopback name, refusing another at its key", () => {
+		const paths = outboundOver(outboundSection.parse({ "allow-any-public": true }), async () => [
+			"93.184.216.34",
+		]);
+		const { explained, plainInternal, browsedRefusal } = paths;
+		const policy: OutboundRefusals = { explained, plainInternal, browsedRefusal };
+		const keysOf = (more: Record<string, unknown>) =>
+			settingsOf(policy)
+				.safeParse({ ...{ "client-id": "client", "client-secret": "s3cr:et" }, ...more })
+				.error?.issues.map((i) => i.path.join("."));
+		expect(keysOf({})).toBeUndefined();
+		expect(
+			keysOf({
+				"authorization-endpoint": "http://127.0.0.1:9300/auth",
+				"end-session-endpoint": "http://localhost:9300/out",
+			}),
+		).toBeUndefined();
+		expect(keysOf({ "authorization-endpoint": "http://idp.example/auth" })).toEqual([
+			"authorization-endpoint",
+		]);
+		expect(keysOf({ "end-session-endpoint": "http://idp.example/out" })).toEqual([
+			"end-session-endpoint",
+		]);
 	});
 
 	it("refuses at boot, at its key, an endpoint outbound's policy refuses, Google's own included", () => {

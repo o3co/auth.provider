@@ -3,6 +3,7 @@ import { auditStandIn } from "@mod/audit/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
 import { authMethods } from "@mod/clients";
+import clientEvents from "@mod/clients/audit-events";
 import { clientsConfig, confidentialClient, publicClient } from "@mod/clients/testing";
 import { type Grant, grants, sessionIssuances, targetRules } from "@mod/grants";
 import { listening } from "@mod/http";
@@ -12,7 +13,7 @@ import rateLimitModule from "@mod/rate-limit/module";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { senderBindings } from "@mod/sender-binding";
 import { simulatedStore } from "@mod/store/testing";
-import { type IssuanceRequest, issuancePolicies } from "@mod/tokens";
+import { type AddedClaims, type IssuanceRequest, issuancePolicies } from "@mod/tokens";
 import { afterEach, describe, expect, it } from "vitest";
 import declared from "../src/audit-events.ts";
 import { tokenEndpointLocation } from "../src/contract.ts";
@@ -51,7 +52,11 @@ let events: readonly AuditEvent[] = [];
 // Every event a test records is one the module declares, with attributes it declares.
 afterEach(() => {
 	for (const { kind, attributes } of events) {
-		const known: readonly string[] = declared[kind as keyof typeof declared]?.attributes ?? [];
+		const all: Readonly<Record<string, { readonly attributes: readonly string[] }>> = {
+			...clientEvents,
+			...declared,
+		};
+		const known: readonly string[] = all[kind]?.attributes ?? [];
 		expect(known, `${kind} is declared`).not.toEqual([]);
 		expect(
 			Object.keys(attributes ?? {}).filter((name) => !known.includes(name)),
@@ -464,6 +469,114 @@ describe("token endpoint", () => {
 		expect((await post({ ...echo, first: "1" }, "oneonly")).status).toBe(200);
 		expect((await post(echo, "oneonly")).status).toBe(200);
 		expect(ran).toBe(3);
+	});
+
+	it("names the claims a grant added to the tokens it issued, never their values, in the order of their names", async () => {
+		const claimed = (name: string, sets: readonly AddedClaims[]) =>
+			defineModule({ name }, (m) => [
+				m.contribute(grants).by(() => ({
+					grantType: name === "twice" ? "urn:test:echo" : "urn:test:other",
+					readsAmbient: "none",
+					handle: async (input) => {
+						for (const claims of sets) {
+							const base = { subject: "sue", issuedTo: input.client.id, audience: [], scope: [] };
+							const grant = Object.keys(claims).length > 0 ? { ...base, claims } : base;
+							const issued = await input.issue(grant);
+							if (issued.kind !== "issued") return { kind: "refused", refusal: issued.refusal };
+						}
+						return { kind: "issued", body: {} };
+					},
+				})),
+			]);
+		const post = await serve([
+			claimed("twice", [
+				{ "zeta.example": "z-value", "alpha.example": 1 },
+				{ "alpha.example": 2, "mid.example": true },
+			]),
+			claimed("none", [{}]),
+		]);
+		expect((await post({ grant_type: "urn:test:echo" }, "echoes")).status).toBe(200);
+		expect(events.at(-1)).toMatchObject({
+			kind: "token.issued",
+			attributes: { claims: "alpha.example mid.example zeta.example" },
+		});
+		expect(JSON.stringify(events.at(-1))).not.toContain("z-value");
+		expect((await post({ grant_type: "urn:test:other" }, "echoes")).status).toBe(200);
+		expect(events.at(-1)?.attributes).not.toHaveProperty("claims");
+	});
+
+	it("names every added claim while they fit in 2048 characters, else as many as fit and how many it left out", async () => {
+		const named = (length: number, count: number) =>
+			Object.fromEntries(
+				Array.from({ length: count }, (_, i) => [
+					`${String(i).padStart(2, "0")}${"n".repeat(length - 2)}`,
+					0,
+				]),
+			);
+		const issuing = (claims: Record<string, number>) =>
+			defineModule({ name: "many" }, (m) => [
+				m.contribute(grants).by(() => ({
+					grantType: "urn:test:echo",
+					readsAmbient: "none",
+					handle: async (input) => {
+						const base = { subject: "sue", issuedTo: input.client.id, audience: [], scope: [] };
+						const issued = await input.issue({ ...base, claims });
+						return issued.kind === "issued"
+							? { kind: "issued", body: {} }
+							: { kind: "refused", refusal: issued.refusal };
+					},
+				})),
+			]);
+		// Eight names of 255 characters fill 2047, one space apart: all are named.
+		const fits = await serve([issuing(named(255, 8))]);
+		expect((await fits({ grant_type: "urn:test:echo" }, "echo")).status).toBe(200);
+		const all = events.at(-1)?.attributes;
+		expect([String(all?.claims).split(" ").length, all?.claims_left]).toEqual([8, undefined]);
+		await stop();
+		// Twelve of 200: ten fit, and two are left out.
+		const over = await serve([issuing(named(200, 12))]);
+		expect((await over({ grant_type: "urn:test:echo" }, "echo")).status).toBe(200);
+		const cut = events.at(-1)?.attributes;
+		expect([String(cut?.claims).length <= 2048, String(cut?.claims).split(" ").length]).toEqual([
+			true,
+			10,
+		]);
+		expect(cut?.claims_left).toBe("2");
+	});
+
+	it("names all at exactly 2048 characters, and leaves one out at 2049", async () => {
+		/** Eight names of 227 characters and one of `last`, sorted by their first two digits. */
+		const names = (last: number) =>
+			Object.fromEntries(
+				Array.from({ length: 9 }, (_, i) => {
+					const length = i === 8 ? last : 227;
+					return [`${String(i).padStart(2, "0")}${"n".repeat(length - 2)}`, 0];
+				}),
+			);
+		const issuing = (claims: Record<string, number>) =>
+			defineModule({ name: "edge" }, (m) => [
+				m.contribute(grants).by(() => ({
+					grantType: "urn:test:echo",
+					readsAmbient: "none",
+					handle: async (input) => {
+						const base = { subject: "sue", issuedTo: input.client.id, audience: [], scope: [] };
+						const issued = await input.issue({ ...base, claims });
+						return issued.kind === "issued"
+							? { kind: "issued", body: {} }
+							: { kind: "refused", refusal: issued.refusal };
+					},
+				})),
+			]);
+		// 8 × 227 + 8 spaces + 224 = 2048.
+		const exact = await serve([issuing(names(224))]);
+		expect((await exact({ grant_type: "urn:test:echo" }, "echo")).status).toBe(200);
+		const all = events.at(-1)?.attributes;
+		expect([String(all?.claims).length, all?.claims_left]).toEqual([2048, undefined]);
+		await stop();
+		const over = await serve([issuing(names(225))]);
+		expect((await over({ grant_type: "urn:test:echo" }, "echo")).status).toBe(200);
+		const cut = events.at(-1)?.attributes;
+		expect([String(cut?.claims).split(" ").length, cut?.claims_left]).toEqual([8, "1"]);
 	});
 
 	it("records each issuance and each refusal it decides, with the client and the source, never a token or secret", async () => {

@@ -31,10 +31,6 @@ export const signerKeys = extensionPoint<SignerKeys>("jwt-bearer.signer-keys", {
 	keyOf: (keys) => keys.issuer,
 });
 
-/** A signer's subject shape: 1 to 255 ASCII characters, as OpenID Connect Core §2 bounds `sub`. */
-export const isSignerSubject = (value: unknown): value is string =>
-	typeof value === "string" && /^\p{ASCII}{1,255}$/u.test(value);
-
 /** The subject a linked issuer's verified signer stands for, by the IdP name its signers are known by. */
 export interface LinkedSubjects {
 	/** The contributing module's name, told where boot is refused. */

@@ -1,5 +1,8 @@
+import type { AddedClaims } from "@mod/added-claims";
 import { contract, extensionPoint } from "@mod/kernel";
 import type { Binding, TokenValidity } from "@mod/sender-binding";
+
+export type { AddedClaims, AddedValue } from "@mod/added-claims";
 
 /** Who acts for the subject, and the actor it acts for in turn (`act`). */
 export interface Actor {
@@ -20,6 +23,11 @@ export interface AccessGrant {
 	/** The authentication time is not known: no `auth_time` is written, whatever `authenticatedAt` holds. */
 	readonly authenticatedAtUnknown?: true;
 	readonly acr?: string;
+	/**
+	 * Claims the grant adds to its access token: JSON within `added-claims`' limits, no name
+	 * reserved; an empty set is none. What the grant states, never what the provider vouches for.
+	 */
+	readonly claims?: AddedClaims;
 }
 
 export interface IssuedAccess {
@@ -29,6 +37,8 @@ export interface IssuedAccess {
 	readonly expiresAt: number;
 	readonly expiresIn: number;
 	readonly tokenType: string;
+	/** The names of the claims the grant added, in name order; none where it added none. */
+	readonly addedClaims?: readonly string[];
 }
 
 export type AccessCheck =
@@ -74,8 +84,8 @@ export type IssuanceVerdict =
 /** A rule an operator composes on whether an access token may be issued at all. */
 export interface IssuancePolicy {
 	readonly name: string;
-	/** Throws Unavailable when it cannot tell. */
-	judge(request: IssuanceRequest): Promise<IssuanceVerdict>;
+	/** Throws Unavailable when it cannot tell. `signal` aborts at the policies' deadline, so it may stop its own work. */
+	judge(request: IssuanceRequest, signal?: AbortSignal): Promise<IssuanceVerdict>;
 }
 
 export const issuancePolicies = extensionPoint<IssuancePolicy>("tokens.issuance-policies", {
@@ -150,4 +160,4 @@ export const subjectChecks = extensionPoint<SubjectCheck>("tokens.subject-checks
 	multiplicity: "many",
 });
 
-export * from "./store.ts";
+export { type RevokedTokens, revokedTokens, revokedTokensNeeds } from "@mod/token-denylist";

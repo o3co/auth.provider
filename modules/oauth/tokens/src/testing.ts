@@ -1,10 +1,12 @@
 import { defineModule, isUnavailable, Unavailable } from "@mod/kernel";
 import { type Binding, senderBindings } from "@mod/sender-binding";
+import { denylistAllowanceMs, denylistOver } from "@mod/token-denylist";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import {
 	type AccessCheck,
 	type AccessGrant,
+	type Actor,
 	accessConditions,
 	type IssuancePolicy,
 	type IssuanceVerdict,
@@ -15,12 +17,10 @@ import {
 	type Tokens,
 	tokens,
 } from "./contract.ts";
-import { denylistAllowanceMs, denylistOver } from "./denylist/denylist.ts";
 import { authenticatedAheadMs, type IssueAccess, issuing, judging } from "./issuance.ts";
 import { defaultLifetimeSeconds, expiryOf, keptGrant, lifetimeOf, tokenId } from "./limits.ts";
 import { namedBy } from "./reference.ts";
 import type { section } from "./section.ts";
-import type { RevokedTokens } from "./store.ts";
 
 export type TokensSettings = z.input<typeof section>;
 
@@ -63,6 +63,9 @@ export function tokensContract(
 	}) => Promise<TokensUnderTest>,
 ): void {
 	const grant = { subject: "s", issuedTo: "c", audience: ["api"], scope: ["read"] };
+	/** An actor chain n deep. */
+	const chain = (n: number): Actor =>
+		n === 1 ? { subject: "a1" } : { subject: `a${n}`, actor: chain(n - 1) };
 	/** Issues through `issue`, which no policy here refuses, and answers what it issued. */
 	const issueFor = async (tokens: Tokens, grant: AccessGrant, limits?: IssueLimits) => {
 		const issued = await tokens.issue({ grant, grantType: "test" }, limits);
@@ -244,6 +247,92 @@ export function tokensContract(
 				kind: "valid",
 				grant: { subject: "s", scope: ["read"] },
 			});
+		});
+
+		it("carries the claims a grant adds, read back frozen and named in name order, and refuses a reserved one", async () => {
+			const place = await open({ revocable: true });
+			const claims = { b: { c: [1] }, a: "x" };
+			const issued = await place.tokens.issue({ grant: { ...grant, claims }, grantType: "test" });
+			if (issued.kind !== "issued") throw new Error(issued.policy);
+			expect(issued.access.addedClaims).toEqual(["a", "b"]);
+			const checked = await place.tokens.verifyAccess(issued.access.token);
+			if (checked.kind !== "valid") throw new Error(checked.reason);
+			expect(checked.grant.claims).toEqual(claims);
+			expect(Object.isFrozen(checked.grant.claims?.b)).toBe(true);
+			const plain = await issueFor(place.tokens, grant);
+			expect("addedClaims" in plain).toBe(false);
+			const reserved = { grant: { ...grant, claims: { scope: "x" } }, grantType: "test" };
+			await expect(place.tokens.issue(reserved)).rejects.toThrow(TypeError);
+			await expect(place.tokens.admits(reserved)).rejects.toThrow(TypeError);
+		});
+
+		it("reads back the added claims frozen at every depth, and their names frozen", async () => {
+			const place = await open({ revocable: true });
+			const claims = { a: { b: [{ c: [1] }] } };
+			const issued = await place.tokens.issue({ grant: { ...grant, claims }, grantType: "test" });
+			if (issued.kind !== "issued") throw new Error(issued.policy);
+			expect(Object.isFrozen(issued.access.addedClaims)).toBe(true);
+			const checked = await place.tokens.verifyAccess(issued.access.token);
+			const read = checked.kind === "valid" ? checked.grant.claims : undefined;
+			const levels = [read, read?.a, (read?.a as { b: unknown })?.b];
+			const inner = (levels[2] as readonly { c: unknown }[] | undefined)?.[0];
+			for (const level of [...levels, inner, inner?.c]) expect(Object.isFrozen(level)).toBe(true);
+		});
+
+		it("refuses every reserved name at the top, at issue and at admits, and takes each one nested", async () => {
+			const place = await open({ revocable: true });
+			// Written as the rules name them, so dropping one from the rules fails here.
+			const names = [
+				...["iss", "sub", "aud", "client_id", "scope", "act", "amr", "auth_time", "acr", "iat"],
+				...["exp", "jti", "cnf", "nbf", "roles", "groups", "entitlements", "scp", "may_act"],
+				...["authorization_details", "htm", "htu", "ath", "nonce", "azp", "at_hash", "c_hash"],
+				...["sid", "name", "picture", "profile", "email", "email_verified", "active"],
+				...["token_type", "username"],
+			];
+			for (const name of names) {
+				const request = { grant: { ...grant, claims: { [name]: 1 } }, grantType: "test" };
+				await expect(place.tokens.issue(request), name).rejects.toThrow(TypeError);
+				await expect(place.tokens.admits(request), name).rejects.toThrow(TypeError);
+			}
+			const nested = Object.fromEntries(names.map((name) => [name, 1]));
+			const taken = { grant: { ...grant, claims: { nested } }, grantType: "test" };
+			expect((await place.tokens.issue(taken)).kind).toBe("issued");
+		});
+
+		it("issues and reads back an actor chain 16 deep, and refuses one of 17 as the caller's mistake", async () => {
+			const place = await open({ revocable: true });
+			const deepest = await issueFor(place.tokens, { ...grant, actor: chain(16) });
+			expect(await place.tokens.verifyAccess(deepest.token)).toMatchObject({
+				kind: "valid",
+				grant: { actor: chain(16) },
+			});
+			const over = { grant: { ...grant, actor: chain(17) }, grantType: "test" };
+			await expect(place.tokens.issue(over)).rejects.toThrow(TypeError);
+			await expect(place.tokens.admits(over)).rejects.toThrow(TypeError);
+		});
+
+		it("reads a grant's actor once, so a getter answering otherwise the second time changes nothing", async () => {
+			const place = await open({ revocable: true });
+			const shifting = (first: Actor | undefined) => {
+				let reads = 0;
+				const given = Object.defineProperty({ ...grant }, "actor", {
+					enumerable: true,
+					get: () => (++reads === 1 ? first : chain(17)),
+				});
+				return { request: { grant: given as AccessGrant, grantType: "test" }, reads: () => reads };
+			};
+			const none = shifting(undefined);
+			const issued = await place.tokens.issue(none.request);
+			if (issued.kind !== "issued") throw new Error(issued.policy);
+			expect(none.reads()).toBe(1);
+			const checked = await place.tokens.verifyAccess(issued.access.token);
+			if (checked.kind !== "valid") throw new Error(checked.reason);
+			expect("actor" in checked.grant).toBe(false);
+			const admitted = shifting(undefined);
+			expect((await place.tokens.admits(admitted.request)).kind).toBe("allowed");
+			expect(admitted.reads()).toBe(1);
+			const deep = shifting(chain(17));
+			await expect(place.tokens.issue(deep.request)).rejects.toThrow(TypeError);
 		});
 
 		it("refuses an authentication time beyond its allowance ahead of the clock", async () => {
@@ -507,6 +596,7 @@ export function tokensStandIn(
 					expiresAt: exp * 1000,
 					expiresIn: exp - iat,
 					tokenType: binding?.tokenType ?? "Bearer",
+					...(grant.claims ? { addedClaims: Object.freeze(Object.keys(grant.claims).sort()) } : {}),
 				};
 			};
 			const stand: Tokens = {
@@ -532,53 +622,4 @@ export function tokensStandIn(
 			return stand;
 		}),
 	]);
-}
-
-/** A place that keeps revoked tokens, as one implementation of the store interface offers it. */
-export interface RevokedPlace {
-	readonly revoked: RevokedTokens;
-	/** Moves the place's clock on, so lifetimes run out. */
-	advance(ms: number): void;
-	/** Where answers can be lost: the next write takes effect, but its answer is lost. */
-	readonly loseNextAnswer?: () => void;
-	/** Where the place replicates: a replica takes over, keeping only what was confirmed. */
-	readonly failover?: () => Promise<void>;
-	/** Where the place can restart: it does, keeping only what it holds durably. */
-	readonly restart?: () => Promise<void>;
-	/** Where memory can run short: it does, keeping only what is kept from eviction. */
-	readonly pressMemory?: () => Promise<void>;
-}
-
-/** What tokens needs from any implementation: an id kept once, for exactly its lifetime, through faults. */
-export function revokedTokensContract(name: string, open: () => Promise<RevokedPlace>): void {
-	let n = 0;
-	const fresh = () => `t-${++n}-${Math.random().toString(36).slice(2)}`;
-	describe(`tokens' store interface: ${name}`, () => {
-		it("keeps an id once, for exactly its lifetime", async () => {
-			const place = await open();
-			const id = fresh();
-			expect(await place.revoked.holds(id)).toBe(false);
-			expect(await place.revoked.save(id, 1000)).toBe("created");
-			expect(await place.revoked.save(id, 1000)).toBe("exists");
-			place.advance(999);
-			expect(await place.revoked.holds(id)).toBe(true);
-			place.advance(1);
-			expect(await place.revoked.holds(id)).toBe(false);
-		});
-
-		it("keeps ids through restarts, memory pressure, lost answers and failovers", async (context) => {
-			const place = await open();
-			const { loseNextAnswer: lose, failover, restart, pressMemory } = place;
-			if (!lose || !failover || !restart || !pressMemory) return context.skip();
-			const [kept, settled] = [fresh(), fresh()];
-			await place.revoked.save(kept, 60_000);
-			lose();
-			expect(await place.revoked.save(settled, 60_000)).toBe("created");
-			await failover();
-			await restart();
-			await pressMemory();
-			expect(await place.revoked.holds(kept)).toBe(true);
-			expect(await place.revoked.holds(settled)).toBe(true);
-		});
-	});
 }

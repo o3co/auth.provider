@@ -14,7 +14,7 @@ import {
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
-import { keys } from "@mod/keys";
+import { accessTokenSigning } from "@mod/keys";
 import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
 import { senderBindings } from "@mod/sender-binding";
@@ -291,7 +291,7 @@ it("refuses as shape a token whose act, amr or auth_time is malformed", async ()
 	const app = await assembled({ revocation: "unsupported" });
 	const t = app.get(tokens);
 	const issued = await issueFor(t, grant);
-	const signer = app.get(keys);
+	const signer = app.get(accessTokenSigning);
 	for (const malformed of [
 		{ act: { sub: "a", act: { sub: 1 } } },
 		{ act: "a" },
@@ -300,7 +300,7 @@ it("refuses as shape a token whose act, amr or auth_time is malformed", async ()
 		{ acr: 7 },
 		{ acr: "" },
 	]) {
-		const token = await signer.sign({ ...claimsOf(issued.token), ...malformed }, "at+jwt");
+		const token = await signer.sign({ ...claimsOf(issued.token), ...malformed });
 		expect(await t.verifyAccess(token), JSON.stringify(malformed)).toEqual({
 			kind: "invalid",
 			reason: "shape",
@@ -336,10 +336,9 @@ it("refuses a token another issuer stamped, and one bound by two members", async
 	);
 	const app = await assembled({ revocation: "unsupported" }, { extra: [kinds] });
 	const t = app.get(tokens);
-	const signer = app.get(keys);
+	const signer = app.get(accessTokenSigning);
 	const claims = claimsOf((await issueFor(t, grant)).token);
-	const signed = (changed: Record<string, unknown>) =>
-		signer.sign({ ...claims, ...changed }, "at+jwt");
+	const signed = (changed: Record<string, unknown>) => signer.sign({ ...claims, ...changed });
 	expect(await t.verifyAccess(await signed({ iss: "https://other.example" }))).toEqual({
 		kind: "invalid",
 		reason: "issuer",

@@ -7,7 +7,7 @@
 - What each metadata field means: the module that reads one contributes it as a section, and its default applies to a client without it.
 
 ## Offers
-- `find` (id → client or none) and `authenticate` (request → client or a typed refusal, never null); both throw unavailable when a source is unavailable.
+- `find` (id → client or none) and `authenticate` (request → client or a typed refusal, never null); both throw unavailable when a source is unavailable. A caller records a refusal through `recordRefusedAuthentication` (its audit, the request, the refusal) as `client.authentication.failure`, with `reason` and `source`, never the client id claimed; declared in `./audit-events`.
 - `checkRecord` (record → where it fails, or nothing): the checks `find` holds a source's record to (the registered rule, a known method, each section's schema), each failure a path from the record's root (`sections.consent.uri`), never a value or message; it rejects when a schema throws.
 - An authenticated answer carries the challenges for a later 401 to that client: its method's, or every method's when its method has none.
 - `methods` names the usable authentication methods, built in and contributed; `signingAlgorithms` names the algorithms they take signed credentials in.
@@ -36,7 +36,7 @@
 - An unknown client, an invalid record and another method's client are refused only after the work the claimed method's credentials would cost (`decoy`; a secret's is the checker's decoys), so the time tells no client id apart.
 
 ## Depends on
-- `kernel`, `http`, `secret-hash`
+- `kernel`, `http`, `secret-hash`, `audit` (the declaration), `request-source` (the source)
 
 ## Vocabulary
 - client: an id, a kind (public or confidential), an authentication method, and metadata by section.

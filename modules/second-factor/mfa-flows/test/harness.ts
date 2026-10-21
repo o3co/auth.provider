@@ -15,6 +15,7 @@ import { type MfaSettings, mfaConfig } from "@mod/mfa/testing";
 import bindingProofModule from "@mod/mfa-binding-proof/module";
 import mfaEntry from "@mod/mfa-entry/module";
 import { factorKinds } from "@mod/mfa-extensions";
+import mfaRevocation from "@mod/mfa-revocation/module";
 import { type Lockouts, lockouts } from "@mod/rate-limit";
 import rateLimitModule from "@mod/rate-limit/module";
 import { memoryRecords } from "@mod/records/testing";
@@ -198,11 +199,15 @@ interface Call {
 /** Settings for both sections; each goes to the module that reads it. */
 type Settings = Partial<MfaSettings> & Partial<FlowSettings>;
 
-/** The package over its parts; `enrolling` is the enrollment flow composed (the test one unless given, none with `null`). */
+/**
+ * The package over its parts; `enrolling` is the enrollment flow composed (the test one unless given,
+ * none with `null`); `fenced` composes `mfa-revocation`, as `combinations` does.
+ */
 export async function serve(
 	settings: Settings = {},
 	extra: Module[] = [],
 	enrolling: Module | null = testEnrollment,
+	fenced = true,
 ) {
 	const pick = (own: boolean) =>
 		Object.fromEntries(Object.entries(settings).filter(([k]) => flowKeys.includes(k) === own));
@@ -231,6 +236,7 @@ export async function serve(
 			switchedModule(rateLimitModule, lockouts, releasing),
 			sealModule,
 			mfaModule,
+			...(fenced ? [mfaRevocation] : []),
 			mfaEntry,
 			bindingProofModule,
 			flowsModule,

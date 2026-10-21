@@ -12,6 +12,7 @@
 ## Offers
 - `roundTrips.begin` (a name, what the caller carries as JSON, a lifetime, cross-site or not) → the state, nonce and S256 challenge for the upstream, and the cookie to set.
 - `roundTrips.take` (the callback's request, the name, its `state`) → `taken` (what was carried, the verifier and nonce for the exchange, when it started, and the cookie cleared) or `none`.
+- `roundTrips.current` (a request, the name) → the browser's live round trip as its start made it (state, nonce, S256 challenge, what was carried), or none.
 - Composition definition (`./module`): provides `roundTrips` over the store interface the assembly wires and `cookies`.
 - Store interface for round trips, its needs (survives failover, names from the secret) and contract test (`./testing`).
 - The caller adds the cookie cleared to every answer after a take, and reads what it carried with its own schema.
@@ -26,6 +27,7 @@
 - A take counts only when the record read was untaken and the one written is taken, so one of two callbacks at once takes it.
 - Nothing taken spends nothing and clears no cookie; a taken one is never taken again.
 - Two round trips of one name begun in one browser leave only the later one takeable.
+- `current` answers only the name's own record in a shape it knows, live and untaken; it reads through a change that writes nothing, so the record's lifetime stays where its start put it.
 
 ## Data
 - Round trip record, by its cookie: format 1, the name, state, nonce, verifier, start time, what was carried, whether cross-site, and whether taken. The store derives its name from the cookie and never keeps the cookie in clear.

@@ -12,6 +12,7 @@ import {
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
+import { isLabel } from "@mod/labels";
 import { logins } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
 import * as extensions from "@mod/mfa-extensions";
@@ -30,10 +31,11 @@ import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import * as offered from "../src/contract.ts";
-import { enforcers, factors, isLabel, proofSteps } from "../src/contract.ts";
+import { enforcers, factors, proofSteps, type Witnessing, witnessing } from "../src/contract.ts";
 import mfaModule from "../src/module.ts";
 import { listKeyOf, storedList } from "../src/records/records.ts";
 import { section } from "../src/section.ts";
+import type { StoredFactors } from "../src/store.ts";
 import { type MfaSettings, mfaConfig } from "../src/testing.ts";
 import { memoryFactors } from "./stores.ts";
 
@@ -902,6 +904,68 @@ describe("values no two factors may hold", () => {
 		expect(await bindKind("bob", "card", "c1")).toMatchObject({ kind: "bound" });
 	});
 
+	it("counts a factor of a unique value once its claim names it; one written before claims, unless another holds it", async () => {
+		const { decided, bindKind, place } = await serve({}, { kinds: [card, backup] });
+		await bindKind("ann", "card", "c1");
+		// Read between a binding's write of its factor and its claim on the value.
+		const seen: Record<string, boolean> = {};
+		let reading: string | undefined;
+		place.hooks.beforeSave = async (key) => {
+			if (key.startsWith("u-") && reading) seen[reading] = await decided.countingWritten(reading);
+		};
+		reading = "bob";
+		expect(await bindKind("bob", "card", "c1")).toEqual({ kind: "duplicate" });
+		expect(seen.bob).toBe(false);
+		reading = "cid";
+		expect(await bindKind("cid", "card", "c2")).toMatchObject({ kind: "bound" });
+		// Not yet claimed, its binding could still end as a duplicate.
+		expect(seen.cid).toBe(false);
+		reading = undefined;
+		expect([await decided.countingWritten("ann"), await decided.countingWritten("cid")]).toEqual([
+			true,
+			true,
+		]);
+		// A factor written before claims were kept carries no mark: it counts unless another holds its value.
+		const unmarked = (record: StoredFactors) => {
+			const list = record as unknown as { factors: { claims?: true }[] };
+			const factors = list.factors.map(({ claims: _, ...rest }) => rest);
+			return { value: { ...list, factors } as unknown as StoredFactors };
+		};
+		reading = "dee";
+		place.hooks.beforeSave = async (key) => {
+			if (!key.startsWith("u-") || !reading) return;
+			await place.factors.update(listKeyOf(reading), unmarked);
+			seen[reading] = await decided.countingWritten(reading);
+		};
+		expect(await bindKind("dee", "card", "c3")).toMatchObject({ kind: "bound" });
+		expect(seen.dee).toBe(true);
+		reading = "eve";
+		expect(await bindKind("eve", "card", "c1")).toEqual({ kind: "duplicate" });
+		expect(seen.eve).toBe(false);
+	});
+
+	it("refuses removing the last factor that stands while a binding beside it is not yet claimed, and ends as a duplicate", async () => {
+		const { decided, bindKind, bindCode, idOf, place } = await serve(
+			{ mode: "required" },
+			{ kinds: [code, backup, card] },
+		);
+		await bindKind("ann", "card", "c1");
+		await bindCode("zed");
+		// Zed's card is written and not yet claimed when zed's code is removed; ann holds its value.
+		let removed: string | undefined;
+		place.hooks.beforeSave = async (key) => {
+			if (!key.startsWith("u-") || removed !== undefined) return;
+			removed = await decided.remove(
+				"zed",
+				await idOf("zed", "code"),
+				await decided.fenceOf("zed"),
+			);
+		};
+		expect(await bindKind("zed", "card", "c1")).toEqual({ kind: "duplicate" });
+		expect(removed).toBe("last");
+		expect((await decided.held("zed")).map((f) => f.kind)).toContain("code");
+	});
+
 	it("refuses a first binding another counting factor beat to the subject, binding nothing and recording it", async () => {
 		const { decided, provedCode, bindCode, events } = await serve({ mode: "required" });
 		const beaten = await provedCode("liz");
@@ -1156,75 +1220,38 @@ describe("the extension points mfa-extensions offers", () => {
 });
 
 describe("an enrollment witness", () => {
-	/** mfa beside a witness in memory; `wipe` loses a subject's factors, as a store wiped or rolled back would. */
-	const witnessed = async (settings: Partial<MfaSettings> = {}) => {
+	it("refuses to start with a witness composed and no witnessing, so the witness is never left unasked", async () => {
 		const witness = witnessStandIn();
-		const served = await serve(settings, { extra: [witness.module] });
-		const wipe = (subject: string) =>
-			served.place.factors.update(listKeyOf(subject), () => ({ value: storedList(subject, []) }));
-		const counted = async (subject: string) =>
-			(await served.decided.held(subject)).filter((f) => f.kind === "code").length;
-		return { ...served, witness, wipe, counted };
-	};
-
-	it("refuses to start with two witnesses", async () => {
-		const [one, two] = [witnessStandIn("witness-one"), witnessStandIn("witness-two")];
-		await expect(serve({}, { extra: [one.module, two.module] })).rejects.toBeInstanceOf(
-			BootRefused,
+		await expect(serve({}, { extra: [witness.module] })).rejects.toSatisfy(
+			(error) =>
+				error instanceof BootRefused &&
+				error.refusals.some((r) => r.where === "mfa" && r.reason.includes("mfa-witnessing")),
 		);
 	});
 
-	it("marks no subject whose first binding another subject's factor already holds the value of, so it stays usable", async () => {
-		const witness = witnessStandIn();
-		const { decided, bindKind } = await serve(
-			{},
-			{ kinds: [card, backup], extra: [witness.module] },
-		);
-		expect(await bindKind("ann", "card", "c1")).toMatchObject({ kind: "bound" });
-		expect(await bindKind("bob", "card", "c1")).toEqual({ kind: "duplicate" });
-		expect(witness.marks.has("bob")).toBe(false);
-		// Not marked, bob holding nothing reads as never enrolled, not as a store that lost a factor.
-		expect(await decided.asks("bob")).not.toBe(undefined);
-		expect(await bindKind("bob", "card", "c2")).toMatchObject({ kind: "bound" });
-	});
-
-	it("marks the subject before its first counting factor is written, and only then", async () => {
-		const { bindCode, witness } = await witnessed();
-		await bindCode("ana");
-		expect(witness.marks.has("ana")).toBe(true);
-		witness.marks.clear();
-		await bindCode("ana");
-		expect(witness.marks.has("ana")).toBe(false);
-	});
-
-	it("answers unavailable where a wiped store would read as never enrolled: login, a first binding, and credentials", async () => {
-		const { decided, bindCode, wipe, events } = await witnessed();
-		await bindCode("bea");
-		await wipe("bea");
-		events.length = 0;
-		await expect(decided.asks("bea")).rejects.toSatisfy(isUnavailable);
-		await expect(decided.begin("bea", "code")).rejects.toSatisfy(isUnavailable);
-		await expect(decided.countingHeld("bea", "credentials")).rejects.toSatisfy(isUnavailable);
-		expect(events.map((e) => [e.kind, e.attributes])).toEqual([
-			["mfa.enrollment_inconsistent", { at: "login" }],
-			["mfa.enrollment_inconsistent", { at: "binding" }],
-			["mfa.enrollment_inconsistent", { at: "credentials" }],
-		]);
-	});
-
-	it("judges whether a counting factor is held against the witness, recording where it was asked", async () => {
-		const { decided, bindCode, wipe, events } = await witnessed();
-		await bindCode("dee");
-		expect(await decided.countingHeld("dee", "credentials")).toBe(true);
-		await wipe("dee");
-		events.length = 0;
-		await expect(decided.countingHeld("dee", "credentials")).rejects.toSatisfy(isUnavailable);
-		await expect(decided.countingHeld("dee", "binding")).rejects.toSatisfy(isUnavailable);
-		expect(events.map((e) => [e.kind, e.attributes])).toEqual([
-			["mfa.enrollment_inconsistent", { at: "credentials" }],
-			["mfa.enrollment_inconsistent", { at: "binding" }],
-		]);
-		expect(await decided.countingHeld("eli", "login")).toBe(false);
+	it("asks a contributed witnessing in place of its own, and refuses to start with two", async () => {
+		const asked: string[] = [];
+		const told: Witnessing = {
+			standing: async (subject, counts) => {
+				asked.push(`standing ${subject}`);
+				return counts ? "held" : "none";
+			},
+			settle: async (subject) => {
+				asked.push(`settle ${subject}`);
+			},
+			cleared: async (subject) => {
+				asked.push(`cleared ${subject}`);
+			},
+		};
+		const contributing = (name: string) =>
+			defineModule({ name }, (m) => [m.contribute(witnessing).by(() => told)]);
+		const { decided, bindCode } = await serve({}, { extra: [contributing("told")] });
+		await bindCode("ola");
+		await decided.clear("ola");
+		expect(asked).toEqual(expect.arrayContaining(["standing ola", "settle ola", "cleared ola"]));
+		await expect(
+			serve({}, { extra: [contributing("one"), contributing("two")] }),
+		).rejects.toBeInstanceOf(BootRefused);
 	});
 
 	it("tells whether every session needs a second factor, as the mode says", async () => {
@@ -1232,120 +1259,13 @@ describe("an enrollment witness", () => {
 		expect((await serve({ mode: "optional" })).decided.secondFactorRequired()).toBe(false);
 	});
 
-	it("refuses a first binding begun before the owner's, once the store is wiped, writing nothing", async () => {
-		const { decided, provedCode, bindCode, wipe, counted, events } = await witnessed();
-		const stale = await provedCode("cid");
-		await bindCode("cid");
-		await wipe("cid");
-		events.length = 0;
-		expect(await decided.bind("cid", stale.pending, stale.state)).toEqual({
-			kind: "first-binding-closed",
-		});
-		expect(await counted("cid")).toBe(0);
-		expect(events.map((e) => [e.kind, e.attributes])).toEqual([
-			["mfa.first_binding_conflict", { kind: "code", reason: "competing" }],
-		]);
-	});
-
-	it("asks the witness again with the same token, three times at most, before it writes nothing", async () => {
-		const { decided, provedCode, witness, counted } = await witnessed();
-		const begun = await provedCode("dan");
-		witness.failing.enroll = 2;
-		expect((await decided.bind("dan", begun.pending, begun.state)).kind).toBe("bound");
-		const other = await provedCode("eli");
-		witness.failing.enroll = 4;
-		await expect(decided.bind("eli", other.pending, other.state)).rejects.toSatisfy(isUnavailable);
-		expect([await counted("eli"), witness.marks.has("eli")]).toEqual([0, false]);
-	});
-
-	it("binds over a mark its own token set when its answer was lost", async () => {
-		const { decided, provedCode, witness, counted } = await witnessed();
-		const begun = await provedCode("fay");
-		witness.lost.enroll = 1;
-		expect((await decided.bind("fay", begun.pending, begun.state)).kind).toBe("bound");
-		expect(await counted("fay")).toBe(1);
-	});
-
-	it("takes back its own factor when a reset cleared the mark while it was being written", async () => {
-		const { decided, provedCode, witness, counted, events } = await witnessed();
-		const begun = await provedCode("gus");
-		// The reset's clear lands after the enroll that set the mark, before the factor is read again.
-		witness.next.afterEnroll = () => witness.marks.delete("gus");
-		events.length = 0;
-		expect(await decided.bind("gus", begun.pending, begun.state)).toEqual({
-			kind: "first-binding-closed",
-		});
-		expect(await counted("gus")).toBe(0);
-		expect(events.map((e) => [e.kind, e.attributes])).toEqual([
-			["mfa.first_binding_conflict", { kind: "code", reason: "reset-cleared" }],
-		]);
-	});
-
-	it("leaves the witness's mark when a reset's clear lands while it binds a first factor: only a reset clears one", async () => {
-		const { decided, provedCode, witness, counted, place } = await witnessed();
-		await place.factors.save(listKeyOf("gil"), storedList("gil", []), "endless");
-		const begun = await provedCode("gil");
-		// While this binding writes, a reset clears the factors and the mark, and a newer binding marks.
-		place.raceNextChange((record) => {
-			witness.marks.set("gil", "newer");
-			return { ...record, factors: [], fences: 1 };
-		});
-		expect(await decided.bind("gil", begun.pending, begun.state)).toEqual({ kind: "fenced" });
-		expect(await counted("gil")).toBe(0);
-		expect(witness.marks.get("gil")).toBe("newer");
-	});
-
-	it("takes back its own factor once more when the store cannot answer the first time", async () => {
-		const { decided, provedCode, witness, counted, place } = await witnessed();
-		const begun = await provedCode("guy");
-		witness.next.afterEnroll = () => witness.marks.delete("guy");
-		// The store fails the first take-back, which comes after the mark is read again.
-		witness.next.beforeRead = () => place.down.failNext("update");
-		expect(await decided.bind("guy", begun.pending, begun.state)).toEqual({
-			kind: "first-binding-closed",
-		});
-		expect(await counted("guy")).toBe(0);
-	});
-
-	it("refuses a first pending that holds no token, as one sealed before the witness was composed", async () => {
-		const { app, decided, counted } = await witnessed();
+	it("binds a first pending sealed by an earlier version, holding a token and no fence", async () => {
+		const { app, decided } = await serve();
 		const sealed = app
 			.get(seal)
-			.seal(JSON.stringify({ kind: "code", secret: "s", first: true }), "hal\npending");
-		expect(await decided.bind("hal", sealed, 0)).toEqual({ kind: "first-binding-closed" });
-		expect(await counted("hal")).toBe(0);
-	});
-
-	it("never removes the last counting factor under optional mode, as only a reset clears the mark", async () => {
-		const { decided, bindCode, idOf } = await witnessed();
-		await bindCode("ivy");
-		expect(
-			await decided.remove("ivy", await idOf("ivy", "code"), await decided.fenceOf("ivy")),
-		).toBe("last");
-	});
-
-	it("clears the mark after a reset's removal, and answers unavailable while it cannot, the factors gone", async () => {
-		const { decided, bindCode, witness, counted } = await witnessed();
-		await bindCode("jo");
-		expect((await decided.clear("jo")).count).toBe(2);
-		expect(witness.marks.has("jo")).toBe(false);
-		await bindCode("jo");
-		witness.failing.clear = 1;
-		await expect(decided.clear("jo")).rejects.toSatisfy(isUnavailable);
-		expect([await counted("jo"), witness.marks.has("jo")]).toEqual([0, true]);
-		await expect(decided.asks("jo")).rejects.toSatisfy(isUnavailable);
-	});
-
-	it("answers unavailable, writing nothing, wherever the witness cannot be read", async () => {
-		const { decided, provedCode, witness, counted } = await witnessed();
-		witness.failing.read = 3;
-		await expect(decided.asks("kim")).rejects.toSatisfy(isUnavailable);
-		await expect(decided.begin("kim", "code")).rejects.toSatisfy(isUnavailable);
-		await expect(decided.countingHeld("kim", "credentials")).rejects.toSatisfy(isUnavailable);
-		const begun = await provedCode("kim");
-		witness.failing.read = 1;
-		await expect(decided.bind("kim", begun.pending, begun.state)).rejects.toSatisfy(isUnavailable);
-		expect(await counted("kim")).toBe(1);
+			.seal(JSON.stringify({ kind: "code", secret: "s", first: true, token: "t" }), "hal\npending");
+		expect((await decided.bind("hal", sealed, 0)).kind).toBe("bound");
+		expect((await decided.held("hal")).map((f) => f.kind)).toEqual(["code"]);
 	});
 
 	it("keeps today's behaviour without a witness: a wiped store reads as never enrolled", async () => {

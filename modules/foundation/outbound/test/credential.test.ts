@@ -24,7 +24,11 @@ afterAll(() => new Promise<void>((done) => server.close(() => done())));
 const resolve: Resolver = async () => ["127.0.0.1"];
 const over = () =>
 	outboundOver(
-		section.parse({ "allow-any-public": true, "plain-loopback": [`127.0.0.1:${port}`] }),
+		section.parse({
+			"allow-any-public": true,
+			"plain-loopback": [`127.0.0.1:${port}`],
+			"plain-internal": ["ledger.internal:9092"],
+		}),
 		resolve,
 	);
 const secret = "Bearer s3cr3t-0123456789";
@@ -89,7 +93,7 @@ it("never sends a credential for signed material, which may go over plain http",
 	expect(seen.length).toBe(before);
 });
 
-it("answers at boot why a credential must not go to a set of URLs: more than one origin, or neither https nor a named plain-loopback pair", () => {
+it("answers at boot why a credential must not go to a set of URLs: more than one origin, or neither https nor a named plain-loopback or plain-internal pair", () => {
 	const policy = { credentialRefusalOf: over().credentialRefusalOf };
 	const plain = `http://127.0.0.1:${port}`;
 	expect(policy.credentialRefusalOf([])).toBeUndefined();
@@ -97,6 +101,8 @@ it("answers at boot why a credential must not go to a set of URLs: more than one
 		policy.credentialRefusalOf(["https://a.example/v", "https://a.example/s?x=1"]),
 	).toBeUndefined();
 	expect(policy.credentialRefusalOf([`${plain}/v`, `${plain}/s`])).toBeUndefined();
+	expect(policy.credentialRefusalOf(["http://ledger.internal:9092/v"])).toBeUndefined();
+	expect(policy.credentialRefusalOf(["http://ledger.internal:9093/v"])).toBe("scheme");
 	expect(policy.credentialRefusalOf(["https://a.example/v", "https://b.example/s"])).toBe(
 		"origins",
 	);

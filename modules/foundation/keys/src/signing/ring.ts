@@ -41,7 +41,10 @@ function signingKey(signing: Section["signing"]): RingKey | undefined {
 		return {
 			kid: signing.kid,
 			alg: "HS256",
-			key: createSecretKey(bytesOf(signing.secret, { hex: true }) ?? Buffer.alloc(0)),
+			key: createSecretKey(
+				bytesOf(signing.secret, { hex: true, encoding: signing["secret-encoding"] }) ??
+					Buffer.alloc(0),
+			),
 		};
 	}
 	// createPrivateKey refuses a public key, so what it reads is always private.

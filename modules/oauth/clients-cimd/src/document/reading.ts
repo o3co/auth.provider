@@ -9,12 +9,12 @@ import {
 import type { BuildContext, Log } from "@mod/kernel";
 import {
 	DestinationRefused,
+	isOutboundUnavailable,
 	jsonObjectOf,
 	type Narrower,
 	type Outbound,
 	type OutboundFailure,
 	type OutboundResponse,
-	OutboundUnavailable,
 	outbound,
 } from "@mod/outbound";
 import type { Fetched } from "../fetching/fetching.ts";
@@ -68,9 +68,9 @@ export function readingWith({
 	};
 	/** What a fetch that threw says of the id: a refusal to remember, or a failure to forget. */
 	const missed = (id: string, error: unknown): Fetched<ClientRecord> => {
-		if (error instanceof DestinationRefused) return refused(id, error.reason);
+		if (DestinationRefused.is(error)) return refused(id, error.reason);
 		// Running out of time or places says nothing of the id, so it is fetched again next time.
-		if (error instanceof OutboundUnavailable && !forgotten.has(error.failure)) {
+		if (isOutboundUnavailable(error) && !forgotten.has(error.failure)) {
 			return refused(id, error.failure);
 		}
 		log.warn("clients-cimd.fetch_failed", { client: loggable(id) });
@@ -130,6 +130,8 @@ export async function readingOver(c: BuildContext<Settings>) {
 			...(s.allow.length > 0 ? { hosts: s.allow } : {}),
 			maxBytes: s["max-size"],
 			timeoutMs: s.timeout,
+			// A client id is a URL whoever asks for it chooses: its lookups take outbound's share apart.
+			outsideChosen: true,
 		},
 		ceiling: { scopes: s.scopes, audiences: s.audiences },
 		log: c.log,

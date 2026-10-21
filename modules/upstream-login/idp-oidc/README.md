@@ -18,10 +18,10 @@
 - IdP endpoint settings (in the same place): `discovery` (default true), `authorization-endpoint`, `token-endpoint`, `jwks-uri` (all three, only without discovery), `end-session-endpoint` (optional, only without discovery), `endpoint-hosts` (hosts besides the issuer's its endpoints may be on, read as `outbound` reads a host list: a host, or `.name` for the name and the names under it; default none)
 
 ## Invariants
-- Every request to the upstream goes through `outbound`, narrowed to the issuer's host, the `endpoint-hosts` and the hosts of endpoints the operator gives; the client's secret goes to no other host.
+- Every request to the upstream goes through `outbound`, narrowed to the issuer's host, the `endpoint-hosts` and the hosts of endpoints the operator gives, and sent for an operator's URL (`internal`): the issuer for all its description names (an endpoint on another origin, another port too, reaches public addresses only), each given endpoint for itself; the client's secret goes to no other host.
 - An issuer's description that names an endpoint (its end of session included) on another host, as `outbound` matches hosts, refuses boot.
-- An issuer's description that names an endpoint not on https (or on http where the issuer is) refuses boot.
-- Boot is refused, at its key, on a URL this server sends to that `outbound`'s destination policy refuses with those hosts: the description's own URL (at `issuer`), or `token-endpoint` and `jwks-uri` without discovery; it says which of `outbound`'s keys to set (`outbound.refusals`).
+- An endpoint the browser goes to (authorization, end of session), described or given, holds only where `outbound.refusals`' `browsedRefusal` takes it for the issuer or the given endpoint: https, or plain http at a loopback name or a `plain-internal` origin; else boot is refused, at `issuer` or the key. Plain http there carries the user's password and the IdP's cookies in the clear between browser and IdP, outside any mesh.
+- Boot is refused, at its key, on a URL this server sends to that `outbound`'s destination policy refuses with that same narrowing: the description's own URL (at `issuer`), or `token-endpoint` and `jwks-uri` without discovery; it says which of `outbound`'s keys to set (`outbound.refusals`).
 - A description whose token endpoint or key set that policy refuses also refuses boot.
 - A description's refusal, `outbound` refusing to fetch it included, is told at `issuer`, with its reason; one the policy gives names the endpoint and the policy's reason.
 - An answer naming another issuer in `iss` is refused before its code is used.

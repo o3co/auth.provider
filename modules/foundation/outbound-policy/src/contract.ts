@@ -12,10 +12,24 @@ export type RefusalReason =
 	/** A 3xx answer, which the sender refuses as this rule says: a redirect is never followed. */
 	| "redirect"
 	/** A credential where none may go: material fetched for its signature. */
-	| "credential";
+	| "credential"
+	/** A pair plain-internal names that resolved to a public address: plain http reaches only private ones. */
+	| "plain-public";
+
+/** One mark for every copy of outbound-policy, so a second bundled copy's refusal is still told apart. */
+const destinationRefusedMark = Symbol.for("@mod/outbound-policy.destination-refused");
 
 export class DestinationRefused extends Error {
+	/** Whether an error is the destination policy's refusal, by its mark rather than its class. */
+	static is(error: unknown): error is DestinationRefused {
+		return (
+			typeof error === "object" &&
+			error !== null &&
+			(error as { readonly [destinationRefusedMark]?: unknown })[destinationRefusedMark] === true
+		);
+	}
 	readonly reason: RefusalReason;
+	readonly [destinationRefusedMark] = true;
 	constructor(reason: RefusalReason) {
 		super(`outbound destination refused: ${reason}`);
 		this.name = "DestinationRefused";
@@ -31,9 +45,12 @@ export interface Narrower {
 	readonly timeoutMs?: number;
 	/**
 	 * The operator's URL, as url-setting read it from their configuration: a request at its origin
-	 * may reach a private address when `internal-hosts` lists the host.
+	 * may reach a private address when `internal-hosts` lists the host, or over plain http when
+	 * `plain-internal` names its host:port.
 	 */
 	readonly internal?: ConfiguredUrl;
+	/** An outside party chooses the destination (a client's metadata document, say): its name lookups take a share apart, so they never hold every lookup. */
+	readonly outsideChosen?: true;
 }
 
 /** The destination policy's refusals, as an operator reads them at boot, apart from sending: no name is resolved. */
@@ -43,6 +60,18 @@ export interface OutboundRefusals {
 	 * never the URL's host, port or any other value; undefined when the policy lets it through.
 	 */
 	explained(url: string, narrower?: Narrower): string | undefined;
+	/**
+	 * Whether the policy takes the URL as plain http to a pair `plain-internal` names, for the
+	 * narrower's own `internal` URL; false where it refuses the URL or takes it another way. No name
+	 * is resolved: the sender still checks every address is private. Absent, read it as false.
+	 */
+	plainInternal?(url: string, narrower?: Narrower): boolean;
+	/**
+	 * Why the URL may not be one the browser is sent to, which outbound never reaches: plain http
+	 * other than at a loopback name or as `plainInternal` takes it for the narrower's own `internal`
+	 * URL, `<reason>: <what to set>`, naming keys alone; undefined for https. Absent, read it as refusing plain http.
+	 */
+	browsedRefusal?(url: string, narrower?: Narrower): string | undefined;
 }
 
 export const outboundRefusals = contract<OutboundRefusals>("outbound.refusals");
@@ -62,7 +91,33 @@ export function destinationRefusal(
 	return explained && `outbound's destination policy refuses ${what}: ${explained}`;
 }
 
-/** Why a credential must not go to a set of URLs: more than one origin, or a URL neither https nor a named plain-loopback pair. */
+/**
+ * A boot refusal of a URL the browser goes to that `browsedRefusal` refuses, as every module says it:
+ * `outbound's policy for what the browser goes to refuses <what>: <reason>: <what to set>`, `what`
+ * being `it` unless given; undefined where it takes the URL. Refusals that do not say take https alone.
+ */
+export function browsedRefusalText(
+	refusals: OutboundRefusals,
+	url: string,
+	narrower?: Narrower,
+	what = "it",
+): string | undefined {
+	const reason = refusals.browsedRefusal
+		? refusals.browsedRefusal(url, narrower)
+		: URL.parse(url)?.protocol === "https:"
+			? undefined
+			: "not https: name it over https";
+	return reason && `outbound's policy for what the browser goes to refuses ${what}: ${reason}`;
+}
+
+/** Why a credential may not go, in words every caller of `outbound.credentials` gives the operator alike. */
+export function credentialRefusalText(refusal: CredentialRefusal): string {
+	return refusal === "scheme"
+		? "goes over https alone, or to a host:port outbound.plain-loopback or outbound.plain-internal names"
+		: "is sent to one origin alone, but the URLs name more than one";
+}
+
+/** Why a credential must not go to a set of URLs: more than one origin, or a URL neither https nor a named plain-loopback or plain-internal pair. */
 export type CredentialRefusal = "origins" | "scheme";
 
 /** Where a caller's credential may go, answered at boot, apart from sending. */
@@ -83,6 +138,8 @@ export interface Limits {
 export interface OutboundLimits {
 	/** The operator's caps narrowed, never widened; throws RangeError on a narrowing that is not positive and finite. */
 	of(narrower?: Narrower): Limits;
+	/** How many names the caller's requests may resolve at once, `outsideChosen` taking a share apart; 0 is none, so every such request is unavailable. */
+	lookupsOf?(narrower?: Narrower): number;
 }
 
 export const outboundLimits = contract<OutboundLimits>("outbound.limits");
@@ -92,11 +149,18 @@ export interface Admitted {
 	readonly url: URL;
 	readonly host: string;
 	readonly port: number;
+	/**
+	 * An address written in the URL, as written there without brackets; `host` is its spelling for
+	 * the lists. Its reach is judged on this, never on an IPv4 address it may carry.
+	 */
+	readonly address?: string;
 	readonly plain: boolean;
 	/** Reached at loopback addresses alone, as a named plain pair. */
 	readonly loopback: boolean;
 	/** The caller's URL is the operator's and `internal` lists its host: private addresses are reached. */
 	readonly internal: boolean;
+	/** Plain http to a pair `plain-internal` names, for the operator's own URL there: every address must be private. */
+	readonly plainInternal?: boolean;
 }
 
 /** The operator's destination policy and caps, made once from the settings, for the sender and for boot alike. */
@@ -107,6 +171,10 @@ export interface Policy {
 	admitAddresses(addresses: readonly string[], admitted: Admitted): readonly string[];
 	/** `<reason>: <what to set>` for a URL the policy refuses, resolving no name; undefined when it lets it through. */
 	explain(url: string, narrower?: Narrower): string | undefined;
+	/** Whether the URL is taken as plain http to a pair `plain-internal` names, resolving no name. */
+	plainInternal(url: string, narrower?: Narrower): boolean;
+	/** Why the URL may not be one the browser is sent to, resolving no name; undefined when it may. */
+	browsedRefusal(url: string, narrower?: Narrower): string | undefined;
 	credentialRefusal(urls: readonly string[]): CredentialRefusal | undefined;
 	/** Whether a host is among an operator's list entries. */
 	listed(host: string, entries: readonly string[]): boolean;

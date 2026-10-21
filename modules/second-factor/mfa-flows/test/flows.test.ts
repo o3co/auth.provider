@@ -351,6 +351,14 @@ describe("the operator's numbers", () => {
 		]);
 	});
 
+	it("refuses to boot where nothing moves mfa's fence on a revocation", async () => {
+		const refused = await serve({}, [], undefined, false).catch((e) => e);
+		expect(refused).toBeInstanceOf(BootRefused);
+		expect((refused as BootRefused).refusals.map((r) => `${r.where}: ${r.reason}`)).toEqual([
+			"mfa-flows: a binding begun before a revocation would bind: compose mfa-revocation",
+		]);
+	});
+
 	it("refuses to boot with a time under its name in seconds, or naming no unit", async () => {
 		const before = [{ "window-seconds": 300 }, { lockout: { "backoff-seconds": 900 } }];
 		for (const settings of [...before, { window: 300 as unknown as string }]) {

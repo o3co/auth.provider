@@ -1,14 +1,10 @@
 import { auditEvents } from "@mod/audit";
 
-/** What the token endpoint records, and `authenticateClient` for every endpoint using it; a token or secret is never held. */
+/** What the token endpoint records; a token or secret is never held. */
 export default auditEvents({
-	"client.authentication.failure": {
-		attributes: ["source", "reason"],
-		when: "a client's authentication is refused, before any client is known, with `reason` (`no_credentials`, `multiple_methods`, `malformed_credentials`, `unknown_client`, `wrong_method`, `bad_credentials` or `invalid_record`); the client id claimed is never named",
-	},
 	"token.issued": {
-		attributes: ["client", "source", "grant_type"],
-		when: "a grant issues",
+		attributes: ["client", "source", "grant_type", "claims", "claims_left"],
+		when: "a grant issues; `claims` names the claims the grant added to the tokens it issued, in their order, one space apart, never their values: all of them within 2048 characters, else as many as fit, with `claims_left` how many were left out",
 	},
 	"token.issued.failure": {
 		attributes: ["client", "source", "grant_type", "reason", "error", "policy", "refusal"],

@@ -316,6 +316,22 @@ export function sessionsContract(
 			expect(done.session.context.authenticatedAt).toBe(opened);
 		});
 
+		it("throws a TypeError, naming no value, for an authentication time that is no time, closing nothing", async () => {
+			const place = await open();
+			const carried = await place.sessions.complete(place.request(), facts(place));
+			for (const at of [-1, Number.NaN, Number.POSITIVE_INFINITY, 8.64e15 + 1]) {
+				const opened = place.sessions.complete(place.request(carried.cookies), {
+					...facts(place),
+					authenticatedAt: at,
+				});
+				await expect(opened, String(at)).rejects.toThrow(TypeError);
+				await expect(opened).rejects.not.toThrow(String(at));
+			}
+			expect((await place.sessions.enter(place.request(carried.cookies)))?.id).toBe(
+				carried.session.id,
+			);
+		});
+
 		it("says what a raise added once each, however often it was given", async () => {
 			const place = await open();
 			const done = await place.sessions.complete(place.request(), facts(place));
@@ -731,6 +747,9 @@ export const sessionStandIn = defineModule({ name: "session" }, (m) => [
 			enterFor: (request, level) => enterAt(handleIn(request), level),
 			entryOf: (handle, level = "use") => enterAt(handle, level),
 			complete: async (request, facts) => {
+				const at = facts.authenticatedAt;
+				if (at !== "unknown" && !(Number.isFinite(at) && at >= 0 && at <= 8.64e15))
+					throw new TypeError('authenticatedAt must be epoch milliseconds or "unknown"');
 				const carried = handleIn(request);
 				if (carried !== undefined) await close(carried);
 				const handle = random();

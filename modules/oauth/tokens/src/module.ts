@@ -1,8 +1,10 @@
+import { type AddedClaims, addedClaimsIn, addedClaimsOf } from "@mod/added-claims";
 import { site } from "@mod/http";
 import { issuer, metadata } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
-import { keys } from "@mod/keys";
+import { accessTokenSigning, keys } from "@mod/keys";
 import { senderBinding } from "@mod/sender-binding";
+import { denylistAllowanceMs, denylistOver, revokedTokens } from "@mod/token-denylist";
 import { z } from "zod";
 import {
 	type AccessCheck,
@@ -14,12 +16,10 @@ import {
 	type Tokens,
 	tokens,
 } from "./contract.ts";
-import { denylistAllowanceMs, denylistOver } from "./denylist/denylist.ts";
 import { type IssueAccess, issuing, judging } from "./issuance.ts";
-import { expiryOf, keptGrant, lifetimeOf, tokenId } from "./limits.ts";
+import { chainWithin, expiryOf, issuedWithin, keptGrant, lifetimeOf, tokenId } from "./limits.ts";
 import { namedBy } from "./reference.ts";
 import { section } from "./section.ts";
-import { revokedTokens } from "./store.ts";
 
 interface Act {
 	readonly sub: string;
@@ -53,14 +53,21 @@ const claimsShape = z.object({
 });
 
 type Claims = z.infer<typeof claimsShape>;
+
+/** The longest compact access token tokens issues or reads, so it always takes what it issued. */
+const compactLimit = 16_384;
+/** Whether a payload's actor chain is within the depth tokens issues. */
+const actorsWithin = (act: unknown) => chainWithin(act, (link) => (link as { act?: unknown }).act);
 type Valid = Extract<AccessCheck, { kind: "valid" }>;
 type Invalid = Extract<AccessCheck, { kind: "invalid" }>;
 type Checked =
 	| { readonly kind: "checked"; readonly access: Valid; readonly issuedAt: number }
 	| Invalid;
 
-/** A kept grant as claims; `act`, `amr`, `auth_time` and `acr` only when given. */
+/** A kept grant as claims; the added ones, `act`, `amr`, `auth_time` and `acr` only when given. */
 const grantClaims = (grant: AccessGrant) => ({
+	// None can stand for a name below: a grant adds no reserved name.
+	...grant.claims,
 	sub: grant.subject,
 	aud: grant.audience.length === 1 ? grant.audience[0] : grant.audience,
 	client_id: grant.issuedTo,
@@ -73,8 +80,8 @@ const grantClaims = (grant: AccessGrant) => ({
 	...(grant.acr === undefined ? {} : { acr: grant.acr }),
 });
 
-/** The grant read back from verified claims. */
-const grantOf = (claims: Claims): AccessGrant =>
+/** The grant read back from verified claims, and the claims its grant added. */
+const grantOf = (claims: Claims, added: AddedClaims | undefined): AccessGrant =>
 	Object.freeze({
 		subject: claims.sub,
 		issuedTo: claims.client_id,
@@ -84,7 +91,18 @@ const grantOf = (claims: Claims): AccessGrant =>
 		...(claims.amr ? { amr: Object.freeze(claims.amr) } : {}),
 		...(claims.auth_time === undefined ? {} : { authenticatedAt: claims.auth_time * 1000 }),
 		...(claims.acr === undefined ? {} : { acr: claims.acr }),
+		...(added ? { claims: added } : {}),
 	});
+
+/** The added claims of a verified payload, copied as an issue copies them; undefined for a token none of tokens' issued. */
+const addedOf = (payload: Readonly<Record<string, unknown>>) => {
+	try {
+		return { added: addedClaimsOf(addedClaimsIn(payload)) };
+	} catch (error) {
+		if (error instanceof TypeError) return undefined;
+		throw error;
+	}
+};
 
 export default defineModule({ name: "tokens", section }, (m) => [
 	// Access tokens are signed by keys, which publishes the key set they are checked with.
@@ -94,7 +112,7 @@ export default defineModule({ name: "tokens", section }, (m) => [
 		return { name: "jwks_uri", value: origin && new URL(path, origin).href };
 	}),
 	m.provide(tokens).by(async (c) => {
-		const signer = await c.get(keys);
+		const signing = await c.get(accessTokenSigning);
 		const bindings = await c.get(senderBinding);
 		const subjects = await c.collect(subjectChecks);
 		// Exactly one module checks subject revocation, or the operator states that none does.
@@ -121,14 +139,23 @@ export default defineModule({ name: "tokens", section }, (m) => [
 
 		/** Verifies everything but revocation; `allowanceMs` keeps a just-expired token valid. */
 		const check = async (token: string, allowanceMs = 0): Promise<Checked> => {
-			const verified = await signer.verify(token, "at+jwt");
+			if (token.length > compactLimit) return { kind: "invalid", reason: "shape" };
+			const verified = await signing.verify(token);
 			if (verified.kind === "invalid") return { kind: "invalid", reason: "signature" };
+			// Taken from the payload as signed, before the shape drops what it does not name: a member
+			// reserved and never written, or one outside the rules, is no token of tokens'.
+			const extra = addedOf(verified.claims);
+			if (!extra || !actorsWithin(verified.claims.act)) return { kind: "invalid", reason: "shape" };
 			const parsed = claimsShape.safeParse(verified.claims);
 			if (!parsed.success) return { kind: "invalid", reason: "shape" };
 			const claims = parsed.data;
 			if (claims.iss !== iss) return { kind: "invalid", reason: "issuer" };
 			if (claims.exp * 1000 + allowanceMs <= c.clock.now())
 				return { kind: "invalid", reason: "expired" };
+			// Times tokens never issues: a token signed past it, or whose iat moved, is no token of tokens'.
+			if (!issuedWithin(claims.iat, claims.exp, c.clock.now())) {
+				return { kind: "invalid", reason: "shape" };
+			}
 			const bound = Object.entries(claims.cnf ?? {}).map(([member, confirmation]) => ({
 				member,
 				confirmation,
@@ -146,12 +173,15 @@ export default defineModule({ name: "tokens", section }, (m) => [
 					expiresAt: claims.exp * 1000,
 					tokenType,
 					...(binding ? { binding: { ...binding, tokenType } } : {}),
-					grant: grantOf(claims),
+					grant: grantOf(claims, extra.added),
 				},
 			};
 		};
 
-		const judge = judging(await c.collect(issuancePolicies), c.clock.now);
+		const timeout = c.section["issuance-timeout"];
+		const judge = judging(await c.collect(issuancePolicies), c.clock.now, () =>
+			AbortSignal.timeout(timeout),
+		);
 		const issueAccess: IssueAccess = async (grant, limits) => {
 			const lifetimeSeconds = lifetimeOf(limits?.lifetimeSeconds, lifetime);
 			const { iat, exp } = expiryOf(c.clock.now(), lifetimeSeconds, limits?.notAfter);
@@ -165,12 +195,18 @@ export default defineModule({ name: "tokens", section }, (m) => [
 					? { cnf: { [limits.binding.member]: limits.binding.confirmation } }
 					: {}),
 			};
+			const token = await signing.sign(claims);
+			// Its standard claims have no cap of their own: one past what tokens reads is never answered.
+			if (token.length > compactLimit) {
+				throw new TypeError(`tokens: the access token is over ${compactLimit} bytes`);
+			}
 			return {
-				token: await signer.sign(claims, "at+jwt"),
+				token,
 				id: claims.jti,
 				expiresAt: exp * 1000,
 				expiresIn: exp - iat,
 				tokenType: limits?.binding?.tokenType ?? "Bearer",
+				...(grant.claims ? { addedClaims: Object.freeze(Object.keys(grant.claims).sort()) } : {}),
 			};
 		};
 		const access: Tokens = {

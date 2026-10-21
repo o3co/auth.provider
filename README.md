@@ -179,7 +179,7 @@ npx @o3co/create-auth-provider@next my-provider-dpop --pattern simple-web --add 
 
 Repeat `--add` for each feature. To keep `simple-web`'s store in Redis, add `--axis @mod/store=@mod/redis`. You can also replace a pattern's login methods, grants or other feature groups. Axis and group options need a pattern other than `full`. Run `npx @o3co/create-auth-provider@next --help` for all options.
 
-You can also list modules yourself instead of choosing a pattern. The generator then adds what they need to connect, and you write the configuration. See [create-app](modules/scaffold/create-app/README.md) for what each kind of project contains.
+You can also list modules yourself instead of choosing a pattern. The generator then adds what they need to connect, and you write the configuration. See [app-output](modules/scaffold/app-output/README.md) for what each kind of project contains.
 
 To change an existing app's selection, generate a new project into an empty directory and copy your configuration into it. The generator never overwrites a directory that has files in it.
 

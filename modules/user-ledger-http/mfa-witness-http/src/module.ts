@@ -3,18 +3,13 @@ import { enrollmentWitnesses } from "@mod/mfa-witness";
 import { outbound } from "@mod/outbound";
 import {
 	credentialPolicy,
+	credentialRefusalText,
 	destinationRefusal,
 	outboundLimits,
 	outboundRefusals,
 } from "@mod/outbound-policy";
 import { section } from "./section.ts";
 import { witnessAt } from "./witness.ts";
-
-/** Why the credential may not go to the three URLs, as the operator reads it. */
-const credentialRefused = {
-	origins: "goes to one origin alone: read-url, enroll-url and clear-url must share it",
-	scheme: "goes over https alone, or to a named plain-loopback pair",
-} as const;
 
 export default defineModule({ name: "mfa-witness-http", section, replicaSafe: true }, (m) => [
 	m.contribute(enrollmentWitnesses).by(async (c) => {
@@ -24,8 +19,8 @@ export default defineModule({ name: "mfa-witness-http", section, replicaSafe: tr
 			enroll: c.section["enroll-url"],
 			clear: c.section["clear-url"],
 		};
-		// The operator's own URLs, at one origin as their credential's rule holds them: a host in
-		// `internal-hosts` is reached at a private address there alone.
+		// The operator's own URLs, at one origin as their credential's rule holds them: reached at a
+		// private address there alone, for a host in `internal-hosts` or a `plain-internal` pair.
 		const narrower = {
 			hosts: [...new Set(Object.values(urls).map((url) => new URL(url).hostname))],
 			internal: urls.read,
@@ -39,7 +34,7 @@ export default defineModule({ name: "mfa-witness-http", section, replicaSafe: tr
 		}
 		const refused = (await c.get(credentialPolicy)).refusalOf(Object.values(urls));
 		if (refused !== undefined) {
-			return c.refuse("mfa-witness-http.credential", credentialRefused[refused]);
+			return c.refuse("mfa-witness-http.credential", credentialRefusalText(refused));
 		}
 		return witnessAt({
 			urls,

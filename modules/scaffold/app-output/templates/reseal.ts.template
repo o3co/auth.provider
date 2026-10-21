@@ -1,0 +1,45 @@
+import { legacyVariablesWarning, loadConfig, unreadLegacyVariables } from "{{configFiles}}";
+import { assemble, BootRefused } from "{{kernel}}";
+import { resealing } from "{{entry}}";
+{{imports}}
+
+/** A refused boot: each refusal on its own line of standard error, then exit 78. */
+const refused = (error: unknown): never => {
+	if (!BootRefused.is(error)) throw error;
+	for (const refusal of error.refusals) {
+		process.stderr.write(`refused ${refusal.where}: ${refusal.reason}\n`);
+	}
+	process.exit(78);
+};
+
+// The app as `start` builds it, never started: no route is served while values are sealed again.
+const files = (process.env.APP_CONFIG ?? "config/application.conf").split(",");
+const source = { files, env: process.env };
+const app = await loadConfig(source)
+	.then(async (config) => {
+		// A variable 0.17 read, left in the environment, is named once; boot goes on.
+		const told = legacyVariablesWarning(await unreadLegacyVariables(source));
+		if (told !== undefined) process.stderr.write(`warn config-files: ${told}\n`);
+		return assemble({ modules: [{{modules}}], config });
+	})
+	.catch(refused);
+const told = await app.get(resealing).reseal();
+for (const holder of told) {
+	const counts = "failed" in holder ? "failed" : `resealed ${holder.resealed} left ${holder.left}`;
+	process.stdout.write(`${holder.name} ${counts}\n`);
+}
+const counted = told.flatMap((h) => ("failed" in h ? [] : [h]));
+// 1: a holder failed; 2: values no key opens remain; 3: values were sealed again, and a walk across
+// a failover may miss some, so run again. Only a run that seals nothing and leaves nothing is 0.
+const code =
+	counted.length < told.length
+		? 1
+		: counted.some((h) => h.left > 0)
+			? 2
+			: counted.some((h) => h.resealed > 0)
+				? 3
+				: 0;
+process.stdout.write(code === 0 ? "previous keys may be retired\n" : "run reseal again before retiring a key\n");
+// Stopped, though never started, so its stop hooks run; a stop that fails keeps the code.
+await app.stop().catch(() => undefined);
+process.exit(code);

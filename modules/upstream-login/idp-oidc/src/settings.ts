@@ -1,17 +1,43 @@
 import type { Algorithm } from "@mod/external-jwt";
 import { setting } from "@mod/kernel";
-import { destinationRefusal, hostEntryOf, type OutboundRefusals } from "@mod/outbound-policy";
+import {
+	browsedRefusalText,
+	destinationRefusal,
+	hostEntryOf,
+	type OutboundRefusals,
+} from "@mod/outbound-policy";
 import {
 	clientSetting,
 	endpointSetting as endpoint,
 	scopeSetting as scope,
 } from "@mod/upstream-client";
-import { urlsChecked } from "@mod/url-setting";
+import { type ConfiguredUrl, urlsChecked } from "@mod/url-setting";
 import { z } from "zod";
 
 /** Where the issuer describes itself. */
 export const descriptionUrl = (issuer: string) =>
 	`${issuer.replace(/\/$/, "")}/.well-known/openid-configuration`;
+
+/**
+ * The operator's URL each request is sent for, which outbound may reach as theirs: the issuer for
+ * everything its description names, else each given endpoint for itself. Nothing a description
+ * names becomes one.
+ */
+export const sentFor = (s: {
+	readonly discovery: boolean;
+	readonly issuer: ConfiguredUrl;
+	readonly "token-endpoint"?: ConfiguredUrl | undefined;
+	readonly "jwks-uri"?: ConfiguredUrl | undefined;
+}) =>
+	s.discovery
+		? { token: s.issuer, jwks: s.issuer }
+		: { token: s["token-endpoint"], jwks: s["jwks-uri"] };
+
+/** How a request to the upstream is narrowed: its hosts, and the operator's URL it is sent for. */
+export const narrowerOf = (hosts: readonly string[], internal: ConfiguredUrl | undefined) => ({
+	hosts,
+	...(internal === undefined ? {} : { internal }),
+});
 
 /** The hosts requests to the upstream are narrowed to: the issuer's, the named ones, the given endpoints'. */
 export function hostsOf(s: {
@@ -101,16 +127,34 @@ export const settingsOf = (asymmetric: readonly Algorithm[], refusals: OutboundR
 			},
 		)
 		.superRefine(
-			urlsChecked((url, hosts) => destinationRefusal(refusals, url, { hosts }), {
-				urls: (s) => [s.issuer, s["authorization-endpoint"], s["token-endpoint"], s["jwks-uri"]],
-				sent: (s) =>
-					s.discovery
-						? { issuer: { url: descriptionUrl(s.issuer), hosts: hostsOf(s) } }
-						: {
-								"token-endpoint": { url: s["token-endpoint"], hosts: hostsOf(s) },
-								"jwks-uri": { url: s["jwks-uri"], hosts: hostsOf(s) },
-							},
-			}),
-		);
+			// Asked with the same narrowing as the requests themselves.
+			urlsChecked(
+				(url, hosts, internal) => destinationRefusal(refusals, url, narrowerOf(hosts, internal)),
+				{
+					urls: (s) => [s.issuer, s["authorization-endpoint"], s["token-endpoint"], s["jwks-uri"]],
+					sent: (s) => {
+						const hosts = hostsOf(s);
+						const from = sentFor(s);
+						return s.discovery
+							? { issuer: { url: descriptionUrl(s.issuer), hosts, internal: s.issuer } }
+							: {
+									"token-endpoint": { url: s["token-endpoint"], hosts, internal: from.token },
+									"jwks-uri": { url: s["jwks-uri"], hosts, internal: from.jwks },
+								};
+					},
+				},
+			),
+		)
+		.superRefine((s, context) => {
+			// The browser goes to these, each given endpoint the operator's URL for itself alone.
+			if (s.discovery) return;
+			for (const key of ["authorization-endpoint", "end-session-endpoint"] as const) {
+				const url = s[key];
+				// Its own schema refuses a URL that does not parse.
+				if (url === undefined || !URL.canParse(url)) continue;
+				const refused = browsedRefusalText(refusals, url, { internal: url });
+				if (refused) context.addIssue({ code: "custom", path: [key], message: refused });
+			}
+		});
 
 export type Settings = z.output<ReturnType<typeof settingsOf>>;

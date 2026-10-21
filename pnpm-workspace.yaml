@@ -6,3 +6,9 @@ packages:
 # fresh @o3co release (ts.hocon) installs at once.
 minimumReleaseAgeExclude:
   - "@o3co/*"
+
+# vitest takes vite as a peer; 8.3.0–8.3.2 carry launch-editor advisories
+# (GHSA-587h-7wmj-h5pm, GHSA-698v-4r3x-3vcv, GHSA-r825-w8mm-5pxw), so the
+# workspace resolves the patched release until vitest's own range moves past.
+overrides:
+  "vite@>=8.3.0 <8.3.3": "8.3.3"

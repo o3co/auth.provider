@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  vite@>=8.3.0 <8.3.3: 8.3.3
+
 importers:
 
   .:
@@ -19,7 +22,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/audit-receivers/audit-http:
     dependencies:
@@ -44,7 +47,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/audit-receivers/audit-stdout:
     dependencies:
@@ -57,7 +60,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/cert-binding/mtls:
     dependencies:
@@ -94,7 +97,7 @@ importers:
         version: link:../../foundation/http
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/delegation/federation-grants:
     dependencies:
@@ -161,7 +164,19 @@ importers:
         version: link:../../foundation/store
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+
+  modules/foundation/added-claims:
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+
+  modules/foundation/address-reach:
+    dependencies:
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../url-setting
 
   modules/foundation/audit:
     dependencies:
@@ -180,6 +195,22 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../kernel
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+
+  modules/foundation/config-files:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@o3co/ts.hocon':
+        specifier: 1.14.3
+        version: 1.14.3(zod@4.6.7)
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -213,6 +244,10 @@ importers:
       zod:
         specifier: 4.6.7
         version: 4.6.7
+    devDependencies:
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../url-setting
 
   modules/foundation/http:
     dependencies:
@@ -276,7 +311,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/foundation/mail:
     dependencies:
@@ -289,7 +324,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/foundation/metrics:
     dependencies:
@@ -299,10 +334,13 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/foundation/outbound:
     dependencies:
+      '@mod/address-reach':
+        specifier: workspace:*
+        version: link:../address-reach
       '@mod/kernel':
         specifier: workspace:*
         version: link:../kernel
@@ -318,10 +356,13 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/foundation/outbound-policy:
     dependencies:
+      '@mod/address-reach':
+        specifier: workspace:*
+        version: link:../address-reach
       '@mod/kernel':
         specifier: workspace:*
         version: link:../kernel
@@ -334,7 +375,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/foundation/rate-limit:
     dependencies:
@@ -416,7 +457,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/foundation/url-setting:
     dependencies:
@@ -430,12 +471,18 @@ importers:
 
   modules/identity/clients:
     dependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/request-source':
+        specifier: workspace:*
+        version: link:../../foundation/request-source
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
@@ -469,7 +516,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/identity/login-gates:
     dependencies:
@@ -562,7 +609,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/identity/session-lifecycle:
     dependencies:
@@ -599,7 +646,7 @@ importers:
         version: link:../session-requirements
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/identity/session-participants:
     dependencies:
@@ -612,7 +659,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/identity/session-requirements:
     dependencies:
@@ -625,7 +672,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/identity/subject-attributes:
     dependencies:
@@ -647,7 +694,7 @@ importers:
         version: link:../../foundation/secret-hash
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/identity/subject-revocation:
     dependencies:
@@ -660,7 +707,7 @@ importers:
         version: link:../../foundation/records
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/identity/users:
     dependencies:
@@ -679,7 +726,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/log-sinks/log-stdout:
     dependencies:
@@ -689,7 +736,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/metrics-publishers/metrics-prometheus:
     dependencies:
@@ -711,7 +758,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/acr:
     dependencies:
@@ -830,7 +877,7 @@ importers:
         version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/client-allowance:
     dependencies:
@@ -849,7 +896,7 @@ importers:
         version: link:../../foundation/secret-hash
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/client-assertion:
     dependencies:
@@ -898,7 +945,7 @@ importers:
         version: link:../../foundation/secret-hash
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/clients-cimd:
     dependencies:
@@ -929,6 +976,9 @@ importers:
       '@mod/refresh':
         specifier: workspace:*
         version: link:../refresh
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../../foundation/url-setting
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -944,7 +994,7 @@ importers:
         version: link:../../foundation/secret-hash
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/code-grant:
     dependencies:
@@ -1005,7 +1055,7 @@ importers:
         version: link:../token-endpoint
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/consent:
     dependencies:
@@ -1051,7 +1101,7 @@ importers:
         version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/device-grant:
     dependencies:
@@ -1121,7 +1171,7 @@ importers:
         version: link:../../foundation/store
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/discovery:
     dependencies:
@@ -1168,7 +1218,7 @@ importers:
         version: link:../../foundation/records
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/exchange-id-tokens:
     dependencies:
@@ -1229,7 +1279,7 @@ importers:
         version: link:../tokens
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/grants:
     dependencies:
@@ -1251,7 +1301,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/issuer:
     dependencies:
@@ -1300,6 +1350,9 @@ importers:
       '@mod/token-endpoint':
         specifier: workspace:*
         version: link:../token-endpoint
+      '@mod/users':
+        specifier: workspace:*
+        version: link:../../identity/users
       jose:
         specifier: 6.2.12
         version: 6.2.12
@@ -1327,7 +1380,7 @@ importers:
         version: link:../tokens
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/jwt-bearer-users:
     dependencies:
@@ -1346,7 +1399,7 @@ importers:
         version: link:../../foundation/secret-hash
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/logout:
     dependencies:
@@ -1445,7 +1498,7 @@ importers:
         version: link:../../foundation/records
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/redirect-uris:
     dependencies:
@@ -1458,7 +1511,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/refresh:
     dependencies:
@@ -1537,7 +1590,7 @@ importers:
         version: link:../token-exchange
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/resource-indicators:
     dependencies:
@@ -1550,7 +1603,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/rp-logout:
     dependencies:
@@ -1620,7 +1673,7 @@ importers:
         version: link:../../identity/users
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/sender-binding:
     dependencies:
@@ -1685,7 +1738,7 @@ importers:
         version: link:../token-endpoint
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/session-tokens:
     dependencies:
@@ -1719,7 +1772,7 @@ importers:
         version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/subject-tokens:
     dependencies:
@@ -1785,6 +1838,19 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
+
+  modules/oauth/token-denylist:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+    devDependencies:
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/token-endpoint:
     dependencies:
@@ -1879,10 +1945,13 @@ importers:
         version: link:../token-endpoint
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/tokens:
     dependencies:
+      '@mod/added-claims':
+        specifier: workspace:*
+        version: link:../../foundation/added-claims
       '@mod/http':
         specifier: workspace:*
         version: link:../../foundation/http
@@ -1898,6 +1967,9 @@ importers:
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../sender-binding
+      '@mod/token-denylist':
+        specifier: workspace:*
+        version: link:../token-denylist
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -1907,7 +1979,7 @@ importers:
         version: link:../../foundation/records
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/userinfo:
     dependencies:
@@ -1938,7 +2010,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/oauth/verified-email:
     dependencies:
@@ -1966,7 +2038,7 @@ importers:
         version: link:../../identity/session
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/passkey/mfa-webauthn:
     dependencies:
@@ -1994,7 +2066,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/passkey/passkey-registration:
     dependencies:
@@ -2061,7 +2133,7 @@ importers:
         version: link:../../templates/webauthn-store
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/passkey/webauthn:
     dependencies:
@@ -2086,7 +2158,7 @@ importers:
         version: link:../../foundation/store
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/passkey/webauthn-login:
     dependencies:
@@ -2141,19 +2213,33 @@ importers:
         version: link:../../oauth/tokens
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+
+  modules/scaffold/app-output:
+    dependencies:
+      '@o3co/ts.hocon':
+        specifier: 1.14.3
+        version: 1.14.3(zod@4.6.7)
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/scaffold/combinations:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/scaffold/create-app:
     dependencies:
+      '@mod/app-output':
+        specifier: workspace:*
+        version: link:../app-output
       '@mod/combinations':
         specifier: workspace:*
         version: link:../combinations
+    devDependencies:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
@@ -2163,10 +2249,9 @@ importers:
       '@o3co/ts.hocon':
         specifier: 1.14.3
         version: 1.14.3(zod@4.6.7)
-    devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/scaffold/trial:
     dependencies:
@@ -2176,7 +2261,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/second-factor/mfa:
     dependencies:
@@ -2219,7 +2304,7 @@ importers:
         version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/second-factor/mfa-binding-proof:
     dependencies:
@@ -2265,7 +2350,7 @@ importers:
         version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/second-factor/mfa-email:
     dependencies:
@@ -2296,7 +2381,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/second-factor/mfa-email-wording:
     dependencies:
@@ -2312,7 +2397,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/second-factor/mfa-enrollment:
     dependencies:
@@ -2322,6 +2407,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/labels':
+        specifier: workspace:*
+        version: link:../../foundation/labels
       '@mod/mfa':
         specifier: workspace:*
         version: link:../mfa
@@ -2359,6 +2447,9 @@ importers:
       '@mod/mfa-entry':
         specifier: workspace:*
         version: link:../mfa-entry
+      '@mod/mfa-revocation':
+        specifier: workspace:*
+        version: link:../mfa-revocation
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -2382,7 +2473,7 @@ importers:
         version: link:../../identity/subject-attributes
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -2413,7 +2504,7 @@ importers:
         version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/second-factor/mfa-extensions:
     dependencies:
@@ -2423,7 +2514,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/second-factor/mfa-flows:
     dependencies:
@@ -2479,6 +2570,9 @@ importers:
       '@mod/mfa-entry':
         specifier: workspace:*
         version: link:../mfa-entry
+      '@mod/mfa-revocation':
+        specifier: workspace:*
+        version: link:../mfa-revocation
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -2493,7 +2587,7 @@ importers:
         version: link:../../foundation/store
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/second-factor/mfa-management:
     dependencies:
@@ -2551,7 +2645,7 @@ importers:
         version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/second-factor/mfa-recovery:
     dependencies:
@@ -2613,6 +2707,9 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-revocation':
+        specifier: workspace:*
+        version: link:../mfa-revocation
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -2636,7 +2733,7 @@ importers:
         version: link:../../identity/subject-attributes
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -2655,7 +2752,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/second-factor/mfa-totp:
     dependencies:
@@ -2680,16 +2777,50 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+
+  modules/second-factor/mfa-witnessing:
+    dependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mfa':
+        specifier: workspace:*
+        version: link:../mfa
+      '@mod/mfa-witness':
+        specifier: workspace:*
+        version: link:../mfa-witness
+    devDependencies:
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      '@mod/seal':
+        specifier: workspace:*
+        version: link:../../foundation/seal
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/smtp/mail-smtp:
     dependencies:
+      '@mod/address-reach':
+        specifier: workspace:*
+        version: link:../../foundation/address-reach
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
       '@mod/mail':
         specifier: workspace:*
         version: link:../../foundation/mail
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../../foundation/url-setting
       nodemailer:
         specifier: 10.1.2
         version: 10.1.2
@@ -2699,7 +2830,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/store-redis/redis:
     dependencies:
@@ -2718,7 +2849,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/templates/authorize-store:
     dependencies:
@@ -2915,7 +3046,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/templates/federation-tokens-store:
     dependencies:
@@ -2934,7 +3065,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/templates/jwt-bearer-store:
     dependencies:
@@ -3062,7 +3193,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/templates/session-store:
     dependencies:
@@ -3161,6 +3292,9 @@ importers:
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../../oauth/sender-binding
+      '@mod/token-denylist':
+        specifier: workspace:*
+        version: link:../../oauth/token-denylist
 
   modules/templates/upstream-handoff-store:
     dependencies:
@@ -3179,7 +3313,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/templates/upstream-round-trip-store:
     dependencies:
@@ -3198,7 +3332,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/templates/users-store:
     dependencies:
@@ -3243,7 +3377,7 @@ importers:
         version: link:../../scaffold/trial
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/tooling/conformance-code:
     dependencies:
@@ -3274,7 +3408,7 @@ importers:
         version: 6.2.12
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/tooling/conformance-device:
     dependencies:
@@ -3296,7 +3430,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/tooling/conformance-exchange:
     dependencies:
@@ -3306,6 +3440,9 @@ importers:
       '@mod/conformance-code':
         specifier: workspace:*
         version: link:../conformance-code
+      '@mod/conformance-device':
+        specifier: workspace:*
+        version: link:../conformance-device
       '@mod/conformance-identity':
         specifier: workspace:*
         version: link:../conformance-identity
@@ -3324,7 +3461,7 @@ importers:
         version: 6.2.12
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/tooling/conformance-federation:
     dependencies:
@@ -3355,7 +3492,7 @@ importers:
         version: 6.2.12
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/tooling/conformance-identity:
     dependencies:
@@ -3374,7 +3511,7 @@ importers:
         version: link:../conformance-keys
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/tooling/conformance-keys:
     dependencies:
@@ -3387,7 +3524,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/tooling/conformance-legacy:
     dependencies:
@@ -3421,7 +3558,7 @@ importers:
         version: 6.2.12
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/tooling/conformance-oauth:
     dependencies:
@@ -3443,7 +3580,7 @@ importers:
         version: 6.2.12
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/tooling/conformance-ops:
     dependencies:
@@ -3462,7 +3599,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/tooling/conformance-passkey:
     dependencies:
@@ -3477,7 +3614,7 @@ importers:
         version: link:../conformance-oauth
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
     devDependencies:
       '@mod/conformance-code':
         specifier: workspace:*
@@ -3508,7 +3645,7 @@ importers:
         version: link:../../scaffold/create-app
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
     devDependencies:
       '@mod/conformance-code':
         specifier: workspace:*
@@ -3542,7 +3679,7 @@ importers:
         version: link:../conformance-legacy
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
     devDependencies:
       '@mod/conformance-identity':
         specifier: workspace:*
@@ -3572,6 +3709,34 @@ importers:
         specifier: 6.0.3
         version: 6.0.3
 
+  modules/tooling/references:
+    dependencies:
+      '@mod/app-output':
+        specifier: workspace:*
+        version: link:../../scaffold/app-output
+      '@mod/combinations':
+        specifier: workspace:*
+        version: link:../../scaffold/combinations
+      '@mod/config-files':
+        specifier: workspace:*
+        version: link:../../foundation/config-files
+      '@mod/create-app':
+        specifier: workspace:*
+        version: link:../../scaffold/create-app
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/trial':
+        specifier: workspace:*
+        version: link:../../scaffold/trial
+    devDependencies:
+      '@o3co/ts.hocon':
+        specifier: 1.14.3
+        version: 1.14.3(zod@4.6.7)
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+
   modules/upstream-login/federation:
     dependencies:
       '@mod/audit':
@@ -3598,9 +3763,6 @@ importers:
       '@mod/request-source':
         specifier: workspace:*
         version: link:../../foundation/request-source
-      '@mod/session':
-        specifier: workspace:*
-        version: link:../../identity/session
       '@mod/upstream-handoff':
         specifier: workspace:*
         version: link:../upstream-handoff
@@ -3623,6 +3785,9 @@ importers:
       '@mod/cookies':
         specifier: workspace:*
         version: link:../../foundation/cookies
+      '@mod/federation-link':
+        specifier: workspace:*
+        version: link:../federation-link
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
@@ -3632,6 +3797,9 @@ importers:
       '@mod/secret-hash':
         specifier: workspace:*
         version: link:../../foundation/secret-hash
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
@@ -3640,7 +3808,40 @@ importers:
         version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+
+  modules/upstream-login/federation-link:
+    dependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
+      '@mod/csrf':
+        specifier: workspace:*
+        version: link:../../identity/csrf
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
+      '@mod/upstream-handoff':
+        specifier: workspace:*
+        version: link:../upstream-handoff
+      '@mod/upstreams':
+        specifier: workspace:*
+        version: link:../upstreams
+      '@mod/users':
+        specifier: workspace:*
+        version: link:../../identity/users
+      vitest:
+        specifier: 5.0.4
+        version: 5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
   modules/upstream-login/federation-tokens:
     dependencies:
@@ -3659,6 +3860,9 @@ importers:
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
+      '@mod/redirect-uris':
+        specifier: workspace:*
+        version: link:../../oauth/redirect-uris
       '@mod/request-source':
         specifier: workspace:*
         version: link:../../foundation/request-source
@@ -3707,7 +3911,7 @@ importers:
         version: link:../../identity/subject-revocation
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/upstream-login/idp-apple:
     dependencies:
@@ -3741,7 +3945,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/upstream-login/idp-github:
     dependencies:
@@ -3769,7 +3973,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/upstream-login/idp-google:
     dependencies:
@@ -3800,7 +4004,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/upstream-login/idp-oidc:
     dependencies:
@@ -3834,7 +4038,7 @@ importers:
         version: 6.2.12
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/upstream-login/rp-logout-federation:
     dependencies:
@@ -3850,7 +4054,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/upstream-login/upstream-client:
     dependencies:
@@ -3875,7 +4079,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/upstream-login/upstream-handoff:
     dependencies:
@@ -3900,7 +4104,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/upstream-login/upstream-round-trip:
     dependencies:
@@ -3922,10 +4126,13 @@ importers:
         version: link:../../foundation/records
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/upstream-login/upstreams:
     dependencies:
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
@@ -3935,6 +4142,10 @@ importers:
       zod:
         specifier: 4.6.7
         version: 4.6.7
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/user-ledger-http/mfa-witness-http:
     dependencies:
@@ -3962,7 +4173,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/user-ledger-http/signer-keys-http:
     dependencies:
@@ -4057,7 +4268,7 @@ importers:
     devDependencies:
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
   modules/user-ledger-http/users-http:
     dependencies:
@@ -4088,7 +4299,7 @@ importers:
         version: link:../../foundation/secret-hash
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5))
 
 packages:
 
@@ -4371,16 +4582,30 @@ packages:
   '@types/node@26.6.5':
     resolution: {integrity: sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==}
 
-  '@vitest/mocker@5.0.5':
-    resolution: {integrity: sha512-xLL3lkDegJZw+MGoGaCCsFayDZthGgpAtr3Vziyfc4p7xH89K7KRPcRBBh/kEYm0Aqkt5DtTmkYpBtRV/FrHZg==}
+  '@vitest/mocker@5.0.4':
+    resolution: {integrity: sha512-tqAlrYWce4iUxhr3ncNohejtCTOcHeE8XWrSNZY3OhPoDn01yeGv+gnaBy64ATp7o6pb03eIbBAjzmibpc9vIQ==}
     peerDependencies:
       msw: ^2.4.9 || ^3.0.0
-      vite: ^6.0.0 || ^7.0.0 || ^8.0.0
+      vite: 8.3.3
     peerDependenciesMeta:
       msw:
         optional: true
       vite:
         optional: true
+
+  '@vitest/mocker@5.0.5':
+    resolution: {integrity: sha512-xLL3lkDegJZw+MGoGaCCsFayDZthGgpAtr3Vziyfc4p7xH89K7KRPcRBBh/kEYm0Aqkt5DtTmkYpBtRV/FrHZg==}
+    peerDependencies:
+      msw: ^2.4.9 || ^3.0.0
+      vite: 8.3.3
+    peerDependenciesMeta:
+      msw:
+        optional: true
+      vite:
+        optional: true
+
+  '@vitest/spy@5.0.4':
+    resolution: {integrity: sha512-MZKk/gSkm2q+ICobMxCpH1mA+cCAWm8WV7UhxlqGjq/sJ3AGc1BqFOs5CRVXxH78wQtme9q/NAAgBquj4AcyMw==}
 
   '@vitest/spy@5.0.5':
     resolution: {integrity: sha512-lwJRExuH417257Q5wv9QYugN9IMJkoxcrKrYxGPQkBzl7wlNpTUxD/5yNX4ESKVUIShKPgkGchYPFMWOOk0wzw==}
@@ -4639,8 +4864,8 @@ packages:
   undici-types@8.9.0:
     resolution: {integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==}
 
-  vite@8.3.2:
-    resolution: {integrity: sha512-SQr1x6W5vVSbROg7vsyXIaxK9b0G7zsT68acdWWRmnBUsgDieLCRG+Rep9WdZgcposvv/GSnr4GUUBqB3vXq6w==}
+  vite@8.3.3:
+    resolution: {integrity: sha512-cTAldKPImjg6c+gk48U19POPn3GCBzZwpdsN8ZMEEcbpes+6/wvfqUd0C2y3qYY4wsj8PwgFwrZ/1jBPVttMSg==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
     peerDependencies:
@@ -4682,6 +4907,47 @@ packages:
       yaml:
         optional: true
 
+  vitest@5.0.4:
+    resolution: {integrity: sha512-z0WxZRV2Sg48wF0FSgMq3TFG8JS38/Qr96vZVZdX6+Em9raQTvnXQvdTFJe2m3rfyJnEHeHQ/snceIdi8D1pVg==}
+    engines: {node: ^22.12.0 || ^24.0.0 || >=26.0.0}
+    hasBin: true
+    peerDependencies:
+      '@edge-runtime/vm': '*'
+      '@opentelemetry/api': ^1.9.0
+      '@types/node': ^22.0.0 || >=24.0.0
+      '@vitest/browser-playwright': 5.0.4
+      '@vitest/browser-preview': 5.0.4
+      '@vitest/browser-webdriverio': ^5.0.0-beta.5 || >=5.0.0
+      '@vitest/coverage-istanbul': 5.0.4
+      '@vitest/coverage-v8': 5.0.4
+      '@vitest/ui': 5.0.4
+      happy-dom: '*'
+      jsdom: '*'
+      vite: 8.3.3
+    peerDependenciesMeta:
+      '@edge-runtime/vm':
+        optional: true
+      '@opentelemetry/api':
+        optional: true
+      '@types/node':
+        optional: true
+      '@vitest/browser-playwright':
+        optional: true
+      '@vitest/browser-preview':
+        optional: true
+      '@vitest/browser-webdriverio':
+        optional: true
+      '@vitest/coverage-istanbul':
+        optional: true
+      '@vitest/coverage-v8':
+        optional: true
+      '@vitest/ui':
+        optional: true
+      happy-dom:
+        optional: true
+      jsdom:
+        optional: true
+
   vitest@5.0.5:
     resolution: {integrity: sha512-cPODOMF8YnkiiYtDdHo6n4wWmBrOBBbOIYH2d33M4l3CdNn72h+qMmO6uXffUN6A5AZFXNND/d+krS9mgkXRfg==}
     engines: {node: ^22.12.0 || ^24.0.0 || >=26.0.0}
@@ -4698,7 +4964,7 @@ packages:
       '@vitest/ui': 5.0.5
       happy-dom: '*'
       jsdom: '*'
-      vite: ^6.4.0 || ^7.0.0 || ^8.0.0
+      vite: 8.3.3
     peerDependenciesMeta:
       '@edge-runtime/vm':
         optional: true
@@ -4984,14 +5250,25 @@ snapshots:
     dependencies:
       undici-types: 8.9.0
 
-  '@vitest/mocker@5.0.5(vite@8.3.2(@types/node@26.6.5))':
+  '@vitest/mocker@5.0.4(vite@8.3.3(@types/node@26.6.5))':
+    dependencies:
+      '@jridgewell/trace-mapping': 0.3.31
+      '@vitest/spy': 5.0.4
+      estree-walker: 3.0.3
+      magic-string: 1.4.3
+    optionalDependencies:
+      vite: 8.3.3(@types/node@26.6.5)
+
+  '@vitest/mocker@5.0.5(vite@8.3.3(@types/node@26.6.5))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@vitest/spy': 5.0.5
       estree-walker: 3.0.3
       magic-string: 1.4.3
     optionalDependencies:
-      vite: 8.3.2(@types/node@26.6.5)
+      vite: 8.3.3(@types/node@26.6.5)
+
+  '@vitest/spy@5.0.4': {}
 
   '@vitest/spy@5.0.5': {}
 
@@ -5201,7 +5478,7 @@ snapshots:
 
   undici-types@8.9.0: {}
 
-  vite@8.3.2(@types/node@26.6.5):
+  vite@8.3.3(@types/node@26.6.5):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -5212,10 +5489,10 @@ snapshots:
       '@types/node': 26.6.5
       fsevents: 2.3.3
 
-  vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.2(@types/node@26.6.5)):
+  vitest@5.0.4(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)):
     dependencies:
       '@types/chai': 5.2.3
-      '@vitest/mocker': 5.0.5(vite@8.3.2(@types/node@26.6.5))
+      '@vitest/mocker': 5.0.4(vite@8.3.3(@types/node@26.6.5))
       chai: 6.3.0
       es-module-lexer: 2.3.2
       expect-type: 1.4.0
@@ -5226,7 +5503,29 @@ snapshots:
       tinybench: 6.2.2
       tinyexec: 1.3.1
       tinyglobby: 0.2.17
-      vite: 8.3.2(@types/node@26.6.5)
+      vite: 8.3.3(@types/node@26.6.5)
+      why-is-node-running: 3.2.1
+    optionalDependencies:
+      '@opentelemetry/api': 1.9.1
+      '@types/node': 26.6.5
+    transitivePeerDependencies:
+      - msw
+
+  vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)):
+    dependencies:
+      '@types/chai': 5.2.3
+      '@vitest/mocker': 5.0.5(vite@8.3.3(@types/node@26.6.5))
+      chai: 6.3.0
+      es-module-lexer: 2.3.2
+      expect-type: 1.4.0
+      magic-string: 1.4.3
+      obug: 3.0.0
+      picomatch: 4.0.7
+      std-env: 4.3.0
+      tinybench: 6.2.2
+      tinyexec: 1.3.1
+      tinyglobby: 0.2.17
+      vite: 8.3.3(@types/node@26.6.5)
       why-is-node-running: 3.2.1
     optionalDependencies:
       '@opentelemetry/api': 1.9.1

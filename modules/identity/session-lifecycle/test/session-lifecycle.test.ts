@@ -242,6 +242,19 @@ describe("session authentication time", () => {
 		expect(raised?.cookies[0]).toBe(jar.write("session", secretIn(raised?.cookies[0]), 3595));
 	});
 
+	it("refuses, before opening anything, a login whose authentication time is no time, never naming it", async () => {
+		const { s } = await boot();
+		for (const at of [-1, Number.NaN, Number.POSITIVE_INFINITY, 8.64e15 + 1]) {
+			const opened = s.complete(testRequest(), { ...facts(), authenticatedAt: at });
+			await expect(opened, String(at)).rejects.toThrow(TypeError);
+			await expect(opened).rejects.not.toThrow(String(at));
+		}
+		for (const at of [0, 8.64e15]) {
+			const done = await s.complete(testRequest(), { ...facts(), authenticatedAt: at });
+			expect(done.session.context.authenticatedAt, String(at)).toBe(Math.min(at, now));
+		}
+	});
+
 	it("logs only that it capped an authentication time later than the opening", async () => {
 		const recorded = recordingLog();
 		const { s } = await boot({}, [], { log: recorded.log });

@@ -2,12 +2,16 @@ import type { GrantInput, Refused, SessionIssuance } from "@mod/grants";
 import type { Binding } from "@mod/sender-binding";
 import { type AccessGrant, type IssuanceRequest, referenceOf, type Tokens } from "@mod/tokens";
 
-/** A grant's `admits` and `issue`, with the binding; `issue` tells `told` of a token from a session. */
+/**
+ * A grant's `admits` and `issue`, with the binding; `issue` tells `told` of a token from a session,
+ * and `added` of the names of the claims the grant added to each token issued.
+ */
 export function issuanceFor(
 	tokens: Tokens,
 	grantType: string,
 	binding: Binding | undefined,
 	told: readonly SessionIssuance[] = [],
+	added: (names: readonly string[]) => void = () => {},
 ) {
 	const bound = binding ? { binding } : {};
 	const requestOf = (
@@ -27,6 +31,8 @@ export function issuanceFor(
 		const { session, continuing: _, ...limits } = from;
 		const issued = await tokens.issue(requestOf(grant, from), { ...limits, ...bound });
 		if (issued.kind !== "issued") return { kind: "refused", refusal: issued };
+		// Named from what tokens judged and signed, never the grant read again.
+		if (issued.access.addedClaims) added(issued.access.addedClaims);
 		if (session === undefined) return issued;
 		const { id, expiresAt } = issued.access;
 		try {

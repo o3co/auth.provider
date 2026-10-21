@@ -1,5 +1,5 @@
 import { type Site, site } from "@mod/http";
-import { type BuildContext, isUnavailable, type Refusal } from "@mod/kernel";
+import { type BuildContext, isUnavailable, type Refusal, readConfigured } from "@mod/kernel";
 import { type IdpType, idpTypes, type Upstream, UpstreamMismatch } from "@mod/upstreams";
 import { callbackPath, federationIdps, type Idp, proves } from "../round-trip/round-trip.ts";
 import type { Settings } from "../section.ts";
@@ -71,7 +71,7 @@ async function openUpstream(
 	try {
 		return { upstream: await idpType.open(settings, at) };
 	} catch (error) {
-		if (error instanceof UpstreamMismatch) {
+		if (UpstreamMismatch.is(error)) {
 			return { refusal: { where: [at.where, ...error.at].join("."), reason: error.message } };
 		}
 		const reason = isUnavailable(error)
@@ -96,10 +96,11 @@ export async function openIdps(parts: Parts) {
 			refusals.push({ where: `${where}.type`, reason: "no module offers this IdP type" });
 			continue;
 		}
-		const settings = idpType.settings.safeParse(rest);
-		if (!settings.success) {
-			for (const issue of settings.error.issues) {
-				refusals.push({ where: [where, ...issue.path].join("."), reason: issue.message });
+		// Read as a section is, so a string from the environment converts as the type's schema asks.
+		const settings = readConfigured(idpType.settings, rest);
+		if ("issues" in settings) {
+			for (const issue of settings.issues) {
+				refusals.push({ where: [where, ...(issue.path ?? [])].join("."), reason: issue.message });
 			}
 			continue;
 		}
@@ -109,7 +110,7 @@ export async function openIdps(parts: Parts) {
 		}
 		const redirectUri = `${origin}${callbackPath(name)}`;
 		const at = { idp: name, redirectUri, where };
-		const opened = await openUpstream(idpType, settings.data, at);
+		const opened = await openUpstream(idpType, settings.value, at);
 		if ("refusal" in opened) {
 			refusals.push(opened.refusal);
 			continue;

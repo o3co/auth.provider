@@ -326,6 +326,10 @@ describe("jwt-bearer", () => {
 		);
 		expect(await error(await assertion({ ...base, sub: undefined }))).toBe("invalid_grant");
 		expect(await error(await assertion({ ...base, sub: "" }))).toBe("invalid_grant");
+		// A subject is 1 to 255 ASCII characters, as users bounds it.
+		expect(await error(await assertion({ ...base, sub: "s".repeat(255) }))).toBe("issued");
+		expect(await error(await assertion({ ...base, sub: "s".repeat(256) }))).toBe("invalid_grant");
+		expect(await error(await assertion({ ...base, sub: "s\u00e9" }))).toBe("invalid_grant");
 		expect(await error(await assertion({ ...base, iss: "https://unknown.example" }))).toBe(
 			"invalid_grant",
 		);

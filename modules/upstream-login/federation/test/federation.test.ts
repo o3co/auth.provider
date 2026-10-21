@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import cookiesModule from "@mod/cookies/module";
 import { csrfStandIn } from "@mod/csrf/testing";
+import linkModule from "@mod/federation-link/module";
 import { listening, type Route, requestEnds, routes } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
@@ -77,7 +78,7 @@ const skewMs = 30_000;
 /** Headers as the trusted proxy forwards a request over https. */
 const viaProxy = { "x-forwarded-proto": "https", "x-forwarded-for": "198.51.100.1" };
 
-type Answer = UpstreamLogin | "unreachable" | "broken";
+type Answer = UpstreamLogin | "unreachable" | "broken" | "copied";
 /** What the test type's upstream answers for each code. */
 const answering = (...pairs: (readonly [string, Answer])[]) => new Map<string, Answer>(pairs);
 /** An upstream login of alice, made at `ms`. */
@@ -107,10 +108,12 @@ interface Setup {
 	readonly origin?: string | null;
 	/** Modules that receive upstream tokens; seal comes with them. */
 	readonly receivers?: Module[];
-	/** Leaves csrf out, which a link needs for its origin evidence. */
+	/** Leaves csrf out, whose origin evidence a start and a link need. */
 	readonly withoutCsrf?: true;
 	/** Gives alice no upstream identity, as a deployment with no IdP has none to name. */
 	readonly unlinked?: true;
+	/** Leaves out the link, which the bridge brings beside federation in a composed app. */
+	readonly withoutLink?: true;
 	/** What the test type's upstreams offer besides a login. */
 	readonly more?: Pick<Upstream, "refresh" | "endSession" | "delegation">;
 }
@@ -144,7 +147,8 @@ async function serve(setup: Setup = {}) {
 	const app = await assemble({
 		modules: [
 			http,
-			...(setup.withoutCsrf ? [] : [csrfStandIn, cookiesModule]),
+			...(setup.withoutCsrf ? [] : [csrfStandIn]),
+			cookiesModule,
 			gatesModule,
 			usersModule,
 			secretHashModule,
@@ -155,6 +159,7 @@ async function serve(setup: Setup = {}) {
 			audit.module,
 			simulatedStore().module,
 			federationModule,
+			...(setup.withoutLink ? [] : [linkModule]),
 			idp.module,
 			handoffModule,
 			setup.held ?? held,
@@ -285,6 +290,201 @@ describe("federation", () => {
 		expect(started.cookies.filter((c) => c.includes("federation.corp"))).toHaveLength(1);
 	});
 
+	it("goes on with the browser's live login round trip on a start from another site, or one that says nothing of its site", async () => {
+		const s = await serve({ federation: { "transaction-lifetime": "1m" } });
+		const first = await s.begin("?prompt=login&max_age=60");
+		const kept = s.saved.length;
+		const sites = [{ "sec-fetch-site": "cross-site" }, { "sec-fetch-site": "same-site" }, {}];
+		for (const site of sites) {
+			const again = await s.get(`${base}/corp`, first.cookie, site);
+			// The same request upstream as the first start's, whatever this one asked; no cookie, nothing kept.
+			expect([again.status, again.location, again.cookies], JSON.stringify(site)).toEqual([
+				302,
+				first.location,
+				[],
+			]);
+		}
+		expect(s.saved.length).toBe(kept);
+		// Each the first start's request whole: its state, nonce, challenge, prompt and max age.
+		const [asked, ...again] = s.asked.starts;
+		expect(asked).toMatchObject({ prompt: "login", maxAgeSeconds: 60 });
+		expect(again).toEqual(sites.map(() => asked));
+		// Read, it is not lengthened: it ends where the first start put it.
+		now += 30_000;
+		const answered = await s.callback(`code=good&state=${first.state}`, first.cookie);
+		expect(answered.status).toBe(302);
+		// A link from another site is still refused before anything else.
+		const linking = await s.get(`${base}/corp?link=1`, first.cookie, {
+			"sec-fetch-site": "cross-site",
+		});
+		expect(linking.status).toBe(403);
+	});
+
+	it("goes on with a link's live round trip on a login's start from another site, which ends in the link", async () => {
+		const s = await serve();
+		const first = await s.begin();
+		const loggedIn = await s.callback(
+			`code=good&state=${first.state}&iss=https://idp.example`,
+			first.cookie,
+		);
+		const session = loggedIn.cookies.filter((c) => !c.includes("federation.corp=")).join("; ");
+		const linking = await s.get(`${base}/corp?link=1`, session, {
+			"sec-fetch-site": "same-origin",
+		});
+		const cookie = linking.cookies.find((c) => c.includes("federation.corp")) ?? "";
+		const again = await s.get(`${base}/corp`, `${session}; ${cookie}`, {
+			"sec-fetch-site": "cross-site",
+		});
+		expect([again.status, again.location, again.cookies]).toEqual([302, linking.location, []]);
+		const state = new URL(linking.location).searchParams.get("state") ?? "";
+		const before = s.events.length;
+		await s.callback(`code=good&state=${state}&iss=https://idp.example`, `${session}; ${cookie}`);
+		expect(s.events.slice(before).map((e) => e.kind)).not.toContain("federation.login.succeeded");
+	});
+
+	it("begins anew where the browser's live round trip carries what federation does not read", async () => {
+		const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
+		let garbled = false;
+		const trips = defineModule({ name: "trips" }, (m) => [
+			m.provide(roundTripStore).by(() => ({
+				save: kept.records.create,
+				update: async (key, change) => {
+					const read = await kept.records.change(key, change);
+					if (!garbled || !read) return read;
+					const odd = { ...(read.before as object), carried: { unheard: 1 } } as never;
+					return { before: odd, after: odd };
+				},
+			})),
+		]);
+		const s = await serve({ trips });
+		const first = await s.begin();
+		garbled = true;
+		const again = await s.get(`${base}/corp`, first.cookie, { "sec-fetch-site": "cross-site" });
+		expect(new URL(again.location).searchParams.get("state")).not.toBe(first.state);
+		expect(again.cookies.filter((c) => c.includes("federation.corp"))).toHaveLength(1);
+	});
+
+	describe("a round trip an earlier version wrote, carrying a link's session as its own field", () => {
+		/**
+		 * A round trip store writing each record in that earlier shape: a link's session as `link`, a
+		 * login's with none; `forced` gives a login's one too, and `mixed` keeps the name beside it.
+		 */
+		const earlier = ({ mixed = false, forced = false } = {}) => {
+			const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
+			return defineModule({ name: "trips" }, (m) => [
+				m.provide(roundTripStore).by(() => ({
+					save: async (key, value, lifetimeMs) => {
+						const { carried: was, ...rest } = value as unknown as {
+							carried: { by?: string; kept?: unknown };
+						};
+						const { by, kept: link, ...left } = was;
+						const old =
+							by !== undefined || forced
+								? { ...left, link: link ?? { session: "s-old", subject: "alice" } }
+								: left;
+						if (mixed) Object.assign(old, { by: "link" });
+						return kept.records.create(key, { ...rest, carried: old } as never, lifetimeMs);
+					},
+					update: kept.records.change,
+				})),
+			]);
+		};
+		/** A session of alice's, and a link begun from it, as the earlier version kept it. */
+		const linkStarted = async (s: Awaited<ReturnType<typeof serve>>) => {
+			const first = await s.begin();
+			const loggedIn = await s.callback(
+				`code=good&state=${first.state}&iss=https://idp.example`,
+				first.cookie,
+			);
+			const session = loggedIn.cookies.filter((c) => !c.includes("federation.corp=")).join("; ");
+			const linking = await s.get(`${base}/corp?link=1`, session, {
+				"sec-fetch-site": "same-origin",
+			});
+			const state = new URL(linking.location).searchParams.get("state") ?? "";
+			const cookie = linking.cookies.find((c) => c.includes("federation.corp")) ?? "";
+			return { session, linking, state, cookie: `${session}; ${cookie}` };
+		};
+
+		it("ends in the link, and a start from another site goes on with it", async () => {
+			const s = await serve({ trips: earlier() });
+			const { linking, state, cookie } = await linkStarted(s);
+			const again = await s.get(`${base}/corp`, cookie, { "sec-fetch-site": "cross-site" });
+			expect([again.status, again.location, again.cookies]).toEqual([302, linking.location, []]);
+			const before = s.events.length;
+			const back = await s.callback(`code=good&state=${state}&iss=https://idp.example`, cookie);
+			// Alice holds that identity already: it ends in the link, which records nothing for it, never a login.
+			expect(back.status).toBe(302);
+			expect(s.events.slice(before).filter((e) => e.kind.startsWith("federation.login."))).toEqual(
+				[],
+			);
+		});
+
+		it("is refused, warned, where no link is composed, and refused as a round trip it cannot read where it mixes both shapes", async () => {
+			const s = await serve({ trips: earlier({ forced: true }), withoutLink: true });
+			const started = await s.begin();
+			const back = await s.callback(`code=good&state=${started.state}`, started.cookie);
+			expect([back.status, back.body]).toEqual([400, { error: "continuation_unavailable" }]);
+			expect(logged()).toContain('federation.continuation_missing {"idp":"corp","name":"link"}');
+			const mixed = await serve({ trips: earlier({ mixed: true, forced: true }) });
+			const begun = await mixed.begin();
+			const refused = await mixed.callback(`code=good&state=${begun.state}`, begun.cookie);
+			expect([refused.status, refused.body]).toEqual([400, { error: "invalid_state" }]);
+		});
+	});
+
+	it("refuses a callback whose round trip goes on to a continuation not composed, clearing its cookie and warning", async () => {
+		const kept = memoryRecords<StoredRoundTrip>(() => now, { shards: 1, perShard: 1 });
+		const trips = defineModule({ name: "trips" }, (m) => [
+			m.provide(roundTripStore).by(() => ({
+				save: async (key, value, lifetimeMs) => {
+					// Carried as if a continuation of another name had begun it.
+					const by = { ...(value as unknown as { carried: object }).carried, by: "elsewhere" };
+					const record = { ...(value as object), carried: by } as never;
+					return kept.records.create(key, record, lifetimeMs);
+				},
+				update: kept.records.change,
+			})),
+		]);
+		const s = await serve({ trips });
+		const started = await s.begin();
+		const back = await s.callback(`code=good&state=${started.state}`, started.cookie);
+		expect([back.status, back.body]).toEqual([400, { error: "continuation_unavailable" }]);
+		expect(back.cookies).toContain("__Host-federation.corp=");
+		expect(logged()).toContain('federation.continuation_missing {"idp":"corp","name":"elsewhere"}');
+	});
+
+	it("begins anew on a start from this deployment's own page, or once the browser's round trip has ended or been taken", async () => {
+		const s = await serve({ federation: { "transaction-lifetime": "1m" } });
+		const fresh = (started: { location: string }) =>
+			new URL(started.location).searchParams.get("state");
+		const first = await s.begin();
+		const own = await s.get(`${base}/corp`, first.cookie, { "sec-fetch-site": "same-origin" });
+		expect(fresh(own)).not.toBe(first.state);
+		expect(own.cookies.filter((c) => c.includes("federation.corp"))).toHaveLength(1);
+		const second = await s.begin();
+		await s.callback(`code=good&state=${second.state}`, second.cookie);
+		const afterTaken = await s.get(`${base}/corp`, second.cookie, {
+			"sec-fetch-site": "cross-site",
+		});
+		expect(fresh(afterTaken)).not.toBe(second.state);
+		const third = await s.begin();
+		now += 60_000;
+		const afterEnd = await s.get(`${base}/corp`, third.cookie, { "sec-fetch-site": "cross-site" });
+		expect(fresh(afterEnd)).not.toBe(third.state);
+	});
+
+	it("refuses a start asking a link where none is composed, and warns, writing nothing", async () => {
+		const s = await serve({ withoutLink: true });
+		const kept = s.saved.length;
+		const asked = await s.get(`${base}/corp?link=1`, "", { "sec-fetch-site": "same-origin" });
+		expect([asked.status, asked.body]).toEqual([400, { error: "continuation_unavailable" }]);
+		expect(asked.cookies.filter((c) => c.includes("federation.corp"))).toEqual([]);
+		expect(s.saved.length).toBe(kept);
+		expect(logged()).toContain('federation.continuation_missing {"idp":"corp","name":"link"}');
+		// A login is no continuation: it starts as ever.
+		expect((await s.begin()).status).toBe(302);
+	});
+
 	it("checks a link start's origin before it makes any transaction, so another site starts none", async () => {
 		const s = await serve();
 		const first = await s.begin();
@@ -353,12 +553,15 @@ describe("federation", () => {
 		expect(await linkFrom(recent)).toEqual(stepUp);
 	});
 
-	it("refuses to boot without csrf, whose origin evidence a link needs", async () => {
-		await expect(serve({ withoutCsrf: true })).rejects.toSatisfy(
-			(error) =>
-				error instanceof BootRefused &&
-				error.refusals.some((r) => r.where === "federation" && r.reason.includes("csrf")),
-		);
+	it("refuses to boot without csrf, whose origin evidence a start needs, as a link does", async () => {
+		const refusedAt = (setup: Setup) =>
+			serve(setup).then(
+				() => [],
+				(error: BootRefused) =>
+					error.refusals.filter((r) => r.reason.includes("csrf")).map((r) => r.where),
+			);
+		expect(await refusedAt({ withoutCsrf: true, withoutLink: true })).toEqual(["federation"]);
+		expect(await refusedAt({ withoutCsrf: true })).toContain("federation-link");
 	});
 
 	it("sends the browser upstream with PKCE, a state and a nonce, and logs it in on its way back", async () => {
@@ -499,6 +702,7 @@ describe("federation", () => {
 				["good", alice],
 				["down", "unreachable"],
 				["broken", "broken"],
+				["copied", "copied"],
 				["stranger", { subject: "u-nobody", amr: [] }],
 			),
 		});
@@ -508,6 +712,7 @@ describe("federation", () => {
 			["x=1", 400, "upstream_refused"],
 			["code=bad", 502, "exchange_failed"],
 			["code=broken", 502, "exchange_failed"],
+			["code=copied", 502, "exchange_failed"],
 			["code=down", 503, "temporarily_unavailable"],
 			["code=stranger", 401, "unknown_user"],
 		] as const) {
@@ -520,6 +725,8 @@ describe("federation", () => {
 		expect(logged().filter((line) => line.startsWith("federation.exchange_failed"))).toEqual([
 			'federation.exchange_failed {"idp":"corp","kind":"refused"}',
 			'federation.exchange_failed {"idp":"corp","kind":"failed"}',
+			// Refused by another copy of upstreams in the bundle: still a refusal.
+			'federation.exchange_failed {"idp":"corp","kind":"refused"}',
 		]);
 	});
 
@@ -959,6 +1166,25 @@ describe("federation", () => {
 		}).catch((error: BootRefused) => error.refusals);
 		expect(told).toEqual([
 			{ where: "federation.idps.a.issuer", reason: "the description names another issuer" },
+		]);
+		// Thrown by another copy of upstreams in the bundle: still the type's own reason, under its key.
+		const copied = await serve({
+			federation: { idps: { a: { type: "test", issuer: "https://copied.example" } } },
+		}).catch((error: BootRefused) => error.refusals);
+		expect(copied).toEqual([
+			{ where: "federation.idps.a.issuer", reason: "the description names another issuer" },
+		]);
+		// A type's own settings are read as a section is: a string from the environment converts.
+		const typed = { type: "test", issuer: "https://idp.example", "skew-ms": "0", refuses: "false" };
+		expect(await refused({ corp: typed })).toEqual([]);
+		const converted = await serve({
+			federation: { idps: { corp: { ...typed, refuses: "true" } } },
+		}).catch((error: BootRefused) => error.refusals);
+		expect(converted).toEqual([
+			{ where: "federation.idps.corp.refuses", reason: "refused by its settings" },
+		]);
+		expect(await refused({ corp: { ...typed, "skew-ms": "soon" } })).toEqual([
+			"federation.idps.corp.skew-ms",
 		]);
 		// An upstream that cannot be reached is told apart from one that does not match.
 		const reasons = async (issuer: string) =>

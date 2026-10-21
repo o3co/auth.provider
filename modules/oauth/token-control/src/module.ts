@@ -1,14 +1,13 @@
-import { audit } from "@mod/audit";
 import { type Clients, clients } from "@mod/clients";
 import { routes, site, use } from "@mod/http";
-import { issuer, metadata } from "@mod/issuer";
+import { metadata } from "@mod/issuer";
 import { type BuildContext, defineModule } from "@mod/kernel";
 import { requestsPerSource } from "@mod/rate-limit";
 import { tokens } from "@mod/tokens";
 import type { z } from "zod";
 import { revocableKinds } from "./contract.ts";
-import { introspection } from "./introspection.ts";
-import { accessKind, revocation } from "./revocation.ts";
+import { introspectionIn } from "./introspection/introspection.ts";
+import { revocationIn } from "./revocation/revocation.ts";
 import { section } from "./section.ts";
 
 const introspectPath = "/oauth/introspect";
@@ -37,12 +36,7 @@ export default defineModule({ name: "token-control", section }, (m) => [
 		path: introspectPath,
 		uses: limited(c, "introspect"),
 		crossSite: "A resource server's call, authenticated as a client; it reads no cookie.",
-		...introspection(
-			await c.get(clients),
-			await c.get(tokens),
-			(await c.get(issuer)).url,
-			await c.get(audit),
-		),
+		...(await introspectionIn(c)),
 	})),
 	m.contribute(routes).by(async (c) => {
 		const contributed = await c.collect(revocableKinds);
@@ -56,11 +50,7 @@ export default defineModule({ name: "token-control", section }, (m) => [
 			crossSite:
 				"It reads no cookie: revoking needs the token itself, which a public client may revoke for itself (RFC 7009).",
 			cors: revokeCors,
-			...revocation(
-				await c.get(clients),
-				[accessKind(await c.get(tokens)), ...contributed],
-				await c.get(audit),
-			),
+			...(await revocationIn(c, contributed)),
 		};
 	}),
 	m.contribute(metadata).by(async (c) => ({

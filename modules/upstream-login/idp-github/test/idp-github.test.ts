@@ -1,5 +1,6 @@
 import { isUnavailable, Unavailable } from "@mod/kernel";
 import type { Narrower, Outbound, OutboundRequest, OutboundResponse } from "@mod/outbound";
+import { outboundOver, section as outboundSection } from "@mod/outbound/module";
 import type { OutboundRefusals } from "@mod/outbound-policy";
 import { type AuthorizationStart, type CodeExchange, UpstreamRefused } from "@mod/upstreams";
 import { describe, expect, it } from "vitest";
@@ -27,7 +28,12 @@ const policyRefusing = (refused: readonly string[] = []): OutboundRefusals => ({
 const settings = settingsOf(policyRefusing());
 
 function open(handlers: { token?: Handler; user?: Handler }, more: Record<string, unknown> = {}) {
-	const asked: { url: string; request: OutboundRequest; hosts?: readonly string[] }[] = [];
+	const asked: {
+		url: string;
+		request: OutboundRequest;
+		hosts?: readonly string[];
+		internal?: string;
+	}[] = [];
 	const table: Record<string, Handler | undefined> = {
 		"https://github.com/login/oauth/access_token":
 			handlers.token ?? (() => ok({ access_token: "gho_x", token_type: "bearer" })),
@@ -35,7 +41,12 @@ function open(handlers: { token?: Handler; user?: Handler }, more: Record<string
 	};
 	const outbound: Outbound = {
 		fetch: async (url, request = {}, narrower = {}) => {
-			asked.push({ url, request, ...(narrower.hosts ? { hosts: narrower.hosts } : {}) });
+			asked.push({
+				url,
+				request,
+				...(narrower.hosts ? { hosts: narrower.hosts } : {}),
+				...(narrower.internal ? { internal: narrower.internal } : {}),
+			});
 			const answer = table[url]?.(request) ?? ok({}, 404);
 			if (answer === "unreachable") throw new Unavailable("stub");
 			if (answer === "broken") throw new Error("refused by the destination policy");
@@ -65,7 +76,7 @@ const outcome = (run: Promise<unknown>) =>
 	run.then(
 		(value) => value,
 		(error) =>
-			error instanceof UpstreamRefused ? "refused" : isUnavailable(error) ? "unavailable" : error,
+			UpstreamRefused.is(error) ? "refused" : isUnavailable(error) ? "unavailable" : error,
 	);
 
 describe("idp-github", () => {
@@ -149,6 +160,42 @@ describe("idp-github", () => {
 			["github.com", "api.github.com"],
 			["github.com", "api.github.com"],
 		]);
+		// Each sent for the endpoint the operator set, so one on an internal network is reached as theirs.
+		expect(asked.map((a) => a.internal)).toEqual([
+			"https://github.com/login/oauth/access_token",
+			"https://api.github.com",
+		]);
+	});
+
+	it("reaches a GitHub Enterprise at a private address as the operator's endpoints, only where outbound.internal-hosts lists its host", async () => {
+		const enterprise = {
+			"client-id": "cid",
+			"client-secret": "sec",
+			"authorization-endpoint": "https://ghe.corp/login/oauth/authorize",
+			"token-endpoint": "https://ghe.corp/login/oauth/access_token",
+			api: "https://ghe.corp/api/v3/",
+		};
+		/** outbound itself, every name resolving to a private address, a request ending fast. */
+		const pathsOf = (internal: readonly string[]) =>
+			outboundOver(
+				outboundSection.parse({
+					allow: ["ghe.corp"],
+					"internal-hosts": internal,
+					timeout: "300ms",
+				}),
+				async () => ["10.0.0.5"],
+			);
+		for (const [internal, expected] of [
+			[[], "refused"],
+			[["ghe.corp"], "unavailable"],
+		] as const) {
+			const paths = pathsOf(internal);
+			// Boot asks with the same narrowing, and outbound's policy refuses no host it allows.
+			const read = settingsOf({ explained: paths.explained }).parse(enterprise);
+			const upstream = opened(read, { fetch: paths.fetch } as Outbound);
+			// Unlisted, the address refuses the token request; listed, it gets past it to the connection.
+			expect(await outcome(upstream.exchange(exchange())), JSON.stringify(internal)).toBe(expected);
+		}
 	});
 
 	it("refuses at boot, at its key, an endpoint outbound's policy refuses, GitHub's own included", () => {
@@ -165,8 +212,14 @@ describe("idp-github", () => {
 		expect(refusalsOf(["github.com"])).toEqual([refused("token-endpoint")]);
 		const hosts = ["github.com", "api.github.com"];
 		expect(policyAsked).toEqual([
-			{ url: "https://github.com/login/oauth/access_token", narrower: { hosts } },
-			{ url: "https://api.github.com/user", narrower: { hosts } },
+			{
+				url: "https://github.com/login/oauth/access_token",
+				narrower: { hosts, internal: "https://github.com/login/oauth/access_token" },
+			},
+			{
+				url: "https://api.github.com/user",
+				narrower: { hosts, internal: "https://api.github.com" },
+			},
 		]);
 		expect(refusalsOf(["api.github.com"])).toEqual([refused("api")]);
 		const enterprise = {
@@ -177,13 +230,65 @@ describe("idp-github", () => {
 		expect(refusalsOf(["github.com", "api.github.com"], enterprise)).toBeUndefined();
 		// The API's trailing slash is not doubled, and a host named twice is narrowed to once.
 		expect(policyAsked).toEqual([
-			{ url: "https://ghe.example/t", narrower: { hosts: ["ghe.example"] } },
-			{ url: "https://ghe.example/api/v3/user", narrower: { hosts: ["ghe.example"] } },
+			{
+				url: "https://ghe.example/t",
+				narrower: { hosts: ["ghe.example"], internal: "https://ghe.example/t" },
+			},
+			{
+				url: "https://ghe.example/api/v3/user",
+				narrower: { hosts: ["ghe.example"], internal: "https://ghe.example/api/v3/" },
+			},
 		]);
 		expect(refusalsOf(["ghe.example"], enterprise)).toEqual([
 			refused("token-endpoint"),
 			refused("api"),
 		]);
+	});
+
+	it("takes the authorization endpoint over plain http only where outbound's policy for the browser does, refusing it at its key", () => {
+		const both = { "client-id": "cid", "client-secret": "sec" };
+		const refusalsOver = (more: Record<string, unknown>): OutboundRefusals => {
+			const paths = outboundOver(outboundSection.parse(more), async () => ["10.0.0.5"]);
+			const { explained, plainInternal, browsedRefusal } = paths;
+			return { explained, plainInternal, browsedRefusal };
+		};
+		const policy = refusalsOver({
+			allow: ["ghe.internal", "ghe.example", "127.0.0.1"],
+			"plain-internal": ["ghe.internal:8080"],
+		});
+		const keysOf = (refusals: OutboundRefusals, more: Record<string, unknown>) =>
+			settingsOf(refusals)
+				.safeParse({ ...both, ...more })
+				.error?.issues.map((i) => i.path.join("."));
+		const at = (authorization: string) => ({
+			"authorization-endpoint": authorization,
+			"token-endpoint": "https://ghe.example/t",
+			api: "https://ghe.example/api/v3/",
+		});
+		expect(keysOf(policy, at("https://ghe.example/login/oauth/authorize"))).toBeUndefined();
+		expect(keysOf(policy, at("http://127.0.0.1:9200/login/oauth/authorize"))).toBeUndefined();
+		expect(keysOf(policy, at("http://ghe.internal:8080/login/oauth/authorize"))).toBeUndefined();
+		for (const refused of ["http://ghe.example/login", "http://ghe.internal:9090/login"]) {
+			expect(keysOf(policy, at(refused)), refused).toEqual(["authorization-endpoint"]);
+		}
+		// A policy that does not say takes https alone.
+		expect(keysOf(policyRefusing(), at("http://127.0.0.1:9200/login"))).toEqual([
+			"authorization-endpoint",
+		]);
+	});
+
+	it("asks for the browser's endpoint with it as the operator's URL", () => {
+		const asked: [string, string | undefined][] = [];
+		const refusals: OutboundRefusals = {
+			explained: () => undefined,
+			browsedRefusal: (url, narrower) => {
+				asked.push([url, narrower?.internal]);
+				return undefined;
+			},
+		};
+		settingsOf(refusals).parse({ "client-id": "cid", "client-secret": "sec" });
+		const github = "https://github.com/login/oauth/authorize";
+		expect(asked).toEqual([[github, github]]);
 	});
 
 	it("takes an id written as its canonical digits, and never one past the safe integers", async () => {

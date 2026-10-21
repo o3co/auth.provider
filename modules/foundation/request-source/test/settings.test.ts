@@ -17,6 +17,76 @@ it("takes trusted proxies as IP addresses or CIDR blocks", () => {
 	expect(trusted.check("2001:db8::1", "ipv6")).toBe(true);
 });
 
+it("refuses trusted proxies that together cover every address of a family, at the list", () => {
+	const together = [
+		["0.0.0.0/1", "128.0.0.0/1"],
+		["::ffff:0:0/97", "::ffff:128.0.0.0/97"],
+		["0.0.0.0/1", "::ffff:128.0.0.0/97"],
+		[
+			"10.0.0.0/8",
+			"0.0.0.0/5",
+			"8.0.0.0/7",
+			"11.0.0.0/8",
+			"12.0.0.0/6",
+			"16.0.0.0/4",
+			"32.0.0.0/3",
+			"64.0.0.0/2",
+			"128.0.0.0/1",
+		],
+	];
+	for (const entries of together) {
+		const issues = sourceSettings.safeParse({ "trusted-proxies": entries }).error?.issues ?? [];
+		expect(
+			issues.map((issue) => issue.path.join(".")),
+			entries.join(),
+		).toEqual(["trusted-proxies"]);
+		expect(issues[0]?.message, entries.join()).toContain("together cover every address");
+	}
+	// One address short of a family, or a family's halves across the two families, is a proxy's own range.
+	for (const entries of [
+		[
+			"0.0.0.0/1",
+			"128.0.0.0/2",
+			"192.0.0.0/3",
+			"224.0.0.0/4",
+			"240.0.0.0/5",
+			"248.0.0.0/6",
+			"252.0.0.0/7",
+			"254.0.0.0/8",
+			"255.0.0.0/9",
+			"255.128.0.0/10",
+			"255.192.0.0/11",
+			"255.224.0.0/12",
+			"255.240.0.0/13",
+			"255.248.0.0/14",
+			"255.252.0.0/15",
+			"255.254.0.0/16",
+			"255.255.0.0/17",
+			"255.255.128.0/18",
+			"255.255.192.0/19",
+			"255.255.224.0/20",
+			"255.255.240.0/21",
+			"255.255.248.0/22",
+			"255.255.252.0/23",
+			"255.255.254.0/24",
+			"255.255.255.0/25",
+			"255.255.255.128/26",
+			"255.255.255.192/27",
+			"255.255.255.224/28",
+			"255.255.255.240/29",
+			"255.255.255.248/30",
+			"255.255.255.252/31",
+			"255.255.255.254",
+		],
+		["0.0.0.0/1", "8000::/1"],
+		["10.0.0.0/8", "192.168.0.0/16", "2001:db8::/32"],
+	]) {
+		expect(sourceSettings.safeParse({ "trusted-proxies": entries }).success, entries.at(-1)).toBe(
+			true,
+		);
+	}
+});
+
 it("refuses a trusted proxy covering every address of a family, however written, as no source could be told", () => {
 	const everyAddress = ["0.0.0.0/0", "10.1.2.3/0", "::/0", "2001:db8::/0", "::ffff:0:0/0"];
 	// Every IPv4 address, mapped into IPv6, as an IPv4-mapped peer is checked as IPv4.

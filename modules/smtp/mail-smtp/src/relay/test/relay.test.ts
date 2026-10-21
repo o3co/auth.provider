@@ -1,19 +1,6 @@
 import { connect, createServer, Socket } from "node:net";
 import { expect, it } from "vitest";
-import { isLoopback, isLoopbackHost, mailboxOf, RelayFailure, relayOver } from "../relay.ts";
-
-it("reads loopback addresses, IPv4-mapped ones included, and nothing else", () => {
-	for (const address of ["127.0.0.1", "127.9.8.7", "::1", "::ffff:127.0.0.1"]) {
-		expect(isLoopback(address), address).toBe(true);
-	}
-	for (const address of [undefined, "", "10.0.0.1", "::ffff:10.0.0.1", "::2", "localhost"]) {
-		expect(isLoopback(address), String(address)).toBe(false);
-	}
-	expect(isLoopbackHost("LocalHost")).toBe(true);
-	for (const host of ["127.0.0.08", "2130706433", "localhost.example"]) {
-		expect(isLoopbackHost(host), host).toBe(false);
-	}
-});
+import { mailboxOf, RelayFailure, relayOver } from "../relay.ts";
 
 it("reads one mailbox from `from`, with or without a display name, leaving its address to the section", () => {
 	expect(mailboxOf("Provider <noreply@example.test>")).toEqual({

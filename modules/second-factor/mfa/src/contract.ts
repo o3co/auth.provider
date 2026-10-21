@@ -12,6 +12,12 @@ export const proofSteps = extensionPoint<ProofStep>("mfa.proof-steps", { multipl
 /** Where a subject's fence stood when read: compared, never computed with. */
 export type Fence = number & { readonly __fence: never };
 
+/**
+ * The name that whatever moves a subject's fence when the subject is revoked goes by among the
+ * revocation's followers: a module that binds factors over revocations looks for it.
+ */
+export const fenceFollower = "mfa";
+
 /** Where a subject's standing is asked, as an inconsistency with the witness is recorded. */
 export type Asked = "login" | "binding" | "credentials";
 
@@ -21,9 +27,6 @@ export interface Shown {
 	readonly kind: string;
 	readonly label?: string;
 }
-
-/** Whether a page can show `text` as a factor's label; `labels` owns the rule. */
-export { isLabel } from "@mod/labels";
 
 export type Proved =
 	/** `amr` is what this proof adds. */
@@ -57,6 +60,8 @@ export interface Factors {
 	 * recorded with where it was asked.
 	 */
 	countingHeld(subject: string, at: Asked): Promise<boolean>;
+	/** Whether the subject holds a counting factor as written, not judged against the witness. One of a unique value counts once its claim names it, as before that its binding may still end as a duplicate; one written before claims were kept, unless another holds its value. */
+	countingWritten(subject: string): Promise<boolean>;
 	/** Whether every session needs a second factor to be used (`mode = required`). */
 	secondFactorRequired(): boolean;
 	/** What a login asks of the subject: nothing, a proof of a factor, or a first binding. */
@@ -153,6 +158,19 @@ export interface Factors {
 }
 
 export const factors = contract<Factors>("mfa.factors");
+
+/** Who tells, apart from the store, that a subject enrolled: contributed by `mfa-witnessing` where a witness is composed. */
+export interface Witnessing {
+	/** `held` for a subject holding a counting factor, `none` where nothing marks it either; unavailable, recorded, where a mark stands beside nothing counting. */
+	standing(subject: string, counts: boolean, at: Asked): Promise<"held" | "none">;
+	/** After a binding's write: brings the mark in line with the counting factors, as `counting` reads them now. */
+	settle(subject: string, counting: () => Promise<boolean>): Promise<void>;
+	/** After a reset removed every factor: the mark goes. */
+	cleared(subject: string): Promise<void>;
+}
+
+/** At most one; with none, the store alone tells. */
+export const witnessing = extensionPoint<Witnessing>("mfa.witnessing", { multiplicity: "many" });
 
 /** A module holding sessions to the subject's factors: what `mode` asks to use one, and a recent second factor to change credentials. */
 export interface Enforcer {

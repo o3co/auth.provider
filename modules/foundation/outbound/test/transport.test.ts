@@ -13,10 +13,32 @@ import {
 import { isUnavailable } from "@mod/kernel";
 import { policyOf, policySettings } from "@mod/outbound-policy";
 import { configuredUrl } from "@mod/url-setting/testing";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { DestinationRefused, type OutboundUnavailable } from "../src/contract.ts";
 import { lookupsAtOnce, outboundOver, section } from "../src/module.ts";
 import { type Resolver, send } from "../src/transport.ts";
+
+// A connection to `rerouted.from` reaches a local server instead, and is recorded: a private address
+// the transport checked is dialed, and nothing is sent anywhere else.
+const rerouted = vi.hoisted(() => ({
+	from: "",
+	to: 0,
+	dials: [] as { host: string | undefined; port: number | undefined }[],
+}));
+vi.mock("node:net", async (original) => {
+	const real = await original<typeof import("node:net")>();
+	return {
+		...real,
+		connect: (...args: unknown[]) => {
+			const options = args[0] as { host?: unknown; port?: number } | null;
+			if (typeof options === "object" && options?.host === rerouted.from) {
+				rerouted.dials.push({ host: rerouted.from, port: options.port });
+				return real.connect({ host: "127.0.0.1", port: rerouted.to });
+			}
+			return (real.connect as (...a: unknown[]) => ReturnType<typeof real.connect>)(...args);
+		},
+	};
+});
 
 /** The operator's policy at its plainest, checking the addresses a test's admitted URL reaches. */
 const anyPublic = policyOf(policySettings.parse({ "allow-any-public": true }));
@@ -158,7 +180,7 @@ const failure = (run: Promise<unknown>) =>
 	run.then(
 		() => "answered",
 		(error) =>
-			error instanceof DestinationRefused
+			DestinationRefused.is(error)
 				? error.reason
 				: isUnavailable(error)
 					? `unavailable: ${(error as Partial<OutboundUnavailable>).failure}`
@@ -184,6 +206,45 @@ describe("outbound", () => {
 			);
 		}
 		expect(calls).toEqual([]);
+	});
+
+	it("sends plain http to a plain-loopback pair only where every address it resolves to is loopback", async () => {
+		const before = seen.length;
+		for (const addresses of [
+			["10.0.0.1"],
+			["127.0.0.1", "10.0.0.1"],
+			["::7f00:1"],
+			["::ffff:0:7f00:1"],
+		]) {
+			const { resolve } = table({ "svc.test": addresses });
+			expect(await failure(over(resolve).fetch(svc("/ok"))), addresses.join()).toBe(
+				"special-address",
+			);
+		}
+		expect(seen.length).toBe(before);
+		for (const addresses of [["127.0.0.1"], ["::ffff:127.0.0.1"]]) {
+			const { resolve } = table({ "svc.test": addresses });
+			expect((await over(resolve).fetch(svc("/ok"))).status, addresses.join()).toBe(200);
+		}
+	});
+
+	it("reaches an address written in the URL as written, never the IPv4 it may carry", async () => {
+		const { calls, resolve } = table({});
+		const before = seen.length;
+		for (const spelled of ["[::7f00:1]", "[::ffff:0:7f00:1]"]) {
+			expect(await failure(over(resolve).fetch(`http://${spelled}:${port}/ok`)), spelled).toBe(
+				"special-address",
+			);
+		}
+		expect(seen.length).toBe(before);
+		expect((await over(resolve).fetch(`http://[::ffff:7f00:1]:${port}/ok`)).status).toBe(200);
+		expect(calls).toEqual([]);
+	});
+
+	it("names the host as the URL writes an address, IPv4 mapped into IPv6 too", async () => {
+		const { resolve } = table({});
+		const answer = await over(resolve).fetch(`http://[::ffff:7f00:1]:${port}/ok`);
+		expect([answer.status, seen.at(-1)?.host]).toEqual([200, `[::ffff:7f00:1]:${port}`]);
 	});
 
 	it("refuses a name when any address it resolves to is special, before connecting", async () => {
@@ -357,7 +418,9 @@ describe("outbound", () => {
 			deadlines.push(deadline);
 			return deadline.signal;
 		};
-		const outbound = over(slow, { "max-concurrent": 1 }, deadlineOf);
+		const other = `http://other.svc.test:${port}/ok`;
+		const pairs = [`svc.test:${port}`, `other.svc.test:${port}`, `127.0.0.1:${port}`];
+		const outbound = over(slow, { "max-concurrent": 1, "plain-loopback": pairs }, deadlineOf);
 		const first = failure(outbound.fetch(svc("/ok")));
 		await until(() => calls.length === 1);
 		deadlines.at(-1)?.abort();
@@ -366,7 +429,7 @@ describe("outbound", () => {
 		expect((await outbound.fetch(`http://127.0.0.1:${port}/ok`)).status).toBe(200);
 		// The name still resolving holds the only lookup, so another name is refused at once.
 		for (let i = 0; i < 3; i++) {
-			expect(await failure(outbound.fetch(svc("/ok")))).toBe("unavailable: busy");
+			expect(await failure(outbound.fetch(other))).toBe("unavailable: busy");
 		}
 		expect(calls).toHaveLength(1);
 		settle(["127.0.0.1"]);
@@ -391,16 +454,147 @@ describe("outbound", () => {
 			deadlines.push(deadline);
 			return deadline.signal;
 		};
-		// Sixteen requests may run, yet a threadpool of four takes two lookups at once.
-		const outbound = over(slow, { "max-concurrent": 16 }, deadlineOf, lookupsAtOnce("4", 16));
-		const held = [failure(outbound.fetch(svc("/ok"))), failure(outbound.fetch(svc("/ok")))];
+		// Sixteen requests may run, yet a threadpool of four takes two lookups at once: one of the
+		// deployment's own, one of the names an outside party chose.
+		const url = (host: string) => `http://${host}:${port}/ok`;
+		const pairs = ["a.svc.test", "b.svc.test", "c.svc.test", "127.0.0.1"].map(
+			(host) => `${host}:${port}`,
+		);
+		const outbound = over(
+			slow,
+			{ "max-concurrent": 16, "plain-loopback": pairs },
+			deadlineOf,
+			lookupsAtOnce("4", 16),
+		);
+		const held = [
+			failure(outbound.fetch(url("a.svc.test"))),
+			failure(outbound.fetch(url("c.svc.test"), {}, { outsideChosen: true })),
+		];
 		await until(() => settles.length === 2);
-		expect(await failure(outbound.fetch(svc("/ok")))).toBe("unavailable: busy");
+		expect(await failure(outbound.fetch(url("b.svc.test")))).toBe("unavailable: busy");
 		// An address written in the URL needs no lookup, so it is still reached.
 		expect((await outbound.fetch(`http://127.0.0.1:${port}/ok`)).status).toBe(200);
 		for (const deadline of deadlines) deadline.abort();
 		expect(await Promise.all(held)).toEqual(["unavailable: timeout", "unavailable: timeout"]);
 		for (const settle of settles) settle(["127.0.0.1"]);
+	});
+
+	it("gives lookups an outside party chose half the share, so theirs never hold every lookup", async () => {
+		const settles = new Map<string, (addresses: readonly string[]) => void>();
+		const slow: Resolver = (host) =>
+			new Promise((done) => {
+				settles.set(host, done);
+			});
+		const pairs = ["a.svc.test", "b.svc.test", "svc.test"].map((host) => `${host}:${port}`);
+		const outbound = over(slow, { "max-concurrent": 16, "plain-loopback": pairs }, undefined, 2);
+		const chosen = { outsideChosen: true } as const;
+		const url = (host: string) => `http://${host}:${port}/ok`;
+		const resolving = outbound.fetch(url("a.svc.test"), {}, chosen).catch(() => undefined);
+		await until(() => settles.has("a.svc.test"));
+		// The outside party's share, one of two, is held: another name it chose is refused at once.
+		expect(await failure(outbound.fetch(url("b.svc.test"), {}, chosen))).toBe("unavailable: busy");
+		// The rest is the deployment's own: its name still resolves.
+		const own = outbound.fetch(svc("/ok"));
+		await until(() => settles.has("svc.test"));
+		settles.get("svc.test")?.(["127.0.0.1"]);
+		expect((await own).status).toBe(200);
+		settles.get("a.svc.test")?.(["127.0.0.1"]);
+		await resolving;
+	});
+
+	it("sends plain http to a plain-internal pair only where every address is private, checked on each request", async () => {
+		let answer: readonly string[] = [];
+		const resolve: Resolver = async () => answer;
+		const received: { authorization?: string; body: string }[] = [];
+		const ledgerServer = createServer((req, res) => {
+			const chunks: Buffer[] = [];
+			req.on("data", (chunk: Buffer) => chunks.push(chunk));
+			req.on("end", () => {
+				received.push({
+					...(req.headers.authorization ? { authorization: req.headers.authorization } : {}),
+					body: Buffer.concat(chunks).toString(),
+				});
+				res.end("ok");
+			});
+		});
+		await new Promise<void>((ready) => ledgerServer.listen(0, "127.0.0.1", ready));
+		Object.assign(rerouted, {
+			from: "10.255.255.1",
+			to: (ledgerServer.address() as AddressInfo).port,
+			dials: [],
+		});
+		const pair = "ledger.internal:9092";
+		const outbound = over(resolve, { "plain-internal": [pair] });
+		const ledger = `http://${pair}/verify`;
+		const own = { internal: configuredUrl(ledger) };
+		for (const [addresses, reason] of [
+			[["93.184.216.34"], "plain-public"],
+			[["10.1.2.3", "93.184.216.34"], "plain-public"],
+			[["93.184.216.34", "10.1.2.3"], "plain-public"],
+			[[], "special-address"],
+			[["::7f00:1"], "special-address"],
+			[["169.254.169.254"], "special-address"],
+			[["::ffff:100.100.100.200"], "special-address"],
+			[["fd00:ec2::254"], "special-address"],
+			[["fe80::1"], "special-address"],
+			[["64:ff9b::a01:203"], "special-address"],
+		] as const) {
+			answer = addresses;
+			expect(await failure(outbound.fetch(ledger, {}, own)), addresses.join()).toBe(reason);
+		}
+		// Private alone: the request, its credential and its body, goes to the checked address itself.
+		answer = ["10.255.255.1"];
+		const asked = {
+			method: "POST",
+			credential: "Bearer s3cret",
+			body: '{"subject":"alice"}',
+		} as const;
+		const answered = await outbound.fetch(ledger, asked, own);
+		expect([answered.status, rerouted.dials, received]).toEqual([
+			200,
+			[{ host: "10.255.255.1", port: 9092 }],
+			[{ authorization: "Bearer s3cret", body: '{"subject":"alice"}' }],
+		]);
+		// The next request asks again: a name turned public is refused, with no second connection
+		// and no credential sent.
+		answer = ["93.184.216.34"];
+		expect(await failure(outbound.fetch(ledger, asked, own))).toBe("plain-public");
+		expect([rerouted.dials.length, received.length]).toEqual([1, 1]);
+		// Without the caller's own URL, or for an outside party's choice, plain http is not taken at all.
+		expect(await failure(outbound.fetch(ledger))).toBe("scheme");
+		expect(await failure(outbound.fetch(ledger, {}, { ...own, outsideChosen: true }))).toBe(
+			"scheme",
+		);
+		await new Promise((closed) => ledgerServer.close(closed));
+	});
+
+	it("answers how many names a caller may resolve at once, the outside party's share apart", () => {
+		const shares = (lookups: number) => {
+			const out = over(table({}).resolve, { "max-concurrent": 16 }, undefined, lookups);
+			return [out.lookupsOf({ outsideChosen: true }), out.lookupsOf({}), out.lookupsOf()];
+		};
+		expect([shares(1), shares(2), shares(5)]).toEqual([
+			[0, 1, 1],
+			[1, 1, 1],
+			[2, 3, 3],
+		]);
+	});
+
+	it("resolves a name once for the requests asking it at once, taking one place", async () => {
+		const calls: string[] = [];
+		let settle: (addresses: readonly string[]) => void = () => {};
+		const slow: Resolver = (host) => {
+			calls.push(host);
+			return new Promise((done) => {
+				settle = done;
+			});
+		};
+		const outbound = over(slow, { "max-concurrent": 16 }, undefined, 1);
+		const answers = [outbound.fetch(svc("/ok")), outbound.fetch(svc("/ok"))];
+		await until(() => calls.length === 1);
+		settle(["127.0.0.1"]);
+		expect((await Promise.all(answers)).map((answer) => answer.status)).toEqual([200, 200]);
+		expect(calls).toEqual(["svc.test"]);
 	});
 
 	it("takes half the threadpool, at least one and never more than max-concurrent, four threads when unset or unreadable", () => {

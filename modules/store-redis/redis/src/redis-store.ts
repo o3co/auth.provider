@@ -11,7 +11,7 @@ import {
 	type Space,
 	type Store,
 } from "@mod/store";
-import type { Redis } from "ioredis";
+import { type Redis, ReplyError } from "ioredis";
 import { sharedRounds } from "./rounds.ts";
 import * as scripts from "./scripts.ts";
 
@@ -45,6 +45,78 @@ export interface RedisStoreOptions {
 	readonly replicationTimeoutMs: number;
 	/** What the operator declared: no failover at all, or replicas that must take every write. */
 	readonly replication: "none" | "replicas" | undefined;
+}
+
+/** Whether the server refuses a command for good, for want of permission or of the command; any other error is no answer. */
+export const refusedForGood = (error: unknown) =>
+	error instanceof ReplyError &&
+	/^(NOPERM|ERR unknown (sub)?command)\b/i.test((error as Error).message);
+
+/** A user refused keys, in Redis 7.0's or 7.4's words, before a script runs or within it. */
+const keysRefused = (message: string) =>
+	/no permissions to access (a key|one of the keys)|can't access at least one of the keys/i.test(
+		message,
+	);
+/** A command a script calls refused, in Redis 7.0's or 7.4's words, or one renamed away. */
+const refusedInScript = (message: string) =>
+	/can't run this command|no permissions to run|unknown (redis )?command/i.test(message);
+/** A write refused for want of replicas: no answer on whether the command is allowed. */
+const noReplicas = (message: string) => /^NOREPLICAS\b/.test(message);
+
+/**
+ * What the server refuses the store for good, each as a problem naming it: a command, or the keys.
+ * The confirming connection sends a round's ROLE and INFO, its SET of the confirmation key where
+ * replication is declared, and its WAIT, asking for no replica, with replicas; the other runs a
+ * script calling every command the scripts call, on keys of the store's own that expire at once,
+ * and a SCAN of them. A write refused for want of replicas tells nothing either way, so it is no
+ * problem; any other failure is thrown.
+ */
+export async function refusedCommands(
+	client: Redis,
+	confirmer: Redis,
+	options: Pick<RedisStoreOptions, "prefix" | "replication">,
+): Promise<string[]> {
+	const { prefix, replication } = options;
+	const problems = new Set<string>();
+	const storeKeys = `the store's keys (${prefix}:{…})`;
+	const judge = (name: string, error: unknown, keys: string) => {
+		const message = error instanceof Error ? error.message : String(error);
+		if (keysRefused(message)) problems.add(`the server refuses this user ${keys}: allow them`);
+		else if (refusedForGood(error) || refusedInScript(message)) {
+			problems.add(`the server refuses ${name}: allow it`);
+		} else if (!noReplicas(message)) throw error;
+	};
+	const round = confirmer.pipeline().call("ROLE").info("server");
+	const sent = ["ROLE", "INFO"];
+	if (replication !== undefined) {
+		round.set(`${prefix}:#confirm`, "1", "PX", 60_000);
+		sent.push("SET");
+	}
+	if (replication === "replicas") {
+		// Answers within its millisecond, once a confirmation's WAIT before it has.
+		round.call("WAIT", 0, 1);
+		sent.push("WAIT");
+	}
+	const replies = (await round.exec()) ?? [];
+	sent.forEach((name, at) => {
+		const error = replies[at]?.[0];
+		if (error) judge(name, error, `the confirmation key (${prefix}:#confirm)`);
+	});
+	const check = `${prefix}:{#check}`;
+	try {
+		const failed = (await client.eval(scripts.commands, 2, `${check}:h`, `${check}:s`)) as string[];
+		for (let at = 0; at < failed.length; at += 2) {
+			judge(String(failed[at]), new Error(String(failed[at + 1])), storeKeys);
+		}
+	} catch (error) {
+		judge("EVAL", error, storeKeys);
+	}
+	try {
+		await client.scan("0", "MATCH", `${literal(check)}:*`, "COUNT", 1);
+	} catch (error) {
+		judge("SCAN", error, storeKeys);
+	}
+	return [...problems];
 }
 
 /**

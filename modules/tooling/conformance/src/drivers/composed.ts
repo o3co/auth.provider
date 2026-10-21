@@ -29,7 +29,10 @@ export function composition(scene: AreaScene) {
 	if (absent.length > 0) throw new Error(`the scene is about the absence of ${absent.join(", ")}`);
 	const set = newPartsOf(scene, composed);
 	const layers = set.flatMap((p) => (p.layer === undefined ? [] : [p.layer]));
-	return { modules: composed, config: sectionsOf(set), layers, store };
+	const config = sectionsOf(set);
+	// The generated configuration holds no value: one instance, unless a part says otherwise.
+	config.kernel = { deployment: "single", ...config.kernel };
+	return { modules: composed, config, layers, store };
 }
 
 /** The new system, composed of the modules each area's part asks for. */

@@ -57,7 +57,11 @@ export async function ledgerParty(held: {
 							(u) => u.upstream?.idp === given.idp && u.upstream?.subject === given.subject,
 						)
 					: users?.find((u) => u.identifier === given.email && u.password === given.password);
-		if (!user) return { status: asked.path === "/verify" ? 401 : 404 };
+		// A lookup says it knows no such user, as users-http reads one; a bare 404 above is a wrong set-up.
+		if (!user)
+			return asked.path === "/verify"
+				? { status: 401 }
+				: { status: 404, json: { error: "not_found" } };
 		const { emailVerified } = user;
 		const email = emailVerified === undefined ? user.email : addressOf(user);
 		return {

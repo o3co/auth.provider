@@ -1,4 +1,4 @@
-import { sameSecret, Unavailable } from "@mod/kernel";
+import { type Log, sameSecret, Unavailable } from "@mod/kernel";
 import type { Mail } from "@mod/mail";
 import type { BindingProof } from "@mod/mfa-binding-proof";
 import type { AskedFrom, FactorKind, Opened, Sending } from "@mod/mfa-extensions";
@@ -39,6 +39,7 @@ export interface EmailParts {
 	/** A session's login attributes, and whether `users` vouches for them. */
 	readonly attributes: () => Pick<SubjectAttributes, "of">;
 	readonly addsSecondFactor: boolean;
+	readonly log: Pick<Log, "warn">;
 	readonly codeMs: number;
 	readonly now: () => number;
 	readonly random: (n: number) => Uint8Array;
@@ -140,8 +141,14 @@ export function emailFactor(p: EmailParts) {
 		check: async (subject, kept, given) => {
 			const asked = read(secretShape, kept);
 			if (!asked || !answers(asked, readLongCode(given))) return false;
-			// The code reached the address: users keeps it as the subject's.
-			await p.users.verifiedContact(subject, { kind: "email", value: asked.address });
+			// The code reached the address: users keeps it as the subject's, where it keeps any more.
+			try {
+				await p.users.verifiedContact(subject, { kind: "email", value: asked.address });
+			} catch (error) {
+				// Past users' limit the proof still stands: keeping the address only records it.
+				if (!(error instanceof RangeError)) throw error;
+				p.log.warn("mfa-email.contact_not_kept", { reason: "limit" });
+			}
 			return true;
 		},
 	};

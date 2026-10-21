@@ -24,7 +24,7 @@
 - Route `POST /oauth/federation/<idp>/logout` (form: `post_logout_redirect_uri?`, `state?`): `303` to the upstream's end of session, or `200 {"disconnected": true}` where it has none or fails; taken from other sites as the token route is.
   - Errors as the token route's, without `403`.
 - Both routes answer `no-store` and are limited per source by `rate-limit`'s requests policy.
-- Client metadata section `federation-tokens`: `receives` (default false), `post-logout-redirect-uris` (default none).
+- Client metadata section `federation-tokens`: `receives` (default false), `post-logout-redirect-uris` (default none; each one a client may register to be sent back to, by `redirect-uris`' rule).
 - Operator section: `refresh-before` (default `30s`), `max-lifetime` (default `1d`), `lock-lifetime` (default `5s`), `requests` in `window`; times written with their unit, a bare number refused.
 - Store interfaces, which the assembly wires; the store never reads a record.
   - Upstream tokens: one record per session handle, saved once, read, changed from what it holds with a new lifetime or its own, removed, and the sessions whose records live walked by pages. Needs: no eviction, never rolled back by failover.
@@ -52,7 +52,7 @@
 - A failed refresh answers the same for 30 seconds without asking the upstream: kept in each process, by session, IdP and a hash of the access token.
 
 ## Depends on
-- `kernel`, `http`, `request-source`, `clients`, `upstreams`, `rate-limit`, `audit`, `session`, `session-participants`, and through its internal modules `tokens`, `sender-binding`, `refresh`, `session-tokens`, `seal`
+- `kernel`, `http`, `request-source`, `clients`, `redirect-uris`, `upstreams`, `rate-limit`, `audit`, `session`, `session-participants`, and through its internal modules `tokens`, `sender-binding`, `refresh`, `session-tokens`, `seal`
 
 ## Vocabulary
 - receiver: a client the operator lets receive upstream tokens.

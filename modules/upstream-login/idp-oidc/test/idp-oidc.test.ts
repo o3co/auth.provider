@@ -18,6 +18,7 @@ import {
 	type OutboundResponse,
 	outbound,
 } from "@mod/outbound";
+import { outboundOver, section as outboundSection } from "@mod/outbound/module";
 import { type OutboundRefusals, outboundRefusals, withinHosts } from "@mod/outbound-policy";
 import {
 	type AuthorizationStart,
@@ -65,10 +66,20 @@ const granted = (idToken: string, more: Record<string, unknown> = {}) =>
 
 /** An outbound that answers from a table of handlers by URL, keeping what it was asked. */
 function stubOutbound(handlers: Record<string, Handler>) {
-	const asked: { url: string; request: OutboundRequest; hosts?: readonly string[] }[] = [];
+	const asked: {
+		url: string;
+		request: OutboundRequest;
+		hosts?: readonly string[];
+		internal?: string;
+	}[] = [];
 	const outbound: Outbound = {
 		fetch: async (url, request = {}, narrower = {}) => {
-			asked.push({ url, request, ...(narrower.hosts ? { hosts: narrower.hosts } : {}) });
+			asked.push({
+				url,
+				request,
+				...(narrower.hosts ? { hosts: narrower.hosts } : {}),
+				...(narrower.internal ? { internal: narrower.internal } : {}),
+			});
 			if (narrower.hosts && !withinHosts(url, narrower.hosts)) {
 				throw new Error("outside the narrowed hosts");
 			}
@@ -150,6 +161,10 @@ interface World {
 	readonly refused?: readonly string[];
 	/** How the issuer's description answers, in place of the usual one. */
 	readonly describes?: Handler;
+	/** A real outbound and its refusals, in place of the table of answers. */
+	readonly reach?: { readonly outbound: Outbound; readonly refusals: OutboundRefusals };
+	/** Refusals in place of the table's, with the table of answers kept. */
+	readonly refusals?: OutboundRefusals;
 }
 
 async function open(world: World = {}) {
@@ -177,7 +192,7 @@ async function open(world: World = {}) {
 		runtime,
 	});
 	const jwt = app.get(externalJwt);
-	const refusals = policyRefusing(world.refused);
+	const refusals = world.reach?.refusals ?? world.refusals ?? policyRefusing(world.refused);
 	const settings = settingsOf(jwt.algorithms, refusals);
 	const read = settings.parse({
 		issuer,
@@ -186,11 +201,16 @@ async function open(world: World = {}) {
 		...world.settings,
 	});
 	const recorded = recordingLog();
-	const upstream = await opened(read, { outbound: stub.outbound, refusals }, jwt, {
-		clock,
-		log: recorded.log,
-		idp: "corp",
-	});
+	const upstream = await opened(
+		read,
+		{ outbound: world.reach?.outbound ?? stub.outbound, refusals },
+		jwt,
+		{
+			clock,
+			log: recorded.log,
+			idp: "corp",
+		},
+	);
 	/** The warn lines while it opened. */
 	const warned = recorded
 		.lines()
@@ -229,7 +249,7 @@ const outcome = (run: Promise<unknown>) =>
 	run.then(
 		(value) => value,
 		(error) =>
-			error instanceof UpstreamRefused ? "refused" : isUnavailable(error) ? "unavailable" : error,
+			UpstreamRefused.is(error) ? "refused" : isUnavailable(error) ? "unavailable" : error,
 	);
 /** An upstream whose token endpoint hands over `idToken`, with what `world` changes. */
 const answering = (idToken: string, world: Omit<World, "token"> = {}) =>
@@ -250,6 +270,30 @@ const givenEndpoints = {
 	"token-endpoint": `${issuer}/token`,
 	"jwks-uri": `${issuer}/jwks`,
 };
+/** outbound's own refusals over `settings`, every name resolving to a private address. */
+const refusalsOver = (settings: Record<string, unknown>): OutboundRefusals => {
+	const paths = outboundOver(outboundSection.parse(settings), async () => ["10.0.0.5"]);
+	const { explained, plainInternal, browsedRefusal } = paths;
+	return { explained, plainInternal, browsedRefusal };
+};
+/** An issuer at `at` describing itself and serving its key set, as `issuer` does. */
+const servedAt = (at: string, described: Record<string, unknown> = {}) => ({
+	[`${at}/.well-known/openid-configuration`]: () =>
+		ok({
+			issuer: at,
+			authorization_endpoint: `${at}/authorize`,
+			token_endpoint: `${at}/token`,
+			jwks_uri: `${at}/jwks`,
+			...described,
+		}),
+	[`${at}/jwks`]: () => ok({ keys: [rsa.jwk] }),
+});
+const loopbackIssuer = "http://127.0.0.1:9100";
+const loopbackRefusals = () =>
+	refusalsOver({ allow: ["127.0.0.1", "idp.example"], "plain-loopback": ["127.0.0.1:9100"] });
+const internalIssuer = "http://idp.internal:8080";
+const internalRefusals = () =>
+	refusalsOver({ allow: ["idp.internal", "idp.example"], "plain-internal": ["idp.internal:8080"] });
 afterEach(() => {
 	now = start;
 });
@@ -347,29 +391,145 @@ describe("idp-oidc", () => {
 		);
 	});
 
-	it("refuses at boot a description whose endpoints the browser would leave https for", async () => {
+	it("refuses at boot a description whose endpoints the browser would leave https for, where outbound does not take it", async () => {
 		const described: Record<string, Record<string, unknown>> = {
 			"an app's scheme": { authorization_endpoint: "myapp://idp.example/authorize" },
 			"plain http": { authorization_endpoint: "http://idp.example/authorize" },
 			"an end of session in an app's scheme": { end_session_endpoint: "myapp://idp.example/out" },
 		};
 		for (const [label, description] of Object.entries(described)) {
-			await expect(open({ description }), label).rejects.toThrow(/https/);
+			await expect(open({ description }), label).rejects.toThrow(/the browser/);
 		}
-		// An issuer the operator names on plain http may describe its endpoints on it.
-		const plain = "http://idp.example";
-		const local = {
-			issuer: plain,
-			authorization_endpoint: `${plain}/authorize`,
-			token_endpoint: `${plain}/token`,
-			jwks_uri: `${plain}/jwks`,
-		};
-		await expect(
+	});
+
+	it("lets the browser go over plain http only at a loopback name, or at the issuer's origin that plain-internal names", async () => {
+		const at = (issuerUrl: string, refusals: OutboundRefusals, described = {}) =>
 			open({
-				settings: { issuer: plain },
-				more: { [`${plain}/.well-known/openid-configuration`]: () => ok(local) },
-			}),
-		).resolves.toBeDefined();
+				settings: { issuer: issuerUrl, "endpoint-hosts": ["idp.example"] },
+				more: servedAt(issuerUrl, described),
+				refusals,
+			}).catch((e: unknown) => e);
+		expect(await at(loopbackIssuer, loopbackRefusals())).toMatchObject({
+			upstream: { issuer: loopbackIssuer },
+		});
+		expect(await at(internalIssuer, internalRefusals())).toMatchObject({
+			upstream: { issuer: internalIssuer },
+		});
+		const refused: [string, OutboundRefusals, Record<string, unknown>][] = [
+			[
+				loopbackIssuer,
+				loopbackRefusals(),
+				{ authorization_endpoint: "http://idp.example/authorize" },
+			],
+			[loopbackIssuer, loopbackRefusals(), { end_session_endpoint: "http://idp.example/out" }],
+			// The issuer's host, but another origin than the issuer's.
+			[
+				internalIssuer,
+				internalRefusals(),
+				{ authorization_endpoint: "http://idp.internal:9090/a" },
+			],
+		];
+		for (const [issuerUrl, refusals, described] of refused) {
+			const error = await at(issuerUrl, refusals, described);
+			expect(error, JSON.stringify(described)).toBeInstanceOf(UpstreamMismatch);
+			expect((error as UpstreamMismatch).at).toEqual(["issuer"]);
+			expect(String(error)).toMatch(/the browser/);
+			expect(String(error)).not.toMatch(/idp\.example|9090/);
+		}
+	});
+
+	it("takes plain http among its given endpoints where outbound takes each, and refuses at its key one the browser would go to", async () => {
+		const given = (at: string) => ({
+			discovery: false,
+			issuer: at,
+			"authorization-endpoint": `${at}/a`,
+			"token-endpoint": `${at}/token`,
+			"jwks-uri": `${at}/jwks`,
+		});
+		await expect(
+			open({ settings: given(internalIssuer), refusals: internalRefusals() }),
+		).resolves.toMatchObject({ upstream: { issuer: internalIssuer } });
+		const settingsFor = settingsOf(asymmetric, internalRefusals());
+		const keysRefused = (more: Record<string, unknown>) => {
+			const read = settingsFor.safeParse({
+				...given(internalIssuer),
+				"client-id": "client",
+				"client-secret": "s",
+				...more,
+			});
+			return read.success ? [] : read.error.issues.map((issue) => issue.path.join("."));
+		};
+		expect(keysRefused({ "authorization-endpoint": "http://idp.example/a" })).toEqual([
+			"authorization-endpoint",
+		]);
+		expect(keysRefused({ "end-session-endpoint": "http://idp.example/out" })).toEqual([
+			"end-session-endpoint",
+		]);
+		// A logout on another host, which plain-internal names, is taken for itself.
+		const logout = "http://logout.internal:8080/logout";
+		const twoHosts = refusalsOver({
+			allow: ["idp.internal", "logout.internal"],
+			"plain-internal": ["idp.internal:8080", "logout.internal:8080"],
+		});
+		const read = settingsOf(asymmetric, twoHosts).safeParse({
+			...given(internalIssuer),
+			"client-id": "client",
+			"client-secret": "s",
+			"end-session-endpoint": logout,
+		});
+		expect(read.error?.issues).toBeUndefined();
+	});
+
+	it("asks for a browser's URL with the issuer as the operator's URL for what it describes, and each given endpoint for itself", async () => {
+		const asked: [string, string | undefined][] = [];
+		const refusals: OutboundRefusals = {
+			explained: () => undefined,
+			browsedRefusal: (url, narrower) => {
+				asked.push([url, narrower?.internal]);
+				return undefined;
+			},
+		};
+		await open({ refusals, description: { end_session_endpoint: `${issuer}/out` } });
+		expect(asked).toEqual([
+			[`${issuer}/authorize`, issuer],
+			[`${issuer}/out`, issuer],
+		]);
+		asked.length = 0;
+		await open({
+			refusals,
+			settings: { ...givenEndpoints, "end-session-endpoint": `${issuer}/out` },
+		});
+		expect(asked).toEqual([
+			[`${issuer}/a`, `${issuer}/a`],
+			[`${issuer}/out`, `${issuer}/out`],
+		]);
+	});
+
+	it("logs in at an issuer named on plain http, comparing its iss as written", async () => {
+		const token = await idToken({ iss: loopbackIssuer });
+		const { upstream } = await open({
+			settings: { issuer: loopbackIssuer },
+			more: { ...servedAt(loopbackIssuer), [`${loopbackIssuer}/token`]: () => granted(token) },
+			refusals: loopbackRefusals(),
+		});
+		expect(await outcome(upstream.exchange(codeExchange({ iss: loopbackIssuer })))).toMatchObject({
+			subject: "u-alice",
+		});
+		const other = "https://127.0.0.1:9100";
+		expect(await outcome(upstream.exchange(codeExchange({ iss: other })))).toBe("refused");
+	});
+
+	it("refuses, asking the token endpoint nothing, an iss of the issuer's origin in another form", async () => {
+		const token = await idToken({ iss: loopbackIssuer });
+		const { upstream, asked } = await open({
+			settings: { issuer: loopbackIssuer },
+			more: { ...servedAt(loopbackIssuer), [`${loopbackIssuer}/token`]: () => granted(token) },
+			refusals: loopbackRefusals(),
+		});
+		for (const iss of [`${loopbackIssuer}/`, `${loopbackIssuer}/other`, "HTTP://127.0.0.1:9100"]) {
+			expect(await outcome(upstream.exchange(codeExchange({ iss }))), iss).toBe("refused");
+		}
+		expect(asked.some((a) => a.url === `${loopbackIssuer}/token`)).toBe(false);
 	});
 
 	it("refuses at boot, at its key, an endpoint outbound's policy refuses, asking with the hosts it sends to", async () => {
@@ -386,7 +546,7 @@ describe("idp-oidc", () => {
 		expect(policyAsked).toEqual([
 			{
 				url: `${issuer}/.well-known/openid-configuration`,
-				narrower: { hosts: ["idp.example", "x.example"] },
+				narrower: { hosts: ["idp.example", "x.example"], internal: issuer },
 			},
 		]);
 		const elsewhere = "https://keys.other.example/jwks";
@@ -396,8 +556,8 @@ describe("idp-oidc", () => {
 		]);
 		const hosts = ["idp.example", "keys.other.example"];
 		expect(policyAsked).toEqual([
-			{ url: `${issuer}/token`, narrower: { hosts } },
-			{ url: elsewhere, narrower: { hosts } },
+			{ url: `${issuer}/token`, narrower: { hosts, internal: `${issuer}/token` } },
+			{ url: elsewhere, narrower: { hosts, internal: elsewhere } },
 		]);
 		expect(refusalsOf(givenEndpoints)).toEqual([refused("token-endpoint"), refused("jwks-uri")]);
 	});
@@ -446,9 +606,58 @@ describe("idp-oidc", () => {
 				`outbound's destination policy refuses the description: ${reason}`,
 			]);
 		}
+		// A refusal a second bundled copy of outbound-policy throws: another class, the same mark.
+		const describes = () => {
+			throw Object.assign(new Error("outbound destination refused: redirect"), {
+				[Symbol.for("@mod/outbound-policy.destination-refused")]: true,
+				reason: "redirect",
+			});
+		};
+		const fromAnotherCopy = await open({ describes }).catch((e) => e);
+		expect(fromAnotherCopy).toBeInstanceOf(UpstreamMismatch);
 		// An issuer that cannot be reached is not one that does not match.
 		const unreachable = await open({ describes: () => "unreachable" }).catch((e) => e);
 		expect(isUnavailable(unreachable)).toBe(true);
+	});
+
+	it("reaches as the operator's URL the issuer for all its description names, and each given endpoint for itself", async () => {
+		const described = await answering(await idToken());
+		await described.upstream.exchange(codeExchange());
+		expect(described.asked.map((a) => [a.url, a.internal])).toEqual([
+			[`${issuer}/.well-known/openid-configuration`, issuer],
+			[`${issuer}/token`, issuer],
+			[`${issuer}/jwks`, issuer],
+		]);
+		const elsewhere = "https://keys.other.example/jwks";
+		const given = await answering(await idToken(), {
+			settings: { ...givenEndpoints, "jwks-uri": elsewhere },
+			more: { [elsewhere]: () => ok({ keys: [rsa.jwk] }) },
+		});
+		await given.upstream.exchange(codeExchange());
+		expect(given.asked.map((a) => [a.url, a.internal])).toEqual([
+			[`${issuer}/token`, `${issuer}/token`],
+			[elsewhere, elsewhere],
+		]);
+	});
+
+	it("reaches an issuer at a private address as the operator's URL, only where outbound.internal-hosts lists its host", async () => {
+		const corp = "https://idp.corp";
+		/** outbound itself, every name resolving to a private address, a request ending fast. */
+		const reachOf = (internal: readonly string[]) => {
+			const settings = { allow: ["idp.corp"], "internal-hosts": internal, timeout: "300ms" };
+			const paths = outboundOver(outboundSection.parse(settings), async () => ["10.0.0.5"]);
+			return {
+				outbound: { fetch: paths.fetch } as Outbound,
+				refusals: { explained: paths.explained },
+			};
+		};
+		const settings = { issuer: corp };
+		// Unlisted, the address refuses the description at the issuer, as an upstream that does not match.
+		const refused = await open({ settings, reach: reachOf([]) }).catch((e) => e);
+		expect([refused instanceof UpstreamMismatch, refused.at]).toEqual([true, ["issuer"]]);
+		// Listed, it gets past the address to the connection, which cannot be made here.
+		const reached = await open({ settings, reach: reachOf(["idp.corp"]) }).catch((e) => e);
+		expect(isUnavailable(reached)).toBe(true);
 	});
 
 	it("reaches an endpoint the operator gives on another host", async () => {

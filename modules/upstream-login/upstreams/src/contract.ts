@@ -1,6 +1,20 @@
+import type { HttpRequest, HttpResponse } from "@mod/http";
 import { contract, extensionPoint } from "@mod/kernel";
 import type { Session } from "@mod/session";
 import type { z } from "zod";
+
+/**
+ * When a refreshed access token ends: where the upstream hands the same token again, the earlier of
+ * its new end and the end it held, so a refresh never lengthens a token; else its new end.
+ */
+export function refreshedExpiry(
+	answered: { readonly accessToken: string; readonly expiresAt: number },
+	held: { readonly accessToken: string; readonly expiresAt?: number | undefined } | undefined,
+): number {
+	return held?.expiresAt !== undefined && held.accessToken === answered.accessToken
+		? Math.min(answered.expiresAt, held.expiresAt)
+		: answered.expiresAt;
+}
 
 /** What the implementation asks an upstream to authorize, for one login. */
 export interface AuthorizationStart {
@@ -113,24 +127,42 @@ export interface DelegatedExchange extends CodeExchange {
 	readonly resource?: string;
 }
 
-/** The upstream refused, or its answer did not hold; never says why to the browser. */
+/** The marks a mismatch and a refusal carry, the same in every copy of upstreams a bundle may hold. */
+const mismatchMark = Symbol.for("@mod/upstreams.mismatch");
+const refusedMark = Symbol.for("@mod/upstreams.refused");
+const marked = (error: unknown, mark: symbol) =>
+	typeof error === "object" &&
+	error !== null &&
+	(error as { readonly [key: symbol]: unknown })[mark] === true;
+
 /**
  * Why `open` refuses an IdP's settings, under `at`, the key path in the IdP's settings it is about
  * (`issuer`, say). Its reason names no configuration value, so boot can tell it to the operator.
  */
 export class UpstreamMismatch extends Error {
 	readonly at: readonly string[];
+	readonly [mismatchMark] = true;
 	constructor(reason: string, at: readonly string[] = []) {
 		super(reason);
 		this.name = "UpstreamMismatch";
 		this.at = at;
 	}
+	/** Whether `error` is a mismatch, by its mark rather than its class, so two copies of upstreams agree. */
+	static is(error: unknown): error is UpstreamMismatch {
+		return marked(error, mismatchMark);
+	}
 }
 
+/** The upstream refused, or its answer did not hold; never says why to the browser. */
 export class UpstreamRefused extends Error {
+	readonly [refusedMark] = true;
 	constructor() {
 		super("upstream refused");
 		this.name = "UpstreamRefused";
+	}
+	/** Whether `error` is a refusal, by its mark rather than its class, so two copies of upstreams agree. */
+	static is(error: unknown): error is UpstreamRefused {
+		return marked(error, refusedMark);
 	}
 }
 
@@ -180,6 +212,50 @@ export interface UpstreamLoginReceiver {
 export const upstreamLoginReceivers = extensionPoint<UpstreamLoginReceiver>(
 	"upstreams.upstream-login-receivers",
 	{ multiplicity: "keyed", keyOf: (receiver) => receiver.name },
+);
+
+/** What a continuation keeps in a round trip at its start, as JSON, read back by it alone. */
+export type Kept = z.infer<ReturnType<typeof z.json>>;
+
+/** What a continuation is handed once the upstream's login is taken, exchanged and found fresh. */
+export interface Continued {
+	readonly request: HttpRequest;
+	readonly idp: string;
+	readonly upstreamLogin: UpstreamLogin;
+	/** What its `begin` kept, or none. */
+	readonly kept: Kept | undefined;
+	/** Where the browser lands: the return target its start named, else the implementation's landing. */
+	readonly lands: string;
+	readonly source?: string | undefined;
+	readonly userAgent?: string | undefined;
+	/** The round trip's cookie, cleared: every answer from here on carries it. */
+	readonly cleared: readonly string[];
+}
+
+/**
+ * Where a browser's round trip through an upstream goes besides a login, chosen by name at its
+ * start: it may refuse the start, keeps what its end reads, and answers the browser at the end.
+ */
+export interface UpstreamContinuation {
+	readonly name: string;
+	begin(
+		request: HttpRequest,
+		idp: string,
+	): Promise<{ readonly answer: HttpResponse } | { readonly kept?: Kept }>;
+	complete(at: Continued): Promise<HttpResponse>;
+	/** A refusal after the take and before `complete`, recorded as this continuation records them. */
+	failed(at: {
+		readonly idp: string;
+		readonly reason: string;
+		readonly kept: Kept | undefined;
+		readonly source?: string | undefined;
+		readonly userAgent?: string | undefined;
+	}): void;
+}
+
+export const upstreamContinuations = extensionPoint<UpstreamContinuation>(
+	"upstreams.continuations",
+	{ multiplicity: "keyed", keyOf: (continuation) => continuation.name },
 );
 
 /** The upstreams of the configured IdPs, by name. */

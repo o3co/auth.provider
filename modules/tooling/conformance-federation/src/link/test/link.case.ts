@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
-import { areaTarget, type Started } from "@mod/conformance";
+import { areaTarget, auditEvents, type Started } from "@mod/conformance";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type Browser, browser as openBrowser, probeClient } from "../../../test/browser.ts";
 import { fakeUpstream } from "../../../test/upstream.ts";
@@ -168,6 +168,40 @@ describe("federation: linking an upstream identity to the account logged in", ()
 			}
 		},
 	);
+
+	describe.runIf(areaTarget().can(auditEvents.need))("audit events", () => {
+		it("records a link for the account it started for, and a refused one with its reason", async () => {
+			const trail = auditEvents.of(running);
+			const alice = await loggedIn("alice");
+			const linked = await trail.during(async () =>
+				alice.get(`${start}/callback?${await linking(alice, "u-audited")}`),
+			);
+			expect(linked.result.status).toBe(302);
+			const on = { idp: "corp", source: alice.from };
+			expect(linked.events).toEqual([
+				{
+					kind: "federation.identity.linked",
+					at: expect.any(Number),
+					subject: expect.stringMatching(/./),
+					attributes: expect.objectContaining(on),
+				},
+			]);
+			const conflict = await trail.during(async () =>
+				alice.get(`${start}/callback?${await linking(alice, "u-bob")}`),
+			);
+			expect(conflict.result.status).toBe(409);
+			expect(conflict.events).toEqual([
+				{
+					kind: "federation.identity.link_refused",
+					at: expect.any(Number),
+					subject: linked.events[0]?.subject,
+					attributes: expect.objectContaining({ ...on, reason: "conflict" }),
+				},
+			]);
+			// The upstream subject is never told.
+			expect(JSON.stringify([...linked.events, ...conflict.events])).not.toMatch(/u-audited|u-bob/);
+		});
+	});
 
 	it("links nothing on a login started without link, even in a browser logged in", async () => {
 		const alice = await loggedIn("alice");

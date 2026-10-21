@@ -2,6 +2,7 @@ import { createServer as createPlainServer, type IncomingMessage, type Server } 
 import { createServer as createTlsServer } from "node:https";
 import { type AddressInfo, connect, type Socket } from "node:net";
 import { isUnavailable } from "@mod/kernel";
+import { configuredUrl } from "@mod/url-setting/testing";
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import type { OutboundUnavailable } from "../src/contract.ts";
 import { outboundOver, section } from "../src/module.ts";
@@ -146,6 +147,30 @@ it("connects directly to a host listed as direct, resolving it as without a prox
 	expect(resolved).toEqual(["idp.example.test"]);
 });
 
+it("sends plain http to a plain-internal pair directly, resolving it itself, never through the proxy", async () => {
+	resolved.length = 0;
+	const pair = "ledger.internal:9092";
+	const linkLocal = async (host: string): Promise<readonly string[]> => {
+		resolved.push(host);
+		return ["169.254.1.1"];
+	};
+	const out = outboundOver(
+		section.parse({
+			proxy: `http://127.0.0.1:${proxyPort}`,
+			allow: ["ledger.internal"],
+			"plain-internal": [pair],
+		}),
+		linkLocal,
+		{ ca: authority },
+	);
+	const url = `http://${pair}/verify`;
+	// The name resolves to a link-local address, which a plain-internal pair never reaches: resolved here, not by the proxy.
+	await expect(out.fetch(url, {}, { internal: configuredUrl(url) })).rejects.toMatchObject({
+		reason: "special-address",
+	});
+	expect(resolved).toEqual(["ledger.internal"]);
+});
+
 it("connects directly to a dotted entry's name and the names under it, and to no other", async () => {
 	const underDot = async (entry: string) => {
 		asked.length = 0;
@@ -176,6 +201,21 @@ it("checks a destination written as an address against that address, never the p
 	// A certificate for the proxy's address, or for localhost, does not stand for the destination.
 	expect(await reached("proxy")).toBe("unreachable");
 	expect(await reached("public")).toBe(200);
+});
+
+it("asks the proxy for a destination written as an address as written, never its IPv4 spelling", async () => {
+	const out = outboundOver(
+		section.parse({
+			"allow-any-public": true,
+			proxy: `http://127.0.0.1:${proxyPort}`,
+			"internal-hosts": ["10.0.0.1"],
+		}),
+		noResolving,
+		{ ca: addressAuthority },
+	);
+	const url = "https://[::ffff:a00:1]:8443/";
+	await out.fetch(url, {}, { internal: configuredUrl(url) }).catch(() => undefined);
+	expect(asked.map((a) => a.target)).toEqual(["[::ffff:a00:1]:8443"]);
 });
 
 it("closes the tunnel when the request cannot be made over it, as for a header broken across lines", async () => {

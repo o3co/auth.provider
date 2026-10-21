@@ -9,7 +9,7 @@ import {
 	type Runtime,
 	systemClock,
 	systemRandom,
-} from "./runtime.ts";
+} from "./runtime/runtime.ts";
 
 /** A log that writes nothing. */
 export const quietLog: Log = Object.freeze({

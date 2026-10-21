@@ -10,13 +10,15 @@ Internal module of `federation-tokens`: keeping each session's upstream tokens a
 - Accepting the caller and what the routes answer (the package). Sealing and the record's shape (`vault`). The refresh request itself (the IdP type, through `federation`).
 
 ## Offers
+- `renewalIn` (the build context) builds it, taking the stores, `upstreams`, the vault and `session`'s entries (late) itself.
 - `renewalWith` (store, locks, `upstreams`, `session`'s entries by handle, vault, `kernel`'s runtime, settings): `current` (session, IdP → handed / an outcome the routes answer), `receive`, `disconnect` (→ the id_token, or not linked), `withdraw`, `close`
 
 ## Invariants
 - When a token ends is judged here only, on `kernel`'s clock, capped at the longest lifetime. At login, an end not a positive number is due now, and none stays none unless a refresh token can renew it. At a refresh, none is the cap and one not a positive number refuses the answer.
+- A refresh's end is `upstreams`' `refreshedExpiry`: the same access token keeps the earlier of the two ends. Its life is counted from the refresh, so it is not due again at once.
 - A token is due within `refresh-before` of its end, once half its life is spent; at once with less than a second left, or no time it was obtained.
 - A token with less than a second left is unavailable, never handed.
-- The lock is taken per session and IdP for `lock-lifetime`, under a mark of 128 random bits; a request waits for it at most that long, then reads the entry again. It is let go (ending a millisecond later) only while it holds that mark.
+- The lock is taken per session and IdP for `lock-lifetime`, under a mark of 128 random bits; a request waits for it at most that long, then reads the entry again. While the refresh runs, it is kept for its lifetime again every half of it, only under that mark; once lost, nothing the refresh answered is written, and a store that cannot answer stops the keeping. It is kept no longer, then let go (ending a millisecond later) only while it holds that mark.
 - Writes land only over the version read; a new version is 128 random bits.
 - What the upstream says is read once: a part that cannot be read refuses the answer, never counts as absent.
 - An entry that does not open is removed.

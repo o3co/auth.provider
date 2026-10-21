@@ -1,4 +1,11 @@
-import { BlockList, isIP } from "node:net";
+import { isIP } from "node:net";
+import {
+	carriedIPv4,
+	isLoopbackAddress,
+	isPrivateAddress,
+	isSpecialAddress,
+} from "@mod/address-reach";
+import { isLoopbackName } from "@mod/url-setting";
 import {
 	type Admitted,
 	type CredentialRefusal,
@@ -19,6 +26,8 @@ export interface Rules {
 	readonly plainLoopback: readonly string[];
 	/** The hosts an operator's own URL may reach at a private address. */
 	readonly internal: readonly string[];
+	/** The `host:port` pairs an operator's own URL may reach over plain http, at private or loopback addresses alone. */
+	readonly plainInternal: readonly string[];
 }
 
 /** Ports the Fetch standard calls bad, and port 0. */
@@ -29,72 +38,6 @@ const badPorts = new Set([
 	995, 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668,
 	6669, 6679, 6697, 10080,
 ]);
-
-const blockList = (family: "ipv4" | "ipv6", subnets: readonly (readonly [string, number])[]) => {
-	const list = new BlockList();
-	for (const [net, bits] of subnets) list.addSubnet(net, bits, family);
-	return list;
-};
-// IANA's special-purpose blocks, and IPv6 outside global unicast. A BlockList checks
-// IPv4-mapped IPv6 against IPv4 rules too.
-const specialIpv4 = blockList("ipv4", [
-	["0.0.0.0", 8],
-	["10.0.0.0", 8],
-	["100.64.0.0", 10],
-	["127.0.0.0", 8],
-	["169.254.0.0", 16],
-	["172.16.0.0", 12],
-	["192.0.0.0", 24],
-	["192.0.2.0", 24],
-	["192.88.99.0", 24],
-	["192.168.0.0", 16],
-	["198.18.0.0", 15],
-	["198.51.100.0", 24],
-	["203.0.113.0", 24],
-	["224.0.0.0", 4],
-	["240.0.0.0", 4],
-]);
-const globalUnicast = blockList("ipv6", [["2000::", 3]]);
-const specialInGlobalUnicast = blockList("ipv6", [
-	["2001::", 23],
-	["2001:db8::", 32],
-	["2002::", 16],
-	["3fff::", 20],
-]);
-// Private networks an operator's own hosts may reach; the cloud metadata addresses inside them are not.
-const privately = {
-	ipv4: blockList("ipv4", [
-		["10.0.0.0", 8],
-		["100.64.0.0", 10],
-		["172.16.0.0", 12],
-		["192.168.0.0", 16],
-	]),
-	ipv6: blockList("ipv6", [["fc00::", 7]]),
-};
-// Alibaba Cloud's, AWS's over IPv6, Google Cloud's over IPv6; the others sit in link-local, never reached.
-const metadata = { ipv4: new BlockList(), ipv6: new BlockList() };
-metadata.ipv4.addAddress("100.100.100.200", "ipv4");
-metadata.ipv6.addAddress("fd00:ec2::254", "ipv6");
-metadata.ipv6.addAddress("fd20:ce::254", "ipv6");
-const loopback = { ipv4: new BlockList(), ipv6: new BlockList() };
-loopback.ipv4.addSubnet("127.0.0.0", 8, "ipv4");
-loopback.ipv6.addAddress("::1", "ipv6");
-
-const familyOf = (address: string) => (isIP(address) === 6 ? "ipv6" : "ipv4");
-const inList = (lists: Record<"ipv4" | "ipv6", BlockList>, address: string) =>
-	lists[familyOf(address)].check(address, familyOf(address));
-const isSpecial = (address: string) =>
-	familyOf(address) === "ipv6"
-		? !globalUnicast.check(address, "ipv6") || specialInGlobalUnicast.check(address, "ipv6")
-		: specialIpv4.check(address, "ipv4");
-
-/** The IPv4 address an IPv6 address carries (mapped, translated or compatible), if any. */
-function carried(address: string): string | undefined {
-	const found = /^::(?:ffff:(?:0:)?)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(address);
-	if (!found) return undefined;
-	const [high, low] = [Number.parseInt(found[1] ?? "", 16), Number.parseInt(found[2] ?? "", 16)];
-	return [high >> 8, high & 255, low >> 8, low & 255].join(".");
-}
 
 const unbracketed = (host: string) => host.replace(/^\[(.*)\]$/, "$1");
 
@@ -108,7 +51,7 @@ export function normalized(host: string): string | undefined {
 	if (!parsed) return undefined;
 	const name = unbracketed(parsed.hostname).replace(/\.$/, "");
 	if (name === "" || name.split(".").includes("")) return undefined;
-	return carried(name) ?? name;
+	return carriedIPv4(name) ?? name;
 }
 
 const isHost = (host: string) =>
@@ -129,7 +72,8 @@ export function isPair(pair: string): boolean {
 	return /^[1-9][0-9]{0,4}$/.test(port) && Number(port) <= 65_535 && isHost(host);
 }
 
-const pairOf = (pair: string) => {
+/** A pair spelled one way: its host as `normalized` spells hosts, its port as written. */
+export const pairOf = (pair: string) => {
 	const { host, port } = splitPair(pair);
 	return `${normalized(host)}:${port}`;
 };
@@ -207,35 +151,52 @@ export function admitUrl(
 		throw new DestinationRefused("not-allowed");
 	}
 	const plain = url.protocol === "http:";
-	const loopback = plain && policy.plainLoopback.some((pair) => pairOf(pair) === `${host}:${port}`);
-	if (plain && !loopback && !signed) throw new DestinationRefused("scheme");
+	const pair = `${host}:${port}`;
+	const loopback = plain && policy.plainLoopback.some((listed) => pairOf(listed) === pair);
 	// Named by its configured URL, the operator's own reach ends at that URL's origin.
 	const own =
 		narrower.internal !== undefined && URL.parse(narrower.internal)?.origin === url.origin;
+	// An outside party's choice never takes the operator's plain reach, whatever else the caller names.
+	const plainInternal =
+		plain &&
+		!loopback &&
+		own &&
+		narrower.outsideChosen !== true &&
+		policy.plainInternal.some((listed) => pairOf(listed) === pair);
+	if (plain && !loopback && !plainInternal && !signed) throw new DestinationRefused("scheme");
 	const internal = own && listed(host, policy.internal);
-	return { url, host, port, plain, loopback, internal };
+	const written = unbracketed(url.hostname);
+	const address = isIP(written) !== 0 ? { address: written } : {};
+	return { url, host, port, ...address, plain, loopback, internal, plainInternal };
 }
-
-const isPrivate = (address: string) => {
-	const spelled = normalized(address) ?? address;
-	return inList(privately, spelled) && !inList(metadata, spelled);
-};
 
 /** What refuses an address by reach: all but loopback (carried in IPv6 too) for a plain pair; special but private ones for an internal host. */
 function refusing(reach: Pick<Admitted, "loopback" | "internal">): (address: string) => boolean {
-	if (reach.loopback) return (address) => !inList(loopback, normalized(address) ?? address);
-	if (reach.internal) return (address) => isSpecial(address) && !isPrivate(address);
-	return isSpecial;
+	if (reach.loopback) return (address) => !isLoopbackAddress(address);
+	if (reach.internal) return (address) => isSpecialAddress(address) && !isPrivateAddress(address);
+	return isSpecialAddress;
 }
 
 /**
  * One special-purpose address refuses them all; a named plain pair reaches loopback alone, and an
- * internal host private addresses too.
+ * internal host private addresses too. A plain-internal pair reaches private or loopback addresses
+ * alone, every one of them: a public one among them is `plain-public`, any other `special-address`.
  */
 export function admitAddresses(
 	addresses: readonly string[],
-	reach: Pick<Admitted, "loopback" | "internal">,
+	reach: Pick<Admitted, "loopback" | "internal" | "plainInternal">,
 ): readonly string[] {
+	if (reach.plainInternal) {
+		// Loopback lies inside a private network, so a name a sidecar answers on 127/8 or ::1 is taken too.
+		const outside = addresses.filter(
+			(address) => !isPrivateAddress(address) && !isLoopbackAddress(address),
+		);
+		if (addresses.length === 0 || outside.some(isSpecialAddress)) {
+			throw new DestinationRefused("special-address");
+		}
+		if (outside.length > 0) throw new DestinationRefused("plain-public");
+		return addresses;
+	}
 	if (addresses.length === 0 || addresses.some(refusing(reach))) {
 		throw new DestinationRefused("special-address");
 	}
@@ -262,8 +223,10 @@ export function remedyOf(
 		}
 		case "scheme":
 			return url?.protocol === "http:"
-				? "plain http reaches only a host:port that outbound.plain-loopback names; otherwise write the URL with https"
+				? "plain http reaches only a host:port that outbound.plain-loopback names, or, for a URL of your own configuration on a private network, one that outbound.plain-internal names; otherwise write the URL with https"
 				: "only https and http URLs are reached";
+		case "plain-public":
+			return "a host:port outbound.plain-internal names is reached over plain http at private or loopback addresses alone, and its name resolved to a public one: write the URL with https, or point the name at the private network";
 		case "userinfo":
 			return "write the URL without a user or password";
 		case "port":
@@ -272,7 +235,7 @@ export function remedyOf(
 			return "the host matches outbound.deny";
 		case "special-address":
 			return narrower.internal
-				? "the URL names a special-purpose address; a private one is reached only when outbound.internal-hosts names its host"
+				? "the URL names a special-purpose address; a private one is reached only when outbound.internal-hosts names its host, or, over plain http, when outbound.plain-internal names its host:port"
 				: "the URL names a special-purpose address, which outbound never reaches";
 		case "redirect":
 			return "a redirect is never followed";
@@ -281,15 +244,17 @@ export function remedyOf(
 	}
 }
 
-/** Why a credential must not go to these URLs: more than one origin, or one neither https nor a named plain-loopback pair. */
+/** Why a credential must not go to these URLs: more than one origin, or one neither https nor a pair plain-loopback or plain-internal names. */
 export function credentialRefusal(
 	urls: readonly string[],
 	plainLoopback: readonly string[],
+	plainInternal: readonly string[] = [],
 ): CredentialRefusal | undefined {
 	const parsed = urls.map((raw) => URL.parse(raw));
 	const named = (url: URL) => {
 		const port = url.port === "" ? 80 : Number(url.port);
-		return plainLoopback.some((pair) => pairOf(pair) === `${normalized(url.hostname)}:${port}`);
+		const pair = `${normalized(url.hostname)}:${port}`;
+		return [...plainLoopback, ...plainInternal].some((listed) => pairOf(listed) === pair);
 	};
 	const sent = (url: URL | null) =>
 		url?.protocol === "https:" || (url?.protocol === "http:" && named(url));
@@ -304,6 +269,11 @@ const narrowing = (value: number | undefined): number => {
 	throw new RangeError("outbound: a narrower's numbers are positive and finite");
 };
 
+/** Why a URL the browser goes to is refused, and what to set; neither names the URL. */
+const refusedBrowsed =
+	"plain http the browser goes to: name it over https, at a loopback name, or at the origin of the caller's own URL whose host:port outbound.plain-internal names";
+const unreadableBrowsed = "not a URL the browser can be sent to: name an absolute https URL";
+
 /** The operator's destination policy and caps, as the settings give them, for sending and for boot alike. */
 export function policyOf(settings: PolicySettings): Policy {
 	const rules: Rules = {
@@ -312,6 +282,7 @@ export function policyOf(settings: PolicySettings): Policy {
 		deny: settings.deny,
 		plainLoopback: settings["plain-loopback"],
 		internal: settings["internal-hosts"],
+		plainInternal: settings["plain-internal"],
 	};
 	const limitsOf = (narrower: Narrower = {}, signed = false): Limits => ({
 		maxBytes: Math.min(
@@ -334,11 +305,23 @@ export function policyOf(settings: PolicySettings): Policy {
 	const refusalOf = (url: string, narrower: Narrower): RefusalReason | undefined => {
 		try {
 			const admitted = admitUrl(url, rules, narrower, false);
-			// An address written in the URL is checked now; a name's, once resolved, when sent.
-			if (isIP(admitted.host) !== 0) admitAddresses([admitted.host], admitted);
+			// An address written in the URL is checked now, as written; a name's, once resolved, when sent.
+			if (admitted.address !== undefined) admitAddresses([admitted.address], admitted);
 			return undefined;
 		} catch (error) {
-			if (error instanceof DestinationRefused) return error.reason;
+			if (DestinationRefused.is(error)) return error.reason;
+			throw error;
+		}
+	};
+	const plainInternal = (url: string, narrower: Narrower = {}) => {
+		try {
+			const admitted = admitUrl(url, rules, narrower, false);
+			if (admitted.plainInternal !== true) return false;
+			// As `explain`: an address written in the URL is checked now, a name's when sent.
+			if (admitted.address !== undefined) admitAddresses([admitted.address], admitted);
+			return true;
+		} catch (error) {
+			if (DestinationRefused.is(error)) return false;
 			throw error;
 		}
 	};
@@ -349,7 +332,17 @@ export function policyOf(settings: PolicySettings): Policy {
 			const reason = refusalOf(url, narrower);
 			return reason && `${reason}: ${remedyOf(reason, url, rules, narrower)}`;
 		},
-		credentialRefusal: (urls) => credentialRefusal(urls, rules.plainLoopback),
+		plainInternal,
+		browsedRefusal: (url, narrower = {}) => {
+			const target = URL.parse(url);
+			if (target === null) return unreadableBrowsed;
+			if (target.protocol === "https:") return undefined;
+			const plain = target.protocol === "http:";
+			if (plain && (isLoopbackName(target.hostname) || plainInternal(url, narrower)))
+				return undefined;
+			return refusedBrowsed;
+		},
+		credentialRefusal: (urls) => credentialRefusal(urls, rules.plainLoopback, rules.plainInternal),
 		listed,
 		limitsOf,
 	};

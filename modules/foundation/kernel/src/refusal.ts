@@ -3,13 +3,25 @@ export interface Refusal {
 	readonly reason: string;
 }
 
+/** The mark a refused boot carries, the same in every copy of the kernel a bundle may hold. */
+const bootRefusedMark = Symbol.for("@mod/kernel.boot-refused");
+
 /** Raised by assembly when anything refuses; nothing is served after it. */
 export class BootRefused extends Error {
 	readonly refusals: readonly Refusal[];
+	readonly [bootRefusedMark] = true;
 	constructor(refusals: readonly Refusal[]) {
 		super(`boot refused (${refusals.length})`);
 		this.name = "BootRefused";
 		this.refusals = Object.freeze([...refusals]);
+	}
+	/** Whether `error` is a refused boot, by its mark rather than its class, so two copies of the kernel agree. */
+	static is(error: unknown): error is BootRefused {
+		return (
+			typeof error === "object" &&
+			error !== null &&
+			(error as { readonly [bootRefusedMark]?: unknown })[bootRefusedMark] === true
+		);
 	}
 }
 
@@ -22,8 +34,12 @@ export class RefusalSignal extends Error {
 	}
 }
 
+/** The mark an outage carries, the same in every copy of the kernel a bundle may hold. */
+const unavailableMark = Symbol.for("@mod/kernel.unavailable");
+
 export class Unavailable extends Error {
 	readonly what: string;
+	readonly [unavailableMark] = true;
 	constructor(what: string) {
 		super(`${what} unavailable`);
 		this.name = "Unavailable";
@@ -31,6 +47,11 @@ export class Unavailable extends Error {
 	}
 }
 
+/** Whether `error` is an outage, by its mark rather than its class, so two copies of the kernel agree. */
 export function isUnavailable(error: unknown): error is Unavailable {
-	return error instanceof Unavailable;
+	return (
+		typeof error === "object" &&
+		error !== null &&
+		(error as { readonly [unavailableMark]?: unknown })[unavailableMark] === true
+	);
 }

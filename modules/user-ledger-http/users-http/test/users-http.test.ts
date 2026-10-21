@@ -12,7 +12,13 @@ import {
 } from "@mod/kernel";
 import { type Narrower, outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
-import { credentialPolicy, outboundRefusals } from "@mod/outbound-policy";
+import {
+	credentialPolicy,
+	credentialRefusalText,
+	outboundRefusals,
+	policyOf,
+	policySettings,
+} from "@mod/outbound-policy";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Ledger, ledgers, userAttribute, users } from "@mod/users";
 import usersModule from "@mod/users/module";
@@ -42,9 +48,13 @@ interface Answer {
 /**
  * The ledger in the request shape: alice at `/ledger/authenticate`, behind the credential. It refuses
  * an unknown identifier and a wrong password with 401, without a Bearer challenge. At
- * `/ledger/subject` it finds alice, refuses the suspended `s-gone` with 410, and knows no one else.
- * At `/ledger/upstream` it ties Apple's `apple-alice` to alice and refuses `apple-gone` with 410.
+ * `/ledger/subject` it finds alice, refuses the suspended `s-gone` with a 410 saying `gone`, and
+ * knows no one else, saying `not_found`. At `/ledger/upstream` it ties Apple's `apple-alice` to
+ * alice and refuses `apple-gone` alike. Any other route is a bare 404.
  */
+const notFound: Answer = { status: 404, json: { error: "not_found" } };
+const gone: Answer = { status: 410, json: { error: "gone" } };
+
 function aliceLedger(asked: Asked): Answer {
 	if (asked.headers.authorization !== `Bearer ${credential}`) {
 		return { status: 401, headers: { "www-authenticate": 'Bearer error="invalid_token"' } };
@@ -56,15 +66,13 @@ function aliceLedger(asked: Asked): Answer {
 	}
 	if (asked.method === "POST" && asked.path === "/ledger/subject") {
 		const { subject } = JSON.parse(asked.body);
-		if (subject === "s-gone") return { status: 410 };
-		return subject === "s-alice" ? { status: 200, json: alice } : { status: 404 };
+		if (subject === "s-gone") return gone;
+		return subject === "s-alice" ? { status: 200, json: alice } : notFound;
 	}
 	if (asked.method === "POST" && asked.path === "/ledger/upstream") {
 		const { idp, subject } = JSON.parse(asked.body);
-		if (idp === "apple" && subject === "apple-gone") return { status: 410 };
-		return idp === "apple" && subject === "apple-alice"
-			? { status: 200, json: alice }
-			: { status: 404 };
+		if (idp === "apple" && subject === "apple-gone") return gone;
+		return idp === "apple" && subject === "apple-alice" ? { status: 200, json: alice } : notFound;
 	}
 	return { status: 404 };
 }
@@ -640,7 +648,10 @@ describe("users-http", () => {
 			[
 				["127.0.0.1"],
 				"http://127.0.0.1:8/ledger/authenticate",
-				"scheme: plain http reaches only a host:port that outbound.plain-loopback names; otherwise write the URL with https",
+				// The policy's own words for plain http, which outbound-policy's tests hold.
+				policyOf(policySettings.parse({ allow: ["127.0.0.1"] })).explain(
+					"http://127.0.0.1:8/ledger/authenticate",
+				),
 			],
 		] as const;
 		for (const [allow, url, reason] of refused) {
@@ -733,6 +744,13 @@ describe("users-http looking a user up by subject", () => {
 			{ status: 200, json: { id: "" } },
 			{ status: 200, json: ["s-alice"] },
 			{ status: 200, text: "s-alice" },
+			// A 404 or 410 that does not say what it means: a wrong path, a gateway, a ledger hiding itself.
+			{ status: 404 },
+			{ status: 410 },
+			{ status: 404, text: "not_found" },
+			{ status: 404, json: { error: "gone" } },
+			{ status: 410, json: { error: "not_found" } },
+			{ status: 404, json: ["not_found"] },
 		];
 		for (const answer of answers) {
 			script = () => answer;
@@ -742,6 +760,18 @@ describe("users-http looking a user up by subject", () => {
 		}
 		expect(received.map((r) => r.path).filter((path) => path !== "/ledger/subject")).toEqual([]);
 		expect(logged).toContainEqual(["users-http.ledger_failed", { status: 201 }]);
+	});
+
+	it("logs a lookup's 404 or 410 that does not say it knows no such user, with its status alone", async () => {
+		const { ledger } = await looking();
+		script = () => ({ status: 404, text: "ledger detail" });
+		await expect(ledger.bySubject("s-alice")).rejects.toSatisfy(isUnavailable);
+		script = () => ({ status: 410 });
+		await expect(ledger.bySubject("s-alice")).rejects.toSatisfy(isUnavailable);
+		expect(logged).toEqual([
+			["users-http.ledger_failed", { status: 404, reason: "unmarked" }],
+			["users-http.ledger_failed", { status: 410, reason: "unmarked" }],
+		]);
 	});
 
 	it("answers no password without verify-url, asking nothing", async () => {
@@ -783,6 +813,59 @@ describe("users-http looking a user up by subject", () => {
 		).resolves.toBeDefined();
 	});
 
+	it("starts with its credential to a ledger at a plain-internal pair, and says how to name one where plain http is refused", async () => {
+		const internal = "ledger.internal:9092";
+		const at = (pairs: readonly string[]) =>
+			assemble({
+				modules: [
+					outboundModule,
+					usersModule,
+					secretHashModule,
+					memoryUsersStores().module,
+					usersHttp,
+				],
+				config: {
+					...kernelConfig(),
+					outbound: { allow: ["ledger.internal"], "plain-internal": pairs },
+					"users-http": { "verify-url": `http://${internal}/verify`, credential },
+				},
+				runtime,
+			});
+		await expect(at([internal])).resolves.toBeDefined();
+		await expect(at([])).rejects.toMatchObject({
+			refusals: [
+				{
+					where: "users-http.verify-url",
+					reason: expect.stringContaining("outbound.plain-internal"),
+				},
+			],
+		});
+	});
+
+	it("says why its credential may not go in outbound-policy's words", async () => {
+		for (const refusal of ["origins", "scheme"] as const) {
+			const standIn = defineModule({ name: "outbound" }, (m) => [
+				m.provide(outbound).by(() => ({
+					fetch: async () => {
+						throw new Error("never sent");
+					},
+				})),
+				m.provide(outboundRefusals).by(() => ({ explained: () => undefined })),
+				m.provide(credentialPolicy).by(() => ({ refusalOf: () => refusal })),
+			]);
+			await expect(
+				assemble({
+					modules: [standIn, usersModule, secretHashModule, memoryUsersStores().module, usersHttp],
+					config: { ...kernelConfig(), "users-http": settings() },
+					runtime,
+				}),
+				refusal,
+			).rejects.toMatchObject({
+				refusals: [{ where: "users-http.credential", reason: credentialRefusalText(refusal) }],
+			});
+		}
+	});
+
 	it("refuses to start on a subject-url outbound's policy refuses, saying why", async () => {
 		await expect(boot({ "subject-url": "https://ledger.example/subject" })).rejects.toMatchObject({
 			refusals: [{ where: "users-http.subject-url", reason: expect.stringContaining("outbound") }],
@@ -812,6 +895,8 @@ describe("users-http looking a user up by upstream identity", () => {
 			{ status: 403 },
 			{ status: 500 },
 			{ status: 200, json: {} },
+			{ status: 404 },
+			{ status: 410 },
 		]) {
 			script = () => answer;
 			await expect(

@@ -87,6 +87,9 @@ const setUp = (part: IdentityPart): NewPart => ({
 				? { "account-max-wait": `${part.login.accountMaxWaitSeconds}s` }
 				: {}),
 		},
+		...(part.recentAuthenticationSeconds
+			? { "session-lifecycle": { "recent-authentication": `${part.recentAuthenticationSeconds}s` } }
+			: {}),
 		...(part.ledger ? ledgerConfig(part.ledger) : {}),
 		...(part.revocations
 			? {

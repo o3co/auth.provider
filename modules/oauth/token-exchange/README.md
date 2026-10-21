@@ -33,6 +33,7 @@
 - Its lifetime is the `expires_in` asked, or `tokens`' lifetime when none is asked, cut to `max-lifetime`; without that cap, `tokens`' lifetime cuts an asked one too. `expires_in` in the answer is that lifetime.
 - `expires_in` left out or empty asks for nothing. Otherwise it is 1–10 ASCII digits above zero, or `invalid_request` before any token is checked.
 - The subject's amr, authentication time and acr are carried only from this provider's own tokens.
+- The claims a grant added to a token it takes (`claims`) are never carried into the token it issues.
 - It issues through `tokens`' issuance policies, from the subject token's session when it was recorded to one; their refusal is `token-endpoint`'s answer.
 - A verifier's answer is checked for shape once (each scope one RFC 6749 scope-token) and frozen; only that copy is read. An answer marked invalid, or a malformed one, is a failed validation, never a skipped tie.
 - Both tokens and their ties are checked again right before issuing, and the ties then answered are joined. A once-only token is then used up, once the policies admit the grant: a refusal or Unavailable leaves it unused, and `replayed` is refused.

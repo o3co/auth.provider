@@ -82,7 +82,7 @@ export function noticesOver(p: NoticeParts) {
 		try {
 			return (await p.outbound.fetch(uri, { method: "POST", headers, body })).status;
 		} catch (error) {
-			if (error instanceof DestinationRefused) return error;
+			if (DestinationRefused.is(error)) return error;
 			throw error;
 		}
 	};
@@ -104,7 +104,7 @@ export function noticesOver(p: NoticeParts) {
 		if (!registered || uri === undefined) return done();
 		const token = await logoutToken(fields, registered["backchannel-logout-session-required"]);
 		const answer = await posted(uri, token);
-		if (answer instanceof DestinationRefused) {
+		if (DestinationRefused.is(answer)) {
 			p.log.warn("rp-logout.backchannel_refused", { client, reason: answer.reason });
 			return done();
 		}

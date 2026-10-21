@@ -1,11 +1,25 @@
-import { type Audit, declaredAudit } from "@mod/audit";
+import { type Audit, audit, declaredAudit } from "@mod/audit";
 import { clientAllowance } from "@mod/client-allowance";
-import type { Client, Clients } from "@mod/clients";
-import type { Grant, GrantInput, SessionIssuance, TargetRule } from "@mod/grants";
+import { type Client, type Clients, clients } from "@mod/clients";
+import {
+	type Grant,
+	type GrantInput,
+	type SessionIssuance,
+	sessionIssuances,
+	type TargetRule,
+	targets,
+} from "@mod/grants";
 import { type HttpRequest, type HttpResponse, jsonAnswer, type Route } from "@mod/http";
+import type { BuildContext } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
-import type { Binding, ClientBindings, SenderBindings } from "@mod/sender-binding";
-import type { Tokens } from "@mod/tokens";
+import {
+	type Binding,
+	type ClientBindings,
+	clientBindings,
+	type SenderBindings,
+	senderBinding,
+} from "@mod/sender-binding";
+import { type Tokens, tokens } from "@mod/tokens";
 import events from "../audit-events.ts";
 import { authenticateClient, oauthError } from "../contract.ts";
 import { answeredBody } from "./answer.ts";
@@ -51,8 +65,10 @@ export function grantInputOf(parts: {
 	readonly targets: TargetRule;
 	readonly tokens: Tokens;
 	readonly told: readonly SessionIssuance[];
+	/** Told the names of the claims the grant added to each token issued. */
+	readonly added?: (names: readonly string[]) => void;
 }): GrantInput {
-	const { request, client, grantType, binding, targets, tokens, told } = parts;
+	const { request, client, grantType, binding, targets, tokens, told, added } = parts;
 	const { param, value } = readerOf(request);
 	return {
 		request,
@@ -61,9 +77,42 @@ export function grantInputOf(parts: {
 		value,
 		target: (audience, within) => targets.target({ param, audience, within }),
 		...(binding ? { binding } : {}),
-		...issuanceFor(tokens, grantType, binding, told),
+		...issuanceFor(tokens, grantType, binding, told, added),
 	};
 }
+
+/** The endpoint's handler over the contracts the assembly gives, dispatching to the grants composed. */
+export const endpointIn = async (c: BuildContext<unknown>, composed: readonly Grant[]) =>
+	tokenEndpoint(
+		await c.get(clients),
+		await c.get(tokens),
+		await c.collect(sessionIssuances),
+		await c.get(senderBinding),
+		await c.get(clientBindings),
+		new Map(composed.map((g) => [g.grantType, g])),
+		await c.get(targets),
+		await c.get(audit),
+	);
+
+/** The longest list of added claims' names an audit event holds. */
+const namesLimit = 2048;
+
+/**
+ * The names in their order, one space apart, every one while they fit the limit; past it, as many as
+ * fit and how many were left out. Nothing when there are none.
+ */
+const namesOf = (names: ReadonlySet<string>) => {
+	if (names.size === 0) return {};
+	const sorted = [...names].sort();
+	let written = "";
+	for (const [i, name] of sorted.entries()) {
+		const next = written === "" ? name : `${written} ${name}`;
+		if (next.length > namesLimit)
+			return { claims: written, claims_left: String(sorted.length - i) };
+		written = next;
+	}
+	return { claims: written };
+};
 
 /** The endpoint's handler and its answer to Unavailable. */
 export function tokenEndpoint(
@@ -83,6 +132,8 @@ export function tokenEndpoint(
 		const client = authenticated.client;
 		const source = determinedSource(request);
 		// Once the client is known, each answer but an unavailable one is recorded; a known grant type is named.
+		// The claims grants added to the tokens issued for this request, by name; never their values.
+		const addedNames = new Set<string>();
 		const record = (
 			grantType: string | undefined,
 			failure?: { reason: string; error: string; policy?: string; refusal?: string },
@@ -94,7 +145,9 @@ export function tokenEndpoint(
 			};
 			if (failure)
 				recorded.record("token.issued.failure", { attributes: { ...attributes, ...failure } });
-			else recorded.record("token.issued", { attributes });
+			else {
+				recorded.record("token.issued", { attributes: { ...attributes, ...namesOf(addedNames) } });
+			}
 		};
 		const refuse = (failure: {
 			readonly grantType?: string;
@@ -182,7 +235,12 @@ export function tokenEndpoint(
 			const { error, description } = untargeted;
 			return refuse({ grantType, reason: "untargeted", error, description });
 		}
-		const input = grantInputOf({ request, client, grantType, binding, targets, tokens, told });
+		const input = grantInputOf({
+			...{ request, client, grantType, binding, targets, tokens, told },
+			added: (names) => {
+				for (const name of names) addedNames.add(name);
+			},
+		});
 		const outcome = await grant.handle(input);
 		// One answer for every grant; the audit names the policy and its reason, never a value.
 		if (outcome.kind === "refused") {

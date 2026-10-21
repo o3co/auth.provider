@@ -17,6 +17,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 - [From 0.18.0-rc.1](#from-0180-rc1)
 - [From 0.18.0-rc.2](#from-0180-rc2)
 - [From 0.18.0-rc.3](#from-0180-rc3)
+- [From 0.18.0-rc.4](#from-0180-rc4)
 - [Operational notes](#operational-notes)
 
 ## Before you start
@@ -150,7 +151,7 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 | `key-store.local.algorithm` | `keys.signing.alg` | Required (`EdDSA`, `ES256`, `RS256`, `HS256`) |
 | `key-store.local.kid` | `keys.signing.kid` | Required; 1–128 of `A-Za-z0-9._~-` |
 | `key-store.local.privateKey`, `privateKeyPath` | `keys.signing.private-key` | PKCS #8 PEM text; no file paths |
-| `key-store.local.secret` | `keys.signing.secret` | `oidc` needs an asymmetric key. 0.17 took the string's own bytes as the HMAC key; 0.18 decodes the value (hex where it is whole bytes of hex, else base64) and takes the decoded bytes, so a value copied as written boots with other key bytes, and every token 0.17 signed, and every party holding that string, no longer match. To keep the same key, write the hex of the old string's UTF-8 bytes (`printf %s "$OLD" \| od -An -v -tx1 \| tr -d ' \n'`); the floor of 32 bytes of 8 byte values or more still applies |
+| `key-store.local.secret` | `keys.signing.secret` | `oidc` needs an asymmetric key. 0.17 took the string's own bytes as the HMAC key; 0.18 decodes the value (hex where it is whole bytes of hex, else base64) and takes the decoded bytes, so a value copied as written boots with other key bytes, and every token 0.17 signed, and every party holding that string, no longer match. To keep the same key, set `keys.signing.secret-encoding = utf8` and copy the string as written, or write the hex of its UTF-8 bytes (`printf %s "$OLD" \| od -An -v -tx1 \| tr -d ' \n'`); the floor of 32 bytes of 8 byte values or more still applies, to the bytes read |
 | `key-store.local.previousKeys` | `keys.previous` (`kid`, `alg`, `public-key`, `expires-at`) | `alg` per entry; asymmetric only |
 
 ### Clients
@@ -382,6 +383,7 @@ Compose `userinfo` and `oidc` for the userinfo endpoint and ID tokens, `rp-logou
 | (ID token lifetime fixed at 3600 s) | `oidc.id-token-lifetime` | Default `1h`; `1m` to `1d` |
 | `oauth.oidcMode` | `authorize.oidc-mode` (`oidc-required` or `dual`) | Default `oidc-required`, as before |
 | `/oauth/logout` (with the oauth endpoints) | compose `rp-logout` + `rp-logout-store` | `oidc` judges the `id_token_hint` |
+| (an old `id_token_hint` led to a page asking to confirm) | (no setting) | A hint issued more than 24 hours ago is refused `400 invalid_token`, by GET or POST, and the session stays open; the RP sends a fresher hint, or the user logs out at `POST /session/logout` |
 | `POST /session/logout` (session module) | compose `logout` | |
 | upstream end-session from `/oauth/logout` | compose `rp-logout-federation` | Needs `federation-tokens` |
 | `core.sessionLifecycle.sweepIntervalSeconds` | `session-lifecycle.sweep-interval` (pending closes), `rp-logout.sweep-interval` (pending notices) | Defaults `30s` and `1m`; `0` (no sweep) is gone |
@@ -430,7 +432,9 @@ For a second factor by mail alone, with no other factor to enrol, set `mfa-email
 | (development mail sender) | the `mail` module with `mail.accept-unsent = true` | It sends nothing and logs the purpose and a hash of the address alone: a code or link in the message is never logged, unlike 0.17's |
 | `core.outbound.allowedHosts` | `outbound.allow`, or `outbound.allow-any-public = true` | An empty list now reaches nothing. Entries as before: a host, or `.name` for the name and the names under it |
 | `core.outbound.deniedHosts`, `timeoutMs`, `maxResponseBytes` | `outbound.deny`, `timeout`, `max-response-size` | `deny` takes entries as `allow` does |
-| `core.outbound.internalHosts` | `outbound.internal-hosts`; `outbound.plain-loopback` (`host:port`) for plain http at loopback | `internal-hosts` reaches private addresses (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7) for the users-http ledger and the audit-http collector only; a client's URLs (key sets, back-channel logout) never reach a private, loopback or link-local address. `.name` still covers the name and the names under it |
+| `core.outbound.internalHosts` | `outbound.internal-hosts`; `outbound.plain-loopback` (`host:port`) for plain http at loopback, `outbound.plain-internal` (`host:port`) for plain http at private or loopback addresses | `internal-hosts` reaches private addresses (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7) for the users-http ledger and the audit-http collector only; a client's URLs (key sets, back-channel logout) never reach a private, loopback or link-local address. `.name` still covers the name and the names under it |
+| `core.outbound.internalHosts` | `outbound.internal-hosts`; `outbound.plain-loopback` (`host:port`) for plain http at loopback, `outbound.plain-internal` (`host:port`) for plain http at private addresses | `internal-hosts` reaches private addresses (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7) for the users-http ledger and the audit-http collector only; a client's URLs (key sets, back-channel logout) never reach a private, loopback or link-local address. `.name` still covers the name and the names under it |
+| `core.outbound.internalHosts` | `outbound.internal-hosts`; `outbound.plain-loopback` (`host:port`) for plain http at loopback | `internal-hosts` reaches private addresses (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7) for URLs from your own configuration only: the users-http ledger, the audit-http collector, an OpenID Connect IdP's issuer and the endpoints you give it (with the key set its description names on the issuer's origin), and a GitHub Enterprise's endpoints; a client's URLs (key sets, back-channel logout) never reach a private, loopback or link-local address. `.name` still covers the name and the names under it |
 | `core.outbound.egress = direct` | `outbound.direct-despite-proxy = true` | Only while every request goes direct; with a proxy, write `outbound.proxy` instead |
 | `HTTPS_PROXY` with `NODE_USE_ENV_PROXY` | `outbound.proxy` (an http origin alone, such as `http://proxy:3128`), `outbound.proxy-authorization` | Every https request goes through it by CONNECT, key sets and back-channel notices included; the variables are never read |
 | `NO_PROXY` | `outbound.direct-hosts` | The variable is never read: list each host here, as written (no `*`, `_`, spaces or short IPv4 forms); `.name` covers the name and the names under it |
@@ -535,7 +539,7 @@ Times and sizes are written with their unit (`30s`, `5m`, `64KiB`); a number wit
 - **Users**: plain-text passwords, identifiers that differ only by case or Unicode form, and an upstream identity linked to two users.
 - **acr**: an acr value that no composed way of logging in can meet.
 - **Outbound**: `ALL_PROXY`, and the lower-case proxy variables, now refuse boot as `HTTP_PROXY` and `HTTPS_PROXY` already did, unless `outbound.proxy` or `outbound.direct-despite-proxy` is written; the variables are never read.
-- **audit-http**: an `authorization` value with a URL that is neither https nor a `plain-loopback` pair outbound names, or a URL that outbound's policy refuses.
+- **audit-http**: an `authorization` value with a URL that is neither https nor a `plain-loopback` or `plain-internal` pair outbound names, or a URL that outbound's policy refuses.
 - **users-http**: a `verify-url` that outbound's policy refuses.
 - **mail**: the logging-only sender without `mail.accept-unsent = true`.
 - **Revocation**: a composition that issues refresh tokens or codes while access tokens cannot be revoked.
@@ -580,7 +584,7 @@ These are requests 0.17 accepted, or answered differently, that 0.18 refuses or 
 |---|---|---|
 | Verify a password | `POST {authenticateUrl}` with `{"email","password"}` | `POST {verify-url}` with `{"email","password"}`, `Content-Type` and `Accept: application/json` |
 | Credential | | `Authorization: Bearer {credential}` when `credential` is set; none sent otherwise |
-| Find a user by subject | none | `POST {subject-url}` with `{"subject"}`: `200` with the user, its `id` the subject asked; `404` or `410`: no such user; anything else is unavailable. Without `subject-url`, every lookup by subject is one it cannot answer |
+| Find a user by subject | none | `POST {subject-url}` with `{"subject"}`: `200` with the user, its `id` the subject asked; `404` with the JSON object `{"error":"not_found"}`, or `410` with `{"error":"gone"}`: no such user; a `404` or `410` saying neither, and anything else, is unavailable (`503`), logged as `users-http.ledger_failed`. Without `subject-url`, every lookup by subject is one it cannot answer |
 | Success | any `2xx` with the user | `200` with a JSON object: `id` (the subject) and a non-empty `username`; `email`, `name`, `picture`, `groups` and a boolean `emailVerified` (only beside `email`) are kept as attributes, other fields dropped |
 | No such user, or a wrong password | `401` or `403` | `401` alone, unless a `credential` was sent and the answer carries a Bearer challenge: that refuses the credential, and reads as unavailable. A `403` reads as unavailable (`503`): answer a wrong password `401` |
 | Anything else | | Any other status, `404` and other `2xx` included, or a `200` that is not such an object: the ledger is unavailable, and the login answers `503` |
@@ -589,7 +593,7 @@ Upstream links and MFA enrollment are no longer kept by the ledger. An upstream 
 
 A ledger that suspends a user stops new logins and grants by its answers. To end the user's open sessions and issued tokens as well, compose `subject-revocation-http` and have the ledger post the subject to `/ledger/subject-revocations`; see [Revoking a user from the ledger](runbook.md#revoking-a-user-from-the-ledger).
 
-A ledger can also be asked for a user by subject, so a user who signs in upstream has the ledger's attributes, such as the address `mfa-email` mails: set `users-http.subject-url`. It is posted `{"subject"}` the same way; a `200` with an `id` is the user (no `username` asked), `404` and `410` are no such user, and anything else, `401` and `403` included, is unavailable. Likewise `users-http.upstream-url` is posted `{"idp", "subject"}` to look a user up by upstream identity, read the same way; with it, the ledger's answer is the last word, and links users keeps are not read. A lookup's `404` reads as no such user whatever sent it, and nothing is logged: the ledger must refuse a caller it does not accept with `401` or `403`, never `404`, and a gateway in front of it that answers an unknown route `404` (a mistyped `subject-url` or `upstream-url`, a route not deployed) makes every user unknown, so a federated login answers `unknown_user` and a subject's attributes drop out of its tokens. With a `credential`, every URL must be at one origin. Reading the password call's `401` as no such user is kept for 0.17's ledgers, and is to go in a later release, after which it reads as a lookup's does; a `403` is already unavailable.
+A ledger can also be asked for a user by subject, so a user who signs in upstream has the ledger's attributes, such as the address `mfa-email` mails: set `users-http.subject-url`. It is posted `{"subject"}` the same way; a `200` with an `id` is the user (no `username` asked), a `404` with the JSON object `{"error":"not_found"}` or a `410` with `{"error":"gone"}` is no such user, and anything else, a `404` or `410` saying neither and `401` and `403` included, is unavailable. Likewise `users-http.upstream-url` is posted `{"idp", "subject"}` to look a user up by upstream identity, read the same way; with it, the ledger's answer is the last word, and links users keeps are not read. A `404` without that body (a mistyped `subject-url` or `upstream-url`, a route not deployed, a gateway's unknown route, a ledger hiding itself) is unavailable and logged as `users-http.ledger_failed` with its status and `reason: "unmarked"`, never no such user; the ledger refuses a caller it does not accept with `401` or `403`, never `404`. With a `credential`, every URL must be at one origin. Reading the password call's `401` as no such user is kept for 0.17's ledgers, and is to go in a later release, after which it reads as a lookup's does; a `403` is already unavailable.
 
 ### MFA and federation
 
@@ -755,6 +759,54 @@ What changed since rc.3. Coming from an earlier release candidate, read the sect
 - **A federation grant's renewals** count with its lodgings: a client's renewals and lodgings together take `federation-grants.lodges` per `lodge-window`, and past it a renewal answers `429` with `retry-after`. Raise `lodges` where clients renew often.
 - **`federation` with no IdP** still boots, but warns `federation.no_idps` at each boot, as every login answers not found.
 
+## From 0.18.0-rc.4
+
+What changed since rc.4. Coming from an earlier release candidate, read the sections above first.
+
+Before you upgrade, do these three; each stops a deployment that upgrades first:
+
+1. **Mark a user ledger's "no such user"**: have it answer `404` with `{"error":"not_found"}` and `410` with `{"error":"gone"}`, as [below](#a-running-deployment) says. rc.4 reads a marked `404` as it reads a bare one, so the ledger can change first.
+2. **Allow a managed Redis the commands the store needs** (`WAIT`, `ROLE`, `INFO`, `EVAL`, and the commands its scripts call), as the [runbook](runbook.md#managed-redisvalkey-with-replicas) lists: this version refuses boot where one is refused.
+3. **In an app composed by hand, compose the bridges**: `session-tokens` beside `code-grant`, `mfa-revocation` beside `mfa-flows`, `mfa-witnessing` beside a witness, and `federation-link` beside `federation`. An app made by `create-auth-provider`, or composed through `combinations`, has them already.
+
+After upgrading an app with a second-factor witness, run its `witness-backfill` script once.
+
+### A running deployment
+
+- **A user ledger over HTTP**: every unknown user's federated login and lookup answers `503` until the ledger marks its "not found". users-http now reads a lookup's (`subject-url`, `upstream-url`) `404` as no such user only with the JSON object `{"error":"not_found"}`, and a `410` only with `{"error":"gone"}`. A `404` or `410` saying neither (a mistyped URL, a route not deployed, a gateway's unknown route, a ledger hiding itself) is unavailable, logged as `users-http.ledger_failed` with its status and `reason: "unmarked"`. Change the ledger before upgrading: rc.4 reads the marked answers as it reads bare ones. To keep logins working: have the ledger answer a user it does not know `404` with `{"error":"not_found"}` (`Content-Type: application/json`), and a user it knows but refuses `410` with `{"error":"gone"}`; refuse a caller it does not accept with `401` or `403`, never `404`. See [User ledger over HTTP](#user-ledger-over-http).
+- **A Redis store on a managed service**: boot sends the commands the store needs once and is refused, naming the command, where the service refuses one (`WAIT`, `ROLE`, `INFO`, `EVAL`, or a command a script calls); rc.4 booted and answered 503 to every replicated write. Allow the commands the [runbook](runbook.md#managed-redisvalkey-with-replicas) lists before upgrading: a deployment rc.4 ran refuses boot under this version until they are allowed.
+- **An HS256 secret**: `keys.signing.secret-encoding` names how `secret` is read (`hex`, `base64`, or `utf8`, the text's own bytes); unset, it is read as before, and a value not of the reading named refuses boot. To keep 0.17's key, or to share the secret with policy-verifier, which takes the text's own bytes, set `utf8`.
+- **Linking an upstream identity**: the callback now checks the session at `credentials`, as the start did. Without `mfa`, that is a sign-in within 300 s, so a user who spends longer at the IdP is refused `401 login_required`; they sign in again and start the link anew. Nothing is written for the refused link.
+- **A link under way during the upgrade**: its round trip, begun under rc.4, is read as `invalid_state` at the callback; the user starts the link again.
+- **An IdP on a private network**: an OpenID Connect issuer or a GitHub Enterprise at a private address, refused since rc.1, is reached again where `outbound.internal-hosts` lists its host (and `outbound.allow` names it). Only the issuer's origin and the endpoints you give are reached privately; an endpoint the description names on another origin, another port included, reaches public addresses only. Where the description puts an endpoint on another origin, set `discovery = false` and give the endpoints (`authorization-endpoint`, `token-endpoint`, `jwks-uri`, and `end-session-endpoint` where it has one): over plain http, name each endpoint's `host:port` in `outbound.plain-internal`; over https, its host in `internal-hosts`.
+- **An IdP endpoint the browser goes to over plain http now refuses boot unless outbound takes it for the browser**: an OpenID Connect IdP's authorization and end-of-session endpoints (described or given) and a GitHub IdP's `authorization-endpoint` must be https, or plain http at a loopback name (`localhost`, `127.0.0.1`, `[::1]`) or at the origin of the issuer or the given endpoint where `outbound.plain-internal` names its `host:port`; a Google or Apple IdP's `authorization-endpoint` and `end-session-endpoint` must be https, or plain http at a loopback name. An issuer on plain http no longer makes plain http right for every endpoint its description names, and a name that only resolves to loopback (say `idp.local:8080` in `outbound.plain-loopback`) is refused for the browser; the token endpoint and key set are still judged by `outbound.plain-loopback` and `outbound.plain-internal` as before.
+- **A `plain-loopback` pair** is reached only where the address is loopback as written: a name that resolves to an IPv6 form that only carries 127/8 (`::7f00:1`, `::ffff:0:7f00:1`), or a URL that writes one, is refused as a special address; rc.4 took it as 127.0.0.1. A proxy named by a name, `localhost` included, now warns that `proxy-authorization` goes in the clear; write the proxy as a loopback address (`http://127.0.0.1:3128`) where it runs on the host.
+- **An address written in a URL** is reached as written: a public IPv4 address written in IPv6 (`https://[::ffff:5db8:d70e]/`, or `[::5db8:d70e]`) is refused as a special address, as a name resolving to that form already was; rc.4 reached it as the IPv4 address. Write the IPv4 address itself (`https://93.184.215.14/`).
+- **Sign in with Apple**: a callback on a name under `localhost` or on 127/8 mapped into IPv6 now refuses boot, as `localhost` and 127/8 already did.
+- **mail-smtp with `security = none`** boots for the same loopback hosts by name (a name under `localhost`, `localhost.`), and sends only when the connected peer is a loopback address, 127/8 mapped into IPv6 in any spelling included. Write an IPv6 host without brackets (`::1`): a bracketed one refuses boot under `none`.
+- **A URL that takes plain http on a loopback host** (a login or step-up page, a return target, a federation grant's page) now also takes a name under `localhost` (such as `http://app.localhost:3000/`), `localhost.` with its trailing dot, and 127/8 mapped into IPv6 (`http://[::ffff:7f00:1]/`): the host is judged by its name alone, by `url-setting`'s `isLoopbackName`. Such a name reaches loopback only where the browser's resolver keeps names under `localhost` there, as RFC 6761 asks and current browsers do. `localhost.localdomain`, `0.0.0.0` and any other host over http still refuse boot.
+- **When the second-factor witness is marked**: a binding marks the subject after its factor is written, so a failed write no longer leaves a mark that refuses the subject until a reset. Subjects that enrolled before the witness was composed are marked with the app's new `witness-backfill` script, in place of marking them at the ledger by hand (see the [runbook](runbook.md#keeping-the-second-factor-witness-at-the-ledger)). An app generated before carries no such script: generate it again, or copy `src/witness-backfill.ts` and its script from a newly generated one.
+- **0.17 variables left in the environment**: a generated app's entry writes `warn config-files: N variables named in 0.17 are set and never read: …` to standard error once when the environment sets a variable 0.17 read and none of the app's configuration files reads it, naming it, never its value; boot goes on. Such a variable has no effect: map its setting with the tables above, then remove it.
+
+### A generated app or one composed by hand
+
+- **An app's entry reads its configuration files from the `config-files` module**: `loadConfig` and `ConfigSource` moved there from the kernel, unchanged. An app generated with an earlier release candidate imports `loadConfig` from the kernel in `src/main.ts` (and `src/reseal.ts`, where it has one). An app on the published packages imports it from `@o3co/auth-provider-foundation/config-files` instead of `@o3co/auth-provider-foundation/kernel`, and upgrades `@o3co/auth-provider-foundation`; it adds no dependency. An app in the workspace imports it from `@mod/config-files` and adds that package to its dependencies. Or generate the app again. Its configuration is unchanged.
+- **An app made from listed modules** (`create-auth-provider <target> <module>…`) now holds what those modules need to run, and is written as a pattern's app is: its configuration file reads each key from the environment and holds no value, beside `.env.example`, `config/local.conf.example`, a Dockerfile, a README and `AGENTS.md`. Generate it again and carry your settings into `.env` or the local layer: boot refuses until `kernel.deployment` and the keys its README names are set.
+- **An app that composes its modules by hand** (its own `assemble`) composes `session-tokens` where it composes `code-grant`, and `mfa-revocation` where it composes `mfa-flows`, as `combinations` does by itself: without them, boot is refused (`code-grant`: its tokens must be recorded to their session; `mfa-flows`: a binding begun before a revocation would bind). An app generated by `create-auth-provider` has them already.
+- **The second-factor witness in an app composed by hand**: `mfa-witnessing` now keeps the witness for `mfa`; compose it beside `mfa-witness-http` (or a witness of your own). Without it, `mfa` refuses boot ("an enrollment witness is composed without mfa-witnessing"), so a witness is never left unasked. `combinations` adds it. Once upgraded, run the app's `witness-backfill` script once to mark the subjects that enrolled before. `mfa.enrollment_inconsistent` is declared by `mfa-witnessing` now, with the same attributes.
+- **Linking upstream identities in an app composed by hand**: compose `@mod/federation-link` (`@o3co/auth-provider-upstream-login/federation-link`) beside `federation`. Without it, boot goes through and logins work, but every start with `link=1` is refused `400 continuation_unavailable`, warned `federation.continuation_missing` each time, and nothing warns before such a start comes: check a link once after upgrading.
+
+### A module of your own
+
+- **`client.authentication.failure` is declared by `clients`** (`@mod/clients/audit-events`), no longer by `token-endpoint`, with the same name and attributes: a receiver needs no change, and a check of your own that reads the declarations finds it there. A route of your own that calls `clients`' `authenticate` records its refusal through `recordRefusedAuthentication`, handing it the `audit` your module takes.
+- **A grant of your own that needs claims of its own in the access token**: put them in `AccessGrant.claims` and issue through `issue`. A module that signed an `at+jwt` with `keys.sign` moves to `issue`, and one that verified it with `keys.verify` to `verifyAccess`: both now refuse that type (a TypeError). Such a module's tokens still pass `verifyAccess` until their `exp`, which may lie up to a day after their `iat`, and an `iat` may stand up to 60 seconds ahead of the clock. A resource server that checks tokens against the published key set alone applies none of these checks. To end them at once, after upgrading [rotate the signing key](runbook.md#rotating-the-signing-key) and then remove the old key from `keys.previous` rather than waiting for its `expires-at`. The key set is advertised as cacheable for 300 seconds, but nothing makes a verifier drop it then.
+- **Access tokens not issued by `tokens`**: an `at+jwt` carrying a name reserved for what `tokens` never writes (`nbf`, `roles`, `email` and the like) is refused by `verifyAccess`, which retires such tokens on purpose; so is one whose `exp` comes before its `iat`, whose `iat` is over 60 seconds ahead of the clock, or with over a day between them.
+- **Added claims and restrictions**: a refreshed or exchanged token carries no added claim; never use one for a restriction that must hold on.
+- **Audit**: `token.issued` may carry `claims`, the names of the claims a grant added, and `claims_left`, how many names did not fit.
+- **A store of your own for revoked access tokens**: it still imports `revokedTokens` and `revokedTokensNeeds` from `tokens`, which passes on `token-denylist`'s; the contract test it runs, `revokedTokensContract`, moved from `tokens`' `./testing` to `token-denylist`'s. A boot with no such store names the contract `token-denylist.revoked-tokens`, where it named `tokens.revoked-tokens`.
+- **A passkey assertion whose request named no credential needs the user handle**, as WebAuthn asks: `webauthn`'s ceremony refuses one without it (`user-handle`). Registered passkeys and second factors need no change. A module of your own that calls `ceremonies` directly keeps the challenge `request` returns on the server and hands it back as kept, never one the client sent. A second factor's challenge made before the update and answered without a handle is refused once; a new one passes.
+- **`isLabel` is no longer exported by `mfa`**: a module of your own imports it from `labels` (`@mod/labels` in the workspace, `@o3co/auth-provider-foundation/labels` on the published packages), with the same rule.
+
 ## Operational notes
 
 ### Clocks
@@ -787,7 +839,7 @@ Without `mfa`, registering a passkey or linking an upstream account (`?link=1`) 
 
 ### Outbound requests
 
-Every host the app fetches from must be named in `outbound.allow` (or `allow-any-public = true`): IdP issuers and endpoints, key set URLs, the users-http ledger and the audit-http collector. Plain http is allowed only to a `host:port` named in `outbound.plain-loopback`, at loopback addresses.
+Every host the app fetches from must be named in `outbound.allow` (or `allow-any-public = true`): IdP issuers and endpoints, key set URLs, the users-http ledger and the audit-http collector. Plain http is allowed only to a `host:port` named in `outbound.plain-loopback`, at loopback addresses, or in `outbound.plain-internal`, at private or loopback addresses and for a URL of your own configuration.
 
 A deployment that reached its IdP through a proxy and its ledger at an internal load balancer wrote, in 0.17:
 
@@ -816,6 +868,46 @@ users-http.verify-url = "https://users.corp.example/authenticate" // the same ca
 ```
 
 The proxy resolves the names it carries and checks their addresses itself, and boot warns so. An internal destination is listed in `direct-hosts` as well as `internal-hosts`, as only a direct request has its addresses checked and let through to a private one.
+
+Where the ledger answers plain http on a network you trust against reading and changing what crosses it, name its `host:port` in `outbound.plain-internal`, keep its host in `allow`, and write the URLs with http. One pair serves every URL at that `host:port`, here the users, the second-factor witness and the signer keys of one ledger:
+
+```hocon
+outbound {
+  allow = ["users.corp.example"]
+  plain-internal = ["users.corp.example:8080"]
+}
+users-http.verify-url = "http://users.corp.example:8080/authenticate"
+mfa-witness-http {
+  read-url = "http://users.corp.example:8080/mfa-witness/read"
+  enroll-url = "http://users.corp.example:8080/mfa-witness/enroll"
+  clear-url = "http://users.corp.example:8080/mfa-witness/clear"
+}
+signer-keys-http.keys-url = "http://users.corp.example:8080/signer-keys"
+```
+
+Plain http never goes through the proxy. Every address the name resolves to must be private, as `internal-hosts` takes them, or loopback, as for a sidecar on the same host; one public address refuses the request (`plain-public`), and a link-local or metadata address refuses it as any special address. What goes there, users' passwords and the ledger's credential among it, is in the clear, and each boot warns `outbound.plain_internal` with the count of pairs. Prefer https with an internal CA and `internal-hosts` where the ledger can serve it.
+
+An IdP on the same network over plain http is written the same way:
+
+```hocon
+outbound {
+  allow = ["idp-internal"]
+  plain-internal = ["idp-internal:9000"]
+}
+federation.idps.corp.issuer = "http://idp-internal:9000"
+```
+
+The browser goes to the IdP's authorization endpoint at that name too, by its own resolver and outside any mesh: the name must resolve for your users' browsers, and what crosses, the user's password and the IdP's cookies, is in the clear. An IdP whose description puts an endpoint on another origin is set as [From 0.18.0-rc.4](#from-0180-rc4) says, under "An IdP on a private network".
+
+A request outbound refuses is logged with its `reason`:
+
+| `reason` | What it means | What to do |
+|---|---|---|
+| `not-allowed` | The host is not in `outbound.allow`. | Name it there, or set `allow-any-public`. |
+| `scheme` | Plain http to a `host:port` neither `plain-loopback` nor `plain-internal` names. | Name the pair in the list its addresses belong to, or write the URL with https. |
+| `plain-public` | A `plain-internal` pair whose name resolved to a public address. | Point the name at the private network, or write the URL with https. |
+| `special-address` | The URL or its name reached a special-purpose address: link-local, metadata, or a private or loopback one no list names. | Name the host in `internal-hosts` (https) or the pair in `plain-internal` (plain http). Link-local and metadata addresses are never reached. |
+| `denied` | The host matches `outbound.deny`. | Take it out of `deny`, if it is meant to be reached. |
 
 ### Reverse proxy
 
