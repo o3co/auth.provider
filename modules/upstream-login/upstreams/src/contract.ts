@@ -126,24 +126,42 @@ export interface DelegatedExchange extends CodeExchange {
 	readonly resource?: string;
 }
 
-/** The upstream refused, or its answer did not hold; never says why to the browser. */
+/** The marks a mismatch and a refusal carry, the same in every copy of upstreams a bundle may hold. */
+const mismatchMark = Symbol.for("@mod/upstreams.mismatch");
+const refusedMark = Symbol.for("@mod/upstreams.refused");
+const marked = (error: unknown, mark: symbol) =>
+	typeof error === "object" &&
+	error !== null &&
+	(error as { readonly [key: symbol]: unknown })[mark] === true;
+
 /**
  * Why `open` refuses an IdP's settings, under `at`, the key path in the IdP's settings it is about
  * (`issuer`, say). Its reason names no configuration value, so boot can tell it to the operator.
  */
 export class UpstreamMismatch extends Error {
 	readonly at: readonly string[];
+	readonly [mismatchMark] = true;
 	constructor(reason: string, at: readonly string[] = []) {
 		super(reason);
 		this.name = "UpstreamMismatch";
 		this.at = at;
 	}
+	/** Whether `error` is a mismatch, by its mark rather than its class, so two copies of upstreams agree. */
+	static is(error: unknown): error is UpstreamMismatch {
+		return marked(error, mismatchMark);
+	}
 }
 
+/** The upstream refused, or its answer did not hold; never says why to the browser. */
 export class UpstreamRefused extends Error {
+	readonly [refusedMark] = true;
 	constructor() {
 		super("upstream refused");
 		this.name = "UpstreamRefused";
+	}
+	/** Whether `error` is a refusal, by its mark rather than its class, so two copies of upstreams agree. */
+	static is(error: unknown): error is UpstreamRefused {
+		return marked(error, refusedMark);
 	}
 }
 
