@@ -2,10 +2,10 @@ import { deepFreeze, type LogFields, Unavailable } from "@mod/kernel";
 import type { EnrollmentWitness } from "@mod/mfa-witness";
 import {
 	DestinationRefused,
+	isOutboundUnavailable,
 	jsonObjectOf,
 	type Narrower,
 	type Outbound,
-	OutboundUnavailable,
 } from "@mod/outbound";
 import { z } from "zod";
 
@@ -28,7 +28,7 @@ const enrollShape = z.object({ owner: z.boolean() });
 /** The kind outbound gives a failure to send, or no-answer for anything else. */
 function kindOf(error: unknown): string {
 	if (error instanceof DestinationRefused) return error.reason;
-	if (error instanceof OutboundUnavailable) return error.failure;
+	if (isOutboundUnavailable(error)) return error.failure;
 	return "no-answer";
 }
 
