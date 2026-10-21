@@ -256,6 +256,20 @@ describe("redis", () => {
 		}
 	});
 
+	it("refuses boot where the server refuses a command a confirmation round sends, naming it", async () => {
+		cli(container, "acl", "setuser", "nowait", "on", ">pw", "~*", "&*", "+@all", "-wait");
+		try {
+			const through = url.replace("redis://", "redis://nowait:pw@");
+			const refused = await open([durable], undefined, through).catch((error) => error);
+			expect(refused).toBeInstanceOf(BootRefused);
+			const reasons = (refused as BootRefused).refusals.map((r) => r.reason).join("; ");
+			expect(reasons).toContain("the server refuses WAIT");
+			expect(reasons).not.toContain("pw");
+		} finally {
+			cli(container, "acl", "deluser", "nowait");
+		}
+	});
+
 	it("refuses a replica, a cluster node and a primary that would not refuse writes without replicas", async () => {
 		await expect(
 			open([durable], undefined, `redis://127.0.0.1:${replicaPort}`),

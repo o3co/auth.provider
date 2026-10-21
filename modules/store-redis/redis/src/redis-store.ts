@@ -11,7 +11,7 @@ import {
 	type Space,
 	type Store,
 } from "@mod/store";
-import type { Redis } from "ioredis";
+import { type Redis, ReplyError } from "ioredis";
 import { sharedRounds } from "./rounds.ts";
 import * as scripts from "./scripts.ts";
 
@@ -45,6 +45,47 @@ export interface RedisStoreOptions {
 	readonly replicationTimeoutMs: number;
 	/** What the operator declared: no failover at all, or replicas that must take every write. */
 	readonly replication: "none" | "replicas" | undefined;
+}
+
+/** Whether the server refuses a command for good, for want of permission or of the command; any other error is no answer. */
+export const refusedForGood = (error: unknown) =>
+	error instanceof ReplyError &&
+	/^(NOPERM|ERR unknown (sub)?command)\b/i.test((error as Error).message);
+
+/** A script's refusal of what it calls, as Redis words it: the script ran, a command in it did not. */
+const refusedInScript = (error: unknown) =>
+	error instanceof ReplyError &&
+	/script/i.test((error as Error).message) &&
+	/NOPERM|unknown (redis )?command/i.test((error as Error).message);
+
+/**
+ * The commands the store sends that the server refuses for good, by name: a round's ROLE and INFO,
+ * and its SET and WAIT where replication is declared, on the confirming connection; EVAL, and what
+ * every script calls, on the other. One trip each, writing only the confirmation key; WAIT asks for
+ * no replica, so it answers at once whatever replicas there are. Any other failure is thrown.
+ */
+export async function refusedCommands(
+	client: Redis,
+	confirmer: Redis,
+	options: Pick<RedisStoreOptions, "prefix" | "replication">,
+): Promise<string[]> {
+	const confirming = options.replication !== undefined;
+	const sent = confirming ? ["ROLE", "INFO", "SET", "WAIT"] : ["ROLE", "INFO"];
+	const round = confirmer.pipeline().call("ROLE").info("server");
+	if (confirming) round.set(`${options.prefix}:#confirm`, "1", "PX", 60_000).call("WAIT", 0, 1);
+	const replies = (await round.exec()) ?? [];
+	const failed = replies.find(([error]) => error && !refusedForGood(error));
+	if (failed) throw failed[0];
+	const refused = sent.filter((_, at) => refusedForGood(replies[at]?.[0]));
+	try {
+		await client.eval(scripts.commands, 1, `${options.prefix}:#confirm`);
+	} catch (error) {
+		if (refusedInScript(error)) {
+			refused.push("a command a script calls (TIME, INFO or PEXPIRETIME)");
+		} else if (refusedForGood(error)) refused.push("EVAL");
+		else throw error;
+	}
+	return refused;
 }
 
 /**

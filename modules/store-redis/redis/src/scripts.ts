@@ -82,6 +82,15 @@ end
 `;
 
 /** KEYS: key, version key, mark key. ARGV: mode, value, expected, kind, arg, deadline, digest, has mark. */
+/** Calls what every script calls, writing nothing, so a server refusing one of them is told at boot. */
+export const commands = `
+redis.call('TIME')
+redis.call('INFO', 'server')
+redis.call('INFO', 'replication')
+redis.call('PEXPIRETIME', KEYS[1])
+return 1
+`;
+
 export const write = `${prelude}
 local key, vkey, ikey = KEYS[1], KEYS[2], ARGV[8] == '1' and KEYS[3] or ''
 local seen = guard(ikey, ARGV[7], ARGV[6])
