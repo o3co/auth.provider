@@ -4,6 +4,7 @@ import { issuer, metadata } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
 import { keys } from "@mod/keys";
 import { senderBinding } from "@mod/sender-binding";
+import { denylistAllowanceMs, denylistOver, revokedTokens } from "@mod/token-denylist";
 import { z } from "zod";
 import {
 	type AccessCheck,
@@ -15,12 +16,10 @@ import {
 	type Tokens,
 	tokens,
 } from "./contract.ts";
-import { denylistAllowanceMs, denylistOver } from "./denylist/denylist.ts";
 import { type IssueAccess, issuing, judging } from "./issuance.ts";
 import { chainWithin, expiryOf, keptGrant, lifetimeOf, tokenId } from "./limits.ts";
 import { namedBy } from "./reference.ts";
 import { section } from "./section.ts";
-import { revokedTokens } from "./store.ts";
 
 interface Act {
 	readonly sub: string;

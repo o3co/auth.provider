@@ -1,5 +1,6 @@
 import { defineModule, isUnavailable, Unavailable } from "@mod/kernel";
 import { type Binding, senderBindings } from "@mod/sender-binding";
+import { denylistAllowanceMs, denylistOver, type RevokedTokens } from "@mod/token-denylist";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import {
@@ -16,12 +17,10 @@ import {
 	type Tokens,
 	tokens,
 } from "./contract.ts";
-import { denylistAllowanceMs, denylistOver } from "./denylist/denylist.ts";
 import { authenticatedAheadMs, type IssueAccess, issuing, judging } from "./issuance.ts";
 import { defaultLifetimeSeconds, expiryOf, keptGrant, lifetimeOf, tokenId } from "./limits.ts";
 import { namedBy } from "./reference.ts";
 import type { section } from "./section.ts";
-import type { RevokedTokens } from "./store.ts";
 
 export type TokensSettings = z.input<typeof section>;
 

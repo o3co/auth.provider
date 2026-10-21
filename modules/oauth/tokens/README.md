@@ -2,7 +2,7 @@
 
 ## Responsibilities
 - Owns the access token: its format, issuance, verification and revocation; stamps and checks `issuer`'s URL as `iss`.
-- Owns the access token denylist, its internal module `denylist`.
+- Revokes through `token-denylist`'s denylist, over the store interface it offers and `tokens` passes on.
 - Applies `added-claims`' rules to the claims a grant adds, at `issue`, at `admits` and when a token is read back.
 
 ## Not here

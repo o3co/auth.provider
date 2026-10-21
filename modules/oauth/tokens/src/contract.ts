@@ -160,4 +160,4 @@ export const subjectChecks = extensionPoint<SubjectCheck>("tokens.subject-checks
 	multiplicity: "many",
 });
 
-export * from "./store.ts";
+export { type RevokedTokens, revokedTokens, revokedTokensNeeds } from "@mod/token-denylist";
