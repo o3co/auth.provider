@@ -10,10 +10,12 @@ import {
 	type Selection,
 } from "./composed.ts";
 import { type Declared, declaredIn, declaredInIndex } from "./declared.ts";
+import { type Declaration, declaredWith } from "./outside.ts";
 import { type Published, publishedInIndex, publishedWith } from "./published.ts";
 
 export type { Selection } from "./composed.ts";
 export { capabilityBlind, type Kind, kindOrder, kinds, mayNeed } from "./kinds.ts";
+export type { Declaration } from "./outside.ts";
 export type { Published } from "./published.ts";
 
 let workspace: Declared | undefined;
@@ -47,6 +49,32 @@ export const addable = (): string[] => addableOf(declared());
 
 /** The modules given, what they need to run, then `completed`, as `composed` reaches them but with no axis default. */
 export const needed = (modules: readonly string[]): string[] => neededWith(declared(), modules);
+
+/** What composing offers, over a given set of declarations. */
+export interface Combinations {
+	readonly completed: typeof completed;
+	readonly composed: typeof composed;
+	readonly full: typeof full;
+	readonly optIns: typeof optIns;
+	readonly addable: typeof addable;
+	readonly needed: typeof needed;
+}
+
+/**
+ * The same, over the workspace (or the bundle's index) and the packages declared outside it, each a
+ * module beside it; refuses, naming each, what cannot stand beside it (see `declaredWith`).
+ */
+export function combinationsWith(outside: readonly Declaration[]): Combinations {
+	const merged = declaredWith(declared(), outside);
+	return {
+		completed: (modules) => completedOf(merged, modules),
+		composed: (selection) => composedWith(merged, selection),
+		full: (add) => fullWith(merged, add),
+		optIns: () => optInsOf(merged),
+		addable: () => addableOf(merged),
+		needed: (modules) => neededWith(merged, modules),
+	};
+}
 
 let bundle: ReadonlyMap<string, Published> | undefined;
 

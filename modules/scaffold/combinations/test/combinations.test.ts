@@ -2,7 +2,15 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { completed, composed, full, needed, optIns } from "../src/contract.ts";
+import {
+	addable,
+	combinationsWith,
+	completed,
+	composed,
+	full,
+	needed,
+	optIns,
+} from "../src/contract.ts";
 import { completedWith, declaredIn } from "../src/declared.ts";
 
 // These tests read the whole workspace, which is slow when the machine is busy.
@@ -138,3 +146,18 @@ it("composes mfa wherever a factor kind is added alone, so a kind is never compo
 		expect(needed([kind]), kind).toContain("@mod/mfa");
 	}
 }, 30_000);
+
+// What is composed beside the workspace is tried on a fixture; here, that the contract composes it
+// over the workspace's own declarations, and composes as before where nothing is declared beside it.
+it("composes packages declared outside the workspace beside its own", () => {
+	const none = combinationsWith([]);
+	expect(none.full()).toEqual(full());
+	expect(none.addable()).toEqual(addable());
+	const grant = { name: "@x/did-grant", kind: "feature", needs: ["@mod/tokens"] };
+	const beside = combinationsWith([grant]);
+	expect(beside.addable()).toContain("@x/did-grant");
+	expect(beside.needed(["@x/did-grant"])).toEqual(["@x/did-grant", ...needed(["@mod/tokens"])]);
+	expect(() => combinationsWith([{ ...grant, needs: ["@mod/nope"] }])).toThrow(
+		/@x\/did-grant: needs @mod\/nope, which is not declared/,
+	);
+});
