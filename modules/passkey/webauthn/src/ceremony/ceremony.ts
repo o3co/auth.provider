@@ -58,6 +58,9 @@ const refusalOf = (error: unknown): CeremonyRefusal =>
 
 const refused = (reason: CeremonyRefusal) => ({ kind: "refused" as const, reason });
 
+/** Ends the challenge a request kept when it named credentials: the user was known before it. */
+const listedMark = ".listed";
+
 /** The library's answer, or the refusal its error names. */
 async function libraryAnswer<T extends object>(
 	verify: () => Promise<T>,
@@ -167,9 +170,13 @@ export function ceremoniesFor(
 				})),
 				userVerification: v,
 			};
-			return { options, challenge, until };
+			return { options, challenge: allow.length > 0 ? challenge + listedMark : challenge, until };
 		},
-		assert: async (response, challenge, credential, v, until) => {
+		assert: async (response, kept, credential, v, until) => {
+			// The kept challenge alone tells whether the request named credentials; any other ending is unread.
+			if (!/^[A-Za-z0-9_-]+(\.listed)?$/.test(kept)) return refused("malformed");
+			const listed = kept.endsWith(listedMark);
+			const challenge = listed ? kept.slice(0, -listedMark.length) : kept;
 			const early = precheck(response, challenge, until);
 			if (early) return refused(early);
 			const answered = response as Parameters<typeof verifyAuthenticationResponse>[0]["response"];
@@ -190,7 +197,12 @@ export function ceremoniesFor(
 			);
 			if (typeof verified === "string") return refused(verified);
 			if (!verified.verified) return refused("signature");
-			return afterSignature(credential, verified.authenticationInfo, answered.response.userHandle);
+			return afterSignature(
+				credential,
+				verified.authenticationInfo,
+				answered.response.userHandle,
+				listed,
+			);
 		},
 	};
 }
@@ -205,9 +217,13 @@ function afterSignature(
 		userVerified: boolean;
 	},
 	userHandle: unknown,
+	listed: boolean,
 ): Asserted {
-	// None carried passes: a credential that is not discoverable may carry none.
-	if (userHandle !== undefined && userHandle !== null && userHandle !== credential.userHandle) {
+	// None carried passes only where the request named the credentials (WebAuthn §7.2 step 6):
+	// one that is not discoverable may carry none, and the user was known before.
+	if (userHandle === undefined || userHandle === null) {
+		if (!listed) return refused("user-handle");
+	} else if (userHandle !== credential.userHandle) {
 		return refused("user-handle");
 	}
 	if ((info.credentialDeviceType === "multiDevice") !== credential.backupEligible) {

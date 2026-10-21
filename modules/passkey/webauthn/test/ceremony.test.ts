@@ -264,8 +264,10 @@ describe("request and assertion", () => {
 	it("asks for any of the allowed credentials, and asserts one, moving its count on", async () => {
 		const { authenticator, credential } = await made();
 		const { options, challenge } = ceremonies.request([credential], "preferred");
+		// The browser is asked the bare challenge; the one kept also says a credential was named.
+		expect(challenge.endsWith(".listed")).toBe(true);
 		expect(options).toMatchObject({
-			challenge,
+			challenge: challenge.slice(0, -".listed".length),
 			rpId: "rp.example",
 			allowCredentials: [{ id: credential.id, type: "public-key", transports: ["internal"] }],
 		});
@@ -309,11 +311,47 @@ describe("request and assertion", () => {
 		);
 	});
 
-	it("asserts without a handle, which a credential that is not discoverable may leave out", async () => {
+	it("asserts without a handle only where the request named the credential, as one not discoverable may leave it out", async () => {
 		const { authenticator, credential } = await made();
+		const named = ceremonies.request([credential], "preferred");
+		const left = authenticator.get(named.options as RequestOptions, at, { userHandle: null });
+		expect(reasonOf(await assert(left, named.challenge, credential))).toBe("asserted");
+		// Asked with none named, the handle is what ties the key to its holder.
 		const { options, challenge } = request();
 		const response = authenticator.get(options, at, { userHandle: null });
-		expect(reasonOf(await assert(response, challenge, credential))).toBe("asserted");
+		expect(reasonOf(await assert(response, challenge, credential))).toBe("user-handle");
+		// Unmarked, a named request's challenge asks for the handle too.
+		const again = ceremonies.request([credential], "preferred");
+		const bare = again.challenge.slice(0, -".listed".length);
+		const unmarked = authenticator.get(again.options as RequestOptions, at, { userHandle: null });
+		expect(reasonOf(await assert(unmarked, bare, credential))).toBe("user-handle");
+		// One remade from the client's answer, as passkeys remakes it, reads as none named.
+		const remade = challengeOf(unmarked);
+		if (remade === undefined) throw new Error("no challenge answered");
+		expect(reasonOf(await assert(unmarked, remade, credential))).toBe("user-handle");
+		// An ending it did not write is unread.
+		const odd = authenticator.get(again.options as RequestOptions, at);
+		expect(reasonOf(await assert(odd, `${bare}.other`, credential))).toBe("malformed"); // A handle sent as JSON null is none carried.
+		const nulled = (got: unknown) => {
+			const answered = got as { response: Record<string, unknown> };
+			return { ...answered, response: { ...answered.response, userHandle: null } };
+		};
+		const asked = ceremonies.request([credential], "preferred");
+		const sent = nulled(authenticator.get(asked.options as RequestOptions, at));
+		expect(reasonOf(await assert(sent, asked.challenge, credential))).toBe("asserted");
+		const unnamed = request();
+		expect(
+			reasonOf(
+				await assert(nulled(authenticator.get(unnamed.options, at)), unnamed.challenge, credential),
+			),
+		).toBe("user-handle");
+		// Client data signed over the marked challenge answers no challenge the browser was asked.
+		const marked = ceremonies.request([credential], "preferred");
+		const signed = authenticator.get(
+			{ ...(marked.options as RequestOptions), challenge: marked.challenge },
+			at,
+		);
+		expect(reasonOf(await assert(signed, marked.challenge, credential))).toBe("challenge");
 	});
 
 	it("refuses another handle, a changed backup eligibility, and an unverified user when required", async () => {
