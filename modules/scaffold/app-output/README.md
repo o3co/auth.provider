@@ -26,6 +26,7 @@
 - A name not an npm package is refused by `namesPackages`, before anything is written.
 - The manifest names the pnpm the workspace builds with, and the app also depends on `zod` at the packages' version.
 - A fragment holds exactly one section, and no section has two fragments; either is refused, naming the fragment.
+- A fragment is read as data, refused by name otherwise: no substitution or include, no backtick or control character but a line break in a key or value, at most 64 KiB, and 32 KiB of keys and values; nothing is read from env or files.
 - The configuration file reads the fragments' scalar keys from env only, holding no values; each variable is the section and key path joined by `_`, upper-cased, `-` as `_`.
 - Two keys reading one variable, or a key no variable can name, refuse generation, naming both or it.
 - Neither example holds a live value line: the local layer's holds each fragment list with its placeholders and each value spanning sections (`audit.receivers`), the environment's each variable, all as comments; a copy sets nothing. A value spanning sections never goes to env.
