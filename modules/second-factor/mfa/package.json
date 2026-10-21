@@ -26,10 +26,10 @@
 		"@mod/records": "workspace:*",
 		"@mod/session": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
-		"vitest": "5.0.4"
+		"vitest": "5.0.5"
 	},
 	"peerDependencies": {
-		"vitest": "5.0.4"
+		"vitest": "5.0.5"
 	},
 	"peerDependenciesMeta": {
 		"vitest": {

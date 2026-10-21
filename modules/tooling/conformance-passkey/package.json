@@ -14,7 +14,7 @@
 		"@mod/conformance": "workspace:*",
 		"@mod/conformance-legacy": "workspace:*",
 		"@mod/conformance-oauth": "workspace:*",
-		"vitest": "5.0.4"
+		"vitest": "5.0.5"
 	},
 	"devDependencies": {
 		"@mod/conformance-code": "workspace:*",

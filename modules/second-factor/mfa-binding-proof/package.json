@@ -24,6 +24,6 @@
 		"@mod/session": "workspace:*",
 		"@mod/session-requirements": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
-		"vitest": "5.0.4"
+		"vitest": "5.0.5"
 	}
 }
