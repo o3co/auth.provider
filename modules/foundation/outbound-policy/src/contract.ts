@@ -91,6 +91,25 @@ export function destinationRefusal(
 	return explained && `outbound's destination policy refuses ${what}: ${explained}`;
 }
 
+/**
+ * A boot refusal of a URL the browser goes to that `browsedRefusal` refuses, as every module says it:
+ * `outbound's policy for what the browser goes to refuses <what>: <reason>: <what to set>`, `what`
+ * being `it` unless given; undefined where it takes the URL. Refusals that do not say take https alone.
+ */
+export function browsedRefusalText(
+	refusals: OutboundRefusals,
+	url: string,
+	narrower?: Narrower,
+	what = "it",
+): string | undefined {
+	const reason = refusals.browsedRefusal
+		? refusals.browsedRefusal(url, narrower)
+		: URL.parse(url)?.protocol === "https:"
+			? undefined
+			: "not https: name it over https";
+	return reason && `outbound's policy for what the browser goes to refuses ${what}: ${reason}`;
+}
+
 /** Why a credential may not go, in words every caller of `outbound.credentials` gives the operator alike. */
 export function credentialRefusalText(refusal: CredentialRefusal): string {
 	return refusal === "scheme"

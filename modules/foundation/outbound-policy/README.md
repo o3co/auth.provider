@@ -13,6 +13,7 @@
   - Its `plainInternal`: whether a URL is taken as plain http to a `plain-internal` pair for the caller's own `internal` URL; absent, it is read as no.
   - Its `browsedRefusal`: why a URL the browser is sent to is refused: plain http other than at a loopback name or as `plainInternal` takes it; absent, plain http is refused.
 - `destinationRefusal` (the refusals, a URL, a narrowing, what is refused, `it` unless given) → the boot refusal every module gives for it, `outbound's destination policy refuses <what>: <reason>: <what to set>`, or nothing; the words are this package's alone.
+- `browsedRefusalText` (the refusals, a URL the browser goes to, a narrowing, what), the same for `browsedRefusal`: `outbound's policy for what the browser goes to refuses <what>: …`, https alone where it is absent.
 - `outbound.credentials`: at boot, why a caller's credential must not go to its URLs (`origins`: more than one; `scheme`: one neither https nor a named `plain-loopback` or `plain-internal` pair), or nothing; `credentialRefusalText` gives either in the words every caller uses.
 - `outbound.limits`: at boot, where a request under a narrowing is cut (`timeoutMs`, `maxBytes`): the operator's caps narrowed, never widened, the same limits the sender cuts it at.
 - `policySettings`: the keys a section takes for the policy (`allow`, `allow-any-public`, `deny`, `plain-loopback`, `plain-internal`, `internal-hosts`, the size caps and `timeout`); `hostList`: a list of hosts, or `.name` for the name and the names under it.
