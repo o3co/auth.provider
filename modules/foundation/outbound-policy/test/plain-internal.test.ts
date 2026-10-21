@@ -95,29 +95,36 @@ describe("the addresses of a plain-internal pair", () => {
 	const reach = { loopback: false, internal: false, plainInternal: true };
 	const addresses = (list: readonly string[]) => reasonOf(() => admitAddresses(list, reach));
 
-	it("are taken only where every one is private, 100.64/10 among them", () => {
+	it("are taken only where every one is private or loopback, 100.64/10 among them, mixed too", () => {
 		for (const list of [
 			["10.1.2.3"],
 			["172.16.0.1", "192.168.1.1"],
 			["100.64.0.1"],
 			["fd12:3456::1"],
 			["::ffff:10.1.2.3"],
+			// A sidecar on loopback: the name resolves to 127/8 or ::1, alone or beside a private address.
+			["127.0.0.1"],
+			["127.0.0.53"],
+			["::1"],
+			["::ffff:127.0.0.1"],
+			["10.1.2.3", "127.0.0.1"],
 		]) {
 			expect(addresses(list), list.join()).toBe("admitted");
 		}
 	});
 
-	it("are refused as plain-public where one is public, in either order", () => {
+	it("are refused as plain-public where one is public, in either order, beside loopback too", () => {
 		expect(addresses(["10.1.2.3", "93.184.216.34"])).toBe("plain-public");
 		expect(addresses(["93.184.216.34", "10.1.2.3"])).toBe("plain-public");
 		expect(addresses(["2606:4700::1111"])).toBe("plain-public");
+		expect(addresses(["127.0.0.1", "93.184.216.34"])).toBe("plain-public");
 	});
 
-	it("are refused as special where none was answered, or one is loopback, link-local, metadata or NAT64", () => {
+	it("are refused as special where none was answered, or one is link-local, metadata, NAT64 or carries 127/8 unmapped", () => {
 		for (const list of [
 			[],
-			["127.0.0.1"],
-			["::1"],
+			["::7f00:1"],
+			["127.0.0.1", "::ffff:0:7f00:1"],
 			["169.254.169.254"],
 			["fe80::1"],
 			["100.100.100.200"],

@@ -26,7 +26,7 @@ export interface Rules {
 	readonly plainLoopback: readonly string[];
 	/** The hosts an operator's own URL may reach at a private address. */
 	readonly internal: readonly string[];
-	/** The `host:port` pairs an operator's own URL may reach over plain http, at private addresses alone. */
+	/** The `host:port` pairs an operator's own URL may reach over plain http, at private or loopback addresses alone. */
 	readonly plainInternal: readonly string[];
 }
 
@@ -179,15 +179,18 @@ function refusing(reach: Pick<Admitted, "loopback" | "internal">): (address: str
 
 /**
  * One special-purpose address refuses them all; a named plain pair reaches loopback alone, and an
- * internal host private addresses too. A plain-internal pair reaches private addresses alone, every
- * one of them: a public one among them is `plain-public`, any other `special-address`.
+ * internal host private addresses too. A plain-internal pair reaches private or loopback addresses
+ * alone, every one of them: a public one among them is `plain-public`, any other `special-address`.
  */
 export function admitAddresses(
 	addresses: readonly string[],
 	reach: Pick<Admitted, "loopback" | "internal" | "plainInternal">,
 ): readonly string[] {
 	if (reach.plainInternal) {
-		const outside = addresses.filter((address) => !isPrivateAddress(address));
+		// Loopback lies inside a private network, so a name a sidecar answers on 127/8 or ::1 is taken too.
+		const outside = addresses.filter(
+			(address) => !isPrivateAddress(address) && !isLoopbackAddress(address),
+		);
 		if (addresses.length === 0 || outside.some(isSpecialAddress)) {
 			throw new DestinationRefused("special-address");
 		}
@@ -223,7 +226,7 @@ export function remedyOf(
 				? "plain http reaches only a host:port that outbound.plain-loopback names, or, for a URL of your own configuration on a private network, one that outbound.plain-internal names; otherwise write the URL with https"
 				: "only https and http URLs are reached";
 		case "plain-public":
-			return "a host:port outbound.plain-internal names is reached over plain http at private addresses alone, and its name resolved to a public one: write the URL with https, or point the name at the private network";
+			return "a host:port outbound.plain-internal names is reached over plain http at private or loopback addresses alone, and its name resolved to a public one: write the URL with https, or point the name at the private network";
 		case "userinfo":
 			return "write the URL without a user or password";
 		case "port":
@@ -232,7 +235,7 @@ export function remedyOf(
 			return "the host matches outbound.deny";
 		case "special-address":
 			return narrower.internal
-				? "the URL names a special-purpose address; a private one is reached only when outbound.internal-hosts names its host"
+				? "the URL names a special-purpose address; a private one is reached only when outbound.internal-hosts names its host, or, over plain http, when outbound.plain-internal names its host:port"
 				: "the URL names a special-purpose address, which outbound never reaches";
 		case "redirect":
 			return "a redirect is never followed";
