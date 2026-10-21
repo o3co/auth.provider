@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { type BuildContext, type Clock, isUnavailable, type Log, type Random } from "@mod/kernel";
 import { type Sessions, sessions } from "@mod/session";
-import { type Upstreams, type UpstreamTokens, upstreams } from "@mod/upstreams";
+import { refreshedExpiry, type Upstreams, type UpstreamTokens, upstreams } from "@mod/upstreams";
 import type { Settings } from "../section.ts";
 import {
 	type RefreshLocks,
@@ -290,9 +290,10 @@ export function renewalWith(parts: Parts) {
 			return failed(refused ?? "unknown");
 		}
 		const idToken = text(said.idToken) ?? kept.idToken;
-		const same = accessToken === kept.accessToken && kept.expiresAt !== undefined;
 		const end =
-			same && ends.end !== undefined ? Math.min(ends.end, kept.expiresAt ?? ends.end) : ends.end;
+			ends.end === undefined
+				? undefined
+				: refreshedExpiry({ accessToken, expiresAt: ends.end }, kept);
 		const next: Kept = {
 			accessToken,
 			tokenType,
