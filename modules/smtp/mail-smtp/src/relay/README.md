@@ -17,4 +17,4 @@ Internal module of `mail-smtp`: one SMTP conversation per send, over a pinned `n
 - A `RelayFailure` keeps no text from the relay or the library, and no cause.
 
 ## Depends on
-- `nodemailer` (SMTP connection, message composer, address parser); `outbound-policy` (`isLoopbackAddress`, for the peer under `none`).
+- `nodemailer` (SMTP connection, message composer, address parser); `address-reach` (`isLoopbackAddress`, for the peer under `none`).

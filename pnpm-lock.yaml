@@ -2758,15 +2758,15 @@ importers:
 
   modules/smtp/mail-smtp:
     dependencies:
+      '@mod/address-reach':
+        specifier: workspace:*
+        version: link:../../foundation/address-reach
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
       '@mod/mail':
         specifier: workspace:*
         version: link:../../foundation/mail
-      '@mod/outbound-policy':
-        specifier: workspace:*
-        version: link:../../foundation/outbound-policy
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../../foundation/url-setting
