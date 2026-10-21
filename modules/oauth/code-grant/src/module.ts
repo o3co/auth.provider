@@ -1,6 +1,6 @@
 import { clientAllowance } from "@mod/client-allowance";
 import { clients } from "@mod/clients";
-import { grants } from "@mod/grants";
+import { grants, sessionIssuances } from "@mod/grants";
 import { issuer } from "@mod/issuer";
 import { defineModule, Unavailable } from "@mod/kernel";
 import { sessions } from "@mod/session";
@@ -70,6 +70,13 @@ export default defineModule({ name: "code-grant", section }, (m) => [
 			return c.refuse(
 				"code-grant",
 				"a configuration that cannot revoke access tokens cannot handle codes",
+			);
+		}
+		// Its tokens are issued from the code's session: unrecorded, a logout could not end them.
+		if ((await c.collect(sessionIssuances)).length === 0) {
+			return c.refuse(
+				"code-grant",
+				"its tokens must be recorded to their session, so that a logout ends them",
 			);
 		}
 		const makers = await c.collect(idTokens);
