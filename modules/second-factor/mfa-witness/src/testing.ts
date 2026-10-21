@@ -5,16 +5,21 @@ import { type EnrollmentWitness, enrollmentWitnesses } from "./contract.ts";
 /**
  * A witness in memory, keeping its promises: each call fails as unavailable while its count of
  * failures lasts, and `lost` writes take effect with their answer lost. `beforeEnroll`,
- * `afterEnroll` and `beforeRead` run once around the next such call, as a request racing it would.
+ * `afterEnroll`, `beforeRead` and `beforeWithdraw` run once around the next such call, as a request
+ * racing it would. Made `withdraw: false`, it offers no withdraw, as a ledger that has none.
  */
-export function witnessStandIn(name = "enrollment-witness") {
+export function witnessStandIn(
+	name = "enrollment-witness",
+	options: { readonly withdraw?: boolean } = {},
+) {
 	const marks = new Map<string, string>();
-	const failing = { read: 0, enroll: 0, clear: 0 };
-	const lost = { enroll: 0, clear: 0 };
+	const failing = { read: 0, enroll: 0, clear: 0, withdraw: 0 };
+	const lost = { enroll: 0, clear: 0, withdraw: 0 };
 	const next: {
 		beforeEnroll?: (() => void) | undefined;
 		afterEnroll?: (() => void) | undefined;
 		beforeRead?: (() => void) | undefined;
+		beforeWithdraw?: (() => void) | undefined;
 	} = {};
 	const fails = (call: keyof typeof failing) => {
 		if (failing[call] === 0) return;
@@ -53,6 +58,17 @@ export function witnessStandIn(name = "enrollment-witness") {
 			loses("clear");
 		},
 	};
+	// Left out, not undefined, where the stand-in plays a ledger without it.
+	if (options.withdraw !== false) {
+		witness.withdraw = async (subject, token) => {
+			fails("withdraw");
+			const before = next.beforeWithdraw;
+			next.beforeWithdraw = undefined;
+			before?.();
+			if (marks.get(subject) === token) marks.delete(subject);
+			loses("withdraw");
+		};
+	}
 	const module = defineModule({ name }, (m) => [
 		m.contribute(enrollmentWitnesses).by(() => witness),
 	]);
@@ -78,10 +94,25 @@ export async function witnessProblems(witness: EnrollmentWitness): Promise<strin
 	const two = `w-${n}-2`;
 	const raced = await Promise.all([witness.enroll(two, "a"), witness.enroll(two, "b")]);
 	check(raced.filter(Boolean).length === 1, "two enrolls at once do not leave exactly one owner");
+	const withdraw = witness.withdraw?.bind(witness);
+	if (withdraw === undefined) return problems;
+	const three = `w-${n}-3`;
+	await witness.enroll(three, "mine");
+	await withdraw(three, "other");
+	check(await witness.read(three), "a withdraw takes another token's mark");
+	await withdraw(three, "mine");
+	check(!(await witness.read(three)), "a withdraw by the mark's token leaves it");
+	await withdraw(three, "mine");
+	check(!(await witness.read(three)), "a withdraw sent again does not answer alike");
+	check(await witness.enroll(three, "next"), "a token after a withdraw does not own the mark");
+	const four = `w-${n}-4`;
+	await witness.enroll(four, "held");
+	await Promise.all([withdraw(four, "stale"), witness.enroll(four, "late")]);
+	check(await witness.read(four), "a withdraw beside an enroll takes another token's mark");
 	return problems;
 }
 
-/** What mfa needs from any witness: set-if-absent by token, clear, and reads never behind an answered write. */
+/** What mfa needs from any witness: set-if-absent by token, clear, a withdraw of its own token's mark where offered, and reads never behind an answered write. */
 export function enrollmentWitnessContract(name: string, open: () => Promise<EnrollmentWitness>) {
 	describe(`enrollment witness contract: ${name}`, () => {
 		it("keeps the mark by its first token, clears it, and reads every answered write", async () => {
