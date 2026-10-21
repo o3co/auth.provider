@@ -474,6 +474,94 @@ describe("guard-imports", () => {
 		]);
 	});
 
+	it("G31 refuses an import of a contract its owner's manifest declares takenBy, from a package it does not name", () => {
+		const owner = pkg(
+			"@g31/keys",
+			{
+				"src/contract.ts": [
+					`import { contract } from "@g31/kernel";`,
+					`export const signing = contract<object>("keys.signing", { takenBy: ["taker"] });`,
+					`export const open = contract<object>("keys.open");`,
+				].join("\n"),
+			},
+			{ exports: { ".": "./src/contract.ts" }, takenBy: { signing: ["@g31/taker"] } },
+		);
+		const user = (name: string, files: Record<string, string>) =>
+			pkg(name, files, {
+				exports: { ".": "./src/contract.ts" },
+				dependencies: { "@g31/keys": "*" },
+			});
+		const taker = user("@g31/taker", {
+			"src/contract.ts": `import { signing } from "@g31/keys";\nexport const s = signing;\n`,
+			"src/module.ts": `export default defineModule({ name: "taker" }, () => []);\n`,
+		});
+		const other = user("@g31/other", {
+			"src/contract.ts": `import { open } from "@g31/keys";\nexport const o = open;\n`,
+			"src/named.ts": `import { signing } from "@g31/keys";\nexport const s = signing;\n`,
+			"src/alias.ts": `import { signing as s } from "@g31/keys";\nexport const t = s;\n`,
+			"src/whole.ts": `import * as k from "@g31/keys";\nexport const t = k;\n`,
+			"src/again.ts": `export { signing } from "@g31/keys";\n`,
+			"src/every.ts": `export * from "@g31/keys";\n`,
+			"src/typed.ts": `import type { signing } from "@g31/keys";\nexport type T = typeof signing;\n`,
+			"test/other.test.ts": `import { signing } from "@g31/keys";\nexport const s = signing;\n`,
+		});
+		expect(
+			check([owner, taker, other], budget)
+				.filter((v) => v.rule.startsWith("G31"))
+				.map((v) => `${v.where} ${v.detail}`)
+				.sort(),
+		).toEqual([
+			"@g31/other/src/again.ts signing of @g31/keys",
+			"@g31/other/src/alias.ts signing of @g31/keys",
+			"@g31/other/src/every.ts signing of @g31/keys",
+			"@g31/other/src/named.ts signing of @g31/keys",
+			"@g31/other/src/whole.ts signing of @g31/keys",
+		]);
+	});
+
+	it("G31 refuses a takenBy declaration its contract's own takenBy does not match, or that names nothing known", () => {
+		const taker = pkg("@g31b/taker", {
+			"src/contract.ts": "export const x = 1;\n",
+			"src/module.ts": `export default defineModule({ name: "taker" }, () => []);\n`,
+		});
+		const bare = pkg("@g31b/bare", { "src/contract.ts": "export const x = 1;\n" });
+		const owner = pkg(
+			"@g31b/keys",
+			{
+				"src/contract.ts": [
+					`export const same = contract<object>("k.same", { takenBy: ["taker"] });`,
+					`export const apart = contract<object>("k.apart", { takenBy: ["someone"] });`,
+					`export const unbound = contract<object>("k.unbound");`,
+					`export const undeclared = contract<object>("k.undeclared", { takenBy: ["taker"] });`,
+				].join("\n"),
+			},
+			{
+				exports: { ".": "./src/contract.ts" },
+				takenBy: {
+					same: ["@g31b/taker"],
+					apart: ["@g31b/taker"],
+					unbound: ["@g31b/taker"],
+					missing: ["@g31b/taker"],
+					strange: ["@g31b/nobody"],
+					moduleless: ["@g31b/bare"],
+				},
+			},
+		);
+		expect(
+			check([owner, taker, bare], budget)
+				.filter((v) => v.rule.startsWith("G31"))
+				.map((v) => `${v.where} ${v.detail}`)
+				.sort(),
+		).toEqual([
+			"@g31b/keys apart: takenBy in code names someone, the manifest taker",
+			"@g31b/keys missing: no contract of that name declares takenBy",
+			"@g31b/keys moduleless: @g31b/bare has no module to take it",
+			"@g31b/keys strange: @g31b/nobody is no workspace package",
+			"@g31b/keys unbound: no contract of that name declares takenBy",
+			"@g31b/keys undeclared: takenBy in code, but not in the manifest",
+		]);
+	});
+
 	it("G30 refuses an audit event recorded on the audit contract itself, outside the package and its tests", () => {
 		const contract = [
 			"export interface AuditRecord { readonly kind: string }",

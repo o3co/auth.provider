@@ -16,6 +16,7 @@
   - G28: a dependency a manifest names in `helpers` lends functions and types alone: shipped code takes from it no value the kernel's `contract` or `extensionPoint` makes.
   - G29: a test file composing every module a feature bridge `joins` and a module contributing to the bridge's points composes the bridge too, so no contribution that decides an answer is silently lost.
   - G30: outside the package each `./audit-events` declares through (`audit`), shipped code records an event only through the declared wrapper (`declaredAudit`), never on the contract's own `record`, so every event reaches the audit event reference (the `recorded` internal module).
+  - G31: a contract a manifest declares `takenBy` (contract name → the packages that may take it) is imported, in shipped code, by those packages alone, by name, alias, namespace or re-export; the declaration names the modules of the kernel `takenBy` the contract declares, no more and no fewer (the `taken` internal module).
 
 ## Not here
 - The budget, the documents, the vocabulary and the source's contents (the clock, randomness, branches, the network): `guard`, which runs these rules beside its own.
@@ -30,7 +31,7 @@
 - Checks are derived from the repository's current state. Nothing is enumerated, and there is no place to write exceptions.
 - G29 reads a test file's imports: a `./module` (its own package's by path) is composed, a `./testing` value named `…StandIn` composes its package, and an adapter composes its owner; a stand-in named otherwise, or a composition built elsewhere or at run time, is missed, not reported. A package contributes to a bridge when its shipped code takes one of the bridge's `extensionPoint` values.
 - G29 counts feature bridges only: a foundation bridge's points collect operational counts that decide no answer a test reads. Were one to collect what decides answers, the scope is to be looked at again.
-- Internal module `recorded` (G30).
+- Internal modules `recorded` (G30) and `taken` (G31).
 
 ## Depends on
 - `typescript`, `pnpm` (asks it for the workspace's packages).

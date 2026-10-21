@@ -11,6 +11,7 @@ import {
 } from "./rules.ts";
 import { type Rules, type Scope, scopeOf } from "./scope.ts";
 import { type Surface, surfaceOf } from "./surface.ts";
+import { takenByRules } from "./taken/taken.ts";
 import type { Pkg } from "./workspace.ts";
 
 export { budgetsAsTest, type Kinds, type Rules, type Scope, scopeOf } from "./scope.ts";
@@ -47,6 +48,7 @@ export function importRules(s: Scope, surfaces: ReadonlyMap<string, Surface>): v
 	axisRules(s);
 	bridgeRules(s, surfaces);
 	declaredRecordRules(s);
+	takenByRules(s);
 }
 
 /** The import and dependency rules over the workspace, as their findings. */

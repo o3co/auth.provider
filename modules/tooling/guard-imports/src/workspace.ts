@@ -26,6 +26,8 @@ export interface Pkg {
 		readonly helpers?: unknown;
 		/** The words naming how its shipped code reaches the network, other than through outbound. */
 		readonly network?: string | readonly string[];
+		/** Contracts it exports, by name, and the packages alone that may import each. */
+		readonly takenBy?: unknown;
 		readonly exports?: Record<string, string>;
 		readonly dependencies?: Record<string, string>;
 		readonly peerDependencies?: Record<string, string>;
