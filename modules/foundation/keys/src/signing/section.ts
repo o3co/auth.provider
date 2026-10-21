@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { secretBytes } from "../secret/secret.ts";
+import { secretProblem } from "../secret/secret.ts";
 
 const kid = z
 	.string()
@@ -21,13 +21,27 @@ const signing = z.discriminatedUnion("alg", [
 		alg: asymmetric.describe(signingAlg),
 		"private-key": privatePem.describe("The signing key, as a PKCS8 PEM."),
 	}),
-	z.strictObject({
-		kid: signingKid,
-		alg: z.literal("HS256").describe(signingAlg),
-		secret: secretBytes({ atLeast: 32 }, { hex: true }).describe(
-			"The HMAC secret for HS256, its decoded bytes the HMAC key: read as hex where the value is whole bytes of hex, else as base64 (64 hex characters are base64 too, so hex is read first); at least 32 bytes, of at least 8 byte values.",
-		),
-	}),
+	z
+		.strictObject({
+			kid: signingKid,
+			alg: z.literal("HS256").describe(signingAlg),
+			secret: z
+				.string()
+				.describe(
+					"The HMAC secret for HS256, its bytes the HMAC key, read as `secret-encoding` names; unset, as hex where the value is whole bytes of hex, else as base64 (64 hex characters are base64 too, so hex is read first). At least 32 bytes, of at least 8 byte values, however read.",
+				),
+			"secret-encoding": z
+				.enum(["hex", "base64", "utf8"])
+				.optional()
+				.describe(
+					"How `secret` is read: `hex`, `base64` (strict) or `utf8`, the text's own bytes, as 0.17 and policy-verifier read it; a value not of the reading named is refused. Unset, hex or else base64.",
+				),
+		})
+		.superRefine((s, ctx) => {
+			const reading = { hex: true, encoding: s["secret-encoding"] };
+			const problem = secretProblem(s.secret, { atLeast: 32 }, reading);
+			if (problem) ctx.addIssue({ code: "custom", message: problem, path: ["secret"] });
+		}),
 ]);
 
 const previous = z.strictObject({
