@@ -52,9 +52,11 @@ export const refusedForGood = (error: unknown) =>
 	error instanceof ReplyError &&
 	/^(NOPERM|ERR unknown (sub)?command)\b/i.test((error as Error).message);
 
-/** A user refused keys, in Redis 7.0's or 7.4's words. */
+/** A user refused keys, in Redis 7.0's or 7.4's words, before a script runs or within it. */
 const keysRefused = (message: string) =>
-	/no permissions to access (a key|one of the keys)/i.test(message);
+	/no permissions to access (a key|one of the keys)|can't access at least one of the keys/i.test(
+		message,
+	);
 /** A command a script calls refused, in Redis 7.0's or 7.4's words, or one renamed away. */
 const refusedInScript = (message: string) =>
 	/can't run this command|no permissions to run|unknown (redis )?command/i.test(message);

@@ -107,6 +107,15 @@ describe("the commands the store needs", () => {
 		expect(reasons).toContain("the server refuses this user the store's keys");
 		expect(reasons).not.toMatch(/refuses EVAL/);
 		redis.down();
+		for (const wording of ["7.0", "7.4"] as const) {
+			const inScript = primary();
+			inScript.scripts.keysRefusedIn = ["HSET"];
+			inScript.scripts.wording = wording;
+			const said = await refusal(await inScript.listen());
+			expect(said, wording).toContain("the server refuses this user the store's keys");
+			expect(said, wording).not.toMatch(/refuses HSET/);
+			inScript.down();
+		}
 	});
 
 	it("take a write refused for want of replicas as no answer, never as a refused command", async () => {
