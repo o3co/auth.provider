@@ -12,6 +12,9 @@ const fakes: Record<string, Record<string, string>> = {
 export class BootRefused extends Error { constructor(refusals) { super("refused"); this.refusals = refusals; } }
 export const isUnavailable = (error) => error?.name === "Unavailable";
 export const loadConfig = async () => ({});
+// The variables 0.17 read that are set: here, any named LEGACY_*.
+export const unreadLegacyVariables = async ({ env }) => Object.keys(env).filter((name) => name.startsWith("LEGACY_")).sort();
+export const legacyVariablesWarning = (names) => (names.length === 0 ? undefined : \`\${names.length} named: \${names.join(", ")}\`);
 export async function assemble({ runtime }) {
 	// Without the script's own runtime, the composed sink would write this line.
 	(runtime?.log ?? { warn: (event) => process.stdout.write(\`LOG \${event}\\n\`) }).warn("fake.assembled");
@@ -52,11 +55,11 @@ async function script() {
 		join(target, "src", "witness-backfill.ts"),
 		files["src/witness-backfill.ts"] ?? "",
 	);
-	return (input: string) => {
+	return (input: string, env: Record<string, string> = {}) => {
 		const seen = join(target, `seen-${Math.random()}`);
 		const run = spawnSync(process.execPath, ["src/witness-backfill.ts"], {
 			cwd: target,
-			env: { ...process.env, SEEN: seen },
+			env: { ...process.env, ...env, SEEN: seen },
 			input,
 			encoding: "utf8",
 		});
@@ -97,4 +100,12 @@ it("stops at an unexpected failure, telling only the counts and nothing of the f
 	expect(done.stdout).toBe("marked 1 held 0 none 0 inconsistent 0 failed 1\n");
 	expect(done.status).toBe(1);
 	expect(`${done.stdout}${done.stderr}`).not.toMatch(/secret|alice|boom/);
+});
+
+it("warns once of the 0.17 variables its configuration never reads, then goes on", async () => {
+	const run = await script();
+	const done = await run("first\n", { LEGACY_ONE: "v1", LEGACY_TWO: "v2" });
+	expect(done.stderr).toBe("warn config-files: 2 named: LEGACY_ONE, LEGACY_TWO\n");
+	expect(done.stdout).toBe("marked 1 held 0 none 0 inconsistent 0 failed 0\n");
+	expect((await run("first\n")).stderr).toBe("");
 });
