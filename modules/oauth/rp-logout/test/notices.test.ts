@@ -79,6 +79,15 @@ it.each([
 			throw new DestinationRefused("redirect");
 		},
 	],
+	[
+		"a second bundled copy of the destination policy refuses it",
+		async (): Promise<number> => {
+			throw Object.assign(new Error("outbound destination refused: redirect"), {
+				[Symbol.for("@mod/outbound-policy.destination-refused")]: true,
+				reason: "redirect",
+			});
+		},
+	],
 ])("settles a notice once %s", async (_name, answer) => {
 	const h = await serve();
 	h.answering.answer = answer;
