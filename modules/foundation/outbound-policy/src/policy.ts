@@ -1,4 +1,5 @@
 import { BlockList, isIP } from "node:net";
+import { isLoopbackName } from "@mod/url-setting";
 import {
 	type Admitted,
 	type CredentialRefusal,
@@ -78,9 +79,6 @@ const metadata = { ipv4: new BlockList(), ipv6: new BlockList() };
 metadata.ipv4.addAddress("100.100.100.200", "ipv4");
 metadata.ipv6.addAddress("fd00:ec2::254", "ipv6");
 metadata.ipv6.addAddress("fd20:ce::254", "ipv6");
-const loopback = { ipv4: new BlockList(), ipv6: new BlockList() };
-loopback.ipv4.addSubnet("127.0.0.0", 8, "ipv4");
-loopback.ipv6.addAddress("::1", "ipv6");
 
 const familyOf = (address: string) => (isIP(address) === 6 ? "ipv6" : "ipv4");
 const inList = (lists: Record<"ipv4" | "ipv6", BlockList>, address: string) =>
@@ -224,17 +222,44 @@ export function admitUrl(
 		policy.plainInternal.some((listed) => pairOf(listed) === pair);
 	if (plain && !loopback && !plainInternal && !signed) throw new DestinationRefused("scheme");
 	const internal = own && listed(host, policy.internal);
-	return { url, host, port, plain, loopback, internal, plainInternal };
+	const written = unbracketed(url.hostname);
+	const address = isIP(written) !== 0 ? { address: written } : {};
+	return { url, host, port, ...address, plain, loopback, internal, plainInternal };
+}
+
+/**
+ * An address as a connection reaches it: an IPv4 address mapped into IPv6 is that IPv4 one, but no
+ * other IPv6 form that carries one (compatible, translated), unlike the lists' spelling.
+ */
+function reached(address: string): string {
+	const bare = unbracketed(address);
+	if (isIP(bare) !== 6) return bare;
+	const written = unbracketed(URL.parse(`https://[${bare}]`)?.hostname ?? "");
+	return /^::ffff:[0-9a-f]{1,4}:[0-9a-f]{1,4}$/.test(written)
+		? (carried(written) ?? written)
+		: written;
 }
 
 const isPrivate = (address: string) => {
-	const spelled = normalized(address) ?? address;
+	const spelled = reached(address);
 	return inList(privately, spelled) && !inList(metadata, spelled);
 };
 
+/**
+ * Whether an IP address, however written (bracketed, in any case, IPv4 mapped into IPv6), reaches
+ * loopback: 127/8 or `::1`. A name is none; nor is an IPv6 form that carries 127/8 unmapped, which no
+ * connection takes to loopback. The literal is judged as url-setting's `isLoopbackName` judges it.
+ */
+export function isLoopbackAddress(address: string): boolean {
+	const bare = address.startsWith("[") && address.endsWith("]") ? address.slice(1, -1) : address;
+	const family = isIP(bare);
+	if (family === 0 || (family === 4 && bare !== address)) return false;
+	return isLoopbackName(address);
+}
+
 /** What refuses an address by reach: all but loopback (carried in IPv6 too) for a plain pair; special but private ones for an internal host. */
 function refusing(reach: Pick<Admitted, "loopback" | "internal">): (address: string) => boolean {
-	if (reach.loopback) return (address) => !inList(loopback, normalized(address) ?? address);
+	if (reach.loopback) return (address) => !isLoopbackAddress(address);
 	if (reach.internal) return (address) => isSpecial(address) && !isPrivate(address);
 	return isSpecial;
 }
@@ -359,8 +384,8 @@ export function policyOf(settings: PolicySettings): Policy {
 	const refusalOf = (url: string, narrower: Narrower): RefusalReason | undefined => {
 		try {
 			const admitted = admitUrl(url, rules, narrower, false);
-			// An address written in the URL is checked now; a name's, once resolved, when sent.
-			if (isIP(admitted.host) !== 0) admitAddresses([admitted.host], admitted);
+			// An address written in the URL is checked now, as written; a name's, once resolved, when sent.
+			if (admitted.address !== undefined) admitAddresses([admitted.address], admitted);
 			return undefined;
 		} catch (error) {
 			if (error instanceof DestinationRefused) return error.reason;
@@ -373,6 +398,18 @@ export function policyOf(settings: PolicySettings): Policy {
 		explain: (url, narrower = {}) => {
 			const reason = refusalOf(url, narrower);
 			return reason && `${reason}: ${remedyOf(reason, url, rules, narrower)}`;
+		},
+		plainInternal: (url, narrower = {}) => {
+			try {
+				const admitted = admitUrl(url, rules, narrower, false);
+				if (admitted.plainInternal !== true) return false;
+				// As `explain`: an address written in the URL is checked now, a name's when sent.
+				if (admitted.address !== undefined) admitAddresses([admitted.address], admitted);
+				return true;
+			} catch (error) {
+				if (error instanceof DestinationRefused) return false;
+				throw error;
+			}
 		},
 		credentialRefusal: (urls) => credentialRefusal(urls, rules.plainLoopback, rules.plainInternal),
 		listed,

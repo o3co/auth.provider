@@ -1403,7 +1403,11 @@ it("boots with its pages at http on a loopback host, and refuses http on any oth
 		serve({ authorize: { "step-up-page": "http://[::1]:3000/raise" } }),
 	).resolves.toBeDefined();
 	for (const key of ["login-page", "step-up-page"]) {
-		for (const target of ["http://as.example/x", "http://localhost./x", "http://0.0.0.0:3000/x"]) {
+		for (const target of [
+			"http://as.example/x",
+			"http://localhost.localdomain/x",
+			"http://0.0.0.0:3000/x",
+		]) {
 			await expect(
 				serve({ authorize: { [key]: target } }),
 				`${key} ${target}`,

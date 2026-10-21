@@ -203,6 +203,9 @@ describe("idp-apple", () => {
 			"https://localhost./cb",
 			"https://127.0.0.5/cb",
 			"https://[::1]/cb",
+			// A name under localhost and 127/8 mapped into IPv6 are loopback hosts too (isLoopbackName).
+			"https://a.localhost/cb",
+			"https://[::ffff:7f00:1]/cb",
 		]) {
 			await expect(open(undefined, undefined, at), at).rejects.toThrow();
 		}

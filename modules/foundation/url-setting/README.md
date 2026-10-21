@@ -9,11 +9,12 @@
 ## Offers
 - `urlSetting`: a module's `UrlRules` → a schema part for a configured URL, read as a `ConfiguredUrl`: a string only url-setting makes, so whoever holds one holds an operator's URL. `./testing`: `configuredUrl`, one made for a test, refused as url-setting refuses it.
 - `UrlRules`: the schemes, whether plain `http` is also taken, on a loopback host only (`loopbackHttp`, default no), whether a query may be part (default yes), whether a trailing `/` is kept (default) or refused, and whether only an origin is taken (`origin`: no path, not even `/`, and no query).
+- `isLoopbackName`: whether a host is a loopback one by its name alone, never resolved: `localhost` or a name under it, with or without a trailing dot; 127.0.0.0/8 as the parser writes it; `::1` or 127.0.0.0/8 mapped into IPv6. Whether its addresses are loopback is `outbound-policy`'s to check.
 - `urlsChecked` (a check of a URL and its hosts → its refusal, the URLs that must parse first, the URL and hosts sent at each key) → a section's refinement: once every URL parses, each one sent is checked and what the check answers is put at its key; while one is no URL, nothing is asked. The check's words are its own.
 
 ## Invariants
 - A configured URL is written `<scheme>://` in lower case.
-- Its scheme is one of the schemes the module gives; with `loopbackHttp`, also `http`, on a loopback host only: `localhost`, an IPv4 address in 127.0.0.0/8 or `[::1]`, judged on the host as the parser writes it. Any other host over `http` is refused, `localhost.`, a subdomain of `localhost`, `0.0.0.0` and an IPv4-mapped address among them.
+- Its scheme is one of the schemes the module gives; with `loopbackHttp`, also `http`, on a host `isLoopbackName` takes, judged on the host as the parser writes it, by its name alone. Any other host over `http` is refused, `localhost.localdomain` and `0.0.0.0` among them.
 - It has a host.
 - It holds no userinfo.
 - It holds no fragment, not even a bare `#`.

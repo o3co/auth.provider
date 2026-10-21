@@ -49,18 +49,31 @@ function refusal(value: string, rules: UrlRules): string | undefined {
 	const kind = difference(url, authority, path, value);
 	if (kind) return form(kind);
 	// Decided on the parser's form only, which the value now is, so no other spelling reaches here.
-	if (!rules.schemes.some((s) => s === scheme) && !loopback(url.hostname)) {
+	if (!rules.schemes.some((s) => s === scheme) && !isLoopbackName(url.hostname)) {
 		return "a URL: http only on a loopback host";
 	}
 	return undefined;
 }
 
 /**
- * Whether a host, as the parser writes it, is a loopback one: `localhost`, an IPv4 address in
- * 127.0.0.0/8 (the parser writes every IPv4 address as four decimal parts), or `[::1]`.
+ * Whether a host is a loopback one by its name alone, never resolved: `localhost` or a name under it
+ * (RFC 6761), in any case and with or without a trailing dot; an IPv4 address in 127.0.0.0/8 as the
+ * URL parser writes it; or `::1` or 127.0.0.0/8 mapped into IPv6, however written. Bracketed or not.
  */
-function loopback(hostname: string): boolean {
-	return hostname === "localhost" || hostname === "[::1]" || /^127(\.\d{1,3}){3}$/.test(hostname);
+export function isLoopbackName(host: string): boolean {
+	const bracketed = host.startsWith("[") && host.endsWith("]");
+	const bare = bracketed ? host.slice(1, -1) : host;
+	if (bare.includes(":")) {
+		const written = URL.parse(`http://[${bare}]/`)?.hostname;
+		return written === "[::1]" || /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(written ?? "");
+	}
+	if (bracketed) return false;
+	const lower = bare.toLowerCase();
+	if (/^[0-9.]+$/.test(lower)) {
+		return URL.parse(`http://${lower}/`)?.hostname === lower && /^127(\.\d{1,3}){3}$/.test(lower);
+	}
+	const labels = (lower.endsWith(".") ? lower.slice(0, -1) : lower).split(".");
+	return labels.at(-1) === "localhost" && labels.every((label) => label !== "");
 }
 
 function form(kind: string): string {

@@ -69,8 +69,13 @@ const failedAs = (error: unknown, signal: AbortSignal) => {
 	return unavailable(code === "HPE_HEADER_OVERFLOW" ? "too-large" : "unreachable");
 };
 
+/** The address the URL names, as written, never as the IPv4 address it may carry; none for a name. */
+const writtenAddress = (admitted: Admitted) =>
+	admitted.address ?? (isIP(admitted.host) !== 0 ? admitted.host : undefined);
+
 async function addressesOf(admitted: Admitted, resolve: Resolver, signal: AbortSignal) {
-	if (isIP(admitted.host) !== 0) return [admitted.host];
+	const written = writtenAddress(admitted);
+	if (written !== undefined) return [written];
 	// A deadline already past fires no more; the listener lives as long as this request's signal.
 	if (signal.aborted) throw unavailable("timeout");
 	const deadline = new Promise<never>((_, reject) =>
@@ -101,7 +106,8 @@ async function bodyOf(answer: IncomingMessage, maxBytes: number, signal: AbortSi
 
 /** A tunnel to the destination through the proxy, by CONNECT; the proxy resolves the name and checks its addresses. */
 function tunnel(route: Route, admitted: Admitted, signal: AbortSignal) {
-	const target = `${isIP(admitted.host) === 6 ? `[${admitted.host}]` : admitted.host}:${admitted.port}`;
+	const named = writtenAddress(admitted) ?? admitted.host;
+	const target = `${isIP(named) === 6 ? `[${named}]` : named}:${admitted.port}`;
 	return new Promise<Socket>((opened, failed) => {
 		const asking = plainRequest({
 			hostname: unbracketed(route.proxy.hostname),
@@ -139,8 +145,9 @@ async function viaProxy(
 	signal: AbortSignal,
 	trust: Trust,
 ): Promise<Way> {
-	const literal = isIP(admitted.host) !== 0;
-	if (literal) policy.admitAddresses([admitted.host], admitted);
+	const written = writtenAddress(admitted);
+	const literal = written !== undefined;
+	if (written !== undefined) policy.admitAddresses([written], admitted);
 	const socket = await tunnel(route, admitted, signal);
 	const agent = new TlsAgent({ keepAlive: false });
 	agent.createConnection = () =>
@@ -196,7 +203,7 @@ export async function send(
 		let outgoing: ClientRequest;
 		try {
 			outgoing = (admitted.plain ? plainRequest : tlsRequest)({
-				hostname: admitted.host,
+				hostname: writtenAddress(admitted) ?? admitted.host,
 				port: admitted.port,
 				path: `${admitted.url.pathname}${admitted.url.search}`,
 				method: request.method ?? "GET",

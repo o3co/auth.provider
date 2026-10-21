@@ -48,6 +48,12 @@ export interface OutboundRefusals {
 	 * never the URL's host, port or any other value; undefined when the policy lets it through.
 	 */
 	explained(url: string, narrower?: Narrower): string | undefined;
+	/**
+	 * Whether the policy takes the URL as plain http to a pair `plain-internal` names, for the
+	 * narrower's own `internal` URL; false where it refuses the URL or takes it another way. No name
+	 * is resolved: the sender still checks every address is private. Absent, read it as false.
+	 */
+	plainInternal?(url: string, narrower?: Narrower): boolean;
 }
 
 export const outboundRefusals = contract<OutboundRefusals>("outbound.refusals");
@@ -106,6 +112,11 @@ export interface Admitted {
 	readonly url: URL;
 	readonly host: string;
 	readonly port: number;
+	/**
+	 * An address written in the URL, as written there without brackets; `host` is its spelling for
+	 * the lists. Its reach is judged on this, never on an IPv4 address it may carry.
+	 */
+	readonly address?: string;
 	readonly plain: boolean;
 	/** Reached at loopback addresses alone, as a named plain pair. */
 	readonly loopback: boolean;
@@ -123,6 +134,8 @@ export interface Policy {
 	admitAddresses(addresses: readonly string[], admitted: Admitted): readonly string[];
 	/** `<reason>: <what to set>` for a URL the policy refuses, resolving no name; undefined when it lets it through. */
 	explain(url: string, narrower?: Narrower): string | undefined;
+	/** Whether the URL is taken as plain http to a pair `plain-internal` names, resolving no name. */
+	plainInternal(url: string, narrower?: Narrower): boolean;
 	credentialRefusal(urls: readonly string[]): CredentialRefusal | undefined;
 	/** Whether a host is among an operator's list entries. */
 	listed(host: string, entries: readonly string[]): boolean;
@@ -130,5 +143,11 @@ export interface Policy {
 	limitsOf(narrower?: Narrower, signed?: boolean): Limits;
 }
 
-export { type HostEntry, hostEntryOf, policyOf, withinHosts } from "./policy.ts";
+export {
+	type HostEntry,
+	hostEntryOf,
+	isLoopbackAddress,
+	policyOf,
+	withinHosts,
+} from "./policy.ts";
 export { hostList, type PolicySettings, policySettings } from "./settings.ts";

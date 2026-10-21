@@ -11,14 +11,12 @@ import {
 	tokenAnswerOf,
 } from "@mod/upstream-client";
 import { type Upstream, UpstreamRefused } from "@mod/upstreams";
+import { isLoopbackName } from "@mod/url-setting";
 import { secretOf } from "./client-secret/secret.ts";
 import type { Settings } from "./settings.ts";
 
 /** Apple's issuer, exactly as its id_tokens and any callback `iss` must name it. */
 export const issuer = "https://appleid.apple.com";
-
-const loopback = (host: string) =>
-	host === "localhost" || host === "localhost." || host === "[::1]" || /^127(\.\d+){3}$/.test(host);
 
 /** The secret to send: the fixed one, or one the team's key signs. Throws, naming no value, on a key that is no P-256 key in PKCS8. */
 function secretFrom(s: Settings, clock: Clock): () => Promise<string> {
@@ -52,7 +50,7 @@ export function opened(
 	at: { readonly clock: Clock; readonly redirectUri: string },
 ): Upstream {
 	const callback = new URL(at.redirectUri);
-	if (callback.protocol !== "https:" || loopback(callback.hostname)) {
+	if (callback.protocol !== "https:" || isLoopbackName(callback.hostname)) {
 		throw new Error("Apple takes only an https callback off loopback");
 	}
 	const secret = secretFrom(s, at.clock);

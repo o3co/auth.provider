@@ -194,3 +194,98 @@ describe("a credential to a plain-internal pair", () => {
 		expect(credentialRefusalText("origins")).toContain("one origin");
 	});
 });
+
+describe("whether a URL is taken as plain-internal, asked at boot", () => {
+	const policy = policyOf(
+		policySettings.parse({
+			"allow-any-public": true,
+			deny: ["denied.internal"],
+			"plain-loopback": ["localhost:8080"],
+			"plain-internal": ["ledger.internal:9092", "denied.internal:9092"],
+		}),
+	);
+	const url = "http://ledger.internal:9092/verify";
+
+	it("answers true only for the caller's own URL at a pair plain-internal names, resolving no name", () => {
+		expect(policy.plainInternal(url, { internal: own })).toBe(true);
+		expect(policy.plainInternal("http://ledger.internal:9092/other?x=1", { internal: own })).toBe(
+			true,
+		);
+	});
+
+	it("checks an address written in the URL now, as explain does: private alone", () => {
+		const literal = policyOf(
+			policySettings.parse({
+				"allow-any-public": true,
+				"plain-internal": ["10.1.2.3:9092", "93.184.216.34:9092"],
+			}),
+		);
+		const asked = (at: string) => literal.plainInternal(at, { internal: configuredUrl(at) });
+		expect([asked("http://10.1.2.3:9092/x"), asked("http://93.184.216.34:9092/x")]).toEqual([
+			true,
+			false,
+		]);
+	});
+
+	it("answers false where plain http is refused or taken another way", () => {
+		const cases: Record<string, [string, Parameters<typeof policy.plainInternal>[1]]> = {
+			"no configured URL": [url, {}],
+			"another origin's configured URL": [
+				url,
+				{ internal: configuredUrl("http://ledger.internal:9093/verify") },
+			],
+			"an outside party's choice": [url, { internal: own, outsideChosen: true }],
+			"a pair not listed": [
+				"http://other.internal:9092/x",
+				{ internal: configuredUrl("http://other.internal:9092/x") },
+			],
+			"a denied host": [
+				"http://denied.internal:9092/x",
+				{ internal: configuredUrl("http://denied.internal:9092/x") },
+			],
+			"https, never plain": [
+				"https://ledger.internal:9092/verify",
+				{ internal: configuredUrl("https://ledger.internal:9092/verify") },
+			],
+			"a plain-loopback pair": [
+				"http://localhost:8080/x",
+				{ internal: configuredUrl("http://localhost:8080/x") },
+			],
+			"no URL": ["not a url", { internal: own }],
+		};
+		for (const [name, [given, narrower]] of Object.entries(cases)) {
+			expect(policy.plainInternal(given, narrower), name).toBe(false);
+		}
+	});
+});
+
+describe("a private address, as a connection reaches it", () => {
+	it("is IPv4 mapped into IPv6 as the IPv4 one, but no other IPv6 form that carries one", () => {
+		const plainInternal = { loopback: false, internal: false, plainInternal: true };
+		const internal = { loopback: false, internal: true };
+		const refusedFor = (
+			addresses: readonly string[],
+			reach: Parameters<typeof admitAddresses>[1],
+		) => reasonOf(() => admitAddresses(addresses, reach));
+		for (const reach of [plainInternal, internal]) {
+			expect(refusedFor(["::ffff:10.0.0.1"], reach)).toBe("admitted");
+			expect(refusedFor(["::ffff:a00:1"], reach)).toBe("admitted");
+			// Compatible and translated forms carry 10.0.0.1, but a connection does not reach it.
+			expect(refusedFor(["::a00:1"], reach)).toBe("special-address");
+			expect(refusedFor(["::ffff:0:a00:1"], reach)).toBe("special-address");
+		}
+	});
+
+	it("is judged as written in the URL too, though the pair is listed as its IPv4 spelling", () => {
+		const policy = policyOf(
+			policySettings.parse({ "allow-any-public": true, "plain-internal": ["10.0.0.1:8080"] }),
+		);
+		const asked = (at: string) => {
+			const narrower = { internal: configuredUrl(at) };
+			return [policy.explain(at, narrower)?.split(":")[0], policy.plainInternal(at, narrower)];
+		};
+		expect(asked("http://10.0.0.1:8080/x")).toEqual([undefined, true]);
+		expect(asked("http://[::a00:1]:8080/x")).toEqual(["special-address", false]);
+		expect(asked("http://[::ffff:0:a00:1]:8080/x")).toEqual(["special-address", false]);
+	});
+});

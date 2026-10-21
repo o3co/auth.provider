@@ -15,7 +15,7 @@
 
 ## Invariants
 - Whether the code grant is composed is `grants`' `composedGrants`. Without it composed, nothing is fetched and the metadata item is left out; boot is not refused.
-- An id is fetched only when it is https, has a path other than `/`, has no query, fragment, user information, IP literal or localhost, and is written exactly as the URL parser writes it.
+- An id is fetched only when it is https, has a path other than `/`, has no query, fragment, user information, IP literal, empty label or loopback host (`url-setting`'s `isLoopbackName`), and is written exactly as the URL parser writes it.
 - Its host is checked before the fetch, spelled as `outbound` spells hosts: `deny` first, then a non-empty `allow`. An `allow` list also narrows `outbound`'s hosts.
 - The fetch goes only through `outbound`, asks for JSON, and narrows its size and time; it marks its destination `outsideChosen`, as an outside party chooses it, for outbound to keep its name lookups to their share. Only a `200` with a JSON media type and one object is a document.
 - Boot is refused where `max-size` or `timeout` is above `outbound`'s cap, as its `outboundLimits` answers it, naming the key and no value, and where outbound gives the document's names no lookup (`lookupsOf`).
@@ -36,4 +36,4 @@
 - Kept documents, remembered refusals and running fetches, in this process only (see `fetching`). Safe on multiple instances.
 
 ## Depends on
-- `kernel`, `clients`, `client-allowance`, `outbound`, `outbound-policy`, `grants`, `code-grant`, `refresh`, `issuer`
+- `kernel`, `clients`, `client-allowance`, `outbound`, `outbound-policy`, `grants`, `code-grant`, `refresh`, `issuer`, `url-setting` (`isLoopbackName`)

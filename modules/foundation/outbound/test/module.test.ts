@@ -181,6 +181,21 @@ it("boots with a proxy configured whatever the variables say, and warns what it 
 		"outbound.proxy_checks_addresses",
 		"outbound.proxy_credentials_in_clear",
 	]);
+	// The proxy's name is never resolved here, so only a loopback address written as one goes unwarned:
+	// a name, localhost and the names under it included, may resolve anywhere.
+	for (const host of ["localhost", "localhost.", "proxy.localhost"]) {
+		const from = warned().length;
+		await withProxy({ proxy: `http://${host}:3128`, "proxy-authorization": "Basic dGVzdA==" });
+		expect(warned().slice(from), host).toEqual([
+			"outbound.proxy_checks_addresses",
+			"outbound.proxy_credentials_in_clear",
+		]);
+	}
+	for (const host of ["[::1]", "127.0.0.2"]) {
+		const from = warned().length;
+		await withProxy({ proxy: `http://${host}:3128`, "proxy-authorization": "Basic dGVzdA==" });
+		expect(warned().slice(from), host).toEqual(["outbound.proxy_checks_addresses"]);
+	}
 	expect(JSON.stringify(recorded.lines())).not.toContain("dGVzdA==");
 });
 
@@ -285,6 +300,21 @@ it("answers at boot why the policy refuses a URL, or nothing when it lets it thr
 	expect(
 		reasonOf(inside, "https://127.0.0.1/", { internal: configuredUrl("https://127.0.0.1/") }),
 	).toBe("special-address");
+});
+
+it("answers at boot whether a URL is taken as plain-internal, for the caller's own URL alone", async () => {
+	onlyProxy();
+	const refusals = (
+		await boot({ "allow-any-public": true, "plain-internal": ["ledger.internal:9092"] })
+	).get(outboundRefusals);
+	const url = "http://ledger.internal:9092/verify";
+	const own = { internal: configuredUrl(url) };
+	expect([
+		refusals.plainInternal?.(url, own),
+		refusals.plainInternal?.(url),
+		refusals.plainInternal?.(url, { ...own, outsideChosen: true }),
+		refusals.plainInternal?.("http://ledger.internal:9093/verify", own),
+	]).toEqual([true, false, false, false]);
 });
 
 it("explains at boot why the policy refuses a URL by the keys that let it through, naming no value", async () => {

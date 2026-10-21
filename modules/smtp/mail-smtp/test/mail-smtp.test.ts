@@ -83,6 +83,13 @@ mailContract("SMTP, STARTTLS", {
 });
 
 describe("delivery", () => {
+	it("sends under none to a loopback address as the section took it, IPv4 mapped into IPv6 too", async () => {
+		const r = await started();
+		const smtpAt = await boot(section(r.port, { host: "::ffff:127.0.0.1" }));
+		await expect(smtpAt.send(notice())).resolves.toBe("sent");
+		expect(verbs(r)).toEqual(["EHLO", "MAIL", "RCPT", "DATA", "QUIT"]);
+	});
+
 	it("sends one message with one recipient in the envelope and in To, and no AUTH without an account", async () => {
 		const r = await started();
 		await expect((await boot(section(r.port))).send(notice())).resolves.toBe("sent");
@@ -415,6 +422,35 @@ describe("settings", () => {
 				name,
 			).toEqual([where]);
 			expect(JSON.stringify(found), name).not.toContain(password);
+		}
+	});
+
+	it("allows plaintext to a host url-setting's isLoopbackName takes, and to no other", async () => {
+		for (const host of [
+			"LocalHost",
+			"a.localhost",
+			"localhost.",
+			"127.0.0.1",
+			"::1",
+			"::ffff:127.0.0.1",
+		]) {
+			await expect(boot(section(25, { host })), host).resolves.toBeDefined();
+		}
+		for (const host of [
+			"localhost.example",
+			"127.0.0.08",
+			"2130706433",
+			"10.0.0.1",
+			"::ffff:a00:1",
+			// The connection takes the host as written, and Node reads a bracketed one as a name.
+			"[::1]",
+			"[::ffff:7f00:1]",
+		]) {
+			const found = await refusals(section(25, { host }));
+			expect(
+				found.map((f) => f.where),
+				host,
+			).toEqual(["mail-smtp.security"]);
 		}
 	});
 
