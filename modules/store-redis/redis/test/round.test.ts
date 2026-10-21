@@ -124,12 +124,17 @@ describe("a store script, run once", () => {
 		redis.down();
 	});
 
-	it("never names a store script for a passing state of the server, such as one busy with a script", async () => {
-		const redis = primary();
-		redis.storeScripts.transient = true;
-		const reasons = await refusal(await redis.listen());
-		expect(reasons).not.toMatch(/store script/);
-		redis.down();
+	it("never names a store script for a passing state of the server: busy with a script, or loading its data", async () => {
+		for (const state of [
+			"BUSY Redis is busy running a script. You can only call SCRIPT KILL or SHUTDOWN NOSAVE.",
+			"LOADING Redis is loading the dataset in memory",
+		]) {
+			const redis = primary();
+			redis.storeScripts.transient = state;
+			const reasons = await refusal(await redis.listen());
+			expect(reasons, state).not.toMatch(/store script/);
+			redis.down();
+		}
 	});
 
 	it("answers unready once a store script fails after boot", async () => {
