@@ -3511,9 +3511,6 @@ importers:
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
-      '@mod/webauthn':
-        specifier: workspace:*
-        version: link:../../passkey/webauthn
 
   modules/tooling/conformance:
     dependencies:
