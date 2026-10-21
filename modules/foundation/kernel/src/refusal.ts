@@ -22,8 +22,12 @@ export class RefusalSignal extends Error {
 	}
 }
 
+/** The mark an outage carries, the same in every copy of the kernel a bundle may hold. */
+const unavailableMark = Symbol.for("@mod/kernel.unavailable");
+
 export class Unavailable extends Error {
 	readonly what: string;
+	readonly [unavailableMark] = true;
 	constructor(what: string) {
 		super(`${what} unavailable`);
 		this.name = "Unavailable";
@@ -31,6 +35,11 @@ export class Unavailable extends Error {
 	}
 }
 
+/** Whether `error` is an outage, by its mark rather than its class, so two copies of the kernel agree. */
 export function isUnavailable(error: unknown): error is Unavailable {
-	return error instanceof Unavailable;
+	return (
+		typeof error === "object" &&
+		error !== null &&
+		(error as { readonly [unavailableMark]?: unknown })[unavailableMark] === true
+	);
 }
