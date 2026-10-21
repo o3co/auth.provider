@@ -84,6 +84,16 @@ it("points at the release's documents and the cards that ask of the deployment",
 	expect(guide).toContain("https://example.invalid/auth/blob/v1.2.3/docs/recipe-first-login.md");
 });
 
+it("tells a refused boot in its entries by the kernel's mark, never by its class", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/seal"], fakePackages(), readme);
+	for (const entry of ["src/main.ts", "src/reseal.ts"]) {
+		const source = await read(target, entry);
+		expect(source, entry).toContain("BootRefused.is(error)");
+		expect(source, entry).not.toContain("instanceof");
+	}
+});
+
 it("adds the reseal entry when seal is composed", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
 	await writeDeployment(target, ["@mod/seal"], fakePackages(), readme);
