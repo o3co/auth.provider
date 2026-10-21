@@ -77,6 +77,45 @@ describe("a binding a reset or a revocation comes into", () => {
 		]);
 	});
 
+	it("writes no recovery codes when a revocation's record lands before its followers fence the binding", async () => {
+		const s = await serve();
+		await s.signIn("uma");
+		const begun = await s.call("POST", "/session/mfa/enrollment", { kind: "code" });
+		clock.shift += 1000;
+		let release = () => {};
+		const reached = new Promise<void>((arrived) => {
+			during.follow = () => {
+				arrived();
+				return new Promise<void>((go) => {
+					release = go;
+				});
+			};
+		});
+		let recorded: Promise<unknown> = Promise.resolve();
+		during.code = async () => {
+			// After the proof is judged, the bind's write is the next: the revocation's record lands as
+			// it answers, and mfa's fence waits behind it, so the factor stands.
+			during.written = async () => {
+				recorded = s.app.get(revocations).record("uma");
+				await reached;
+				clock.shift += 1000;
+			};
+		};
+		const done = await s.call("POST", "/session/mfa/enrollment/complete", {
+			transaction_id: String(begun.body.transaction),
+			proof: `${begun.body.secret}:0`,
+		});
+		release();
+		await recorded;
+		expect([done.status, done.body.error, done.body.recovery_codes]).toEqual([
+			401,
+			"login_required",
+			undefined,
+		]);
+		expect((await s.app.get(factors).held("uma")).map((f) => f.kind)).toEqual(["code"]);
+		expect(s.events.some((e) => e.kind === "mfa.recovery_codes.generated")).toBe(false);
+	});
+
 	it("writes no factor and no recovery codes once a revocation completes as the binding is written", async () => {
 		const s = await serve();
 		await s.signIn("uma");
