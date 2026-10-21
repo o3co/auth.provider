@@ -1,4 +1,3 @@
-import { createServer, type Server, type Socket } from "node:net";
 import {
 	type Assembly,
 	assemble,
@@ -12,85 +11,7 @@ import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { spaces } from "@mod/store";
 import { afterEach, describe, expect, it } from "vitest";
 import redisModule from "../src/module.ts";
-
-/** One command from the start of `buffer`, and the bytes it took; none until it is whole. */
-function commandOf(buffer: Buffer): { args: string[]; used: number } | undefined {
-	const text = buffer.toString("latin1");
-	let at = 0;
-	const line = () => {
-		const end = text.indexOf("\r\n", at);
-		if (end < 0) return undefined;
-		const read = text.slice(at, end);
-		at = end + 2;
-		return read;
-	};
-	const head = line();
-	if (head === undefined) return undefined;
-	const args: string[] = [];
-	for (let i = 0; i < Number(head.slice(1)); i++) {
-		const size = Number(line()?.slice(1));
-		if (Number.isNaN(size) || text.length < at + size + 2) return undefined;
-		args.push(text.slice(at, at + size));
-		at += size + 2;
-	}
-	return { args, used: at };
-}
-
-const bulk = (text: string) => `$${text.length}\r\n${text}\r\n`;
-
-/** Just enough of a Redis 7 primary to boot the module, counting PINGs per socket; its role and eviction policy may change. */
-function fakeRedis() {
-	const sockets = new Set<Socket>();
-	const pinged = new Set<Socket>();
-	const settings = { role: "master", "maxmemory-policy": "noeviction" };
-	const server: Server = createServer((socket) => {
-		sockets.add(socket);
-		socket.on("close", () => sockets.delete(socket));
-		socket.on("error", () => {});
-		let buffer = Buffer.alloc(0);
-		socket.on("data", (chunk: Buffer) => {
-			buffer = Buffer.concat([buffer, chunk]);
-			for (let command = commandOf(buffer); command; command = commandOf(buffer)) {
-				buffer = buffer.subarray(command.used);
-				const name = command.args[0]?.toUpperCase();
-				if (name === "PING") pinged.add(socket);
-				socket.write(
-					name === "PING"
-						? "+PONG\r\n"
-						: name === "INFO"
-							? bulk("redis_version:7.4.0\r\ncluster_enabled:0\r\nloading:0\r\n")
-							: name === "ROLE"
-								? `*3\r\n${bulk(settings.role)}:0\r\n*0\r\n`
-								: name === "CONFIG" && command.args[2] === "maxmemory-policy"
-									? `*2\r\n${bulk("maxmemory-policy")}${bulk(settings["maxmemory-policy"])}`
-									: "+OK\r\n",
-				);
-			}
-		});
-	});
-	return {
-		pinged,
-		settings,
-		listen: () =>
-			new Promise<number>((resolve) =>
-				server.listen(0, "127.0.0.1", () => {
-					const address = server.address();
-					resolve(typeof address === "object" && address ? address.port : 0);
-				}),
-			),
-		/**
-		 * Bytes no reply starts with, so the client's parser refuses them and reports an error event
-		 * whatever command is waiting; a stray `+PONG` could be taken as one in flight's reply.
-		 */
-		stray: () => {
-			for (const socket of sockets) socket.write("@\r\n");
-		},
-		down: () => {
-			server.close();
-			for (const socket of sockets) socket.destroy();
-		},
-	};
-}
+import { fakeRedis } from "./fake-redis.ts";
 
 /** Waits until `holds`, checking every 10 ms, for 2 s at most: on the event, not on a guess of its time. */
 async function until(holds: () => boolean | Promise<boolean>) {

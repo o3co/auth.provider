@@ -1,9 +1,9 @@
 import { contract, defineModule, probes, setting } from "@mod/kernel";
 import { type Space, spaces, store } from "@mod/store";
-import { Redis, ReplyError } from "ioredis";
+import { Redis } from "ioredis";
 import { z } from "zod";
 import { redisProbe } from "./probe.ts";
-import { redisStore } from "./redis-store.ts";
+import { redisStore, refusedCommands, refusedForGood } from "./redis-store.ts";
 
 const section = z.strictObject({
 	url: z.url({ protocol: /^rediss?$/ }).describe("The Redis server to connect to."),
@@ -78,11 +78,6 @@ type SettingName = keyof Declared;
 
 const minimumVersion = [7, 0];
 
-/** Whether CONFIG is refused for good, for want of permission or of the command; any other error is no answer. */
-const refusesConfig = (error: unknown) =>
-	error instanceof ReplyError &&
-	/^(NOPERM|ERR unknown (sub)?command)\b/i.test((error as Error).message);
-
 /** Reads a server setting by CONFIG GET; where the server refuses it, the operator's declaration. */
 type Settings = (name: SettingName) => Promise<string | undefined>;
 
@@ -100,7 +95,7 @@ function serverSettings(client: Redis, declared: Declared) {
 		try {
 			answered = ((await client.config("GET", name)) as string[])[1];
 		} catch (error) {
-			if (!refusesConfig(error)) throw error;
+			if (!refusedForGood(error)) throw error;
 			used.add(name);
 			const value = declaredOf(name);
 			if (value === undefined) {
@@ -198,6 +193,7 @@ async function durabilityProblems(
 /** What the server's settings fail to give the declared spaces, empty when everything holds; and the settings taken as declared. */
 async function unmet(
 	client: Redis,
+	confirmer: Redis,
 	declared: readonly Space[],
 	s: z.output<typeof section>,
 ): Promise<{
@@ -205,6 +201,12 @@ async function unmet(
 	readonly declaredOnly: readonly SettingName[];
 	readonly undurable: readonly string[];
 }> {
+	// First, as the checks below send some of the same commands: a refused one is named, not lost.
+	const refused = await refusedCommands(client, confirmer, {
+		prefix: s.prefix,
+		replication: s.replication,
+	});
+	if (refused.length > 0) return { problems: refused, declaredOnly: [], undurable: [] };
 	const role = await roleOf(client);
 	const settings = serverSettings(client, s["server-settings"] ?? {});
 	const problems = [
@@ -254,7 +256,7 @@ export default defineModule({ name: "redis", section }, (m) => [
 		try {
 			await client.connect();
 			await confirmer.connect();
-			checked = await unmet(client, declared, c.section);
+			checked = await unmet(client, confirmer, declared, c.section);
 		} catch {
 			client.disconnect();
 			confirmer.disconnect();
@@ -305,7 +307,7 @@ export default defineModule({ name: "redis", section }, (m) => [
 	}),
 	m.contribute(probes).by(async (c) => {
 		const { client, confirmer, declared } = await c.get(connections);
-		const recheck = async () => (await unmet(client, declared, c.section)).problems;
+		const recheck = async () => (await unmet(client, confirmer, declared, c.section)).problems;
 		return redisProbe([client, confirmer], recheck, c.log);
 	}),
 ]);
