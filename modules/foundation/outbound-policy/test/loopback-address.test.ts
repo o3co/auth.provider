@@ -84,3 +84,20 @@ describe("an address written in the URL", () => {
 		expect(policy.admit("https://a.example/").address).toBeUndefined();
 	});
 });
+
+describe("a public address written in the URL", () => {
+	const policy = policyOf(policySettings.parse({ "allow-any-public": true }));
+	const reasonOf = (url: string) => policy.explain(url)?.split(":")[0];
+
+	it("is refused in any IPv6 form that carries it, as a resolved answer is", () => {
+		// 93.184.215.14: IANA's ::ffff:0:0/96 is refused whole, as for ::ffff:8.8.8.8 resolved.
+		expect(reasonOf("https://93.184.215.14/")).toBeUndefined();
+		for (const url of [
+			"https://[::ffff:5db8:d70e]/",
+			"https://[::5db8:d70e]/",
+			"https://[::ffff:0:5db8:d70e]/",
+		]) {
+			expect(reasonOf(url), url).toBe("special-address");
+		}
+	});
+});

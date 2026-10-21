@@ -227,8 +227,21 @@ export function admitUrl(
 	return { url, host, port, ...address, plain, loopback, internal, plainInternal };
 }
 
+/**
+ * An address as a connection reaches it: an IPv4 address mapped into IPv6 is that IPv4 one, but no
+ * other IPv6 form that carries one (compatible, translated), unlike the lists' spelling.
+ */
+function reached(address: string): string {
+	const bare = unbracketed(address);
+	if (isIP(bare) !== 6) return bare;
+	const written = unbracketed(URL.parse(`https://[${bare}]`)?.hostname ?? "");
+	return /^::ffff:[0-9a-f]{1,4}:[0-9a-f]{1,4}$/.test(written)
+		? (carried(written) ?? written)
+		: written;
+}
+
 const isPrivate = (address: string) => {
-	const spelled = normalized(address) ?? address;
+	const spelled = reached(address);
 	return inList(privately, spelled) && !inList(metadata, spelled);
 };
 

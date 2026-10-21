@@ -258,3 +258,34 @@ describe("whether a URL is taken as plain-internal, asked at boot", () => {
 		}
 	});
 });
+
+describe("a private address, as a connection reaches it", () => {
+	it("is IPv4 mapped into IPv6 as the IPv4 one, but no other IPv6 form that carries one", () => {
+		const plainInternal = { loopback: false, internal: false, plainInternal: true };
+		const internal = { loopback: false, internal: true };
+		const refusedFor = (
+			addresses: readonly string[],
+			reach: Parameters<typeof admitAddresses>[1],
+		) => reasonOf(() => admitAddresses(addresses, reach));
+		for (const reach of [plainInternal, internal]) {
+			expect(refusedFor(["::ffff:10.0.0.1"], reach)).toBe("admitted");
+			expect(refusedFor(["::ffff:a00:1"], reach)).toBe("admitted");
+			// Compatible and translated forms carry 10.0.0.1, but a connection does not reach it.
+			expect(refusedFor(["::a00:1"], reach)).toBe("special-address");
+			expect(refusedFor(["::ffff:0:a00:1"], reach)).toBe("special-address");
+		}
+	});
+
+	it("is judged as written in the URL too, though the pair is listed as its IPv4 spelling", () => {
+		const policy = policyOf(
+			policySettings.parse({ "allow-any-public": true, "plain-internal": ["10.0.0.1:8080"] }),
+		);
+		const asked = (at: string) => {
+			const narrower = { internal: configuredUrl(at) };
+			return [policy.explain(at, narrower)?.split(":")[0], policy.plainInternal(at, narrower)];
+		};
+		expect(asked("http://10.0.0.1:8080/x")).toEqual([undefined, true]);
+		expect(asked("http://[::a00:1]:8080/x")).toEqual(["special-address", false]);
+		expect(asked("http://[::ffff:0:a00:1]:8080/x")).toEqual(["special-address", false]);
+	});
+});
