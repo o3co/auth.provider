@@ -446,6 +446,15 @@ describe("idp-oidc", () => {
 				`outbound's destination policy refuses the description: ${reason}`,
 			]);
 		}
+		// A refusal a second bundled copy of outbound-policy throws: another class, the same mark.
+		const describes = () => {
+			throw Object.assign(new Error("outbound destination refused: redirect"), {
+				[Symbol.for("@mod/outbound-policy.destination-refused")]: true,
+				reason: "redirect",
+			});
+		};
+		const fromAnotherCopy = await open({ describes }).catch((e) => e);
+		expect(fromAnotherCopy).toBeInstanceOf(UpstreamMismatch);
 		// An issuer that cannot be reached is not one that does not match.
 		const unreachable = await open({ describes: () => "unreachable" }).catch((e) => e);
 		expect(isUnavailable(unreachable)).toBe(true);

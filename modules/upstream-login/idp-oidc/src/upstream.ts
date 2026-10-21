@@ -60,7 +60,7 @@ async function discovered(s: Settings, { outbound, refusals }: Reach, hosts: rea
 	const where = descriptionUrl(s.issuer);
 	// A destination outbound refuses, as an answer that does not hold, refuses boot under the issuer.
 	const fetched = await outbound.fetch(where, {}, { hosts }).catch((error: unknown) => {
-		if (!(error instanceof DestinationRefused)) throw error;
+		if (!DestinationRefused.is(error)) throw error;
 		throw mismatch(`outbound's destination policy refuses the description: ${error.reason}`);
 	});
 	// Refused as the upstream's answer, which at boot refuses boot.
