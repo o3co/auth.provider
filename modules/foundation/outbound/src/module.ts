@@ -4,6 +4,7 @@ import {
 	credentialPolicy,
 	DestinationRefused,
 	hostList,
+	isLoopbackAddress,
 	type Narrower,
 	type OutboundLimits,
 	type OutboundRefusals,
@@ -12,7 +13,7 @@ import {
 	policyOf,
 	policySettings,
 } from "@mod/outbound-policy";
-import { isLoopbackName, urlSetting } from "@mod/url-setting";
+import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
 import {
 	type Outbound,
@@ -197,7 +198,7 @@ export default defineModule({ name: "outbound", section, replicaSafe: true }, (m
 		if (proxy !== undefined) {
 			const host = new URL(proxy).hostname;
 			c.log.warn("outbound.proxy_checks_addresses", { host });
-			if (c.section["proxy-authorization"] && !isLoopbackName(host)) {
+			if (c.section["proxy-authorization"] && !isLoopbackAddress(host)) {
 				c.log.warn("outbound.proxy_credentials_in_clear", { host });
 			}
 		}

@@ -181,12 +181,21 @@ it("boots with a proxy configured whatever the variables say, and warns what it 
 		"outbound.proxy_checks_addresses",
 		"outbound.proxy_credentials_in_clear",
 	]);
-	// A name under localhost is a loopback host, as url-setting's isLoopbackName judges it.
-	await withProxy({
-		proxy: "http://proxy.localhost:3128",
-		"proxy-authorization": "Basic dGVzdA==",
-	});
-	expect(warned().slice(5)).toEqual(["outbound.proxy_checks_addresses"]);
+	// The proxy's name is never resolved here, so only a loopback address written as one goes unwarned:
+	// a name, localhost and the names under it included, may resolve anywhere.
+	for (const host of ["localhost", "localhost.", "proxy.localhost"]) {
+		const from = warned().length;
+		await withProxy({ proxy: `http://${host}:3128`, "proxy-authorization": "Basic dGVzdA==" });
+		expect(warned().slice(from), host).toEqual([
+			"outbound.proxy_checks_addresses",
+			"outbound.proxy_credentials_in_clear",
+		]);
+	}
+	for (const host of ["[::1]", "127.0.0.2"]) {
+		const from = warned().length;
+		await withProxy({ proxy: `http://${host}:3128`, "proxy-authorization": "Basic dGVzdA==" });
+		expect(warned().slice(from), host).toEqual(["outbound.proxy_checks_addresses"]);
+	}
 	expect(JSON.stringify(recorded.lines())).not.toContain("dGVzdA==");
 });
 
