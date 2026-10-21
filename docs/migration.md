@@ -151,7 +151,7 @@ Only the settings an existing deployment is likely to carry are listed. Each mod
 | `key-store.local.algorithm` | `keys.signing.alg` | Required (`EdDSA`, `ES256`, `RS256`, `HS256`) |
 | `key-store.local.kid` | `keys.signing.kid` | Required; 1–128 of `A-Za-z0-9._~-` |
 | `key-store.local.privateKey`, `privateKeyPath` | `keys.signing.private-key` | PKCS #8 PEM text; no file paths |
-| `key-store.local.secret` | `keys.signing.secret` | `oidc` needs an asymmetric key. 0.17 took the string's own bytes as the HMAC key; 0.18 decodes the value (hex where it is whole bytes of hex, else base64) and takes the decoded bytes, so a value copied as written boots with other key bytes, and every token 0.17 signed, and every party holding that string, no longer match. To keep the same key, write the hex of the old string's UTF-8 bytes (`printf %s "$OLD" \| od -An -v -tx1 \| tr -d ' \n'`); the floor of 32 bytes of 8 byte values or more still applies |
+| `key-store.local.secret` | `keys.signing.secret` | `oidc` needs an asymmetric key. 0.17 took the string's own bytes as the HMAC key; 0.18 decodes the value (hex where it is whole bytes of hex, else base64) and takes the decoded bytes, so a value copied as written boots with other key bytes, and every token 0.17 signed, and every party holding that string, no longer match. To keep the same key, set `keys.signing.secret-encoding = utf8` and copy the string as written, or write the hex of its UTF-8 bytes (`printf %s "$OLD" \| od -An -v -tx1 \| tr -d ' \n'`); the floor of 32 bytes of 8 byte values or more still applies, to the bytes read |
 | `key-store.local.previousKeys` | `keys.previous` (`kid`, `alg`, `public-key`, `expires-at`) | `alg` per entry; asymmetric only |
 
 ### Clients
@@ -763,6 +763,7 @@ What changed since rc.4. Coming from an earlier release candidate, read the sect
 
 - **An app's entry reads its configuration files from the `config-files` module**: `loadConfig` and `ConfigSource` moved there from the kernel, unchanged. An app generated with an earlier release candidate imports `loadConfig` from the kernel in `src/main.ts` (and `src/reseal.ts`, where it has one). An app on the published packages imports it from `@o3co/auth-provider-foundation/config-files` instead of `@o3co/auth-provider-foundation/kernel`, and upgrades `@o3co/auth-provider-foundation`; it adds no dependency. An app in the workspace imports it from `@mod/config-files` and adds that package to its dependencies. Or generate the app again. Its configuration is unchanged.
 - **`client.authentication.failure` is declared by `clients`** (`@mod/clients/audit-events`), no longer by `token-endpoint`, with the same name and attributes: a receiver needs no change, and a check of your own that reads the declarations finds it there. A route of your own that calls `clients`' `authenticate` records its refusal through `recordRefusedAuthentication`, handing it the `audit` your module takes.
+- **An HS256 secret**: `keys.signing.secret-encoding` names how `secret` is read (`hex`, `base64`, or `utf8`, the text's own bytes); unset, it is read as before, and a value not of the reading named refuses boot. To keep 0.17's key, or to share the secret with policy-verifier, which takes the text's own bytes, set `utf8`.
 
 ## Operational notes
 

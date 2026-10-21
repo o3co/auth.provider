@@ -105,7 +105,7 @@ Tokens name the key that signed them (`kid`). An instance verifies a token by th
    - Restart every instance. During a rolling restart, the instances not yet restarted already publish and verify the new key, because of step 1.
 4. **Retire the old key.** After its `expires-at`, remove it from `keys.previous` at the next restart. Tokens it signed are refused with `kid_expired` from that time.
 
-An HS256 secret is not published and has no `previous` or `next` form: changing it refuses every token signed with the old secret at once.
+An HS256 secret is not published and has no `previous` or `next` form: changing it refuses every token signed with the old secret at once. Where policy-verifier checks the same tokens with the same secret, set `keys.signing.secret-encoding = utf8`: the verifier takes the text's own bytes.
 
 None of these steps needs a new image. Keep the ring in a HOCON file of its own, outside the image (a mounted secret, say), and name it first in `APP_CONFIG`, which lists files comma-separated with the first winning: `APP_CONFIG=/run/secrets/keys.conf,config/application.conf`. An array is replaced from one file to the next, never added to, so that file holds the whole `keys.previous` list, and `seal.previous` too where it holds the sealing ring. A single value can also come from the environment where the file writes `${VAR}`, as `public-key = ${NEXT_PUBLIC_KEY}`; a PEM spans several lines, so its variable must carry them, which an env file read one line per variable does not.
 
