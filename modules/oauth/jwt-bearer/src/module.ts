@@ -9,7 +9,7 @@ import { withinHosts } from "@mod/outbound-policy";
 import { revocations } from "@mod/subject-revocation";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
 import { z } from "zod";
-import { check } from "./assertion.ts";
+import { check } from "./assertion/assertion.ts";
 import {
 	algorithms,
 	linkedIssuers,

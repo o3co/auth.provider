@@ -1,9 +1,9 @@
 import type { Reason } from "@mod/external-jwt";
 import { Unavailable } from "@mod/kernel";
+import { isWellFormedSubject } from "@mod/users";
 import { decodeJwt, decodeProtectedHeader } from "jose";
 import { z } from "zod";
-import { isSignerSubject } from "./contract.ts";
-import { isThumbprint, type Signers } from "./signers.ts";
+import { isThumbprint, type Signers } from "../signers.ts";
 
 export type Checked =
 	| {
@@ -63,7 +63,7 @@ export async function check(
 	const signers = trusted.get(issuer);
 	if (!signers) return invalid("untrusted signer");
 	const { sub, kid } = signer;
-	if (!isSignerSubject(sub)) return invalid("missing or malformed claims");
+	if (!isWellFormedSubject(sub)) return invalid("missing or malformed claims");
 	// Read unverified, so bounded before it reaches a key source.
 	if (kid !== undefined && !bounded.safeParse(kid).success) return invalid("malformed assertion");
 	if (signers.thumbprint && !isThumbprint(sub)) return invalid("subject is no key thumbprint");

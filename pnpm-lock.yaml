@@ -1325,6 +1325,9 @@ importers:
       '@mod/token-endpoint':
         specifier: workspace:*
         version: link:../token-endpoint
+      '@mod/users':
+        specifier: workspace:*
+        version: link:../../identity/users
       jose:
         specifier: 6.2.12
         version: 6.2.12

@@ -2,6 +2,7 @@
 
 ## Responsibilities
 - Contributes the grant by JWT assertion. Holds the list of trusted issuers.
+- Its internal module `assertion` checks an assertion, all but its single use.
 
 ## Not here
 - Client authentication (`token-endpoint`).
@@ -39,7 +40,7 @@
 - Needs: never evicted, survives a crash and a failover (losing one lets an assertion be reused).
 
 ## Depends on
-- `kernel`, `grants`, `token-endpoint`, `issuer`, `external-jwt`, `outbound`, `outbound-policy`, `keys`, `subject-revocation`
+- `kernel`, `grants`, `token-endpoint`, `issuer`, `external-jwt`, `outbound`, `outbound-policy`, `keys`, `subject-revocation`, and `users`, through its internal module `assertion`
 
 ## Vocabulary
 - Trusted issuer: an issuer whose assertions are accepted.
