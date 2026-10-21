@@ -119,6 +119,44 @@ export async function refusedCommands(
 	return [...problems];
 }
 
+const runIdOf = (info: string) => /run_id:(\w+)/.exec(info)?.[1];
+
+/**
+ * What a confirmation round and a store script, each run once, tell of the server, as problems: the
+ * confirming connection reaching another server than the operations, where replication is declared,
+ * as only then does a round run; and a store script the server cannot run, read on a key of the
+ * store's own. A replica missing or lagging is none: a write waits for it, and answers unavailable
+ * past its timeout. Any other failure, a passing state of the server among them, is thrown.
+ */
+export async function roundProblems(
+	client: Redis,
+	confirmer: Redis,
+	options: Pick<RedisStoreOptions, "prefix" | "replication">,
+): Promise<string[]> {
+	const problems: string[] = [];
+	if (options.replication !== undefined) {
+		// The operations connection is asked before and after the confirming one: a server that
+		// changed meanwhile, as in a failover or a restart, tells nothing of where each one goes.
+		const before = runIdOf(await client.info("server"));
+		const confirming = runIdOf(await confirmer.info("server"));
+		const after = runIdOf(await client.info("server"));
+		if (before === after && confirming !== before) {
+			problems.push(
+				"the confirming connection reaches another server than the operations: point both at one server",
+			);
+		}
+	}
+	try {
+		await client.eval(scripts.read, 1, `${options.prefix}:{#check}:r`);
+	} catch (error) {
+		// The script's own failure, never a passing state of the server (BUSY, LOADING and the like).
+		if (!(error instanceof ReplyError) || !/^ERR\b.*script/i.test((error as Error).message))
+			throw error;
+		problems.push("the server fails a store script (read): it lacks what the store's scripts use");
+	}
+	return problems;
+}
+
 /**
  * `client` serves the operations; `confirmer` is a connection of its own for confirming
  * replication, so a WAIT never holds up the other commands.
