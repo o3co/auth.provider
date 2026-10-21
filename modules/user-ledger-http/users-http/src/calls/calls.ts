@@ -47,7 +47,7 @@ function challengesBearer(value: string | undefined): boolean {
 
 /** The kind outbound gives a failure to send, or no-answer for anything else. */
 function kindOf(error: unknown): string {
-	if (error instanceof DestinationRefused) return error.reason;
+	if (DestinationRefused.is(error)) return error.reason;
 	if (isOutboundUnavailable(error)) return error.failure;
 	return "no-answer";
 }
