@@ -11,6 +11,9 @@
 - `passkeys`: a challenge the same for everyone, made for a requester, and the assertion of a discoverable passkey by that requester → subject, challenge time, user verified, backup eligible; or a refusal.
 - `registrations`: options for a subject's new passkey, and keeping the one a response creates → the credential, or a refusal (the ceremony's, `unreadable`, `no-challenge`, `conflict`, `full`).
   - The caller answers for who the subject is; passkeys takes it as given, so only a module that has authenticated the subject may ask.
+- Store interfaces, which the assembly wires. The store never sees what a record holds.
+  - Passkeys: credentials and subjects, each by a key passkeys makes, saved once, read, changed from what they hold, kept without end. Needs: no eviction, survives a crash, never rolled back by failover, confirmed reads.
+  - Challenges: opened for a lifetime, taken by putting a mark in place. Needs: survives a crash, never rolled back by failover, names derived from the challenge.
 - Operator section: `user-verification` (default `preferred`), `max-credentials` (per subject, default 10).
 - `./testing`: the section's test configuration builder.
 

@@ -49,3 +49,5 @@ export interface Registrations {
 }
 
 export const registrations = contract<Registrations>("passkeys.registrations");
+
+export * from "./store.ts";
