@@ -3276,6 +3276,9 @@ importers:
       '@mod/sender-binding':
         specifier: workspace:*
         version: link:../../oauth/sender-binding
+      '@mod/token-denylist':
+        specifier: workspace:*
+        version: link:../../oauth/token-denylist
 
   modules/templates/upstream-handoff-store:
     dependencies:
