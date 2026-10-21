@@ -214,7 +214,7 @@ it("boots on the generated configuration with the environment and local layer fi
 	expect(run.refused, run.stderr).toEqual(["redis.url"]);
 });
 
-it("makes the full template from the command with features added, and the listed packages' app as before", async () => {
+it("makes the full template from the command with features added, and the listed packages' app", async () => {
 	const cli = (...args: string[]) =>
 		spawnSync(process.execPath, [join(import.meta.dirname, "..", "src", "main.ts"), ...args], {
 			encoding: "utf8",
@@ -228,7 +228,8 @@ it("makes the full template from the command with features added, and the listed
 	expect(await imports(join(parent, "listed"))).toEqual(
 		expect.arrayContaining(["@mod/http", "@mod/log-stdout"]),
 	);
-	expect(existsSync(join(parent, "listed", "Dockerfile"))).toBe(false);
+	// Written as a deployment, as the full template is.
+	expect(existsSync(join(parent, "listed", "Dockerfile"))).toBe(true);
 	for (const args of [
 		[join(parent, "both"), "--add", "@mod/device-grant", "@mod/http"],
 		[join(parent, "sink"), "--sink", "@mod/log-stdout"],

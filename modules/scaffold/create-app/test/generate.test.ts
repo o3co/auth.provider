@@ -3,30 +3,40 @@ import { mkdir, mkdtemp, readdir, readFile, symlink, writeFile } from "node:fs/p
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mainSource } from "@mod/app-output";
-import { addable, completed } from "@mod/combinations";
-import { kernelConfig } from "@mod/kernel";
+import { addable, needed } from "@mod/combinations";
+import { trialLayer } from "@mod/trial";
 import { expect, it, vi } from "vitest";
 import { generate, run } from "../src/contract.ts";
-import { importedModules, linked, root } from "./full-app.ts";
+import {
+	freePort,
+	readsScalarsFromEnv,
+	refusesGeneratedOnlyForNamedKeys,
+	startsAndStops,
+	writesListsLocally,
+} from "./checks.ts";
+import { configured, importedModules, linked, root } from "./full-app.ts";
 
 // These tests read the whole workspace, which is slow when the machine is busy.
 vi.setConfig({ testTimeout: 60_000 });
 
-it("assembles the modules asked for, with the wirings and bridges they come with by default", async () => {
+it("assembles the modules asked for, with what they need to run and the wirings and bridges they come with", async () => {
 	const target = await mkdtemp(join(tmpdir(), "create-app-"));
-	await generate({ target, modules: ["@mod/session", "@mod/tokens", "@mod/code-grant"] });
+	const asked = ["@mod/session", "@mod/tokens", "@mod/code-grant"];
+	await generate({ target, modules: asked });
 	const imported = await importedModules(target);
-	// The modules asked for first, session as the default that replaces it, then what combinations
-	// completes them with, whatever that is.
-	const completedList = completed(["@mod/session", "@mod/tokens", "@mod/code-grant"]);
-	expect(completedList.slice(0, 3)).toEqual([
-		"@mod/session-lifecycle",
-		"@mod/tokens",
-		"@mod/code-grant",
-	]);
-	expect(completedList.length).toBeGreaterThan(3);
+	// What combinations reaches from them, session as the default that replaces it, whatever that is.
+	const neededList = needed(asked);
+	expect(neededList).toEqual(
+		expect.arrayContaining([
+			"@mod/session-lifecycle",
+			"@mod/tokens",
+			"@mod/code-grant",
+			"@mod/http",
+		]),
+	);
+	expect(neededList).not.toContain("@mod/session");
 	// Then the log sink, the default one when the plan names none.
-	const expected = [...completedList, "@mod/log-stdout"];
+	const expected = [...neededList, "@mod/log-stdout"];
 	expect(imported).toEqual(expected);
 	const manifest = JSON.parse(await readFile(join(target, "package.json"), "utf8"));
 	expect(Object.keys(manifest.dependencies)).toEqual([
@@ -68,7 +78,12 @@ it("refuses a target that holds anything, leaving it as it was", async () => {
 	]) {
 		await generate({ target: taken, modules: ["@mod/http"] });
 		expect((await readdir(taken)).sort(), taken).toEqual([
+			".dockerignore",
+			".env.example",
 			".gitignore",
+			"AGENTS.md",
+			"Dockerfile",
+			"README.md",
 			"config",
 			"package.json",
 			"src",
@@ -97,27 +112,48 @@ it("refuses a module or sink that is not named as a package, before writing anyt
 	expect(await readdir(parent)).toEqual([]);
 });
 
-it("writes the kernel's configuration, a start script and what git leaves out", async () => {
+it("reads its fragments' scalars from env and writes their lists locally, with a start script and what git leaves out", async () => {
 	const target = await mkdtemp(join(tmpdir(), "create-app-"));
-	await generate({ target, modules: ["@mod/http"] });
-	const config = JSON.parse(await readFile(join(target, "config", "application.conf"), "utf8"));
-	expect(config).toEqual(kernelConfig());
+	await generate({ target, modules: ["@mod/tokens"] });
+	const modules = (await importedModules(target)).flatMap((name) => (name ? [name] : []));
+	await readsScalarsFromEnv(target, modules);
+	await writesListsLocally(target, modules);
 	const manifest = JSON.parse(await readFile(join(target, "package.json"), "utf8"));
 	expect([manifest.private, manifest.type, manifest.scripts]).toEqual([
 		true,
 		"module",
-		{ start: "node src/main.ts" },
+		{ start: "node --env-file-if-exists=.env src/main.ts" },
 	]);
 	const ignored = (await readFile(join(target, ".gitignore"), "utf8")).split("\n");
-	expect(ignored).toEqual(["node_modules/", "config/local*.conf", ""]);
+	expect(ignored).toContain(".env");
+	expect(ignored).toContain("!.env.example");
 	await expect(readFile(join(target, "src", "reseal.ts"), "utf8")).rejects.toThrow();
+	const guide = await readFile(join(target, "README.md"), "utf8");
+	expect(guide).toContain("from the modules listed: `@mod/tokens`.");
+	expect(guide).toContain("- `tokens.revocation`:");
+});
+
+it("boots a listed app on its generated configuration filled, holding what its modules need, and stops on SIGTERM", async () => {
+	const target = await mkdtemp(join(tmpdir(), "create-app-"));
+	await generate({ target, modules: ["@mod/code-grant"], workspace: root });
+	await linked(target);
+	// The generated file alone is refused only for keys the guide names.
+	await refusesGeneratedOnlyForNamedKeys(target);
+	const port = await freePort();
+	await configured(target, { deployment: "single", redisUrl: "", port });
+	const run = await startsAndStops(target);
+	expect(run.output).toContain('"event":"http.listening"');
+	expect(run.code, run.output).toBe(0);
 });
 
 it("writes a reseal script for an app that seals, which seals again through each holder and tells the counts", async () => {
 	const target = await mkdtemp(join(tmpdir(), "create-app-"));
 	await generate({ target, modules: ["@mod/seal", "@mod/log-stdout"], workspace: root });
 	const manifest = JSON.parse(await readFile(join(target, "package.json"), "utf8"));
-	expect(manifest.scripts).toEqual({ start: "node src/main.ts", reseal: "node src/reseal.ts" });
+	expect(manifest.scripts).toEqual({
+		start: "node --env-file-if-exists=.env src/main.ts",
+		reseal: "node --env-file-if-exists=.env src/reseal.ts",
+	});
 	// Stopped before it exits, so the stop hooks run (connections closed, buffered log lines out).
 	expect(await readFile(join(target, "src", "reseal.ts"), "utf8")).toMatch(/await app\.stop\(\)/);
 	await linked(target);
@@ -126,13 +162,18 @@ it("writes a reseal script for an app that seals, which seals again through each
 		join(target, "config", "seal.conf"),
 		JSON.stringify({ seal: { current: { id: "now", key } } }),
 	);
+	// What seal needs to run (its keys, http) is set by trial's layer; the seal key is this test's.
+	await writeFile(
+		join(target, "config", "local.conf"),
+		await trialLayer(target, { redisUrl: "redis://127.0.0.1:1", leave: ["seal"] }),
+	);
 	const reseal = (files: string) =>
 		spawnSync(process.execPath, ["src/reseal.ts"], {
 			cwd: target,
-			env: { ...process.env, APP_CONFIG: files },
+			env: { ...process.env, KERNEL_DEPLOYMENT: "single", APP_CONFIG: files },
 			encoding: "utf8",
 		});
-	const done = reseal("config/application.conf,config/seal.conf");
+	const done = reseal("config/seal.conf,config/local.conf,config/application.conf");
 	expect([done.status, done.stdout]).toEqual([0, "previous keys may be retired\n"]);
 	expect(reseal("config/application.conf").status).toBe(78);
 });
@@ -150,7 +191,7 @@ it("links each dependency to the workspace when given one, and refuses a module 
 	const elsewhere = await mkdtemp(join(tmpdir(), "create-app-"));
 	await expect(
 		generate({ target: elsewhere, modules: ["@mod/nowhere"], workspace: root }),
-	).rejects.toThrow("@mod/nowhere is not in the workspace");
+	).rejects.toThrow("@mod/nowhere: not in the workspace");
 });
 
 it("starts on the configuration files APP_CONFIG lists, and exits 78 telling each refusal", async () => {
@@ -163,8 +204,13 @@ it("starts on the configuration files APP_CONFIG lists, and exits 78 telling eac
 			env: { ...process.env, ...env },
 			encoding: "utf8",
 		});
-	expect(run({}).status).toBe(0);
-	const refused = run({ APP_CONFIG: "config/application.conf,missing.conf" });
+	// The generated file holds no value: the kernel's deployment is read from the environment.
+	expect(run({}).status).toBe(78);
+	expect(run({ KERNEL_DEPLOYMENT: "single" }).status).toBe(0);
+	const refused = run({
+		KERNEL_DEPLOYMENT: "single",
+		APP_CONFIG: "config/application.conf,missing.conf",
+	});
 	expect(refused.status).toBe(78);
 	expect(refused.stderr).toMatch(/^refused missing\.conf: /m);
 });
@@ -214,7 +260,10 @@ it("stops once started on a SIGTERM that comes while it starts, instead of being
 		join(target, "src", "main.ts"),
 		await mainSource(["@mod/log-stdout", "@test/slow"]),
 	);
-	const child = spawn(process.execPath, ["src/main.ts"], { cwd: target });
+	const child = spawn(process.execPath, ["src/main.ts"], {
+		cwd: target,
+		env: { ...process.env, KERNEL_DEPLOYMENT: "single" },
+	});
 	let output = "";
 	const exited = new Promise<[number | null, string | null]>((resolve) =>
 		child.once("exit", (code, signal) => resolve([code, signal])),
@@ -242,10 +291,8 @@ it("makes an app from the command naming session by its default, with session's 
 	expect(await run([target, "@mod/session-lifecycle", "@mod/tokens", "@mod/code-grant"], io)).toBe(
 		0,
 	);
-	// A listed app holds no module its modules need, nor their settings: it cannot start as made.
-	expect(out.join("")).toBe(
-		`created ${target}\nnext: add the modules and settings the listed modules need, then cd ${target} && pnpm install && pnpm start\n`,
-	);
+	// A listed app holds what its modules need, and its guide tells the settings.
+	expect(out.join("")).toBe(`created ${target}\nnext: cd ${target} and follow its README.md\n`);
 	const imported = await importedModules(target);
 	expect(imported).toContain("@mod/session-tokens");
 	expect(imported).not.toContain("@mod/session");
