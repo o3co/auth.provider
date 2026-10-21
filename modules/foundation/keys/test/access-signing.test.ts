@@ -83,7 +83,18 @@ describe("accessTokenSigning", () => {
 	it("is the only way to an access token: keys' sign and verify refuse its typ, in any case or as a media type", async () => {
 		const { access, k } = await open(rotated);
 		const token = await access.sign({ sub: "a" });
-		for (const typ of ["at+jwt", "AT+JWT", "At+Jwt", "application/at+jwt", "Application/AT+JWT"]) {
+		for (const typ of [
+			"at+jwt",
+			"AT+JWT",
+			"At+Jwt",
+			"application/at+jwt",
+			"Application/AT+JWT",
+			// A media type's parameters, and the space around them, name the same type.
+			"application/at+jwt; charset=UTF-8",
+			"AT+JWT;x=1",
+			" at+jwt ",
+			"Application/At+Jwt ; q=0.5",
+		]) {
 			await expect(k.sign({ sub: "a" }, typ), typ).rejects.toThrow(TypeError);
 			await expect(k.verify(token, typ), typ).rejects.toThrow(TypeError);
 		}
