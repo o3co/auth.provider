@@ -9,6 +9,7 @@ export {
 	ledgerBesideUsers,
 	ledgerRevocation,
 	type RevocationScene,
+	recentAuthenticationWindow,
 	type UpstreamScene,
 	type UserScene,
 } from "./area.ts";

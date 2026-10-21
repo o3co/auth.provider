@@ -6,6 +6,7 @@ import {
 	type LedgerScene,
 	ledgerBesideUsers,
 	ledgerRevocation,
+	recentAuthenticationWindow,
 	type UpstreamScene,
 } from "./area.ts";
 
@@ -61,7 +62,8 @@ onLegacy(identityArea, {
 	}),
 	// The legacy build cannot be set up so that its login fails with its store, takes either
 	// its users file or a ledger over HTTP, never both, and has no route a ledger revokes through.
-	cannot: ["store-fault:login", ledgerBesideUsers, ledgerRevocation],
+	// It asks a recent sign-in only of a step-up rule a deployment registers, never by a window.
+	cannot: ["store-fault:login", ledgerBesideUsers, ledgerRevocation, recentAuthenticationWindow],
 	// Ours matches a bcrypt password on all its bytes, answers a login that repeats a field as a
 	// malformed request (400), and counts failed logins per identifier too, from any sender.
 	differs: ["bcrypt-all-bytes", "repeated-field-login-400", "login-attempts-per-account"],

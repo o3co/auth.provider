@@ -70,6 +70,8 @@ export interface FederationScene extends FederationPart {
 	readonly clients?: readonly ClientScene[];
 	readonly userinfo?: boolean;
 	readonly revocations?: RevocationScene;
+	/** How recent a sign-in a link asks, in seconds: the identity part's window. */
+	readonly recentAuthenticationSeconds?: number;
 }
 
 export function federationScene(scene: FederationScene): AreaScene {
@@ -80,6 +82,9 @@ export function federationScene(scene: FederationScene): AreaScene {
 			users: scene.users,
 			login: { returnTargets: scene.returnTargets },
 			...(scene.revocations ? { revocations: scene.revocations } : {}),
+			...(scene.recentAuthenticationSeconds
+				? { recentAuthenticationSeconds: scene.recentAuthenticationSeconds }
+				: {}),
 		}),
 		...(scene.clients
 			? [
