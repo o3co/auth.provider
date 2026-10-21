@@ -331,7 +331,27 @@ describe("request and assertion", () => {
 		expect(reasonOf(await assert(unmarked, remade, credential))).toBe("user-handle");
 		// An ending it did not write is unread.
 		const odd = authenticator.get(again.options as RequestOptions, at);
-		expect(reasonOf(await assert(odd, `${bare}.other`, credential))).toBe("malformed");
+		expect(reasonOf(await assert(odd, `${bare}.other`, credential))).toBe("malformed"); // A handle sent as JSON null is none carried.
+		const nulled = (got: unknown) => {
+			const answered = got as { response: Record<string, unknown> };
+			return { ...answered, response: { ...answered.response, userHandle: null } };
+		};
+		const asked = ceremonies.request([credential], "preferred");
+		const sent = nulled(authenticator.get(asked.options as RequestOptions, at));
+		expect(reasonOf(await assert(sent, asked.challenge, credential))).toBe("asserted");
+		const unnamed = request();
+		expect(
+			reasonOf(
+				await assert(nulled(authenticator.get(unnamed.options, at)), unnamed.challenge, credential),
+			),
+		).toBe("user-handle");
+		// Client data signed over the marked challenge answers no challenge the browser was asked.
+		const marked = ceremonies.request([credential], "preferred");
+		const signed = authenticator.get(
+			{ ...(marked.options as RequestOptions), challenge: marked.challenge },
+			at,
+		);
+		expect(reasonOf(await assert(signed, marked.challenge, credential))).toBe("challenge");
 	});
 
 	it("refuses another handle, a changed backup eligibility, and an unverified user when required", async () => {

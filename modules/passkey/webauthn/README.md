@@ -13,6 +13,7 @@
   - Options also answer the challenge's end, `until`: now on `kernel`'s clock plus `challenge-lifetime`.
   - An answer at or past an `until` handed back is `challenge`; with none, the caller judges the lifetime.
   - A request's challenge says whether it named credentials, and `assert` reads that from it alone: keep it on the server and hand back what was kept, never a value the client sent. One remade from the client's answer, as `passkeys` remakes it, reads as none named; an ending it did not write is `malformed`.
+  - Across an update to this release, a challenge kept bare before it reads as none named: its answer passes with a handle, and one without (a second factor's that is not discoverable) is refused, a new challenge then passing.
 - `passkeys`: a challenge the same for everyone, made for a requester, and the assertion of a discoverable passkey by that requester → subject, challenge time, user verified, backup eligible; or a refusal.
 - `registrations`: options for a subject's new passkey, and keeping the one a response creates → the credential, or a refusal (the ceremony's, `unreadable`, `no-challenge`, `conflict`, `full`).
   - The caller answers for who the subject is; webauthn takes it as given, so only a module that has authenticated the subject may ask.
