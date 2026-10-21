@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { refusalsOf } from "../../../test/refusals.ts";
 import {
 	assemble,
 	type BuildContext,
@@ -7,9 +8,8 @@ import {
 	kernelConfig,
 	type Probe,
 	probes,
-} from "../src/contract.ts";
-import { quietRuntime, recordingLog } from "../src/testing.ts";
-import { refusalsOf } from "./refusals.ts";
+} from "../../contract.ts";
+import { quietRuntime, recordingLog } from "../../testing.ts";
 
 const single = kernelConfig();
 

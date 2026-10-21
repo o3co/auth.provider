@@ -10,8 +10,8 @@ import {
 	type LogSink,
 	logSinks,
 	type Module,
-} from "../src/contract.ts";
-import { quietRuntime, recordingLog } from "../src/testing.ts";
+} from "../../contract.ts";
+import { quietRuntime, recordingLog } from "../../testing.ts";
 
 type Call = (log: Log) => void;
 

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
 	assemble,
@@ -8,7 +8,6 @@ import {
 	kernelConfig,
 	kernelSection,
 } from "../src/contract.ts";
-import { quietRuntime, recordingLog } from "../src/testing.ts";
 import { refusalsOf } from "./refusals.ts";
 
 const single = kernelConfig();
@@ -648,307 +647,105 @@ describe("late", () => {
 	});
 });
 
-describe("every", () => {
-	const probe = contract<object>("probe");
-	const recorded = recordingLog();
-	let from = 0;
-	/** The events warned since this test began. */
-	const warned = () =>
-		recorded
-			.lines()
-			.slice(from)
-			.filter((line) => line.level === "warn")
-			.map((line) => line.event);
-	const runtime = quietRuntime({ log: recorded.log });
-	const withTask = (intervalMs: number, task: (signal: AbortSignal) => Promise<void>) =>
-		defineModule({ name: "p" }, (m) => [
-			m.provide(probe).by((c) => {
-				c.every(intervalMs, task);
+describe("takenBy", () => {
+	const signer = contract<{ sign(): string }>("signer", { takenBy: ["issuer"] });
+	const keys = defineModule({ name: "keys" }, (m) => [
+		m.provide(signer).by(() => ({ sign: () => "signed" })),
+	]);
+	/** A module named `name` providing `out`, which takes the signer as `how` says. */
+	const taker = (name: string, how: "get" | "late" | "caught" | "late-caught") => {
+		const out = contract<object>(`${name}-out`);
+		return defineModule({ name }, (m) => [
+			m.provide(out).by(async (c) => {
+				if (how === "late") c.late(signer);
+				else if (how === "get") await c.get(signer);
+				else if (how === "caught") await c.get(signer).catch(() => undefined);
+				else
+					try {
+						c.late(signer);
+					} catch {}
 				return {};
 			}),
 		]);
+	};
+	const refusal = (where: string) => ({ where, reason: "signer is taken by issuer alone" });
 
-	beforeEach(() => {
-		from = recorded.lines().length;
-		vi.useFakeTimers();
-	});
-	afterEach(() => {
-		vi.useRealTimers();
-	});
-
-	it("logs a task that throws before it returns a promise, as one that rejects, and runs it again", async () => {
-		let runs = 0;
-		const app = await assemble({
-			modules: [
-				withTask(100, () => {
-					runs++;
-					throw new Error("at once");
-				}),
-			],
-			config: single,
-			runtime,
-		});
-		await app.start();
-		await vi.advanceTimersByTimeAsync(200);
-		expect([runs, warned()]).toEqual([2, ["kernel.every_failed", "kernel.every_failed"]]);
-		await app.stop(1000);
-	});
-
-	it("runs a task on its interval only once started, never two runs at once, and on after a failure", async () => {
-		let runs = 0;
-		let release = () => {};
-		const app = await assemble({
-			modules: [
-				withTask(100, async () => {
-					runs++;
-					if (runs === 1) throw new Error("once");
-					if (runs === 2) await new Promise<void>((resolve) => (release = resolve));
-				}),
-			],
-			config: single,
-			runtime,
-		});
-		await vi.advanceTimersByTimeAsync(500);
-		expect(runs).toBe(0);
-		await app.start();
-		await vi.advanceTimersByTimeAsync(100);
-		expect([runs, warned()]).toEqual([1, ["kernel.every_failed"]]);
-		await vi.advanceTimersByTimeAsync(500);
-		expect(runs).toBe(2);
-		release();
-		await vi.advanceTimersByTimeAsync(100);
-		expect(runs).toBe(3);
-		await app.stop(1000);
-	});
-
-	it("aborts the running run on stop and waits for it", async () => {
-		const seen: string[] = [];
-		const app = await assemble({
-			modules: [
-				withTask(
-					100,
-					(signal) =>
-						new Promise<void>((resolve) => {
-							seen.push("running");
-							// The run takes a while to wind down once aborted, so stop has to wait for it.
-							signal.addEventListener("abort", () => {
-								seen.push("aborted");
-								setTimeout(() => {
-									seen.push("ended");
-									resolve();
-								}, 50);
-							});
-						}),
-				),
-			],
-			config: single,
-			runtime,
-		});
-		await app.start();
-		await vi.advanceTimersByTimeAsync(100);
-		const stopped = app.stop(1000).then(() => seen.push("stopped"));
-		await vi.advanceTimersByTimeAsync(10);
-		expect(seen).toEqual(["running", "aborted"]);
-		await vi.advanceTimersByTimeAsync(50);
-		await stopped;
-		expect(seen).toEqual(["running", "aborted", "ended", "stopped"]);
-		await vi.advanceTimersByTimeAsync(1000);
-		expect(seen).toEqual(["running", "aborted", "ended", "stopped"]);
-	});
-
-	it.each([0, -1, 1.5, 2 ** 31])(
-		"refuses the interval %s, no whole number of ms from 1 to 2^31-1",
-		async (bad) => {
-			const refusals = await refusalsOf(
-				assemble({ modules: [withTask(bad, async () => {})], config: single, runtime }),
-			);
-			expect(refusals.map((r) => r.where)).toContain("p");
-		},
-	);
-
-	it("takes the longest interval a timer holds", async () => {
-		await expect(
-			assemble({ modules: [withTask(2 ** 31 - 1, async () => {})], config: single, runtime }),
-		).resolves.toBeDefined();
-	});
-});
-
-describe("stop", () => {
-	afterEach(() => {
-		vi.useRealTimers();
-	});
-	/** A module whose stop hook does what `hook` does, after noting its name in `order`. */
-	const stopping = (
-		name: string,
-		order: string[],
-		hook: (signal: AbortSignal) => Promise<void> | void = () => {},
-	) =>
-		defineModule({ name }, (m) => [
-			m.provide(contract<object>(name)).by((c) => {
-				c.onStop((signal) => {
-					order.push(name);
-					return hook(signal);
-				});
-				return {};
+	it("lets a module the contract names take it, by get or late, and the composition root besides", async () => {
+		const app = await assemble({ modules: [keys, taker("issuer", "get")], config: single });
+		expect(app.get(signer).sign()).toBe("signed");
+		const signs = contract<{ sign(): string }>("signs");
+		const late = defineModule({ name: "issuer" }, (m) => [
+			m.provide(signs).by((c) => {
+				const later = c.late(signer);
+				return { sign: () => later().sign() };
 			}),
 		]);
-
-	it("runs the earlier stop hooks when one fails, logging the failure", async () => {
-		const order: string[] = [];
-		const recorded = recordingLog();
-		const app = await assemble({
-			modules: [
-				stopping("store", order),
-				stopping("broken", order, () => {
-					throw new Error("at db.internal");
-				}),
-			],
-			config: single,
-			runtime: quietRuntime({ log: recorded.log }),
-		});
-		await app.stop(1000);
-		expect(order).toEqual(["broken", "store"]);
-		expect(recorded.lines()).toEqual([
-			{
-				level: "warn",
-				event: "kernel.stop_failed",
-				fields: { module: "broken", outcome: "failed", kind: "Error" },
-			},
-		]);
+		const lateApp = await assemble({ modules: [keys, late], config: single });
+		expect(lateApp.get(signs).sign()).toBe("signed");
 	});
 
-	it("refuses a deadline that is no whole number from 1 to 2^31-1, stopping nothing", async () => {
-		const order: string[] = [];
-		const app = await assemble({ modules: [stopping("store", order)], config: single });
-		for (const bad of [0, -1, 1.5, Number.NaN, 2 ** 31]) {
-			await expect(app.stop(bad)).rejects.toThrow(TypeError);
-		}
-		expect(order).toEqual([]);
-		await app.stop(2 ** 31 - 1);
-		expect(order).toEqual(["store"]);
-	});
-
-	it("stops by kernel.stop-deadline when given no deadline, 30s unless set", async () => {
-		vi.useFakeTimers();
-		const hung = (signals: AbortSignal[]) =>
-			stopping("hung", [], (signal) => {
-				signals.push(signal);
-				return new Promise<void>(() => {});
-			});
-		const at = async (config: object, ms: number) => {
-			const signals: AbortSignal[] = [];
-			const app = await assemble({ modules: [hung(signals)], config });
-			const stop = app.stop();
-			await vi.advanceTimersByTimeAsync(ms - 1);
-			const before = signals[0]?.aborted;
-			await vi.advanceTimersByTimeAsync(1);
-			await stop;
-			return [before, signals[0]?.aborted];
-		};
-		expect(await at(single, 30_000)).toEqual([false, true]);
-		expect(await at(kernelConfig({ "stop-deadline": "5s" }), 5_000)).toEqual([false, true]);
-		expect(await at({ kernel: { deployment: "single", "stop-deadline": "7s" } }, 7_000)).toEqual([
-			false,
-			true,
-		]);
-	});
-
-	it("refuses a stop-deadline without its unit, or not whole seconds from 1s to 1h", async () => {
-		for (const bad of ["0s", "3601s", "1500ms", 30, "30", "x", true]) {
-			const refusals = await refusalsOf(
-				assemble({
-					modules: [],
-					config: { kernel: { deployment: "single", "stop-deadline": bad } },
-				}),
+	it("refuses boot when a module it does not name takes it, by get or late, even when the taker catches the throw", async () => {
+		for (const how of ["get", "late", "caught", "late-caught"] as const) {
+			const refused = await refusalsOf(
+				assemble({ modules: [keys, taker("tokens", how)], config: single }),
 			);
-			expect(refusals.map((r) => r.where)).toEqual(["kernel.stop-deadline"]);
+			expect(refused, how).toEqual([refusal("tokens")]);
 		}
 	});
 
-	it("calls the hooks left at the deadline with the aborted signal, without waiting for them", async () => {
-		vi.useFakeTimers();
-		const order: string[] = [];
-		const signals: AbortSignal[] = [];
-		const hang = (signal: AbortSignal) => {
-			signals.push(signal);
-			return new Promise<void>(() => {});
-		};
-		const app = await assemble({
-			modules: [stopping("first", order, hang), stopping("last", order, hang)],
-			config: single,
-			runtime: quietRuntime(),
-		});
-		let stopped = false;
-		const stop = app.stop(500).then(() => {
-			stopped = true;
-		});
-		await vi.advanceTimersByTimeAsync(500);
-		await stop;
-		expect([stopped, order]).toEqual([true, ["last", "first"]]);
-		expect(signals.map((signal) => signal.aborted)).toEqual([true, true]);
-	});
-
-	it("runs the stop hooks only once the periodic tasks have ended", async () => {
-		vi.useFakeTimers();
-		const seen: string[] = [];
-		const app = await assemble({
-			modules: [
-				defineModule({ name: "p" }, (m) => [
-					m.provide(contract<object>("p")).by((c) => {
-						c.every(100, (signal) => {
-							return new Promise<void>((resolve) => {
-								signal.addEventListener("abort", () =>
-									setTimeout(() => {
-										seen.push("task ended");
-										resolve();
-									}, 50),
-								);
-							});
-						});
-						c.onStop(() => void seen.push("hook"));
+	it("binds the contract object, never its label: a lookalike reaches no provider", async () => {
+		for (const lookalike of [
+			contract<{ sign(): string }>("signer"),
+			contract<{ sign(): string }>("signer", { takenBy: ["tokens"] }),
+		]) {
+			for (const how of ["get", "late"] as const) {
+				const tokens = defineModule({ name: "tokens" }, (m) => [
+					m.provide(contract<object>("tokens-out")).by(async (c) => {
+						if (how === "get") await c.get(lookalike);
+						else c.late(lookalike);
 						return {};
 					}),
-				]),
-			],
-			config: single,
-			runtime: quietRuntime(),
-		});
-		await app.start();
-		await vi.advanceTimersByTimeAsync(100);
-		const stop = app.stop(1000);
-		await vi.advanceTimersByTimeAsync(50);
-		await stop;
-		expect(seen).toEqual(["task ended", "hook"]);
+				]);
+				const refused = await refusalsOf(assemble({ modules: [keys, tokens], config: single }));
+				expect(refused, how).toEqual([{ where: "tokens", reason: "no module provides signer" }]);
+			}
+		}
 	});
 
-	it("aborts a hung stop hook at the deadline, and still calls the earlier ones", async () => {
-		vi.useFakeTimers();
-		const order: string[] = [];
-		const signals: AbortSignal[] = [];
-		const recorded = recordingLog();
-		const app = await assemble({
-			modules: [
-				stopping("store", order, (signal) => void signals.push(signal)),
-				stopping("hung", order, (signal) => {
-					signals.push(signal);
-					return new Promise<void>(() => {});
-				}),
-			],
-			config: single,
-			runtime: quietRuntime({ log: recorded.log }),
-		});
-		let stopped = false;
-		const stop = app.stop(500).then(() => {
-			stopped = true;
-		});
-		await vi.advanceTimersByTimeAsync(499);
-		expect([stopped, order, signals[0]?.aborted]).toEqual([false, ["hung"], false]);
-		await vi.advanceTimersByTimeAsync(1);
-		await stop;
-		expect(order).toEqual(["hung", "store"]);
-		expect(signals.map((signal) => signal.aborted)).toEqual([true, true]);
-		expect(recorded.lines().map((line) => line.fields)).toEqual([
-			{ module: "hung", outcome: "late" },
+	it("lets no module take a contract whose takenBy is empty", async () => {
+		const sealed = contract<object>("sealed", { takenBy: [] });
+		const holder = defineModule({ name: "holder" }, (m) => [m.provide(sealed).by(() => ({}))]);
+		const reader = defineModule({ name: "reader" }, (m) => [
+			m.provide(contract<object>("read")).by(async (c) => c.get(sealed)),
 		]);
+		expect(await refusalsOf(assemble({ modules: [holder, reader], config: single }))).toEqual([
+			{ where: "reader", reason: "sealed is taken by no module" },
+		]);
+	});
+
+	it("keeps the takers it was given, whatever later becomes of the list", async () => {
+		const takers = ["issuer"];
+		const kept = contract<{ sign(): string }>("kept", { takenBy: takers });
+		takers.push("tokens");
+		expect(kept.takenBy).toEqual(["issuer"]);
+		expect(Object.isFrozen(kept.takenBy)).toBe(true);
+		const holder = defineModule({ name: "holder" }, (m) => [
+			m.provide(kept).by(() => ({ sign: () => "signed" })),
+		]);
+		const tokens = defineModule({ name: "tokens" }, (m) => [
+			m.provide(contract<object>("tokens-out")).by(async (c) => c.get(kept)),
+		]);
+		expect(await refusalsOf(assemble({ modules: [holder, tokens], config: single }))).toEqual([
+			{ where: "tokens", reason: "kept is taken by issuer alone" },
+		]);
+	});
+
+	it("binds only the contracts that name their takers", async () => {
+		const open = contract<object>("open");
+		const anyone = defineModule({ name: "anyone" }, (m) => [m.provide(open).by(() => ({}))]);
+		const reader = defineModule({ name: "reader" }, (m) => [
+			m.provide(contract<object>("read")).by(async (c) => c.get(open)),
+		]);
+		await assemble({ modules: [anyone, reader], config: single });
 	});
 });

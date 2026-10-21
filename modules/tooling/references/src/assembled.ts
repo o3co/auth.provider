@@ -4,8 +4,9 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { full, optIns } from "@mod/combinations";
+import { loadConfig } from "@mod/config-files";
 import { generate } from "@mod/create-app";
-import { assemble, contract, defineModule, type ExtensionPoint, loadConfig } from "@mod/kernel";
+import { assemble, contract, defineModule, type ExtensionPoint } from "@mod/kernel";
 import { trialLayer } from "@mod/trial";
 import { workspacePackages } from "./workspace.ts";
 

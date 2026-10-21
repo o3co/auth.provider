@@ -17,6 +17,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 - [From 0.18.0-rc.1](#from-0180-rc1)
 - [From 0.18.0-rc.2](#from-0180-rc2)
 - [From 0.18.0-rc.3](#from-0180-rc3)
+- [From 0.18.0-rc.4](#from-0180-rc4)
 - [Operational notes](#operational-notes)
 
 ## Before you start
@@ -718,7 +719,7 @@ What changed since rc.2, before [From 0.18.0-rc.3](#from-0180-rc3). Coming from 
 - **Sessions in an app composed by hand, and an entry requirement or closing participant of your own**: `session`'s points for entry requirements and closing participants are gone; they are the bridges `session-requirements` and `session-participants`, which `combinations` composes with `session`, and `session-lifecycle` refuses to boot without them. Contribute to their points, importing the types from them.
 - **`authorize` in an app composed by hand**: its redirect-URI rules and its re-authentication records are the packages `redirect-uris` and `reauth`, which `combinations` composes with it. `authorize` no longer re-exports `redirects`, `registrable` and `redirectsAt`, nor its store interface: import them from `redirect-uris` and `reauth`. The `authorize-store` template wires `reauth`'s store in the same space, so records written before carry over. The client metadata section keeps its name `authorize`.
 - **outbound's destination policy in a module of your own**: `outboundRefusals`, `credentialPolicy`, their types and the host list readers come from `@mod/outbound-policy`, which `combinations` composes with `outbound`, and `outboundLimits` is new there; `@mod/outbound` keeps `DestinationRefused`, `Narrower` and `RefusalReason`.
-- **A grant of your own that authenticates its client**: `token-endpoint`'s `authenticateClient` takes the audit (`Pick<Audit, "record">`) as its third argument, and records a refusal as `client.authentication.failure`; pass the `audit` your module takes. A route of your own that calls `clients`' `authenticate` records its refusal through `recordRefusedAuthentication`. The event is declared by `clients` (`@mod/clients/audit-events`), no longer by `token-endpoint`, with the same name and attributes: a receiver needs no change, and a check of your own that reads the declarations finds it there.
+- **A grant of your own that authenticates its client**: `token-endpoint`'s `authenticateClient` takes the audit (`Pick<Audit, "record">`) as its third argument, and records a refusal as `client.authentication.failure`; pass the `audit` your module takes.
 - **outbound.proxy** is written as an origin alone, as the URL parser writes it: no path, not even a trailing `/`, no default port, the host in lower case (`http://proxy:3128`). Earlier release candidates also took a trailing `/` and other spellings, which now refuse boot at `outbound.proxy`.
 - **A code by mail as a second factor**: it counts only where `mfa-email.adds-second-factor = true`; by default it is a way back only, as the [mapping](#configuration-mapping) says. Earlier release candidates counted it whatever that setting, so a user whose only factor is a code by mail no longer holds one that counts. An app generated from the `mfa-web` pattern does not set it; set it to keep a code by mail counting.
 - **A code store of your own**: the place it gives `codeStoreContract` (`@mod/code-grant/testing`) names its void list's crowd `crowd.names`, no longer `crowd.hashes`; rename it.
@@ -755,6 +756,13 @@ What changed since rc.3. Coming from an earlier release candidate, read the sect
 - **An address in `outbound.deny`** is refused also where a name resolves to it, not only where a URL writes it: a name that resolves to an address you denied is no longer reached. An IPv4 address carried in IPv6 counts as the IPv4 one.
 - **A federation grant's renewals** count with its lodgings: a client's renewals and lodgings together take `federation-grants.lodges` per `lodge-window`, and past it a renewal answers `429` with `retry-after`. Raise `lodges` where clients renew often.
 - **`federation` with no IdP** still boots, but warns `federation.no_idps` at each boot, as every login answers not found.
+
+## From 0.18.0-rc.4
+
+What changed since rc.4. Coming from an earlier release candidate, read the sections above first.
+
+- **An app's entry reads its configuration files from the `config-files` module**: `loadConfig` and `ConfigSource` moved there from the kernel, unchanged. An app generated with an earlier release candidate imports `loadConfig` from the kernel in `src/main.ts` (and `src/reseal.ts`, where it has one). An app on the published packages imports it from `@o3co/auth-provider-foundation/config-files` instead of `@o3co/auth-provider-foundation/kernel`, and upgrades `@o3co/auth-provider-foundation`; it adds no dependency. An app in the workspace imports it from `@mod/config-files` and adds that package to its dependencies. Or generate the app again. Its configuration is unchanged.
+- **`client.authentication.failure` is declared by `clients`** (`@mod/clients/audit-events`), no longer by `token-endpoint`, with the same name and attributes: a receiver needs no change, and a check of your own that reads the declarations finds it there. A route of your own that calls `clients`' `authenticate` records its refusal through `recordRefusedAuthentication`, handing it the `audit` your module takes.
 
 ## Operational notes
 

@@ -10,6 +10,7 @@
 	"dependencies": {
 		"@mod/app-output": "workspace:*",
 		"@mod/combinations": "workspace:*",
+		"@mod/config-files": "workspace:*",
 		"@mod/create-app": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/trial": "workspace:*"

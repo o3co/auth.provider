@@ -1,14 +1,15 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { assemble, contract, defineModule } from "@mod/kernel";
+import { quietRuntime } from "@mod/kernel/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { assemble, contract, defineModule, loadConfig } from "../src/contract.ts";
-import { quietRuntime } from "../src/testing.ts";
+import { loadConfig } from "../src/contract.ts";
 import { refusalsOf } from "./refusals.ts";
 
 async function files(...contents: string[]): Promise<string[]> {
-	const dir = await mkdtemp(join(tmpdir(), "kernel-config-"));
+	const dir = await mkdtemp(join(tmpdir(), "config-files-"));
 	return Promise.all(
 		contents.map(async (content, i) => {
 			const path = join(dir, `${i}.conf`);

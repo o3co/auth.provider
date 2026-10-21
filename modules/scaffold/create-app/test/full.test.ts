@@ -9,6 +9,7 @@ import { expect, it, vi } from "vitest";
 import { generate } from "../src/contract.ts";
 import {
 	boot,
+	configFiles,
 	kernel,
 	manifest,
 	readsScalarsFromEnv,
@@ -36,7 +37,7 @@ it("assembles what combinations composes in full, each axis with one adapter, an
 	const modules = full();
 	expect(await imports(target)).toEqual(modules);
 	const pkg = JSON.parse(await read(target, "package.json"));
-	expect(Object.keys(pkg.dependencies)).toEqual([kernel, ...modules, "zod"]);
+	expect(Object.keys(pkg.dependencies)).toEqual([kernel, configFiles, ...modules, "zod"]);
 	// An app writing sections of its own holds the one zod the kernel asks of it as a peer: the
 	// version the workspace tests with, within the kernel's range.
 	const kernelManifest = manifest(kernel) as {

@@ -1,6 +1,8 @@
 export interface Contract<T> {
 	readonly kind: "contract";
 	readonly label: string;
+	/** The modules that may take it, by name; when omitted, any module may, and an empty list lets none. */
+	readonly takenBy?: readonly string[];
 	readonly __type?: T;
 }
 
@@ -15,8 +17,16 @@ export interface ExtensionPoint<T> {
 	readonly __type?: T;
 }
 
-export function contract<T>(label: string): Contract<T> {
-	return Object.freeze({ kind: "contract", label });
+export function contract<T>(
+	label: string,
+	options: { readonly takenBy?: readonly string[] } = {},
+): Contract<T> {
+	const { takenBy } = options;
+	return Object.freeze({
+		kind: "contract",
+		label,
+		...(takenBy === undefined ? {} : { takenBy: Object.freeze([...takenBy]) }),
+	});
 }
 
 export function extensionPoint<T>(label: string, rule: ExtensionRule<T>): ExtensionPoint<T> {

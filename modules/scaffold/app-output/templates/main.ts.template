@@ -1,4 +1,5 @@
-import { assemble, BootRefused, loadConfig } from "{{kernel}}";
+import { loadConfig } from "{{configFiles}}";
+import { assemble, BootRefused } from "{{kernel}}";
 {{imports}}
 
 /** A refused boot: each refusal on its own line of standard error, then exit 78. */

@@ -1,4 +1,4 @@
-import { extensionPoint } from "./handles.ts";
+import { extensionPoint } from "../handles.ts";
 import type { Clock, Log, LogFields, LogSink } from "./runtime.ts";
 
 /** In order: a threshold lets through its own level and those after it. */

@@ -1,6 +1,6 @@
-import { deepFreeze } from "./freeze.ts";
-import { extensionPoint } from "./handles.ts";
-import type { Runtime } from "./runtime.ts";
+import { deepFreeze } from "../freeze.ts";
+import { extensionPoint } from "../handles.ts";
+import type { Runtime } from "../runtime/runtime.ts";
 
 export interface Probe {
 	/** The resource's name, as the log shows it; the key at `probes`. */
