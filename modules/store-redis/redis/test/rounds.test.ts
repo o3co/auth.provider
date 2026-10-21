@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sharedRounds } from "../src/rounds.ts";
+import { sharedRounds } from "../src/round/rounds.ts";
 
 describe("shared confirmation rounds", () => {
 	it("lets calls during a round share the next one, never the running one", async () => {

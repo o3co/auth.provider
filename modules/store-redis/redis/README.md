@@ -29,9 +29,8 @@
 - A refusal or a warning never tells the URL, which may hold a password; an error event is logged by its name alone.
 - `replicas`: at runtime, no replica seen is unavailable.
 - `none`: the operator states there is no failover, so even confirmed writes are lost by one; a replica seen at runtime is unavailable.
-- A confirmation writes the confirmation key on a connection of its own, then waits until every replica ROLE shows has it.
 - A timeout, too few replicas, or another server than the one that answered is unavailable, the answer then unknown.
-- A confirmation asked during a round rides on the next round.
+- Internal module `round` (the confirmation round).
 - Every script first deletes keys whose expiry is at or before its time, as Redis still holds them then.
 - Versions are `server.epoch.n` and never repeat after a restart, a failover, or the end of the key counting them.
 - A command whose reply was lost is never sent again; a dropped connection fails at once, and nothing ends the process.
@@ -55,5 +54,3 @@
 
 ## Vocabulary
 - slot: the range of keys one node holds; a partition fits in one.
-- confirmation key: one key per prefix, written in a confirmation round, apart from idempotency marks.
-- round: one write to the confirmation key and one WAIT.
