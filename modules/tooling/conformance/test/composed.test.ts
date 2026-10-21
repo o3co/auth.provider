@@ -31,6 +31,16 @@ describe("the new system composed of a scene's parts", () => {
 		expect(config.kernel).toEqual({ deployment: "single" });
 	});
 
+	it("takes the deployment a part gives over the single one, keeping the part's other kernel keys", () => {
+		const own = area<NewPart>("composed-kernel");
+		onNew(own, (part) => part);
+		const kernel = { deployment: "multi", logging: { level: "debug" } };
+		const { config } = composition(
+			sceneOf(own.part({ modules: ["@mod/keys"], config: { kernel } })),
+		);
+		expect(config.kernel).toEqual(kernel);
+	});
+
 	it("composes the modules a listed module needs, with their wirings, and tells the parts", () => {
 		const { modules, config } = composed({ modules: ["@mod/logout"] });
 		// Session is composed as its default, session-lifecycle, with that one's wiring.
