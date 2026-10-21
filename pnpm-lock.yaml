@@ -2173,9 +2173,6 @@ importers:
 
   modules/scaffold/app-output:
     dependencies:
-      '@mod/kernel':
-        specifier: workspace:*
-        version: link:../../foundation/kernel
       '@o3co/ts.hocon':
         specifier: 1.14.3
         version: 1.14.3(zod@4.6.7)

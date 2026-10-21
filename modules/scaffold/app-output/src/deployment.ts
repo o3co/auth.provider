@@ -36,6 +36,10 @@ const nodeImage =
 const corepack = "0.36.0";
 /** http's default port: the image changes only the interface it listens on. */
 const httpPort = 8080;
+/** The module that listens: only an app composing it is given a port, in the image and the guide. */
+const httpPackage = "@mod/http";
+/** The module that answers `/_healthcheck` and `/readyz`: only an app composing it is checked for liveness. */
+const opsPackage = "@mod/http-ops";
 
 /** Secrets of any file name stay out of git: env files but their example, the local layer, keys. */
 const gitIgnored = [
@@ -77,6 +81,7 @@ export async function writeDeployment(
 	const fragments = await packages.fragments(names);
 	const settings = settingsOf(fragments);
 	const seals = names.includes(sealPackage);
+	const http = { serves: names.includes(httpPackage), live: names.includes(opsPackage) };
 	await writeProject(target, {
 		"package.json": manifestOf(
 			"node --env-file-if-exists=.env src/main.ts",
@@ -89,7 +94,7 @@ export async function writeDeployment(
 		[paths.localExample]: localConfExample(fragments),
 		".env.example": envExample(settings),
 		"AGENTS.md": agentsIndex(packages.cards(names), packages.release()),
-		Dockerfile: dockerfile(),
+		Dockerfile: dockerfile(http),
 		".dockerignore": lines(dockerIgnored),
 		".gitignore": lines(gitIgnored),
 		"README.md": await filled(readme.template, {
@@ -97,10 +102,11 @@ export async function writeDeployment(
 			...guideLists(settings, writtenOf(fragments)),
 			cards: cardLines(packages.cards(names)),
 			askedOfDeployment: deploymentLines(packages.cards(names)),
-			firstLogin: firstLoginLine(packages.release()),
+			firstLogin: http.serves ? firstLoginLine(packages.release()) : "",
 			port: String(httpPort),
 			hostEnv: envName("http.host"),
 			portEnv: envName("http.port"),
+			...httpLines(http),
 			...readme.fill,
 		}),
 	});
@@ -185,7 +191,41 @@ const guideLists = (settings: readonly Setting[], written: readonly Written[]) =
 		.join("\n"),
 });
 
-function dockerfile(): string {
+/** The guide's lines about http, for an app that listens; and the health check's, for one that answers it. */
+function httpLines(http: { readonly serves: boolean; readonly live: boolean }) {
+	const config = `-e APP_CONFIG=${paths.local},${paths.application} -v "$PWD/${paths.local}:/app/${paths.local}:ro"`;
+	const host = envName("http.host");
+	const port = envName("http.port");
+	return {
+		tryHttp: http.serves
+			? `To try it on this machine over plain http, set \`http.public-origin\` to \`http://localhost:${httpPort}\` and \`http.insecure-origin\` to \`true\`: an http public origin boots only with it, and its cookies cannot be made secure. A deployment keeps an https origin and leaves it \`false\`.\n`
+			: "",
+		dockerRun: http.serves
+			? `docker run --env-file .env -e ${host}=0.0.0.0 -e ${port}=${httpPort} ${config} -p ${httpPort}:${httpPort} auth-provider`
+			: `docker run --env-file .env ${config} auth-provider`,
+		listening: http.serves
+			? `An \`-e\` after \`--env-file\` wins over it: the container listens on every interface at ${httpPort}, where \`-p\` reaches it, whatever \`.env\` names for a run on the host.\n\n`
+			: "",
+		healthCheck: http.live
+			? "Its health check asks `/_healthcheck`, which answers while the process runs; `/readyz` answers readiness, for a load balancer.\n"
+			: "",
+	};
+}
+
+function dockerfile(http: { readonly serves: boolean; readonly live: boolean }): string {
+	const port = envName("http.port");
+	const listening = http.serves
+		? `# Listens on every interface inside the container; the port is http's, which the health check follows.
+ENV ${envName("http.host")}=0.0.0.0
+ENV ${port}=${httpPort}
+`
+		: "";
+	const exposed = http.serves ? `EXPOSE \${${port}}\n` : "";
+	const checked = http.live
+		? `# Liveness, not readiness: the container is restarted only when the process stops answering.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:' + process.env.${port} + '/_healthcheck').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+`
+		: "";
 	return `# syntax=docker/dockerfile:1
 # Node 24 pinned by version and digest, corepack pinned too; pnpm is the manifest's packageManager.
 FROM ${nodeImage} AS base
@@ -203,14 +243,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY src ./src
 COPY ${paths.application} ./${paths.application}
-# Listens on every interface inside the container; the port is http's, which the health check follows.
-ENV ${envName("http.host")}=0.0.0.0
-ENV ${envName("http.port")}=${httpPort}
-USER node
-EXPOSE \${${envName("http.port")}}
-# Liveness, not readiness: the container is restarted only when the process stops answering.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:' + process.env.${envName("http.port")} + '/_healthcheck').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
-ENTRYPOINT ["/sbin/tini", "--"]
+${listening}USER node
+${exposed}${checked}ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "${paths.main}"]
 `;
 }

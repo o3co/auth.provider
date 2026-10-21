@@ -7,6 +7,5 @@ export {
 	type Setting,
 	settingsOf,
 } from "./fragments.ts";
-export { writeListed } from "./listed.ts";
 export type { Card, Packages, Release } from "./packages.ts";
 export { configFiles, kernel, mainSource, namesPackages, vacant } from "./project.ts";

@@ -1,7 +1,8 @@
 /** What every generated deployment is held to, full or a pattern: its configuration and its boot. */
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
 import { configFiles, kernel } from "@mod/app-output";
@@ -152,4 +153,34 @@ export async function refusesGeneratedOnlyForNamedKeys(target: string) {
 		).toBe(true);
 	}
 	return generatedOnly.refused;
+}
+
+export async function freePort(): Promise<number> {
+	return new Promise((resolve) => {
+		const server = createServer().listen(0, "127.0.0.1", () => {
+			const address = server.address();
+			server.close(() => resolve(typeof address === "object" && address ? address.port : 0));
+		});
+	});
+}
+
+/** Runs the app until it says it listens, then stops it by SIGTERM: its exit code and output. */
+export async function startsAndStops(target: string) {
+	const child = spawn(process.execPath, ["src/main.ts"], {
+		cwd: target,
+		env: { APP_CONFIG: "config/local.conf,config/application.conf" },
+	});
+	let output = "";
+	const exited = new Promise<number | null>((resolve) => child.once("exit", resolve));
+	const listening = new Promise<void>((resolve) => {
+		const seen = (chunk: Buffer) => {
+			output += chunk;
+			if (output.includes('"event":"http.listening"')) resolve();
+		};
+		child.stdout.on("data", seen);
+		child.stderr.on("data", seen);
+	});
+	await Promise.race([listening, exited]);
+	child.kill("SIGTERM");
+	return { code: await exited, output };
 }

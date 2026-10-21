@@ -101,10 +101,6 @@ export async function run(
 		io.err(`${(error as Error).message}\n`);
 		return 1;
 	}
-	io.out(
-		listed
-			? `created ${target}\nnext: add the modules and settings the listed modules need, then cd ${target} && pnpm install && pnpm start\n`
-			: `created ${target}\nnext: cd ${target} and follow its README.md\n`,
-	);
+	io.out(`created ${target}\nnext: cd ${target} and follow its README.md\n`);
 	return 0;
 }

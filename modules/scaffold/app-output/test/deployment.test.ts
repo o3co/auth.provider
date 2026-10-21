@@ -98,3 +98,65 @@ it("refuses a target that holds anything, and writes nothing", async () => {
 	);
 	expect(await readdir(target)).toEqual(["kept"]);
 });
+
+it("fills a listed app's guide with the modules listed and the caller's lines", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/http"], fakePackages(), {
+		template: "listed-readme.md",
+		fill: {
+			listed: "`@mod/http`",
+			chosen: "",
+			decided: "- `kernel.deployment`: `single` for one instance, `multi` for several.",
+		},
+	});
+
+	const guide = await read(target, "README.md");
+	expect(guide).toContain("from the modules listed: `@mod/http`.");
+	expect(guide).toContain("- `kernel.deployment`: `single` for one instance, `multi` for several.");
+	expect(guide).toContain("| `http.port` | `HTTP_PORT` | `8080` |");
+	expect(guide).not.toContain("{{");
+});
+
+const listedReadme = (listed: string) => ({
+	template: "listed-readme.md",
+	fill: { listed, chosen: "", decided: "" },
+});
+
+it("promises no http, port or health check to an app that composes no http", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/redis"], fakePackages(), listedReadme("`@mod/redis`"));
+
+	const docker = await read(target, "Dockerfile");
+	for (const http of ["HEALTHCHECK", "EXPOSE", "HTTP_HOST", "HTTP_PORT", "_healthcheck"]) {
+		expect(docker).not.toContain(http);
+	}
+	const guide = await read(target, "README.md");
+	for (const http of ["_healthcheck", "/readyz", "-p 8080", "HTTP_PORT", "plain http", "listens"]) {
+		expect(guide).not.toContain(http);
+	}
+	expect(guide).toContain("docker run --env-file .env -e APP_CONFIG=");
+	expect(guide).not.toContain("{{");
+});
+
+it("listens and exposes the port where http is composed, and checks liveness where http-ops is", async () => {
+	const served = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(served, ["@mod/http"], fakePackages(), listedReadme("`@mod/http`"));
+	const docker = await read(served, "Dockerfile");
+	expect(docker).toContain("ENV HTTP_HOST=0.0.0.0");
+	expect(docker).toContain("EXPOSE ${HTTP_PORT}");
+	expect(docker).not.toContain("HEALTHCHECK");
+	const guide = await read(served, "README.md");
+	expect(guide).toContain("-p 8080:8080");
+	expect(guide).toContain("To try it on this machine over plain http");
+	expect(guide).not.toContain("_healthcheck");
+
+	const live = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(
+		live,
+		["@mod/http", "@mod/http-ops"],
+		fakePackages(),
+		listedReadme("`@mod/http`"),
+	);
+	expect(await read(live, "Dockerfile")).toContain("/_healthcheck");
+	expect(await read(live, "README.md")).toContain("Its health check asks `/_healthcheck`");
+});
