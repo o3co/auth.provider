@@ -77,7 +77,8 @@ export function settlingOf(p: SettlingParts) {
 				if (!(await p.counting())) return;
 			}
 			if (marks === settleMarks) throw new Unavailable("mfa");
-			set = (await markedBy(witness, subject, p.token())) || set;
+			// Its last mark alone: one another set after its clear is not its own to clear.
+			set = await markedBy(witness, subject, p.token());
 		}
 	};
 }

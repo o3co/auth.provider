@@ -10,7 +10,7 @@
 ## Offers
 - Contribution to `mfa`'s `witnessing`:
   - `standing`: `held` for a subject holding a counting factor; `none` where the witness marks nothing either; a mark beside nothing counting is recorded as `mfa.enrollment_inconsistent` (`at`), logged, and unavailable, as is a witness that cannot be read.
-  - `settle`, after a binding's write: a counting factor with no mark is marked under a new token; a mark beside nothing counting goes only where this call set it (a reset took the factor meanwhile). After that clear it reads the factors again and marks anew where one counts. Every mark it makes is checked so, its own going where nothing counts; it marks twice at most, then is unavailable while they still differ.
+  - `settle`, after a binding's write: a counting factor with no mark is marked under a new token; a mark beside nothing counting goes only where this call's last mark is its own (a reset took the factor meanwhile). After that clear it reads the factors again and marks anew where one counts. Every mark it makes is checked so, its own going where nothing counts; it marks twice at most, then is unavailable while they still differ.
   - `cleared`, after a reset: the mark goes.
 - Contract `witnessBackfill`:
   - `settle(subject)` → `marked` (this call filled it), `held` (marked already, or by another meanwhile), `none`, or `inconsistent` (a mark it did not set beside nothing counting, left as it is).
