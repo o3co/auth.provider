@@ -16,17 +16,6 @@
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
-		"@mod/http": "workspace:*",
-		"@mod/records": "workspace:*",
-		"@mod/store": "workspace:*",
 		"vitest": "5.0.5"
-	},
-	"peerDependencies": {
-		"vitest": "5.0.5"
-	},
-	"peerDependenciesMeta": {
-		"vitest": {
-			"optional": true
-		}
 	}
 }

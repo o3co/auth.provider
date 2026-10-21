@@ -13,11 +13,8 @@
   - A request's challenge says whether it named credentials, and `assert` reads that from it alone: keep it on the server and hand back what was kept, never a value the client sent. One remade from the client's answer, as `passkeys` remakes it, reads as none named; an ending it did not write is `malformed`.
   - A challenge kept bare before this release reads as none named: an answer without a handle is refused, and a new challenge passes.
 - `credentialOf`: a value read as a credential in the shape webauthn writes, with its fields alone and the canonical checks and limits of its id, key and handle (`isCanonical`, `credentialLimits`); nothing for any other value. `freshHandle`: a new user handle from the randomness given, by the rule webauthn makes its own by.
-- Store interfaces for the passkeys `passkeys` keeps, which the assembly wires. The store never sees what a record holds.
-  - Passkeys: credentials and subjects, each by a key the keeper makes, saved once, read, changed from what they hold, kept without end. Needs: no eviction, survives a crash, never rolled back by failover, confirmed reads.
-  - Challenges: opened for a lifetime, taken by putting a mark in place. Needs: survives a crash, never rolled back by failover, names derived from the challenge.
 - Operator section: `rp-id`, `rp-name`, `origins` (required), `top-origins` (default none), `challenge-lifetime` (10s–10m, default `2m`, written with its unit).
-- Test configuration builders, the ceremonies over a relying party a test gives (`testCeremonies`), the contract tests of both store interfaces, and a software authenticator behind a browser (`./testing`), which answers options as a browser does and takes twists for refusal tests.
+- Test configuration builders, the ceremonies over a relying party a test gives (`testCeremonies`), and a software authenticator behind a browser (`./testing`), which answers options as a browser does and takes twists for refusal tests.
 
 ## Invariants
 - A challenge is 32 random bytes, answered within `challenge-lifetime` of its making on `kernel`'s clock.

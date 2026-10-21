@@ -71,4 +71,3 @@ export const ceremonies = contract<Ceremonies>("webauthn.ceremonies");
 
 export { challengeOf } from "./ceremony/ceremony.ts";
 export { credentialLimits, credentialOf, freshHandle, isCanonical } from "./records.ts";
-export * from "./store.ts";
