@@ -22,7 +22,6 @@
 - Audit events, with the subject, once written (never for a refused or raced decision but a first binding another factor beat, nor a reset, never with a secret, proof or code): declared in `./audit-events`, listed in the audit event reference.
 - Contributions: `login-gates` amr (each kind's, and `mfa` if one adds it); `seal`'s `resealers`, a resealer sealing again what a `previous` key sealed (internal module `records`).
 - Section: `mode` (`optional`, or `required` by default), `max-factors` (default 10).
-- How the lists and claims are kept and sealed again: internal module `records`.
 - Store interface `factorStore`: factor lists and claims on unique values, by keys mfa makes, contents opaque; save once, read, change from what it holds, kept without end. Needs: never evicted, survives a crash and a failover, reads only what is confirmed. `./testing`: its contract test, and a config builder.
 
 ## Invariants
