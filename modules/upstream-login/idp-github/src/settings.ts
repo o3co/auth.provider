@@ -1,4 +1,8 @@
-import { destinationRefusal, type OutboundRefusals } from "@mod/outbound-policy";
+import {
+	browsedRefusalText,
+	destinationRefusal,
+	type OutboundRefusals,
+} from "@mod/outbound-policy";
 import {
 	clientSetting,
 	endpointSetting as endpoint,
@@ -37,25 +41,37 @@ const section = clientSetting.extend({
 		.describe("The `iss` a callback carries, where it carries one (RFC 9207)."),
 });
 
-/** The section; boot is refused on a URL it sends to that outbound's destination policy refuses. */
+/**
+ * The section; boot is refused on a URL it sends to that outbound's destination policy refuses,
+ * and on an authorization endpoint its policy for the browser refuses.
+ */
 export const settingsOf = (refusals: OutboundRefusals) =>
-	section.superRefine(
-		// Asked with the same narrowing as the requests: each sent for the endpoint the operator set.
-		urlsChecked(
-			(url, hosts, internal) =>
-				destinationRefusal(refusals, url, { hosts, ...(internal ? { internal } : {}) }),
-			{
-				urls: (s) => [s["token-endpoint"], s.api],
-				sent: (s) => ({
-					"token-endpoint": {
-						url: s["token-endpoint"],
-						hosts: hostsOf(s),
-						internal: s["token-endpoint"],
-					},
-					api: { url: userUrl(s.api), hosts: hostsOf(s), internal: s.api },
-				}),
-			},
-		),
-	);
+	section
+		.superRefine(
+			// Asked with the same narrowing as the requests: each sent for the endpoint the operator set.
+			urlsChecked(
+				(url, hosts, internal) =>
+					destinationRefusal(refusals, url, { hosts, ...(internal ? { internal } : {}) }),
+				{
+					urls: (s) => [s["token-endpoint"], s.api],
+					sent: (s) => ({
+						"token-endpoint": {
+							url: s["token-endpoint"],
+							hosts: hostsOf(s),
+							internal: s["token-endpoint"],
+						},
+						api: { url: userUrl(s.api), hosts: hostsOf(s), internal: s.api },
+					}),
+				},
+			),
+		)
+		.superRefine((s, context) => {
+			const url = s["authorization-endpoint"];
+			// Its own schema refuses a URL that does not parse; the endpoint is the operator's URL for itself.
+			if (!URL.canParse(url)) return;
+			const refused = browsedRefusalText(refusals, url, { internal: url });
+			if (refused)
+				context.addIssue({ code: "custom", path: ["authorization-endpoint"], message: refused });
+		});
 
 export type Settings = z.output<typeof section>;

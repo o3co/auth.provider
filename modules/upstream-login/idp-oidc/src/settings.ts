@@ -1,6 +1,11 @@
 import type { Algorithm } from "@mod/external-jwt";
 import { setting } from "@mod/kernel";
-import { destinationRefusal, hostEntryOf, type OutboundRefusals } from "@mod/outbound-policy";
+import {
+	browsedRefusalText,
+	destinationRefusal,
+	hostEntryOf,
+	type OutboundRefusals,
+} from "@mod/outbound-policy";
 import {
 	clientSetting,
 	endpointSetting as endpoint,
@@ -139,6 +144,17 @@ export const settingsOf = (asymmetric: readonly Algorithm[], refusals: OutboundR
 					},
 				},
 			),
-		);
+		)
+		.superRefine((s, context) => {
+			// The browser goes to these, each given endpoint the operator's URL for itself alone.
+			if (s.discovery) return;
+			for (const key of ["authorization-endpoint", "end-session-endpoint"] as const) {
+				const url = s[key];
+				// Its own schema refuses a URL that does not parse.
+				if (url === undefined || !URL.canParse(url)) continue;
+				const refused = browsedRefusalText(refusals, url, { internal: url });
+				if (refused) context.addIssue({ code: "custom", path: [key], message: refused });
+			}
+		});
 
 export type Settings = z.output<ReturnType<typeof settingsOf>>;

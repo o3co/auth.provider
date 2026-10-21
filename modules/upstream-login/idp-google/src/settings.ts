@@ -1,5 +1,9 @@
 import { setting } from "@mod/kernel";
-import { destinationRefusal, type OutboundRefusals } from "@mod/outbound-policy";
+import {
+	browsedRefusalText,
+	destinationRefusal,
+	type OutboundRefusals,
+} from "@mod/outbound-policy";
 import { clientSetting, endpointSetting as endpoint } from "@mod/upstream-client";
 import { urlsChecked } from "@mod/url-setting";
 import { z } from "zod";
@@ -48,17 +52,28 @@ const section = clientSetting.extend({
  * outbound's destination policy refuses with the endpoint's host alone.
  */
 export const settingsOf = (refusals: OutboundRefusals) =>
-	section.superRefine(
-		urlsChecked((url, hosts) => destinationRefusal(refusals, url, { hosts }), {
-			urls: (s) => [s["token-endpoint"], s["jwks-uri"]],
-			sent: (s) => ({
-				"token-endpoint": {
-					url: s["token-endpoint"],
-					hosts: [new URL(s["token-endpoint"]).hostname],
-				},
-				"jwks-uri": { url: s["jwks-uri"], hosts: [new URL(s["jwks-uri"]).hostname] },
+	section
+		.superRefine(
+			urlsChecked((url, hosts) => destinationRefusal(refusals, url, { hosts }), {
+				urls: (s) => [s["token-endpoint"], s["jwks-uri"]],
+				sent: (s) => ({
+					"token-endpoint": {
+						url: s["token-endpoint"],
+						hosts: [new URL(s["token-endpoint"]).hostname],
+					},
+					"jwks-uri": { url: s["jwks-uri"], hosts: [new URL(s["jwks-uri"]).hostname] },
+				}),
 			}),
-		}),
-	);
+		)
+		.superRefine((s, context) => {
+			// The browser goes to these; Google is a public service, so plain http is taken at a loopback name alone.
+			for (const key of ["authorization-endpoint", "end-session-endpoint"] as const) {
+				const url = s[key];
+				// Its own schema refuses a URL that does not parse.
+				if (url === undefined || !URL.canParse(url)) continue;
+				const refused = browsedRefusalText(refusals, url);
+				if (refused) context.addIssue({ code: "custom", path: [key], message: refused });
+			}
+		});
 
 export type Settings = z.output<typeof section>;

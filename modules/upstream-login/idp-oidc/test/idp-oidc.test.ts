@@ -163,6 +163,8 @@ interface World {
 	readonly describes?: Handler;
 	/** A real outbound and its refusals, in place of the table of answers. */
 	readonly reach?: { readonly outbound: Outbound; readonly refusals: OutboundRefusals };
+	/** Refusals in place of the table's, with the table of answers kept. */
+	readonly refusals?: OutboundRefusals;
 }
 
 async function open(world: World = {}) {
@@ -190,7 +192,7 @@ async function open(world: World = {}) {
 		runtime,
 	});
 	const jwt = app.get(externalJwt);
-	const refusals = world.reach?.refusals ?? policyRefusing(world.refused);
+	const refusals = world.reach?.refusals ?? world.refusals ?? policyRefusing(world.refused);
 	const settings = settingsOf(jwt.algorithms, refusals);
 	const read = settings.parse({
 		issuer,
@@ -268,6 +270,30 @@ const givenEndpoints = {
 	"token-endpoint": `${issuer}/token`,
 	"jwks-uri": `${issuer}/jwks`,
 };
+/** outbound's own refusals over `settings`, every name resolving to a private address. */
+const refusalsOver = (settings: Record<string, unknown>): OutboundRefusals => {
+	const paths = outboundOver(outboundSection.parse(settings), async () => ["10.0.0.5"]);
+	const { explained, plainInternal, browsedRefusal } = paths;
+	return { explained, plainInternal, browsedRefusal };
+};
+/** An issuer at `at` describing itself and serving its key set, as `issuer` does. */
+const servedAt = (at: string, described: Record<string, unknown> = {}) => ({
+	[`${at}/.well-known/openid-configuration`]: () =>
+		ok({
+			issuer: at,
+			authorization_endpoint: `${at}/authorize`,
+			token_endpoint: `${at}/token`,
+			jwks_uri: `${at}/jwks`,
+			...described,
+		}),
+	[`${at}/jwks`]: () => ok({ keys: [rsa.jwk] }),
+});
+const loopbackIssuer = "http://127.0.0.1:9100";
+const loopbackRefusals = () =>
+	refusalsOver({ allow: ["127.0.0.1", "idp.example"], "plain-loopback": ["127.0.0.1:9100"] });
+const internalIssuer = "http://idp.internal:8080";
+const internalRefusals = () =>
+	refusalsOver({ allow: ["idp.internal", "idp.example"], "plain-internal": ["idp.internal:8080"] });
 afterEach(() => {
 	now = start;
 });
@@ -365,29 +391,145 @@ describe("idp-oidc", () => {
 		);
 	});
 
-	it("refuses at boot a description whose endpoints the browser would leave https for", async () => {
+	it("refuses at boot a description whose endpoints the browser would leave https for, where outbound does not take it", async () => {
 		const described: Record<string, Record<string, unknown>> = {
 			"an app's scheme": { authorization_endpoint: "myapp://idp.example/authorize" },
 			"plain http": { authorization_endpoint: "http://idp.example/authorize" },
 			"an end of session in an app's scheme": { end_session_endpoint: "myapp://idp.example/out" },
 		};
 		for (const [label, description] of Object.entries(described)) {
-			await expect(open({ description }), label).rejects.toThrow(/https/);
+			await expect(open({ description }), label).rejects.toThrow(/the browser/);
 		}
-		// An issuer the operator names on plain http may describe its endpoints on it.
-		const plain = "http://idp.example";
-		const local = {
-			issuer: plain,
-			authorization_endpoint: `${plain}/authorize`,
-			token_endpoint: `${plain}/token`,
-			jwks_uri: `${plain}/jwks`,
-		};
-		await expect(
+	});
+
+	it("lets the browser go over plain http only at a loopback name, or at the issuer's origin that plain-internal names", async () => {
+		const at = (issuerUrl: string, refusals: OutboundRefusals, described = {}) =>
 			open({
-				settings: { issuer: plain },
-				more: { [`${plain}/.well-known/openid-configuration`]: () => ok(local) },
-			}),
-		).resolves.toBeDefined();
+				settings: { issuer: issuerUrl, "endpoint-hosts": ["idp.example"] },
+				more: servedAt(issuerUrl, described),
+				refusals,
+			}).catch((e: unknown) => e);
+		expect(await at(loopbackIssuer, loopbackRefusals())).toMatchObject({
+			upstream: { issuer: loopbackIssuer },
+		});
+		expect(await at(internalIssuer, internalRefusals())).toMatchObject({
+			upstream: { issuer: internalIssuer },
+		});
+		const refused: [string, OutboundRefusals, Record<string, unknown>][] = [
+			[
+				loopbackIssuer,
+				loopbackRefusals(),
+				{ authorization_endpoint: "http://idp.example/authorize" },
+			],
+			[loopbackIssuer, loopbackRefusals(), { end_session_endpoint: "http://idp.example/out" }],
+			// The issuer's host, but another origin than the issuer's.
+			[
+				internalIssuer,
+				internalRefusals(),
+				{ authorization_endpoint: "http://idp.internal:9090/a" },
+			],
+		];
+		for (const [issuerUrl, refusals, described] of refused) {
+			const error = await at(issuerUrl, refusals, described);
+			expect(error, JSON.stringify(described)).toBeInstanceOf(UpstreamMismatch);
+			expect((error as UpstreamMismatch).at).toEqual(["issuer"]);
+			expect(String(error)).toMatch(/the browser/);
+			expect(String(error)).not.toMatch(/idp\.example|9090/);
+		}
+	});
+
+	it("takes plain http among its given endpoints where outbound takes each, and refuses at its key one the browser would go to", async () => {
+		const given = (at: string) => ({
+			discovery: false,
+			issuer: at,
+			"authorization-endpoint": `${at}/a`,
+			"token-endpoint": `${at}/token`,
+			"jwks-uri": `${at}/jwks`,
+		});
+		await expect(
+			open({ settings: given(internalIssuer), refusals: internalRefusals() }),
+		).resolves.toMatchObject({ upstream: { issuer: internalIssuer } });
+		const settingsFor = settingsOf(asymmetric, internalRefusals());
+		const keysRefused = (more: Record<string, unknown>) => {
+			const read = settingsFor.safeParse({
+				...given(internalIssuer),
+				"client-id": "client",
+				"client-secret": "s",
+				...more,
+			});
+			return read.success ? [] : read.error.issues.map((issue) => issue.path.join("."));
+		};
+		expect(keysRefused({ "authorization-endpoint": "http://idp.example/a" })).toEqual([
+			"authorization-endpoint",
+		]);
+		expect(keysRefused({ "end-session-endpoint": "http://idp.example/out" })).toEqual([
+			"end-session-endpoint",
+		]);
+		// A logout on another host, which plain-internal names, is taken for itself.
+		const logout = "http://logout.internal:8080/logout";
+		const twoHosts = refusalsOver({
+			allow: ["idp.internal", "logout.internal"],
+			"plain-internal": ["idp.internal:8080", "logout.internal:8080"],
+		});
+		const read = settingsOf(asymmetric, twoHosts).safeParse({
+			...given(internalIssuer),
+			"client-id": "client",
+			"client-secret": "s",
+			"end-session-endpoint": logout,
+		});
+		expect(read.error?.issues).toBeUndefined();
+	});
+
+	it("asks for a browser's URL with the issuer as the operator's URL for what it describes, and each given endpoint for itself", async () => {
+		const asked: [string, string | undefined][] = [];
+		const refusals: OutboundRefusals = {
+			explained: () => undefined,
+			browsedRefusal: (url, narrower) => {
+				asked.push([url, narrower?.internal]);
+				return undefined;
+			},
+		};
+		await open({ refusals, description: { end_session_endpoint: `${issuer}/out` } });
+		expect(asked).toEqual([
+			[`${issuer}/authorize`, issuer],
+			[`${issuer}/out`, issuer],
+		]);
+		asked.length = 0;
+		await open({
+			refusals,
+			settings: { ...givenEndpoints, "end-session-endpoint": `${issuer}/out` },
+		});
+		expect(asked).toEqual([
+			[`${issuer}/a`, `${issuer}/a`],
+			[`${issuer}/out`, `${issuer}/out`],
+		]);
+	});
+
+	it("logs in at an issuer named on plain http, comparing its iss as written", async () => {
+		const token = await idToken({ iss: loopbackIssuer });
+		const { upstream } = await open({
+			settings: { issuer: loopbackIssuer },
+			more: { ...servedAt(loopbackIssuer), [`${loopbackIssuer}/token`]: () => granted(token) },
+			refusals: loopbackRefusals(),
+		});
+		expect(await outcome(upstream.exchange(codeExchange({ iss: loopbackIssuer })))).toMatchObject({
+			subject: "u-alice",
+		});
+		const other = "https://127.0.0.1:9100";
+		expect(await outcome(upstream.exchange(codeExchange({ iss: other })))).toBe("refused");
+	});
+
+	it("refuses, asking the token endpoint nothing, an iss of the issuer's origin in another form", async () => {
+		const token = await idToken({ iss: loopbackIssuer });
+		const { upstream, asked } = await open({
+			settings: { issuer: loopbackIssuer },
+			more: { ...servedAt(loopbackIssuer), [`${loopbackIssuer}/token`]: () => granted(token) },
+			refusals: loopbackRefusals(),
+		});
+		for (const iss of [`${loopbackIssuer}/`, `${loopbackIssuer}/other`, "HTTP://127.0.0.1:9100"]) {
+			expect(await outcome(upstream.exchange(codeExchange({ iss }))), iss).toBe("refused");
+		}
+		expect(asked.some((a) => a.url === `${loopbackIssuer}/token`)).toBe(false);
 	});
 
 	it("refuses at boot, at its key, an endpoint outbound's policy refuses, asking with the hosts it sends to", async () => {

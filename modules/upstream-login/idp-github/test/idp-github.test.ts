@@ -245,6 +245,52 @@ describe("idp-github", () => {
 		]);
 	});
 
+	it("takes the authorization endpoint over plain http only where outbound's policy for the browser does, refusing it at its key", () => {
+		const both = { "client-id": "cid", "client-secret": "sec" };
+		const refusalsOver = (more: Record<string, unknown>): OutboundRefusals => {
+			const paths = outboundOver(outboundSection.parse(more), async () => ["10.0.0.5"]);
+			const { explained, plainInternal, browsedRefusal } = paths;
+			return { explained, plainInternal, browsedRefusal };
+		};
+		const policy = refusalsOver({
+			allow: ["ghe.internal", "ghe.example", "127.0.0.1"],
+			"plain-internal": ["ghe.internal:8080"],
+		});
+		const keysOf = (refusals: OutboundRefusals, more: Record<string, unknown>) =>
+			settingsOf(refusals)
+				.safeParse({ ...both, ...more })
+				.error?.issues.map((i) => i.path.join("."));
+		const at = (authorization: string) => ({
+			"authorization-endpoint": authorization,
+			"token-endpoint": "https://ghe.example/t",
+			api: "https://ghe.example/api/v3/",
+		});
+		expect(keysOf(policy, at("https://ghe.example/login/oauth/authorize"))).toBeUndefined();
+		expect(keysOf(policy, at("http://127.0.0.1:9200/login/oauth/authorize"))).toBeUndefined();
+		expect(keysOf(policy, at("http://ghe.internal:8080/login/oauth/authorize"))).toBeUndefined();
+		for (const refused of ["http://ghe.example/login", "http://ghe.internal:9090/login"]) {
+			expect(keysOf(policy, at(refused)), refused).toEqual(["authorization-endpoint"]);
+		}
+		// A policy that does not say takes https alone.
+		expect(keysOf(policyRefusing(), at("http://127.0.0.1:9200/login"))).toEqual([
+			"authorization-endpoint",
+		]);
+	});
+
+	it("asks for the browser's endpoint with it as the operator's URL", () => {
+		const asked: [string, string | undefined][] = [];
+		const refusals: OutboundRefusals = {
+			explained: () => undefined,
+			browsedRefusal: (url, narrower) => {
+				asked.push([url, narrower?.internal]);
+				return undefined;
+			},
+		};
+		settingsOf(refusals).parse({ "client-id": "cid", "client-secret": "sec" });
+		const github = "https://github.com/login/oauth/authorize";
+		expect(asked).toEqual([[github, github]]);
+	});
+
 	it("takes an id written as its canonical digits, and never one past the safe integers", async () => {
 		const answered = async (id: unknown) =>
 			outcome(open({ user: () => ok({ id }) }).upstream.exchange(exchange()));
