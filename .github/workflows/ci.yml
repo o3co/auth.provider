@@ -188,17 +188,60 @@ jobs:
           echo "checks: ${CHECKS}, integration: ${INTEGRATION}"
           [ "$CHECKS" = success ] && [ "$INTEGRATION" = success ]
 
-  # On a pull request to main (a release), on the release branches, and once
-  # a day on the default branch (develop): the new system's conformance and the
-  # legacy system's (0.17.0, built from this repository's own v0.17.0 tag), then
-  # the scenes on each pattern's app. A release is tested before it reaches
-  # main, so the push to main does not run it again. Each area and each pattern
-  # runs in a job of its own; `conformance` passes only once all of them have.
+  # On a push to develop: whether five merges have landed since the last
+  # conformance run on develop (pull requests to develop skip conformance).
+  # When they have, the conformance jobs below run on this push; the daily run
+  # covers develop on quieter days.
+  conformance-due:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # To read which earlier runs on develop ran conformance.
+      actions: read
+    outputs:
+      due: ${{ steps.count.outputs.due }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: count
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVERY: 5
+        run: |
+          set -euo pipefail
+          last=""
+          for run in $(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=develop&event=push&status=completed&per_page=50" --jq '.workflow_runs[].id'); do
+            ran=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --jq '[.jobs[] | select(.name == "conformance" and (.conclusion == "success" or .conclusion == "failure"))] | length')
+            if [ "$ran" != 0 ]; then
+              last=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq .head_sha)
+              break
+            fi
+          done
+          if [ -n "$last" ] && git cat-file -e "$last^{commit}" 2>/dev/null; then
+            merges=$(git rev-list --first-parent --count "$last..$GITHUB_SHA")
+          else
+            merges=$EVERY
+          fi
+          echo "merges on develop since the last conformance run: $merges"
+          if [ "$merges" -ge "$EVERY" ]; then due=true; else due=false; fi
+          echo "due=$due" >> "$GITHUB_OUTPUT"
+
+  # On a pull request to main (a release), on the release branches, once a day
+  # on develop, and on a push to develop every five merges: the new system's
+  # conformance and the legacy system's (0.17.0, built from this repository's
+  # own v0.17.0 tag), then the scenes on each pattern's app. A release is tested
+  # before it reaches main, so the push to main does not run it again. Each area
+  # and each pattern runs in a job of its own; `conformance` passes only once
+  # all of them have.
   #
   # What the jobs run, read from the repository: an area is a package with a
   # `conformance` script, and a pattern is a run `patterns --list` names.
   conformance-plan:
-    if: github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/'))
+    needs: conformance-due
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true')) }}
     runs-on: ubuntu-latest
     outputs:
       areas: ${{ steps.plan.outputs.areas }}
@@ -227,6 +270,8 @@ jobs:
   # skipped; any other fails.
   conformance-area:
     needs: conformance-plan
+    # A skipped conformance-due above would otherwise skip this job too.
+    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -282,6 +327,8 @@ jobs:
   # One pattern's app, on each area it composes.
   conformance-pattern:
     needs: conformance-plan
+    # A skipped conformance-due above would otherwise skip this job too.
+    if: ${{ !cancelled() && needs.conformance-plan.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -312,8 +359,8 @@ jobs:
 
   # The check required of a release: every area and every pattern passed.
   conformance:
-    needs: [conformance-plan, conformance-area, conformance-pattern]
-    if: always() && (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')))
+    needs: [conformance-due, conformance-plan, conformance-area, conformance-pattern]
+    if: always() && (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')) || (github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.conformance-due.outputs.due == 'true'))
     runs-on: ubuntu-latest
     steps:
       - name: Every area and every pattern passed
