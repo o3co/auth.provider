@@ -13,7 +13,8 @@ import { section } from "./section.ts";
 export default defineModule({ name: "signer-keys-http", section, replicaSafe: true }, (m) => [
 	m.contribute(signerKeys).by(async (c) => {
 		const { "keys-url": url, "max-response-size": maxBytes, timeout: timeoutMs } = c.section;
-		// The operator's own URL: a host in `internal-hosts` is reached at a private address at its origin.
+		// The operator's own URL: reached at a private address at its origin, for a host in
+		// `internal-hosts` or a `plain-internal` pair.
 		const narrower = {
 			hosts: [new URL(url).hostname],
 			internal: url,
