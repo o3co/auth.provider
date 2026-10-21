@@ -26,7 +26,14 @@ import {
 	UpstreamRefused,
 } from "@mod/upstreams";
 import { z } from "zod";
-import { descriptionUrl, hostsOf, narrowerOf, type Settings, sentFor } from "./settings.ts";
+import {
+	browsedRefusal,
+	descriptionUrl,
+	hostsOf,
+	narrowerOf,
+	type Settings,
+	sentFor,
+} from "./settings.ts";
 
 const description = z.looseObject({
 	issuer: z.string(),
@@ -79,10 +86,15 @@ async function discovered(s: Settings, { outbound, refusals }: Reach, hosts: rea
 	if (all.some((url) => !withinHosts(url, hosts))) {
 		throw mismatch("the description names an endpoint on a host the operator did not name");
 	}
-	// The browser goes to some of them: https, or plain http where the operator named the issuer so.
-	const schemes = ["https:", new URL(s.issuer).protocol];
-	if (all.some((url) => !schemes.includes(new URL(url).protocol))) {
-		throw mismatch("the description names an endpoint that is not https");
+	// The browser goes to these, which outbound never reaches: its policy for them decides.
+	const browsed = {
+		authorization_endpoint: described.authorization_endpoint,
+		...(endSession ? { end_session_endpoint: endSession } : {}),
+	};
+	for (const [name, url] of Object.entries(browsed)) {
+		const narrowed = narrowerOf(hosts, s.issuer);
+		const refused = browsedRefusal(refusals, url, narrowed, `the description's ${name}`);
+		if (refused !== undefined) throw mismatch(refused);
 	}
 	// The two this server sends to; a refusal here would fail every login.
 	const sent = { token_endpoint: described.token_endpoint, jwks_uri: described.jwks_uri };

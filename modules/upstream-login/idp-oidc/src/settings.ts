@@ -1,6 +1,11 @@
 import type { Algorithm } from "@mod/external-jwt";
 import { setting } from "@mod/kernel";
-import { destinationRefusal, hostEntryOf, type OutboundRefusals } from "@mod/outbound-policy";
+import {
+	destinationRefusal,
+	hostEntryOf,
+	type Narrower,
+	type OutboundRefusals,
+} from "@mod/outbound-policy";
 import {
 	clientSetting,
 	endpointSetting as endpoint,
@@ -35,6 +40,24 @@ export const narrowerOf = (hosts: readonly string[], internal: ConfiguredUrl | u
 });
 
 /** The hosts requests to the upstream are narrowed to: the issuer's, the named ones, the given endpoints'. */
+/**
+ * Why outbound's policy for a URL the browser goes to refuses it, as boot says it, naming `what`;
+ * a policy that does not say refuses all but https.
+ */
+export function browsedRefusal(
+	refusals: OutboundRefusals,
+	url: string,
+	narrower: Narrower,
+	what: string,
+): string | undefined {
+	const reason = refusals.browsedRefusal
+		? refusals.browsedRefusal(url, narrower)
+		: URL.parse(url)?.protocol === "https:"
+			? undefined
+			: "not https";
+	return reason && `outbound's policy for what the browser goes to refuses ${what}: ${reason}`;
+}
+
 export function hostsOf(s: {
 	readonly issuer: string;
 	readonly "endpoint-hosts": readonly string[];
@@ -139,6 +162,18 @@ export const settingsOf = (asymmetric: readonly Algorithm[], refusals: OutboundR
 					},
 				},
 			),
-		);
+		)
+		.superRefine((s, context) => {
+			// The browser goes to these; each given endpoint is the operator's URL for itself.
+			const named = [s.issuer, s["authorization-endpoint"], s["token-endpoint"], s["jwks-uri"]];
+			// Their own schemas refuse a URL that does not parse.
+			if (s.discovery || !named.every((url) => url === undefined || URL.canParse(url))) return;
+			const hosts = hostsOf(s);
+			for (const key of ["authorization-endpoint", "end-session-endpoint"] as const) {
+				const url = s[key];
+				const refused = url && browsedRefusal(refusals, url, narrowerOf(hosts, url), "it");
+				if (refused) context.addIssue({ code: "custom", path: [key], message: refused });
+			}
+		});
 
 export type Settings = z.output<ReturnType<typeof settingsOf>>;
