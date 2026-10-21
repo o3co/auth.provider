@@ -20,6 +20,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 - [From 0.18.0-rc.4](#from-0180-rc4)
 - [From 0.18.0-rc.5](#from-0180-rc5)
 - [From 0.18.0](#from-0180)
+- [From 0.18 to 0.19](#from-018-to-019)
 - [Operational notes](#operational-notes)
 
 ## Before you start
@@ -817,6 +818,11 @@ What changed since rc.5. Coming from an earlier release candidate, read the sect
 - **A Redis server that cannot run the store's scripts**: boot runs one of them once and is refused, naming a store script, where the server cannot run it, as one whose Lua lacks `cjson`; rc.5 booted and failed the writes with 503. The [runbook](runbook.md#managed-redisvalkey-with-replicas) says what the server must offer.
 - After boot, `/readyz` answers `503`, warning `redis.settings_unmet`, while either holds; a probe that finds them right again answers ready.
 - **A generated app's image**: it now builds on `node:24-alpine`, Node 24's latest, so each build takes Node's security fixes. An app generated before pins Node 24.21.0, which the 2026-10-21 Node.js security release left vulnerable: change its Dockerfile's `FROM` line to `FROM node:24-alpine AS base` and build the image again, or generate the app again.
+## From 0.18 to 0.19
+
+What changes from 0.18 to 0.19. Coming from an earlier release candidate, read the sections above first.
+
+- **The second-factor witness at the ledger** (`mfa-witness-http`): the provider removes a mark it set itself by withdrawing it by its token, where the ledger serves `withdraw-url`, so another binding's mark is never taken. Serve the route and check it as [Keeping the second-factor witness at the ledger](runbook.md#keeping-the-second-factor-witness-at-the-ledger) says, then set `mfa-witness-http.withdraw-url` on every instance; it must not be the same as `clear-url`. Until you do, nothing changes but a warning at each boot (`mfa-witness-http.withdraw_missing`); a later release will require it.
 
 ## From 0.18.0
 
