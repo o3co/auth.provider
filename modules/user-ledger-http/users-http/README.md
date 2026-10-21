@@ -12,7 +12,7 @@
 - Composition definition only (a contribution to `users`' `ledgers`).
 - Operator section, each URL whole (https or a plain-http pair outbound names, no fragment; optional, at least one):
   - `verify-url`: the password call; without it, no password matches and nothing is asked.
-  - `subject-url`: the lookup by subject, posting `{"subject"}`; `404` and `410` are none, `401` and `403` unavailable.
+  - `subject-url`: the lookup by subject, posting `{"subject"}`; a `404` or `410` saying so is none, `401` and `403` unavailable.
   - `upstream-url`: the lookup by upstream identity, posting `{"idp", "subject"}` apart, read as the lookup by subject. With it the ledger offers `byUpstream`, and its answer is the last word: users reads no link of its own. Without it, none is offered.
 - `credential` (optional: `keys`' `bearerToken` of at least 32 bytes of key material, never a `REPLACE-` sample), sent on every call.
 - `timeout` and `max-response-size`: each narrows outbound's cap on every call; written with its unit, a bare number refused.
@@ -31,19 +31,19 @@
   | Answer | Read as |
   |---|---|
   | `200`, a JSON object with an `id` of a subject's shape | the user; no `username` is asked for |
-  | `404` (not known) or `410` (known, and refused) | none |
-  | anything else, `401` and `403` included, challenged or not | unavailable |
+  | `404` with the JSON object `{"error":"not_found"}` (not known), or `410` with `{"error":"gone"}` (known, and refused) | none |
+  | anything else, a `404` or `410` saying neither, `401` and `403` included, challenged or not | unavailable |
 
 - A user: `id` is the subject; `email`, `name`, `picture`, `groups` and a boolean `emailVerified` (only beside `email`) are the attributes `users` names for them; other fields are dropped.
 
-- `./testing`: `usersLedger` (users, each with any upstream identity linked to it), a fake ledger speaking these calls for the users given, behind a credential of its own: its answer to a call (none for a call not its own) and the section pointing users-http at it, for a scene or an operator's trial.
+- `./testing`: `usersLedger` (users, each with any upstream identity linked to it), a fake ledger speaking these calls for the users given, behind a credential of its own: its answer to a call (none for a call not its own; a bare `404` without its credential, and `not_found` for a user it does not hold) and the section pointing users-http at it, for a scene or an operator's trial.
 ## Invariants
 - The ledger is reached only through `outbound`, at each URL's host alone; a redirect is not followed. Each URL is an internal destination, named to `outbound` as itself: a private address is reached only when its host is in `outbound.internal-hosts` or, over plain http, when `outbound.plain-internal` names its `host:port`, and only at that URL's origin (scheme, host and port).
 - Boot is refused with no URL, on a URL outbound's destination policy refuses (at that URL's key, with which of `outbound`'s keys to set), and with a `credential` where `outbound.credentials` refuses its URLs (more than one origin, or one neither https nor a `plain-loopback` or `plain-internal` pair, in `credentialRefusalText`'s words; at `credential`): the credential goes to one party alone, sent by `outbound` as its `credential`.
 - The password goes in the request body alone, never in a URL, a log line or an error.
 - A destination refused when sending, or no answer in time or size, is unavailable. A wrong `verify-url` makes verification unavailable, never "no such user", unless what answers there is a `401` without a Bearer challenge, which reads as none.
 - Boot reports never show the credential.
-- A lookup's `404` is none whatever answered it, logged nowhere: the operator's ledger refuses a caller it does not accept with `401` or `403`, never `404`, and a gateway before it that answers an unknown route `404` reads as no such user.
+- A lookup's `404` or `410` is none only where its body says so: one without the word (a wrong URL, a gateway's unknown route, a ledger hiding itself) is unavailable, logged as `users-http.ledger_failed` with its status and `reason: "unmarked"`, never no such user.
 - The operator's ledger must do the same work for an unknown identifier as for a known one; this module sends the same one request either way.
 - Holds no state, so it is safe on multiple instances.
 
