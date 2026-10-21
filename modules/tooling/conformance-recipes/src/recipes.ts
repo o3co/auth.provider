@@ -30,4 +30,4 @@ export const shownScript = (script: string) => `node -e '${script}'`;
 
 /** The command as a reader types it, from the published entrance. */
 export const shownCommand = (argv: readonly string[]) =>
-	["npx @o3co/create-auth-provider@next my-provider", ...argv].join(" ");
+	["npx @o3co/create-auth-provider my-provider", ...argv].join(" ");
