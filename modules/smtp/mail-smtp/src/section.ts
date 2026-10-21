@@ -60,7 +60,9 @@ export const section = z
 		if (s.password !== undefined && s.user === undefined) {
 			ctx.addIssue({ code: "custom", path: ["user"], message: "is needed with password" });
 		}
-		if (s.security === "none" && !isLoopbackName(s.host)) {
+		// The relay connects to the host as written, and Node resolves a bracketed address as a name.
+		const loopback = !s.host.startsWith("[") && isLoopbackName(s.host);
+		if (s.security === "none" && !loopback) {
 			ctx.addIssue({
 				code: "custom",
 				path: ["security"],
