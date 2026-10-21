@@ -13,7 +13,7 @@ import { type Declared, declaredIn, declaredInIndex } from "./declared.ts";
 import { type Published, publishedInIndex, publishedWith } from "./published.ts";
 
 export type { Selection } from "./composed.ts";
-export { type Kind, kinds } from "./kinds.ts";
+export { capabilityBlind, type Kind, kindOrder, kinds, mayNeed } from "./kinds.ts";
 export type { Published } from "./published.ts";
 
 let workspace: Declared | undefined;

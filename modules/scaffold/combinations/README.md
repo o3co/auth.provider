@@ -7,7 +7,7 @@
 
 ## Not here
 - Whether a composition boots: the kernel's refusals.
-- What each kind may depend on, and the checks on it: `guard`.
+- The checks on what each kind depends on, and the rest of the budget's words for kinds: `guard`.
 - Generating an app: `create-app`.
 - Running scenes: the conformance areas.
 - Checking that each feature declaring `storeWiring` has a wiring: `guard`.
@@ -21,6 +21,8 @@
 - `addable`: the names a selection or the full template may add (a feature or an adapter, with a module), in code point order; `composed` and `full` refuse any other.
 - `published` (modules): built into a bundle, each name given as published, in the order given: `{ name, package, entry }`, the bundle to depend on and the path its entries import under (a module at `<entry>/module`), read from the index's entries. It refuses, naming each, a name no bundle publishes; in the workspace, where nothing is published, it refuses every name.
 - `kinds`: the kinds a package's manifest may name, the one place their words are written.
+- `kindOrder` (kinds from the bottom up; a kind may depend on its own level and those below) and `capabilityBlind` (kinds kept off a capability below them): which way a dependency may point, the one place it is written.
+- `mayNeed` (from, to): whether a package of one kind may depend on one of another, by `kindOrder` and `capabilityBlind`; never where either is no kind.
 
 ## Invariants
 - A wiring names the feature it `wires`; it comes with the feature, whether given or brought in.
