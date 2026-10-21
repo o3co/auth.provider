@@ -3,13 +3,25 @@ export interface Refusal {
 	readonly reason: string;
 }
 
+/** The mark a refused boot carries, the same in every copy of the kernel a bundle may hold. */
+const bootRefusedMark = Symbol.for("@mod/kernel.boot-refused");
+
 /** Raised by assembly when anything refuses; nothing is served after it. */
 export class BootRefused extends Error {
 	readonly refusals: readonly Refusal[];
+	readonly [bootRefusedMark] = true;
 	constructor(refusals: readonly Refusal[]) {
 		super(`boot refused (${refusals.length})`);
 		this.name = "BootRefused";
 		this.refusals = Object.freeze([...refusals]);
+	}
+	/** Whether `error` is a refused boot, by its mark rather than its class, so two copies of the kernel agree. */
+	static is(error: unknown): error is BootRefused {
+		return (
+			typeof error === "object" &&
+			error !== null &&
+			(error as { readonly [bootRefusedMark]?: unknown })[bootRefusedMark] === true
+		);
 	}
 }
 
