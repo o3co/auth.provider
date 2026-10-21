@@ -1,7 +1,8 @@
 import type { Section } from "@mod/clients";
 import type { KeySource } from "@mod/external-jwt";
+import type { BuildContext } from "@mod/kernel";
 import { publicJwk, verifiesUnder } from "@mod/keys";
-import { destinationRefusal, type OutboundRefusals } from "@mod/outbound-policy";
+import { destinationRefusal, type OutboundRefusals, outboundRefusals } from "@mod/outbound-policy";
 import { urlSetting } from "@mod/url-setting";
 import { z } from "zod";
 
@@ -65,4 +66,11 @@ export function clientKeysUnder(refusals: OutboundRefusals): Section<ClientKeys>
 			);
 		},
 	};
+}
+
+/** The section as the composition gives it, with `outbound`'s refusals read from it. */
+export async function clientKeysIn(
+	c: Pick<BuildContext<unknown>, "get">,
+): Promise<Section<ClientKeys>> {
+	return clientKeysUnder(await c.get(outboundRefusals));
 }

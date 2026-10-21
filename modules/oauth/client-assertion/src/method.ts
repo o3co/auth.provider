@@ -5,7 +5,7 @@ import type { HttpRequest } from "@mod/http";
 import { type Clock, type Log, Unavailable } from "@mod/kernel";
 import { decodeJwt } from "jose";
 import { checked } from "./check.ts";
-import { clientKeys, keysOf } from "./keys.ts";
+import { clientKeys, keysOf } from "./keys/keys.ts";
 import type { SpentAssertions } from "./store.ts";
 
 export const assertionType = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
