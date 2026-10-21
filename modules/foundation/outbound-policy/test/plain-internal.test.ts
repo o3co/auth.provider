@@ -22,7 +22,7 @@ const reasonOf = (run: () => unknown): RefusalReason | "admitted" => {
 		run();
 		return "admitted";
 	} catch (error) {
-		if (error instanceof DestinationRefused) return error.reason;
+		if (DestinationRefused.is(error)) return error.reason;
 		throw error;
 	}
 };
