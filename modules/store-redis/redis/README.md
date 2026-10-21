@@ -22,7 +22,7 @@
 ## Invariants
 - Connects to Redis itself, through its client, apart from `outbound`, which carries HTTP alone (`network`: `redis`).
 - Boot is refused, naming what is unmet, when the server is not what Deployment states.
-- Boot sends once the commands the store sends, as a confirmation round and a script do; one the server refuses for good (`NOPERM`, or unknown or renamed) refuses boot, named, and the probe sends them again, answering unready and warning `redis.settings_unmet` with its name.
+- Boot sends once every command the store sends, a script's on keys of the store's own that expire at once; one the server refuses for good (`NOPERM`, or unknown or renamed), or keys it refuses the user, refuse boot, named. The probe sends them again, answering unready and warning `redis.settings_unmet` with the name. A write refused for want of replicas leaves a command unjudged, never refused.
 - A setting is read by `CONFIG GET`. Where the server refuses it for good (`NOPERM`, or an unknown command or subcommand), the declared value is taken, a needed one left undeclared refusing boot, and every boot warns `redis.settings_declared` with the names taken so; where it answers, a declared value that differs refuses boot; any other error (`BUSY`, say) refuses boot.
 - `durability` `none`: the operator states the server does not fsync every write, so a crash loses the latest writes, spent assertion and proof ids and lockout records among them; every boot warns `redis.durability_none` naming the durable spaces.
 - Boot is refused on a space needing replicated or confirmed reads without `replication`.
@@ -44,7 +44,7 @@
 - `appendonly yes` and `appendfsync always`, where a composed module keeps a durable space, unless `durability` is `none`.
 - With `replication` `replicas`: `min-replicas-to-write` and `min-replicas-max-lag` of 1 or more. With `none`: no replica connected.
 - `CONFIG GET` allowed, or the settings it would read declared in `server-settings`.
-- `EVAL`, with `TIME`, `INFO` and `PEXPIRETIME` called from a script, `ROLE` and `INFO` allowed; with `replication`, `SET` and `WAIT` on the confirming connection too.
+- Allowed: `EVAL`, the commands the scripts call (`TIME`, `INFO`, `EXISTS`, `GET`, `HGET`, `HMGET`, `PTTL`, `PEXPIRETIME`, `SET`, `INCR`, `HSET`, `HINCRBY`, `PEXPIRE`, `PEXPIREAT`, `DEL`), `SCAN`, `ROLE` and the keys under the prefix; with `replication`, `SET` of `<prefix>:#confirm`, and with `replicas` `WAIT`.
 - The operator's, outside these checks: keeping a detached or lagging replica from promotion, replicas' disk writes, and what a `CONFIG SET` or a failover after boot lets through until the next probe answers unready.
 
 ## Data

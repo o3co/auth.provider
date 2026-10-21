@@ -27,23 +27,46 @@ const bulk = (text: string) => `$${text.length}\r\n${text}\r\n`;
 
 /**
  * Just enough of a Redis 7 primary to boot the module, counting PINGs per socket. Its role and
- * settings may change; a command named in `refused` is refused for want of permission, and with
- * `scripts.refused` a script is refused what it calls, as Redis answers each.
+ * settings may change; a command named in `refused` is refused for want of permission. The check's
+ * script answers as the real one reports: each command in `scripts.refused` refused in the words of
+ * `scripts.wording`'s Redis, and each write NOREPLICAS while `writes.noReplicas`; with
+ * `scripts.keysRefused`, the script is refused its keys before it runs.
  */
 export function fakeRedis() {
 	const sockets = new Set<Socket>();
 	const pinged = new Set<Socket>();
 	const settings: Record<string, string> = { role: "master", "maxmemory-policy": "noeviction" };
 	const refused = new Set<string>();
-	const scripts = { refused: false };
+	const scripts = {
+		refused: [] as string[],
+		wording: "7.4" as "7.0" | "7.4",
+		keysRefused: false,
+	};
+	const writes = { noReplicas: false };
+	const writing = new Set(["SET", "INCR", "HSET", "HINCRBY", "PEXPIRE", "PEXPIREAT", "DEL"]);
+	const refusal = (name: string) =>
+		scripts.wording === "7.0"
+			? "ERR The user executing the script can't run this command or subcommand"
+			: `ERR ACL failure in script: User u has no permissions to run the '${name.toLowerCase()}' command`;
+	/** The check script's report: each command that failed, then its error. */
+	const report = () => {
+		const failed = [
+			...scripts.refused.map((name) => [name, refusal(name)]),
+			...(writes.noReplicas
+				? [...writing].map((name) => [name, "NOREPLICAS Not enough good replicas to write."])
+				: []),
+		].flat();
+		return `*${failed.length}\r\n${failed.map(bulk).join("")}`;
+	};
 	const reply = (args: readonly string[]): string => {
 		const name = args[0]?.toUpperCase() ?? "";
 		if (refused.has(name)) {
 			return `-NOPERM User default has no permissions to run the '${name.toLowerCase()}' command\r\n`;
 		}
-		if (name === "EVAL" && scripts.refused) {
-			return "-ERR Error running script, @user_script:1: NOPERM User default has no permissions to run the 'info' command\r\n";
-		}
+		if (name === "EVAL" && scripts.keysRefused) return "-NOPERM No permissions to access a key\r\n";
+		if (name === "EVAL") return report();
+		if (name === "SET" && writes.noReplicas)
+			return "-NOREPLICAS Not enough good replicas to write.\r\n";
 		if (name === "PING") return "+PONG\r\n";
 		if (name === "INFO")
 			return bulk("redis_version:7.4.0\r\ncluster_enabled:0\r\nloading:0\r\nrun_id:abc\r\n");
@@ -74,6 +97,7 @@ export function fakeRedis() {
 		settings,
 		refused,
 		scripts,
+		writes,
 		listen: () =>
 			new Promise<number>((resolve) =>
 				server.listen(0, "127.0.0.1", () => {

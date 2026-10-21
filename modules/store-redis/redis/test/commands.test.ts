@@ -11,6 +11,7 @@ import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { spaces } from "@mod/store";
 import { afterEach, describe, expect, it } from "vitest";
 import redisModule from "../src/module.ts";
+import * as scripts from "../src/scripts.ts";
 import { fakeRedis } from "./fake-redis.ts";
 
 let app: Assembly | undefined;
@@ -83,17 +84,68 @@ describe("the commands the store needs", () => {
 		}
 	});
 
-	it("refuse boot where the server refuses a script, or what a script calls, naming which", async () => {
+	it("refuse boot where the server refuses EVAL, or a command a script calls, naming it in either Redis's words", async () => {
 		const evalRefused = primary();
 		evalRefused.refused.add("EVAL");
 		expect(await refusal(await evalRefused.listen())).toMatch(/the server refuses EVAL\b/);
 		evalRefused.down();
-		const inScript = primary();
-		inScript.scripts.refused = true;
-		expect(await refusal(await inScript.listen())).toMatch(
-			/the server refuses a command a script calls \(TIME, INFO or PEXPIRETIME\)/,
-		);
-		inScript.down();
+		for (const wording of ["7.0", "7.4"] as const) {
+			const inScript = primary();
+			inScript.scripts.refused = ["HSET", "PEXPIRETIME"];
+			inScript.scripts.wording = wording;
+			const reasons = await refusal(await inScript.listen());
+			expect(reasons, wording).toMatch(/the server refuses HSET\b/);
+			expect(reasons, wording).toMatch(/the server refuses PEXPIRETIME\b/);
+			inScript.down();
+		}
+	});
+
+	it("tell a refused key from a refused command, naming the store's keys", async () => {
+		const redis = primary();
+		redis.scripts.keysRefused = true;
+		const reasons = await refusal(await redis.listen());
+		expect(reasons).toContain("the server refuses this user the store's keys");
+		expect(reasons).not.toMatch(/refuses EVAL/);
+		redis.down();
+	});
+
+	it("take a write refused for want of replicas as no answer, never as a refused command", async () => {
+		const redis = primary();
+		redis.writes.noReplicas = true;
+		const { ready } = await boot(await redis.listen(), "replicas");
+		expect(await ready()).toBe("ready");
+		redis.down();
+	});
+
+	it("send SET of the confirmation key where replication is declared, and WAIT only with replicas", async () => {
+		const outcome = async (refused: string, replication?: "none" | "replicas") => {
+			const redis = primary();
+			redis.refused.add(refused);
+			const answer = await boot(await redis.listen(), replication).then(
+				() => "booted",
+				(error: unknown) => (error as BootRefused).refusals.map((r) => r.reason).join("; "),
+			);
+			await app?.stop(1000);
+			app = undefined;
+			redis.down();
+			return answer;
+		};
+		expect(await outcome("SET")).toBe("booted");
+		expect(await outcome("WAIT")).toBe("booted");
+		expect(await outcome("SET", "none")).toMatch(/the server refuses SET\b/);
+		expect(await outcome("WAIT", "none")).toBe("booted");
+		expect(await outcome("SET", "replicas")).toMatch(/the server refuses SET\b/);
+		expect(await outcome("WAIT", "replicas")).toMatch(/the server refuses WAIT\b/);
+	});
+
+	it("cover every command the store's scripts call", () => {
+		const { commands, ...others } = scripts;
+		const covered = new Set([...commands.matchAll(/'([A-Z]+)'/g)].map((m) => m[1]));
+		for (const [name, text] of Object.entries(others)) {
+			for (const called of String(text).matchAll(/redis\.call\('([A-Z]+)'/g)) {
+				expect(covered.has(called[1]), `${name}: ${called[1]}`).toBe(true);
+			}
+		}
 	});
 
 	it("check WAIT only where replication is declared, as only then does a round wait", async () => {

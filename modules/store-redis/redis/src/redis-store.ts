@@ -52,40 +52,69 @@ export const refusedForGood = (error: unknown) =>
 	error instanceof ReplyError &&
 	/^(NOPERM|ERR unknown (sub)?command)\b/i.test((error as Error).message);
 
-/** A script's refusal of what it calls, as Redis words it: the script ran, a command in it did not. */
-const refusedInScript = (error: unknown) =>
-	error instanceof ReplyError &&
-	/script/i.test((error as Error).message) &&
-	/NOPERM|unknown (redis )?command/i.test((error as Error).message);
+/** A user refused keys, in Redis 7.0's or 7.4's words. */
+const keysRefused = (message: string) =>
+	/no permissions to access (a key|one of the keys)/i.test(message);
+/** A command a script calls refused, in Redis 7.0's or 7.4's words, or one renamed away. */
+const refusedInScript = (message: string) =>
+	/can't run this command|no permissions to run|unknown (redis )?command/i.test(message);
+/** A write refused for want of replicas: no answer on whether the command is allowed. */
+const noReplicas = (message: string) => /^NOREPLICAS\b/.test(message);
 
 /**
- * The commands the store sends that the server refuses for good, by name: a round's ROLE and INFO,
- * and its SET and WAIT where replication is declared, on the confirming connection; EVAL, and what
- * every script calls, on the other. One trip each, writing only the confirmation key; WAIT asks for
- * no replica, so it answers at once whatever replicas there are. Any other failure is thrown.
+ * What the server refuses the store for good, each as a problem naming it: a command, or the keys.
+ * The confirming connection sends a round's ROLE and INFO, its SET of the confirmation key where
+ * replication is declared, and its WAIT, asking for no replica, with replicas; the other runs a
+ * script calling every command the scripts call, on keys of the store's own that expire at once,
+ * and a SCAN of them. A write refused for want of replicas tells nothing either way, so it is no
+ * problem; any other failure is thrown.
  */
 export async function refusedCommands(
 	client: Redis,
 	confirmer: Redis,
 	options: Pick<RedisStoreOptions, "prefix" | "replication">,
 ): Promise<string[]> {
-	const confirming = options.replication !== undefined;
-	const sent = confirming ? ["ROLE", "INFO", "SET", "WAIT"] : ["ROLE", "INFO"];
+	const { prefix, replication } = options;
+	const problems = new Set<string>();
+	const storeKeys = `the store's keys (${prefix}:{…})`;
+	const judge = (name: string, error: unknown, keys: string) => {
+		const message = error instanceof Error ? error.message : String(error);
+		if (keysRefused(message)) problems.add(`the server refuses this user ${keys}: allow them`);
+		else if (refusedForGood(error) || refusedInScript(message)) {
+			problems.add(`the server refuses ${name}: allow it`);
+		} else if (!noReplicas(message)) throw error;
+	};
 	const round = confirmer.pipeline().call("ROLE").info("server");
-	if (confirming) round.set(`${options.prefix}:#confirm`, "1", "PX", 60_000).call("WAIT", 0, 1);
-	const replies = (await round.exec()) ?? [];
-	const failed = replies.find(([error]) => error && !refusedForGood(error));
-	if (failed) throw failed[0];
-	const refused = sent.filter((_, at) => refusedForGood(replies[at]?.[0]));
-	try {
-		await client.eval(scripts.commands, 1, `${options.prefix}:#confirm`);
-	} catch (error) {
-		if (refusedInScript(error)) {
-			refused.push("a command a script calls (TIME, INFO or PEXPIRETIME)");
-		} else if (refusedForGood(error)) refused.push("EVAL");
-		else throw error;
+	const sent = ["ROLE", "INFO"];
+	if (replication !== undefined) {
+		round.set(`${prefix}:#confirm`, "1", "PX", 60_000);
+		sent.push("SET");
 	}
-	return refused;
+	if (replication === "replicas") {
+		// Answers within its millisecond, once a confirmation's WAIT before it has.
+		round.call("WAIT", 0, 1);
+		sent.push("WAIT");
+	}
+	const replies = (await round.exec()) ?? [];
+	sent.forEach((name, at) => {
+		const error = replies[at]?.[0];
+		if (error) judge(name, error, `the confirmation key (${prefix}:#confirm)`);
+	});
+	const check = `${prefix}:{#check}`;
+	try {
+		const failed = (await client.eval(scripts.commands, 2, `${check}:h`, `${check}:s`)) as string[];
+		for (let at = 0; at < failed.length; at += 2) {
+			judge(String(failed[at]), new Error(String(failed[at + 1])), storeKeys);
+		}
+	} catch (error) {
+		judge("EVAL", error, storeKeys);
+	}
+	try {
+		await client.scan("0", "MATCH", `${literal(check)}:*`, "COUNT", 1);
+	} catch (error) {
+		judge("SCAN", error, storeKeys);
+	}
+	return [...problems];
 }
 
 /**

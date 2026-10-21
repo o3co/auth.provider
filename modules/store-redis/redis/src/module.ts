@@ -206,10 +206,7 @@ async function unmet(
 		prefix: s.prefix,
 		replication: s.replication,
 	});
-	if (refused.length > 0) {
-		const problems = refused.map((command) => `the server refuses ${command}: allow it`);
-		return { problems, declaredOnly: [], undurable: [] };
-	}
+	if (refused.length > 0) return { problems: refused, declaredOnly: [], undurable: [] };
 	const role = await roleOf(client);
 	const settings = serverSettings(client, s["server-settings"] ?? {});
 	const problems = [

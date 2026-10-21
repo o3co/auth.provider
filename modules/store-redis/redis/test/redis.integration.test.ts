@@ -256,19 +256,60 @@ describe("redis", () => {
 		}
 	});
 
-	it("refuses boot where the server refuses a command a confirmation round sends, naming it", async () => {
-		cli(container, "acl", "setuser", "nowait", "on", ">pw", "~*", "&*", "+@all", "-wait");
+	/** Boots as a user the server's ACL holds to `rules`: why boot was refused, or `booted`. */
+	const asUser = async (
+		rules: readonly string[],
+		extra = [durable],
+		replication: string | null = "replicas",
+		prefix?: string,
+	) => {
+		const user = `u${++opened}`;
+		cli(container, "acl", "setuser", user, "on", ">pw", ...rules);
 		try {
-			const through = url.replace("redis://", "redis://nowait:pw@");
-			const refused = await open([durable], undefined, through).catch((error) => error);
-			expect(refused).toBeInstanceOf(BootRefused);
-			const reasons = (refused as BootRefused).refusals.map((r) => r.reason).join("; ");
-			expect(reasons).toContain("the server refuses WAIT");
-			expect(reasons).not.toContain("pw");
+			const through = url.replace("redis://", `redis://${user}:pw@`);
+			const booted = await open(extra, prefix, through, replication).catch((error) => error);
+			if (booted instanceof BootRefused) {
+				const reasons = booted.refusals.map((r) => r.reason).join("; ");
+				expect(reasons).not.toContain("pw@");
+				return reasons;
+			}
+			if (booted instanceof Error) throw booted;
+			await booted.stop(1000);
+			return "booted";
 		} finally {
-			cli(container, "acl", "deluser", "nowait");
+			cli(container, "acl", "deluser", user);
 		}
+	};
+	const every = ["~*", "&*", "+@all"];
+
+	it("refuses boot where the server refuses a command the store sends, naming it, in a script or not", async () => {
+		expect(await asUser([...every, "-wait"])).toContain("the server refuses WAIT");
+		expect(await asUser([...every, "-hset"])).toContain("the server refuses HSET");
+		expect(await asUser([...every, "-time"])).toContain("the server refuses TIME");
+		expect(await asUser([...every, "-scan"])).toContain("the server refuses SCAN");
 	});
+
+	it("boots a user held to the store's own keys, needing the confirmation key only where it confirms", async () => {
+		expect(await asUser(["~acl:{*", "&*", "+@all"], [], null, "acl")).toBe("booted");
+		expect(await asUser(["~acl:{*", "&*", "+@all"], [durable], "replicas", "acl")).toContain(
+			"acl:#confirm",
+		);
+	});
+
+	it("boots while no replica takes writes: that leaves the commands undetermined, never refused", async () => {
+		docker("pause", replica);
+		docker("pause", secondReplica);
+		try {
+			cli(container, "client", "kill", "type", "replica");
+			await waitFor(() => connectedReplicas() === 0 && !writable(), 20_000);
+			const app = await open();
+			await app.stop(1000);
+		} finally {
+			docker("unpause", replica);
+			docker("unpause", secondReplica);
+			await waitFor(() => connectedReplicas() === 2 && writable(), 60_000);
+		}
+	}, 90_000);
 
 	it("refuses a replica, a cluster node and a primary that would not refuse writes without replicas", async () => {
 		await expect(
