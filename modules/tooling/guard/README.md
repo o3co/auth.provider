@@ -2,7 +2,7 @@
 
 ## Responsibilities
 - Checks the workspace's invariants, each reported by its id, place and what went over:
-  - The import and dependency rules (G1–G4, G8, G10, G14, G16, G22, G24, G25, G28–G30): `guard-imports`', run beside these.
+  - The import and dependency rules (G1–G4, G8, G10, G14, G16, G22, G24, G25, G28–G31): `guard-imports`', run beside these.
   - G5: a package exports `.`, `./testing`, `./module` and `./audit-events` (its events, as `audit` declares them) only.
   - G6: no feature vocabulary in common: common's contract and imports hold no name another package's contract owns.
   - G7: the budget, measured by the internal module `budget`.
