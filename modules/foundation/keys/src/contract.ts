@@ -26,7 +26,10 @@ export interface AccessTokenSigning {
 	verify(token: string): Promise<VerifyResult>;
 }
 
-export const accessTokenSigning = contract<AccessTokenSigning>("keys.access-signing");
+/** Taken by `tokens` alone, so no other module of a composition signs or verifies an access token. */
+export const accessTokenSigning = contract<AccessTokenSigning>("keys.access-signing", {
+	takenBy: ["tokens"],
+});
 
 export { isCanonicalJws } from "./material/jws.ts";
 export {

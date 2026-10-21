@@ -1,7 +1,7 @@
 import { createPrivateKey, generateKeyPairSync, randomBytes } from "node:crypto";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
-import { assemble, kernelConfig } from "@mod/kernel";
+import { assemble, BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { CompactSign, decodeProtectedHeader } from "jose";
 import { afterEach, describe, expect, it } from "vitest";
@@ -91,6 +91,30 @@ describe("accessTokenSigning", () => {
 		for (const typ of ["JWT", "logout+jwt", "at+jwt2", "application/jwt"]) {
 			expect((await k.verify(await k.sign({ sub: "a" }, typ), typ)).kind, typ).toBe("valid");
 		}
+	});
+
+	it("is taken by tokens alone: another module asking for it refuses boot, though it catches the throw", async () => {
+		const asking = (name: string) =>
+			defineModule({ name }, (m) => [
+				m.provide(contract<object>(`${name}.asks`)).by(async (c) => {
+					try {
+						await c.get(accessTokenSigning);
+					} catch {}
+					return {};
+				}),
+			]);
+		const boot = (name: string) =>
+			assemble({
+				modules: [http, keysModule, asking(name)],
+				config: { ...kernelConfig(), ...httpConfig(), keys: rotated },
+				runtime,
+			});
+		const refused = await boot("intruder").catch((error: unknown) => error);
+		expect(refused).toBeInstanceOf(BootRefused);
+		expect((refused as BootRefused).refusals.map((r) => r.reason).join()).toContain(
+			"keys.access-signing is taken by tokens alone",
+		);
+		await expect(boot("tokens")).resolves.toBeDefined();
 	});
 
 	it("signs and verifies with an HMAC secret as with a key pair", async () => {
