@@ -777,6 +777,7 @@ What changed since rc.4. Coming from an earlier release candidate, read the sect
 - **mail-smtp with `security = none`** boots for the same loopback hosts by name (a name under `localhost`, `localhost.`), and sends only when the connected peer is a loopback address, 127/8 mapped into IPv6 in any spelling included. Write an IPv6 host without brackets (`::1`): a bracketed one refuses boot under `none`.
 - **Sign in with Apple**: a callback on a name under `localhost` or on 127/8 mapped into IPv6 now refuses boot, as `localhost` and 127/8 already did.
 - **A `plain-loopback` pair** is reached only where the address is loopback as written: a name that resolves to an IPv6 form that only carries 127/8 (`::7f00:1`, `::ffff:0:7f00:1`), or a URL that writes one, is refused as a special address; rc.4 took it as 127.0.0.1. A proxy named by a name, `localhost` included, now warns that `proxy-authorization` goes in the clear; write the proxy as a loopback address (`http://127.0.0.1:3128`) where it runs on the host.
+- **An address written in a URL** is reached as written: a public IPv4 address written in IPv6 (`https://[::ffff:5db8:d70e]/`, or `[::5db8:d70e]`) is refused as a special address, as a name resolving to that form already was; rc.4 reached it as the IPv4 address. Write the IPv4 address itself (`https://93.184.215.14/`).
 
 ## Operational notes
 
