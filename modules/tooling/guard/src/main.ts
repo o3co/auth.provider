@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { readWorkspace } from "@mod/guard-imports";
 import { type Budget, branchingImports, check } from "./contract.ts";
 import { kindRules } from "./kinds.ts";
-import { readDocuments, readWorkspace } from "./workspace.ts";
+import { readDocuments } from "./workspace.ts";
 
 const root = process.env.INIT_CWD ?? process.cwd();
 const budget = {

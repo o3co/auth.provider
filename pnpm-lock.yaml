@@ -3705,6 +3705,9 @@ importers:
       '@mod/combinations':
         specifier: workspace:*
         version: link:../../scaffold/combinations
+      '@mod/guard-imports':
+        specifier: workspace:*
+        version: link:../guard-imports
       typescript:
         specifier: 6.0.3
         version: 6.0.3

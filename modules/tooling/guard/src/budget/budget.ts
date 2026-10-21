@@ -1,10 +1,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { importsOf, type Pkg, packageOf, type Surface } from "@mod/guard-imports";
 import type { Budget } from "../contract.ts";
-import { countLines, importsOf, packageOf } from "../source.ts";
-import type { Surface } from "../surface.ts";
+import { countLines } from "../source.ts";
 import { budgetsAsTest, type Scope, unitsOf } from "../units.ts";
-import type { Pkg } from "../workspace.ts";
 
 const planPhrases = ["Not yet built", "Moving to", "Moved to", "being removed"];
 

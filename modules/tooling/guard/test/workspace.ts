@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Pkg } from "@mod/guard-imports";
 import type { Budget } from "../src/contract.ts";
-import type { Pkg } from "../src/workspace.ts";
 
 /** A budget for the tests' workspaces, close to the repository's. */
 export const budget: Budget = {
