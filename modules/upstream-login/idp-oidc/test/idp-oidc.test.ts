@@ -465,6 +465,19 @@ describe("idp-oidc", () => {
 		expect(keysRefused({ "end-session-endpoint": "http://idp.example/out" })).toEqual([
 			"end-session-endpoint",
 		]);
+		// A logout on another host, which plain-internal names, is taken for itself.
+		const logout = "http://logout.internal:8080/logout";
+		const twoHosts = refusalsOver({
+			allow: ["idp.internal", "logout.internal"],
+			"plain-internal": ["idp.internal:8080", "logout.internal:8080"],
+		});
+		const read = settingsOf(asymmetric, twoHosts).safeParse({
+			...given(internalIssuer),
+			"client-id": "client",
+			"client-secret": "s",
+			"end-session-endpoint": logout,
+		});
+		expect(read.error?.issues).toBeUndefined();
 	});
 
 	it("asks for a browser's URL with the issuer as the operator's URL for what it describes, and each given endpoint for itself", async () => {

@@ -164,14 +164,13 @@ export const settingsOf = (asymmetric: readonly Algorithm[], refusals: OutboundR
 			),
 		)
 		.superRefine((s, context) => {
-			// The browser goes to these; each given endpoint is the operator's URL for itself.
-			const named = [s.issuer, s["authorization-endpoint"], s["token-endpoint"], s["jwks-uri"]];
-			// Their own schemas refuse a URL that does not parse.
-			if (s.discovery || !named.every((url) => url === undefined || URL.canParse(url))) return;
-			const hosts = hostsOf(s);
+			// The browser goes to these, each given endpoint the operator's URL for itself alone.
+			if (s.discovery) return;
 			for (const key of ["authorization-endpoint", "end-session-endpoint"] as const) {
 				const url = s[key];
-				const refused = url && browsedRefusal(refusals, url, narrowerOf(hosts, url), "it");
+				// Its own schema refuses a URL that does not parse.
+				if (url === undefined || !URL.canParse(url)) continue;
+				const refused = browsedRefusal(refusals, url, { internal: url }, "it");
 				if (refused) context.addIssue({ code: "custom", path: [key], message: refused });
 			}
 		});
