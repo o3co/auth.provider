@@ -4,7 +4,9 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "feature",
-	"optIn": true,
+	"joins": [
+		"@mod/federation"
+	],
 	"exports": {
 		"./module": "./src/module.ts",
 		"./audit-events": "./src/audit-events.ts"
