@@ -7,7 +7,7 @@ import { registrationsOver } from "./registration/registrations.ts";
 import { type Settings, section } from "./section.ts";
 
 type Context = BuildContext<Settings>;
-const passkeysOf = async (c: Context) => keptPasskeys(await c.get(passkeyStore));
+const passkeysOf = async (c: Context) => keptPasskeys(await c.get(passkeyStore), c.clock.now);
 // A challenge lives as long as the relying party lets one be answered.
 const challengesOf = async (c: Context) =>
 	keptChallenges(await c.get(challengeStore), c.clock.now, (await c.get(ceremonies)).lifetimeMs);

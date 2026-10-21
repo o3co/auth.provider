@@ -43,7 +43,7 @@ function kept({
 	const random = (n: number) => new Uint8Array(randomBytes(n));
 	const registrations = registrationsOver({
 		ceremonies: ceremoniesFor(rp, random, now),
-		records: keptPasskeys(stores.passkeys),
+		records: keptPasskeys(stores.passkeys, now),
 		challenges: keptChallenges(stores.challenges, now, 120_000),
 		verification,
 		max,
@@ -88,6 +88,19 @@ it("registers a passkey for the subject under one handle, and excludes it from t
 	const next = (await registrations.creation("sam")).options as Options;
 	expect(next.user.id).toBe(first.options.user.id);
 	expect(next.excludeCredentials.map((c) => c.id)).toEqual([first.response.id]);
+});
+
+it("answers when the challenge a registration answered was made, and lists, renames and removes what the subject holds", async () => {
+	const { registrations, register } = kept({ now: () => 7_000 });
+	const { answer, response } = await register("sam");
+	expect(answer).toMatchObject({ kind: "registered", challengedAt: 7_000 });
+	expect(await registrations.listed?.("sam")).toEqual([
+		expect.objectContaining({ id: response.id, nickname: "laptop", at: 7_000 }),
+	]);
+	expect(await registrations.renamed?.("sam", response.id, "phone")).toBe("renamed");
+	expect(await registrations.renamed?.("kim", response.id, "mine")).toBe("unknown");
+	expect(await registrations.removed?.("sam", response.id)).toEqual({ removed: true, empty: true });
+	expect(await registrations.listed?.("sam")).toEqual([]);
 });
 
 it("takes a challenge once, and only for the subject it was made for", async () => {
