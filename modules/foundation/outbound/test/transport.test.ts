@@ -228,6 +228,19 @@ describe("outbound", () => {
 		}
 	});
 
+	it("reaches an address written in the URL as written, never the IPv4 it may carry", async () => {
+		const { calls, resolve } = table({});
+		const before = seen.length;
+		for (const spelled of ["[::7f00:1]", "[::ffff:0:7f00:1]"]) {
+			expect(await failure(over(resolve).fetch(`http://${spelled}:${port}/ok`)), spelled).toBe(
+				"special-address",
+			);
+		}
+		expect(seen.length).toBe(before);
+		expect((await over(resolve).fetch(`http://[::ffff:7f00:1]:${port}/ok`)).status).toBe(200);
+		expect(calls).toEqual([]);
+	});
+
 	it("refuses a name when any address it resolves to is special, before connecting", async () => {
 		const { resolve } = table({ "public.test": ["8.8.8.8", "10.0.0.1"], "inside.test": ["::1"] });
 		const before = seen.length;

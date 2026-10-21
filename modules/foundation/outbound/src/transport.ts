@@ -69,8 +69,13 @@ const failedAs = (error: unknown, signal: AbortSignal) => {
 	return unavailable(code === "HPE_HEADER_OVERFLOW" ? "too-large" : "unreachable");
 };
 
+/** The address the URL names, as written, never as the IPv4 address it may carry; none for a name. */
+const writtenAddress = (admitted: Admitted) =>
+	admitted.address ?? (isIP(admitted.host) !== 0 ? admitted.host : undefined);
+
 async function addressesOf(admitted: Admitted, resolve: Resolver, signal: AbortSignal) {
-	if (isIP(admitted.host) !== 0) return [admitted.host];
+	const written = writtenAddress(admitted);
+	if (written !== undefined) return [written];
 	// A deadline already past fires no more; the listener lives as long as this request's signal.
 	if (signal.aborted) throw unavailable("timeout");
 	const deadline = new Promise<never>((_, reject) =>
@@ -139,8 +144,9 @@ async function viaProxy(
 	signal: AbortSignal,
 	trust: Trust,
 ): Promise<Way> {
-	const literal = isIP(admitted.host) !== 0;
-	if (literal) policy.admitAddresses([admitted.host], admitted);
+	const written = writtenAddress(admitted);
+	const literal = written !== undefined;
+	if (written !== undefined) policy.admitAddresses([written], admitted);
 	const socket = await tunnel(route, admitted, signal);
 	const agent = new TlsAgent({ keepAlive: false });
 	agent.createConnection = () =>
