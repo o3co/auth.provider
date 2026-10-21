@@ -14,10 +14,9 @@ import tokensModule from "../src/module.ts";
 import { revokedInMemory } from "./revoked.ts";
 
 const now = 1_800_000_000_000;
-const runtime = quietRuntime({ clock: { now: () => now } });
 const grant: AccessGrant = { subject: "s", issuedTo: "c", audience: ["api"], scope: [] };
 
-async function boot(signing?: Module) {
+async function boot(signing?: Module, at = now) {
 	const app = await assemble({
 		modules: [
 			http,
@@ -25,7 +24,7 @@ async function boot(signing?: Module) {
 			issuerModule,
 			senderBindingModule,
 			tokensModule,
-			revokedInMemory(() => now).module,
+			revokedInMemory(() => at).module,
 		],
 		config: {
 			...kernelConfig(),
@@ -34,7 +33,7 @@ async function boot(signing?: Module) {
 			...issuerConfig({ url: "https://issuer.example" }),
 			tokens: { "subject-check": "none", revocation: "unsupported" },
 		},
-		runtime,
+		runtime: quietRuntime({ clock: { now: () => at } }),
 	});
 	return { t: app.get(tokens), access: app.get(accessTokenSigning) };
 }
@@ -45,7 +44,7 @@ describe("access tokens, signed through accessTokenSigning", () => {
 		const ring = await assemble({
 			modules: [http, keysModule],
 			config: { ...kernelConfig(), ...httpConfig({}), ...keysConfig() },
-			runtime,
+			runtime: quietRuntime({ clock: { now: () => now } }),
 		});
 		const refused = async (): Promise<never> => {
 			throw new TypeError("keys: an access token is signed through accessTokenSigning");
@@ -73,8 +72,8 @@ describe("an access token's iat", () => {
 			jti: "j",
 			...times,
 		});
-	const checked = async (times: object) => {
-		const { t, access } = await boot();
+	const checked = async (times: object, at = now) => {
+		const { t, access } = await boot(undefined, at);
 		const answer = await t.verifyAccess(await signed(access, times));
 		return answer.kind === "valid" ? "valid" : answer;
 	};
@@ -92,6 +91,27 @@ describe("an access token's iat", () => {
 		expect(await checked({ iat: iat + 61, exp: iat + 3600 })).toEqual({
 			kind: "invalid",
 			reason: "shape",
+		});
+	});
+
+	it("takes an exp equal to its iat while that time is still ahead", async () => {
+		expect(await checked({ iat: iat + 30, exp: iat + 30 })).toBe("valid");
+	});
+
+	it("is refused 60,001 ms ahead of the clock, to the millisecond", async () => {
+		// A clock 999 ms into its second: an iat 61 s on from the second it is in lies 60,001 ms ahead.
+		const at = now + 999;
+		expect(await checked({ iat: iat + 61, exp: iat + 3600 }, at)).toEqual({
+			kind: "invalid",
+			reason: "shape",
+		});
+		expect(await checked({ iat: iat + 60, exp: iat + 3600 }, at)).toBe("valid");
+	});
+
+	it("is answered expired before shape where a token has both ended and times tokens never issues", async () => {
+		expect(await checked({ iat: iat - 100, exp: iat - 200 })).toEqual({
+			kind: "invalid",
+			reason: "expired",
 		});
 	});
 
