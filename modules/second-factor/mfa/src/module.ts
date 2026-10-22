@@ -40,8 +40,16 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 		if (!contributed && (await c.collect(enrollmentWitnesses)).length > 0) {
 			return c.refuse("mfa", "an enrollment witness is composed without mfa-witnessing");
 		}
+		const stored = await c.get(factorStore);
+		// A binding writes its factor and the claim on its value at once: never one without the other.
+		if (typeof stored.updateTogether !== "function") {
+			return c.refuse(
+				"mfa",
+				"its factor store cannot write a list and a claim as one (updateTogether)",
+			);
+		}
 		return factorDecisions({
-			stored: await c.get(factorStore),
+			stored,
 			kinds: byKind(kinds),
 			seal: await c.get(seal),
 			required: c.section.mode === "required",

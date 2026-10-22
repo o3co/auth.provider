@@ -40,7 +40,7 @@ import { enforcers, proofSteps } from "../src/contract.ts";
 import mfaModule from "../src/module.ts";
 import { claimKeyOf, listKeyOf, storedList } from "../src/records/records.ts";
 import { section } from "../src/section.ts";
-import type { StoredFactors } from "../src/store.ts";
+import { type FactorStore, factorStore, type StoredFactors } from "../src/store.ts";
 import { type MfaSettings, mfaConfig } from "../src/testing.ts";
 import { memoryFactors } from "./stores.ts";
 
@@ -226,7 +226,13 @@ const enforcer = defineModule({ name: "enforcer" }, (m) => [
 
 async function serve(
 	settings: Partial<MfaSettings> = {},
-	{ steps = [step], kinds = [code, backup], extra = [] as Module[], enforced = true } = {},
+	{
+		steps = [step],
+		kinds = [code, backup],
+		extra = [] as Module[],
+		enforced = true,
+		store = undefined as Module | undefined,
+	} = {},
 ) {
 	const audit = auditStandIn();
 	const place = memoryFactors();
@@ -235,7 +241,7 @@ async function serve(
 			http,
 			audit.module,
 			subjectRevocationStandIn,
-			place.module,
+			store ?? place.module,
 			sealModule,
 			sessionStandIn,
 			gatesModule,
@@ -1114,6 +1120,22 @@ it("refuses to start without a module holding sessions to the factors, whatever 
 	}
 });
 
+it("refuses to start over a factor store that cannot write a list and a claim as one", async () => {
+	const { factors } = memoryFactors();
+	const { updateTogether: _, ...lacking } = factors;
+	const store = defineModule({ name: "factor-store" }, (m) => [
+		m.provide(factorStore).by(() => lacking as FactorStore),
+	]);
+	const refused = await serve({}, { store }).catch((error) => error);
+	expect(refused).toBeInstanceOf(BootRefused);
+	expect((refused as BootRefused).refusals).toEqual([
+		{
+			where: "mfa",
+			reason: "its factor store cannot write a list and a claim as one (updateTogether)",
+		},
+	]);
+});
+
 it("refuses to start without a step that proves factors, naming what it lacks", async () => {
 	const refused = await serve({}, { steps: [] }).catch((error) => error);
 	expect(refused).toBeInstanceOf(BootRefused);
@@ -1380,6 +1402,46 @@ describe("a binding writing its factor and the claim on its value together", () 
 			factor: (await decided.held("ann"))[0]?.id,
 		});
 		expect(await decided.writtenStanding("ann")).toBe("counting");
+	});
+
+	it("writes neither the factor nor its claim for a first binding of a unique value another counting factor beat", async () => {
+		const { decided, bindCode, bindKind, place } = await serve(
+			{ mode: "required" },
+			{ kinds: [code, backup, card] },
+		);
+		const begun = await decided.begin("liz", "card");
+		if (begun.kind !== "begun") throw new Error(begun.kind);
+		const valid = await decided.provePending("liz", begun.pending, "c-2");
+		if (valid.kind !== "valid") throw new Error(valid.kind);
+		await bindCode("liz");
+		expect(await decided.bind("liz", begun.pending, valid.state)).toEqual({
+			kind: "first-binding-closed",
+		});
+		expect(place.peek(claimKeyOf("card", "c-2"))).toBeUndefined();
+		expect((await decided.held("liz")).map((f) => f.kind)).not.toContain("card");
+		// The value stays free for another.
+		expect((await bindKind("max", "card", "c-2")).kind).toBe("bound");
+	});
+
+	it("writes neither the factor nor its claim for a binding of a unique value whose fence moved as it wrote", async () => {
+		const { decided, bindKind, place } = await serve({}, { kinds: [code, backup, card] });
+		const begun = await decided.begin("lia", "card");
+		if (begun.kind !== "begun") throw new Error(begun.kind);
+		const valid = await decided.provePending("lia", begun.pending, "c-3");
+		if (valid.kind !== "valid") throw new Error(valid.kind);
+		// The fence moves once the binding has read it: the write itself must refuse.
+		let moved = false;
+		place.hooks.afterRead = async (key) => {
+			if (key !== listKeyOf("lia") || moved) return;
+			moved = true;
+			await decided.fence("lia");
+		};
+		expect(await decided.bind("lia", begun.pending, valid.state)).toEqual({ kind: "fenced" });
+		delete place.hooks.afterRead;
+		expect(moved).toBe(true);
+		expect(place.peek(claimKeyOf("card", "c-3"))).toBeUndefined();
+		expect(await decided.held("lia")).toEqual([]);
+		expect((await bindKind("max", "card", "c-3")).kind).toBe("bound");
 	});
 
 	it("binds nothing where another factor holds the value, and takes a claim its factor left", async () => {
