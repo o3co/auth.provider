@@ -19,6 +19,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 - [From 0.18.0-rc.3](#from-0180-rc3)
 - [From 0.18.0-rc.4](#from-0180-rc4)
 - [From 0.18.0-rc.5](#from-0180-rc5)
+- [From 0.18.0](#from-0180)
 - [Operational notes](#operational-notes)
 
 ## Before you start
@@ -816,6 +817,10 @@ What changed since rc.5. Coming from an earlier release candidate, read the sect
 - **A Redis server that cannot run the store's scripts**: boot runs one of them once and is refused, naming a store script, where the server cannot run it, as one whose Lua lacks `cjson`; rc.5 booted and failed the writes with 503. The [runbook](runbook.md#managed-redisvalkey-with-replicas) says what the server must offer.
 - After boot, `/readyz` answers `503`, warning `redis.settings_unmet`, while either holds; a probe that finds them right again answers ready.
 - **A generated app's image**: it now builds on `node:24-alpine`, Node 24's latest, so each build takes Node's security fixes. An app generated before pins Node 24.21.0, which the 2026-10-21 Node.js security release left vulnerable: change its Dockerfile's `FROM` line to `FROM node:24-alpine AS base` and build the image again, or generate the app again.
+
+## From 0.18.0
+
+- **A generated app's pnpm**: an app generated now names `pnpm@11.28.7` in its `package.json` (`packageManager`), which its image installs with. An app generated before names `pnpm@11.3.0`, short of the 2026-10-21 pnpm security release: change its `packageManager` to `pnpm@11.28.7` and build its image again, or generate the app again.
 
 ## Operational notes
 
