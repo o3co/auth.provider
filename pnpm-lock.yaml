@@ -2857,6 +2857,9 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../mfa
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation

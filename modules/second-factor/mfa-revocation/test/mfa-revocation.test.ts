@@ -1,6 +1,6 @@
 import { assemble, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
-import { type Factors, factors } from "@mod/mfa";
+import { type FactorManaging, factorManaging } from "@mod/mfa-managing";
 import { revocations } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { expect, it } from "vitest";
@@ -9,12 +9,12 @@ import bridge from "../src/module.ts";
 const runtime = quietRuntime();
 
 /** mfa's decisions as far as the bridge asks them: each fence moved, or one that cannot be. */
-const fencing = (fence: Factors["fence"]) =>
+const fencing = (fence: FactorManaging["fence"]) =>
 	defineModule({ name: "factors-stand-in" }, (m) => [
-		m.provide(factors).by(() => ({ fence }) as Factors),
+		m.provide(factorManaging).by(() => ({ fence }) as FactorManaging),
 	]);
 
-const boot = (fence: Factors["fence"]) =>
+const boot = (fence: FactorManaging["fence"]) =>
 	assemble({
 		modules: [subjectRevocationStandIn, fencing(fence), bridge],
 		config: kernelConfig(),

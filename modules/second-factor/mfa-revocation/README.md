@@ -19,4 +19,4 @@
 - None.
 
 ## Depends on
-- `kernel`, `mfa`, `subject-revocation`
+- `kernel`, `mfa` (composed with it, and its `fenceFollower`), `mfa-managing` (`fence`), `subject-revocation`
