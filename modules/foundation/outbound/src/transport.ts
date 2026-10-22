@@ -20,11 +20,13 @@ import {
 
 const unbracketed = (host: string) => host.replace(/^\[(.*)\]$/, "$1");
 
-/** Every address a name resolves to, once. */
-export type Resolver = (host: string) => Promise<readonly string[]>;
+/** Every address a name resolves to, once; IPv4 ones alone where `family` is 4. */
+export type Resolver = (host: string, family?: 4) => Promise<readonly string[]>;
 
-export const systemResolver: Resolver = async (host) =>
-	(await resolveName(host, { all: true, verbatim: true })).map((found) => found.address);
+export const systemResolver: Resolver = async (host, family) =>
+	(await resolveName(host, { all: true, verbatim: true, ...(family ? { family } : {}) })).map(
+		(found) => found.address,
+	);
 
 /** The proxy that carries requests, but to hosts it is told to leave direct; set by the operator, never read from the environment. */
 export interface Route {
