@@ -4,6 +4,12 @@ Notable changes, newest first, in the form of [Keep a Changelog](https://keepach
 
 Changes up to 0.17.0 are in [the 0.17.0 changelog](https://github.com/o3co/auth.provider/blob/v0.17.0/CHANGELOG.md).
 
+## [0.18.1] - 2026-10-22
+
+### Security
+
+- A generated app pins pnpm 11.28.7 in its manifest (`packageManager`), which its image installs with, and the repository builds with it; both named 11.3.0. The 2026-10-21 pnpm security release refuses registry metadata that names another package than the one asked for, applies `trustPolicy` to the pinned pnpm, and caps a package's unpacked size (`maxTarballUnpackedSize`). An app generated before changes its `packageManager` to `pnpm@11.28.7`, as [From 0.18.0](docs/migration.md#from-0180) says.
+
 ## [0.18.0] - 2026-10-22
 
 A rewrite of 0.17 as modules assembled by a generated app, published as one package per concern under new names. Configuration is rewritten, stored state does not carry over, and several settings and requests that 0.17 accepted are refused. Read the [migration guide](docs/migration.md) before moving a 0.17 deployment.
