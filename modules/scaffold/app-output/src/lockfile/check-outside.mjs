@@ -342,19 +342,27 @@ export function recordOf(text, name, registries) {
 /** Run as an app's script: the lockfile, the record (its packages and registries) and the overrides beside it. */
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 	const read = (file) => readFileSync(file, "utf8");
-	const workspace = parseDocument(read("pnpm-workspace.yaml"), { merge: false }).toJS({
-		maxAliasCount: 0,
-	});
-	const outside = JSON.parse(read("outside-modules.json"));
-	const found = refusals(
-		read("pnpm-lock.yaml"),
-		outside.modules,
-		Object.fromEntries(own(own(workspace).get("overrides"))),
-		outside.registries,
-	);
-	for (const line of found) process.stdout.write(`${line}\n`);
-	process.stdout.write(
-		found.length === 0 ? "check:outside: ok\n" : `check:outside: ${found.length} refusal(s)\n`,
-	);
-	process.exitCode = found.length === 0 ? 0 : 1;
+	try {
+		const workspace = parseDocument(read("pnpm-workspace.yaml"), { merge: false }).toJS({
+			maxAliasCount: 0,
+		});
+		const outside = JSON.parse(read("outside-modules.json"));
+		const found = refusals(
+			read("pnpm-lock.yaml"),
+			outside.modules,
+			Object.fromEntries(own(own(workspace).get("overrides"))),
+			outside.registries,
+		);
+		for (const line of found) process.stdout.write(`${line}\n`);
+		process.stdout.write(
+			found.length === 0 ? "check:outside: ok\n" : `check:outside: ${found.length} refusal(s)\n`,
+		);
+		process.exitCode = found.length === 0 ? 0 : 1;
+	} catch (error) {
+		// What cannot be read is a refusal too, said in a line.
+		process.stdout.write(
+			`check:outside: ${error instanceof Error ? error.message : String(error)}\n`,
+		);
+		process.exitCode = 1;
+	}
 }

@@ -1,4 +1,10 @@
-import { type Card, fragmentsOf, type Packages, type Release } from "../src/contract.ts";
+import {
+	type Card,
+	fragmentsOf,
+	type OutsideModules,
+	type Packages,
+	type Release,
+} from "../src/contract.ts";
 
 const fragmentTexts: Readonly<Record<string, string>> = {
 	"@mod/kernel": "kernel { deployment = single }",
@@ -10,6 +16,7 @@ const fragmentTexts: Readonly<Record<string, string>> = {
 export function fakePackages(
 	release: Release = { version: "1.2.3" },
 	asking: readonly string[] = [],
+	outside?: OutsideModules,
 ): Packages {
 	return {
 		fragments: async (names) =>
@@ -33,5 +40,6 @@ export function fakePackages(
 				}),
 			),
 		release: () => release,
+		...(outside ? { outside: () => outside } : {}),
 	};
 }

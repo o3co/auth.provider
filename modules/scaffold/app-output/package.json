@@ -13,6 +13,10 @@
 		"yaml": "2.9.1"
 	},
 	"devDependencies": {
+		"rolldown": "1.2.14",
 		"vitest": "5.0.5"
+	},
+	"scripts": {
+		"check-outside": "node src/lockfile/test/write-check.ts"
 	}
 }

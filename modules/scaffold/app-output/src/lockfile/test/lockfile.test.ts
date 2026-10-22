@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
 import { type OutsideRecord, outsideLock } from "../contract.ts";
+import { bundledCheck } from "./bundle.ts";
 
 // The lockfiles are pnpm 11.3's own, written against a registry serving the packages of
 // `registry-packages.json` (see `generate.mjs`): an app with the release's overrides, and the
@@ -377,10 +378,8 @@ describe("the script an app runs, the file as it ships", () => {
 	const appWith = (lock: string) => {
 		const app = mkdtempSync(join(tmpdir(), "check-outside-"));
 		copyFileSync(outsideLock.script, join(app, "check-outside.mjs"));
-		symlinkSync(
-			join(import.meta.dirname, "..", "..", "..", "node_modules"),
-			join(app, "node_modules"),
-		);
+		// What the app installed is beside the script; the script reads none of it.
+		mkdirSync(join(app, "node_modules"));
 		writeFileSync(join(app, "pnpm-lock.yaml"), lock);
 		writeFileSync(
 			join(app, "outside-modules.json"),
@@ -403,6 +402,60 @@ describe("the script an app runs, the file as it ships", () => {
 
 	it("passes the lockfile the module passes", () => {
 		expect(run(appWith(appLock))).toEqual({ code: 0, out: "check:outside: ok\n" });
+	});
+
+	it("is the bundle of the module's own file, as write-check makes it, from wherever it is made", async () => {
+		expect(readFileSync(outsideLock.script, "utf8")).toBe(await bundledCheck());
+		const made = (cwd: string) =>
+			execFileSync(
+				"node",
+				[
+					"--input-type=module",
+					"-e",
+					`const { bundledCheck } = await import(${JSON.stringify(join(import.meta.dirname, "bundle.ts"))}); process.stdout.write(await bundledCheck());`,
+				],
+				{ cwd, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 },
+			);
+		const repository = join(import.meta.dirname, "..", "..", "..", "..", "..", "..");
+		expect(made(repository)).toBe(readFileSync(outsideLock.script, "utf8"));
+		expect(made(tmpdir())).toBe(readFileSync(outsideLock.script, "utf8"));
+	}, 120_000);
+
+	it("still refuses where the app's install holds a yaml and a semver of another's making", () => {
+		const lock = changed(
+			(l) =>
+				(l.importers["."].dependencies.zod = {
+					specifier: "link:../fake-zod",
+					version: "link:../fake-zod",
+				}),
+		);
+		const app = appWith(lock);
+		// Each exports what the check imports, and ends the process as passed the moment it is imported:
+		// the check as written, importing them, would pass; the one an app runs holds its own.
+		for (const name of ["yaml", "semver"]) {
+			mkdirSync(join(app, "node_modules", name));
+			writeFileSync(
+				join(app, "node_modules", name, "package.json"),
+				JSON.stringify({ name, version: "9.9.9", type: "module", exports: "./index.js" }),
+			);
+			writeFileSync(
+				join(app, "node_modules", name, "index.js"),
+				'process.stdout.write("check:outside: ok\\n");\nprocess.exit(0);\nexport const parseDocument = () => {};\nexport default {};\n',
+			);
+		}
+		const found = refusals(lock);
+		expect(found).not.toEqual([]);
+		expect(run(app)).toEqual({
+			code: 1,
+			out: `${found.join("\n")}\ncheck:outside: ${found.length} refusal(s)\n`,
+		});
+	});
+
+	it("says why it cannot read a lockfile, and exits 1", () => {
+		expect(run(appWith("lockfileVersion: '6.0'\n"))).toEqual({
+			code: 1,
+			out: "check:outside: lockfile version 6.0, where 9.0 is read\n",
+		});
 	});
 
 	it("refuses with the module's words, and exits 1", () => {

@@ -36,7 +36,7 @@ export async function vacant(target: string): Promise<void> {
 const pnpm = "pnpm@11.28.7";
 
 /** The zod the packages take, so a section the app writes is read by the same copy. */
-const zod = "4.6.7";
+export const zod = "4.6.7";
 
 /** The project's manifest, starting the app with `start`, and running each of `scripts` by its name. */
 export const manifestOf = (

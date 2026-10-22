@@ -13,5 +13,13 @@ export {
 	type Recorded,
 	type Registries,
 } from "./lockfile/contract.ts";
+export type { OutsideModules } from "./outside/contract.ts";
 export type { Card, Packages, Release } from "./packages.ts";
-export { configFiles, kernel, mainSource, namesPackages, vacant } from "./project.ts";
+export {
+	configFiles,
+	kernel,
+	mainSource,
+	namesPackages,
+	vacant,
+	zod as appZod,
+} from "./project.ts";

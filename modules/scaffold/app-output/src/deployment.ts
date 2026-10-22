@@ -9,6 +9,7 @@ import {
 	type Written,
 	writtenOf,
 } from "./fragments/contract.ts";
+import { type Beside, besideRelease } from "./outside/contract.ts";
 import type { Card, Packages, Release } from "./packages.ts";
 import {
 	entriesOf,
@@ -18,6 +19,7 @@ import {
 	vacant,
 	withKernel,
 	writeProject,
+	zod,
 } from "./project.ts";
 
 /** The files the generated project names in its guide, each written where the guide says. */
@@ -84,35 +86,51 @@ export async function writeDeployment(
 	const http = { serves: names.includes(httpPackage), live: names.includes(opsPackage) };
 	const run = (file: string) => `node --env-file-if-exists=.env ${file}`;
 	const entries = await entriesOf(modules, packages.importOf, run);
+	const dependencies = packages.dependencies(names);
+	// The one place a caller without packages outside the release is read as having none.
+	const beside = besideRelease(packages.outside?.(names), {
+		dependencies,
+		version: packages.release().version,
+		zod,
+	});
 	await writeProject(target, {
-		"package.json": manifestOf(
-			"node --env-file-if-exists=.env src/main.ts",
-			packages.dependencies(names),
-			entries.scripts,
-		),
+		"package.json": manifestOf("node --env-file-if-exists=.env src/main.ts", dependencies, {
+			...entries.scripts,
+			...beside.scripts,
+		}),
+		...beside.files,
 		[paths.main]: await mainSource(modules, packages.importOf),
 		...entries.files,
 		[paths.application]: applicationConf(fragments),
 		[paths.localExample]: localConfExample(fragments),
 		".env.example": envExample(settings),
-		"AGENTS.md": agentsIndex(packages.cards(names), packages.release()),
-		Dockerfile: dockerfile(http),
+		"AGENTS.md": agentsIndex(packages.cards(names), packages.release()) + beside.index,
+		Dockerfile: dockerfile(http, beside.image),
 		".dockerignore": lines(dockerIgnored),
 		".gitignore": lines(gitIgnored),
-		"README.md": await filled(readme.template, {
-			...paths,
-			...guideLists(settings, writtenOf(fragments)),
-			cards: cardLines(packages.cards(names)),
-			askedOfDeployment: deploymentLines(packages.cards(names)),
-			firstLogin: http.serves ? firstLoginLine(packages.release()) : "",
-			port: String(httpPort),
-			hostEnv: envName("http.host"),
-			portEnv: envName("http.port"),
-			...httpLines(http),
-			...readme.fill,
-		}),
+		"README.md":
+			(await filled(readme.template, {
+				...paths,
+				...guideLists(settings, writtenOf(fragments)),
+				cards: cardLines(packages.cards(names)),
+				askedOfDeployment: deploymentLines(packages.cards(names)),
+				firstLogin: http.serves ? firstLoginLine(packages.release()) : "",
+				port: String(httpPort),
+				hostEnv: envName("http.host"),
+				portEnv: envName("http.port"),
+				...httpLines(http),
+				...readme.fill,
+			})) + beside.guide,
 	});
 }
+
+/** The install stage's install: with packages outside the release, what it checks against copied, and checked after. */
+const installed = (beside: Beside["image"]) =>
+	beside === undefined
+		? "RUN pnpm install --frozen-lockfile --prod"
+		: `# The lockfile is held to what was recorded of the packages outside the release.
+${beside.copy.map((file) => `COPY ${file} ./${file}`).join("\n")}
+RUN pnpm install --frozen-lockfile --prod && ${beside.after}`;
 
 /** Each composed module's card, where the app installs it. */
 const cardLines = (cards: readonly Card[]) =>
@@ -214,7 +232,10 @@ function httpLines(http: { readonly serves: boolean; readonly live: boolean }) {
 	};
 }
 
-function dockerfile(http: { readonly serves: boolean; readonly live: boolean }): string {
+function dockerfile(
+	http: { readonly serves: boolean; readonly live: boolean },
+	beside: Beside["image"],
+): string {
 	const port = envName("http.port");
 	const listening = http.serves
 		? `# Listens on every interface inside the container; the port is http's, which the health check follows.
@@ -237,7 +258,7 @@ WORKDIR /app
 
 FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yam[l] ./
-RUN pnpm install --frozen-lockfile --prod
+${installed(beside)}
 
 FROM base AS runtime
 ENV NODE_ENV=production
