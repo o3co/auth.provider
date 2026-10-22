@@ -42,14 +42,16 @@ const privately = {
 	]),
 	ipv6: blockList("ipv6", [["fc00::", 7]]),
 };
-// Alibaba Cloud's, AWS's over IPv6 (the instance's, and EKS Pod Identity's credentials), Google
-// Cloud's over IPv6, Akamai Cloud's (Linode) over IPv6; the others sit in link-local.
+// The cloud metadata and credential addresses inside the private networks: Alibaba Cloud's, and over
+// IPv6 AWS's (the instance's, and EKS Pod Identity's credentials), Google Cloud's, Akamai Cloud's
+// (Linode) and Scaleway's. Those over IPv4 elsewhere sit in link-local, which is never private.
 const metadata = { ipv4: new BlockList(), ipv6: new BlockList() };
 metadata.ipv4.addAddress("100.100.100.200", "ipv4");
 metadata.ipv6.addAddress("fd00:ec2::254", "ipv6");
 metadata.ipv6.addAddress("fd00:ec2::23", "ipv6");
 metadata.ipv6.addAddress("fd20:ce::254", "ipv6");
 metadata.ipv6.addAddress("fd00:a9fe:a9fe::1", "ipv6");
+metadata.ipv6.addAddress("fd00:42::42", "ipv6");
 
 const familyOf = (address: string) => (isIP(address) === 6 ? "ipv6" : "ipv4");
 const inList = (lists: Record<"ipv4" | "ipv6", BlockList>, address: string) =>
