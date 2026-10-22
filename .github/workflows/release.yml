@@ -83,14 +83,60 @@ jobs:
       - run: pnpm release:check
 
       # The tarballs of this tag, checked before a draft release is created or
-      # anything is published: every bundle and the entrance is packed, and
-      # each ships the root LICENSE word for word.
-      - name: Pack the bundles and refuse a tarball without the root LICENSE
+      # anything is published. Each attempt first restores the tarballs an
+      # earlier attempt of this run saved: a rerun publishes those, never a new
+      # pack, as a tarball packed again need not be the same bytes as one
+      # published. Where none was saved (the first attempt, or one before it
+      # failed before saving them, so before anything was published), every
+      # bundle and the entrance is packed, the index sealed with the other
+      # bundles' and zod's integrity in between, and saved. A restore that fails
+      # for another reason packs anew too: the check before publishing then
+      # stops it where what is on npm is other bytes.
+      - name: Restore the tarballs an earlier attempt saved
+        id: restore
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: release-tarballs
+          path: ${{ runner.temp }}/tarballs
+
+      - name: Pack the bundles
+        if: steps.restore.outcome != 'success'
         run: |
           set -euo pipefail
+          rm -rf "$RUNNER_TEMP/tarballs"
           pnpm bundles
           .github/scripts/pack-published.sh "$RUNNER_TEMP/tarballs"
+
+      # Built, not packed: the license check lists the packages the release
+      # publishes from what pnpm bundles builds. Checked before they are saved,
+      # so a pack that fails it is never restored.
+      - name: Refuse a tarball without the root LICENSE
+        env:
+          RESTORED: ${{ steps.restore.outcome }}
+        run: |
+          set -euo pipefail
+          if [ "$RESTORED" = success ]; then pnpm bundles; fi
           .github/scripts/check-tarball-license.sh "$RUNNER_TEMP/tarballs" LICENSE
+
+      # Saved before anything is published, so a rerun has them to publish.
+      # Kept 90 days: a rerun after that packs anew, as above.
+      - name: Save the tarballs
+        if: steps.restore.outcome != 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-tarballs
+          path: ${{ runner.temp }}/tarballs/*.tgz
+          if-no-files-found: error
+          retention-days: 90
+
+      # Before anything is published: every package of this version already on
+      # npm, the index's bundle and the entrance among them, must be the very
+      # tarball about to be published, and an answer npm gives that cannot be
+      # read stops it as well. A first attempt finds none; a rerun finds those
+      # it published, which must be these.
+      - name: Refuse what is published already as another tarball
+        run: pnpm release:published "$RUNNER_TEMP/tarballs"
 
       - name: Create GitHub Release (draft)
         id: draft

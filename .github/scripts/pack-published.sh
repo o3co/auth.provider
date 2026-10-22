@@ -1,31 +1,24 @@
 #!/usr/bin/env bash
-# Packs every package the release publishes into <destination>, with
-# `pnpm pack` — what CI's release-check job checks and what release.yml
-# checks and then publishes, so the two cannot pack different sets.
+# Packs every package the release publishes into <destination>, by
+# `pnpm release:pack`: every bundle but the index's, then the index sealed with
+# their integrity and zod's, then the index's bundle and the entrance. What
+# CI's release-check job checks and what release.yml checks and then
+# publishes, so the two cannot pack different sets or in another order.
 #
-# The list is `published-packages.sh`'s: the bundles and the entrance that
-# `pnpm bundles` built. Each already holds the root LICENSE, which
-# `pnpm bundles` copies in, so any packer ships it.
+# Each package is one `pnpm bundles` built, and already holds the root
+# LICENSE, which `pnpm bundles` copies in, so any packer ships it. Each pack
+# runs with stdin closed, so no lifecycle script reads it.
 #
-# Each `pnpm pack` runs with stdin closed. The list is read line by line from
-# stdin, and a pack's lifecycle scripts (`prepack`, `prepare`, `postpack`)
-# would otherwise inherit it: one that reads stdin would swallow the rest of
-# the list, and those packages would silently go unpacked.
-#
-# Fails closed: a list pnpm cannot produce, or a pack that fails, stops it.
+# Fails closed: a pack that fails, or an index that cannot be sealed, stops it.
 #
 # Usage (from the workspace root, after pnpm bundles): pack-published.sh <destination>
 set -euo pipefail
 
 destination="${1:?usage: pack-published.sh <destination>}"
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
+if [ ! -d dist/bundles ]; then
+	echo "::error::dist/bundles is missing — run pnpm bundles first"
+	exit 2
+fi
 mkdir -p "$destination"
 destination="$(cd "$destination" && pwd)"
-packages="$("$here/published-packages.sh")"
-
-while IFS=$'\t' read -r name directory; do
-	[ -n "$name" ] || continue
-	echo "packing ${name}"
-	(cd "$directory" && pnpm pack --pack-destination "$destination" >/dev/null </dev/null)
-done <<<"$packages"
+pnpm release:pack "$destination" </dev/null
