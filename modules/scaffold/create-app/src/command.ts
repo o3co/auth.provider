@@ -63,20 +63,21 @@ export async function run(
 		return 0;
 	}
 	// A package outside the release is named `npm:<name>`; the plan takes the name, and reads it from the project given.
-	const outsideNames: string[] = [];
-	const unprefixed = (name: string) => {
-		if (!name.startsWith(npm)) return name;
-		outsideNames.push(name.slice(npm.length));
-		return name.slice(npm.length);
-	};
+	const unprefixed = (name: string) => (name.startsWith(npm) ? name.slice(npm.length) : name);
 	const [target, ...given] = positionals;
+	const pattern = values.pattern ?? "full";
+	const axisPairs = (values.axis ?? []).map((pair) => pair.split("="));
+	// An axis given twice takes the last choice, as the plan does: only that one is a name the plan reads.
+	const lastChoices = new Map(axisPairs.map((pair) => [pair[0] ?? "", pair]));
+	const named = [
+		...given,
+		...(values.add ?? []),
+		...[...lastChoices.values()].flatMap((pair) => pair.slice(1)),
+	];
+	const outsideNames = named.filter((name) => name.startsWith(npm)).map(unprefixed);
 	const modules = given.map(unprefixed);
 	const added = values.add?.map(unprefixed);
-	const pattern = values.pattern ?? "full";
-	const axes = (values.axis ?? []).map((pair) => {
-		const [owner, ...rest] = pair.split("=");
-		return [owner ?? "", ...rest.map(unprefixed)];
-	});
+	const axes = axisPairs.map(([owner, ...rest]) => [owner ?? "", ...rest.map(unprefixed)]);
 	const chosen = groups.flatMap((group) => {
 		const listed = values[group];
 		return typeof listed === "string" ? [[group, listed.split(",")] as const] : [];
@@ -100,6 +101,7 @@ export async function run(
 	const from = values["outside-from"];
 	const fresh = values["allow-fresh"] ?? [];
 	const misnamed = [
+		...(outsideNames.includes("") ? [`${npm} names no package: write npm:<name>`] : []),
 		...(outsideNames.length > 0 && from === undefined
 			? [`${npm}<name> is read from --outside-from <project>`]
 			: []),

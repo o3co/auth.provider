@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import { run } from "../src/contract.ts";
+import { generateFull } from "../src/full.ts";
 import { generateListed } from "../src/listed.ts";
+import { generatePattern } from "../src/pattern.ts";
+import { patternNamed } from "../src/patterns/patterns.ts";
 import { workspacePackages } from "../src/project.ts";
 import { root } from "./full-app.ts";
 
@@ -28,7 +31,7 @@ function indexOfWorkspace(): string {
 }
 
 /** The project an operator had pnpm install `@x/grant@1.2.0` into, a feature needing tokens (see src/outside's tests). */
-function project(): string {
+function project(extra: Record<string, unknown> = {}): string {
 	const at = mkdtempSync(join(tmpdir(), "project-"));
 	const lock = readFileSync(
 		join(import.meta.dirname, "..", "src", "outside", "test", "fixtures", "staging-lock.yaml"),
@@ -48,6 +51,7 @@ function project(): string {
 			optionalDependencies: { "fast-path": "^2.0.0" },
 			peerDependencies: { "@o3co/auth-provider-oauth": "^0.19.0", zod: "^4.6.0" },
 			authProvider: { format: 1, kind: "feature", needs: ["@mod/tokens"] },
+			...extra,
 		}),
 	);
 	writeFileSync(join(stored, "config.example"), 'grant {\n\tissuer = "REPLACE-ISSUER"\n}\n');
@@ -90,6 +94,30 @@ describe("an app listing a package outside the release", () => {
 		const guide = await read(target, "README.md");
 		expect(guide).toContain("`node_modules/@x/grant/README.md#deployment`");
 		expect(guide).toContain("| `@x/grant` | `1.2.0` |");
+	});
+
+	it("lets a version published within the last day be installed where named, at its recorded version alone", async () => {
+		const target = join(mkdtempSync(join(tmpdir(), "outside-app-")), "app");
+		const plan = { target, outside: { from: project(), names: ["@x/grant"], fresh: ["@x/grant"] } };
+		await generateListed(plan, ["@x/grant"], "@mod/log-stdout", indexOfWorkspace());
+		const settings = parse(await read(target, "pnpm-workspace.yaml"));
+		expect(settings.minimumReleaseAge).toBe(1440);
+		expect(settings.minimumReleaseAgeExclude).toEqual([
+			"@o3co/auth-provider-oauth",
+			"@x/grant@1.2.0",
+		]);
+	});
+
+	it("refuses through generation a package that breaks a rule, writing nothing", async () => {
+		const target = join(mkdtempSync(join(tmpdir(), "outside-app-")), "app");
+		const plan = {
+			target,
+			outside: { from: project({ scripts: { postinstall: "node x" } }), names: ["@x/grant"] },
+		};
+		await expect(
+			generateListed(plan, ["@x/grant"], "@mod/log-stdout", indexOfWorkspace()),
+		).rejects.toThrow("@x/grant: it runs postinstall when installed");
+		await expect(readFile(join(target, "package.json"))).rejects.toThrow();
 	});
 
 	it("refuses to compose it beside a linked workspace, or beside no published release", async () => {
@@ -156,6 +184,28 @@ describe("naming a package outside the release on the command line", () => {
 		expect(fresh.said.err).toContain("--allow-fresh @x/other: not named npm:@x/other");
 	});
 
+	it("refuses npm: naming no package, in a list or in --add", async () => {
+		for (const args of [["npm:"], ["--add", "npm:"]]) {
+			const said = io();
+			expect(await run([target(), ...args, "--outside-from", "/somewhere"], said.io)).toBe(64);
+			expect(said.said.err).toContain("npm: names no package: write npm:<name>");
+		}
+	});
+
+	it("reads only the last choice of an axis given twice: a package outside it chose before is not read", async () => {
+		const said = io();
+		const args = [
+			"--pattern",
+			"simple-web",
+			"--axis",
+			"@mod/users=npm:@x/old",
+			"--axis",
+			"@mod/users=@mod/users",
+		];
+		expect(await run([target(), ...args, "--outside-from", "/somewhere"], said.io)).toBe(64);
+		expect(said.said.err).toContain("--outside-from names no package: none is named npm:<name>");
+	});
+
 	it("takes npm:<name> in --add and an axis's module as well, and tells a plan it cannot make", async () => {
 		// In the workspace nothing is published, so the plan is refused, after the names are taken.
 		for (const args of [
@@ -168,5 +218,33 @@ describe("naming a package outside the release on the command line", () => {
 				"packages outside the release are composed beside the published release alone",
 			);
 		}
+	});
+});
+
+describe("the full template and a pattern adding a package outside the release", () => {
+	it("composes it in the full template, with the rest of the release", async () => {
+		const target = join(mkdtempSync(join(tmpdir(), "outside-full-")), "app");
+		const plan = {
+			target,
+			template: "full" as const,
+			add: ["@x/grant"],
+			outside: { from: project(), names: ["@x/grant"] },
+		};
+		await generateFull(plan, indexOfWorkspace());
+		expect(await read(target, "src/main.ts")).toContain('from "@x/grant/module"');
+		expect(JSON.parse(await read(target, "outside-modules.json")).modules[0].name).toBe("@x/grant");
+	});
+
+	it("composes it in a pattern, added to the pattern's selection", async () => {
+		const target = join(mkdtempSync(join(tmpdir(), "outside-pattern-")), "app");
+		const plan = {
+			target,
+			template: "simple-web",
+			add: ["@x/grant"],
+			outside: { from: project(), names: ["@x/grant"] },
+		};
+		await generatePattern(plan, patternNamed("simple-web"), indexOfWorkspace());
+		expect(await read(target, "src/main.ts")).toContain('from "@x/grant/module"');
+		expect(JSON.parse(await read(target, "package.json")).dependencies["@x/grant"]).toBe("1.2.0");
 	});
 });
