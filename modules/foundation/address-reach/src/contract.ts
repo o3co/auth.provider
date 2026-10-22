@@ -6,9 +6,11 @@ const blockList = (family: "ipv4" | "ipv6", subnets: readonly (readonly [string,
 	for (const [net, bits] of subnets) list.addSubnet(net, bits, family);
 	return list;
 };
-// IANA's special-purpose blocks, and IPv6 outside global unicast. A BlockList checks
+// IANA's special-purpose blocks, and IPv6 outside global unicast; and Azure's platform address,
+// public but the host node's in every region (WireServer, its DNS and DHCP). A BlockList checks
 // IPv4-mapped IPv6 against IPv4 rules too.
 const specialIpv4 = blockList("ipv4", [
+	["168.63.129.16", 32],
 	["0.0.0.0", 8],
 	["10.0.0.0", 8],
 	["100.64.0.0", 10],
@@ -42,18 +44,24 @@ const privately = {
 	]),
 	ipv6: blockList("ipv6", [["fc00::", 7]]),
 };
-// Alibaba Cloud's, AWS's over IPv6, Google Cloud's over IPv6; the others sit in link-local.
+// The cloud metadata and credential addresses inside the private networks: Alibaba Cloud's, and over
+// IPv6 AWS's (the instance's, and EKS Pod Identity's credentials), Google Cloud's, Akamai Cloud's
+// (Linode), Scaleway's and Oracle Cloud's. Those over IPv4 elsewhere sit in link-local, which is never private.
 const metadata = { ipv4: new BlockList(), ipv6: new BlockList() };
 metadata.ipv4.addAddress("100.100.100.200", "ipv4");
 metadata.ipv6.addAddress("fd00:ec2::254", "ipv6");
+metadata.ipv6.addAddress("fd00:ec2::23", "ipv6");
 metadata.ipv6.addAddress("fd20:ce::254", "ipv6");
+metadata.ipv6.addAddress("fd00:a9fe:a9fe::1", "ipv6");
+metadata.ipv6.addAddress("fd00:42::42", "ipv6");
+metadata.ipv6.addAddress("fd00:c1::a9fe:a9fe", "ipv6");
 
 const familyOf = (address: string) => (isIP(address) === 6 ? "ipv6" : "ipv4");
 const inList = (lists: Record<"ipv4" | "ipv6", BlockList>, address: string) =>
 	lists[familyOf(address)].check(address, familyOf(address));
 const unbracketed = (host: string) => host.replace(/^\[(.*)\]$/, "$1");
 
-/** Whether an IP address is special-purpose: IANA's blocks not globally reachable, multicast, IPv6 outside global unicast. */
+/** Whether an IP address is special-purpose: IANA's blocks not globally reachable, multicast, IPv6 outside global unicast, Azure's platform address. */
 export const isSpecialAddress = (address: string): boolean =>
 	familyOf(address) === "ipv6"
 		? !globalUnicast.check(address, "ipv6") || specialInGlobalUnicast.check(address, "ipv6")
