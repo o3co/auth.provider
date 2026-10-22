@@ -86,8 +86,8 @@ it("points at the release's documents and the cards that ask of the deployment",
 
 it("tells a refused boot in its entries by the kernel's mark, never by its class", async () => {
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
-	await writeDeployment(target, ["@mod/seal"], fakePackages(), readme);
-	for (const entry of ["src/main.ts", "src/reseal.ts"]) {
+	await writeDeployment(target, ["@mod/seal", "@mod/mfa-witnessing"], fakePackages(), readme);
+	for (const entry of ["src/main.ts", "src/reseal.ts", "src/witness-backfill.ts"]) {
 		const source = await read(target, entry);
 		expect(source, entry).toContain("BootRefused.is(error)");
 		expect(source, entry).not.toContain("instanceof");

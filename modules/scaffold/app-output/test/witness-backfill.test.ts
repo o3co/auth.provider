@@ -9,17 +9,30 @@ import { configFiles, entriesOf, kernel } from "../src/project.ts";
 const fakes: Record<string, Record<string, string>> = {
 	"fake-kernel": {
 		"index.js": `
-export class BootRefused extends Error { constructor(refusals) { super("refused"); this.refusals = refusals; } }
+const mark = Symbol.for("@mod/kernel.boot-refused");
+export class BootRefused extends Error {
+	constructor(refusals) { super("refused"); this.refusals = refusals; this[mark] = true; }
+	static is(error) { return typeof error === "object" && error !== null && error[mark] === true; }
+}
 export const isUnavailable = (error) => error?.name === "Unavailable";
 export const loadConfig = async () => ({});
 // The variables 0.17 read that are set: here, any named LEGACY_*.
 export const unreadLegacyVariables = async ({ env }) => Object.keys(env).filter((name) => name.startsWith("LEGACY_")).sort();
 export const legacyVariablesWarning = (names) => (names.length === 0 ? undefined : \`\${names.length} named: \${names.join(", ")}\`);
 export async function assemble({ runtime }) {
+	// A refusal thrown by a second copy of the kernel: its own class, the same mark.
+	if (process.env.REFUSE) throw new (await import("fake-kernel-copy")).BootRefused([{ where: "a.b", reason: "why" }]);
 	// Without the script's own runtime, the composed sink would write this line.
 	(runtime?.log ?? { warn: (event) => process.stdout.write(\`LOG \${event}\\n\`) }).warn("fake.assembled");
 	const { backfill } = await import("fake-witnessing");
 	return { get: () => backfill, stop: async () => {} };
+}`,
+	},
+	"fake-kernel-copy": {
+		"index.js": `
+const mark = Symbol.for("@mod/kernel.boot-refused");
+export class BootRefused extends Error {
+	constructor(refusals) { super("refused"); this.refusals = refusals; this[mark] = true; }
 }`,
 	},
 	"fake-witnessing": {
@@ -131,4 +144,12 @@ it("counts a subject whose factor is written and not claimed, and an answer it d
 	expect(odd.seen).toEqual(["odd", "first"]);
 	expect(odd.stdout).toBe("marked 1 held 0 none 0 unclaimed 0 inconsistent 0 unknown 1 failed 0\n");
 	expect(odd.status).toBe(1);
+});
+
+it("exits 78 on a boot another copy of the kernel refused, writing each refusal", async () => {
+	const run = await script();
+	const done = await run("first\n", { REFUSE: "1" });
+	expect(done.stderr).toBe("refused a.b: why\n");
+	expect(done.status).toBe(78);
+	expect(done.seen).toEqual([]);
 });

@@ -4,6 +4,16 @@ Notable changes, newest first, in the form of [Keep a Changelog](https://keepach
 
 Changes up to 0.17.0 are in [the 0.17.0 changelog](https://github.com/o3co/auth.provider/blob/v0.17.0/CHANGELOG.md).
 
+## [0.18.2] - 2026-10-22
+
+### Added
+
+- `outbound.plain-ipv4`, a list of `host:port` pairs of `plain-loopback` or `plain-internal`: plain http to such a pair resolves its name to IPv4 addresses alone, checks every one of them and reaches the first, and neither checks nor reaches an IPv6 one. With ECS Service Connect, which writes each name in the hosts file with an IPv4 address and an IPv6 one that in the environment reported does not reach, a `plain-internal` pair was refused as `plain-public`; naming it here too takes it. A pair is named by its host name, never an address. Unset, nothing changes. A configuration naming the key is refused at boot by an earlier version, which does not know it.
+
+### Fixed
+
+- A generated app's `witness-backfill` script told a refused boot by the kernel's class, so where the kernel was bundled twice it threw the refusal on as a crash instead of writing each refusal and exiting 78, as the app's entry and `reseal` already did; it now tells it by the kernel's mark (`BootRefused.is`). An app generated before changes one line of `src/witness-backfill.ts`, as [From 0.18.1](docs/migration.md#from-0181) says, or is generated again.
+
 ## [0.18.1] - 2026-10-22
 
 ### Security
