@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { outsideLock } from "../../lockfile/contract.ts";
@@ -36,7 +35,6 @@ describe("what an app beside packages outside the release is given", () => {
 		]) {
 			expect(besideRelease(none, app)).toEqual({
 				files: {},
-				dependencies: {},
 				scripts: {},
 				image: undefined,
 				guide: "",
@@ -45,18 +43,29 @@ describe("what an app beside packages outside the release is given", () => {
 		}
 	});
 
-	it("records each package and the registries, and ships the script that checks the lockfile against them", () => {
-		const { files, scripts, dependencies } = besideRelease(outside, app);
-		expect(JSON.parse(files["outside-modules.json"] as string)).toEqual({
+	it("records each package and the registries, and ships the check bundled with what it uses, adding no dependency", () => {
+		const beside = besideRelease(outside, app);
+		expect(JSON.parse(beside.files["outside-modules.json"] as string)).toEqual({
 			modules: [grant],
 			registries: outside.registries,
 		});
-		expect(files["scripts/check-outside.mjs"]).toBe(readFileSync(outsideLock.script, "utf8"));
-		expect(scripts).toEqual({ "check:outside": "node scripts/check-outside.mjs" });
-		const own = JSON.parse(
-			readFileSync(join(import.meta.dirname, "..", "..", "..", "package.json"), "utf8"),
-		).dependencies;
-		expect(dependencies).toEqual({ semver: own.semver, yaml: own.yaml });
+		expect(beside.files["scripts/check-outside.mjs"]).toBe(
+			readFileSync(outsideLock.script, "utf8"),
+		);
+		expect(beside.scripts).toEqual({ "check:outside": "node scripts/check-outside.mjs" });
+		expect(beside).not.toHaveProperty("dependencies");
+	});
+
+	it("refuses a record whose fields are not a package name, version and integrity: they go into the guide's table", () => {
+		for (const field of [
+			{ name: "@x/gr`ant" },
+			{ version: "1.2.0|x" },
+			{ integrity: "sha512-AA\n| injected |" },
+		]) {
+			expect(() => besideRelease({ ...outside, modules: [{ ...grant, ...field }] }, app)).toThrow(
+				"its record is not a package name, version and integrity",
+			);
+		}
 	});
 
 	it("holds every bundle of the release it depends on, or a package outside names as a peer, and zod to one version", () => {

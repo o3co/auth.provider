@@ -14,7 +14,6 @@ export interface OutsideModules {
 /** What the app is given beside its own files, where it composes packages outside the release. */
 export interface Beside {
 	readonly files: Readonly<Record<string, string>>;
-	readonly dependencies: Readonly<Record<string, string>>;
 	readonly scripts: Readonly<Record<string, string>>;
 	/** What the image's install stage copies, and runs once the dependencies are installed. */
 	readonly image: { readonly copy: readonly string[]; readonly after: string } | undefined;
@@ -23,8 +22,6 @@ export interface Beside {
 	readonly index: string;
 }
 
-/** What the app's script needs: the versions app-output itself depends on. */
-const scriptDependencies = { semver: "7.8.5", yaml: "2.9.1" };
 const recordFile = "outside-modules.json";
 const scriptFile = "scripts/check-outside.mjs";
 const script = "check:outside";
@@ -34,7 +31,6 @@ const releasePackage = (name: string) => name.startsWith("@o3co/auth-provider-")
 
 const nothing: Beside = {
 	files: {},
-	dependencies: {},
 	scripts: {},
 	image: undefined,
 	guide: "",
@@ -56,6 +52,16 @@ export function besideRelease(
 	},
 ): Beside {
 	if (outside === undefined || outside.modules.length === 0) return nothing;
+	for (const m of outside.modules) {
+		// Each goes into a table of the guide: only the text a package name, a version and an integrity are made of.
+		if (
+			!/^[@a-z0-9._~/-]+$/.test(m.name) ||
+			!/^[0-9A-Za-z.+-]+$/.test(m.version) ||
+			!/^sha(256|384|512)-[A-Za-z0-9+/]+=*$/.test(m.integrity)
+		) {
+			throw new Error(`${m.name}: its record is not a package name, version and integrity`);
+		}
+	}
 	for (const name of outside.fresh ?? []) {
 		if (!outside.modules.some((m) => m.name === name))
 			throw new Error(`${name}: let through as fresh, but not recorded`);
@@ -84,10 +90,10 @@ export function besideRelease(
 	return {
 		files: {
 			[recordFile]: `${JSON.stringify(record, null, "\t")}\n`,
+			// The script holds what it uses: it loads nothing of the install it checks.
 			[scriptFile]: readFileSync(outsideLock.script, "utf8"),
 			"pnpm-workspace.yaml": stringify(settings),
 		},
-		dependencies: scriptDependencies,
 		scripts: { [script]: `node ${scriptFile}` },
 		image: { copy: [recordFile, scriptFile], after: `pnpm ${script}` },
 		guide: guideOf(outside.modules),

@@ -94,11 +94,10 @@ export async function writeDeployment(
 		zod,
 	});
 	await writeProject(target, {
-		"package.json": manifestOf(
-			"node --env-file-if-exists=.env src/main.ts",
-			{ ...dependencies, ...beside.dependencies },
-			{ ...entries.scripts, ...beside.scripts },
-		),
+		"package.json": manifestOf("node --env-file-if-exists=.env src/main.ts", dependencies, {
+			...entries.scripts,
+			...beside.scripts,
+		}),
 		...beside.files,
 		[paths.main]: await mainSource(modules, packages.importOf),
 		...entries.files,

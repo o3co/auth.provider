@@ -217,9 +217,9 @@ it("records the packages outside the release and checks the lockfile against the
 	);
 	const manifest = JSON.parse(await read(target, "package.json"));
 	expect(manifest.scripts["check:outside"]).toBe("node scripts/check-outside.mjs");
-	expect(Object.keys(manifest.dependencies)).toEqual(
-		expect.arrayContaining(["semver", "yaml", "zod"]),
-	);
+	// The check holds what it uses: the app depends on nothing for it.
+	expect(manifest.dependencies).not.toHaveProperty("semver");
+	expect(manifest.dependencies).not.toHaveProperty("yaml");
 	const docker = await read(target, "Dockerfile");
 	expect(docker).toContain("COPY outside-modules.json ./outside-modules.json");
 	expect(docker).toContain("RUN pnpm install --frozen-lockfile --prod && pnpm check:outside");
