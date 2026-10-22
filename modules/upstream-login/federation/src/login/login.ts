@@ -72,9 +72,14 @@ export function loginWith(p: LoginParts): Continuation {
 			const authenticatedAt = onOurClock(upstreamLogin.authenticatedAt, trip.startedAt, idp);
 			const facts = { subject, amr, authenticatedAt, ...attributesOf(name, upstreamLogin.profile) };
 			const outcome = await p.logins.login(request, facts, done, from);
+			await handing?.after(outcome);
+			// A login a gate refused fails as one with no local user does, telling nothing of why.
+			if (outcome.kind === "refused") {
+				record("failed", name, { reason: "refused", source });
+				return jsonAnswer(401, { error: "unknown_user" }, { cookies: cleared });
+			}
 			const held = outcome.kind === "held";
 			record(held ? "held" : "succeeded", name, { subject, source });
-			await handing?.after(outcome);
 			const cookies = [...cleared, ...outcome.cookies];
 			if (!held) return sent(lands, cookies);
 			return p.heldPage === undefined
