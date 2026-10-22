@@ -46,7 +46,8 @@ const privately = {
 };
 // The cloud metadata and credential addresses inside the private networks: Alibaba Cloud's, and over
 // IPv6 AWS's (the instance's, and EKS Pod Identity's credentials), Google Cloud's, Akamai Cloud's
-// (Linode), Scaleway's and Oracle Cloud's. Those over IPv4 elsewhere sit in link-local, which is never private.
+// (Linode), Scaleway's and Oracle Cloud's. Those over IPv4 elsewhere sit in special-purpose blocks,
+// never private: link-local (169.254.0.0/16) for most, 192.0.0.0/24 for Oracle Cloud Classic's.
 const metadata = { ipv4: new BlockList(), ipv6: new BlockList() };
 metadata.ipv4.addAddress("100.100.100.200", "ipv4");
 metadata.ipv6.addAddress("fd00:ec2::254", "ipv6");
