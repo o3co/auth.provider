@@ -108,7 +108,7 @@ export interface Witnessing {
 	/** After a binding's write: brings the mark in line with the counting factors, as `counting` reads them now. */
 	settle(subject: string, counting: () => Promise<boolean>): Promise<void>;
 	/** After a reset removed every factor: the mark goes where `after` says it may. */
-	cleared(subject: string, after?: () => Promise<AfterReset>): Promise<void>;
+	cleared(subject: string, after: () => Promise<AfterReset>): Promise<void>;
 }
 
 /** At most one; with none, the store alone tells. */
