@@ -9,7 +9,7 @@
 - On the new target, mail, where composed, is accepted to send nothing.
 - On a pattern's app that takes users from a ledger (`users-http`), serves the users a scene gives from a fake ledger the app is pointed at, unless the scene sets its own.
 - On a pattern's app that takes users from a ledger (`users-http`), a fake ledger holds the scene's users and answers their upstream links by `upstream-url`; a scene with users a ledger cannot hold (a bcrypt hash) is left out as the app's alternative.
-- On a pattern's app that keeps mfa's witness at a ledger (`mfa-witness-http`), a fake ledger keeps it for every scene, its own ledger or none: whether a subject is enrolled, the first mark, and clearing it.
+- On a pattern's app that keeps mfa's witness at a ledger (`mfa-witness-http`), a fake ledger keeps it for every scene, its own ledger or none: whether a subject is enrolled and by which token, the first mark, withdrawing it by its token alone, and clearing it.
 - On a pattern's app composing `verified-email`, a scene that states none of its users' email verified or not has each stated verified, with an address.
 - On a pattern's app composing `verified-email`, a user stated either way is given an address where the scene gave none, as `users` keeps the statement only beside one.
 
