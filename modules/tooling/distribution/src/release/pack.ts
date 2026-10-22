@@ -7,7 +7,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { readBundles } from "./contract.ts";
+import { readBundles } from "../contract.ts";
 import { packOrder } from "./pack-order.ts";
 import { packedOf, sealed, zodOf } from "./seal.ts";
 
@@ -30,6 +30,7 @@ const declared = readBundles(root).flatMap((bundle) => {
 	return [
 		{
 			dir: basename(bundle.dir),
+			shipped: bundle.shipped === true,
 			index: manifest.index,
 			entrances: Object.keys(manifest.entrances ?? {}),
 		},

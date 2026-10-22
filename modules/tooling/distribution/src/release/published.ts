@@ -36,7 +36,8 @@ export function lookupOf(answer: { status: number; stdout: string; stderr: strin
 		try {
 			code = (JSON.parse(answer.stdout) as { error?: { code?: unknown } }).error?.code;
 		} catch {
-			code = /\bE404\b/.test(answer.stderr) ? "E404" : undefined;
+			// npm's own error code line, as npm writes it: never E404 elsewhere in a message or a URL.
+			code = /^npm (error|ERR!) code E404$/m.test(answer.stderr) ? "E404" : undefined;
 		}
 		return code === "E404"
 			? { kind: "absent" }

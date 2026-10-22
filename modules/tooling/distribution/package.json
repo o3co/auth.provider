@@ -8,8 +8,8 @@
 		"check": "node src/main.ts",
 		"bundles": "node src/bundles.ts",
 		"release-check": "node src/release-check.ts",
-		"release-pack": "node src/release-pack.ts",
-		"release-published": "node src/release-published.ts"
+		"release-pack": "node src/release/pack.ts",
+		"release-published": "node src/release/check-published.ts"
 	},
 	"exports": {
 		".": "./src/contract.ts"

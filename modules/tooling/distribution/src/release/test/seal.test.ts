@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { integrityOf, type Packed, packedOf, sealed, zodOf } from "../src/seal.ts";
+import { integrityOf, type Packed, packedOf, sealed, zodOf } from "../seal.ts";
 
 /** A tarball as pnpm packs one: `package/package.json` and a file. */
 function tarball(name: string, version: string): string {
@@ -50,7 +50,7 @@ it("reads the one zod the lockfile holds, and refuses none, two, or one without 
 });
 
 it("reads the workspace's own lockfile, whose zod an app is held to", () => {
-	const root = join(import.meta.dirname, "..", "..", "..", "..");
+	const root = join(import.meta.dirname, "..", "..", "..", "..", "..", "..");
 	const zod = zodOf(readFileSync(join(root, "pnpm-lock.yaml"), "utf8"));
 	expect(typeof zod === "string" ? zod : zod.version).toBe("4.6.7");
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { type Lookup, lookupOf, publishedProblems } from "../src/published.ts";
-import type { Packed } from "../src/seal.ts";
+import { type Lookup, lookupOf, publishedProblems } from "../published.ts";
+import type { Packed } from "../seal.ts";
 
 const packed: Packed[] = [
 	{ name: "@o3co/auth-provider-foundation", version: "0.19.0", integrity: "sha512-F" },
@@ -55,6 +55,10 @@ describe("reading npm view's answer", () => {
 		expect(lookupOf({ status: 1, stdout: e404, stderr: "npm error code E404" })).toEqual({
 			kind: "absent",
 		});
+		// Without JSON, npm's error code line alone, as npm 10 and before write it.
+		for (const stderr of ["npm error code E404\nnpm error 404 Not Found", "npm ERR! code E404"]) {
+			expect(lookupOf({ status: 1, stdout: "", stderr })).toEqual({ kind: "absent" });
+		}
 		expect(lookupOf({ status: 0, stdout: '"sha512-AbC+/="\n', stderr: "" })).toEqual({
 			kind: "present",
 			integrity: "sha512-AbC+/=",
@@ -70,6 +74,14 @@ describe("reading npm view's answer", () => {
 			{ status: 0, stdout: "", stderr: "" },
 			{ status: 0, stdout: '"sha1-abc"', stderr: "" },
 			{ status: 0, stdout: "null", stderr: "" },
+			// E404 in a URL of another error is not npm's error code.
+			{
+				status: 1,
+				stdout: "",
+				stderr:
+					"npm error code ECONNRESET\nnpm error network request to https://r.example/E404/x failed",
+			},
+			{ status: 1, stdout: "", stderr: "npm error E404 somewhere in a message" },
 		]) {
 			expect(lookupOf(answer).kind, JSON.stringify(answer)).toBe("failed");
 		}

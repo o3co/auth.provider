@@ -13,13 +13,10 @@
 ## Offers
 - `pnpm distribution`: prints each problem and exits 1, or prints `distribution: ok`.
 - `pnpm bundles`: builds each shipped bundle into `dist/bundles/<concern directory>` at the workspace's `version`: its members compiled to JS and declarations (tests and test tools, a trial file among them, left out), named publicly, with their other files, and its manifest. Prints each problem and exits 1, or how many it built.
-- `pnpm release-pack <dir>` (after `pnpm bundles`): packs every bundle but the one holding the index, seals the index with their integrity and zod's, then packs the index's bundle and the entrances, into `dir`. Prints each problem and exits 1.
-- `pnpm release-published <dir>`: before anything is published, asks the registry for each tarball's name at its version; exits 1, naming each, where one is there with another integrity or its answer cannot be read.
+- `pnpm release-pack` and `pnpm release-published`: packing the release with its index sealed, and checking it before anything is published; see the internal module `release`.
 - `pnpm release:check`: packs every bundle and entrance, makes an app of each pattern with the packed `create-auth-provider`, installs it from the tarballs alone, type-checks it, and boots it to `/readyz` or to its refusals, each told. It also assembles an app by hand, as one keeping its own composition root does: `combinations`' full names, made published, installed from the tarballs, each module imported, and assembled to the kernel's refusals. Exits 1 on any problem.
 
 ## Invariants
-- The index is sealed over every packed bundle but its own: `integrity` names each bundle's npm integrity (the SHA-512 of its tarball's bytes, at the index's `version`), and `zod` the one zod the workspace's lockfile holds, with its integrity. A bundle without exactly one tarball, a tarball of another version or of no such bundle, a lockfile without exactly one zod or its sha512 integrity, or not exactly one bundle declaring the index refuses the pack.
-- A package already published at the release's version, the index's bundle and the entrances among them, must be this run's tarball: any other integrity, an npm error other than E404, an answer that is no JSON or holds no sha512 integrity stops the release before anything is published; E404 alone is not published.
 - The release check refuses a tarball without its `LICENSE`.
 - The release check boots each app in the image its Dockerfile builds; only the `deps` stage is replaced, by the same `--prod` install from the tarballs in the `base` stage, as the registry has none of them yet.
 - Without Docker, the release check exits 1 at once: no boot is skipped.
