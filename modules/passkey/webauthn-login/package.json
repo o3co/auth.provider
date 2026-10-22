@@ -20,7 +20,7 @@
 		"@mod/rate-limit": "workspace:*",
 		"@mod/refresh": "workspace:*",
 		"@mod/subject-revocation": "workspace:*",
-		"@mod/webauthn": "workspace:*",
+		"@mod/passkeys": "workspace:*",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {

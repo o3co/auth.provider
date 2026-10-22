@@ -2,23 +2,25 @@ import { randomBytes } from "node:crypto";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
-import { assemble, BootRefused, isUnavailable, kernelConfig } from "@mod/kernel";
+import { assemble, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
-import { expect, it } from "vitest";
-import { ceremoniesFor } from "../src/ceremony/ceremony.ts";
-import { registrations, type Verification } from "../src/contract.ts";
-import webauthn from "../src/module.ts";
-import { keptChallenges, keptPasskeys } from "../src/records.ts";
-import { registrationsOver } from "../src/registration/registrations.ts";
+import type { Verification } from "@mod/webauthn";
+import webauthn from "@mod/webauthn/module";
 import {
 	type Client,
 	type CreationOptions,
+	testCeremonies as ceremoniesFor,
 	softwareAuthenticator,
 	type Twist,
 	testOrigin,
-	type WebauthnSettings,
 	webauthnConfig,
-} from "../src/testing.ts";
+} from "@mod/webauthn/testing";
+import { expect, it } from "vitest";
+import { registrations } from "../src/contract.ts";
+import passkeysModule from "../src/module.ts";
+import { keptChallenges, keptPasskeys } from "../src/records.ts";
+import { registrationsOver } from "../src/registration/registrations.ts";
+import { passkeysConfig } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
 
 type Options = CreationOptions & { excludeCredentials: { id: string }[] };
@@ -163,8 +165,8 @@ it("throws unavailable when a store cannot tell", async () => {
 
 it("offers registrations in a composition without a session, and serves no route of its own", async () => {
 	const app = await assemble({
-		modules: [http, memoryStores().module, webauthn],
-		config: { ...kernelConfig(), ...httpConfig(), ...webauthnConfig() },
+		modules: [http, memoryStores().module, webauthn, passkeysModule],
+		config: { ...kernelConfig(), ...httpConfig(), ...webauthnConfig(), ...passkeysConfig() },
 		runtime: quietRuntime(),
 	});
 	await app.start();
@@ -180,35 +182,14 @@ it("offers registrations in a composition without a session, and serves no route
 	}
 });
 
-it("refuses to boot, never throwing, on an origin that is empty or no URL, wherever it is listed", async () => {
-	const cases: [Partial<WebauthnSettings>, string][] = [
-		[{ origins: [""] }, "webauthn.origins.0"],
-		[{ origins: ["not a url"] }, "webauthn.origins.0"],
-		[{ origins: [testOrigin, ""] }, "webauthn.origins.1"],
-		[{ "top-origins": [""] }, "webauthn.top-origins.0"],
-		[{ "top-origins": ["not a url"] }, "webauthn.top-origins.0"],
-	];
-	for (const [settings, where] of cases) {
-		const error = await assemble({
-			modules: [http, memoryStores().module, webauthn],
-			config: { ...kernelConfig(), ...httpConfig(), ...webauthnConfig(settings) },
-			runtime: quietRuntime(),
-		}).then(
-			() => undefined,
-			(e: unknown) => e,
-		);
-		expect(error, JSON.stringify(settings)).toBeInstanceOf(BootRefused);
-		expect((error as BootRefused).refusals.map((r) => r.where)).toEqual([where]);
-	}
-});
-
 it("gives a ceremony the challenge lifetime the operator sets", async () => {
 	const app = await assemble({
-		modules: [http, memoryStores().module, webauthn],
+		modules: [http, memoryStores().module, webauthn, passkeysModule],
 		config: {
 			...kernelConfig(),
 			...httpConfig(),
 			...webauthnConfig({ "challenge-lifetime": "30s" }),
+			...passkeysConfig(),
 		},
 		runtime: quietRuntime(),
 	});

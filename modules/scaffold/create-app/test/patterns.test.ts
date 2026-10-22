@@ -199,7 +199,7 @@ const areaModules: Readonly<Record<string, string>> = {
 	"second-factor": "@mod/mfa",
 	device: "@mod/device-grant",
 	mtls: "@mod/mtls",
-	passkey: "@mod/webauthn",
+	passkey: "@mod/passkeys",
 	exchange: "@mod/token-exchange",
 };
 

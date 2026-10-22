@@ -4,6 +4,7 @@ import { type PasskeyPart, passkeyArea } from "./area.ts";
 const setUp = (part: PasskeyPart): NewPart => ({
 	modules: [
 		"@mod/webauthn",
+		"@mod/passkeys",
 		"@mod/passkey-registration",
 		...(part.login ? ["@mod/webauthn-login"] : []),
 		...(part.secondFactor ? ["@mod/mfa-webauthn"] : []),
@@ -15,8 +16,10 @@ const setUp = (part: PasskeyPart): NewPart => ({
 			"rp-name": "Conformance",
 			origins: [...part.origins],
 			...(part.topOrigins ? { "top-origins": [...part.topOrigins] } : {}),
-			...(part.userVerification ? { "user-verification": part.userVerification } : {}),
 			...(part.challengeSeconds ? { "challenge-lifetime": `${part.challengeSeconds}s` } : {}),
+		},
+		passkeys: {
+			...(part.userVerification ? { "user-verification": part.userVerification } : {}),
 			...(part.maxCredentials ? { "max-credentials": part.maxCredentials } : {}),
 		},
 		...(part.login

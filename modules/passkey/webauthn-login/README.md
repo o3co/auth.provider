@@ -6,7 +6,7 @@
 - Declares the amr this login gives: `hwk`, which means only possession of the key and includes no user verification.
 
 ## Not here
-- Checking a ceremony, and keeping credentials and challenges: `webauthn`.
+- Keeping credentials and challenges: `passkeys`, which checks the ceremony through `webauthn`.
 - Client authentication, the body a grant takes, and whether it is allowed: `token-endpoint`.
 - Refresh families: `refresh`. The token format: `tokens`.
 - A browser login: there is none, so no session opens.
@@ -36,4 +36,4 @@
 - A store that cannot answer is `503`, never a refusal.
 
 ## Depends on
-- `kernel`, `http`, `grants`, `client-allowance`, `webauthn`, `refresh`, `subject-revocation`, `issuer`, `rate-limit`, `audit`
+- `kernel`, `http`, `grants`, `client-allowance`, `passkeys`, `refresh`, `subject-revocation`, `issuer`, `rate-limit`, `audit`

@@ -1,5 +1,5 @@
-import { challengeOf } from "../ceremony/ceremony.ts";
-import type { Ceremonies, RegistrationRefusal, Registrations, Verification } from "../contract.ts";
+import { type Ceremonies, challengeOf, type Verification } from "@mod/webauthn";
+import type { RegistrationRefusal, Registrations } from "../contract.ts";
 import type { KeptChallenges, KeptPasskeys } from "../records.ts";
 
 export interface RegistrationParts {

@@ -3,9 +3,9 @@ import { clientAllowance } from "@mod/client-allowance";
 import type { Grant, GrantOutcome } from "@mod/grants";
 import { issuer } from "@mod/issuer";
 import type { BuildContext } from "@mod/kernel";
+import { type Passkeys, passkeys } from "@mod/passkeys";
 import { type Lineage, lineage } from "@mod/refresh";
 import { type SubjectRevocation, subjectRevocation } from "@mod/subject-revocation";
-import { type Passkeys, passkeys } from "@mod/webauthn";
 import events from "../audit-events.ts";
 import { passkeyAmr, webauthnGrantType } from "../contract.ts";
 

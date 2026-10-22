@@ -2088,6 +2088,9 @@ importers:
       '@mod/labels':
         specifier: workspace:*
         version: link:../../foundation/labels
+      '@mod/passkeys':
+        specifier: workspace:*
+        version: link:../passkeys
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -2097,9 +2100,6 @@ importers:
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
-      '@mod/webauthn':
-        specifier: workspace:*
-        version: link:../webauthn
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -2131,9 +2131,34 @@ importers:
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
+      '@mod/webauthn':
+        specifier: workspace:*
+        version: link:../webauthn
       '@mod/webauthn-store':
         specifier: workspace:*
         version: link:../../templates/webauthn-store
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/passkey/passkeys:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/webauthn':
+        specifier: workspace:*
+        version: link:../webauthn
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -2150,15 +2175,6 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@mod/http':
-        specifier: workspace:*
-        version: link:../../foundation/http
-      '@mod/records':
-        specifier: workspace:*
-        version: link:../../foundation/records
-      '@mod/store':
-        specifier: workspace:*
-        version: link:../../foundation/store
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -2183,6 +2199,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/passkeys':
+        specifier: workspace:*
+        version: link:../passkeys
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -2192,9 +2211,6 @@ importers:
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
-      '@mod/webauthn':
-        specifier: workspace:*
-        version: link:../webauthn
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -3477,15 +3493,15 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/passkeys':
+        specifier: workspace:*
+        version: link:../../passkey/passkeys
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records
       '@mod/store':
         specifier: workspace:*
         version: link:../../foundation/store
-      '@mod/webauthn':
-        specifier: workspace:*
-        version: link:../../passkey/webauthn
 
   modules/tooling/conformance:
     dependencies:

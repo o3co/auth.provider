@@ -2,7 +2,6 @@ import { assemble, contract, defineModule, isUnavailable, kernelConfig } from "@
 import { quietRuntime } from "@mod/kernel/testing";
 import { type FactorKind, factorKinds, type Opened, type Verified } from "@mod/mfa-extensions";
 import { type AttributesAnswer, subjectAttributes } from "@mod/subject-attributes";
-import { challengeStore, passkeyStore } from "@mod/webauthn";
 import webauthnModule from "@mod/webauthn/module";
 import {
 	softwareAuthenticator,
@@ -17,11 +16,6 @@ import kindModule from "../src/module.ts";
 let shift = 0;
 const runtime = quietRuntime({ clock: { now: () => Date.now() + shift } });
 const kinds = contract<readonly FactorKind[]>("kinds");
-/** webauthn's stores, which the ceremonies never reach. */
-const unused = defineModule({ name: "webauthn-stores" }, (m) => [
-	m.provide(passkeyStore).by(() => ({}) as never),
-	m.provide(challengeStore).by(() => ({}) as never),
-]);
 const browser = { origin: testOrigin };
 /** What subject-attributes answers, by subject; unknown for any other. */
 const attributes = new Map<string, AttributesAnswer>();
@@ -45,7 +39,6 @@ const handleOf = (secret: string) => (JSON.parse(secret) as { handle: string }).
 async function boot(settings: Record<string, unknown> = {}) {
 	const app = await assemble({
 		modules: [
-			unused,
 			attributesStandIn,
 			webauthnModule,
 			kindModule,

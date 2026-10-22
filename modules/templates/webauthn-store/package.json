@@ -4,14 +4,14 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "wiring",
-	"wires": "@mod/webauthn",
+	"wires": "@mod/passkeys",
 	"exports": {
 		"./module": "./src/module.ts"
 	},
 	"dependencies": {
 		"@mod/kernel": "workspace:*",
+		"@mod/passkeys": "workspace:*",
 		"@mod/records": "workspace:*",
-		"@mod/store": "workspace:*",
-		"@mod/webauthn": "workspace:*"
+		"@mod/store": "workspace:*"
 	}
 }

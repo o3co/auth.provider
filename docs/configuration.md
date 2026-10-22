@@ -470,6 +470,15 @@ From `@mod/passkey-registration`.
 | `passkey-registration.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over both registration routes. |
 | `passkey-registration.window` | string | `5m` |  |  |  | The window requests are counted over, from 1s to 1d. |
 
+## passkeys
+
+From `@mod/passkeys`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `passkeys.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  | Whether the authenticator is asked to verify its user, as WebAuthn says it. |
+| `passkeys.max-credentials` | integer (1–100) | `10` |  |  |  | The most passkeys a subject may hold, from 1 to 100. |
+
 ## rate-limit
 
 From `@mod/rate-limit`.
@@ -711,8 +720,6 @@ From `@mod/webauthn`.
 | `webauthn.origins` | list of string |  | yes |  | `["https://login.example.invalid"]` | The origins ceremonies may come from, matched exactly: https web origins (http only on localhost), or Android app origins. |
 | `webauthn.top-origins` | list of string | `[]` |  |  |  | The pages that may frame a ceremony; none by default, so any ceremony in a frame is refused. |
 | `webauthn.challenge-lifetime` | string | `2m` |  |  |  | How long a ceremony's challenge can be answered, from 10s to 10m. |
-| `webauthn.user-verification` | required \| preferred \| discouraged | `preferred` |  |  |  | Whether the authenticator is asked to verify its user, as WebAuthn says it. |
-| `webauthn.max-credentials` | integer (1–100) | `10` |  |  |  | The most passkeys a subject may hold, from 1 to 100. |
 
 ## webauthn-login
 

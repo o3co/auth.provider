@@ -6,13 +6,13 @@ import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
+import { type RegistrationRefusal, type Registrations, registrations } from "@mod/passkeys";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { entryRequirements } from "@mod/session-requirements";
 import sessionRequirements from "@mod/session-requirements/module";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
-import { type RegistrationRefusal, type Registrations, registrations } from "@mod/webauthn";
 import { afterEach, describe, expect, it } from "vitest";
 import registration from "../src/module.ts";
 
@@ -49,16 +49,16 @@ async function serve(section: Record<string, unknown> = {}) {
 	const state = { answer: { kind: "registered", credential } as Registered, down: false };
 	const asked: unknown[][] = [];
 	const audit = auditStandIn();
-	const standIn = defineModule({ name: "webauthn" }, (m) => [
+	const standIn = defineModule({ name: "passkeys" }, (m) => [
 		m.provide(registrations).by(() => ({
 			creation: async (subject) => {
 				asked.push(["creation", subject]);
-				if (state.down) throw new Unavailable("webauthn");
+				if (state.down) throw new Unavailable("passkeys");
 				return { options: { for: subject } };
 			},
 			register: async (...args) => {
 				asked.push(["register", ...args]);
-				if (state.down) throw new Unavailable("webauthn");
+				if (state.down) throw new Unavailable("passkeys");
 				return state.answer;
 			},
 		})),

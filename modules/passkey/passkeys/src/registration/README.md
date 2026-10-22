@@ -1,12 +1,12 @@
 # registration
 
-Internal module of `webauthn`: registering passkeys.
+Internal module of `passkeys`: registering passkeys.
 
 ## Responsibilities
 - Registers passkeys for a subject: options, then the verified response.
 
 ## Not here
-- The ceremonies (`ceremony`). How records are written (the package's records). Who the subject is (the caller).
+- The ceremonies (`webauthn`). How records are written (the package's records). Who the subject is (the caller).
 
 ## Offers
 - `registrationsOver` (ceremonies, records, challenges, user verification, the limit, a fresh handle) → the package's `Registrations`.
@@ -16,4 +16,4 @@ Internal module of `webauthn`: registering passkeys.
 - A subject's handle is made on its first options, and kept.
 
 ## Depends on
-- `ceremony`; the package's contract and records
+- `webauthn` (the ceremonies); the package's contract and records
