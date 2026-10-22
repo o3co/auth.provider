@@ -11,6 +11,7 @@ How to run auth-provider 0.18: Redis, rotating keys, upgrading, and what to watc
 - [Upgrading](#upgrading)
 - [Revoking a user from the ledger](#revoking-a-user-from-the-ledger)
 - [Keeping the second-factor witness at the ledger](#keeping-the-second-factor-witness-at-the-ledger)
+- [Second factors left without their claim](#second-factors-left-without-their-claim)
 - [Probes and alerts](#probes-and-alerts)
 - [Stopping](#stopping)
 
@@ -33,7 +34,7 @@ The app relies on the deployment for these. Each is required, not advice.
 
 The `redis` module checks the server once, at boot, and refuses to start when any of these does not hold:
 
-- Redis 7.0 or later, answering as a primary. Cluster mode is refused, and so is a proxy that splits keys across nodes.
+- Redis 7.0 or later, answering as a primary. Cluster mode is refused, and so is a proxy that splits keys across nodes: a write across partitions runs as one script on the one server, over the slots of every partition it touches.
 - `maxmemory-policy noeviction`, where any composed module keeps data that must never be evicted (sessions, the token denylist, lockouts, DPoP proof ids).
 - `appendonly yes` and `appendfsync always`, where any composed module keeps data that must survive a crash. RDB snapshots are not enough.
 - With `redis.replication = replicas`: `min-replicas-to-write` and `min-replicas-max-lag` of at least 1.
@@ -135,6 +136,7 @@ Only a value a `previous` key sealed is sealed again; one `next` sealed is newer
 - Changing `redis.prefix` starts from empty state: every key, sessions, refresh tokens, the denylist, lockouts and MFA factors included, lives under the prefix.
 - `create-auth-provider` never writes into a non-empty directory. To add a feature to an existing app, generate again (`create-auth-provider <target> --add <feature>`) and carry your configuration over.
 - A boot that refuses exits with status 78 and prints each refusal on stderr, by setting path and never by value. Fix every refusal it lists; they are reported together.
+- **From 0.18, upgrade every instance before looking for second factors left without their claim.** A 0.18 instance writes a WebAuthn second factor and its claim apart, so while one runs, or a request it took is still under way, it can leave a factor without its claim. Look once none is left: see [Second factors left without their claim](#second-factors-left-without-their-claim).
 
 ## Revoking a user from the ledger
 
@@ -209,10 +211,24 @@ Two cases remain where a reset that stopped after its write, and went on after a
 
 1. Make sure the app's `src/witness-backfill.ts` is this release's (it counts `unclaimed` and `unknown`); one generated before reads `unclaimed` as nothing and exits 0.
 2. Run the backfill for the subject. `marked`: a factor had no mark, and now has one. `held` or `none`: the mark and the factors agree. `unavailable` (`failed`): run it again once the ledger and the store answer.
-3. `unclaimed`: a factor of a unique-valued kind is written and none is claimed. Do not reset: the subject proves that factor as before. Run the backfill again a little later; a binding still waiting for its claim then answers `held` or `marked`, or `inconsistent` where it ended as a duplicate. If it stays `unclaimed`, this factor holds no claim of its own on its value (the claim lost, a binding stopped before claiming, or another subject's factor holding it): the check that keeps two factors from holding one value does not cover this factor. Leave it, or tell the user and reset: the reset removes the factor and they bind again.
+3. `unclaimed`: a factor of a unique-valued kind is written and none is claimed. Do not reset at once: the subject proves that factor as before. Where a 0.18 instance still runs, run the backfill again once none is left; a binding it was still writing then answers `held` or `marked`. Once every instance runs 0.19, a factor that stays `unclaimed` holds no claim of its own on its value (left by 0.18, the claim lost, or another factor of the subject holding it): the check that keeps two factors from holding one value does not cover it. Mend it as [Second factors left without their claim](#second-factors-left-without-their-claim) says.
 4. `inconsistent`: no factor of a counting kind is written and a mark stands. With no binding of the subject running meanwhile (stop or tell the user, as a reset removes a factor bound meanwhile too), reset the subject's second factors again: its own write is now the store's, so it withdraws the mark. Then run the backfill once more and check `none`; if it stays `inconsistent`, the store is not keeping its answers: mend it first.
 
 **While the ledger cannot answer.** Subjects holding no counting factor get `503` at login, when they start their first enrollment and when they change their credentials, until it answers; subjects holding one are let through without asking it.
+
+## Second factors left without their claim
+
+A WebAuthn second factor (`mfa-webauthn`) is kept with a claim on the pair of the subject's user handle and its credential id, which keeps the subject from binding one credential twice; 0.19 writes the factor and its claim in one write. Another subject may hold the same credential id under its own handle: that is no conflict. A factor 0.18 left without its claim (the store unavailable between its two writes), or one whose claim the store lost, stays usable: the user proves it and logs in as before. But it does not stand for the subject:
+
+- The check that keeps the subject from binding the same credential twice does not cover it.
+- Under `mfa.mode = required`, or with a second-factor witness, the subject cannot remove another factor that stands while this one is all that would be left: the removal is refused as the last.
+- With a witness, the backfill counts the subject `unclaimed`, where no other counting factor of it stands, and leaves the mark as it is. A reset removes such a factor as it removes any other. Only with `withdraw-url` set and a mark on the subject does the reset then read what stands, as [When a reset removes the mark](#keeping-the-second-factor-witness-at-the-ledger) says: it answers unavailable (`unsure`) where the factors written since it are such factors alone, none of its counting factors standing (as a 0.18 instance still running may write one), or where the subject's records were lost or put back since the reset (the fence it reads is behind the reset's). Without `withdraw-url` the reset clears the mark without that read, and with no mark it reads nothing: a reset that answered does not show that no such factor is left.
+
+Nothing mends it by itself, and no release adds the claim later. Mend it by a reset, once you know the factor holds no claim of its own:
+
+1. Upgrade every instance to 0.19, and let the requests the 0.18 instances took finish.
+2. Find the subjects. No tool names them yet. With a second-factor witness, run `pnpm run witness-backfill` with the subjects on standard input; it counts `unclaimed`, never naming a subject, and reads only the subjects you give it, so a count of 0 says nothing of a subject left out. It counts a subject `unclaimed` only where none of its counting factors stands: one holding a sound factor beside a factor without its claim answers `held` or `marked`. So even given every subject, a count of 0 does not show every claim in place. Give it every subject that holds a WebAuthn second factor (from the user ledger, or every subject you know); to find which subjects are `unclaimed`, run it on smaller lists, down to one subject a run. Without a witness, no script finds them. A sign to look into, never proof on its own: under `mfa.mode = required` or with a witness, removing the subject's WebAuthn second factor is refused as the last while another counting factor is listed (a recovery code does not count, so a WebAuthn factor beside codes alone is rightly the last). Reset only once you know the factor holds no claim of its own: with a witness, the backfill answering `unclaimed` for that subject alone tells it; without one, no tool tells it yet.
+3. Tell the user that their security key will be removed and they will bind it again, then reset the subject's second factors as an operator. The reset removes the factor (and, with a witness, the mark, as the reset's own write); the user binds the key again, and the new binding writes the factor and its claim in one write.
 
 ## Probes and alerts
 
