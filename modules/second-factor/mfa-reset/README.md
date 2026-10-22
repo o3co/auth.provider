@@ -23,4 +23,4 @@
 - A finished run logs `mfa-flows.reset`, an unfinished one `mfa-flows.reset_incomplete` (`stoppedAt`: `sessions`, `factors` or `lock`; `error`: the error's type); the names stay `mfa-flows`' as operators know them.
 
 ## Depends on
-- `kernel`, `audit`, `mfa` (factor decisions), `rate-limit` (lockouts), `subject-revocation` (boundaries), `mfa-flows` (its lockout, through `flowParts`).
+- `kernel`, `audit`, `mfa` (composed with it), `mfa-managing` (`clear`), `rate-limit` (lockouts), `subject-revocation` (boundaries), `mfa-flows` (its lockout, through `flowParts`).

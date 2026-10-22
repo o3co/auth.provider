@@ -2781,6 +2781,9 @@ importers:
       '@mod/mfa-flows':
         specifier: workspace:*
         version: link:../mfa-flows
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit

@@ -1,13 +1,13 @@
 import { type Audit, declaredAudit } from "@mod/audit";
 import { type Log, Unavailable } from "@mod/kernel";
-import type { Factors } from "@mod/mfa";
+import type { FactorManaging } from "@mod/mfa-managing";
 import type { LockoutPolicy, Lockouts } from "@mod/rate-limit";
 import type { Revocations } from "@mod/subject-revocation";
 import events from "./audit-events.ts";
 import type { MfaReset } from "./contract.ts";
 
 export interface ResetParts {
-	readonly factors: Pick<Factors, "clear">;
+	readonly factors: Pick<FactorManaging, "clear">;
 	readonly revocations: Pick<Revocations, "record">;
 	readonly lockouts: Pick<Lockouts, "releaseUnder">;
 	/** `mfa-flows`' lockout: its name and policy. */

@@ -1,7 +1,7 @@
 import { audit } from "@mod/audit";
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
-import { factors } from "@mod/mfa";
 import { flowParts } from "@mod/mfa-flows";
+import { factorManaging } from "@mod/mfa-managing";
 import { lockouts } from "@mod/rate-limit";
 import { revocations } from "@mod/subject-revocation";
 import { expect, it } from "vitest";
@@ -13,7 +13,9 @@ it("resets over the contracts it is given, releasing mfa-flows' lockout by its n
 	const policy = { budget: 10 };
 	const parts = defineModule({ name: "parts" }, (m) => [
 		m.provide(flowParts).by(() => ({ lockout: { name: "mfa", policy } }) as never),
-		m.provide(factors).by(() => ({ clear: async () => ({ count: 1, kinds: ["code"] }) }) as never),
+		m
+			.provide(factorManaging)
+			.by(() => ({ clear: async () => ({ count: 1, kinds: ["code"] }) }) as never),
 		m.provide(revocations).by(() => ({ record: async () => ({ complete: true }) }) as never),
 		m.provide(lockouts).by(
 			() =>
