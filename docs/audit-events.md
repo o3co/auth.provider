@@ -126,6 +126,12 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 |---|---|---|
 | `passkey.registered` | `source` | a passkey is kept for the session's subject, the event's subject |
 
+## @mod/passkeys
+
+| Kind | Attributes | Recorded when |
+|---|---|---|
+| `passkey.enrollment_inconsistent` | `at` | the witness marks a subject holding no passkey, so the passkey store may have lost them; `at` is where it was found: `held`, `registration`, `removal`, `reset` or `settle` |
+
 ## @mod/rate-limit
 
 | Kind | Attributes | Recorded when |

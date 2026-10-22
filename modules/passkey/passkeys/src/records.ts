@@ -97,6 +97,13 @@ export function keptPasskeys(store: PasskeyStore, now: () => number = Date.now) 
 		);
 		return taken !== undefined && same(taken.before);
 	};
+	/** Strips a passkey's record to its subject, only where that subject holds it: one another subject took over is theirs. */
+	const strip = (subject: string, id: string) =>
+		store.credentials.update(credentialKey(id), (current) => {
+			const kept = keptOf(current);
+			if (kept.kind !== "passkey" || kept.subject !== subject) return undefined;
+			return { value: stored({ v: 1, subject, removed: true }) };
+		});
 	return {
 		holder,
 		/** The subject's handle; `fresh` becomes it when the subject has none yet. */
@@ -217,13 +224,21 @@ export function keptPasskeys(store: PasskeyStore, now: () => number = Date.now) 
 			const left = holderOf(delisted.after).credentials;
 			const removed = holderOf(delisted.before).credentials.includes(id) && !left.includes(id);
 			if (!removed) return { removed: false, empty: left.length === 0 };
-			// Only a record its holder was this subject: one another subject took over is theirs.
-			await store.credentials.update(credentialKey(id), (current) => {
-				const kept = keptOf(current);
-				if (kept.kind !== "passkey" || kept.subject !== subject) return undefined;
-				return { value: stored({ v: 1, subject, removed: true }) };
-			});
+			await strip(subject, id);
 			return { removed: true, empty: left.length === 0 };
+		},
+		/** Takes every passkey off the subject's holder in one update, keeping its handle, then strips their records. `removed` counts what this call took off. */
+		cleared: async (subject: string): Promise<{ readonly removed: number }> => {
+			const delisted = await store.subjects.update(subjectKey(subject), (current) => {
+				const holder = holderOf(current);
+				if (holder.credentials.length === 0) return undefined;
+				return { value: stored({ ...current, credentials: [] }) };
+			});
+			if (!delisted) return { removed: 0 };
+			const left = new Set(holderOf(delisted.after).credentials);
+			const taken = holderOf(delisted.before).credentials.filter((id) => !left.has(id));
+			for (const id of taken) await strip(subject, id);
+			return { removed: taken.length };
 		},
 	};
 }

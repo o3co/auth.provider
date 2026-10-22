@@ -74,4 +74,22 @@ export interface RegisteredPasskey {
 
 export const registrations = contract<Registrations>("passkeys.registrations");
 
+/** Whether subjects hold passkeys, kept in line with the witness composed. Throws Unavailable when the store or the witness cannot tell. */
+export interface PasskeyHolders {
+	/** Whether the subject holds a passkey; settled with the witness first, so a mark beside none is unavailable. */
+	held(subject: string): Promise<boolean>;
+	/** Ends every passkey of the subject, and has its mark go: a reset's. */
+	cleared(subject: string): Promise<{ readonly removed: number }>;
+	/** Brings the witness's mark in line with the passkeys the subject holds. */
+	settle(subject: string): Promise<void>;
+	/** Whether a witness is composed, as read at boot. */
+	readonly witnessed: boolean;
+}
+
+/** Taken by the modules that log in with passkeys and reset them, as it can end every passkey a subject holds. */
+export const passkeyHolders = contract<PasskeyHolders>("passkeys.holders", {
+	takenBy: ["login-passkey", "passkey-reset"],
+});
+
 export * from "./store.ts";
+export * from "./witness.ts";

@@ -1,3 +1,4 @@
+import { auditStandIn } from "@mod/audit/testing";
 import { assemble, BootRefused, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import webauthn from "@mod/webauthn/module";
@@ -9,7 +10,7 @@ import { memoryStores } from "./stores.ts";
 
 const boot = (settings: Partial<PasskeysSettings>) =>
 	assemble({
-		modules: [memoryStores().module, webauthn, passkeysModule],
+		modules: [memoryStores().module, auditStandIn().module, webauthn, passkeysModule],
 		config: { ...kernelConfig(), ...webauthnConfig(), ...passkeysConfig(settings) },
 		runtime: quietRuntime(),
 	});
