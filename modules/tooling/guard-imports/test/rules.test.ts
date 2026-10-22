@@ -606,4 +606,97 @@ describe("guard-imports", () => {
 			"@c/feature/src/module.ts:5 p.audit.record",
 		]);
 	});
+
+	describe("G32 internal by the packages the narrower's owner lists", () => {
+		const urls = pkg("@c/urls", {
+			"src/contract.ts": [
+				"declare const brand: unique symbol;",
+				'export type ConfiguredUrl = string & { readonly [brand]: "ConfiguredUrl" };',
+				"export const read = (text: string) => text as ConfiguredUrl;",
+			].join("\n"),
+		});
+		const policy = (internalBy: unknown) =>
+			pkg(
+				"@c/policy",
+				{
+					"src/contract.ts": [
+						'import type { ConfiguredUrl } from "@c/urls";',
+						"export interface Narrower { readonly hosts?: readonly string[]; readonly internal?: ConfiguredUrl }",
+						"export const send = (url: string, n?: Narrower) => (n?.internal === undefined ? url : n.internal);",
+					].join("\n"),
+				},
+				{
+					exports: { ".": "./src/contract.ts" },
+					dependencies: { "@c/urls": "*" },
+					internalBy,
+				},
+				"foundation",
+			);
+		/** A package writing `internal` in each way the rule counts, and in ways it does not. */
+		const writer = (name: string) =>
+			pkg(
+				name,
+				{
+					"src/module.ts": [
+						'import { type ConfiguredUrl, read } from "@c/urls";',
+						'import { send } from "@c/policy";',
+						"interface Source { readonly url: string; readonly internal?: ConfiguredUrl }",
+						'const url = read("http://collector:8080/");',
+						"export const direct = () => send(url, { internal: url });",
+						"const own = { internal: url };",
+						"export const kept = () => send(url, own);",
+						"const internal: ConfiguredUrl | undefined = url;",
+						"export const short = () => send(url, { hosts: [], ...(internal === undefined ? {} : { internal }) });",
+						"export const source: Source = { url, internal: url };",
+						'export const computed = () => send(url, { ["internal"]: url });',
+						// Not counted: another field of that name, a binding, a value of no type.
+						"export const flag = { internal: true };",
+						"export const read2 = (s: Source) => { const { internal: i } = s; return i; };",
+						"export const lost = () => send(url, { internal: (url as any) });",
+					].join("\n"),
+					"test/module.test.ts":
+						'import { read } from "@c/urls";\nexport const t = { internal: read("http://x/") };\n',
+				},
+				{ exports: { ".": "./src/module.ts" }, dependencies: { "@c/urls": "*", "@c/policy": "*" } },
+			);
+		const found = (packages: Pkg[]) =>
+			check(packages, budget)
+				.filter((v) => v.rule.startsWith("G32"))
+				.map((v) => `${v.where} ${v.detail}`);
+
+		it("passes a package the list names, writing internal in each way", () => {
+			expect(found([urls, policy(["@c/listed"]), writer("@c/listed")])).toEqual([]);
+		});
+
+		it("refuses each internal a package the list leaves out writes, and counts no other field, binding or test", () => {
+			expect(found([urls, policy(["@c/listed"]), writer("@c/listed"), writer("@c/other")])).toEqual(
+				[
+					"@c/other/src/module.ts:5 internal",
+					"@c/other/src/module.ts:6 internal",
+					"@c/other/src/module.ts:9 internal",
+					"@c/other/src/module.ts:10 internal",
+					"@c/other/src/module.ts:11 internal",
+				],
+			);
+		});
+
+		it("refuses a list naming a package that writes none, no workspace package, or one twice, and one not a list", () => {
+			const silent = pkg("@c/silent", { "src/module.ts": "export const x = 1;\n" });
+			expect(
+				found([
+					urls,
+					policy(["@c/listed", "@c/silent", "@c/gone", "@c/listed"]),
+					writer("@c/listed"),
+					silent,
+				]),
+			).toEqual([
+				"@c/policy internalBy names @c/listed twice",
+				"@c/policy internalBy: @c/silent writes no internal",
+				"@c/policy internalBy: @c/gone is no workspace package",
+			]);
+			expect(found([urls, policy("@c/listed"), writer("@c/listed")])).toEqual([
+				"@c/policy internalBy is no list of package names",
+			]);
+		});
+	});
 });

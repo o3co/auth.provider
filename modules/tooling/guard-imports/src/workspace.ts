@@ -28,6 +28,8 @@ export interface Pkg {
 		readonly network?: string | readonly string[];
 		/** Contracts it exports, by name, and the packages alone that may import each. */
 		readonly takenBy?: unknown;
+		/** The packages that may write the narrower's `internal` (G32). */
+		readonly internalBy?: unknown;
 		readonly exports?: Record<string, string>;
 		readonly dependencies?: Record<string, string>;
 		readonly peerDependencies?: Record<string, string>;
