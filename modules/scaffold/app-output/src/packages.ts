@@ -1,5 +1,6 @@
 /** What the output takes from where the packages come from; the caller implements it. */
 import type { Fragment } from "./fragments/contract.ts";
+import type { OutsideModules } from "./outside/contract.ts";
 
 /** Where the packages an app assembles come from, and how the app names them. */
 export interface Packages {
@@ -13,6 +14,8 @@ export interface Packages {
 	cards(names: readonly string[]): Card[];
 	/** The release the packages are of, and its repository where stated. */
 	release(): Release;
+	/** The packages outside the release among the names, as recorded; none where the caller has none. */
+	outside?(names: readonly string[]): OutsideModules | undefined;
 }
 
 /** A module's card and section defaults, as the app installs them, from the app's directory. */

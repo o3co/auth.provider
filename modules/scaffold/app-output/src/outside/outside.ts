@@ -1,0 +1,112 @@
+import { readFileSync } from "node:fs";
+import { stringify } from "yaml";
+import { type OutsideRecord, outsideLock, type Registries } from "../lockfile/contract.ts";
+
+/** The packages outside the release an app composes, as recorded when it is generated. */
+export interface OutsideModules {
+	readonly modules: readonly OutsideRecord[];
+	/** The registries they, and the release's packages, are installed from. */
+	readonly registries: Registries;
+	/** The names let through though published within the last day, each at its recorded version alone. */
+	readonly fresh?: readonly string[];
+}
+
+/** What the app is given beside its own files, where it composes packages outside the release. */
+export interface Beside {
+	readonly files: Readonly<Record<string, string>>;
+	readonly dependencies: Readonly<Record<string, string>>;
+	readonly scripts: Readonly<Record<string, string>>;
+	/** What the image's install stage copies, and runs once the dependencies are installed. */
+	readonly image: { readonly copy: readonly string[]; readonly after: string } | undefined;
+	/** The guide's section, and the agents' index's lines, on those packages. */
+	readonly guide: string;
+	readonly index: string;
+}
+
+/** What the app's script needs: the versions app-output itself depends on. */
+const scriptDependencies = { semver: "7.8.5", yaml: "2.9.1" };
+const recordFile = "outside-modules.json";
+const scriptFile = "scripts/check-outside.mjs";
+const script = "check:outside";
+/** A day, in minutes: pnpm installs no version published since. */
+const releaseAge = 1440;
+const releasePackage = (name: string) => name.startsWith("@o3co/auth-provider-");
+
+const nothing: Beside = {
+	files: {},
+	dependencies: {},
+	scripts: {},
+	image: undefined,
+	guide: "",
+	index: "",
+};
+
+/**
+ * What an app composing packages outside the release is given: their record and the script that
+ * holds the lockfile to it, the release's packages (those it depends on, and those an outside
+ * package takes as a peer) and zod held to one version each, no version from the last day but the
+ * release's and those let through, and the check in its image. Nothing where it composes none.
+ */
+export function besideRelease(
+	outside: OutsideModules | undefined,
+	app: {
+		readonly dependencies: Readonly<Record<string, string>>;
+		readonly version: string;
+		readonly zod: string;
+	},
+): Beside {
+	if (outside === undefined || outside.modules.length === 0) return nothing;
+	for (const name of outside.fresh ?? []) {
+		if (!outside.modules.some((m) => m.name === name))
+			throw new Error(`${name}: let through as fresh, but not recorded`);
+	}
+	const release = new Map(
+		Object.entries(app.dependencies).filter(([name]) => releasePackage(name)),
+	);
+	for (const { peerDependencies } of outside.modules) {
+		for (const peer of Object.keys(peerDependencies).filter(releasePackage)) {
+			if (!release.has(peer)) release.set(peer, app.version);
+		}
+	}
+	const held = [...release.keys()].sort();
+	const fresh = (outside.fresh ?? []).map(
+		(name) => `${name}@${outside.modules.find((m) => m.name === name)?.version}`,
+	);
+	const settings = {
+		overrides: {
+			...Object.fromEntries(held.map((name) => [name, release.get(name)])),
+			zod: app.zod,
+		},
+		minimumReleaseAge: releaseAge,
+		minimumReleaseAgeExclude: [...held, ...fresh.sort()],
+	};
+	const record = { modules: outside.modules, registries: outside.registries };
+	return {
+		files: {
+			[recordFile]: `${JSON.stringify(record, null, "\t")}\n`,
+			[scriptFile]: readFileSync(outsideLock.script, "utf8"),
+			"pnpm-workspace.yaml": stringify(settings),
+		},
+		dependencies: scriptDependencies,
+		scripts: { [script]: `node ${scriptFile}` },
+		image: { copy: [recordFile, scriptFile], after: `pnpm ${script}` },
+		guide: guideOf(outside.modules),
+		index: `\nPackages outside the release, not part of it: \`${recordFile}\` records each one as the app was generated.\n`,
+	};
+}
+
+function guideOf(modules: readonly OutsideRecord[]): string {
+	return [
+		"",
+		"## Packages outside this release",
+		"",
+		`These packages are not part of the release and not covered by its conformance. The app was generated with each one as \`${recordFile}\` records it:`,
+		"",
+		"| Package | Version | Integrity |",
+		"|---|---|---|",
+		...modules.map((m) => `| \`${m.name}\` | \`${m.version}\` | \`${m.integrity}\` |`),
+		"",
+		`After the first \`pnpm install\`, run \`pnpm ${script}\` and commit \`pnpm-lock.yaml\`: it holds the lockfile to that record, and the image runs it after installing. \`pnpm-workspace.yaml\` holds the release's packages and zod to one version each; when upgrading the release, upgrade those overrides with it. A version published within the last day is not installed, but for those \`minimumReleaseAgeExclude\` names.`,
+		"",
+	].join("\n");
+}

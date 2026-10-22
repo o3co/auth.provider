@@ -21,6 +21,7 @@
 - `namesPackages` and `vacant`, for a caller to refuse a plan before it composes; `mainSource`, the app's entry; `kernel` and `configFiles`, the packages every app depends on (its entry reads its configuration files through `config-files`).
 - `fragmentsIn`, `fragmentsOf`, `fragmentFile` and `settingsOf`: the internal module `fragments`'s.
 - `outsideLock`: see the internal module `lockfile`.
+- `Packages.outside`, where the caller has packages outside the release: what the app is given beside them, see the internal module `outside`; `appZod`, the zod every app depends on.
 
 ## Invariants
 - A target that holds anything is refused, never overwritten; a missing or empty one is taken. Every file is made before any is written.

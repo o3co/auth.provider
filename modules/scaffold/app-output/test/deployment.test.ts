@@ -193,3 +193,36 @@ it("builds on Node 24's latest, so a build takes its security fixes", async () =
 	expect(docker).toMatch(/^FROM node:24-alpine AS base$/m);
 	expect(docker).not.toContain("@sha256:");
 });
+
+it("records the packages outside the release and checks the lockfile against them, where the app composes one", async () => {
+	const grant = {
+		name: "@x/grant",
+		version: "1.2.0",
+		integrity: "sha512-AAAA",
+		dependencies: {},
+		optionalDependencies: {},
+		peerDependencies: { zod: "^4.6.0" },
+		peerDependenciesMeta: {},
+	};
+	const outside = { modules: [grant], registries: { default: "https://registry.npmjs.org" } };
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/http"], fakePackages(undefined, [], outside), readme);
+	const files = await readdir(target, { recursive: true });
+	expect(files).toEqual(
+		expect.arrayContaining([
+			"outside-modules.json",
+			"pnpm-workspace.yaml",
+			"scripts/check-outside.mjs",
+		]),
+	);
+	const manifest = JSON.parse(await read(target, "package.json"));
+	expect(manifest.scripts["check:outside"]).toBe("node scripts/check-outside.mjs");
+	expect(Object.keys(manifest.dependencies)).toEqual(
+		expect.arrayContaining(["semver", "yaml", "zod"]),
+	);
+	const docker = await read(target, "Dockerfile");
+	expect(docker).toContain("COPY outside-modules.json ./outside-modules.json");
+	expect(docker).toContain("RUN pnpm install --frozen-lockfile --prod && pnpm check:outside");
+	expect(await read(target, "README.md")).toContain("## Packages outside this release");
+	expect(await read(target, "AGENTS.md")).toContain("`outside-modules.json`");
+});
