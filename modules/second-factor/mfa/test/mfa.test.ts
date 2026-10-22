@@ -1207,6 +1207,12 @@ describe("the extension points mfa-extensions offers", () => {
 		}
 	});
 
+	it("leaves the factor contracts to mfa-reading, mfa-binding and mfa-managing, offering no factors of its own", () => {
+		for (const name of ["factors", "factorReading", "factorBinding", "factorManaging"]) {
+			expect(Object.keys(offered), name).not.toContain(name);
+		}
+	});
+
 	it("asks a gate contributed through mfa-extensions before a first binding, and a kind through it", async () => {
 		const gate = defineModule({ name: "gate-by-extensions" }, (m) => [
 			m.contribute(extensions.firstBindingGates).by(() => ({ admits: async () => false })),

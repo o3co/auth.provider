@@ -1,5 +1,5 @@
 import { audit } from "@mod/audit";
-import { defineModule } from "@mod/kernel";
+import { contract, defineModule } from "@mod/kernel";
 import { amrSources } from "@mod/login-gates";
 import { factorBinding } from "@mod/mfa-binding";
 import { factorKinds, firstBindingGates, secondFactorAmr, witnessing } from "@mod/mfa-extensions";
@@ -7,10 +7,13 @@ import { factorManaging } from "@mod/mfa-managing";
 import { factorReading } from "@mod/mfa-reading";
 import { enrollmentWitnesses } from "@mod/mfa-witness";
 import { resealers, seal } from "@mod/seal";
-import { enforcers, factorStore, factors, proofSteps } from "./contract.ts";
-import { addsMfa, byKind, factorDecisions } from "./factors.ts";
+import { enforcers, factorStore, proofSteps } from "./contract.ts";
+import { addsMfa, byKind, type Decisions, factorDecisions } from "./factors.ts";
 import { resealerOver } from "./records/resealer.ts";
 import { section } from "./section.ts";
+
+/** mfa's decisions, built once in each app and provided as its three faces; never offered. */
+const decisions = contract<Decisions>("mfa.decisions");
 
 export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => [
 	m.contribute(amrSources).by(async (c) => {
@@ -18,7 +21,7 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 		const second = kinds.some(addsMfa) ? [secondFactorAmr] : [];
 		return { name: "mfa", amr: [...second, ...kinds.flatMap((k) => k.amr)] };
 	}),
-	m.provide(factors).by(async (c) => {
+	m.provide(decisions).by(async (c) => {
 		await c.collect(proofSteps);
 		const kinds = await c.collect(factorKinds);
 		if (c.section.mode === "required" && !kinds.some((k) => k.counts)) {
@@ -51,10 +54,10 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 			log: c.log,
 		});
 	}),
-	// The three faces are the one implementation `factors` is, built once in each app.
-	m.provide(factorReading).by((c) => c.get(factors)),
-	m.provide(factorBinding).by((c) => c.get(factors)),
-	m.provide(factorManaging).by((c) => c.get(factors)),
+	// The three faces are the one implementation, built once in each app.
+	m.provide(factorReading).by((c) => c.get(decisions)),
+	m.provide(factorBinding).by((c) => c.get(decisions)),
+	m.provide(factorManaging).by((c) => c.get(decisions)),
 	m
 		.contribute(resealers)
 		.by(async (c) => resealerOver(await c.get(factorStore), await c.get(seal))),

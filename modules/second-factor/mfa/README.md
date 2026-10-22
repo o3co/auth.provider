@@ -12,7 +12,6 @@
 - `proofSteps`: at least one, or `mfa` refuses to boot.
 - Through `mfa-extensions`: `factorKinds`, asked at each binding and proof; `firstBindingGates`, asked by `begin`, with what the caller gave, while no counting factor is held; `witnessing` (at most one, two refusing boot).
 - Provides `mfa-reading`'s `factorReading`, `mfa-binding`'s `factorBinding` and `mfa-managing`'s `factorManaging`, one implementation in each app; their cards hold the members and their rules.
-  - `factors`: the three as one (`Factors`), with `Shown`, `Fence`, `Proved` and `Challenged` given on from `mfa-reading`, while readers still take it.
 - `fenceFollower`: the name what moves the fence on a revocation goes by among its followers.
 - Extension point `enforcers`: the modules holding sessions to the factors (`mfa-entry`); without one, whatever the mode, boot is refused.
 - Audit events, with the subject, once written (never for a refused or raced decision but a first binding another factor beat, nor a reset, never with a secret, proof or code): declared in `./audit-events`, listed in the audit event reference.
