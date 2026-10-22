@@ -1,13 +1,13 @@
 import { audit } from "@mod/audit";
-import type { BuildContext } from "@mod/kernel";
-import { logins } from "@mod/login-gates";
+import type { BuildContext, Parts } from "@mod/kernel";
+import { loginGates, logins } from "@mod/login-gates";
 import { factorReading } from "@mod/mfa-reading";
 import { type LockoutPolicy, lockouts } from "@mod/rate-limit";
 import { longestRecentMs, sessions } from "@mod/session";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { type EnrollmentFlow, enrollmentFlow } from "../contract.ts";
 import { permitsOver } from "../permits/permits.ts";
-import { proofOver, resumeOver } from "../proof/proof.ts";
+import { gateOver, proofOver, resumeOver } from "../proof/proof.ts";
 import { releaseOver } from "../release/release.ts";
 import { flowPartsOf } from "../seams/seams.ts";
 import type { Settings } from "../section.ts";
@@ -23,6 +23,16 @@ export const policyOf = (s: Settings): LockoutPolicy => ({
 	hardLimit: s.lockout["hard-limit"],
 	memoryMs: s.lockout.memory * 1000,
 });
+
+/** The gate `mfa` the package contributes to `login-gates`, over its factors and transactions. */
+export const gating = (m: Parts<Settings>) =>
+	m.contribute(loginGates).by(async (c) => ({
+		name: "mfa",
+		hold: gateOver({
+			factors: await c.get(factorReading),
+			transactions: await transactionsIn(c),
+		}),
+	}));
 
 /** The parts the module binding factors takes, from the contracts this package pulls. */
 export async function partsIn(c: BuildContext<Settings>) {

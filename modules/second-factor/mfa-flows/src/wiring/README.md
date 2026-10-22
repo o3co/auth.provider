@@ -12,6 +12,7 @@ Internal module of `mfa-flows`: what each of the package's internal modules is g
 - `handlersOver` (the build context, the lockout policy) → every route's handler, by name.
 - `policyOf` (the section) → the lockout policy `rate-limit` judges.
 - `partsIn` (the build context) → the parts the module binding factors takes (`seams`).
+- `gating` (the module's parts) → the gate `mfa` contributed to `login-gates`, over the factors and the transactions.
 
 ## Invariants
 - Internal modules: `transactions` keeps transactions; `proof` holds a login (the gate) or a session (step-up) until a factor is proved; `release` is the user's release of their lockout, by `permits`; `recording` records a request's audit events; `seams` shapes what the module binding factors gives and takes. `transactions` takes its own contracts; `wiring` gives the others only what they use.

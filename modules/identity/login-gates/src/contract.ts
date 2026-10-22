@@ -57,9 +57,17 @@ export interface Logins {
 
 export const logins = contract<Logins>("login-gates");
 
-/** A step a login must pass before its session opens; one that holds it writes and cleans up its own state. */
+/**
+ * A step a login must pass before its session opens; one that holds it writes and cleans up its own
+ * state, and one that refuses it ends it, writing nothing the login keeps.
+ */
 export interface LoginGate {
 	readonly name: string;
+	/**
+	 * Asked again when a login a gate after it held resumes, before the gates after that one: it may
+	 * only pass or refuse there, as one that never holds.
+	 */
+	readonly rechecked?: boolean;
 	hold(
 		request: HttpRequest,
 		facts: LoginFacts,
@@ -68,6 +76,7 @@ export interface LoginGate {
 	): Promise<
 		| { readonly kind: "pass" }
 		| { readonly kind: "held"; readonly answer: unknown; readonly cookies?: readonly string[] }
+		| { readonly kind: "refused" }
 	>;
 }
 

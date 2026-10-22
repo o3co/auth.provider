@@ -66,12 +66,30 @@ export default defineModule({ name: "login-gates", section, replicaSafe: true },
 		): Promise<LoginOutcome> => {
 			for (const gate of pending) {
 				const decision = await gate.hold(request, facts, done, from);
+				if (decision.kind === "refused") return { kind: "refused", gate: gate.name, cookies: [] };
 				if (decision.kind === "held") {
 					const cookies = decision.cookies ?? [];
 					return { kind: "held", gate: gate.name, answer: decision.answer, cookies };
 				}
 			}
 			return { kind: "opened", ...(await opening.complete(request, facts)) };
+		};
+		/** The gates before `heldAt` that are asked again on resume; one holding there is the gate's error. */
+		const rechecked = async (
+			request: HttpRequest,
+			facts: LoginFacts,
+			heldAt: number,
+			done: unknown = null,
+			from?: LoginFrom,
+		): Promise<LoginOutcome | undefined> => {
+			for (const gate of gates.slice(0, heldAt).filter((g) => g.rechecked)) {
+				const decision = await gate.hold(request, facts, done, from);
+				if (decision.kind === "refused") return { kind: "refused", gate: gate.name, cookies: [] };
+				if (decision.kind === "held") {
+					throw new TypeError("login-gates: a gate asked again on resume may only pass or refuse");
+				}
+			}
+			return undefined;
 		};
 		return {
 			achievable: (amr) => amr.every((name) => provable.has(name)),
@@ -86,7 +104,9 @@ export default defineModule({ name: "login-gates", section, replicaSafe: true },
 				const tell = tellerOf(from);
 				if (from?.deadline !== undefined && c.clock.now() >= from.deadline)
 					return { kind: "expired" };
-				const outcome = await through(request, facts, gates.slice(heldAt + 1), done, from);
+				const outcome =
+					(await rechecked(request, facts, heldAt, done, from)) ??
+					(await through(request, facts, gates.slice(heldAt + 1), done, from));
 				if (outcome.kind === "opened") await tell?.(outcome.session);
 				return outcome;
 			},
