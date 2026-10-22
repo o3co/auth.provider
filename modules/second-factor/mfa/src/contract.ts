@@ -1,5 +1,7 @@
 import { contract, extensionPoint } from "@mod/kernel";
-import type { AskedFrom, RefusedReason } from "@mod/mfa-extensions";
+import type { Asked, AskedFrom, RefusedReason } from "@mod/mfa-extensions";
+
+export { type Asked, type Witnessing, witnessing } from "@mod/mfa-extensions";
 
 /** A step where a user proves a factor at login; without one, a factor could never be proven. */
 export interface ProofStep {
@@ -17,9 +19,6 @@ export type Fence = number & { readonly __fence: never };
  * revocation's followers: a module that binds factors over revocations looks for it.
  */
 export const fenceFollower = "mfa";
-
-/** Where a subject's standing is asked, as an inconsistency with the witness is recorded. */
-export type Asked = "login" | "binding" | "credentials";
 
 /** A factor as the user sees it. */
 export interface Shown {
@@ -158,19 +157,6 @@ export interface Factors {
 }
 
 export const factors = contract<Factors>("mfa.factors");
-
-/** Who tells, apart from the store, that a subject enrolled: contributed by `mfa-witnessing` where a witness is composed. */
-export interface Witnessing {
-	/** `held` for a subject holding a counting factor, `none` where nothing marks it either; unavailable, recorded, where a mark stands beside nothing counting. */
-	standing(subject: string, counts: boolean, at: Asked): Promise<"held" | "none">;
-	/** After a binding's write: brings the mark in line with the counting factors, as `counting` reads them now. */
-	settle(subject: string, counting: () => Promise<boolean>): Promise<void>;
-	/** After a reset removed every factor: the mark goes. */
-	cleared(subject: string): Promise<void>;
-}
-
-/** At most one; with none, the store alone tells. */
-export const witnessing = extensionPoint<Witnessing>("mfa.witnessing", { multiplicity: "many" });
 
 /** A module holding sessions to the subject's factors: what `mode` asks to use one, and a recent second factor to change credentials. */
 export interface Enforcer {

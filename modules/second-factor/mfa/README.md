@@ -10,17 +10,16 @@
 
 ## Offers
 - `proofSteps`: at least one, or `mfa` refuses to boot.
-- Factor kinds and first-binding gates come through `mfa-extensions`: `factorKinds`, asked at each binding and proof, and `firstBindingGates`, asked by `begin`, with what the caller gave, while no counting factor is held.
+- Through `mfa-extensions`: `factorKinds`, asked at each binding and proof; `firstBindingGates`, asked by `begin`, with what the caller gave, while no counting factor is held; `witnessing` (at most one, two refusing boot).
 - `factors`, its decisions:
   - Reading: `held`; `countingHeld` (judged against the witness); `countingWritten` (as written, a unique value's claimed); `secondFactorRequired`; `asks` (nothing / proof / binding); `guessable`; `guessableBoundAfter` (whether every factor of a guessable kind was bound after a time; an unknown kind, or a record with no time, as bound before).
   - Proving: `challenge` (sent with the kind, what to show and the challenge sealed / none / limited / refused with the kind, and `contact-changed` when the kind gives it / unknown); `prove`, given the sealed challenge (valid with amr / invalid / replayed / raced).
   - Binding: `begin`, given what the caller holds for the gates (begun with what to show / unknown kind / full / limited / refused / duplicate / binding proof required / first binding closed); `provePending` (valid with the proof's own amr / invalid / unknown); `bind` (bound, with the fence it began under and whether codes are due / full / unknown / malformed label / duplicate / fenced); `fence` (no binding begun before binds).
   - Managing: `rename`; `remove`; `clear` (every factor of the subject, of any kind → how many, and their kinds sorted once each); `reissue` (the first set too; `full` past `max-factors`). `remove` and `reissue`, given a fence read before (`fenceOf`'s, or a binding's), change nothing (`fenced`) once it moved past it. The fence stops `bind`, `remove` and `reissue` only: `rename` and `prove` do not read it.
 - `fenceFollower`: the name what moves the fence on a revocation goes by among its followers.
-- Extension point `witnessing` (at most one, two refusing boot): who tells, beside the store, that a subject enrolled; `mfa-witnessing` contributes it over the witness composed (its card holds the rules).
 - Extension point `enforcers`: the modules holding sessions to the factors (`mfa-entry`); without one, whatever the mode, boot is refused.
 - Audit events, with the subject, once written (never for a refused or raced decision but a first binding another factor beat, nor a reset, never with a secret, proof or code): declared in `./audit-events`, listed in the audit event reference.
-- Contributions: `login-gates` amr (each kind's, and `mfa` if one adds it); `seal`'s `resealers`, a resealer sealing again what a `previous` key sealed (internal module `records`).
+- Contributions: `login-gates` amr (each kind's, and `mfa` if one adds it); `seal`'s `resealers`, a resealer sealing again what a `previous` key sealed.
 - Section: `mode` (`optional`, or `required` by default), `max-factors` (default 10).
 - Store interface `factorStore`: factor lists and claims on unique values, by keys mfa makes, contents opaque; save once, read, change from what it holds, kept without end. Needs: never evicted, survives a crash and a failover, reads only what is confirmed. `./testing`: its contract test, and a config builder.
 
@@ -40,4 +39,4 @@
 - A witness composed (`mfa-witness`) with no witnessing refuses boot, so it is never left unasked.
 
 ## Depends on
-- `kernel`, `login-gates`, `seal`, `audit`, `mfa-extensions` (the kinds and gates), `mfa-witness` (only to refuse a witness left unasked), `labels` (the label's shape)
+- `kernel`, `login-gates`, `seal`, `audit`, `mfa-extensions` (the kinds, gates and witnessing), `mfa-witness` (only to refuse a witness left unasked), `labels` (the label's shape)
