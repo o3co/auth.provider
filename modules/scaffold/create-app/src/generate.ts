@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { namesPackages, vacant } from "@mod/app-output";
+import type { OutsidePlan } from "./assembly.ts";
 import { generateFull } from "./full.ts";
 import { generateListed } from "./listed.ts";
 import { generatePattern, type PatternPlan } from "./pattern.ts";
@@ -14,6 +15,8 @@ export interface ModulesPlan {
 	readonly workspace?: string;
 	/** The package whose `./module` contributes the app's log sink. */
 	readonly sink?: string;
+	/** Packages outside the release among `modules`, read from where pnpm installed them. */
+	readonly outside?: OutsidePlan;
 }
 
 /** A project from the full template: what `combinations` composes in full, with the features added (the pattern `full`). */
@@ -23,6 +26,8 @@ export interface FullPlan {
 	/** Features of the workspace to compose beside the template's, with their wirings and bridges. */
 	readonly add?: readonly string[];
 	readonly workspace?: string;
+	/** Packages outside the release among `add`, read from where pnpm installed them. */
+	readonly outside?: OutsidePlan;
 }
 
 export type Plan = ModulesPlan | FullPlan | PatternPlan;

@@ -1,23 +1,24 @@
 /** A listed app's project: the modules listed with what they need to run, written as a pattern's is. */
 import { writeDeployment } from "@mod/app-output";
-import { needed } from "@mod/combinations";
-import { packagesFor } from "./packages.ts";
+import { assemblyFor, type OutsidePlan } from "./assembly.ts";
 import { auditReceiversLine, chosenLines } from "./patterns/chosen.ts";
 
 /** The store kept in memory: an app composing it runs as one instance. */
 const memoryStore = "@mod/store";
 
-/** Writes the app of `listed`, with what they need to run and the sink, into the plan's target. */
+/** Writes the app of `listed`, with what they need to run and the sink, into the plan's target; `index` as `generateFull` takes it. */
 export async function generateListed(
-	plan: { readonly target: string; readonly workspace?: string },
+	plan: { readonly target: string; readonly workspace?: string; readonly outside?: OutsidePlan },
 	listed: readonly string[],
 	sink: string,
+	index?: string,
 ): Promise<void> {
-	const asked = needed(listed);
+	const { packages, combinations } = assemblyFor(plan, index);
+	const asked = combinations.needed(listed);
 	// Without a sink, the app's log lines would go nowhere.
 	const modules = asked.includes(sink) ? asked : [...asked, sink];
 	const chosen = chosenLines(modules);
-	await writeDeployment(plan.target, modules, packagesFor(plan), {
+	await writeDeployment(plan.target, modules, packages, {
 		template: "listed-readme.md",
 		fill: {
 			listed: listed.map((name) => `\`${name}\``).join(", "),
