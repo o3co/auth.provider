@@ -11,7 +11,7 @@
 ## Offers
 - `passkeys`: a challenge the same for everyone, made for a requester, and the assertion of a discoverable passkey by that requester → subject, challenge time, user verified, backup eligible; or a refusal.
 - `registrations`: options for a subject's new passkey, and keeping the one a response creates → the credential, or a refusal (the ceremony's, `unreadable`, `no-challenge`, `conflict`, `full`, `revoked`).
-  - A caller's check (`admitted`, given when the challenge was made) is asked once the record is written and before it is listed, then once more after: on `false` (`revoked`) or a throw, the record is stripped, or the passkey removed, so nothing of it stays usable.
+  - A caller's check (`admitted`, given when the challenge was made) is asked once the record is written and before it is listed, then once more after: on `false` (`revoked`) or a throw, the record is stripped, or the passkey removed, so nothing of it stays usable; a listing that fails, which may have landed, is removed too.
   - The caller answers for who the subject is; passkeys takes it as given, so only a module that has authenticated the subject may ask.
   - A registration answers when its challenge was made (`challengedAt`). `listed` (id, nickname, transports, backup state, and when registered where kept), `renamed` (`renamed` / `unknown`) and `removed` (`removed`: this call ended it; `empty`: none left) take only the subject's own; they are optional in the contract until their callers are written.
 - `passkeyHolders`, taken only by `login-passkey` and `passkey-reset`: `held` (settled first), `cleared` (ends every passkey of the subject and has its mark go → how many it ended), `settle`, and `witnessed` (whether a witness is composed).
