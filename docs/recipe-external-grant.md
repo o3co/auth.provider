@@ -83,7 +83,7 @@ If your grant calls another server, take `outbound`'s contract and send the requ
 
 ## Add it to the app
 
-Generate the app as the README's quick start shows, add your package to its dependencies, and add your module to the list the generated `src/main.ts` passes to `assemble`:
+Generate the app as the README's quick start shows, add your package to its dependencies, and add your module to the list the generated `src/main.ts` passes to `assemble`. (To have the generator compose it instead, declare it and install it as [packages outside the release](outside-modules.md) shows.)
 
 <!-- generated:main -->
 ```ts
