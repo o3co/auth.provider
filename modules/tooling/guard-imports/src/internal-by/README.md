@@ -13,8 +13,9 @@ Internal module of `guard-imports`: G32, that the narrower's `internal` is writt
 - `internalByRules` (G32).
 
 ## Invariants
-- The owner is the package whose manifest declares `internalBy`, a list of package names; its contract exports the interface `Narrower`, whose `internal` property gives the type counted.
-- Counted: an object literal's property named `internal`, written as a property, a shorthand or a computed string key, anywhere in shipped code, whose value, `undefined` aside, is of that type. A binding, a property of another type, a value of type `any`, `unknown` or `never`, and a test are not.
+- The owner is the package whose manifest declares `internalBy`, a list of package names; its contract exports `Narrower` (declared there or re-exported), whose `internal` property gives the type counted. The owner's own code is held to the list too: it states `internal`, and writes none.
+- Counted: an object literal's property named `internal`, anywhere in shipped code, a literal spread into another included, whose value, `undefined` aside, is of that type: a property, a shorthand, a getter (its return), or a computed key whose type is `"internal"`, a union holding it, or a string of no known value.
+- Not counted: a binding, a property of another type, a value of type `any`, `unknown` or `never`, a test; a literal whose value is a type parameter (a generic factory's, though called with that type) and an object only spread on, its own literal counted where written.
 - A package outside the list writing one is reported at its file and line, never with the value; so is a listed name that is no workspace package, that writes none, or that is listed twice, and a list that is no list.
 
 ## Depends on

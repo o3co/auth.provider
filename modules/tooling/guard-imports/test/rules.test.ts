@@ -615,15 +615,22 @@ describe("guard-imports", () => {
 				"export const read = (text: string) => text as ConfiguredUrl;",
 			].join("\n"),
 		});
-		const policy = (internalBy: unknown) =>
+		const narrower = [
+			'import type { ConfiguredUrl } from "@c/urls";',
+			"export interface Narrower { readonly hosts?: readonly string[]; readonly internal?: ConfiguredUrl }",
+		].join("\n");
+		const sending = [
+			'import type { Narrower } from "./narrower.ts";',
+			"export type { Narrower };",
+			"export const send = (url: string, n?: Narrower) => (n?.internal === undefined ? url : n.internal);",
+		];
+		const policy = (internalBy: unknown, own: string[] = []) =>
 			pkg(
 				"@c/policy",
 				{
-					"src/contract.ts": [
-						'import type { ConfiguredUrl } from "@c/urls";',
-						"export interface Narrower { readonly hosts?: readonly string[]; readonly internal?: ConfiguredUrl }",
-						"export const send = (url: string, n?: Narrower) => (n?.internal === undefined ? url : n.internal);",
-					].join("\n"),
+					// The interface re-exported from a file of its own, as a contract may.
+					"src/narrower.ts": narrower,
+					"src/contract.ts": [...sending, ...own].join("\n"),
 				},
 				{
 					exports: { ".": "./src/contract.ts" },
@@ -653,6 +660,13 @@ describe("guard-imports", () => {
 						"export const flag = { internal: true };",
 						"export const read2 = (s: Source) => { const { internal: i } = s; return i; };",
 						"export const lost = () => send(url, { internal: (url as any) });",
+						'const key = "internal";',
+						"export const keyed = () => send(url, { [key]: url });",
+						"export const got = { get internal() { return url; } };",
+						// Not counted: a literal of a generic factory's type, and an object only spread on.
+						"const make = <T>(v: T) => ({ internal: v });",
+						"export const made = () => send(url, make(url));",
+						"export const spread = () => send(url, { ...own });",
 					].join("\n"),
 					"test/module.test.ts":
 						'import { read } from "@c/urls";\nexport const t = { internal: read("http://x/") };\n',
@@ -676,8 +690,35 @@ describe("guard-imports", () => {
 					"@c/other/src/module.ts:9 internal",
 					"@c/other/src/module.ts:10 internal",
 					"@c/other/src/module.ts:11 internal",
+					"@c/other/src/module.ts:16 internal",
+					"@c/other/src/module.ts:17 internal",
 				],
 			);
+		});
+
+		it("counts the owner too: it states internal, and writes none", () => {
+			const leak = [
+				'import { read } from "@c/urls";',
+				'export const leak = () => send("x", { internal: read("http://x/") });',
+			];
+			expect(found([urls, policy(["@c/listed"], leak), writer("@c/listed")])).toEqual([
+				"@c/policy/src/contract.ts:5 internal",
+			]);
+		});
+
+		it("refuses a list where the owner's contract exports no Narrower with internal", () => {
+			const hidden = pkg(
+				"@c/policy",
+				{
+					"src/contract.ts":
+						'import type { ConfiguredUrl } from "@c/urls";\ninterface Narrower { readonly internal?: ConfiguredUrl }\nexport const send = (n?: Narrower) => n;\n',
+				},
+				{ exports: { ".": "./src/contract.ts" }, dependencies: { "@c/urls": "*" }, internalBy: [] },
+				"foundation",
+			);
+			expect(found([urls, hidden])).toEqual([
+				"@c/policy internalBy, but it exports no Narrower with internal",
+			]);
 		});
 
 		it("refuses a list naming a package that writes none, no workspace package, or one twice, and one not a list", () => {

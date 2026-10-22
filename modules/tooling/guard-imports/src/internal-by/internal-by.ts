@@ -21,14 +21,34 @@ interface Written {
 	readonly line: number;
 }
 
-/** The name an object literal's property is written under, a computed string key included. */
-const nameOf = (property: ts.ObjectLiteralElementLike) => {
+/**
+ * Whether an object literal's property may be written under the name `internal`: by name, or by a
+ * computed key whose type is that string, a union holding it, or a string of no known value.
+ */
+const namesInternal = (checker: ts.TypeChecker, property: ts.ObjectLiteralElementLike) => {
 	const name = property.name;
-	if (name === undefined) return undefined;
-	if (ts.isComputedPropertyName(name)) {
-		return ts.isStringLiteralLike(name.expression) ? name.expression.text : undefined;
+	if (name === undefined) return false;
+	if (!ts.isComputedPropertyName(name)) {
+		return (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) && name.text === "internal";
 	}
-	return ts.isIdentifier(name) || ts.isStringLiteralLike(name) ? name.text : undefined;
+	const key = checker.getTypeAtLocation(name.expression);
+	const keys = key.isUnion() ? key.types : [key];
+	return keys.some((k) =>
+		k.isStringLiteral()
+			? k.value === "internal"
+			: (k.flags & (ts.TypeFlags.String | ts.TypeFlags.TemplateLiteral)) !== 0,
+	);
+};
+
+/** The type of the value a property is written with: its initializer, its shorthand name, or its getter's return. */
+const writtenType = (checker: ts.TypeChecker, property: ts.ObjectLiteralElementLike) => {
+	if (ts.isPropertyAssignment(property)) return checker.getTypeAtLocation(property.initializer);
+	if (ts.isShorthandPropertyAssignment(property)) return checker.getTypeAtLocation(property.name);
+	if (ts.isGetAccessorDeclaration(property)) {
+		const signature = checker.getSignatureFromDeclaration(property);
+		return signature && checker.getReturnTypeOfSignature(signature);
+	}
+	return undefined;
 };
 
 /**
@@ -57,14 +77,17 @@ function writtenIn(s: Scope, owner: Pkg, packages: readonly Pkg[]): Written[] | 
 		paths,
 	});
 	const checker = program.getTypeChecker();
+	// `Narrower` as the contract exports it, wherever it is declared.
 	const contract = program.getSourceFile(ownerEntry);
-	const narrower = contract?.statements.find(
-		(st): st is ts.InterfaceDeclaration =>
-			ts.isInterfaceDeclaration(st) && st.name.text === "Narrower",
-	);
-	const property = narrower && checker.getTypeAtLocation(narrower).getProperty("internal");
-	if (narrower === undefined || property === undefined) return "exports no Narrower with internal";
-	const wanted = checker.getNonNullableType(checker.getTypeOfSymbolAtLocation(property, narrower));
+	const module = contract && checker.getSymbolAtLocation(contract);
+	const exported = module && checker.getExportsOfModule(module).find((e) => e.name === "Narrower");
+	const narrower =
+		exported && exported.flags & ts.SymbolFlags.Alias
+			? checker.getAliasedSymbol(exported)
+			: exported;
+	const property = narrower && checker.getDeclaredTypeOfSymbol(narrower).getProperty("internal");
+	if (property === undefined) return "exports no Narrower with internal";
+	const wanted = checker.getNonNullableType(checker.getTypeOfSymbol(property));
 	const written: Written[] = [];
 	for (const { p, path, file } of files) {
 		const source = program.getSourceFile(path);
@@ -72,14 +95,10 @@ function writtenIn(s: Scope, owner: Pkg, packages: readonly Pkg[]): Written[] | 
 		const visit = (node: ts.Node): void => {
 			if (ts.isObjectLiteralExpression(node)) {
 				for (const element of node.properties) {
-					if (nameOf(element) !== "internal") continue;
-					const value = ts.isPropertyAssignment(element)
-						? element.initializer
-						: ts.isShorthandPropertyAssignment(element)
-							? element.name
-							: undefined;
+					if (!namesInternal(checker, element)) continue;
+					const value = writtenType(checker, element);
 					if (value === undefined) continue;
-					const type = checker.getNonNullableType(checker.getTypeAtLocation(value));
+					const type = checker.getNonNullableType(value);
 					if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Never | ts.TypeFlags.Unknown)) continue;
 					if (!checker.isTypeAssignableTo(type, wanted)) continue;
 					const { line } = source.getLineAndCharacterOfPosition(element.getStart());
@@ -109,8 +128,8 @@ export function internalByRules(s: Scope) {
 		for (const name of new Set(listed.filter((name, i) => listed.indexOf(name) !== i))) {
 			s.report(rule, owner.name, `internalBy names ${name} twice`);
 		}
-		const others = s.packages.filter((p) => p !== owner);
-		const written = writtenIn(s, owner, others);
+		// The owner too: it states `internal`, and writes none.
+		const written = writtenIn(s, owner, s.packages);
 		if (typeof written === "string") {
 			s.report(rule, owner.name, `internalBy, but it ${written}`);
 			continue;
