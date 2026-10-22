@@ -120,6 +120,7 @@ describe("what an app beside packages outside the release is given", () => {
 		expect(guide).toContain("| `@x/grant` | `1.2.0` | `sha512-AAAA` |");
 		expect(guide).toContain("pnpm check:outside");
 		expect(guide).toContain("the overrides and `held` move together");
+		expect(guide).toContain("take the overrides, `held` and `scripts/check-outside.mjs` from it");
 		expect(guide).toContain("not covered by its conformance");
 		expect(index).toContain("`outside-modules.json`");
 	});
