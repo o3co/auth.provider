@@ -4,6 +4,12 @@ Notable changes, newest first, in the form of [Keep a Changelog](https://keepach
 
 Changes up to 0.17.0 are in [the 0.17.0 changelog](https://github.com/o3co/auth.provider/blob/v0.17.0/CHANGELOG.md).
 
+## [Unreleased]
+
+### Added
+
+- `tokens` offers the access-token lifetime it applies where a grant gives none, as `accessTokenLifetimeSeconds()` on its contract. A grant with a lifetime ceiling can read it at build time and refuse boot, naming both values, when it is above the ceiling (#2076). An implementation of `Tokens` of your own adds the member, and the `./testing` contract test now checks it against the issued `expiresIn`.
+
 ## [0.18.1] - 2026-10-22
 
 ### Security

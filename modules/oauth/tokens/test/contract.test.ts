@@ -70,38 +70,53 @@ const contributing = (policies: readonly IssuancePolicy[] = []) =>
 		policies.map((policy) => m.contribute(issuancePolicies).by(() => policy)),
 	);
 
-tokensContract("tokens over keys and a simulated store", async ({ revocable, policies }) => {
+tokensContract(
+	"tokens over keys and a simulated store",
+	async ({ revocable, policies, lifetimeSeconds }) => {
+		const { runtime, module, place } = around();
+		const app = await assemble({
+			modules: [
+				http,
+				keysModule,
+				issuerModule,
+				senderBindingModule,
+				tokensModule,
+				revokedInMemory(() => runtime.clock.now()).module,
+				module,
+				contributing(policies),
+			],
+			config: {
+				...kernelConfig(),
+				...httpConfig(),
+				...keysConfig(),
+				...issuerConfig(),
+				...tokensConfig(
+					{
+						revocation: revocable ? "denylist" : "unsupported",
+						...(lifetimeSeconds === undefined
+							? {}
+							: { "access-token-lifetime": `${lifetimeSeconds}s` }),
+					},
+					{ subjects: "checked" },
+				),
+			},
+			runtime,
+		});
+		return place(app);
+	},
+);
+
+tokensContract("the stand-in", async ({ revocable, policies, lifetimeSeconds }) => {
 	const { runtime, module, place } = around();
 	const app = await assemble({
 		modules: [
-			http,
-			keysModule,
-			issuerModule,
-			senderBindingModule,
-			tokensModule,
-			revokedInMemory(() => runtime.clock.now()).module,
+			tokensStandIn({
+				revocable,
+				...(lifetimeSeconds === undefined ? {} : { lifetimeSeconds }),
+			}),
 			module,
 			contributing(policies),
 		],
-		config: {
-			...kernelConfig(),
-			...httpConfig(),
-			...keysConfig(),
-			...issuerConfig(),
-			...tokensConfig(
-				{ revocation: revocable ? "denylist" : "unsupported" },
-				{ subjects: "checked" },
-			),
-		},
-		runtime,
-	});
-	return place(app);
-});
-
-tokensContract("the stand-in", async ({ revocable, policies }) => {
-	const { runtime, module, place } = around();
-	const app = await assemble({
-		modules: [tokensStandIn({ revocable }), module, contributing(policies)],
 		config: kernelConfig(),
 		runtime,
 	});
