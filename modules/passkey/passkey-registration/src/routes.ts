@@ -106,8 +106,12 @@ export function registrationRoutes(p: RouteParts): {
 		}
 		if (nickname !== undefined && (typeof nickname !== "string" || !isLabel(nickname)))
 			return invalid("invalid nickname");
-		const kept = await p.registrations.register(subject, response, nickname);
+		// A revocation since the challenge was made, a reset's included, leaves nothing usable of it.
+		const admitted = async (challengedAt: number) =>
+			(await p.revocation.check(subject, challengedAt)) === "valid";
+		const kept = await p.registrations.register(subject, response, nickname, admitted);
 		if (kept.kind === "refused") {
+			if (kept.reason === "revoked") return jsonAnswer(401, { error: errorOf.revoked });
 			const description = descriptionOf[kept.reason];
 			return jsonAnswer(400, {
 				error: errorOf[kept.reason],
@@ -115,14 +119,6 @@ export function registrationRoutes(p: RouteParts): {
 			});
 		}
 		const { credential } = kept;
-		// A revocation since the challenge was made, a reset's included, ends what it wrote: it is undone.
-		if (
-			kept.challengedAt !== undefined &&
-			(await p.revocation.check(subject, kept.challengedAt)) === "revoked"
-		) {
-			await asked(p.registrations.removed)(subject, credential.id);
-			return jsonAnswer(401, { error: "unauthorized" });
-		}
 		audited.record("passkey.registered", { subject, attributes: sourced(request) });
 		return jsonAnswer(200, {
 			credentialId: credential.id,

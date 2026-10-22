@@ -21,6 +21,7 @@ import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import sessionRequirements from "@mod/session-requirements/module";
 import { simulatedStore } from "@mod/store/testing";
+import { subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import webauthn from "@mod/webauthn/module";
 import {
@@ -106,7 +107,12 @@ async function serve(
 			return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 		};
 	};
-	return { store, browser, sessions: app.get(sessions) };
+	return {
+		store,
+		browser,
+		sessions: app.get(sessions),
+		revoke: (subject: string) => app.get(subjectRevocation).revoke(subject),
+	};
 }
 
 type Post = Awaited<ReturnType<Awaited<ReturnType<typeof serve>>["browser"]>>;
@@ -238,4 +244,26 @@ it("lists, renames and removes the subject's passkeys through passkeys, telling 
 	expect((await post("/oauth/webauthn/registrations", undefined, "GET")).body).toEqual({
 		passkeys: [],
 	});
+});
+
+it("keeps nothing of a registration a revocation reaches as its record is written, through passkeys and its store", async () => {
+	const { store, browser, revoke } = await serve();
+	const post = await browser("sam");
+	const options = (await post("options")).body as unknown as Options;
+	const response = softwareAuthenticator().create(options, { origin: testOrigin });
+	// The revocation lands as passkeys writes the record, before it asks whether the subject was revoked.
+	store.beforeNext("putIfAbsent", "webauthn-store.credentials", () => revoke("sam"));
+	expect(await post("verify", { response })).toEqual({
+		status: 401,
+		body: { error: "unauthorized" },
+	});
+	const kims = await browser("kim");
+	const theirs = (await kims("options")).body as unknown as Options;
+	// The id the revoked registration wrote is free again: nothing of it was kept.
+	const taken = softwareAuthenticator().create(
+		theirs,
+		{ origin: testOrigin },
+		{ credentialId: response.id },
+	);
+	expect((await kims("verify", { response: taken })).status).toBe(200);
 });

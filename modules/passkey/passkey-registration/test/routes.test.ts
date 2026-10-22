@@ -69,8 +69,18 @@ async function serve(section: Record<string, unknown> = {}) {
 			register: async (...args) => {
 				asked.push(["register", ...args]);
 				if (state.down) throw new Unavailable("passkeys");
+				// As passkeys does: the caller's check, asked once the record is written.
 				if (state.revokeWhileWriting) await revoke(args[0]);
-				return state.answer;
+				const admitted = args[3];
+				const answer = state.answer;
+				if (
+					answer.kind === "registered" &&
+					admitted &&
+					!(await admitted(answer.challengedAt ?? 0))
+				) {
+					return { kind: "refused", reason: "revoked" } as const;
+				}
+				return answer;
 			},
 			listed: async (subject) => {
 				asked.push(["listed", subject]);
@@ -168,14 +178,14 @@ describe("registration from a session", () => {
 			body: { credentialId: "Y3JlZA", transports: ["internal", "hybrid"], backedUp: true },
 			cacheControl: "no-store",
 		});
-		expect(asked).toEqual([["register", "sam", response, "laptop"]]);
+		expect(asked).toEqual([["register", "sam", response, "laptop", expect.any(Function)]]);
 		const { transports: _, ...bare } = credential;
 		state.answer = { kind: "registered", credential: { ...bare, backedUp: false } };
 		expect((await post("verify", { response })).body).toEqual({
 			credentialId: "Y3JlZA",
 			backedUp: false,
 		});
-		expect(asked[1]).toEqual(["register", "sam", response, undefined]);
+		expect(asked[1]).toEqual(["register", "sam", response, undefined, expect.any(Function)]);
 		// Each passkey kept is recorded for the subject, with the source alone: no id, nickname or ceremony.
 		const registered = { kind: "passkey.registered", subject: "sam", at: expect.any(Number) };
 		const attributes = { source: "198.51.100.1" };
@@ -377,7 +387,24 @@ describe("the subject's passkeys from a session", () => {
 		]);
 	});
 
-	it("ends a passkey a revocation since its challenge reaches as it is written, answering unauthorized and recording no registration", async () => {
+	it("checks the origin and limits requests on renaming and removing too", async () => {
+		const { browser } = await serve({ requests: 2, window: "1m" });
+		const elsewhere = await browser("sam", "https://evil.example");
+		for (const path of ["rename", "remove"]) {
+			expect(
+				await elsewhere(`/oauth/webauthn/registrations/${path}`, { id: "YQ", nickname: "x" }),
+				path,
+			).toMatchObject({ status: 403, body: { error: "csrf" } });
+		}
+		const post = await browser("kim");
+		await post("/oauth/webauthn/registrations/rename", { id: "YQ", nickname: "x" });
+		await post("/oauth/webauthn/registrations/remove", { id: "YQ" });
+		expect(await post("/oauth/webauthn/registrations/remove", { id: "YQ" })).toMatchObject({
+			status: 429,
+		});
+	});
+
+	it("asks passkeys to keep nothing a revocation since its challenge reaches, answering unauthorized and recording no registration", async () => {
 		const { state, asked, browser, events } = await serve();
 		state.answer = {
 			kind: "registered",
@@ -388,7 +415,7 @@ describe("the subject's passkeys from a session", () => {
 		const post = await browser("sam");
 		const res = await post("verify", { response: {} });
 		expect([res.status, res.body]).toEqual([401, { error: "unauthorized" }]);
-		expect(asked.at(-1)).toEqual(["removed", "sam", credential.id]);
+		expect(asked.at(-1)).toEqual(["register", "sam", {}, undefined, expect.any(Function)]);
 		expect(events).toEqual([]);
 	});
 });
