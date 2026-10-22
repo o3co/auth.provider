@@ -2,17 +2,13 @@ import { randomBytes } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
-import {
-	enforcers,
-	type FactorStore,
-	factorStore,
-	factors,
-	proofSteps,
-	type StoredFactors,
-} from "@mod/mfa";
+import { enforcers, type FactorStore, factorStore, proofSteps, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
 import { type MfaSettings, mfaConfig } from "@mod/mfa/testing";
+import { type FactorBinding, factorBinding } from "@mod/mfa-binding";
 import { factorKinds } from "@mod/mfa-extensions";
+import { type FactorManaging, factorManaging } from "@mod/mfa-managing";
+import { type FactorReading, factorReading } from "@mod/mfa-reading";
 import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { memoryRecords } from "@mod/records/testing";
 import sealModule from "@mod/seal/module";
@@ -115,7 +111,12 @@ export async function witnessed(settings: Partial<MfaSettings> = {}, extra: Modu
 		config: { ...kernelConfig(), ...sealConfig(), ...mfaConfig(settings) },
 		runtime: quietRuntime(),
 	});
-	const decided = app.get(factors);
+	// mfa's three faces, as one for the scenes.
+	const decided: FactorReading & FactorBinding & FactorManaging = {
+		...app.get(factorReading),
+		...app.get(factorBinding),
+		...app.get(factorManaging),
+	};
 	const provedCode = async (subject: string) => {
 		const begun = await decided.begin(subject, "code", undefined, "t");
 		if (begun.kind !== "begun") throw new Error(begun.kind);

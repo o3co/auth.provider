@@ -19,9 +19,12 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/mfa": "workspace:*",
 		"@mod/mfa-extensions": "workspace:*",
+		"@mod/mfa-reading": "workspace:*",
 		"@mod/mfa-witness": "workspace:*"
 	},
 	"devDependencies": {
+		"@mod/mfa-binding": "workspace:*",
+		"@mod/mfa-managing": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/seal": "workspace:*",
 		"vitest": "5.0.5"

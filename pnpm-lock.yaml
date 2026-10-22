@@ -2883,10 +2883,19 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/mfa-witness':
         specifier: workspace:*
         version: link:../mfa-witness
     devDependencies:
+      '@mod/mfa-binding':
+        specifier: workspace:*
+        version: link:../mfa-binding
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records

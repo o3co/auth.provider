@@ -15,7 +15,7 @@
     - After its withdraw it reads `after` again: beside a factor standing it fills a mark as backfill does; `unsure` is recorded and unavailable.
     - Over a witness without `withdraw` or `markedWith`, it clears.
 - Contract `witnessBackfill`:
-  - `settle(subject)` → `marked` (this call filled it), `held` (marked already, or by another meanwhile), `none`, `unclaimed` (a factor written and none claimed, `mfa`'s `writtenStanding`; the mark as it is), or `inconsistent` (a mark it did not set beside nothing written, left as it is).
+  - `settle(subject)` → `marked` (this call filled it), `held` (marked already, or by another meanwhile), `none`, `unclaimed` (a factor written and none claimed, `mfa-reading`'s `writtenStanding`; the mark as it is), or `inconsistent` (a mark it did not set beside nothing written, left as it is).
   - It reads the factors again after marking: a mark it set beside nothing counting (a reset took the factors meanwhile) goes, by `withdraw` where offered; a mark still standing beside nothing counting after a withdraw is `inconsistent`. After that removal it reads again and marks anew where one counts, three times at most; every mark it makes is checked so, and past the last it is unavailable, leaving at worst a factor unmarked.
   - Unavailable where the witness or `mfa` cannot answer, named `mfa` as `mfa` names it.
   - Unavailable too where a reset lands between its last read of the factors and its last read of the witness, though neither then holds anything; asked again, it answers `none`.
@@ -32,4 +32,4 @@
 - Comes once `mfa` and `mfa-witness-http` are both composed, through `combinations`; an app composed by hand with another witness composes it too.
 
 ## Depends on
-- `kernel`, `audit`, `mfa` (its factor decisions), `mfa-extensions` (the `witnessing` point), `mfa-witness` (the witness)
+- `kernel`, `audit`, `mfa` (composed with it), `mfa-reading` (its reading of the factors), `mfa-extensions` (the `witnessing` point), `mfa-witness` (the witness)
