@@ -12,8 +12,8 @@
 ## Offers
 - `outsideLock.recordOf` (lockfile text, name, registries): the version and integrity the root importer resolves the name to.
   - It refuses a name the importer lacks, a resolution to no version (a link, a file, an alias), and one from no registry.
-- `outsideLock.refusals` (lockfile text, records, overrides, registries: the default origin and each scope's, and where recorded the integrity of each package held): why the lockfile is not as recorded; none where it is.
-- `outsideLock.script`: the file an app runs beside its `pnpm-lock.yaml`, `outside-modules.json` (`{ modules: records, registries }`) and `pnpm-workspace.yaml` (its `overrides`); it prints each refusal, or why a file cannot be read, and exits 1 on any. It is `check-outside.mjs` bundled with `yaml` and `semver` inside (`pnpm check-outside` makes it, in development), so it loads nothing of the install it checks.
+- `outsideLock.refusals` (lockfile text, records, overrides, registries: the default origin and each scope's, and the integrity the release recorded of each package held): why the lockfile is not as recorded; none where it is.
+- `outsideLock.script`: the file an app runs beside its `pnpm-lock.yaml`, `outside-modules.json` (`{ modules: records, registries, held }`) and `pnpm-workspace.yaml` (its `overrides`); it prints each refusal, or why a file cannot be read, and exits 1 on any. It is `check-outside.mjs` bundled with `yaml` and `semver` inside (`pnpm check-outside` makes it, in development), so it loads nothing of the install it checks.
 
 ## Invariants
 - A lockfile is read as data: pnpm's version 9.0 alone, at most 16 MiB, no anchor's alias resolved, no unknown tag and no duplicate key; only own keys are read, never inherited ones.
@@ -23,8 +23,7 @@
 - A peer range is compared after the app's overrides: pnpm writes an override in a range's place. The range recorded must still hold the override.
 - Every resolution of a recorded package (not the root's alone) resolves each required dependency and peer as required, and each optional one as optional; an optional declaration takes the place of a required one of its name. Each resolves to a version in its range, the overrides applied, or, declared as an alias, to a version of the package the alias names; nothing undeclared is resolved.
 - A package the overrides hold resolves, wherever it is referenced (by an importer's dependencies of any kind or by a resolution), to the held version from its registry under its own name, and to a resolution the lockfile holds, with the package's entry; the lockfile holds no other version, and one resolution, of it.
-- Where the integrity the release recorded of each package the overrides hold is given (`held` in `outside-modules.json`), each one's entry at its held version (the package, not a resolution with peers) holds that integrity, and each held package has one recorded.
-- Where it is not given, a held package is bound to its registry's origin alone: its integrity, what the package is, is not held, so a lockfile changed to another package's tarball on the same registry is not refused. A later change records and checks it.
+- Each package the overrides hold has the integrity the release recorded of it (`held` in `outside-modules.json`), and its entry at its held version (the package, not a resolution with peers) holds that integrity: one recorded without, or a record holding none, is refused.
 - The file imports nothing of the workspace: `yaml`, `semver` and node only. Its bundle requires node's builtins alone, and a test holds it to what the file bundles to.
 
 ## Depends on

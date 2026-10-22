@@ -44,8 +44,15 @@ const changed = (change: (lock: Lock) => void, from = appLock) => {
 	change(lock);
 	return stringify(lock);
 };
+/** As the release records them: each held package's integrity, from the tarball it published. */
+const fixed = parse(appLock);
+const recorded = {
+	"@o3co/auth-provider-oauth": fixed.packages["@o3co/auth-provider-oauth@0.19.0"].resolution
+		.integrity as string,
+	zod: fixed.packages["zod@4.6.7"].resolution.integrity as string,
+};
 const refusals = (lock: string, records = [record], held: Record<string, string> = overrides) =>
-	outsideLock.refusals(lock, records, held, registries);
+	outsideLock.refusals(lock, records, held, registries, recorded);
 
 describe("an app's lockfile, as pnpm writes it", () => {
 	it("passes: overrides rewriting peer ranges, peers in a resolution, an optional dependency, a declared alias, a registry's own tarball address", () => {
@@ -317,20 +324,13 @@ describe("where a package's tarball lies", () => {
 
 	it("holds a scoped package to its scope's registry", () => {
 		const scoped = { default: "http://127.0.0.1:4873", scopes: { "@x": "https://x.example" } };
-		expect(outsideLock.refusals(appLock, [record], overrides, scoped)).toEqual([
+		expect(outsideLock.refusals(appLock, [record], overrides, scoped, recorded)).toEqual([
 			"@x/grant: its tarball lies at http://127.0.0.1:4873, not at its registry https://x.example",
 		]);
 	});
 });
 
 describe("the integrity the release recorded of each package the overrides hold", () => {
-	const lock = parse(appLock);
-	/** As the release records them: each held package's integrity, from the tarball it published. */
-	const recorded = {
-		"@o3co/auth-provider-oauth": lock.packages["@o3co/auth-provider-oauth@0.19.0"].resolution
-			.integrity as string,
-		zod: lock.packages["zod@4.6.7"].resolution.integrity as string,
-	};
 	const held = (text: string, integrities: Record<string, string>) =>
 		outsideLock.refusals(text, [record], overrides, registries, integrities);
 
@@ -347,7 +347,6 @@ describe("the integrity the release recorded of each package the overrides hold"
 				tarball: "http://127.0.0.1:4873/evil/-/evil-1.0.0.tgz",
 			};
 		});
-		expect(refusals(swapped)).toEqual([]);
 		expect(held(swapped, recorded)).toEqual([
 			`zod: integrity sha512-OTHERtarballOFtheSAMEregistry==, not ${recorded.zod} as the release recorded`,
 		]);
@@ -359,8 +358,12 @@ describe("the integrity the release recorded of each package the overrides hold"
 		]);
 	});
 
-	it("leaves the lockfile as before where no integrity is recorded", () => {
-		expect(outsideLock.refusals(appLock, [record], overrides, registries)).toEqual([]);
+	it("refuses each held package where the app records no integrity, and asks none where the overrides hold none", () => {
+		expect(outsideLock.refusals(appLock, [record], overrides, registries)).toEqual([
+			"@o3co/auth-provider-oauth: the app records no integrity of it",
+			"zod: the app records no integrity of it",
+		]);
+		expect(outsideLock.refusals(stagingLock, [record], {}, registries)).toEqual([]);
 	});
 });
 
@@ -416,7 +419,7 @@ describe("reading a package's record from the project pnpm installed it into", (
 
 describe("the script an app runs, the file as it ships", () => {
 	/** An app's directory holding the script beside the lockfile, the record and the overrides. */
-	const appWith = (lock: string, held?: Record<string, string>) => {
+	const appWith = (lock: string, held: Record<string, string> | null = recorded) => {
 		const app = mkdtempSync(join(tmpdir(), "check-outside-"));
 		copyFileSync(outsideLock.script, join(app, "check-outside.mjs"));
 		// What the app installed is beside the script; the script reads none of it.
@@ -500,12 +503,6 @@ describe("the script an app runs, the file as it ships", () => {
 	});
 
 	it("holds each held package to the integrity the release recorded, as the module does", () => {
-		const lock = parse(appLock);
-		const recorded = {
-			"@o3co/auth-provider-oauth": lock.packages["@o3co/auth-provider-oauth@0.19.0"].resolution
-				.integrity as string,
-			zod: lock.packages["zod@4.6.7"].resolution.integrity as string,
-		};
 		expect(run(appWith(appLock, recorded))).toEqual({ code: 0, out: "check:outside: ok\n" });
 		const swapped = changed((l) => {
 			l.packages["zod@4.6.7"].resolution = { integrity: "sha512-OTHER==" };
@@ -517,6 +514,17 @@ describe("the script an app runs, the file as it ships", () => {
 		expect(run(appWith(swapped, recorded))).toEqual({
 			code: 1,
 			out: `${found.join("\n")}\ncheck:outside: ${found.length} refusal(s)\n`,
+		});
+	});
+
+	it("refuses a record holding no integrity of the held packages, or not of each one the overrides hold", () => {
+		expect(run(appWith(appLock, null))).toEqual({
+			code: 1,
+			out: "@o3co/auth-provider-oauth: the app records no integrity of it\nzod: the app records no integrity of it\ncheck:outside: 2 refusal(s)\n",
+		});
+		expect(run(appWith(appLock, { zod: recorded.zod }))).toEqual({
+			code: 1,
+			out: "@o3co/auth-provider-oauth: the app records no integrity of it\ncheck:outside: 1 refusal(s)\n",
 		});
 	});
 

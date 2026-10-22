@@ -49,7 +49,7 @@ export function besideRelease(
 		readonly dependencies: Readonly<Record<string, string>>;
 		readonly version: string;
 		readonly zod: string;
-		/** The integrity the release recorded of each bundle and of zod; where given, each package held is. */
+		/** The integrity the release recorded of each bundle and of zod: each package held is held to it. */
 		readonly integrity?: Readonly<Record<string, string>>;
 	},
 ): Beside {
@@ -88,11 +88,10 @@ export function besideRelease(
 		minimumReleaseAge: releaseAge,
 		minimumReleaseAgeExclude: [...held, ...fresh.sort()],
 	};
-	const integrities = heldIntegrities([...held, "zod"], app.integrity);
 	const record = {
 		modules: outside.modules,
 		registries: outside.registries,
-		...(integrities ? { held: integrities } : {}),
+		held: heldIntegrities([...held, "zod"], app.integrity ?? {}),
 	};
 	return {
 		files: {
@@ -108,12 +107,8 @@ export function besideRelease(
 	};
 }
 
-/** The integrity of each package the app holds to one copy, where the release records them; refuses one it does not. */
-function heldIntegrities(
-	names: readonly string[],
-	recorded: Readonly<Record<string, string>> | undefined,
-) {
-	if (recorded === undefined) return undefined;
+/** The integrity of each package the app holds to one copy, as the release records it; refuses one it does not. */
+function heldIntegrities(names: readonly string[], recorded: Readonly<Record<string, string>>) {
 	const missing = names.filter((name) => typeof recorded[name] !== "string");
 	if (missing.length > 0) {
 		throw new Error(
@@ -134,7 +129,7 @@ function guideOf(modules: readonly OutsideRecord[]): string {
 		"|---|---|---|",
 		...modules.map((m) => `| \`${m.name}\` | \`${m.version}\` | \`${m.integrity}\` |`),
 		"",
-		`After the first \`pnpm install\`, run \`pnpm ${script}\` and commit \`pnpm-lock.yaml\`: it holds the lockfile to that record, and the image runs it after installing. \`pnpm-workspace.yaml\` holds the release's packages and zod to one version each; when upgrading the release, upgrade those overrides with it. A version published within the last day is not installed, but for those \`minimumReleaseAgeExclude\` names.`,
+		`After the first \`pnpm install\`, run \`pnpm ${script}\` and commit \`pnpm-lock.yaml\`: it holds the lockfile to that record, and the image runs it after installing. \`pnpm-workspace.yaml\` holds the release's packages and zod to one version each, and \`held\` in \`${recordFile}\` each to the integrity the release recorded of it. When upgrading the release, generate the app again with the new release's \`create-auth-provider\` and take both from it: the overrides and \`held\` move together. A version published within the last day is not installed, but for those \`minimumReleaseAgeExclude\` names.`,
 		"",
 	].join("\n");
 }
