@@ -1,5 +1,5 @@
 /** What the output takes from where the packages come from; the caller implements it. */
-import type { Fragment } from "./fragments.ts";
+import type { Fragment } from "./fragments/contract.ts";
 
 /** Where the packages an app assembles come from, and how the app names them. */
 export interface Packages {

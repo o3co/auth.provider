@@ -8,7 +8,7 @@ import {
 	settingsOf,
 	type Written,
 	writtenOf,
-} from "./fragments.ts";
+} from "./fragments/contract.ts";
 import type { Card, Packages, Release } from "./packages.ts";
 import {
 	entriesOf,
