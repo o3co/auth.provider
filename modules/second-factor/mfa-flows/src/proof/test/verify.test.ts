@@ -184,7 +184,7 @@ it("hands back the answer of a later gate that holds the login, with its cookies
 	expect([...statusOf(held), held.cookies]).toEqual([403, { step: "next" }, ["later=1"]]);
 });
 
-it("refuses a login whose resume came past its caller's deadline as a gate would, logging it", async () => {
+it("refuses a login whose resume came past its caller's deadline as a gate would, clearing the transaction's cookie and logging it", async () => {
 	const s = standIn();
 	const { request } = await s.login();
 	s.set.resumed = { kind: "expired" } as unknown as LoginOutcome;
@@ -192,7 +192,7 @@ it("refuses a login whose resume came past its caller's deadline as a gate would
 	expect([...statusOf(expired), expired.cookies]).toEqual([
 		403,
 		{ error: "login_required" },
-		undefined,
+		["mfa="],
 	]);
 	expect(s.logged.lines().map((l) => [l.level, l.event])).toEqual([
 		["warn", "mfa-flows.login_expired"],

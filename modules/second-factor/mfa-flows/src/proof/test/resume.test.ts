@@ -151,3 +151,13 @@ it("answers a login a gate refused on resuming 403, clearing the transaction's c
 	expect(s.lines()).toEqual([]);
 	expect(s.calls).toEqual([]);
 });
+
+it("answers a refused resume and an expired one alike, in status, body, headers and cookies, only the log telling them apart", async () => {
+	const s = standIn();
+	s.set.resumed = { kind: "refused", gate: "credential-policy", cookies: [] };
+	const refused = await s.resume(undefined);
+	s.set.resumed = { kind: "expired" } as never;
+	const expired = await s.resume(undefined);
+	expect(expired).toEqual(refused);
+	expect(s.lines()).toEqual([expect.objectContaining({ event: "mfa-flows.login_expired" })]);
+});
