@@ -20,6 +20,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 - [From 0.18.0-rc.4](#from-0180-rc4)
 - [From 0.18.0-rc.5](#from-0180-rc5)
 - [From 0.18.0](#from-0180)
+- [From 0.18.1](#from-0181)
 - [Operational notes](#operational-notes)
 
 ## Before you start
@@ -821,6 +822,10 @@ What changed since rc.5. Coming from an earlier release candidate, read the sect
 ## From 0.18.0
 
 - **A generated app's pnpm**: an app generated now names `pnpm@11.28.7` in its `package.json` (`packageManager`), which its image installs with. An app generated before names `pnpm@11.3.0`, short of the 2026-10-21 pnpm security release: change its `packageManager` to `pnpm@11.28.7` and build its image again, or generate the app again.
+
+## From 0.18.1
+
+- **A generated app's `witness-backfill` script**: where the kernel is bundled twice, a refused boot is now written and exits 78, as the app's entry does, where it was thrown on as a crash. In an app generated before, change the line `if (!(error instanceof BootRefused)) throw error;` in `src/witness-backfill.ts` to `if (!BootRefused.is(error)) throw error;`, or generate the app again.
 
 ## Operational notes
 
