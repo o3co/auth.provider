@@ -9,14 +9,15 @@ const split = (pair: string) => {
 	return { host: pair.slice(0, at), port: pair.slice(at + 1) };
 };
 
-/** Whether a pair reads as one: a host a URL takes, and a port written 1–65535 without a leading zero. */
+/** A host alone: an IPv6 address in brackets, or no part of a URL but the host (no path, user, port, query or fragment). */
+const isHostAlone = (host: string) =>
+	(/^\[[0-9a-f:.]+\]$/i.test(host) || !/[*:/?#@\\]/.test(host)) &&
+	URL.parse(`http://${host}/`) !== null;
+
+/** Whether a pair reads as one: a host alone, and a port written 1–65535 without a leading zero. */
 const isPair = (pair: string) => {
 	const { host, port } = split(pair);
-	return (
-		/^[1-9][0-9]{0,4}$/.test(port) &&
-		Number(port) <= 65_535 &&
-		URL.parse(`http://${host}/`) !== null
-	);
+	return /^[1-9][0-9]{0,4}$/.test(port) && Number(port) <= 65_535 && isHostAlone(host);
 };
 
 /** Whether two pairs name one host and port, the hosts compared as the policy's lists compare them. */
@@ -68,8 +69,8 @@ export const plainIpv4Rules: readonly [(s: PlainLists) => boolean, string][] = [
 
 /**
  * Whether a request's name is resolved to IPv4 alone: plain http taken as a `plain-loopback` or
- * `plain-internal` pair's, to a host and port `plain-ipv4` names. Its other ports, https to it, and
- * signed material, resolve every family as before.
+ * `plain-internal` pair's, to a host and port `plain-ipv4` names, signed material so taken included.
+ * Its other ports, https to it, and a request not taken as the pair's resolve every family as before.
  */
 export const takesIpv4 = (pairs: readonly string[], admitted: Admitted) =>
 	admitted.plain &&

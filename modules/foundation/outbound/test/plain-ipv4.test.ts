@@ -148,6 +148,16 @@ describe("plain http to a pair plain-ipv4 names", () => {
 		setDefaultAutoSelectFamily(true);
 	});
 
+	it("resolves signed material taken as the pair's for IPv4 alone too", async () => {
+		const { asked, resolve } = serviceConnect();
+		const answered = await over(resolve).fetchSigned(url, {}, { hosts: ["api-internal"], ...own });
+		expect([answered.status, asked, dialed.at]).toEqual([
+			200,
+			[{ host: "api-internal", family: 4 }],
+			["127.255.0.1"],
+		]);
+	});
+
 	it("leaves another port of the name as before", async () => {
 		const { asked, resolve } = serviceConnect({ all: ["127.255.0.1"] });
 		const other = "http://api-internal:9093/verify";
@@ -241,12 +251,18 @@ describe("plain-ipv4 in the operator's section", () => {
 		expect(twice).toBe("plain-ipv4: plain-ipv4 names a pair once");
 	});
 
-	it("refuses an entry that is not a host:port pair", () => {
+	it("refuses an entry that is not a host:port pair, or holds another part of a URL in its host", () => {
 		for (const entry of [
 			"api-internal",
 			"api-internal:09092",
 			"api-internal:70000",
 			"api internal:9092",
+			"api-internal/ignored:9092",
+			"user@api-internal:9092",
+			"api-internal?x:9092",
+			"api-internal#x:9092",
+			"api-internal\\x:9092",
+			"api-internal:80:9092",
 		]) {
 			expect(refusal({ "plain-ipv4": [entry] }), entry).toContain("not a host:port pair");
 		}
