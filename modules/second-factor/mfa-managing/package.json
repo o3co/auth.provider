@@ -1,0 +1,17 @@
+{
+	"name": "@mod/mfa-managing",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"exports": {
+		".": "./src/contract.ts"
+	},
+	"dependencies": {
+		"@mod/kernel": "workspace:*",
+		"@mod/mfa-reading": "workspace:*"
+	},
+	"devDependencies": {
+		"vitest": "5.0.5"
+	}
+}
