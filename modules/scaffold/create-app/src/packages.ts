@@ -35,6 +35,9 @@ export interface Indexed {
 		readonly references?: boolean;
 		readonly deployment?: boolean;
 	}[];
+	/** Sealed by the release: each bundle's integrity, by its public name, and zod's. */
+	readonly integrity?: Readonly<Record<string, string>>;
+	readonly zod?: { readonly version: string; readonly integrity: string };
 }
 
 /** The index distribution writes at the root of the bundle create-app is built into. */
@@ -138,6 +141,9 @@ export function publishedIn(index: Indexed, beside?: Beside): Packages {
 		release: () => ({
 			version: index.version,
 			...(index.repository ? { repository: index.repository } : {}),
+			...(index.integrity && index.zod
+				? { integrity: { ...index.integrity, zod: index.zod.integrity } }
+				: {}),
 		}),
 		outside: (names) => {
 			const modules = names.flatMap((name) => outside.get(name)?.record ?? []);

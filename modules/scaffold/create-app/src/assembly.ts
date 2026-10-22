@@ -29,6 +29,26 @@ export interface Assembly {
 
 const release: Combinations = { completed, composed, full, optIns, addable, needed };
 
+const isReleasePackage = (name: string) => name.startsWith("@o3co/auth-provider-");
+
+/**
+ * The integrity the release sealed into its index, of each bundle and of zod: what the app is held
+ * to. Refuses an index that records none (a release before it), and a zod other than the app's.
+ */
+function sealedOf(indexed: Indexed): Readonly<Record<string, string>> {
+	if (indexed.integrity === undefined || indexed.zod === undefined) {
+		throw new Error(
+			"the release's index records no integrity of its bundles: packages outside the release are composed beside a release that does",
+		);
+	}
+	if (indexed.zod.version !== appZod) {
+		throw new Error(
+			`the release's index records zod ${indexed.zod.version}, where an app holds ${appZod}`,
+		);
+	}
+	return indexed.integrity;
+}
+
 /**
  * How a plan is composed and where its packages come from. With packages outside the release, they
  * are read from the project named, beside the published release alone: never with a workspace
@@ -48,12 +68,23 @@ export function assemblyFor(
 	if (!existsSync(index))
 		throw new Error("packages outside the release are composed beside the published release alone");
 	const indexed = JSON.parse(readFileSync(index, "utf8")) as Indexed;
+	const sealed = sealedOf(indexed);
 	const bundles = new Map(indexed.packages.map((entry) => [entry.name, entry.package]));
 	const read = readOutside(plan.outside.from, plan.outside.names, {
 		version: indexed.version,
 		zod: appZod,
 		bundleOf: (module) => bundles.get(module),
 	});
+	// The app holds an outside package's release peers to one copy too: each must be one the release sealed.
+	for (const { record } of read.outside) {
+		for (const peer of Object.keys(record.peerDependencies).filter(isReleasePackage)) {
+			if (sealed[peer] === undefined) {
+				throw new Error(
+					`${record.name}: takes ${peer} as a peer, whose integrity the release records not`,
+				);
+			}
+		}
+	}
 	return {
 		packages: publishedIn(indexed, {
 			read,
