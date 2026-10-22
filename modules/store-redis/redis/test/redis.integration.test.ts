@@ -205,6 +205,18 @@ afterAll(async () => {
 	for (const stop of stops) await stop();
 });
 
+it("answers an empty batch in time as committed with no versions, as the contract's answer is shaped", async () => {
+	const app = await open([durable], undefined, proxyUrl);
+	stops.push(() => app.stop(1000));
+	const s = app.get(store);
+	const now = await s.now();
+	expect(await s.batch([], [], { deadline: now + 60_000 })).toEqual({
+		kind: "committed",
+		versions: [],
+	});
+	expect(await s.batch([], [])).toEqual({ kind: "committed", versions: [] });
+});
+
 storeContract("redis", {
 	open: async () => {
 		const app = await open([durable], undefined, proxyUrl);

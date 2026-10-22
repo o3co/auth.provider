@@ -293,7 +293,11 @@ export function redisStore(
 				const keys = [...conditions.map((c) => c.key), ...writes.map((w) => w.key)];
 				samePartition(keys);
 				const [first] = keys;
-				if (!first) return run(scripts.deadlineOnly, [], [options?.deadline ?? ""]);
+				if (!first) {
+					// The script answers its own shape; an empty batch committed names no versions.
+					const empty = await run(scripts.deadlineOnly, [], [options?.deadline ?? ""]);
+					return empty.kind === "committed" ? { kind: "committed", versions: [] } : empty;
+				}
 				const names = [...new Set(keys.map(valueKey))];
 				const index = (key: Key) => names.indexOf(valueKey(key)) + 1;
 				const spec = {
