@@ -15,7 +15,8 @@
 		"@mod/acr": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/mfa": "workspace:*",
-		"@mod/mfa-extensions": "workspace:*"
+		"@mod/mfa-extensions": "workspace:*",
+		"@mod/mfa-reading": "workspace:*"
 	},
 	"devDependencies": {}
 }

@@ -1446,6 +1446,9 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../../second-factor/mfa-extensions
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../../second-factor/mfa-reading
 
   modules/oauth/oidc:
     dependencies:
