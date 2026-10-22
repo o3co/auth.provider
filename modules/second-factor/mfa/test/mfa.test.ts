@@ -35,7 +35,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as offered from "../src/contract.ts";
 import { enforcers, factors, proofSteps } from "../src/contract.ts";
 import mfaModule from "../src/module.ts";
-import { listKeyOf, storedList } from "../src/records/records.ts";
+import { claimKeyOf, listKeyOf, storedList } from "../src/records/records.ts";
 import { section } from "../src/section.ts";
 import type { StoredFactors } from "../src/store.ts";
 import { type MfaSettings, mfaConfig } from "../src/testing.ts";
@@ -1254,6 +1254,94 @@ describe("an enrollment witness", () => {
 		await expect(
 			serve({}, { extra: [contributing("one"), contributing("two")] }),
 		).rejects.toBeInstanceOf(BootRefused);
+	});
+
+	describe("what a reset gives its witnessing to read after it", () => {
+		/** A witnessing keeping each reset's `after`, to be read when a test asks. */
+		const keeping = () => {
+			const afters: (() => Promise<string>)[] = [];
+			const told: Witnessing = {
+				standing: async (_subject, counts) => (counts ? "held" : "none"),
+				settle: async () => {},
+				cleared: async (_subject, after) => {
+					if (after) afters.push(after);
+				},
+			};
+			const module = defineModule({ name: "keeping" }, (m) => [
+				m.contribute(witnessing).by(() => told),
+			]);
+			return { module, afters };
+		};
+
+		it("answers none after a reset nothing followed, and again for the next reset", async () => {
+			const kept = keeping();
+			const { decided, bindCode } = await serve({}, { extra: [kept.module] });
+			await bindCode("ann");
+			await decided.clear("ann");
+			expect(await kept.afters[0]?.()).toBe("none");
+			await decided.clear("ann");
+			expect(await kept.afters[1]?.()).toBe("none");
+		});
+
+		it("answers counting where a binding wrote a factor after the reset", async () => {
+			const kept = keeping();
+			const { decided, bindCode } = await serve({}, { extra: [kept.module] });
+			await bindCode("ben");
+			await decided.clear("ben");
+			await bindCode("ben");
+			expect(await kept.afters[0]?.()).toBe("counting");
+		});
+
+		it("answers unsure where a factor written after the reset does not stand, its claim lost or not yet made", async () => {
+			const kept = keeping();
+			const { decided, bindKind, place } = await serve({}, { kinds: [card], extra: [kept.module] });
+			await decided.clear("cal");
+			expect((await bindKind("cal", "card", "c-9")).kind).toBe("bound");
+			await place.records.remove(claimKeyOf("card", "c-9"));
+			expect(await kept.afters[0]?.()).toBe("unsure");
+			await decided.clear("dee");
+			let before: string | undefined;
+			place.hooks.beforeSave = async (key) => {
+				if (key === claimKeyOf("card", "c-8")) before ??= await kept.afters[1]?.();
+			};
+			expect((await bindKind("dee", "card", "c-8")).kind).toBe("bound");
+			expect(before).toBe("unsure");
+		});
+
+		it("answers unsure once the subject's record is lost after the reset, though a later reset answers none", async () => {
+			const kept = keeping();
+			const { decided, bindCode, place } = await serve({}, { extra: [kept.module] });
+			await bindCode("eli");
+			await decided.clear("eli");
+			await place.records.remove(listKeyOf("eli"));
+			expect(await kept.afters[0]?.()).toBe("unsure");
+			await decided.clear("eli");
+			expect(await kept.afters[1]?.()).toBe("none");
+		});
+
+		it("answers unsure, not counting, where the record goes after its factors were read", async () => {
+			const kept = keeping();
+			const { decided, bindCode, place } = await serve({}, { extra: [kept.module] });
+			await decided.clear("fay");
+			await bindCode("fay");
+			let reads = 0;
+			place.hooks.afterRead = async (key) => {
+				if (key !== listKeyOf("fay")) return;
+				reads += 1;
+				if (reads === 1) await place.records.remove(key);
+			};
+			expect(await kept.afters[0]?.()).toBe("unsure");
+		});
+	});
+
+	it("tells how the subject's counting factors stand as written: counting, unclaimed or none", async () => {
+		const { decided, bindKind, place } = await serve({}, { kinds: [card] });
+		expect(await decided.writtenStanding("gus")).toBe("none");
+		expect((await bindKind("gus", "card", "c-7")).kind).toBe("bound");
+		expect(await decided.writtenStanding("gus")).toBe("counting");
+		await place.records.remove(claimKeyOf("card", "c-7"));
+		expect(await decided.writtenStanding("gus")).toBe("unclaimed");
+		expect(await decided.countingWritten("gus")).toBe(false);
 	});
 
 	it("tells whether every session needs a second factor, as the mode says", async () => {

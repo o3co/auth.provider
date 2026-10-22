@@ -1,7 +1,7 @@
 import { type Audit, declaredAudit } from "@mod/audit";
 import { type Log, Unavailable } from "@mod/kernel";
 import { isLabel } from "@mod/labels";
-import type { Asked, Witnessing } from "@mod/mfa-extensions";
+import type { AfterReset, Asked, Witnessing } from "@mod/mfa-extensions";
 import {
 	type FactorKind,
 	type FirstBindingGate,
@@ -150,6 +150,24 @@ export function factorDecisions(p: FactorParts): Factors {
 		return ids;
 	};
 	const countsNow = async (subject: string) => (await standingIds(subject)).size > 0;
+	/** Whether a factor of a counting kind is written and stands, is written and none stands, or none is written. */
+	const writtenStanding = async (subject: string) => {
+		const written = counting(await records.list(subject), p.kinds);
+		if (written.length === 0) return "none" as const;
+		for (const factor of written) if (await stands(subject, factor)) return "counting" as const;
+		return "unclaimed" as const;
+	};
+	/**
+	 * What stands after a reset that moved the fence to `moved`: the factors are read before the
+	 * fence, and a fence behind `moved` (the record lost or put back since) is judged first, so no
+	 * loss between the reads answers `none` or `counting`.
+	 */
+	const afterReset = (subject: string, moved: number) => async (): Promise<AfterReset> => {
+		const written = await writtenStanding(subject);
+		if ((await records.fences(subject)) < moved) return "unsure";
+		if (written === "counting") return "counting";
+		return written === "none" ? "none" : "unsure";
+	};
 	const settle = async (subject: string) => p.witnessing?.settle(subject, () => countsNow(subject));
 	/** A first binding refused, recorded with why; nothing of it is kept. */
 	const closed = (subject: string, kind: string, reason: "competing" | "reset-cleared") => {
@@ -159,12 +177,16 @@ export function factorDecisions(p: FactorParts): Factors {
 	// Factors first, then the mark: a failure between leaves a mark and no factor, which stops logins.
 	const clear = async (subject: string) => {
 		// Written even when nothing is held: the fence moves, so no binding begun before it binds.
-		const cleared = await records.decide(subject, (all) => ({
+		const { moved, ...cleared } = await records.decide(subject, (all, fences) => ({
 			next: [],
 			fence: true,
-			verdict: { count: all.length, kinds: [...new Set(all.map((f) => f.kind))].sort() },
+			verdict: {
+				count: all.length,
+				kinds: [...new Set(all.map((f) => f.kind))].sort(),
+				moved: fences + 1,
+			},
 		}));
-		await p.witnessing?.cleared(subject);
+		await p.witnessing?.cleared(subject, afterReset(subject, moved));
 		return cleared;
 	};
 	return {
@@ -174,6 +196,7 @@ export function factorDecisions(p: FactorParts): Factors {
 			return (await standing(subject, counts, at)) === "held";
 		},
 		countingWritten: (subject) => countsNow(subject),
+		writtenStanding,
 		secondFactorRequired: () => p.required,
 		asks: async (subject) => {
 			const all = await records.list(subject);

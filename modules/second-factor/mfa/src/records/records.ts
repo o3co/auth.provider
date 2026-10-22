@@ -44,6 +44,7 @@ export const fencesOf = (record: StoredFactors | undefined): number => {
 export const storedList = (subject: string, factors: readonly Factor[], fences = 0) =>
 	({ subject, factors, ...(fences > 0 ? { fences } : {}) }) as unknown as StoredFactors;
 export const listKeyOf = (subject: string) => `s-${hashOf(subject)}`;
+export const claimKeyOf = (kind: string, value: string) => `u-${hashOf(`${kind}\n${value}`)}`;
 const claimOf = (record: StoredFactors | undefined) => record as unknown as Claim | undefined;
 const asClaim = (claim: Claim) => claim as unknown as StoredFactors;
 const sameClaim = (a: Claim | undefined, b: Claim) =>
@@ -75,7 +76,7 @@ export function factorRecords(store: FactorStore) {
 		// Another request saved one first, yet it cannot be found.
 		if (!(await store.update(key, changing))) throw new Unavailable("mfa");
 	};
-	const claimKey = (kind: string, value: string) => `u-${hashOf(`${kind}\n${value}`)}`;
+	const claimKey = claimKeyOf;
 	/** A factor is written before its claim, so a claim whose list lacks its factor is stale. */
 	const holding = async (claim: Claim) =>
 		factorsOf(await store.read(claim.listKey)).some((f) => f.id === claim.factor);
