@@ -3,10 +3,10 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { patterns } from "@mod/create-app";
-import { buildBundles } from "./build.ts";
-import { readBundles } from "./contract.ts";
+import { buildBundles } from "../build.ts";
+import { readBundles } from "../contract.ts";
 import { dockerMissing, images, overridesFile } from "./image.ts";
-import { releaseOf } from "./workspace.ts";
+import { releaseOf } from "../workspace.ts";
 
 /**
  * Checks the release as an operator meets it: every bundle packed, an app of each pattern made by

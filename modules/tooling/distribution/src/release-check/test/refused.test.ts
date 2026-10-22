@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { refusalsIn } from "../src/refused.ts";
+import { refusalsIn } from "../refused.ts";
 
 it("reads every refusal a refused app wrote, past the log lines before them", () => {
 	const output = [

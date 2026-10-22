@@ -13,13 +13,9 @@
 ## Offers
 - `pnpm distribution`: prints each problem and exits 1, or prints `distribution: ok`.
 - `pnpm bundles`: builds each shipped bundle into `dist/bundles/<concern directory>` at the workspace's `version`: its members compiled to JS and declarations (tests and test tools, a trial file among them, left out), named publicly, with their other files, and its manifest. Prints each problem and exits 1, or how many it built.
-- `pnpm release-pack` and `pnpm release-published`: packing the release with its index sealed, and checking it before anything is published; see the internal module `release`.
-- `pnpm release:check`: packs every bundle and entrance, makes an app of each pattern with the packed `create-auth-provider`, installs it from the tarballs alone, type-checks it, and boots it to `/readyz` or to its refusals, each told. It also assembles an app by hand, as one keeping its own composition root does: `combinations`' full names, made published, installed from the tarballs, each module imported, and assembled to the kernel's refusals. Exits 1 on any problem.
+- `pnpm release-pack`, `pnpm release-published` and `pnpm release:check`: packing the release with its index sealed, checking it before anything is published, and checking it as an operator meets it; see the internal modules `release` and `release-check`.
 
 ## Invariants
-- The release check refuses a tarball without its `LICENSE`.
-- The release check boots each app in the image its Dockerfile builds; only the `deps` stage is replaced, by the same `--prod` install from the tarballs in the `base` stage, as the registry has none of them yet.
-- Without Docker, the release check exits 1 at once: no boot is skipped.
 - Bundles come only from the directory structure and the bundle manifests.
 - A bundle and an entrance carry the workspace's `license` and `engines` in their manifest, and its `LICENSE` file beside it, so npm and pnpm alike ship it.
 - A bundle's and an entrance's manifest carry the description its declaration states, and the workspace's `keywords` followed by its own, each once; a shipped bundle or an entrance without a description is refused.
