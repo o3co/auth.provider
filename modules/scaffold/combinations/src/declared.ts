@@ -15,6 +15,10 @@ export interface Package {
 	readonly replaces?: string;
 	readonly adapts?: string;
 	readonly default: boolean;
+	/** Whether it declares itself for wirings alone: no feature depends on it. */
+	readonly forWiring: boolean;
+	/** Whether it is declared outside the workspace, beside it. */
+	readonly outside: boolean;
 }
 
 export interface Declared {
@@ -36,6 +40,7 @@ interface Manifest {
 	readonly replaces?: unknown;
 	readonly adapts?: unknown;
 	readonly default?: unknown;
+	readonly forWiring?: unknown;
 	readonly wires?: unknown;
 	readonly joins?: unknown;
 }
@@ -55,6 +60,8 @@ const packageOf = (m: Manifest): Package => ({
 	...(isName(m.replaces) ? { replaces: m.replaces } : {}),
 	...(isName(m.adapts) ? { adapts: m.adapts } : {}),
 	default: m.default === true,
+	forWiring: m.forWiring === true,
+	outside: false,
 });
 
 const isName = (value: unknown): value is string => typeof value === "string" && value !== "";

@@ -11,8 +11,8 @@ export interface Selection {
 /** The axis owner a package adapts to or replaces. */
 const axisOf = (p: Package | undefined) => p?.replaces ?? p?.adapts;
 
-/** Each axis's adapters, by owner; the default is the one declaring it, or the only one. */
-function axesIn(declared: Declared) {
+/** Each axis's adapters, by owner; the default is the one declaring it, or else the only one (of the workspace's, where it has any). */
+export function axesIn(declared: Declared) {
 	const adapters = new Map<string, Package[]>();
 	for (const p of declared.packages.values()) {
 		const owner = axisOf(p);
@@ -20,7 +20,10 @@ function axesIn(declared: Declared) {
 	}
 	const defaultOf = (owner: string) => {
 		const of = adapters.get(owner) ?? [];
-		return (of.length === 1 ? of[0] : of.find((p) => p.default))?.name;
+		// An adapter declared outside never takes the place of the workspace's only one.
+		const ours = of.filter((p) => !p.outside);
+		const only = ours.length > 0 ? ours : of;
+		return (of.find((p) => p.default) ?? (only.length === 1 ? only[0] : undefined))?.name;
 	};
 	/** The adapter declared the default that replaces an owner: it composes in the owner's place, a module or not. */
 	const replacingOf = (owner: string) =>
