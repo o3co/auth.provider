@@ -826,6 +826,7 @@ What changed since rc.5. Coming from an earlier release candidate, read the sect
 ## From 0.18.1
 
 - **A generated app's `witness-backfill` script**: where the kernel is bundled twice, a refused boot is now written and exits 78, as the app's entry does, where it was thrown on as a crash. In an app generated before, change the line `if (!(error instanceof BootRefused)) throw error;` in `src/witness-backfill.ts` to `if (!BootRefused.is(error)) throw error;`, or generate the app again.
+- **A `plain-internal` pair whose name also answers an IPv6 address that does not reach**, as ECS Service Connect writes in the hosts file: 0.18.1 refused it as `plain-public`. Name the pair in `outbound.plain-ipv4` as well, and its name is resolved to IPv4 alone. An earlier version refuses boot on a configuration naming `outbound.plain-ipv4`, so a rollback takes the setting out with it.
 
 ## Operational notes
 
