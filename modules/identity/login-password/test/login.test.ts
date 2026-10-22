@@ -12,7 +12,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import { loginGates, logins, returnPaths } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
 import rateLimitModule from "@mod/rate-limit/module";
@@ -44,6 +44,8 @@ interface Setup {
 	readonly sessions?: Module;
 	readonly users?: Module;
 	readonly extra?: Module[];
+	/** A log in place of the quiet one. */
+	readonly log?: ReturnType<typeof recordingLog>;
 }
 
 async function serve(setup: Setup = {}) {
@@ -83,7 +85,7 @@ async function serve(setup: Setup = {}) {
 			"login-password": setup.login ?? {},
 			...(setup.logins ? {} : { "login-gates": setup.gates ?? {} }),
 		},
-		runtime,
+		runtime: setup.log ? quietRuntime({ log: setup.log.log }) : runtime,
 	});
 	await app.start();
 	stop = () => app.stop(1000);
@@ -641,5 +643,54 @@ describe("login-password under a gate that refuses", () => {
 				{ error: "temporarily_unavailable" },
 			]);
 		}
+	});
+
+	it("answers a login the gates opened or held though its run cannot be ended then, the attempt staying counted", async () => {
+		let down = () => {};
+		const outcomes = {
+			opened: { kind: "opened", session: { id: "h1" }, cookies: ["__Host-session=s1; Path=/"] },
+			held: {
+				kind: "held",
+				gate: "mfa",
+				answer: { error: "mfa_required" },
+				cookies: ["mfa=t1; Path=/"],
+			},
+		};
+		let next: keyof typeof outcomes = "opened";
+		const logged = recordingLog();
+		const { login, simulated, events } = await serve({
+			log: logged,
+			login: budget,
+			logins: answering(async () => {
+				// The store goes down once the login is made, before its run is ended.
+				down();
+				return outcomes[next];
+			}),
+		});
+		down = () => simulated.unreachable(true);
+		const answers = [];
+		for (const kind of ["opened", "held"] as const) {
+			next = kind;
+			simulated.unreachable(false);
+			const res = await login({ username: "alice", password: "correct horse" }, elsewhere());
+			answers.push([res.status, res.body, res.headers.getSetCookie()]);
+		}
+		expect(answers).toEqual([
+			[200, {}, [expect.stringMatching(/^__Host-session=s1/)]],
+			[403, { error: "mfa_required" }, [expect.stringMatching(/^mfa=t1/)]],
+		]);
+		expect(events.map((e) => [e.kind, e.subject])).toEqual([
+			["login.succeeded", "alice"],
+			["login.held", "alice"],
+		]);
+		expect(logged.lines().filter((l) => l.level === "warn")).toEqual([
+			{ level: "warn", event: "login-password.run_unended", fields: {} },
+			{ level: "warn", event: "login-password.run_unended", fields: {} },
+		]);
+		// Both left counted: the identifier, past its two attempts, waits.
+		simulated.unreachable(false);
+		down = () => {};
+		const held = await login({ username: "alice", password: "correct horse" }, elsewhere());
+		expect([held.status, held.body]).toEqual([429, { error: "too_many_attempts" }]);
 	});
 });

@@ -164,7 +164,11 @@ export default defineModule({ name: "login-password", section }, (m) => [
 				recordLogin(request, "failed");
 				return answer(401, { error: "invalid_credentials" });
 			}
-			await budgets.succeeded(accountAttempts, key, policy, reserved.reservation);
+			// The login is open or held already: a run that cannot be ended stays counted, the safe side, and the login is answered.
+			await budgets.succeeded(accountAttempts, key, policy, reserved.reservation).catch((error) => {
+				if (!isUnavailable(error)) throw error;
+				c.log.warn("login-password.run_unended", {});
+			});
 			if (outcome.kind === "held") {
 				recordLogin(request, "held", facts.subject);
 				return answer(403, outcome.answer, outcome.cookies);
