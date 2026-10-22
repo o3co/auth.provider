@@ -1,6 +1,7 @@
 import { defineModule } from "@mod/kernel";
-import { enforcers, factors } from "@mod/mfa";
+import { enforcers } from "@mod/mfa";
 import { factorKinds, secondFactorAmr } from "@mod/mfa-extensions";
+import { factorReading } from "@mod/mfa-reading";
 import { type AuthContext, sessions } from "@mod/session";
 import { entryRequirements } from "@mod/session-requirements";
 import { secondFactors } from "./contract.ts";
@@ -30,7 +31,7 @@ export default defineModule({ name: "mfa-entry" }, (m) => [
 		};
 	}),
 	m.contribute(entryRequirements).by(async (c) => {
-		const decided = await c.get(factors);
+		const decided = await c.get(factorReading);
 		const required = decided.secondFactorRequired();
 		if (required && !(await c.collect(factorKinds)).some((k) => k.counts && k.addsSecondFactor)) {
 			return c.refuse("mfa.mode", "required needs a kind that counts to add mfa");

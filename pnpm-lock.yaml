@@ -2541,6 +2541,9 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
