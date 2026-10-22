@@ -1,12 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { patterns } from "@mod/create-app";
 import { buildBundles } from "../build.ts";
 import { readBundles } from "../contract.ts";
-import { dockerMissing, images, overridesFile } from "./image.ts";
+import { outsideScene } from "../outside-scene/contract.ts";
+import { packedOf, packRelease, zodOf } from "../release/contract.ts";
 import { releaseOf } from "../workspace.ts";
+import { dockerMissing, images, overridesFile } from "./image.ts";
 
 /**
  * Checks the release as an operator meets it: every bundle packed, an app of each pattern made by
@@ -42,19 +44,15 @@ if (unbuilt.length > 0) {
 
 const scratch = mkdtempSync(join(tmpdir(), "release-check-"));
 const tarballs = join(scratch, "tarballs");
-mkdirSync(tarballs);
+// Packed as the release packs them: the index sealed in between.
+const packed = packRelease(root, tarballs);
+if ("problems" in packed) {
+	for (const problem of packed.problems) console.error(problem);
+	process.exit(1);
+}
 const overrides: Record<string, string> = {};
-for (const dir of readdirSync(out)) {
-	const { name } = JSON.parse(readFileSync(join(out, dir, "package.json"), "utf8"));
-	const packed = execFileSync("pnpm", ["pack", "--pack-destination", tarballs], {
-		cwd: join(out, dir),
-		encoding: "utf8",
-	})
-		.trim()
-		.split("\n")
-		.findLast((line) => line.endsWith(".tgz"));
-	if (!packed) throw new Error(`${name}: pnpm pack named no tarball`);
-	const tarball = packed.startsWith("/") ? packed : join(tarballs, packed);
+for (const tarball of packed.tarballs) {
+	const { name } = packedOf(tarball);
 	// npm and pnpm alike ship what the tarball holds: the license must be in it.
 	const held = execFileSync("tar", ["-tzf", tarball], { encoding: "utf8" }).split("\n");
 	if (!held.includes("package/LICENSE")) problems.push(`${name}: its tarball holds no LICENSE`);
@@ -174,6 +172,16 @@ for (const name of patterns().map((pattern) => pattern.name)) {
 }
 
 run.remove();
+
+const zod = zodOf(readFileSync(join(root, "pnpm-lock.yaml"), "utf8"));
+try {
+	if (typeof zod === "string") throw new Error(zod);
+	const scene = { tarballs, scratch, version: packedOf(overrides[entrance] as string).version };
+	say(`outside: ${await outsideScene({ ...scene, zod: zod.version, pattern: "simple-web" })}`);
+} catch (error) {
+	problems.push(`outside: ${error instanceof Error ? error.message : String(error)}`);
+	say("outside: failed");
+}
 
 for (const problem of problems) console.error(problem);
 say(problems.length === 0 ? `release: ok (${scratch})` : `release: ${problems.length}`);
