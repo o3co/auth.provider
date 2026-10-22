@@ -4,7 +4,14 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
-import { assemble, BootRefused, defineModule, kernelConfig, type Module } from "@mod/kernel";
+import {
+	assemble,
+	BootRefused,
+	defineModule,
+	kernelConfig,
+	type Module,
+	Unavailable,
+} from "@mod/kernel";
 import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import { loginGates, logins, returnPaths } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
@@ -30,6 +37,8 @@ afterEach(async () => {
 interface Setup {
 	readonly login?: Record<string, unknown>;
 	readonly gates?: Record<string, unknown>;
+	/** In place of login-gates, a `logins` answering as a test needs. */
+	readonly logins?: Module;
 	readonly trusted?: string[];
 	readonly origin?: string;
 	readonly sessions?: Module;
@@ -44,7 +53,7 @@ async function serve(setup: Setup = {}) {
 	const app = await assemble({
 		modules: [
 			http,
-			gatesModule,
+			setup.logins ?? gatesModule,
 			csrfStandIn,
 			cookiesModule,
 			setup.users ?? usersModule,
@@ -72,7 +81,7 @@ async function serve(setup: Setup = {}) {
 				testUser("carol", "pw", { attributes: carol }),
 			]),
 			"login-password": setup.login ?? {},
-			"login-gates": setup.gates ?? {},
+			...(setup.logins ? {} : { "login-gates": setup.gates ?? {} }),
 		},
 		runtime,
 	});
@@ -581,6 +590,56 @@ describe("login-password attempts per account", () => {
 			{ "account-window": "10m", "account-max-wait": "15m" },
 		]) {
 			await expect(serve({ login }), JSON.stringify(login)).rejects.toBeInstanceOf(BootRefused);
+		}
+	});
+});
+
+describe("login-password under a gate that refuses", () => {
+	/** A `logins` whose login answers `outcome`, or throws it. */
+	const answering = (outcome: () => Promise<unknown>) =>
+		defineModule({ name: "logins-stand-in" }, (m) => [
+			m.provide(logins).by(() => ({
+				login: outcome as never,
+				resume: outcome as never,
+				achievable: () => true,
+				returnAllowed: () => true,
+			})),
+		]);
+	const budget = { "account-attempts": 2, "account-window": "1h", "account-max-wait": "1m" };
+	let sender = 60;
+	const elsewhere = () => from(`198.51.100.${sender++}`);
+
+	it("answers a refused login as a wrong password, in its answer, its record and its count", async () => {
+		const refused = async () => ({ kind: "refused", gate: "credential-policy", cookies: [] });
+		const { login, events } = await serve({ login: budget, logins: answering(refused) });
+		const wrong = await login({ username: "bob", password: "wrong" }, elsewhere());
+		const refusedOne = await login({ username: "alice", password: "correct horse" }, elsewhere());
+		expect([refusedOne.status, refusedOne.body]).toEqual([wrong.status, wrong.body]);
+		expect(refusedOne.headers.getSetCookie()).toEqual([]);
+		expect(events.map((e) => [e.kind, e.subject])).toEqual([
+			["login.failed", undefined],
+			["login.failed", undefined],
+		]);
+		// Counted as a failed guess: the identifier waits after its attempts.
+		await login({ username: "alice", password: "correct horse" }, elsewhere());
+		const held = await login({ username: "alice", password: "correct horse" }, elsewhere());
+		expect([held.status, held.body]).toEqual([429, { error: "too_many_attempts" }]);
+	});
+
+	it("hands back the guess where a gate cannot tell, answering unavailable", async () => {
+		const down = async () => {
+			throw new Unavailable("login-gates");
+		};
+		const { login } = await serve({
+			login: { ...budget, "account-attempts": 1 },
+			logins: answering(down),
+		});
+		for (let i = 0; i < 3; i++) {
+			const res = await login({ username: "alice", password: "correct horse" }, elsewhere());
+			expect([res.status, res.body], String(i)).toEqual([
+				503,
+				{ error: "temporarily_unavailable" },
+			]);
 		}
 	});
 });
