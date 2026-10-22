@@ -83,14 +83,51 @@ jobs:
       - run: pnpm release:check
 
       # The tarballs of this tag, checked before a draft release is created or
-      # anything is published: every bundle and the entrance is packed, and
-      # each ships the root LICENSE word for word.
+      # anything is published: every bundle and the entrance is packed, the
+      # index sealed with the other bundles' and zod's integrity in between,
+      # and each ships the root LICENSE word for word. A rerun of this run
+      # publishes the first attempt's tarballs, saved below, never a new pack:
+      # a tarball packed again need not be the same bytes as one published.
       - name: Pack the bundles and refuse a tarball without the root LICENSE
+        if: github.run_attempt == 1
         run: |
           set -euo pipefail
           pnpm bundles
           .github/scripts/pack-published.sh "$RUNNER_TEMP/tarballs"
           .github/scripts/check-tarball-license.sh "$RUNNER_TEMP/tarballs" LICENSE
+
+      # Saved before anything is published, so a rerun has them to publish.
+      - name: Save the tarballs
+        if: github.run_attempt == 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-tarballs
+          path: ${{ runner.temp }}/tarballs/*.tgz
+          if-no-files-found: error
+
+      - name: Restore the first attempt's tarballs
+        if: github.run_attempt != 1
+        uses: actions/download-artifact@v4
+        with:
+          name: release-tarballs
+          path: ${{ runner.temp }}/tarballs
+
+      # Built, not packed: the license check lists the packages the release
+      # publishes from what pnpm bundles builds.
+      - name: Refuse a restored tarball without the root LICENSE
+        if: github.run_attempt != 1
+        run: |
+          set -euo pipefail
+          pnpm bundles
+          .github/scripts/check-tarball-license.sh "$RUNNER_TEMP/tarballs" LICENSE
+
+      # Before anything is published: every package of this version already on
+      # npm, the index's bundle and the entrance among them, must be the very
+      # tarball about to be published, and an answer npm gives that cannot be
+      # read stops it as well. A first attempt finds none; a rerun finds those
+      # it published, which must be these.
+      - name: Refuse what is published already as another tarball
+        run: pnpm release:published "$RUNNER_TEMP/tarballs"
 
       - name: Create GitHub Release (draft)
         id: draft

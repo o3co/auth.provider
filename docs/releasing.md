@@ -32,10 +32,11 @@ Tag the merge commit on `main` as `v<version>` and push the tag. The workflow re
 
 1. Checks that npm can publish through trusted publishing (11.5.1 or later).
 2. Runs `pnpm check` and `pnpm release:check`: every pattern generated from the packed tarballs alone, type-checked and booted.
-3. Packs every package, and refuses any tarball without the root `LICENSE` word for word.
-4. Creates a draft GitHub release with generated notes.
-5. Publishes each tarball with provenance, the entrance last since it depends on the others. Each is authenticated by the run's own token, through the package's trusted publisher; no npm token is stored.
-6. Publishes the draft release.
+3. Packs every package (`pnpm release:pack`): every bundle but the scaffold, then the scaffold's index sealed with their integrity and zod's, then the scaffold and the entrance. Refuses any tarball without the root `LICENSE` word for word, and saves the tarballs to the run.
+4. Refuses to go on where a package of this version is on npm already as another tarball, or npm's answer cannot be read (`pnpm release:published`).
+5. Creates a draft GitHub release with generated notes.
+6. Publishes each tarball with provenance, the entrance last since it depends on the others. Each is authenticated by the run's own token, through the package's trusted publisher; no npm token is stored.
+7. Publishes the draft release.
 
 ## A package name never published before
 
@@ -48,7 +49,7 @@ A release whose new name is missing either stops at that package; see the next s
 
 ## When a publish stops partway
 
-Fix the cause and run the workflow again for the same tag. A package already on npm at that version is passed over, so the rerun publishes only what is missing, and the release is published once every package is.
+Fix the cause and re-run the failed job of the same run (not a new run, and not a new tag). The rerun restores the tarballs the first attempt packed and saved, never packing again, and checks that every package of this version already on npm is that very tarball before publishing anything; one that is passed over, so the rerun publishes only what is missing, and the release is published once every package is. Where the check stops the rerun, what is on npm is not what the index of this version names: publish the next version instead.
 
 ## After the release
 
