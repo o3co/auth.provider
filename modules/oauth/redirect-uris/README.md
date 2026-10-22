@@ -9,6 +9,7 @@
 
 ## Offers
 - Client metadata section `redirects` (`authorize`): `redirect-uris` (default empty), each registrable. From a client's metadata document it copies `redirect_uris` as given, under its own key, for the schema to check (`reads`: `redirect_uris`); nothing without it. An empty list is taken too: that a document's client needs a redirect URI is `clients-cimd`'s rule.
+- `redirectsCopy`: the same copy, for `client-documents`' `documentCopies`.
 - `registrable` (URI → whether a client may register it to be sent back to).
 - `matches` (registered, given → whether the given redirect URI is the registered one).
 - `answerTo` (redirect URI, parameters → the answer's URL; a parameter without a value is left out).
@@ -23,7 +24,7 @@
 - `redirectsAt` takes no origin from a private-use scheme (its origin is `null`), and finds no URI for a client read where the section is not composed.
 
 ## Depends on
-- `clients` (the section and the client), `zod`.
+- `clients` (the section and the client), `client-documents` (the copy), `zod`.
 
 ## Vocabulary
 - redirect URI: where a client asks an authorization answer to be sent back to.

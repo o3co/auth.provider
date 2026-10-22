@@ -1,6 +1,13 @@
 import type { Client, Section } from "@mod/clients";
 import { describe, expect, it } from "vitest";
-import { answerTo, matches, redirects, redirectsAt, registrable } from "../src/contract.ts";
+import {
+	answerTo,
+	matches,
+	redirects,
+	redirectsAt,
+	redirectsCopy,
+	registrable,
+} from "../src/contract.ts";
 
 /** A client whose `authorize` section registers these redirect URIs. */
 const registering = (uris: readonly string[]): Client => ({
@@ -108,5 +115,18 @@ describe("redirect-uris: a document's copy", () => {
 
 	it("copies nothing from a document without redirect_uris", () => {
 		expect(redirects.fromDocument?.({ client_name: "App" }, from)).toBeUndefined();
+	});
+});
+
+describe("redirect-uris: the copy client-documents collects", () => {
+	const from = { id: "https://app.example/c", host: "app.example" };
+	it("fills the section from redirect_uris as given, and copies nothing without them", () => {
+		expect(redirectsCopy.section).toBe(redirects);
+		expect(redirectsCopy.reads).toEqual(["redirect_uris"]);
+		const uris = ["https://app.example/cb"];
+		expect(redirectsCopy.copy({ redirect_uris: uris, client_name: "App" }, from)).toEqual({
+			value: { "redirect-uris": uris },
+		});
+		expect(redirectsCopy.copy({ client_name: "App" }, from)).toBeUndefined();
 	});
 });

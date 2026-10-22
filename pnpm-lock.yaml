@@ -1518,6 +1518,9 @@ importers:
 
   modules/oauth/redirect-uris:
     dependencies:
+      '@mod/client-documents':
+        specifier: workspace:*
+        version: link:../../identity/client-documents
       '@mod/clients':
         specifier: workspace:*
         version: link:../../identity/clients
