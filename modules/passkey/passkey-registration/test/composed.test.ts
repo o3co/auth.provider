@@ -90,9 +90,10 @@ async function serve(
 			.get(sessions)
 			.complete(testRequest(), { subject, amr: ["pwd"], authenticatedAt });
 		const cookie = done.cookies.map((c) => c.split(";")[0]).join("; ");
-		return async (path: string, body?: unknown) => {
-			const res = await fetch(`${base}/oauth/webauthn/registration/${path}`, {
-				method: "POST",
+		return async (path: string, body?: unknown, method = "POST") => {
+			const url = path.startsWith("/") ? path : `/oauth/webauthn/registration/${path}`;
+			const res = await fetch(`${base}${url}`, {
+				method,
 				headers: {
 					origin: testOrigin,
 					"x-forwarded-proto": "https",
@@ -206,4 +207,35 @@ it("needs a recent sign-in at a known time where nothing judges entry", async ()
 	expect(await (await browser("dee", "unknown"))("options")).toEqual(stepUp);
 	expect(await (await browser("old", runtime.clock.now() - 301_000))("options")).toEqual(stepUp);
 	expect((await (await browser("sam"))("options")).status).toBe(200);
+});
+
+it("lists, renames and removes the subject's passkeys through passkeys, telling when the last goes", async () => {
+	const { browser } = await serve();
+	const post = await browser("sam");
+	const { response } = await register(post);
+	const listed = await post("/oauth/webauthn/registrations", undefined, "GET");
+	expect(listed.body).toEqual({
+		passkeys: [
+			expect.objectContaining({ credentialId: response.id, nickname: "laptop", backedUp: false }),
+		],
+	});
+	expect(
+		(await post("/oauth/webauthn/registrations/rename", { id: response.id, nickname: "phone" }))
+			.status,
+	).toBe(200);
+	expect((await post("/oauth/webauthn/registrations", undefined, "GET")).body).toEqual({
+		passkeys: [expect.objectContaining({ nickname: "phone" })],
+	});
+	// Another subject cannot rename or remove it.
+	const kims = await browser("kim");
+	expect((await kims("/oauth/webauthn/registrations/remove", { id: response.id })).status).toBe(
+		404,
+	);
+	expect(await post("/oauth/webauthn/registrations/remove", { id: response.id })).toEqual({
+		status: 200,
+		body: { last: true },
+	});
+	expect((await post("/oauth/webauthn/registrations", undefined, "GET")).body).toEqual({
+		passkeys: [],
+	});
 });
