@@ -4,7 +4,7 @@ import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
 import { enforcers, type FactorStore, factorStore, proofSteps, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
-import { type MfaSettings, mfaConfig } from "@mod/mfa/testing";
+import { type MfaSettings, mfaConfig, updatingTogether } from "@mod/mfa/testing";
 import { type FactorBinding, factorBinding } from "@mod/mfa-binding";
 import { factorKinds } from "@mod/mfa-extensions";
 import { type FactorManaging, factorManaging } from "@mod/mfa-managing";
@@ -59,8 +59,11 @@ const enforcer = defineModule({ name: "enforcer" }, (m) => [
 	m.contribute(enforcers).by(() => ({ name: "enforcer" })),
 ]);
 
-/** mfa's store on the records stand-in; `wipe` loses every list, as a store wiped or rolled back would. */
-function memoryFactors() {
+/**
+ * mfa's store on the records stand-in, writing a list and its claim together unless `together` is false;
+ * `wipe` loses every list, as a store wiped or rolled back would.
+ */
+function memoryFactors(together: boolean) {
 	const fresh = () => memoryRecords<StoredFactors>(() => 0, { shards: 1, perShard: 1 });
 	let stand = fresh();
 	const down = unavailableSwitch<FactorStore>("factor-store");
@@ -73,6 +76,12 @@ function memoryFactors() {
 		read: (key) => stand.records.read(key),
 		update: (key, change) => stand.records.change(key, change),
 		scan: (...given: Parameters<typeof stand.records.scan>) => stand.records.scan(...given),
+		...(together
+			? {
+					updateTogether: (...given: Parameters<ReturnType<typeof updatingTogether>>) =>
+						updatingTogether(stand.records)(...given),
+				}
+			: {}),
 	});
 	const module = defineModule({ name: "factor-store" }, (m) => [
 		m.provide(factorStore).by(() => store),
@@ -90,9 +99,13 @@ function memoryFactors() {
 	};
 }
 
-export async function witnessed(settings: Partial<MfaSettings> = {}, extra: Module[] = []) {
+export async function witnessed(
+	settings: Partial<MfaSettings> = {},
+	extra: Module[] = [],
+	{ together = true }: { readonly together?: boolean } = {},
+) {
 	const audit = auditStandIn();
-	const place = memoryFactors();
+	const place = memoryFactors(together);
 	const witness = witnessStandIn();
 	const app = await assemble({
 		modules: [
