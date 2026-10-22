@@ -124,6 +124,15 @@ describe("a store script, run once", () => {
 		redis.down();
 	});
 
+	it("refuses boot, naming batchAcross, where the server runs the read script and not the batch across", async () => {
+		const redis = primary();
+		redis.storeScripts.failWhere = "local marks = {}";
+		expect(await refusal(await redis.listen())).toMatch(
+			/the server fails a store script \(batchAcross\)/,
+		);
+		redis.down();
+	});
+
 	it("never names a store script for a passing state of the server: busy with a script, or loading its data", async () => {
 		for (const state of [
 			"BUSY Redis is busy running a script. You can only call SCRIPT KILL or SHUTDOWN NOSAVE.",

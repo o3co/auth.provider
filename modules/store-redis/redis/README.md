@@ -2,7 +2,7 @@
 
 ## Responsibilities
 - Implements the `store` contract with Redis, with one script per shape of basic operation and none per feature.
-- Maps each partition to a hash tag, so a batch and a consistent read run in one slot.
+- Maps each partition to a hash tag, so a batch and a consistent read run in one slot. A batch across partitions runs in one script on the one server, over the slots of every partition it touches; it is what keeps this adapter off a cluster.
 - Checks, once at boot, that the Redis configuration gives the declared spaces their guarantees.
 - Confirms an answer before giving it, for spaces that need replicated or confirmed reads.
 
@@ -23,7 +23,7 @@
 - Connects to Redis itself, through its client, apart from `outbound`, which carries HTTP alone (`network`: `redis`).
 - Boot is refused, naming what is unmet, when the server is not what Deployment states.
 - Boot sends once every command the store sends, a script's on keys of the store's own (`<prefix>:{#check}:…`) it then removes, unless the server refuses that too; one the server refuses for good (`NOPERM`, or unknown or renamed), or keys it refuses the user, refuse boot, named. The probe sends them again, answering unready and warning `redis.settings_unmet` with the name. A write refused for want of replicas leaves a command unjudged, never refused.
-- Boot then runs once what a confirmation would and a store script does: with `replication`, the confirming connection reaching another server than the operations (their run ids differ, and the operations' did not change meanwhile, as in a failover), and a store script (`read`) the server cannot run, refuse boot, named; the probe runs both again, answering unready. A replica missing or lagging is neither.
+- Boot then runs once what a confirmation would and a store script does: with `replication`, the confirming connection reaching another server than the operations (their run ids differ, and the operations' did not change meanwhile, as in a failover), and a store script (`read`, `batchAcross`) the server cannot run, refuse boot, named; the probe runs both again, answering unready. A replica missing or lagging is neither.
 - A setting is read by `CONFIG GET`. Where the server refuses it for good (`NOPERM`, or an unknown command or subcommand), the declared value is taken, a needed one left undeclared refusing boot, and every boot warns `redis.settings_declared` with the names taken so; where it answers, a declared value that differs refuses boot; any other error (`BUSY`, say) refuses boot.
 - `durability` `none`: the operator states the server does not fsync every write, so a crash loses the latest writes, spent assertion and proof ids and lockout records among them; every boot warns `redis.durability_none` naming the durable spaces.
 - Boot is refused on a space needing replicated or confirmed reads without `replication`.
