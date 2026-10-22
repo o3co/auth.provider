@@ -470,6 +470,20 @@ From `@mod/passkey-registration`.
 | `passkey-registration.requests` | integer (1–100000) | `60` |  |  |  | Requests allowed per source in each window, over both registration routes. |
 | `passkey-registration.window` | string | `5m` |  |  |  | The window requests are counted over, from 1s to 1d. |
 
+## passkey-witness-http
+
+From `@mod/passkey-witness-http`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `passkey-witness-http.read-url` | string |  | yes | `PASSKEY_WITNESS_HTTP_READ_URL` | `https://ledger.example.invalid/passkey-witness/read` | Where whether a subject carries the mark is read. At the same origin as the other URLs. Plain http is reached only where outbound's policy names it. |
+| `passkey-witness-http.enroll-url` | string |  | yes | `PASSKEY_WITNESS_HTTP_ENROLL_URL` | `https://ledger.example.invalid/passkey-witness/enroll` | Where the mark is set to a token unless one is set. At the same origin as the other URLs. Plain http is reached only where outbound's policy names it. |
+| `passkey-witness-http.withdraw-url` | string |  | yes | `PASSKEY_WITNESS_HTTP_WITHDRAW_URL` | `https://ledger.example.invalid/passkey-witness/withdraw` | Where the mark is removed only where it is the token's; another target than `clear-url`. At the same origin as the other URLs. Plain http is reached only where outbound's policy names it. |
+| `passkey-witness-http.clear-url` | string |  | yes | `PASSKEY_WITNESS_HTTP_CLEAR_URL` | `https://ledger.example.invalid/passkey-witness/clear` | Where the mark is removed, whoever's it is. At the same origin as the other URLs. Plain http is reached only where outbound's policy names it. |
+| `passkey-witness-http.credential` | string |  | yes | `PASSKEY_WITNESS_HTTP_CREDENTIAL` | `REPLACE-RANDOM-BEARER-TOKEN-32-BYTES` | A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material, sent on every call. |
+| `passkey-witness-http.timeout` | string | `5s` |  |  |  | How long a call may take, from 1ms to 1m, narrowing outbound's cap; a write's deadline is its sending time plus the time outbound holds the call to. |
+| `passkey-witness-http.max-response-size` | string |  |  |  |  | The largest answer read, from 1B to 16MiB, narrowing outbound's cap. |
+
 ## passkeys
 
 From `@mod/passkeys`.
