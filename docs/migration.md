@@ -842,6 +842,7 @@ What changes from 0.18 to 0.19. Coming from an earlier release candidate, read t
   - Two keys move: `webauthn.user-verification` becomes `passkeys.user-verification`, and `webauthn.max-credentials` becomes `passkeys.max-credentials`, with the same values and defaults. Left under `webauthn`, they refuse boot at `webauthn` (`Unrecognized keys: "max-credentials", "user-verification"`): move them, or remove them to take the defaults. `mfa-webauthn.user-verification` is unchanged.
   - An app composed by hand that serves passkey logins or registration (`webauthn-login`, `passkey-registration`) composes `passkeys` beside `webauthn`; without it, boot is refused for the `passkeys` or `registrations` it lacks. `combinations` and `create-app` add it.
   - The passkeys kept are read as they are: `webauthn-store` keeps its name and its spaces, and the records keep their keys.
+  - A removed passkey's record is kept stripped to its subject. While 0.18 and 0.19 hosts run side by side, a 0.18 host reads it as a broken record: an assertion naming that passkey answers `503` there, and the passkey is gone either way once every host runs 0.19.
   - `passkey-registration` comes wherever `passkeys` and a session are composed. An app whose composition brought it only because `mfa-webauthn` brought `webauthn`, with no `passkeys`, no longer serves the passkey registration routes; one that composes `passkeys` and a session still does, with or without a passkey login.
 
 ## Operational notes
