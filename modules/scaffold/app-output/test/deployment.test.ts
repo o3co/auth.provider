@@ -206,7 +206,8 @@ it("records the packages outside the release and checks the lockfile against the
 	};
 	const outside = { modules: [grant], registries: { default: "https://registry.npmjs.org" } };
 	const target = await mkdtemp(join(tmpdir(), "app-output-"));
-	await writeDeployment(target, ["@mod/http"], fakePackages(undefined, [], outside), readme);
+	const release = { version: "1.2.3", integrity: { zod: "sha512-ZOD" } };
+	await writeDeployment(target, ["@mod/http"], fakePackages(release, [], outside), readme);
 	const files = await readdir(target, { recursive: true });
 	expect(files).toEqual(
 		expect.arrayContaining([
@@ -215,6 +216,10 @@ it("records the packages outside the release and checks the lockfile against the
 			"scripts/check-outside.mjs",
 		]),
 	);
+	// What the release recorded of the packages held to one copy reaches the record.
+	expect(JSON.parse(await read(target, "outside-modules.json")).held).toEqual({
+		zod: "sha512-ZOD",
+	});
 	const manifest = JSON.parse(await read(target, "package.json"));
 	expect(manifest.scripts["check:outside"]).toBe("node scripts/check-outside.mjs");
 	// The check holds what it uses: the app depends on nothing for it.

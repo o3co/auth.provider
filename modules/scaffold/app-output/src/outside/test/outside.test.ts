@@ -21,10 +21,18 @@ const outside: OutsideModules = {
 	modules: [grant],
 	registries: { default: "https://registry.npmjs.org" },
 };
+/** As the release records it: each bundle's integrity, and zod's. */
+const integrity = {
+	"@o3co/auth-provider-identity": "sha512-IDENTITY",
+	"@o3co/auth-provider-oauth": "sha512-OAUTH",
+	"@o3co/auth-provider-other": "sha512-OTHER",
+	zod: "sha512-ZOD",
+};
 const app = {
 	dependencies: { "@o3co/auth-provider-oauth": "0.19.0", "@x/grant": "1.2.0" },
 	version: "0.19.0",
 	zod: "4.6.7",
+	integrity,
 };
 
 describe("what an app beside packages outside the release is given", () => {
@@ -48,6 +56,11 @@ describe("what an app beside packages outside the release is given", () => {
 		expect(JSON.parse(beside.files["outside-modules.json"] as string)).toEqual({
 			modules: [grant],
 			registries: outside.registries,
+			held: {
+				"@o3co/auth-provider-identity": "sha512-IDENTITY",
+				"@o3co/auth-provider-oauth": "sha512-OAUTH",
+				zod: "sha512-ZOD",
+			},
 		});
 		expect(beside.files["scripts/check-outside.mjs"]).toBe(
 			readFileSync(outsideLock.script, "utf8"),
@@ -106,31 +119,26 @@ describe("what an app beside packages outside the release is given", () => {
 		expect(guide).toContain("## Packages outside this release");
 		expect(guide).toContain("| `@x/grant` | `1.2.0` | `sha512-AAAA` |");
 		expect(guide).toContain("pnpm check:outside");
+		expect(guide).toContain("the overrides and `held` move together");
+		expect(guide).toContain("take the overrides, `held` and `scripts/check-outside.mjs` from it");
 		expect(guide).toContain("not covered by its conformance");
 		expect(index).toContain("`outside-modules.json`");
 	});
 
-	it("records the integrity the release recorded of every package it holds to one copy, where the release records them", () => {
-		const integrity = {
-			"@o3co/auth-provider-identity": "sha512-IDENTITY",
-			"@o3co/auth-provider-oauth": "sha512-OAUTH",
-			"@o3co/auth-provider-other": "sha512-OTHER",
-			zod: "sha512-ZOD",
-		};
-		const record = JSON.parse(
-			besideRelease(outside, { ...app, integrity }).files["outside-modules.json"] as string,
-		);
+	it("records the integrity the release recorded of every package it holds to one copy", () => {
+		const record = JSON.parse(besideRelease(outside, app).files["outside-modules.json"] as string);
 		expect(record.held).toEqual({
 			"@o3co/auth-provider-identity": "sha512-IDENTITY",
 			"@o3co/auth-provider-oauth": "sha512-OAUTH",
 			zod: "sha512-ZOD",
 		});
-		expect(
-			JSON.parse(besideRelease(outside, app).files["outside-modules.json"] as string),
-		).not.toHaveProperty("held");
 	});
 
-	it("refuses a held package the release records no integrity of", () => {
+	it("refuses a held package the release records no integrity of, and a release recording none", () => {
+		const { integrity: _, ...unrecorded } = app;
+		expect(() => besideRelease(outside, unrecorded)).toThrow(
+			"@o3co/auth-provider-identity, @o3co/auth-provider-oauth, zod: held to one copy, but the release records no integrity of it",
+		);
 		expect(() =>
 			besideRelease(outside, {
 				...app,

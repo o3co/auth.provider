@@ -30,6 +30,6 @@ export interface Card {
 export interface Release {
 	readonly version: string;
 	readonly repository?: string;
-	/** The integrity the release recorded of each of its bundles and of zod, by name, where it records them. */
+	/** The integrity the release recorded of each of its bundles and of zod, by name: required to compose packages outside it. */
 	readonly integrity?: Readonly<Record<string, string>>;
 }

@@ -292,7 +292,9 @@ function recordRefusals(lock, record, overrides, references, registries) {
  * Why the lockfile does not resolve each recorded package as recorded, with the app's `overrides`
  * (name to version) applied, why it holds an overridden package in other than one copy at its
  * version, why either comes from other than its registry in `registries` (the default origin and
- * each scope's), and why it was resolved with other overrides; none where it is as recorded.
+ * each scope's), why it was resolved with other overrides, and why an overridden package is not the
+ * tarball whose integrity the release recorded (`integrities`, one for each package the overrides
+ * hold; one without refused); none where it is as recorded.
  */
 export function refusals(text, records, overrides, registries, integrities) {
 	const lock = lockOf(text);
@@ -311,7 +313,7 @@ export function refusals(text, records, overrides, registries, integrities) {
 			.flatMap(([name, version]) =>
 				oneCopyRefusals(lock, name, String(version), references, registries),
 			),
-		...(integrities === undefined ? [] : heldIntegrityRefusals(lock, held, own(integrities))),
+		...heldIntegrityRefusals(lock, held, own(integrities)),
 	];
 }
 
