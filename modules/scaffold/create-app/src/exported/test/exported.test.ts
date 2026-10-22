@@ -24,6 +24,8 @@ it("loads no blocked target, refused path, or conditions node refuses", () => {
 		"./dist/%2e%2e/escape.js",
 		"./dist%2Fmodule.js",
 		"./dist%5cmodule.js",
+		"./dist/%zz.js",
+		"./dist/%ff.js",
 	]) {
 		expect(loads(target), JSON.stringify(target)).toBe(false);
 	}
@@ -34,4 +36,13 @@ it("loads no array and no empty segment, stricter than node, and nothing of a su
 	expect(loads({ import: "./dist//module.js" })).toBe(false);
 	expect(loadsSubpath({ ".": "./index.js" }, "./module")).toBe(false);
 	expect(loadsSubpath("./index.js", "./module")).toBe(false);
+});
+
+it("loads nothing of exports mixing subpaths and conditions at the top, which node refuses whole", () => {
+	expect(loadsSubpath({ "./module": "./m.js", default: "./m.js" }, "./module")).toBe(false);
+	expect(loadsSubpath({ "./module": "./m.js", ".": "./index.js" }, "./module")).toBe(true);
+});
+
+it("holds the separator rule to the target's path, not its query", () => {
+	expect(loads("./m.js?q=%2F")).toBe(true);
 });

@@ -16,16 +16,22 @@ const invalidSegment =
 
 /**
  * What node makes of an export's target for an app's import, as its resolver does: a path inside
- * the package (`./`, no segment it refuses, no encoded separator), a target blocked (null, a path
+ * the package (`./`, no segment it refuses; its path decoding, with no encoded separator), a target blocked (null, a path
  * it refuses, or conditions with an array index's key, which node refuses whole), or none met
  * (conditions none of which apply, so node goes on to the next). An array is refused.
  */
 function targetOf(target: unknown): "usable" | "blocked" | "unmet" {
 	if (typeof target === "string") {
-		const path = target.slice(2);
-		// An encoded separator is no path node resolves, whatever its segments.
-		const usable = target.startsWith("./") && !invalidSegment.test(path) && !/%2f|%5c/i.test(path);
-		return usable ? "usable" : "blocked";
+		if (!target.startsWith("./") || invalidSegment.test(target.slice(2))) return "blocked";
+		// As node resolves it, under the package: its path holds no encoded separator, and decodes.
+		const { pathname } = new URL(target, "file:///package/");
+		if (/%2f|%5c/i.test(pathname)) return "blocked";
+		try {
+			decodeURIComponent(pathname);
+		} catch {
+			return "blocked";
+		}
+		return "usable";
 	}
 	if (!isObject(target) || Object.keys(target).some(arrayIndex)) return "blocked";
 	for (const [condition, inner] of Object.entries(target)) {
@@ -38,5 +44,10 @@ function targetOf(target: unknown): "usable" | "blocked" | "unmet" {
 
 /** Whether `exports` (a package manifest's) maps `subpath` to a target node loads for an app's import. No package code is run. */
 export function loadsSubpath(exports: unknown, subpath: string): boolean {
-	return isObject(exports) && targetOf(exports[subpath]) === "usable";
+	if (!isObject(exports)) return false;
+	// Subpaths and conditions together at the top are a configuration node refuses whole.
+	const keys = Object.keys(exports);
+	if (keys.some((key) => key.startsWith(".")) && keys.some((key) => !key.startsWith(".")))
+		return false;
+	return targetOf(exports[subpath]) === "usable";
 }
