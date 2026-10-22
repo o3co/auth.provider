@@ -31,6 +31,8 @@ export const backfill = {
 		appendFileSync(process.env.SEEN, \`\${JSON.stringify(subject)}\\n\`);
 		if (subject === "down") throw Object.assign(new Error("down for alice"), { name: "Unavailable" });
 		if (subject === "boom") throw new Error("secret of alice");
+		if (subject === "claimless") return "unclaimed";
+		if (subject === "odd") return "a word of a later release";
 		return "marked";
 	},
 };`,
@@ -81,7 +83,9 @@ it("settles each line as it was sent, skipping only empty lines, and counts a li
 	);
 	const done = await run(input);
 	expect(done.seen).toEqual([" alice ", "bob", "y".repeat(255), "down", "carol"]);
-	expect(done.stdout).toBe("marked 4 held 0 none 0 inconsistent 0 failed 2\n");
+	expect(done.stdout).toBe(
+		"marked 4 held 0 none 0 unclaimed 0 inconsistent 0 unknown 0 failed 2\n",
+	);
 	expect(done.status).toBe(1);
 	expect(`${done.stdout}${done.stderr}`).not.toMatch(/alice|LOG/);
 });
@@ -90,14 +94,18 @@ it("holds no more of an endless line than a subject may be", async () => {
 	const run = await script();
 	const done = await run(`${"q".repeat(4 * 1024 * 1024)}\nnext\n`);
 	expect(done.seen).toEqual(["next"]);
-	expect(done.stdout).toBe("marked 1 held 0 none 0 inconsistent 0 failed 1\n");
+	expect(done.stdout).toBe(
+		"marked 1 held 0 none 0 unclaimed 0 inconsistent 0 unknown 0 failed 1\n",
+	);
 });
 
 it("stops at an unexpected failure, telling only the counts and nothing of the failure", async () => {
 	const run = await script();
 	const done = await run("first\nboom\nafter\n");
 	expect(done.seen).toEqual(["first", "boom"]);
-	expect(done.stdout).toBe("marked 1 held 0 none 0 inconsistent 0 failed 1\n");
+	expect(done.stdout).toBe(
+		"marked 1 held 0 none 0 unclaimed 0 inconsistent 0 unknown 0 failed 1\n",
+	);
 	expect(done.status).toBe(1);
 	expect(`${done.stdout}${done.stderr}`).not.toMatch(/secret|alice|boom/);
 });
@@ -106,6 +114,21 @@ it("warns once of the 0.17 variables its configuration never reads, then goes on
 	const run = await script();
 	const done = await run("first\n", { LEGACY_ONE: "v1", LEGACY_TWO: "v2" });
 	expect(done.stderr).toBe("warn config-files: 2 named: LEGACY_ONE, LEGACY_TWO\n");
-	expect(done.stdout).toBe("marked 1 held 0 none 0 inconsistent 0 failed 0\n");
+	expect(done.stdout).toBe(
+		"marked 1 held 0 none 0 unclaimed 0 inconsistent 0 unknown 0 failed 0\n",
+	);
 	expect((await run("first\n")).stderr).toBe("");
+});
+
+it("counts a subject whose factor is written and not claimed, and an answer it does not know, which fails the run", async () => {
+	const run = await script();
+	const claimless = await run("claimless\nfirst\n");
+	expect(claimless.stdout).toBe(
+		"marked 1 held 0 none 0 unclaimed 1 inconsistent 0 unknown 0 failed 0\n",
+	);
+	expect(claimless.status).toBe(0);
+	const odd = await run("odd\nfirst\n");
+	expect(odd.seen).toEqual(["odd", "first"]);
+	expect(odd.stdout).toBe("marked 1 held 0 none 0 unclaimed 0 inconsistent 0 unknown 1 failed 0\n");
+	expect(odd.status).toBe(1);
 });
