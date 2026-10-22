@@ -2465,6 +2465,9 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../mfa
+      '@mod/mfa-binding':
+        specifier: workspace:*
+        version: link:../mfa-binding
       '@mod/mfa-binding-proof':
         specifier: workspace:*
         version: link:../mfa-binding-proof
@@ -2474,6 +2477,9 @@ importers:
       '@mod/mfa-flows':
         specifier: workspace:*
         version: link:../mfa-flows
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
@@ -2499,6 +2505,9 @@ importers:
       '@mod/mfa-entry':
         specifier: workspace:*
         version: link:../mfa-entry
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/mfa-revocation':
         specifier: workspace:*
         version: link:../mfa-revocation

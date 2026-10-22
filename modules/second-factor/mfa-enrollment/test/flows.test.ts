@@ -1,7 +1,7 @@
 import { contract, defineModule } from "@mod/kernel";
-import { factors } from "@mod/mfa";
 import { type Enrolled, factorKinds } from "@mod/mfa-extensions";
 import { flowParts } from "@mod/mfa-flows";
+import { factorReading } from "@mod/mfa-reading";
 import { seal } from "@mod/seal";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { afterEach, describe, expect, it } from "vitest";
@@ -305,7 +305,7 @@ describe("mfa under races and misuse", () => {
 			[200, undefined],
 			[409, "mfa_enrollment_conflict"],
 		]);
-		const held = await s.app.get(factors).held("ray");
+		const held = await s.app.get(factorReading).held("ray");
 		expect(held.filter((f) => f.kind === "backup")).toHaveLength(1);
 	});
 
@@ -325,7 +325,7 @@ describe("mfa under races and misuse", () => {
 			{ jar: held },
 		);
 		expect([done.status, done.body.error]).toEqual([401, "login_required"]);
-		const kept = await s.app.get(factors).held("lou");
+		const kept = await s.app.get(factorReading).held("lou");
 		expect(kept.filter((f) => f.kind === "code")).toHaveLength(1);
 	});
 
@@ -350,7 +350,7 @@ describe("mfa under races and misuse", () => {
 		);
 		// The start held no pending, so there is nothing to complete.
 		expect([done.status, done.body.error]).toEqual([400, "invalid_request"]);
-		const kept = await s.app.get(factors).held("lou");
+		const kept = await s.app.get(factorReading).held("lou");
 		expect(kept.filter((f) => f.kind === "code")).toHaveLength(1);
 	});
 
@@ -381,7 +381,7 @@ describe("mfa under races and misuse", () => {
 			{ jar: held },
 		);
 		expect([done.status, done.body.error]).toEqual([401, "login_required"]);
-		const kept = await s.app.get(factors).held("lou");
+		const kept = await s.app.get(factorReading).held("lou");
 		expect(kept.filter((f) => f.kind === "code")).toHaveLength(1);
 	});
 });
@@ -423,7 +423,7 @@ describe("mfa bodies", () => {
 			{ headers: { "mfa-transaction": tx } },
 		);
 		expect([done.status, (done.body.factor as { label?: string }).label]).toEqual([200, undefined]);
-		const held = await s.app.get(factors).held("nina");
+		const held = await s.app.get(factorReading).held("nina");
 		expect(held.filter((f) => "label" in f)).toEqual([]);
 		const up = await s.call("POST", "/session/mfa/step-up", {}, json);
 		const pendingless = await complete({
