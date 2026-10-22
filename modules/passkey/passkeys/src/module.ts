@@ -16,7 +16,10 @@ import { registrationsOver } from "./registration/registrations.ts";
 import { type Settings, section } from "./section.ts";
 
 type Context = BuildContext<Settings>;
-const passkeysOf = async (c: Context) => keptPasskeys(await c.get(passkeyStore), c.clock.now);
+/** A new token: 16 random bytes, unpadded base64url. */
+const tokenOf = (c: Context) => () => Buffer.from(c.random.bytes(16)).toString("base64url");
+const passkeysOf = async (c: Context) =>
+	keptPasskeys(await c.get(passkeyStore), tokenOf(c), c.clock.now);
 // A challenge lives as long as the relying party lets one be answered.
 const challengesOf = async (c: Context) =>
 	keptChallenges(await c.get(challengeStore), c.clock.now, (await c.get(ceremonies)).lifetimeMs);
@@ -29,7 +32,7 @@ const holdingOf = async (c: Context) => {
 		witness,
 		audit: await c.get(audit),
 		log: c.log,
-		token: () => Buffer.from(c.random.bytes(16)).toString("base64url"),
+		token: tokenOf(c),
 	});
 };
 const twoWitnesses = "more than one passkey witness is composed";

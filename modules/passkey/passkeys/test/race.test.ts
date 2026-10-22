@@ -12,7 +12,7 @@ import { expect, it } from "vitest";
 import { passkeysOver } from "../src/passkeys.ts";
 import { keptChallenges, keptPasskeys } from "../src/records.ts";
 import type { PasskeyStore } from "../src/store.ts";
-import { memoryStores } from "./stores.ts";
+import { memoryStores, writeToken } from "./stores.ts";
 
 const at = { origin: testOrigin };
 const rp = { id: "rp.example", name: "RP", origins: [testOrigin], topOrigins: [], timeoutMs: 1000 };
@@ -41,7 +41,7 @@ async function raced(kimsListing: "lands" | "fails") {
 		(n) => new Uint8Array(randomBytes(n)),
 		() => 1_000,
 	);
-	const records = keptPasskeys(paused);
+	const records = keptPasskeys(paused, writeToken);
 	const challenges = keptChallenges(stores.challenges, () => 1_000, 120_000);
 	const passkeys = passkeysOver({ ceremonies, records, challenges, verification: "preferred" });
 	const id = randomBytes(16).toString("base64url");

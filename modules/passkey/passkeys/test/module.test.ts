@@ -284,3 +284,128 @@ it("answers conflict where another subject takes the record over before the list
 	expect((await kept.listed?.("kim"))?.map((p) => p.id)).toEqual([response.id]);
 	await app.stop(1000);
 });
+
+/** Two registrations of sam's for one id, each with its own key, against `app`. */
+async function sameId(app: Awaited<ReturnType<typeof boot>>) {
+	const kept = app.get(registrations);
+	const made = async (credentialId?: string) => {
+		const authenticator = softwareAuthenticator();
+		const options = (await kept.creation("sam")).options as CreationOptions;
+		const twist = credentialId === undefined ? {} : { credentialId };
+		return {
+			authenticator,
+			response: authenticator.create(options, { origin: testOrigin }, twist),
+		};
+	};
+	const one = await made();
+	const two = await made(one.response.id);
+	/** Whether `authenticator` signs in, as the subject it signs in as. */
+	const signsIn = async ({ authenticator }: typeof one) => {
+		const { options } = await app.get(passkeys).challenge("app");
+		const assertion = authenticator.get(options as RequestOptions, { origin: testOrigin });
+		const asserted = await app.get(passkeys).assert(assertion, "app");
+		return asserted.kind === "asserted" ? asserted.subject : asserted.kind;
+	};
+	return { kept, one, two, signsIn };
+}
+
+it("keeps only the key of the registration both asks admitted, two of a subject's crossing on one id in either order", async () => {
+	const app = await boot([]);
+	// Admitted first: a revoked one writes over its record while it asks; neither key is kept.
+	const first = await sameId(app);
+	let crossed: unknown;
+	const admittedFirst = await first.kept.register(
+		"sam",
+		first.one.response,
+		undefined,
+		async () => {
+			crossed ??= await first.kept.register(
+				"sam",
+				first.two.response,
+				undefined,
+				async () => false,
+			);
+			return true;
+		},
+	);
+	expect([admittedFirst, crossed]).toEqual([
+		{ kind: "refused", reason: "conflict" },
+		{ kind: "refused", reason: "revoked" },
+	]);
+	expect([await first.signsIn(first.one), await first.signsIn(first.two)]).toEqual([
+		"refused",
+		"refused",
+	]);
+	// Revoked first: the admitted one writes over its record while it asks, and is kept alone.
+	const second = await sameId(app);
+	let admitted: unknown;
+	const revokedFirst = await second.kept.register(
+		"sam",
+		second.two.response,
+		undefined,
+		async () => {
+			admitted = await second.kept.register("sam", second.one.response);
+			return false;
+		},
+	);
+	expect([revokedFirst, admitted]).toEqual([
+		{ kind: "refused", reason: "revoked" },
+		expect.objectContaining({ kind: "registered" }),
+	]);
+	expect([await second.signsIn(second.one), await second.signsIn(second.two)]).toEqual([
+		"sam",
+		"refused",
+	]);
+	await app.stop(1000);
+});
+
+it("answers conflict for the registration listing an id another of the subject's listed first, and makes it usable for that one alone", async () => {
+	const app = await boot([]);
+	const { kept, one, two, signsIn } = await sameId(app);
+	let listedFirst: unknown;
+	const late = await kept.register("sam", one.response, undefined, async () => {
+		listedFirst ??= await kept.register("sam", two.response);
+		return true;
+	});
+	expect([late, listedFirst]).toEqual([
+		{ kind: "refused", reason: "conflict" },
+		expect.objectContaining({ kind: "registered" }),
+	]);
+	expect([await signsIn(one), await signsIn(two)]).toEqual(["refused", "sam"]);
+	await app.stop(1000);
+});
+
+it("registers nothing where a removal ends the passkey between its list and its last write", async () => {
+	const app = await boot([]);
+	const { kept, one, signsIn } = await sameId(app);
+	let asks = 0;
+	const answer = await kept.register("sam", one.response, undefined, async () => {
+		if (++asks === 2) await kept.removed?.("sam", one.response.id);
+		return true;
+	});
+	expect(answer).toEqual({ kind: "refused", reason: "conflict" });
+	expect(await signsIn(one)).toBe("refused");
+	expect(await kept.listed?.("sam")).toEqual([]);
+	await app.stop(1000);
+});
+
+it("ends only its own write where a removal and another registration of the id land during its second ask", async () => {
+	const app = await boot([]);
+	const { kept, one, two, signsIn } = await sameId(app);
+	let asks = 0;
+	let other: unknown;
+	const ended = await kept.register("sam", one.response, undefined, async () => {
+		if (++asks === 1) return true;
+		// The id is removed while listed, and another registration writes, lists and keeps it.
+		await kept.removed?.("sam", one.response.id);
+		other = await kept.register("sam", two.response);
+		return false;
+	});
+	expect([ended, other]).toEqual([
+		{ kind: "refused", reason: "revoked" },
+		expect.objectContaining({ kind: "registered" }),
+	]);
+	expect([await signsIn(one), await signsIn(two)]).toEqual(["refused", "sam"]);
+	expect((await kept.listed?.("sam"))?.map((p) => p.id)).toEqual([one.response.id]);
+	await app.stop(1000);
+});

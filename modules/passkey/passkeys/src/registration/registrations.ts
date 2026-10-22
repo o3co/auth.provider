@@ -61,16 +61,14 @@ export function registrationsOver(p: RegistrationParts): Registrations {
 			if (attested.kind === "refused") return attested;
 			const { credential } = attested;
 			const wrote = await p.records.written(subject, credential, p.max, nickname);
-			if (wrote !== "written") return refused(wrote);
+			if (typeof wrote === "string") return refused(wrote);
+			/** Strips this write's pending record alone: another registration's answers for itself. */
+			const unwritten = () => p.records.unwritten(subject, credential.id, wrote.token);
 			// Unlisted, the record is no passkey yet: a revocation or a failure before the list leaves nothing usable.
-			if (
-				!(await settled(admitted(opened.at), () => p.records.unwritten(subject, credential.id)))
-			) {
-				return refused("revoked");
-			}
-			/** Ends the passkey, listed or not: a list that may have landed is taken off and settled. */
+			if (!(await settled(admitted(opened.at), unwritten))) return refused("revoked");
+			/** Ends what this write left, listed or not: a list that may have landed is taken off and settled. */
 			const end = async () => {
-				const removed = await p.records.removed(subject, credential.id);
+				const removed = await p.records.ended(subject, credential.id, wrote.token);
 				await p.settle(subject, "removal", removed.removed && removed.empty);
 			};
 			// A listing whose answer is lost may have landed: ended, as no ask after it can run.
@@ -78,12 +76,16 @@ export function registrationsOver(p: RegistrationParts): Registrations {
 				await end().catch(() => undefined);
 				throw error;
 			});
-			if (listed !== "registered") return refused(listed);
+			// Listed already, the id is another registration's; this write's record goes either way.
+			if (listed !== "registered") {
+				await unwritten();
+				return refused(listed);
+			}
 			// Once more, listed: a revocation landing between the first ask and the list ends it too.
 			if (!(await settled(admitted(opened.at), end))) return refused("revoked");
 			// Usable only now, both asks having admitted: one stopped before stays pending, no passkey.
-			if ((await p.records.activated(subject, credential.id)) === "taken") {
-				// Another subject took the record over before the list: the list lets go of it.
+			// Not this write's record any more (written over, taken, or removed): the list lets go of it, nothing registered.
+			if ((await p.records.activated(credential.id, wrote.token)) !== "activated") {
 				await end();
 				return refused("conflict");
 			}
