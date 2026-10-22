@@ -23,6 +23,7 @@
 - A peer range is compared after the app's overrides: pnpm writes an override in a range's place. The range recorded must still hold the override.
 - Every resolution of a recorded package (not the root's alone) resolves each required dependency and peer as required, and each optional one as optional; an optional declaration takes the place of a required one of its name. Each resolves to a version in its range, the overrides applied, or, declared as an alias, to a version of the package the alias names; nothing undeclared is resolved.
 - A package the overrides hold resolves, wherever it is referenced (by an importer's dependencies of any kind or by a resolution), to the held version from its registry under its own name, and to a resolution the lockfile holds, with the package's entry; the lockfile holds no other version, and one resolution, of it.
+- A held package is bound to its registry's origin alone: its integrity, what the package is, is not held, so a lockfile changed to another package's tarball on the same registry is not refused. A later change records and checks it.
 - The file imports nothing of the workspace: `yaml`, `semver` and node only.
 
 ## Depends on
