@@ -60,6 +60,8 @@ export function tokensContract(
 		readonly revocable: boolean;
 		/** Issuance policies the composition contributes. */
 		readonly policies?: readonly IssuancePolicy[];
+		/** The access-token lifetime the composition is configured with; the section's default where absent. */
+		readonly lifetimeSeconds?: number;
 	}) => Promise<TokensUnderTest>,
 ): void {
 	const grant = { subject: "s", issuedTo: "c", audience: ["api"], scope: ["read"] };
@@ -420,6 +422,15 @@ export function tokensContract(
 			}
 		});
 
+		it("tells the access-token lifetime it applies where a grant gives none", async () => {
+			const place = await open({ revocable: true });
+			expect(place.tokens.accessTokenLifetimeSeconds()).toBe(defaultLifetimeSeconds);
+			const set = await open({ revocable: true, lifetimeSeconds: 600 });
+			expect(set.tokens.accessTokenLifetimeSeconds()).toBe(600);
+			expect((await issueFor(set.tokens, grant)).expiresIn).toBe(600);
+			expect(set.tokens.accessTokenLifetimeSeconds()).toBe(600);
+		});
+
 		it("caps a token's expiry at what it was issued for", async () => {
 			const place = await open({ revocable: true });
 			const issued = await issueFor(place.tokens, grant, { notAfter: place.now() + 120_000 });
@@ -524,6 +535,7 @@ export function tokensStandIn(
 		(m) => [
 			m.provide(tokens).by(async (c) => {
 				const revocable = options.revocable ?? true;
+				const configured = options.lifetimeSeconds ?? defaultLifetimeSeconds;
 				const conditions = [
 					...(await c.collect(accessConditions)),
 					...(await c.collect(subjectChecks)),
@@ -582,7 +594,6 @@ export function tokensStandIn(
 				};
 				const judge = judging(await c.collect(issuancePolicies), c.clock.now);
 				const issueAccess: IssueAccess = async (grant, limits) => {
-					const configured = options.lifetimeSeconds ?? defaultLifetimeSeconds;
 					const lifetime = lifetimeOf(limits?.lifetimeSeconds, configured);
 					const { iat, exp } = expiryOf(c.clock.now(), lifetime, limits?.notAfter);
 					const id = tokenId(c.random);
@@ -608,6 +619,7 @@ export function tokensStandIn(
 				};
 				const stand: Tokens = {
 					revocable: () => denylist.revocable,
+					accessTokenLifetimeSeconds: () => configured,
 					...issuing(judge, issueAccess),
 					verifyAccess: verify,
 					issuedToOf: async (token) => {

@@ -113,6 +113,12 @@ export interface IssueLimits {
 /** Its `verifyAccess` is the validity `sender-binding` checks a token by at a resource. */
 export interface Tokens extends TokenValidity<AccessCheck> {
 	revocable(): boolean;
+	/**
+	 * The access-token lifetime that `issue` applies where the grant gives no `lifetimeSeconds`, in
+	 * whole seconds from 1 to 86400. It is fixed when `tokens` is built and never changes after, so a
+	 * check made at build time stays true.
+	 */
+	accessTokenLifetimeSeconds(): number;
 	/** Whether an access token may be issued for the request; the same judgment `issue` makes. */
 	admits(request: IssuanceRequest): Promise<Admitted>;
 	/** Issues once every policy, its own first, allows it; throws Unavailable when one cannot tell. */
