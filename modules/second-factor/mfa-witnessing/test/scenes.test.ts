@@ -19,6 +19,19 @@ const card = defineModule({ name: "kind-card" }, (m) => [
 	})),
 ]);
 
+/** A witnessed mfa with the card kind, and a binding of a card under a proof. */
+async function withCards() {
+	const served = await witnessed({}, [card]);
+	const bindCard = async (subject: string, proof: string) => {
+		const begun = await served.decided.begin(subject, "card");
+		if (begun.kind !== "begun") throw new Error(begun.kind);
+		const proved = await served.decided.provePending(subject, begun.pending, proof);
+		if (proved.kind !== "valid") throw new Error(proved.kind);
+		return served.decided.bind(subject, begun.pending, proved.state);
+	};
+	return { ...served, bindCard };
+}
+
 it("refuses to start with two witnesses", async () => {
 	await expect(witnessed({}, [witnessStandIn("witness-two").module])).rejects.toBeInstanceOf(
 		BootRefused,
@@ -41,49 +54,23 @@ it("marks no subject whose first binding another subject's factor already holds 
 	expect(await bindCard("bob", "c2")).toMatchObject({ kind: "bound" });
 });
 
-it("fills no mark for a factor whose binding ends as a duplicate, read before its claim", async () => {
-	const { app, decided, place, witness } = await witnessed({}, [card], { together: false });
-	const bindCard = async (subject: string, proof: string) => {
-		const begun = await decided.begin(subject, "card");
-		if (begun.kind !== "begun") throw new Error(begun.kind);
-		const proved = await decided.provePending(subject, begun.pending, proof);
-		if (proved.kind !== "valid") throw new Error(proved.kind);
-		return decided.bind(subject, begun.pending, proved.state);
-	};
-	expect(await bindCard("ann", "c1")).toMatchObject({ kind: "bound" });
-	// A backfill reads bob's factor once it is written, before its claim on ann's value fails.
-	let filled: string | undefined;
-	place.hooks.beforeSave = async (key) => {
-		if (key.startsWith("u-")) filled ??= await app.get(witnessBackfill).settle("bob");
-	};
-	expect(await bindCard("bob", "c1")).toEqual({ kind: "duplicate" });
-	// Read while its claim is not yet made: written, none claimed.
-	expect(filled).toBe("unclaimed");
+it("fills no mark for a factor whose claim is missing, as 0.18 left one", async () => {
+	const { app, bindCard, place, witness } = await withCards();
+	expect(await bindCard("bob", "c1")).toMatchObject({ kind: "bound" });
+	await place.loseClaims();
+	witness.marks.clear();
+	// Written, none claimed: it may yet be another's.
+	expect(await app.get(witnessBackfill).settle("bob")).toBe("unclaimed");
 	expect(witness.marks.has("bob")).toBe(false);
 });
 
-it("fills no mark for a factor not yet claimed, whose value another then binds first", async () => {
-	const { app, decided, place, witness } = await witnessed({}, [card], { together: false });
-	const proved = async (subject: string, proof: string) => {
-		const begun = await decided.begin(subject, "card");
-		if (begun.kind !== "begun") throw new Error(begun.kind);
-		const valid = await decided.provePending(subject, begun.pending, proof);
-		if (valid.kind !== "valid") throw new Error(valid.kind);
-		return () => decided.bind(subject, begun.pending, valid.state);
-	};
-	const [bob, ann] = [await proved("bob", "c1"), await proved("ann", "c1")];
-	// Bob's factor is written and stops before its claim: a backfill runs, then Ann binds the value.
-	let filled: string | undefined;
-	let paused = false;
-	place.hooks.beforeSave = async (key) => {
-		if (!key.startsWith("u-") || paused) return;
-		paused = true;
-		filled = await app.get(witnessBackfill).settle("bob");
-		expect(await ann()).toMatchObject({ kind: "bound" });
-	};
-	expect(await bob()).toEqual({ kind: "duplicate" });
-	// Read while its claim is not yet made: written, none claimed.
-	expect(filled).toBe("unclaimed");
+it("fills no mark for a factor whose claim is missing, whose value another then binds", async () => {
+	const { app, bindCard, place, witness } = await withCards();
+	expect(await bindCard("bob", "c1")).toMatchObject({ kind: "bound" });
+	await place.loseClaims();
+	witness.marks.clear();
+	expect(await bindCard("ann", "c1")).toMatchObject({ kind: "bound" });
+	expect(await app.get(witnessBackfill).settle("bob")).toBe("unclaimed");
 	expect(witness.marks.has("bob")).toBe(false);
 	expect(witness.marks.has("ann")).toBe(true);
 });

@@ -59,29 +59,18 @@ const enforcer = defineModule({ name: "enforcer" }, (m) => [
 	m.contribute(enforcers).by(() => ({ name: "enforcer" })),
 ]);
 
-/**
- * mfa's store on the records stand-in, writing a list and its claim together unless `together` is false;
- * `wipe` loses every list, as a store wiped or rolled back would.
- */
-function memoryFactors(together: boolean) {
+/** mfa's store on the records stand-in; `wipe` loses every list, as a store wiped or rolled back would. */
+function memoryFactors() {
 	const fresh = () => memoryRecords<StoredFactors>(() => 0, { shards: 1, perShard: 1 });
 	let stand = fresh();
 	const down = unavailableSwitch<FactorStore>("factor-store");
-	const hooks: { beforeSave?: (key: string) => Promise<void> } = {};
 	const store = down.wrap({
-		save: async (key, record) => {
-			await hooks.beforeSave?.(key);
-			return stand.records.create(key, record, "endless");
-		},
+		save: (key, record) => stand.records.create(key, record, "endless"),
 		read: (key) => stand.records.read(key),
 		update: (key, change) => stand.records.change(key, change),
 		scan: (...given: Parameters<typeof stand.records.scan>) => stand.records.scan(...given),
-		...(together
-			? {
-					updateTogether: (...given: Parameters<ReturnType<typeof updatingTogether>>) =>
-						updatingTogether(stand.records)(...given),
-				}
-			: {}),
+		updateTogether: (...given: Parameters<ReturnType<typeof updatingTogether>>) =>
+			updatingTogether(stand.records)(...given),
 	});
 	const module = defineModule({ name: "factor-store" }, (m) => [
 		m.provide(factorStore).by(() => store),
@@ -89,8 +78,12 @@ function memoryFactors(together: boolean) {
 	return {
 		module,
 		down,
-		/** `beforeSave` runs before each save, as a request racing it would. */
-		hooks,
+		/** Loses every claim on a unique value, as 0.18 left a binding whose claim was never made. */
+		loseClaims: async () => {
+			for (const key of (await stand.records.scan()).keys) {
+				if (key.startsWith("u-")) await stand.records.remove(key);
+			}
+		},
 		wipe: () => {
 			stand = fresh();
 		},
@@ -99,13 +92,9 @@ function memoryFactors(together: boolean) {
 	};
 }
 
-export async function witnessed(
-	settings: Partial<MfaSettings> = {},
-	extra: Module[] = [],
-	{ together = true }: { readonly together?: boolean } = {},
-) {
+export async function witnessed(settings: Partial<MfaSettings> = {}, extra: Module[] = []) {
 	const audit = auditStandIn();
-	const place = memoryFactors(together);
+	const place = memoryFactors();
 	const witness = witnessStandIn();
 	const app = await assemble({
 		modules: [
