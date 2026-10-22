@@ -209,6 +209,154 @@ function recordsOf<T extends Json>(place: Place) {
 
 export type Records<T extends Json> = ReturnType<typeof recordsIn<T>>;
 
+/** A record by its place and key, where `changeTogether` reads or writes it. */
+export interface Target {
+	readonly place: Place;
+	readonly key: string;
+}
+
+/** What `changeTogether` does to one record: set it (with a lifetime, or keeping its own), or remove it; none keeps it. */
+export type Next<T> = Changed<T> | { readonly remove: true } | undefined;
+
+/**
+ * Two records of one place changed as one, from what both hold and the records of that place
+ * `watch` names, as `changeTogether` does. Where the place's store cannot, `refuse` (the builder's)
+ * is told, naming `where`: a wiring then maps it with no branch of its own.
+ */
+export function pairedRecordsIn<T extends Json>(
+	place: Place,
+	where: string,
+	refuse: (where: string, reason: string) => never,
+) {
+	if (!changesTogether(place.store)) {
+		refuse(where, "its store writes no records of two partitions as one");
+	}
+	claim(place, "records");
+	const at = (key: string): Target => ({ place, key });
+	return {
+		changeTogether: (
+			firstKey: string,
+			secondKey: string,
+			p: {
+				readonly watch: (first: T | undefined, second: T | undefined) => readonly string[];
+				readonly decide: (
+					first: T | undefined,
+					second: T | undefined,
+					watched: readonly (T | undefined)[],
+				) => { readonly first?: Next<T>; readonly second?: Next<T> };
+			},
+		) =>
+			changeTogether<T, T>({
+				first: at(firstKey),
+				second: at(secondKey),
+				watch: (first, second) => p.watch(first, second).map(at),
+				decide: (first, second, watched) =>
+					p.decide(first, second, watched as readonly (T | undefined)[]),
+			}),
+	};
+}
+
+/** Whether the store writes records of several partitions and spaces as one, as `changeTogether` asks. */
+export function changesTogether(target: Store): boolean {
+	return typeof target.batchAcross === "function";
+}
+
+const recordKey = (target: Target) => ({
+	space: target.place.space,
+	partition: target.key,
+	name: "record",
+});
+const sameTarget = (a: Target, b: Target) =>
+	a.place.space.name === b.place.space.name && a.key === b.key;
+
+/**
+ * Changes two records as one, from what both hold and what `watch` names besides: `decide` runs on
+ * what was read, and everything read is held by a condition of the one write, so another writer of
+ * any of them first makes it read all again, `watch` too, and decide again; it must be pure. A
+ * record `watch` names that is the first or second is read once and held once. Every place is on
+ * one store that writes as one (`changesTogether`); the records sit in spaces of one guarantee.
+ */
+export async function changeTogether<A extends Json, B extends Json>(p: {
+	readonly first: Target;
+	readonly second: Target;
+	readonly watch?: (first: A | undefined, second: B | undefined) => readonly Target[];
+	readonly decide: (
+		first: A | undefined,
+		second: B | undefined,
+		watched: readonly (Json | undefined)[],
+	) => { readonly first?: Next<A>; readonly second?: Next<B> };
+}): Promise<{
+	readonly first: { readonly before: A | undefined; readonly after: A | undefined };
+	readonly second: { readonly before: B | undefined; readonly after: B | undefined };
+}> {
+	const { first, second } = p;
+	const target = first.place.store;
+	const batchAcross = target.batchAcross?.bind(target);
+	if (!batchAcross) throw new Error("the store writes no records of two partitions as one");
+	if (second.place.store !== target) throw new Error("records changed together share one store");
+	if (sameTarget(first, second)) throw new Error("records changed together are two records");
+	claim(first.place, "records");
+	claim(second.place, "records");
+	for (let attempt = 0; attempt < attempts; attempt++) {
+		const marked = markedAt(first.place, await target.now());
+		const [a, b] = await Promise.all([target.get(recordKey(first)), target.get(recordKey(second))]);
+		const before = {
+			first: a.entry?.value as A | undefined,
+			second: b.entry?.value as B | undefined,
+		};
+		// Each record held once: the first and second, then what the watch names besides.
+		const held: { target: Target; version: string | undefined; value: Json | undefined }[] = [
+			{ target: first, version: a.entry?.version, value: a.entry?.value },
+			{ target: second, version: b.entry?.version, value: b.entry?.value },
+		];
+		const named = p.watch?.(before.first, before.second) ?? [];
+		for (const watched of named) {
+			if (watched.place.store !== target)
+				throw new Error("records changed together share one store");
+			if (held.some((h) => sameTarget(h.target, watched))) continue;
+			claim(watched.place, "records");
+			const { entry } = await target.get(recordKey(watched));
+			held.push({ target: watched, version: entry?.version, value: entry?.value });
+		}
+		const watchedValues = named.map((w) => held.find((h) => sameTarget(h.target, w))?.value);
+		const decided = p.decide(before.first, before.second, watchedValues);
+		const conditions = held.map((h) =>
+			h.version === undefined
+				? { key: recordKey(h.target), absent: true as const }
+				: { key: recordKey(h.target), version: h.version },
+		);
+		const writeOf = (record: Target, next: Next<Json>) => {
+			if (next === undefined) return [];
+			if ("remove" in next) return [{ key: recordKey(record), remove: true as const }];
+			return [{ key: recordKey(record), put: next.value, expiry: expiryOf(next.lifetimeMs) }];
+		};
+		const writes = [...writeOf(first, decided.first), ...writeOf(second, decided.second)];
+		// Nothing to write: what was read is confirmed by a mark of its own, held by the same conditions.
+		const sent =
+			writes.length > 0
+				? writes
+				: [
+						{
+							key: { ...recordKey(first), name: "settled" },
+							put: true,
+							expiry: { kind: "after", ms: 1 },
+						} as const,
+					];
+		const written = await settled(() => batchAcross(conditions, sent, marked));
+		if (written.kind === "late" || written.kind === "reused") throw new Unavailable("records");
+		if (written.kind === "conflict") continue;
+		const afterOf = <T>(was: T | undefined, next: Next<T>) => {
+			if (next === undefined) return was;
+			return "remove" in next ? undefined : next.value;
+		};
+		return {
+			first: { before: before.first, after: afterOf(before.first, decided.first) },
+			second: { before: before.second, after: afterOf(before.second, decided.second) },
+		};
+	}
+	throw new Unavailable("records");
+}
+
 /** Records under a name made per space from an unguessable secret; the store never receives it. */
 export function secretRecordsIn<T extends Json>(place: Place) {
 	claim(place, "secret records");
