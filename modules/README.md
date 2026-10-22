@@ -206,6 +206,9 @@ What each module contains is described by that module's contract card (each modu
 | Second factor kinds, with the types they take and give, and the amr a second factor's proof adds | extension point kind / vocabulary | mfa-extensions |
 | Steps that prove a factor at login | extension point kind | mfa |
 | A user's factor records, and judgments about them | contract / data | mfa |
+| Reading a user's factors and proving one, and the words the factor contracts share (`Shown`, `Fence`) | contract / vocabulary | mfa-reading |
+| Binding a new second factor: beginning it, its first proof, writing it | contract | mfa-binding |
+| Managing a user's factors: naming, removing, clearing them, the recovery codes, the fence | contract | mfa-managing |
 | Second factor transactions, contributions to the login completion gate and to step-up, the enrollment routes and their seam, lockout numbers | contract / setting / data | mfa-flows |
 | Binding a new second factor: enrollment, its binding proof, the recovery codes shown | contribution | mfa-enrollment |
 | An operator's reset of a subject's second factors | contract | mfa-reset |
