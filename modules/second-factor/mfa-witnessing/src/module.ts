@@ -1,6 +1,7 @@
 import { audit } from "@mod/audit";
 import { defineModule } from "@mod/kernel";
-import { factors, witnessing } from "@mod/mfa";
+import { factors } from "@mod/mfa";
+import { witnessing } from "@mod/mfa-extensions";
 import { enrollmentWitnesses } from "@mod/mfa-witness";
 import { witnessBackfill } from "./contract.ts";
 import { backfillWith, witnessingWith } from "./witnessing.ts";
