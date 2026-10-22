@@ -8,12 +8,9 @@ import { updatingTogether } from "../src/testing.ts";
  * mfa's factor store on the records stand-in, its lists kept without end on the given clock; `down`
  * makes calls unavailable, and `hooks.beforeSave` runs before each save, `hooks.afterRead` after each
  * read has taken its answer, as a request racing it would, and `hooks.afterTogether` after a write
- * of a list and a claim together has taken effect, as an answer lost would. `together` offers that write.
+ * of a list and a claim together has taken effect, as an answer lost would.
  */
-export function memoryFactors(
-	now: () => number = () => 0,
-	{ together = true }: { readonly together?: boolean } = {},
-) {
+export function memoryFactors(now: () => number = () => 0) {
 	const stand = memoryRecords<StoredFactors>(now, { shards: 1, perShard: 1 });
 	const down = unavailableSwitch<FactorStore>("factor-store");
 	const hooks: {
@@ -34,15 +31,11 @@ export function memoryFactors(
 		},
 		update: stand.records.change,
 		scan: stand.records.scan,
-		...(together
-			? {
-					updateTogether: async (...args: Parameters<typeof joint>) => {
-						const changed = await joint(...args);
-						await hooks.afterTogether?.();
-						return changed;
-					},
-				}
-			: {}),
+		updateTogether: async (...args: Parameters<typeof joint>) => {
+			const changed = await joint(...args);
+			await hooks.afterTogether?.();
+			return changed;
+		},
 	});
 	const module = defineModule({ name: "factor-store" }, (m) => [
 		m.provide(factorStore).by(() => factors),

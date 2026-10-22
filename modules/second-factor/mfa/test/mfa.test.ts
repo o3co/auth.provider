@@ -226,16 +226,10 @@ const enforcer = defineModule({ name: "enforcer" }, (m) => [
 
 async function serve(
 	settings: Partial<MfaSettings> = {},
-	{
-		steps = [step],
-		kinds = [code, backup],
-		extra = [] as Module[],
-		enforced = true,
-		together = true,
-	} = {},
+	{ steps = [step], kinds = [code, backup], extra = [] as Module[], enforced = true } = {},
 ) {
 	const audit = auditStandIn();
-	const place = memoryFactors(undefined, { together });
+	const place = memoryFactors();
 	const app = await assemble({
 		modules: [
 			http,
@@ -921,67 +915,47 @@ describe("values no two factors may hold", () => {
 	});
 
 	it("counts a factor of a unique value once its claim names it; one written before claims, unless another holds it", async () => {
-		const { decided, bindKind, place } = await serve(
-			{},
-			{ kinds: [card, backup], together: false },
-		);
+		const { decided, bindKind, place } = await serve({}, { kinds: [card, backup] });
 		await bindKind("ann", "card", "c1");
-		// Read between a binding's write of its factor and its claim on the value.
-		const seen: Record<string, boolean> = {};
-		let reading: string | undefined;
-		place.hooks.beforeSave = async (key) => {
-			if (key.startsWith("u-") && reading) seen[reading] = await decided.countingWritten(reading);
-		};
-		reading = "bob";
+		// A duplicate writes neither the factor nor a claim.
 		expect(await bindKind("bob", "card", "c1")).toEqual({ kind: "duplicate" });
-		expect(seen.bob).toBe(false);
-		reading = "cid";
+		expect(await decided.countingWritten("bob")).toBe(false);
 		expect(await bindKind("cid", "card", "c2")).toMatchObject({ kind: "bound" });
-		// Not yet claimed, its binding could still end as a duplicate.
-		expect(seen.cid).toBe(false);
-		reading = undefined;
 		expect([await decided.countingWritten("ann"), await decided.countingWritten("cid")]).toEqual([
 			true,
 			true,
 		]);
+		// Its claim missing, as 0.18 left one whose claim was never made: it may yet be another's.
+		await place.records.remove(claimKeyOf("card", "c2"));
+		expect(await decided.countingWritten("cid")).toBe(false);
 		// A factor written before claims were kept carries no mark: it counts unless another holds its value.
 		const unmarked = (record: StoredFactors) => {
 			const list = record as unknown as { factors: { claims?: true }[] };
 			const factors = list.factors.map(({ claims: _, ...rest }) => rest);
 			return { value: { ...list, factors } as unknown as StoredFactors };
 		};
-		reading = "dee";
-		place.hooks.beforeSave = async (key) => {
-			if (!key.startsWith("u-") || !reading) return;
-			await place.factors.update(listKeyOf(reading), unmarked);
-			seen[reading] = await decided.countingWritten(reading);
-		};
 		expect(await bindKind("dee", "card", "c3")).toMatchObject({ kind: "bound" });
-		expect(seen.dee).toBe(true);
-		reading = "eve";
-		expect(await bindKind("eve", "card", "c1")).toEqual({ kind: "duplicate" });
-		expect(seen.eve).toBe(false);
+		await place.factors.update(listKeyOf("dee"), unmarked);
+		await place.records.remove(claimKeyOf("card", "c3"));
+		expect(await decided.countingWritten("dee")).toBe(true);
+		expect(await bindKind("eve", "card", "c3")).toMatchObject({ kind: "bound" });
+		expect([await decided.countingWritten("dee"), await decided.countingWritten("eve")]).toEqual([
+			false,
+			true,
+		]);
 	});
 
-	it("refuses removing the last factor that stands while a binding beside it is not yet claimed, and ends as a duplicate", async () => {
+	it("refuses removing the last factor that stands beside a factor whose claim is missing", async () => {
 		const { decided, bindKind, bindCode, idOf, place } = await serve(
 			{ mode: "required" },
-			{ kinds: [code, backup, card], together: false },
+			{ kinds: [code, backup, card] },
 		);
-		await bindKind("ann", "card", "c1");
 		await bindCode("zed");
-		// Zed's card is written and not yet claimed when zed's code is removed; ann holds its value.
-		let removed: string | undefined;
-		place.hooks.beforeSave = async (key) => {
-			if (!key.startsWith("u-") || removed !== undefined) return;
-			removed = await decided.remove(
-				"zed",
-				await idOf("zed", "code"),
-				await decided.fenceOf("zed"),
-			);
-		};
-		expect(await bindKind("zed", "card", "c1")).toEqual({ kind: "duplicate" });
-		expect(removed).toBe("last");
+		expect(await bindKind("zed", "card", "c1")).toMatchObject({ kind: "bound" });
+		// Its claim missing, as 0.18 left one: the card does not stand for zed.
+		await place.records.remove(claimKeyOf("card", "c1"));
+		const fence = await decided.fenceOf("zed");
+		expect(await decided.remove("zed", await idOf("zed", "code"), fence)).toBe("last");
 		expect((await decided.held("zed")).map((f) => f.kind)).toContain("code");
 	});
 
@@ -1326,23 +1300,14 @@ describe("an enrollment witness", () => {
 			expect(await kept.afters[0]?.()).toBe("counting");
 		});
 
-		it("answers unsure where a factor written after the reset does not stand, its claim lost or not yet made", async () => {
+		it("answers unsure where a factor written after the reset does not stand, its claim lost", async () => {
 			const kept = keeping();
-			const { decided, bindKind, place } = await serve(
-				{},
-				{ kinds: [card], extra: [kept.module], together: false },
-			);
+			const { decided, bindKind, place } = await serve({}, { kinds: [card], extra: [kept.module] });
 			await decided.clear("cal");
 			expect((await bindKind("cal", "card", "c-9")).kind).toBe("bound");
+			expect(await kept.afters[0]?.()).toBe("counting");
 			await place.records.remove(claimKeyOf("card", "c-9"));
 			expect(await kept.afters[0]?.()).toBe("unsure");
-			await decided.clear("dee");
-			let before: string | undefined;
-			place.hooks.beforeSave = async (key) => {
-				if (key === claimKeyOf("card", "c-8")) before ??= await kept.afters[1]?.();
-			};
-			expect((await bindKind("dee", "card", "c-8")).kind).toBe("bound");
-			expect(before).toBe("unsure");
 		});
 
 		it("answers unsure once the subject's record is lost after the reset, though a later reset answers none", async () => {
@@ -1403,9 +1368,9 @@ describe("an enrollment witness", () => {
 	});
 });
 
-describe("a binding over a store writing a list and a claim together", () => {
+describe("a binding writing its factor and the claim on its value together", () => {
 	it("writes the factor of a unique value and its claim in one write, never one without the other", async () => {
-		const { decided, bindKind, place } = await serve({}, { kinds: [card], together: true });
+		const { decided, bindKind, place } = await serve({}, { kinds: [card] });
 		const saved: string[] = [];
 		place.hooks.beforeSave = async (key) => void saved.push(key);
 		expect((await bindKind("ann", "card", "c-1")).kind).toBe("bound");
@@ -1418,7 +1383,7 @@ describe("a binding over a store writing a list and a claim together", () => {
 	});
 
 	it("binds nothing where another factor holds the value, and takes a claim its factor left", async () => {
-		const { decided, bindKind, place } = await serve({}, { kinds: [card], together: true });
+		const { decided, bindKind, place } = await serve({}, { kinds: [card] });
 		expect((await bindKind("ann", "card", "c-2")).kind).toBe("bound");
 		expect((await bindKind("bob", "card", "c-2")).kind).toBe("duplicate");
 		expect(await decided.held("bob")).toEqual([]);
@@ -1430,7 +1395,7 @@ describe("a binding over a store writing a list and a claim together", () => {
 	});
 
 	it("leaves the factor with its claim where the write's answer is lost, so it counts though the bind is unavailable", async () => {
-		const { decided, bindKind, place } = await serve({}, { kinds: [card], together: true });
+		const { decided, bindKind, place } = await serve({}, { kinds: [card] });
 		place.hooks.afterTogether = async () => {
 			throw new Unavailable("factor-store");
 		};
@@ -1441,10 +1406,7 @@ describe("a binding over a store writing a list and a claim together", () => {
 	});
 
 	it("answers full as before, writing no claim for it", async () => {
-		const { decided, bindKind, place } = await serve(
-			{ "max-factors": 2 },
-			{ kinds: [card], together: true },
-		);
+		const { decided, bindKind, place } = await serve({ "max-factors": 2 }, { kinds: [card] });
 		expect((await bindKind("eve", "card", "c-4")).kind).toBe("bound");
 		// Two bindings begun while one place is left: the second to bind finds none.
 		const proved = async (proof: string) => {
