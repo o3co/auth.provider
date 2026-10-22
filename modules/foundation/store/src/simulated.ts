@@ -10,7 +10,15 @@ import {
 } from "./contract.ts";
 import { memoryStore } from "./memory.ts";
 
-const writes = new Set<string>(["putIfAbsent", "replaceIf", "removeIf", "take", "batch", "count"]);
+const writes = new Set<string>([
+	"putIfAbsent",
+	"replaceIf",
+	"removeIf",
+	"take",
+	"batch",
+	"batchAcross",
+	"count",
+]);
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const writtenKinds = new Set(["written", "removed", "taken", "committed", "counted"]);
 
@@ -54,7 +62,9 @@ export interface SimulatedStore {
 
 function spaceOf(name: string, args: readonly unknown[]): Space | undefined {
 	switch (name) {
-		case "batch": {
+		// A batch across joins spaces of one guarantee only, so its first key's space stands for all.
+		case "batch":
+		case "batchAcross": {
 			const [conditions, written] = args as [readonly { key: Key }[], readonly { key: Key }[]];
 			return (conditions[0] ?? written[0])?.key.space;
 		}

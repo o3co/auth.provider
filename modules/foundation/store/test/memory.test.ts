@@ -16,6 +16,25 @@ storeContract("memory", {
 	peer: async (s) => s,
 });
 
+it("offers a batch across partitions and spaces of one guarantee, so the contract's batches across run on it", () => {
+	expect(typeof memoryStore({ now: () => Date.now() }, contractSpaces).batchAcross).toBe(
+		"function",
+	);
+});
+
+it("judges the guarantees a batch across joins as sets, so a guarantee named twice changes nothing", async () => {
+	const once: Space = { name: "once", guarantees: ["durable"] };
+	const twice: Space = { name: "twice", guarantees: ["durable", "durable"] };
+	const s = memoryStore({ now: () => Date.now() }, [once, twice]);
+	const put = (space: Space) =>
+		({
+			key: { space, partition: space.name, name: "k" },
+			put: 1,
+			expiry: { kind: "never" },
+		}) as const;
+	expect((await s.batchAcross?.([], [put(once), put(twice)]))?.kind).toBe("committed");
+});
+
 // A store clock far from the caller's catches implementations that judge time by the caller's clock.
 const skewed = { now: () => Date.now() + 3_600_000 };
 storeContract("memory with a skewed store clock", {

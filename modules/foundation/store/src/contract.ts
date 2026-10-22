@@ -138,6 +138,23 @@ export interface Store {
 		| Reused
 		| { readonly kind: "conflict"; readonly index: number }
 	>;
+	/**
+	 * As `batch`, over keys of any partition, and of any spaces declaring the same guarantees. Its
+	 * mark binds the request (its keys in their order) and is kept, with one answer and one end, in
+	 * every partition it touches, the partitions it only reads included: a resend meets it in any, and
+	 * another request meeting it in any is reused. A late answer is not kept. Reads made before it are
+	 * no snapshot: a value relied on goes in as a condition. A store without it leaves it out.
+	 */
+	batchAcross?(
+		conditions: readonly Condition[],
+		writes: readonly BatchWrite[],
+		options?: Omit<WriteOptions, "expiry">,
+	): Promise<
+		| { readonly kind: "committed"; readonly versions: readonly (Version | null)[] }
+		| Late
+		| Reused
+		| { readonly kind: "conflict"; readonly index: number }
+	>;
 	/** A fixed window counted on the store clock; at the limit nothing is written. */
 	count(
 		key: Key,
@@ -404,7 +421,23 @@ export function checkedStore(inner: Store, declared: readonly Space[]): Store {
 		if (new Set(names).size !== names.length) fail("a batch may write each key once");
 		return checked;
 	};
+	/** Spaces a batch across joins declare the same guarantees, so a fault keeps or drops it whole. */
+	const oneGuarantee = (keys: readonly Key[]) => {
+		const sets = new Set(keys.map((k) => JSON.stringify([...new Set(k.space.guarantees)].sort())));
+		if (sets.size > 1) fail("a batch across spaces joins spaces of the same guarantees only");
+	};
+	const batchAcross = inner.batchAcross?.bind(inner);
 	return {
+		...(batchAcross
+			? {
+					batchAcross: async (conditions, writes, o) => {
+						const checkedConditions = [...conditions].map((c) => readCondition(c, key));
+						const checkedWrites = batchWrites(writes);
+						oneGuarantee([...checkedConditions, ...checkedWrites].map((x) => x.key));
+						return batchAcross(checkedConditions, checkedWrites, readLimits(o));
+					},
+				}
+			: {}),
 		get: async (k) => inner.get(key(k)),
 		putIfAbsent: async (k, v, o) => inner.putIfAbsent(key(k), json(v), readWriteOptions(o)),
 		replaceIf: async (k, version, v, o) =>
