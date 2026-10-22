@@ -3,6 +3,9 @@ import { addable } from "@mod/combinations";
 import { generate, type Plan } from "./generate.ts";
 import { type Group, groups } from "./patterns/pattern.ts";
 
+/** How a package outside the release is named on the command line. */
+const npm = "npm:";
+
 /** Runs the command on its arguments, writing to `io`: 0 once the project is written or `--help` or `--list` told, 64 for a usage error, 1 for a plan it cannot make. */
 export async function run(
 	args: readonly string[],
@@ -16,7 +19,10 @@ export async function run(
 		"         [--axis <owner>=<module>]... [--<group> <feature>,...]...\n" +
 		`         groups: ${groups.join(", ")}; axes and groups need a pattern other than full\n` +
 		"       create-auth-provider <target> [--workspace <root>] [--sink <package>] <package>...\n" +
-		"       create-auth-provider --list   (each name --add takes)\n";
+		"       create-auth-provider --list   (each name --add takes)\n" +
+		"       a package outside the release is named npm:<name> (a package, --add, an axis's module),\n" +
+		"         read from --outside-from <project>, where pnpm installed it; --allow-fresh <name> lets\n" +
+		"         one published within the last day be installed\n";
 	const usage = (): number => {
 		io.err(usageText);
 		return 64;
@@ -33,6 +39,8 @@ export async function run(
 		pattern: { type: "string" },
 		add: { type: "string", multiple: true },
 		axis: { type: "string", multiple: true },
+		"outside-from": { type: "string" },
+		"allow-fresh": { type: "string", multiple: true },
 		...groupOptions,
 	} as const;
 	const parse = () => parseArgs({ args: [...args], allowPositionals: true, options });
@@ -54,9 +62,22 @@ export async function run(
 		io.out(`${addable().join("\n")}\n`);
 		return 0;
 	}
-	const [target, ...modules] = positionals;
+	// A package outside the release is named `npm:<name>`; the plan takes the name, and reads it from the project given.
+	const unprefixed = (name: string) => (name.startsWith(npm) ? name.slice(npm.length) : name);
+	const [target, ...given] = positionals;
 	const pattern = values.pattern ?? "full";
-	const axes = (values.axis ?? []).map((given) => given.split("="));
+	const axisPairs = (values.axis ?? []).map((pair) => pair.split("="));
+	// An axis given twice takes the last choice, as the plan does: only that one is a name the plan reads.
+	const lastChoices = new Map(axisPairs.map((pair) => [pair[0] ?? "", pair]));
+	const named = [
+		...given,
+		...(values.add ?? []),
+		...[...lastChoices.values()].flatMap((pair) => pair.slice(1)),
+	];
+	const outsideNames = named.filter((name) => name.startsWith(npm)).map(unprefixed);
+	const modules = given.map(unprefixed);
+	const added = values.add?.map(unprefixed);
+	const axes = axisPairs.map(([owner, ...rest]) => [owner ?? "", ...rest.map(unprefixed)]);
 	const chosen = groups.flatMap((group) => {
 		const listed = values[group];
 		return typeof listed === "string" ? [[group, listed.split(",")] as const] : [];
@@ -77,18 +98,56 @@ export async function run(
 	) {
 		return usage();
 	}
+	const from = values["outside-from"];
+	const fresh = values["allow-fresh"] ?? [];
+	const misnamed = [
+		...(outsideNames.includes("") ? [`${npm} names no package: write npm:<name>`] : []),
+		...(outsideNames.length > 0 && from === undefined
+			? [`${npm}<name> is read from --outside-from <project>`]
+			: []),
+		...(outsideNames.length === 0 && from !== undefined
+			? ["--outside-from names no package: none is named npm:<name>"]
+			: []),
+		...(outsideNames.length > 0 && values.workspace
+			? ["a linked workspace composes no package outside the release"]
+			: []),
+		...fresh
+			.filter((name) => !outsideNames.includes(name))
+			.map((name) => `--allow-fresh ${name}: not named npm:${name}`),
+	];
+	if (misnamed.length > 0) {
+		io.err(`${misnamed.join("\n")}\n`);
+		return usage();
+	}
 	const workspace = values.workspace ? { workspace: values.workspace } : {};
-	const add = values.add ? { add: values.add } : {};
+	const add = added ? { add: added } : {};
+	const outside =
+		from === undefined
+			? {}
+			: {
+					outside: {
+						from,
+						names: [...new Set(outsideNames)],
+						...(fresh.length > 0 ? { fresh } : {}),
+					},
+				};
 
 	function planOf(target: string): Plan {
 		if (listed)
-			return { target, modules, ...workspace, ...(values.sink ? { sink: values.sink } : {}) };
-		if (pattern === "full") return { target, template: "full", ...workspace, ...add };
+			return {
+				target,
+				modules,
+				...workspace,
+				...outside,
+				...(values.sink ? { sink: values.sink } : {}),
+			};
+		if (pattern === "full") return { target, template: "full", ...workspace, ...add, ...outside };
 		return {
 			target,
 			template: pattern,
 			...workspace,
 			...add,
+			...outside,
 			...(axes.length > 0 ? { axes: Object.fromEntries(axes) } : {}),
 			...(chosen.length > 0 ? { features: Object.fromEntries(chosen) } : {}),
 		};

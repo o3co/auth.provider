@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { type Card, fragmentsIn, fragmentsOf, type Packages } from "@mod/app-output";
+import type { Outside, Read } from "./outside/contract.ts";
 import { dependenciesOf, workspacePackages } from "./project.ts";
 
 /** Where an entry's files lie in the app: under `node_modules`, the entry's own path. */
@@ -23,7 +24,7 @@ const repositoryOf = (stated: unknown): string | undefined => {
 	return typeof url === "string" ? url.replace(/^git\+/, "").replace(/\.git$/, "") : undefined;
 };
 
-interface Indexed {
+export interface Indexed {
 	readonly version: string;
 	readonly repository?: string;
 	readonly packages: readonly {
@@ -37,7 +38,13 @@ interface Indexed {
 }
 
 /** The index distribution writes at the root of the bundle create-app is built into. */
-const bundleIndex = join(import.meta.dirname, "..", "..", "index.json");
+export const bundleIndex = join(import.meta.dirname, "..", "..", "index.json");
+
+/** The packages outside the release read for a plan, and the names let through though fresh. */
+export interface Beside {
+	readonly read: Read;
+	readonly fresh?: readonly string[];
+}
 /** The workspace this package lies in, where `combinations` reads the modules it composes. */
 const ownWorkspace = join(import.meta.dirname, "..", "..", "..", "..");
 
@@ -79,26 +86,49 @@ export function packagesFor(plan: { readonly workspace?: string }, index = bundl
 	};
 }
 
-function publishedIn(index: Indexed): Packages {
+/**
+ * The packages as published, from the index, and beside them the packages outside the release read
+ * for the plan: each of those depended on at its recorded version, imported by its own name.
+ */
+export function publishedIn(index: Indexed, beside?: Beside): Packages {
 	const byName = new Map(index.packages.map((entry) => [entry.name, entry]));
+	const outside = new Map<string, Outside>(
+		(beside?.read.outside ?? []).map((o) => [o.declaration.name, o]),
+	);
 	const found = (name: string) => {
 		const entry = byName.get(name);
 		if (!entry) throw new Error(`${name} is no published package`);
 		return entry;
 	};
 	return {
+		// The release's and those outside it in one reading, so no section is read twice.
 		fragments: async (names) =>
 			fragmentsOf(
 				names.flatMap((name) => {
-					const { fragment } = found(name);
+					const fragment = outside.has(name) ? outside.get(name)?.fragment : found(name).fragment;
 					return fragment === undefined ? [] : [{ from: name, text: fragment }];
 				}),
 			),
 		dependencies: (names) =>
-			Object.fromEntries(names.map((name) => [found(name).package, index.version])),
-		importOf: (name) => found(name).entry,
+			Object.fromEntries(
+				names.map((name) => {
+					const beside = outside.get(name);
+					return beside ? [name, beside.record.version] : [found(name).package, index.version];
+				}),
+			),
+		importOf: (name) => (outside.has(name) ? name : found(name).entry),
 		cards: (names) =>
 			names.map((name) => {
+				const read = outside.get(name);
+				if (read) {
+					return {
+						name,
+						...installed(name, {
+							references: read.references !== undefined,
+							deployment: /^## Deployment$/m.test(read.card ?? ""),
+						}),
+					};
+				}
 				const { entry, references, deployment } = found(name);
 				return {
 					name,
@@ -109,5 +139,15 @@ function publishedIn(index: Indexed): Packages {
 			version: index.version,
 			...(index.repository ? { repository: index.repository } : {}),
 		}),
+		outside: (names) => {
+			const modules = names.flatMap((name) => outside.get(name)?.record ?? []);
+			if (modules.length === 0 || beside === undefined) return undefined;
+			const fresh = (beside.fresh ?? []).filter((name) => names.includes(name));
+			return {
+				modules,
+				registries: beside.read.registries,
+				...(fresh.length > 0 ? { fresh } : {}),
+			};
+		},
 	};
 }
