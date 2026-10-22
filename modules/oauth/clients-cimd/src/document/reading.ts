@@ -1,11 +1,6 @@
 import type { AllowanceLists } from "@mod/client-allowance";
-import {
-	type ClientRecord,
-	clients,
-	metadataSections,
-	type RecordRefusal,
-	type Section,
-} from "@mod/clients";
+import { type DocumentCopy, documentCopies } from "@mod/client-documents";
+import { type ClientRecord, clients, metadataSections, type RecordRefusal } from "@mod/clients";
 import type { BuildContext, Log } from "@mod/kernel";
 import {
 	DestinationRefused,
@@ -47,8 +42,8 @@ export interface ReadingParts {
 	readonly narrower: Narrower;
 	readonly ceiling: Omit<AllowanceLists, "grants">;
 	readonly log: Log;
-	/** The sections their owners copy from a document. */
-	readonly copies: readonly Section<unknown>[];
+	/** The owners' copies of their sections from a document. */
+	readonly copies: readonly DocumentCopy[];
 	/** Where a record fails the checks `clients` holds a source's to, as `checkRecord` answers. */
 	readonly check: (record: ClientRecord) => Promise<readonly RecordRefusal[] | undefined>;
 }
@@ -100,19 +95,29 @@ export function readingWith({
 }
 
 /**
- * The sections whose owners copy them from a document. Boot is refused where no composed section
- * reads a field a document client needs, or where a section this module computes is copied too.
+ * The owners' copies of their sections from a document, as `client-documents` collects them. Boot
+ * is refused where no copy reads a field a document client needs, where a copy's section is not
+ * composed, or where a section this module computes is copied too.
  */
 async function copiesIn(c: BuildContext<Settings>) {
-	const copies = (await c.collect(metadataSections)).filter((one) => one.fromDocument);
-	const read = new Set(copies.flatMap((one) => one.reads ?? []));
+	const copies = await c.collect(documentCopies);
+	const composed = new Set((await c.collect(metadataSections)).map((one) => one.name));
+	const read = new Set(copies.flatMap((one) => one.reads));
 	const refusals = [
 		...neededFields
 			.filter((field) => !read.has(field))
 			.map((field) => `no composed section reads a document's ${field}`),
 		...copies
-			.filter((one) => computedSections.includes(one.name))
-			.map((one) => `${one.name} is computed here, and copied from a document by its owner too`),
+			.filter((one) => !composed.has(one.section.name))
+			.map(
+				(one) => `${one.section.name} is copied from a document, and its section is not composed`,
+			),
+		...copies
+			.filter((one) => computedSections.includes(one.section.name))
+			.map(
+				(one) =>
+					`${one.section.name} is computed here, and copied from a document by its owner too`,
+			),
 	];
 	if (refusals.length > 0)
 		c.refuseAll(refusals.map((reason) => ({ where: "clients-cimd", reason })));

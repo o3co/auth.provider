@@ -1,5 +1,5 @@
-import { clientSection } from "@mod/consent";
-import { redirects } from "@mod/redirect-uris";
+import { clientCopy } from "@mod/consent";
+import { redirectsCopy } from "@mod/redirect-uris";
 import { describe, expect, it } from "vitest";
 import { documentUrl, recordOf } from "../src/document/document.ts";
 
@@ -11,7 +11,7 @@ const doc = {
 };
 const ceiling = { scopes: ["openid", "read"], audiences: ["https://api.example"] };
 /** The sections their owners copy from a document, as composed. */
-const copies = [redirects, clientSection];
+const copies = [redirectsCopy, clientCopy];
 const record = (fields: Record<string, unknown>, limits = ceiling) =>
 	recordOf(new URL(id), { ...doc, ...fields }, limits, copies);
 /** The client-allowance section of the record, or the refusal as it is. */

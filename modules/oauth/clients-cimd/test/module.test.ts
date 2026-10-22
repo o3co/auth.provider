@@ -1,8 +1,9 @@
 import { clientAllowance } from "@mod/client-allowance";
-import { type Client, clients, metadataSections } from "@mod/clients";
+import { type DocumentCopy, documentCopies } from "@mod/client-documents";
+import { type Client, clients, metadataSections, type Section } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { publicClient } from "@mod/clients/testing";
-import { clientSection } from "@mod/consent";
+import { clientCopy, clientSection } from "@mod/consent";
 import { composedGrants } from "@mod/grants";
 import { metadata } from "@mod/issuer";
 import {
@@ -24,7 +25,7 @@ import {
 	outbound,
 } from "@mod/outbound";
 import { type Limits, outboundLimits } from "@mod/outbound-policy";
-import { redirects } from "@mod/redirect-uris";
+import { redirects, redirectsCopy } from "@mod/redirect-uris";
 import secretHashModule from "@mod/secret-hash/module";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -75,15 +76,21 @@ const outboundStandIn = (caps: Limits = wideCaps, lookups?: number) =>
 		})),
 	]);
 
-/** The sections a document record carries, as their owners contribute them; client-allowance's taken as written. */
-const owners = defineModule({ name: "owners" }, (m) => [
-	m.contribute(metadataSections).by(() => redirects),
-	m.contribute(metadataSections).by(() => clientSection),
-	m.contribute(metadataSections).by(() => ({
-		name: "client-allowance",
-		schema: z.record(z.string(), z.unknown()),
-	})),
-]);
+/** client-allowance's section, taken as written. */
+const allowanceSection: Section<unknown> = {
+	name: "client-allowance",
+	schema: z.record(z.string(), z.unknown()),
+};
+
+/** The owners' sections, and their copies from a document, as client-documents collects them. */
+const ownersOf = (sections: readonly Section<unknown>[], copies: readonly DocumentCopy[]) =>
+	defineModule({ name: "owners" }, (m) => [
+		...sections.map((one) => m.contribute(metadataSections).by(() => one)),
+		...copies.map((one) => m.contribute(documentCopies).by(() => one)),
+	]);
+
+/** The sections a document record carries, as their owners contribute them, with their copies. */
+const owners = ownersOf([redirects, clientSection, allowanceSection], [redirectsCopy, clientCopy]);
 
 /** Token-endpoint as a test stand-in: only the grant types it says are composed. */
 const tokenEndpointStandIn = (composed: readonly string[]) =>
@@ -363,34 +370,44 @@ describe("clients-cimd: a refused document", () => {
 });
 
 describe("clients-cimd: the sections a document's record is built from", () => {
-	const allowanceStandIn = (copied: boolean) => ({
-		name: "client-allowance",
-		schema: z.record(z.string(), z.unknown()),
-		...(copied ? { fromDocument: () => ({ value: { grants: ["password"] } }) } : {}),
-	});
-	const ownersOf = (...sections: object[]) =>
-		defineModule({ name: "owners" }, (m) =>
-			sections.map((one) => m.contribute(metadataSections).by(() => one as never)),
-		);
+	const allowanceCopy: DocumentCopy = {
+		section: allowanceSection,
+		reads: [],
+		copy: () => ({ value: { grants: ["password"] } }),
+	};
+	const sections = [redirects, clientSection, allowanceSection];
 	const refusedBoot = (owners: Module) =>
 		boot({}, { owners }).then(
 			() => [],
 			(error: BootRefused) => error.refusals.map((r) => r.reason),
 		);
 
-	it("refuses boot where no composed section copies a field a document client needs", async () => {
-		expect(await refusedBoot(ownersOf(redirects, allowanceStandIn(false)))).toEqual([
+	it("refuses boot where no composed copy reads a field a document client needs", async () => {
+		expect(await refusedBoot(ownersOf(sections, [redirectsCopy]))).toEqual([
 			"no composed section reads a document's client_name",
 		]);
-		expect(await refusedBoot(ownersOf(clientSection, allowanceStandIn(false)))).toEqual([
+		expect(await refusedBoot(ownersOf(sections, [clientCopy]))).toEqual([
 			"no composed section reads a document's redirect_uris",
 		]);
 	});
 
-	it("refuses boot where a section it computes is copied from a document by its owner", async () => {
-		expect(await refusedBoot(ownersOf(redirects, clientSection, allowanceStandIn(true)))).toEqual([
-			"client-allowance is computed here, and copied from a document by its owner too",
+	it("takes the copies client-documents collects, never a section's own fromDocument", async () => {
+		expect(await refusedBoot(ownersOf(sections, []))).toEqual([
+			"no composed section reads a document's redirect_uris",
+			"no composed section reads a document's client_name",
 		]);
+	});
+
+	it("refuses boot where a copy's section is not composed", async () => {
+		expect(
+			await refusedBoot(ownersOf([redirects, allowanceSection], [redirectsCopy, clientCopy])),
+		).toEqual(["consent is copied from a document, and its section is not composed"]);
+	});
+
+	it("refuses boot where a section it computes is copied from a document by its owner", async () => {
+		expect(
+			await refusedBoot(ownersOf(sections, [redirectsCopy, clientCopy, allowanceCopy])),
+		).toEqual(["client-allowance is computed here, and copied from a document by its owner too"]);
 	});
 
 	it("is none, logged with where, for a page the consent section refuses", async () => {

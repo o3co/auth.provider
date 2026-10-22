@@ -7,7 +7,7 @@
 
 ## Not here
 - Authenticating by `none` (`clients`). Matching redirect URIs (`redirect-uris`). Consent and its page (`consent`). The destination policy (`outbound`).
-- What each section takes from a document and what its values mean: each owner's copy (`fromDocument`) and schema, as `metadataSections` holds them; `clients` refuses the record as a whole on any error.
+- What each section takes from a document and what its values mean: each owner's copy, as `client-documents`' `documentCopies` holds them, and schema, as `metadataSections` holds them; `clients` refuses the record as a whole on any error.
 
 ## Offers
 - Composition definition only: a contribution to `clientSources`, and the metadata item `client_id_metadata_document_supported` (`true`).
@@ -19,7 +19,7 @@
 - Its host is checked before the fetch, spelled as `outbound` spells hosts: `deny` first, then a non-empty `allow`. An `allow` list also narrows `outbound`'s hosts.
 - The fetch goes only through `outbound`, asks for JSON, and narrows its size and time; it marks its destination `outsideChosen`, as an outside party chooses it, for outbound to keep its name lookups to their share. Only a `200` with a JSON media type and one object is a document.
 - Boot is refused where `max-size` or `timeout` is above `outbound`'s cap, as its `outboundLimits` answers it, naming the key and no value, and where outbound gives the document's names no lookup (`lookupsOf`).
-- Boot is refused where no composed section copies `redirect_uris` or `client_name` (its `reads`), and where a section it computes (`client-allowance`) is copied from a document too.
+- Boot is refused where no composed copy reads `redirect_uris` or `client_name` (its `reads`), where a copy's section is not composed, and where a section it computes (`client-allowance`) is copied from a document too.
 - The document's `client_id` equals the id. It has no `client_secret` or `client_secret_expires_at`, and its `token_endpoint_auth_method` is `none` or absent.
 - `redirect_uris` is a non-empty list of strings, CIMD's rule for a client with the code flow alone: its section takes an empty list, and checks each URI's form. `grant_types` (default the code) holds the code; `response_types`, if present, holds `code`.
 - Its allowances come from `client-allowance` within the ceiling: the code, refresh only when the document names it, the scopes it asks (all the ceiling's when it asks none), the operator's audiences. An empty answer refuses the record.
@@ -36,4 +36,4 @@
 - Kept documents, remembered refusals and running fetches, in this process only (see `fetching`). Safe on multiple instances.
 
 ## Depends on
-- `kernel`, `clients`, `client-allowance`, `outbound`, `outbound-policy`, `grants`, `code-grant`, `refresh`, `issuer`, `url-setting` (`isLoopbackName`)
+- `kernel`, `clients`, `client-documents`, `client-allowance`, `outbound`, `outbound-policy`, `grants`, `code-grant`, `refresh`, `issuer`, `url-setting` (`isLoopbackName`)
