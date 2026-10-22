@@ -66,6 +66,22 @@ const rangesOf = (value: unknown): Record<string, string> =>
 		? Object.fromEntries(Object.keys(value).map((key) => [key, String(value[key])]))
 		: {};
 
+/** The conditions an app's import of a module meets, in node: the first of these a target names is taken. */
+const conditions = new Set(["node", "import", "module-sync", "default"]);
+
+/**
+ * Whether an export's target is one node would load for an app's import: a path in the package,
+ * or conditions whose first met one reaches such a path. A null, an array or anything else is not.
+ */
+function usableTarget(target: unknown): boolean {
+	if (typeof target === "string") return target.startsWith("./");
+	if (!isObject(target)) return false;
+	for (const [condition, inner] of Object.entries(target)) {
+		if (conditions.has(condition)) return usableTarget(inner);
+	}
+	return false;
+}
+
 /** Why a file of the package cannot be read: a link, no file, or over its bound. */
 function readIn(dir: string, file: string): { text?: string; refusal?: string } {
 	const path = join(dir, file);
@@ -119,7 +135,7 @@ function declarationOf(
 			],
 		};
 	}
-	const needs = stated.needs ?? [];
+	const needs = stated.needs === undefined ? [] : stated.needs;
 	if (!Array.isArray(needs) || !needs.every(isName))
 		refusals.push("authProvider needs is not a list of names");
 	for (const key of ["optIn", "default"] as const) {
@@ -169,10 +185,13 @@ function copyRefusals(manifest: Json, declaration: Declaration, release: Release
 				? bundled.map(String)
 				: [];
 	for (const dep of bundles.filter(heldByApp)) refusals.push(`bundles ${dep}`);
-	for (const [dep, spec] of Object.entries({ ...dependencies, ...optional, ...peers })) {
-		const aliased = /^npm:(@?[^@]+)/.exec(spec)?.[1];
-		if (aliased !== undefined && heldByApp(aliased))
-			refusals.push(`${dep} is an alias of ${aliased}`);
+	// Each map on its own: merged, a peer of one name would hide a dependency's alias of it.
+	for (const map of [dependencies, optional, peers]) {
+		for (const [dep, spec] of Object.entries(map)) {
+			const aliased = /^npm:(@?[^@]+)/.exec(spec)?.[1];
+			if (aliased !== undefined && heldByApp(aliased))
+				refusals.push(`${dep} is an alias of ${aliased}`);
+		}
 	}
 	for (const [peer, range] of Object.entries(peers).filter(([peer]) => heldByApp(peer))) {
 		if (isObject(meta[peer]) && (meta[peer] as Json).optional === true)
@@ -193,28 +212,57 @@ function copyRefusals(manifest: Json, declaration: Declaration, release: Release
 	return refusals;
 }
 
-/** A setting of pnpm's in the project, as it reads its own and the operator's configuration; none where unset. */
-function configIn(project: string, key: string): string | undefined {
-	const value = execFileSync("pnpm", ["config", "get", key], {
-		cwd: project,
-		encoding: "utf8",
-		timeout: 10_000,
-		maxBuffer: 64 * 1024,
-	}).trim();
+/** How pnpm is asked for a setting: the command, and how long it may take. */
+export interface Asking {
+	readonly pnpm?: string;
+	readonly timeoutMs?: number;
+}
+
+/** The most pnpm may answer with, for one setting. */
+const answerBytes = 64 * 1024;
+
+/**
+ * A setting of pnpm's in the project, as it reads its own and the operator's configuration; none
+ * where unset. What pnpm says besides its answer is never passed on: a setting may hold a secret.
+ */
+function configIn(project: string, key: string, asking: Asking): string | undefined {
+	const timeout = asking.timeoutMs ?? 10_000;
+	let value: string;
+	try {
+		value = execFileSync(asking.pnpm ?? "pnpm", ["config", "get", key], {
+			cwd: project,
+			encoding: "utf8",
+			timeout,
+			maxBuffer: answerBytes,
+			stdio: ["ignore", "pipe", "pipe"],
+		}).trim();
+	} catch (error) {
+		// Told by its code alone: an answer over the bound and a timeout both end the child the same way.
+		const { code } = error as NodeJS.ErrnoException;
+		const why =
+			code === "ENOENT"
+				? "pnpm is not found"
+				: code === "ENOBUFS"
+					? `pnpm answered over ${answerBytes} bytes`
+					: code === "ETIMEDOUT"
+						? `pnpm did not answer within ${timeout} ms`
+						: "pnpm failed";
+		throw new Error(`the project's ${key} could not be read: ${why}`);
+	}
 	return value === "" || value === "undefined" ? undefined : value;
 }
 
-/** The origin of a registry's address, refused where it is no http address. */
+/** The origin of a registry's address, refused where it is no http address; the address itself is never told, for it may hold a secret. */
 function originOf(setting: string, address: string): string {
 	try {
 		const url = new URL(address);
 		if (url.protocol === "https:" || url.protocol === "http:") return url.origin;
 	} catch {}
-	throw new Error(`the project's ${setting} is ${address}, not an http address`);
+	throw new Error(`the project's ${setting} is not an http address`);
 }
 
 /** The registries the project installs from: its default, and the scope of each name read and the release's. */
-function registriesIn(project: string, names: readonly string[]): Registries {
+function registriesIn(project: string, names: readonly string[], asking: Asking): Registries {
 	const scopes = [
 		...new Set([
 			"@o3co",
@@ -222,10 +270,10 @@ function registriesIn(project: string, names: readonly string[]): Registries {
 		]),
 	].sort();
 	const own = scopes.flatMap((scope) => {
-		const address = configIn(project, `${scope}:registry`);
+		const address = configIn(project, `${scope}:registry`, asking);
 		return address === undefined ? [] : [[scope, originOf(`${scope}:registry`, address)] as const];
 	});
-	const address = configIn(project, "registry") ?? "https://registry.npmjs.org/";
+	const address = configIn(project, "registry", asking) ?? "https://registry.npmjs.org/";
 	return {
 		default: originOf("registry", address),
 		...(own.length > 0 ? { scopes: Object.fromEntries(own) } : {}),
@@ -247,7 +295,13 @@ function outsideOf(
 	if (unread.length > 0) return unread;
 	const text = read["package.json"]?.text;
 	if (text === undefined) return ["has no package.json"];
-	const manifest = JSON.parse(text) as Json;
+	let manifest: Json;
+	try {
+		manifest = JSON.parse(text) as Json;
+	} catch {
+		return ["its package.json is not JSON"];
+	}
+	if (!isObject(manifest)) return ["its package.json is not an object"];
 	if (manifest.name !== name) return [`its manifest names ${String(manifest.name)}`];
 	if (manifest.version !== recorded.version) {
 		return [
@@ -260,7 +314,7 @@ function outsideOf(
 		.map((s) => `it runs ${s} when installed`);
 	const { declaration, refusals: declared } = declarationOf(name, manifest.authProvider);
 	refusals.push(...declared);
-	if (!isObject(manifest.exports) || manifest.exports["./module"] === undefined)
+	if (!isObject(manifest.exports) || !usableTarget(manifest.exports["./module"]))
 		refusals.push("exports no ./module");
 	if (declaration === undefined) return refusals;
 	refusals.push(...copyRefusals(manifest, declaration, release));
@@ -296,7 +350,12 @@ function outsideOf(
  * `node_modules`, and the registries the project installs from (pnpm's settings there). Refuses,
  * naming each, what cannot be composed beside the release.
  */
-export function readOutside(project: string, names: readonly string[], release: Release): Read {
+export function readOutside(
+	project: string,
+	names: readonly string[],
+	release: Release,
+	asking: Asking = {},
+): Read {
 	const refusals: string[] = [];
 	const said = (name: string, why: readonly string[]) =>
 		refusals.push(...why.map((w) => `${name}: ${w}`));
@@ -312,7 +371,7 @@ export function readOutside(project: string, names: readonly string[], release: 
 		return !releaseScopes.some((scope) => name.startsWith(scope));
 	});
 	if (refusals.length > 0) throw new Error(refusals.join("; "));
-	const registries = registriesIn(project, named);
+	const registries = registriesIn(project, named, asking);
 	if (named.length === 0) return { outside: [], registries };
 	const lock = readFileSync(join(project, "pnpm-lock.yaml"), "utf8");
 	const read: Outside[] = [];

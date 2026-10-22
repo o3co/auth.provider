@@ -1,12 +1,22 @@
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { readOutside } from "../contract.ts";
 
 // The lockfile is pnpm 11.3's own, for a project that ran `pnpm add @x/grant@1.2.0` (it is the
 // fixture app-output's lockfile module is tried on).
+// Each read asks pnpm for the project's registries, slow on a loaded machine.
+vi.setConfig({ testTimeout: 60_000 });
+
 const lock = readFileSync(join(import.meta.dirname, "fixtures", "staging-lock.yaml"), "utf8");
 const integrity = parse(lock).packages["@x/grant@1.2.0"].resolution.integrity as string;
 
@@ -172,9 +182,9 @@ describe("refusing a name or where it lies", () => {
 			project({ lay: (root) => symlinkSync(elsewhere, join(root, "node_modules", "@x", "grant")) }),
 			"@x/grant: lies outside the project's node_modules",
 		);
-		// A sibling whose path only begins with the project's text is still outside it.
+		// A sibling whose path only begins with the project's node_modules is still outside it.
 		const lay = (root: string) => {
-			const sibling = `${root}-node_modules-x`;
+			const sibling = join(root, "node_modules-x");
 			mkdirSync(sibling);
 			writeFileSync(join(sibling, "package.json"), JSON.stringify(manifest));
 			symlinkSync(sibling, join(root, "node_modules", "@x", "grant"));
@@ -335,5 +345,108 @@ describe("refusing a second copy of the release or of zod", () => {
 			with_({ peerDependencies: { zod: "^4.6.0" } }),
 			"@x/grant: needs @mod/tokens, whose bundle @o3co/auth-provider-oauth is not its peer",
 		);
+	});
+});
+
+describe("refusing what a manifest only seems to declare", () => {
+	const with_ = (extra: Record<string, unknown>) =>
+		project({ manifest: { ...manifest, ...extra } });
+
+	it("refuses an alias of zod among its dependencies, though a peer has its name", () => {
+		const hidden = with_({
+			dependencies: { ...manifest.dependencies, "my-zod": "npm:zod@^4.6.0" },
+			peerDependencies: { ...manifest.peerDependencies, "my-zod": "*" },
+		});
+		refused(hidden, "@x/grant: my-zod is an alias of zod");
+	});
+
+	it("takes a module export node would load, and refuses a blocked or unusable one", () => {
+		expect(read(with_({ exports: { "./module": { import: "./dist/module.js" } } }))).toHaveLength(
+			1,
+		);
+		expect(
+			read(with_({ exports: { "./module": { types: "./m.d.ts", default: "./dist/module.js" } } })),
+		).toHaveLength(1);
+		for (const target of [
+			null,
+			["./dist/module.js"],
+			{ require: "./dist/module.cjs" },
+			{ node: null, default: "./dist/module.js" },
+			"dist/module.js",
+		]) {
+			refused(with_({ exports: { "./module": target } }), "@x/grant: exports no ./module");
+		}
+	});
+
+	it("refuses needs of the wrong shape, though empty", () => {
+		refused(
+			project({
+				manifest: { ...manifest, authProvider: { format: 1, kind: "feature", needs: null } },
+			}),
+			"@x/grant: authProvider needs is not a list of names",
+		);
+	});
+
+	it("names the package whose package.json is not JSON", () => {
+		refused(
+			project({ files: { "package.json": "{ not json" } }),
+			"@x/grant: its package.json is not JSON",
+		);
+	});
+
+	it("holds a prerelease of the release to the peer ranges that take it", () => {
+		// The manifest's peer is `^0.19.0`: a prerelease of a later patch lies in it, one of 0.19.0 itself does not.
+		expect(
+			readOutside(project(), ["@x/grant"], { ...release, version: "0.19.1-rc.1" }).outside,
+		).toHaveLength(1);
+		expect(() =>
+			readOutside(project(), ["@x/grant"], { ...release, version: "0.19.0-rc.1" }),
+		).toThrow(
+			"@x/grant: its peer @o3co/auth-provider-oauth is ^0.19.0, without the release's 0.19.0-rc.1",
+		);
+	});
+});
+
+describe("asking pnpm for the project's registries", () => {
+	/** A stand-in for pnpm, answering with the shell given. */
+	const pnpm = (shell: string) => {
+		const dir = mkdtempSync(join(tmpdir(), "pnpm-"));
+		const file = join(dir, "pnpm");
+		writeFileSync(file, `#!/bin/sh\n${shell}\n`);
+		chmodSync(file, 0o755);
+		return file;
+	};
+	const asked = (asking: { pnpm?: string; timeoutMs?: number }) => () =>
+		readOutside(project(), ["@x/grant"], release, asking);
+
+	it("says plainly when pnpm is not there, does not answer in time, or answers too much", () => {
+		expect(asked({ pnpm: "/nonexistent/pnpm" })).toThrow(
+			"the project's @o3co:registry could not be read: pnpm is not found",
+		);
+		expect(asked({ pnpm: pnpm("sleep 5"), timeoutMs: 300 })).toThrow(
+			"the project's @o3co:registry could not be read: pnpm did not answer within 300 ms",
+		);
+		expect(asked({ pnpm: pnpm("head -c 70000 /dev/zero | tr '\\0' x") })).toThrow(
+			"pnpm answered over 65536 bytes",
+		);
+	});
+
+	it("never passes on what pnpm says beside its answer, nor an address it refuses: either may hold a secret", () => {
+		const failing = asked({ pnpm: pnpm("echo 'npm token SECRET-TOKEN' >&2; exit 1") });
+		expect(failing).toThrow("the project's @o3co:registry could not be read: pnpm failed");
+		expect(failing).not.toThrow(/SECRET/);
+		const secretAddress = asked({
+			pnpm: pnpm("echo 'ftp://operator:SECRET-PASSWORD@registry.example/'"),
+		});
+		expect(secretAddress).toThrow("the project's @o3co:registry is not an http address");
+		expect(secretAddress).not.toThrow(/SECRET/);
+	});
+
+	it("keeps an http address's origin alone, its credentials left out", () => {
+		const answering = pnpm(
+			`[ "$3" = registry ] && echo 'http://operator:SECRET@127.0.0.1:4873/npm/' || echo undefined`,
+		);
+		const read = readOutside(project(), ["@x/grant"], release, { pnpm: answering });
+		expect(read.registries).toEqual({ default: "http://127.0.0.1:4873" });
 	});
 });
