@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { auditStandIn } from "@mod/audit/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
@@ -48,6 +49,8 @@ function kept({
 		verification,
 		max,
 		freshHandle: () => randomBytes(32).toString("base64url"),
+		// No witness: nothing to settle.
+		settle: async () => {},
 	});
 	/** Asks options for `subject` and answers them with `authenticator`. */
 	const register = async (
@@ -178,7 +181,7 @@ it("throws unavailable when a store cannot tell", async () => {
 
 it("offers registrations in a composition without a session, and serves no route of its own", async () => {
 	const app = await assemble({
-		modules: [http, memoryStores().module, webauthn, passkeysModule],
+		modules: [http, memoryStores().module, auditStandIn().module, webauthn, passkeysModule],
 		config: { ...kernelConfig(), ...httpConfig(), ...webauthnConfig(), ...passkeysConfig() },
 		runtime: quietRuntime(),
 	});
@@ -197,7 +200,7 @@ it("offers registrations in a composition without a session, and serves no route
 
 it("gives a ceremony the challenge lifetime the operator sets", async () => {
 	const app = await assemble({
-		modules: [http, memoryStores().module, webauthn, passkeysModule],
+		modules: [http, memoryStores().module, auditStandIn().module, webauthn, passkeysModule],
 		config: {
 			...kernelConfig(),
 			...httpConfig(),

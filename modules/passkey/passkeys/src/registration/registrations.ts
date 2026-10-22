@@ -1,5 +1,6 @@
 import { type Ceremonies, challengeOf, type Verification } from "@mod/webauthn";
 import type { RegistrationRefusal, Registrations } from "../contract.ts";
+import type { Asked } from "../holders/holders.ts";
 import type { KeptChallenges, KeptPasskeys } from "../records.ts";
 
 export interface RegistrationParts {
@@ -11,6 +12,8 @@ export interface RegistrationParts {
 	readonly max: number;
 	/** A new subject's handle: 32 random bytes, unpadded base64url. */
 	freshHandle(): string;
+	/** Brings the witness's mark in line after a write; `emptied` where this call emptied the list. */
+	settle(subject: string, at: Asked, emptied?: boolean): Promise<unknown>;
 }
 
 const refused = (reason: RegistrationRefusal) => ({ kind: "refused" as const, reason });
@@ -41,12 +44,18 @@ export function registrationsOver(p: RegistrationParts): Registrations {
 			);
 			if (attested.kind === "refused") return attested;
 			const kept = await p.records.register(subject, attested.credential, p.max, nickname);
-			return kept === "registered"
-				? { kind: "registered", credential: attested.credential, challengedAt: opened.at }
-				: refused(kept);
+			if (kept !== "registered") return refused(kept);
+			// The mark follows the write; one that cannot be set leaves the passkey as written.
+			await p.settle(subject, "registration");
+			return { kind: "registered", credential: attested.credential, challengedAt: opened.at };
 		},
 		listed: (subject) => p.records.listed(subject),
 		renamed: (subject, id, nickname) => p.records.renamed(subject, id, nickname),
-		removed: (subject, id) => p.records.removed(subject, id),
+		removed: async (subject, id) => {
+			const removed = await p.records.removed(subject, id);
+			// Only the call whose own update emptied the list may clear a mark it did not set.
+			await p.settle(subject, "removal", removed.removed && removed.empty);
+			return removed;
+		},
 	};
 }

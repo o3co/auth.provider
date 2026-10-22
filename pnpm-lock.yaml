@@ -2143,6 +2143,9 @@ importers:
 
   modules/passkey/passkeys:
     dependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
