@@ -39,7 +39,7 @@ const withdrawCall = "/mfa-witness/withdraw";
 
 /**
  * A fake ledger keeping mfa's witness as an operator's ledger does, behind a credential of its own:
- * a mark per subject, set only where none is, withdrawn only by its token. Its answer to
+ * a mark per subject, set only where none is, read with its token, withdrawn only by its token. Its answer to
  * mfa-witness-http's calls (none for a call not its own), and the section pointing mfa-witness-http
  * at it once it listens at `base`. Made `withdraw: false`, it plays a ledger with no withdraw route.
  */
@@ -57,7 +57,10 @@ export function witnessLedger(options: { readonly withdraw?: boolean } = {}) {
 			}
 			const { subject, token } = JSON.parse(call.body) as { subject?: string; token?: string };
 			const held = String(subject);
-			if (call.path === "/mfa-witness/read") return { json: { enrolled: marks.has(held) } };
+			if (call.path === "/mfa-witness/read") {
+				const mark = marks.get(held);
+				return { json: mark === undefined ? { enrolled: false } : { enrolled: true, token: mark } };
+			}
 			if (call.path === "/mfa-witness/enroll") {
 				if (!marks.has(held)) marks.set(held, String(token));
 				return { json: { owner: marks.get(held) === token } };

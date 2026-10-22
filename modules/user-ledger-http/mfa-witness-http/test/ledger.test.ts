@@ -26,7 +26,9 @@ describe("a fake ledger keeping mfa's witness", () => {
 		expect(ledger.answer(call("withdraw", { subject: "u-2", token: "b" }))).toEqual({
 			status: 204,
 		});
-		expect(ledger.answer(call("read", { subject: "u-2" }))).toEqual({ json: { enrolled: true } });
+		expect(ledger.answer(call("read", { subject: "u-2" }))).toEqual({
+			json: { enrolled: true, token: "a" },
+		});
 		expect(ledger.answer(call("withdraw", { subject: "u-2", token: "a" }))).toEqual({
 			status: 204,
 		});
@@ -46,7 +48,7 @@ describe("a fake ledger keeping mfa's witness", () => {
 		expect(older.answer(asked)).toBeUndefined();
 	});
 
-	it("says whether a subject is enrolled, takes the first mark only, and clears it", () => {
+	it("says whether a subject is enrolled and by which token, takes the first mark only, and clears it", () => {
 		expect(ledger.answer(call("read", { subject: "u-1" }))).toEqual({ json: { enrolled: false } });
 		expect(ledger.answer(call("enroll", { subject: "u-1", token: "a" }))).toEqual({
 			json: { owner: true },
@@ -54,7 +56,9 @@ describe("a fake ledger keeping mfa's witness", () => {
 		expect(ledger.answer(call("enroll", { subject: "u-1", token: "b" }))).toEqual({
 			json: { owner: false },
 		});
-		expect(ledger.answer(call("read", { subject: "u-1" }))).toEqual({ json: { enrolled: true } });
+		expect(ledger.answer(call("read", { subject: "u-1" }))).toEqual({
+			json: { enrolled: true, token: "a" },
+		});
 		expect(ledger.answer(call("clear", { subject: "u-1" }))).toEqual({ status: 204 });
 		expect(ledger.answer(call("read", { subject: "u-1" }))).toEqual({ json: { enrolled: false } });
 	});

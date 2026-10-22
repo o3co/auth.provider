@@ -1,7 +1,7 @@
 # mfa-witness-http
 
 ## Responsibilities
-- Contributes `mfa`'s enrollment witness kept at the operator's HTTP ledger: whether a subject carries the mark, setting it to a token unless one is set, and removing it, each asked of the ledger through `outbound`.
+- Contributes `mfa`'s enrollment witness kept at the operator's HTTP ledger: whether a subject carries the mark and its token, setting it to a token unless one is set, and removing it, each asked of the ledger through `outbound`.
 - Reads each answer once, at this boundary, into the witness's answer.
 
 ## Not here
@@ -17,7 +17,7 @@
 
   | Call | Body | Answer read | Read as |
   |---|---|---|---|
-  | read | `{"subject"}` | `200`, a JSON object with `enrolled`, a boolean | whether the subject carries the mark |
+  | read | `{"subject"}` | `200`, a JSON object with `enrolled`, a boolean, and where it is true `token`, the mark's token as enrolled | whether the subject carries the mark, and its token |
   | enroll | `{"subject", "token", "deadline"}` | `200`, a JSON object with `owner`, a boolean | whether the mark is that token's |
   | clear | `{"subject", "deadline"}` | `204` | removed |
   | withdraw | `{"subject", "token", "deadline"}` | `204` | removed where the mark was that token's, any other left |
@@ -26,7 +26,7 @@
 
 ## Invariants
 - Nothing is kept between calls: each asks the ledger again.
-- Without `withdraw-url` the witness offers no `withdraw`, and each boot warns `mfa-witness-http.withdraw_missing`, naming no value.
+- Without `withdraw-url` the witness offers no `withdraw` nor `markedWith`, reads `enrolled` alone, and each boot warns `mfa-witness-http.withdraw_missing`, naming no value. With it, a marked read naming no `token` (a string not empty) is unavailable.
 - The ledger is reached only through `outbound`, at the URLs' host alone; a redirect is not followed. The URLs are internal destinations, named to `outbound` by one of them (they share one origin): a private address is reached only when their host is in `outbound.internal-hosts` or, over plain http, when `outbound.plain-internal` names their `host:port`, and only at their origin (scheme, host and port).
 - Boot is refused on a URL that outbound's destination policy refuses (at that URL's key, saying which of `outbound`'s keys to set, by `outbound.refusals`), and on URLs `outbound.credentials` will not send the credential to, as when they are at two origins (at `credential`); `outbound` sends the credential as its `credential`.
 - A destination refused when sending, or no answer in time or size, is unavailable. Each failure logs one `mfa-witness-http.ledger_failed` warning with its `call` and its status, or its kind alone: outbound's refusal reason or failure, `no-answer` or `malformed`. No subject, token, text or bytes from the ledger, nor the credential, are logged.
