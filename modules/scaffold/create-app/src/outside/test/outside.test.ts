@@ -367,12 +367,24 @@ describe("refusing what a manifest only seems to declare", () => {
 		expect(
 			read(with_({ exports: { "./module": { types: "./m.d.ts", default: "./dist/module.js" } } })),
 		).toHaveLength(1);
+		// A nested condition none of whose own applies is passed over, to the next.
+		expect(
+			read(
+				with_({
+					exports: { "./module": { node: { require: "./m.cjs" }, default: "./dist/module.js" } },
+				}),
+			),
+		).toHaveLength(1);
 		for (const target of [
 			null,
 			["./dist/module.js"],
 			{ require: "./dist/module.cjs" },
 			{ node: null, default: "./dist/module.js" },
 			"dist/module.js",
+			"./../escape.js",
+			"./node_modules/dep/index.js",
+			"./dist/%2e%2e/escape.js",
+			{ import: "./dist//module.js" },
 		]) {
 			refused(with_({ exports: { "./module": target } }), "@x/grant: exports no ./module");
 		}

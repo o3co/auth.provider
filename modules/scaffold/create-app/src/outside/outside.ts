@@ -69,18 +69,29 @@ const rangesOf = (value: unknown): Record<string, string> =>
 /** The conditions an app's import of a module meets, in node: the first of these a target names is taken. */
 const conditions = new Set(["node", "import", "module-sync", "default"]);
 
+/** A segment node refuses in a target's path: empty, `.`, `..` or `node_modules`, written plainly or %-encoded (its own rule). */
+const invalidSegment =
+	/(^|\\|\/)((\.|%2e)(\.|%2e)?|(n|%6e|%4e)(o|%6f|%4f)(d|%64|%44)(e|%65|%45)(_|%5f)(m|%6d|%4d)(o|%6f|%4f)(d|%64|%44)(u|%75|%55)(l|%6c|%4c)(e|%65|%45)(s|%73|%53))?(\\|\/|$)/i;
+
 /**
- * Whether an export's target is one node would load for an app's import: a path in the package,
- * or conditions whose first met one reaches such a path. A null, an array or anything else is not.
+ * What node makes of an export's target for an app's import, as its resolver does: a path inside
+ * the package (`./`, no segment it refuses), a target blocked (null, or a path it refuses), or
+ * none met (conditions none of which apply, so node goes on to the next). An array is refused.
  */
-function usableTarget(target: unknown): boolean {
-	if (typeof target === "string") return target.startsWith("./");
-	if (!isObject(target)) return false;
-	for (const [condition, inner] of Object.entries(target)) {
-		if (conditions.has(condition)) return usableTarget(inner);
+function targetOf(target: unknown): "usable" | "blocked" | "unmet" {
+	if (typeof target === "string") {
+		return target.startsWith("./") && !invalidSegment.test(target.slice(2)) ? "usable" : "blocked";
 	}
-	return false;
+	if (!isObject(target)) return "blocked";
+	for (const [condition, inner] of Object.entries(target)) {
+		if (!conditions.has(condition)) continue;
+		const met = targetOf(inner);
+		if (met !== "unmet") return met;
+	}
+	return "unmet";
 }
+
+const usableTarget = (target: unknown) => targetOf(target) === "usable";
 
 /** Why a file of the package cannot be read: a link, no file, or over its bound. */
 function readIn(dir: string, file: string): { text?: string; refusal?: string } {
