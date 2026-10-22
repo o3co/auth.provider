@@ -11,12 +11,19 @@ import { quietRuntime } from "@mod/kernel/testing";
 import webauthn from "@mod/webauthn/module";
 import {
 	type CreationOptions,
+	type RequestOptions,
 	softwareAuthenticator,
 	testOrigin,
 	webauthnConfig,
 } from "@mod/webauthn/testing";
 import { expect, it } from "vitest";
-import { challengeStore, passkeyHolders, passkeyStore, registrations } from "../src/contract.ts";
+import {
+	challengeStore,
+	passkeyHolders,
+	passkeyStore,
+	passkeys,
+	registrations,
+} from "../src/contract.ts";
 import passkeysModule from "../src/module.ts";
 import { passkeysConfig, passkeyWitnessStandIn } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
@@ -179,5 +186,101 @@ it("ends only the new passkey where the check says no once it is listed, the sub
 	expect(answer).toEqual({ kind: "refused", reason: "revoked" });
 	expect((await second.kept.listed?.("ann"))?.map((p) => p.id)).toEqual([first.response.id]);
 	expect(stand.marks.get("ann")).toBe(mark);
+	await app.stop(1000);
+});
+
+it("leaves no usable passkey where the registration is stopped and its end cannot be written", async () => {
+	const stores = memoryStores();
+	/** `lose`: the next list update lands and its answer is lost; `down`: no update lands. */
+	const fails = { lose: false, down: false };
+	const failing = <S extends { update: (...a: never[]) => Promise<unknown> }>(store: S): S => ({
+		...store,
+		update: async (...args: Parameters<S["update"]>) => {
+			if (fails.down) throw new Unavailable("passkey-store");
+			const done = await store.update(...args);
+			if (fails.lose) {
+				fails.lose = false;
+				fails.down = true;
+				throw new Unavailable("passkey-store");
+			}
+			return done;
+		},
+	});
+	const down = defineModule({ name: "failing-stores" }, (m) => [
+		m.provide(passkeyStore).by(() => ({
+			credentials: failing(stores.passkeys.credentials),
+			subjects: failing(stores.passkeys.subjects),
+		})),
+		m.provide(challengeStore).by(() => stores.challenges),
+	]);
+	const app = await assemble({
+		modules: [down, auditStandIn().module, webauthn, passkeysModule],
+		config: { ...kernelConfig(), ...webauthnConfig(), ...passkeysConfig() },
+		runtime: quietRuntime(),
+	});
+	const kept = app.get(registrations);
+	const stops = {
+		// The second ask says no, or fails, and the store goes down before the end is written.
+		"second no": (asks: number) => {
+			if (asks === 1) return true;
+			fails.down = true;
+			return false;
+		},
+		"second throws": (asks: number) => {
+			if (asks === 1) return true;
+			fails.down = true;
+			throw new Unavailable("subject-revocation");
+		},
+		// The listing lands, its answer is lost, and the store goes down before the end is written.
+		"listing lost": () => {
+			fails.lose = true;
+			return true;
+		},
+	};
+	for (const [name, stop] of Object.entries(stops)) {
+		Object.assign(fails, { lose: false, down: false });
+		const authenticator = softwareAuthenticator();
+		const options = (await kept.creation("sam")).options as CreationOptions;
+		const response = authenticator.create(options, { origin: testOrigin });
+		let asks = 0;
+		await expect(
+			kept.register("sam", response, undefined, async () => stop(++asks)),
+			name,
+		).rejects.toSatisfy(isUnavailable);
+		fails.down = false;
+		expect(await kept.listed?.("sam"), name).toEqual([]);
+		const { options: asking } = await app.get(passkeys).challenge("app");
+		const assertion = authenticator.get(asking as RequestOptions, { origin: testOrigin });
+		expect(await app.get(passkeys).assert(assertion, "app"), name).toEqual({
+			kind: "refused",
+			reason: "unknown-credential",
+		});
+	}
+	await app.stop(1000);
+});
+
+it("answers conflict where another subject takes the record over before the list, the list letting go of it", async () => {
+	const app = await boot([]);
+	const { kept, response } = await answered(app, "sam");
+	const kims = (await kept.creation("kim")).options as CreationOptions;
+	const taken = softwareAuthenticator().create(
+		kims,
+		{ origin: testOrigin },
+		{ credentialId: response.id },
+	);
+	// Kim registers the same id while sam's record is written and not yet listed.
+	const admitted = async () => {
+		if (!(await kept.listed?.("kim"))?.length) {
+			expect(await kept.register("kim", taken)).toMatchObject({ kind: "registered" });
+		}
+		return true;
+	};
+	expect(await kept.register("sam", response, undefined, admitted)).toEqual({
+		kind: "refused",
+		reason: "conflict",
+	});
+	expect(await kept.listed?.("sam")).toEqual([]);
+	expect(await app.get(passkeyHolders).held("sam")).toBe(false);
+	expect((await kept.listed?.("kim"))?.map((p) => p.id)).toEqual([response.id]);
 	await app.stop(1000);
 });

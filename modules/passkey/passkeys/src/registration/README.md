@@ -14,6 +14,7 @@ Internal module of `passkeys`: registering passkeys.
 ## Invariants
 - A challenge counts only for the subject it was made for, once. Client data that does not read takes no challenge.
 - A subject's handle is made on its first options, and kept.
+- A passkey is made usable only after both of the caller's asks admitted it; anything stopping the registration before leaves its record pending.
 
 ## Depends on
 - `webauthn` (the ceremonies); the package's contract and records

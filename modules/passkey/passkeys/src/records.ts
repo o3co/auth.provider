@@ -39,6 +39,13 @@ const passkeyShape = z.object({
 	nickname: z.string().optional(),
 	at: z.number().optional(),
 });
+/**
+ * A passkey written and not yet admitted: no read takes it as one. Its version is not the live
+ * one's, so a host reading only that one finds it broken, never a passkey.
+ */
+const pendingShape = passkeyShape
+	.omit({ v: true })
+	.extend({ v: z.literal(2), pending: z.literal(true) });
 /** What a removed passkey leaves: its holder, and that it was removed; no key, count or name. */
 const removedShape = z.object({ v: z.literal(1), subject: z.string(), removed: z.literal(true) });
 
@@ -53,15 +60,17 @@ function holderOf(record: StoredPasskey): Holder {
 function keptOf(record: StoredPasskey) {
 	const live = passkeyShape.safeParse(record);
 	if (live.success) return { kind: "passkey" as const, ...live.data };
+	const pending = pendingShape.safeParse(record);
+	if (pending.success) return { kind: "pending" as const, ...pending.data };
 	const removed = removedShape.safeParse(record);
 	if (removed.success) return { kind: "removed" as const, subject: removed.data.subject };
 	throw broken();
 }
 
-/** A kept passkey; none for one removed. */
+/** A kept passkey; none for one removed, or pending. */
 function passkeyOf(id: string, record: StoredPasskey): Passkey | undefined {
 	const kept = keptOf(record);
-	if (kept.kind === "removed") return undefined;
+	if (kept.kind !== "passkey") return undefined;
 	const { subject, transports, publicKey, signCount, backupEligible, backedUp } = kept;
 	return {
 		subject,
@@ -101,7 +110,7 @@ export function keptPasskeys(store: PasskeyStore, now: () => number = Date.now) 
 	const strip = (subject: string, id: string) =>
 		store.credentials.update(credentialKey(id), (current) => {
 			const kept = keptOf(current);
-			if (kept.kind !== "passkey" || kept.subject !== subject) return undefined;
+			if (kept.kind === "removed" || kept.subject !== subject) return undefined;
 			return { value: stored({ v: 1, subject, removed: true }) };
 		});
 	const records = {
@@ -120,7 +129,7 @@ export function keptPasskeys(store: PasskeyStore, now: () => number = Date.now) 
 			const record = await store.credentials.read(credentialKey(id));
 			return record && passkeyOf(id, record);
 		},
-		/** Keeps a new passkey's record for the subject, whose handle it was made for, unlisted: no read takes it as a passkey until `listing`. An id its holder lists is a conflict. */
+		/** Keeps a new passkey's record for the subject, whose handle it was made for, pending: no read takes it as a passkey until `listing` and `activated`. An id its holder lists is a conflict. */
 		written: async (
 			subject: string,
 			credential: Credential,
@@ -133,12 +142,14 @@ export function keptPasskeys(store: PasskeyStore, now: () => number = Date.now) 
 			const kept = await holder(subject);
 			if (kept?.handle !== userHandle) return "malformed";
 			if (kept.credentials.length >= max) return "full";
+			// Pending: listed or not, no read takes it as a passkey until `activated`.
 			const record = stored({
-				v: 1,
+				v: 2,
 				subject,
 				...rest,
 				...(nickname ? { nickname } : {}),
 				at: now(),
+				pending: true,
 			});
 			const key = credentialKey(id);
 			if ((await store.credentials.save(key, record, "endless")) === "exists") {
@@ -156,12 +167,33 @@ export function keptPasskeys(store: PasskeyStore, now: () => number = Date.now) 
 			if (!listed) throw broken();
 			return holderOf(listed.after).credentials.includes(id) ? "registered" : "full";
 		},
+		/**
+		 * Makes a pending record `written` kept the subject's passkey. `taken`: another subject took the
+		 * record over before it was listed; `ended`: a removal ended it once listed.
+		 */
+		activated: async (subject: string, id: string): Promise<"activated" | "taken" | "ended"> => {
+			const changed = await store.credentials.update(credentialKey(id), (current) => {
+				const kept = keptOf(current);
+				if (kept.kind !== "pending" || kept.subject !== subject) return undefined;
+				const { kind: _, pending: __, ...live } = kept;
+				return { value: stored({ ...live, v: 1 }) };
+			});
+			const after = changed && keptOf(changed.after);
+			if (after && after.subject !== subject) return "taken";
+			return after?.kind === "passkey" ? "activated" : "ended";
+		},
 		/** Strips a record `written` kept and no list names, as a removed passkey's: a later registration takes it over. */
 		unwritten: (subject: string, id: string) => strip(subject, id),
-		/** `written` then `listing`, with nothing between. */
+		/** `written`, `listing` and `activated`, with nothing between. */
 		register: async (subject: string, credential: Credential, max: number, nickname?: string) => {
 			const wrote = await records.written(subject, credential, max, nickname);
-			return wrote === "written" ? records.listing(subject, credential.id, max) : wrote;
+			if (wrote !== "written") return wrote;
+			const listed = await records.listing(subject, credential.id, max);
+			if (listed !== "registered") return listed;
+			// One taken over is another's: this list lets go of it. One ended was registered, then removed.
+			if ((await records.activated(subject, credential.id)) !== "taken") return listed;
+			await records.removed(subject, credential.id);
+			return "conflict" as const;
 		},
 		/** Moves the count on from the one judged; another change first is a lost race. */
 		count: async (judged: Credential, next: Credential): Promise<"counted" | "raced"> => {

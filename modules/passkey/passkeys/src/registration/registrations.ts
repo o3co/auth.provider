@@ -81,6 +81,12 @@ export function registrationsOver(p: RegistrationParts): Registrations {
 			if (listed !== "registered") return refused(listed);
 			// Once more, listed: a revocation landing between the first ask and the list ends it too.
 			if (!(await settled(admitted(opened.at), end))) return refused("revoked");
+			// Usable only now, both asks having admitted: one stopped before stays pending, no passkey.
+			if ((await p.records.activated(subject, credential.id)) === "taken") {
+				// Another subject took the record over before the list: the list lets go of it.
+				await end();
+				return refused("conflict");
+			}
 			// The mark follows the write; one that cannot be set leaves the passkey as written.
 			await p.settle(subject, "registration");
 			return { kind: "registered", credential, challengedAt: opened.at };

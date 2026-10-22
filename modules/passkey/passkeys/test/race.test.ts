@@ -65,9 +65,9 @@ async function raced(kimsListing: "lands" | "fails") {
 			await expect(records.register("kim", kims, 10)).rejects.toSatisfy(isUnavailable);
 		}
 	};
-	// Sam's registration is answered as kept, though kim took the id meanwhile.
-	expect(await records.register("sam", sams, 10)).toBe("registered");
-	expect((await records.holder("sam"))?.credentials).toContain(id);
+	// Kim took the record over before sam's list named it: sam's registration is a conflict, its list lets go.
+	expect(await records.register("sam", sams, 10)).toBe("conflict");
+	expect((await records.holder("sam"))?.credentials).not.toContain(id);
 	const login = async (authenticator: ReturnType<typeof softwareAuthenticator>) => {
 		const { options } = await passkeys.challenge("app");
 		return passkeys.assert(authenticator.get(options as RequestOptions, at), "app");
