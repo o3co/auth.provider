@@ -1,6 +1,6 @@
 import { type Audit, declaredAudit } from "@mod/audit";
 import { isUnavailable, type Log, Unavailable } from "@mod/kernel";
-import type { Asked, Witnessing } from "@mod/mfa";
+import type { Asked, Witnessing } from "@mod/mfa-extensions";
 import type { EnrollmentWitness } from "@mod/mfa-witness";
 import events from "./audit-events.ts";
 

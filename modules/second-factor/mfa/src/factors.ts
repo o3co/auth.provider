@@ -1,6 +1,7 @@
 import { type Audit, declaredAudit } from "@mod/audit";
 import { type Log, Unavailable } from "@mod/kernel";
 import { isLabel } from "@mod/labels";
+import type { Asked, Witnessing } from "@mod/mfa-extensions";
 import {
 	type FactorKind,
 	type FirstBindingGate,
@@ -9,7 +10,7 @@ import {
 } from "@mod/mfa-extensions";
 import type { Seal } from "@mod/seal";
 import events from "./audit-events.ts";
-import type { Asked, Factors, Fence, Shown, Witnessing } from "./contract.ts";
+import type { Factors, Fence, Shown } from "./contract.ts";
 import { type Factor, factorRecords, sealContext } from "./records/records.ts";
 import type { FactorStore } from "./store.ts";
 

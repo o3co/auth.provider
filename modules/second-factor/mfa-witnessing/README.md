@@ -30,4 +30,4 @@
 - Comes once `mfa` and `mfa-witness-http` are both composed, through `combinations`; an app composed by hand with another witness composes it too.
 
 ## Depends on
-- `kernel`, `audit`, `mfa` (its `witnessing` point and factor decisions), `mfa-witness` (the witness)
+- `kernel`, `audit`, `mfa` (its factor decisions), `mfa-extensions` (the `witnessing` point), `mfa-witness` (the witness)

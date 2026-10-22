@@ -22,6 +22,8 @@ import {
 	firstBindingGates,
 	type Opened,
 	type Sending,
+	type Witnessing,
+	witnessing,
 } from "@mod/mfa-extensions";
 import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { seal } from "@mod/seal";
@@ -31,7 +33,7 @@ import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import * as offered from "../src/contract.ts";
-import { enforcers, factors, proofSteps, type Witnessing, witnessing } from "../src/contract.ts";
+import { enforcers, factors, proofSteps } from "../src/contract.ts";
 import mfaModule from "../src/module.ts";
 import { listKeyOf, storedList } from "../src/records/records.ts";
 import { section } from "../src/section.ts";
@@ -1192,7 +1194,7 @@ it("refuses manage-within, now session's one recent-authentication window", () =
 
 describe("the extension points mfa-extensions offers", () => {
 	it("are offered by mfa-extensions alone, never again by mfa", () => {
-		for (const name of ["factorKinds", "firstBindingGates", "secondFactorAmr"]) {
+		for (const name of ["factorKinds", "firstBindingGates", "secondFactorAmr", "witnessing"]) {
 			expect(Object.keys(offered), name).not.toContain(name);
 		}
 	});

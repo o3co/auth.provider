@@ -1,7 +1,7 @@
 # mfa-extensions
 
 ## Responsibilities
-- Owns what a module implements for `mfa`: a kind of second factor, and a gate asked before a subject's first counting factor, with the types they take and give.
+- Owns what a module implements for `mfa`: a kind of second factor, a gate asked before a subject's first counting factor, and the witnessing, with the types they take and give.
 
 ## Not here
 - What `mfa` decides with them, and the steps that prove factors: `mfa`.
@@ -16,10 +16,11 @@
 - `AskedFrom` (a login with its stated email and whether the ledger vouches for it, or a session's handle): passed to kinds, proofs and gates unread.
 - `firstBindingGates`: asked by `begin`, with what the caller gave, while no counting factor is held; a gate refusing answers `binding-proof-required`.
 - `secondFactorAmr` (`mfa`): the amr a proof adds when its kind adds a second factor (RFC 8176).
+- `witnessing` (at most one, two refusing boot): who tells, beside the store, that a subject enrolled; `mfa-witnessing` contributes it over the witness composed (its card holds the rules). `Asked`: where a standing is asked (`login`, `binding`, `credentials`).
 
 ## Invariants
 - A kind is guessable unless it says not, as in 0.17.
-- Nothing here runs: `mfa` collects the kinds and gates, and decides with them.
+- Nothing here runs: `mfa` collects the kinds, gates and witnessing, and decides with them.
 
 ## Depends on
 - `kernel`
