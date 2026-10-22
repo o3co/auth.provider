@@ -16,11 +16,13 @@
 - `outsideLock.script`: the file an app runs beside its `pnpm-lock.yaml`, `outside-modules.json` (`{ modules: records }`) and `pnpm-workspace.yaml` (its `overrides`); it prints each refusal and exits 1 on any.
 
 ## Invariants
-- Only a lockfile of version 9.0 is read; any other is refused.
-- A record's version is the one the root importer resolves, from a registry (its resolution holds an integrity alone), with the recorded integrity.
+- A lockfile is read as data: pnpm's version 9.0 alone, at most 16 MiB, no anchor's alias resolved, no unknown tag and no duplicate key; only own keys are read, never inherited ones.
+- From a registry means an integrity, and at most an http address of the tarball; a directory, a repository or a local file is not.
+- The app's lockfile was resolved with the app's overrides (pnpm writes them into it).
+- A record's version is the one the root importer depends on exactly and resolves, from a registry, with the recorded integrity; no other version of it is in the lockfile.
 - A peer range is compared after the app's overrides: pnpm writes an override in a range's place. The range recorded must still hold the override.
-- Each dependency the package's snapshot resolves is declared by the record, resolves to a version, and satisfies its range (overrides applied); each declared dependency (not optional) is resolved.
-- Each package the overrides name has one version and one resolution in the whole lockfile, and is reached under no other name.
+- Every resolution of a recorded package (not the root's alone) resolves each required dependency and peer as required, and each optional one as optional; an optional declaration takes the place of a required one of its name. Each resolves to a version in its range, the overrides applied, or, declared as an alias, to a version of the package the alias names; nothing undeclared is resolved.
+- A package the overrides hold resolves, wherever it is referenced (by an importer's dependencies of any kind or by a resolution), to the held version from a registry under its own name; the lockfile holds no other version, and one resolution, of it.
 - The file imports nothing of the workspace: `yaml`, `semver` and node only.
 
 ## Depends on

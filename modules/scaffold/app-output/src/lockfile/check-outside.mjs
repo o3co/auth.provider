@@ -6,7 +6,24 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import semver from "semver";
-import { parse } from "yaml";
+import { parseDocument } from "yaml";
+
+/** The most a lockfile read may hold. */
+const lockBytes = 16 * 1024 * 1024;
+
+/** A value's own entries as a map, where it is a plain object; none otherwise. Nothing inherited is read. */
+const own = (value) =>
+	new Map(
+		value !== null && typeof value === "object" && !Array.isArray(value)
+			? Object.keys(value).map((key) => [key, value[key]])
+			: [],
+	);
+
+const sameMap = (a, b) =>
+	a.size === b.size &&
+	[...a].every(
+		([key, value]) => b.has(key) && JSON.stringify(b.get(key)) === JSON.stringify(value),
+	);
 
 /** A resolution as pnpm writes it, its peers in parentheses left off. */
 const bare = (resolved) => String(resolved).replace(/\(.*$/, "");
@@ -17,56 +34,180 @@ const nameOf = (key) => {
 	return plain.slice(0, plain.lastIndexOf("@"));
 };
 
-/** A record's peers and dependencies, each a map of names to ranges. */
-const mapOf = (value) => (value && typeof value === "object" ? value : {});
+/**
+ * What a reference resolves to: a version of the name it is listed under, a version of another
+ * package (an alias, `real@1.0.0`), or something local (a link, a file, a directory).
+ */
+function targetOf(as, reference) {
+	const plain = bare(reference);
+	if (plain.includes(":")) return { local: plain };
+	const at = plain.lastIndexOf("@");
+	return at > 0
+		? { name: plain.slice(0, at), version: plain.slice(at + 1), alias: true }
+		: { name: as, version: plain, alias: false };
+}
 
-const sameJson = (a, b) => JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
-const sorted = (value) =>
-	value && typeof value === "object" && !Array.isArray(value)
-		? Object.fromEntries(
-				Object.keys(value)
-					.sort()
-					.map((key) => [key, sorted(value[key])]),
-			)
-		: value;
+/** A declared range, or a declared alias (`npm:real@range`); none where it is neither. */
+function specOf(spec) {
+	const text = String(spec);
+	if (text.startsWith("npm:")) {
+		const aliased = text.slice(4);
+		const at = aliased.lastIndexOf("@");
+		const range = at > 0 ? aliased.slice(at + 1) : "*";
+		const name = at > 0 ? aliased.slice(0, at) : aliased;
+		return semver.validRange(range) ? { name, range } : undefined;
+	}
+	return semver.validRange(text) ? { range: text } : undefined;
+}
 
-/** The lockfile as data, refused where it is not pnpm's version 9. */
+/** The lockfile as data: pnpm's version 9, no anchor resolved, no unknown tag, within its bound. */
 function lockOf(text) {
-	const lock = parse(text) ?? {};
-	if (String(lock.lockfileVersion) !== "9.0") {
-		throw new Error(`lockfile version ${lock.lockfileVersion}, where 9.0 is read`);
+	if (Buffer.byteLength(text) > lockBytes) throw new Error(`lockfile over ${lockBytes} bytes`);
+	const doc = parseDocument(text, { merge: false, uniqueKeys: true });
+	const [problem] = [...doc.errors, ...doc.warnings];
+	if (problem) throw new Error(`lockfile not read: ${problem.message.split("\n")[0]}`);
+	const lock = doc.toJS({ maxAliasCount: 0 });
+	if (own(lock).get("lockfileVersion") !== "9.0") {
+		throw new Error(`lockfile version ${own(lock).get("lockfileVersion")}, where 9.0 is read`);
 	}
 	return lock;
 }
 
-/** A resolution from a registry holds its integrity alone: no tarball, directory or repository. */
-const fromRegistry = (entry) => {
-	const resolution = entry?.resolution;
-	return resolution !== undefined && Object.keys(resolution).join() === "integrity";
-};
+/** A resolution from a registry: its integrity, and at most the tarball's http address; no directory, repository or other kind. */
+function fromRegistry(entry) {
+	const resolution = own(own(entry).get("resolution"));
+	const tarball = resolution.get("tarball");
+	return (
+		typeof resolution.get("integrity") === "string" &&
+		[...resolution.keys()].every((key) => key === "integrity" || key === "tarball") &&
+		(tarball === undefined || /^https?:\/\//.test(String(tarball)))
+	);
+}
+
+/** Every reference the lockfile holds: each importer's three kinds of dependency, and each snapshot's two. */
+function referencesIn(lock) {
+	const found = [];
+	for (const [at, importer] of own(lock.importers)) {
+		for (const group of ["dependencies", "devDependencies", "optionalDependencies"]) {
+			for (const [as, dep] of own(own(importer).get(group))) {
+				found.push({ at: `the importer ${at}`, as, reference: String(own(dep).get("version")) });
+			}
+		}
+	}
+	for (const [at, snapshot] of own(lock.snapshots)) {
+		for (const group of ["dependencies", "optionalDependencies"]) {
+			for (const [as, reference] of own(own(snapshot).get(group))) {
+				found.push({ at, as, reference: String(reference) });
+			}
+		}
+	}
+	return found;
+}
 
 /**
- * The version and integrity a project's lockfile resolves `name` to, as its root importer depends
- * on it; refuses one the importer lacks, one resolved to no version, and one from no registry.
+ * Why a package that must be one copy at one version is not: each reference to it resolves to that
+ * version from a registry, under its own name, and the lockfile holds no other version or second
+ * resolution of it.
  */
-export function recordOf(text, name) {
-	const lock = lockOf(text);
-	const resolved = lock.importers?.["."]?.dependencies?.[name]?.version;
-	if (resolved === undefined) throw new Error(`${name}: the project does not depend on it`);
-	const version = bare(resolved);
-	if (!semver.valid(version)) {
-		throw new Error(`${name}: the project resolves ${version}, not a version`);
+function oneCopyRefusals(lock, name, version, references, { held = true } = {}) {
+	const refusals = [];
+	for (const { at, as, reference } of references) {
+		const target = targetOf(as, reference);
+		if (as === name && (target.local || target.alias || target.version !== version)) {
+			refusals.push(`${name}: ${at} resolves it to ${bare(reference)}, not ${version}`);
+		} else if (as !== name && target.alias && target.name === name) {
+			refusals.push(`${name}: reached as ${as} by ${at}`);
+		}
 	}
-	const entry = lock.packages?.[`${name}@${version}`];
-	if (!fromRegistry(entry)) throw new Error(`${name}: resolved from no registry`);
-	return { name, version, integrity: entry.resolution.integrity };
+	const versions = [...own(lock.packages).keys()]
+		.filter((key) => nameOf(key) === name)
+		.map((key) => bare(key).slice(name.length + 1))
+		.sort();
+	if (versions.some((v) => v !== version)) {
+		refusals.push(
+			`${name}: ${versions.join(", ")} in the lockfile, where ${version} alone is held`,
+		);
+	}
+	if (!held) return refusals;
+	if (versions.includes(version) && !fromRegistry(own(lock.packages).get(`${name}@${version}`))) {
+		refusals.push(`${name}: resolved from no registry`);
+	}
+	const resolved = [...own(lock.snapshots).keys()].filter((key) => nameOf(key) === name);
+	if (resolved.length > 1) {
+		refusals.push(
+			`${name}: ${resolved.length} resolutions in the lockfile, where the app holds one`,
+		);
+	}
+	return refusals;
+}
+
+/**
+ * Why one snapshot of a recorded package does not resolve what the record declares: required
+ * dependencies and peers as required, optional ones as optional (an optional dependency taking
+ * the place of a required one of its name), each to a version in its range (the app's overrides
+ * applied) or, where declared as an alias, to a version of the package the alias names.
+ */
+function snapshotRefusals(record, snapshot, overrides, say) {
+	const optional = own(record.optionalDependencies);
+	const required = new Map([...own(record.dependencies)].filter(([name]) => !optional.has(name)));
+	const peers = own(record.peerDependencies);
+	const optionalPeer = (name) =>
+		own(own(record.peerDependenciesMeta).get(name)).get("optional") === true;
+	const groups = [
+		["dependencies", own(own(snapshot).get("dependencies"))],
+		["optionalDependencies", own(own(snapshot).get("optionalDependencies"))],
+	];
+	const refusals = [];
+	for (const [group, deps] of groups) {
+		const asRequired = group === "dependencies";
+		for (const [dep, reference] of deps) {
+			const spec = asRequired
+				? (required.get(dep) ?? (peers.has(dep) ? peers.get(dep) : undefined))
+				: (optional.get(dep) ?? (peers.has(dep) && optionalPeer(dep) ? peers.get(dep) : undefined));
+			if (spec === undefined) {
+				const declared = required.has(dep) || optional.has(dep) || peers.has(dep);
+				refusals.push(
+					say(
+						declared
+							? `${dep} resolves as ${asRequired ? "required" : "optional"}, not as declared`
+							: `depends on ${dep}, which the record does not declare`,
+					),
+				);
+				continue;
+			}
+			const held = overrides.get(dep);
+			const wanted = specOf(held ?? spec);
+			const target = targetOf(dep, reference);
+			if (wanted === undefined)
+				refusals.push(say(`declares ${dep} as ${spec}, which is no registry range`));
+			else if (target.local) refusals.push(say(`${dep} resolves ${target.local}, not a version`));
+			else if (
+				Boolean(wanted.name) !== target.alias ||
+				(wanted.name && wanted.name !== target.name)
+			) {
+				refusals.push(
+					say(
+						`${dep} resolves ${bare(reference)}, not ${wanted.name ? `an alias of ${wanted.name}` : `${dep} itself`}`,
+					),
+				);
+			} else if (!semver.valid(target.version) || !semver.satisfies(target.version, wanted.range)) {
+				refusals.push(say(`${dep} resolves ${target.version}, outside ${wanted.range}`));
+			}
+		}
+	}
+	const resolved = groups[0][1];
+	for (const dep of [...required.keys(), ...[...peers.keys()].filter((p) => !optionalPeer(p))]) {
+		if (!resolved.has(dep)) refusals.push(say(`${dep} is declared, but not resolved as required`));
+	}
+	return refusals;
 }
 
 /** Why one recorded package is not what the lockfile resolves, the app's overrides applied. */
-function recordRefusals(lock, record, overrides) {
+function recordRefusals(lock, record, overrides, references) {
 	const { name, version } = record;
 	const say = (what) => `${name}: ${what}`;
-	const resolved = lock.importers?.["."]?.dependencies?.[name]?.version;
+	const root = own(own(own(own(lock.importers).get(".")).get("dependencies")).get(name));
+	const resolved = root.get("version");
 	if (resolved === undefined || bare(resolved) !== version) {
 		return [
 			say(
@@ -74,123 +215,102 @@ function recordRefusals(lock, record, overrides) {
 			),
 		];
 	}
-	const entry = lock.packages?.[`${name}@${version}`];
-	if (!fromRegistry(entry)) return [say("resolved from no registry")];
-	if (entry.resolution.integrity !== record.integrity) {
-		return [say(`integrity ${entry.resolution.integrity}, not ${record.integrity} as recorded`)];
+	if (root.get("specifier") !== version) {
+		return [say(`the app depends on it as ${root.get("specifier")}, not ${version} as recorded`)];
 	}
-	const refusals = [];
-	const peers = mapOf(record.peerDependencies);
-	/** What the lockfile holds for a range: pnpm writes an override in its place. */
-	const expected = (dep, range) => overrides[dep] ?? range;
-	const locked = mapOf(entry.peerDependencies);
-	for (const dep of [...new Set([...Object.keys(peers), ...Object.keys(locked)])].sort()) {
-		const want = peers[dep] === undefined ? undefined : expected(dep, peers[dep]);
-		if (locked[dep] !== want) {
+	// Not held: a recorded package may resolve more than once (each resolution is checked below), and its registry is checked here.
+	const refusals = oneCopyRefusals(lock, name, version, references, { held: false });
+	const entry = own(lock.packages).get(`${name}@${version}`);
+	if (!fromRegistry(entry)) return [...refusals, say("resolved from no registry")];
+	const integrity = own(own(entry).get("resolution")).get("integrity");
+	if (integrity !== record.integrity) {
+		return [...refusals, say(`integrity ${integrity}, not ${record.integrity} as recorded`)];
+	}
+	const peers = own(record.peerDependencies);
+	const locked = own(own(entry).get("peerDependencies"));
+	for (const dep of [...new Set([...peers.keys(), ...locked.keys()])].sort()) {
+		const want = peers.has(dep) ? (overrides.get(dep) ?? peers.get(dep)) : undefined;
+		if (locked.get(dep) !== want) {
 			refusals.push(
 				say(
-					`peer ${dep} is ${locked[dep] ?? "none"}, not ${want ?? "none"} as recorded with the app's overrides`,
+					`peer ${dep} is ${locked.get(dep) ?? "none"}, not ${want ?? "none"} as recorded with the app's overrides`,
 				),
 			);
 		}
 	}
-	if (!sameJson(mapOf(entry.peerDependenciesMeta), mapOf(record.peerDependenciesMeta))) {
+	if (!sameMap(own(own(entry).get("peerDependenciesMeta")), own(record.peerDependenciesMeta))) {
 		refusals.push(say("peerDependenciesMeta is not as recorded"));
 	}
-	const declared = {
-		...mapOf(record.optionalDependencies),
-		...peers,
-		...mapOf(record.dependencies),
-	};
-	const snapshot = lock.snapshots?.[`${name}@${resolved}`] ?? {};
-	const deps = { ...mapOf(snapshot.optionalDependencies), ...mapOf(snapshot.dependencies) };
-	for (const [dep, to] of Object.entries(deps).sort(([a], [b]) => (a < b ? -1 : 1))) {
-		if (declared[dep] === undefined) {
-			refusals.push(say(`depends on ${dep}, which the record does not declare`));
-			continue;
-		}
-		const at = bare(to);
-		const range = expected(dep, declared[dep]);
-		if (!semver.valid(at)) refusals.push(say(`${dep} resolves ${at}, not a version`));
-		else if (!semver.satisfies(at, range))
-			refusals.push(say(`${dep} resolves ${at}, outside ${range}`));
-	}
-	for (const dep of Object.keys(mapOf(record.dependencies)).sort()) {
-		if (deps[dep] === undefined) refusals.push(say(`${dep} is declared, but not resolved`));
-	}
-	for (const [dep, range] of Object.entries(peers)) {
-		const held = overrides[dep];
-		if (held !== undefined && !semver.satisfies(held, range)) {
+	const snapshots = [...own(lock.snapshots)].filter(([key]) => nameOf(key) === name);
+	if (!own(lock.snapshots).has(`${name}@${resolved}`))
+		refusals.push(say("the lockfile holds no resolution of it"));
+	for (const [, snapshot] of snapshots)
+		refusals.push(...snapshotRefusals(record, snapshot, overrides, say));
+	for (const [dep, range] of peers) {
+		const held = overrides.get(dep);
+		if (held !== undefined && !semver.satisfies(held, String(range))) {
 			refusals.push(say(`the app holds ${dep} at ${held}, outside its peer range ${range}`));
 		}
 	}
 	return refusals;
 }
 
-/** Why the lockfile holds a package the overrides hold to one in more than one copy, or under another name. */
-function heldRefusals(lock, held) {
-	const refusals = [];
-	for (const name of held) {
-		const versions = Object.keys(lock.packages ?? {})
-			.filter((key) => nameOf(key) === name)
-			.map((key) => bare(key).slice(name.length + 1))
-			.sort();
-		if (versions.length > 1) {
-			refusals.push(
-				`${name}: ${versions.length} versions in the lockfile (${versions.join(", ")}), where the app holds one`,
-			);
-		}
-		const resolutions = Object.keys(lock.snapshots ?? {}).filter((key) => nameOf(key) === name);
-		if (resolutions.length > 1) {
-			refusals.push(
-				`${name}: ${resolutions.length} resolutions in the lockfile, where the app holds one`,
-			);
-		}
-	}
-	const by = [
-		...Object.entries(lock.importers ?? {}).map(([at, importer]) => [
-			at,
-			importer.dependencies,
-			true,
-		]),
-		...Object.entries(lock.snapshots ?? {}).flatMap(([at, snapshot]) => [
-			[at, snapshot?.dependencies, false],
-			[at, snapshot?.optionalDependencies, false],
-		]),
-	];
-	for (const [at, deps, importer] of by) {
-		for (const [as, to] of Object.entries(mapOf(deps))) {
-			const target = importer ? to?.version : to;
-			for (const name of held) {
-				if (as !== name && String(target ?? "").startsWith(`${name}@`)) {
-					refusals.push(`${name}: reached as ${as} by ${at}`);
-				}
-			}
-		}
-	}
-	return refusals;
-}
-
 /**
- * Why the lockfile does not resolve each recorded package as recorded, the app's `overrides`
- * (name to version) applied, and why it holds an overridden package in more than one copy; none
- * where it does.
+ * Why the lockfile does not resolve each recorded package as recorded, with the app's `overrides`
+ * (name to version) applied, why it holds an overridden package in other than one copy at its
+ * version, and why it was resolved with other overrides; none where it is as recorded.
  */
 export function refusals(text, records, overrides) {
 	const lock = lockOf(text);
+	const versions = (map) =>
+		new Map([...own(map)].map(([name, version]) => [name, String(version)]));
+	const held = versions(overrides);
+	const references = referencesIn(lock);
+	const resolvedWith = versions(lock.overrides);
 	return [
-		...records.flatMap((record) => recordRefusals(lock, record, overrides)),
-		...heldRefusals(lock, Object.keys(overrides).sort()),
+		...(sameMap(resolvedWith, held)
+			? []
+			: ["the lockfile was resolved with other overrides than the app's"]),
+		...records.flatMap((record) => recordRefusals(lock, record, held, references)),
+		...[...held]
+			.sort(([a], [b]) => (a < b ? -1 : 1))
+			.flatMap(([name, version]) => oneCopyRefusals(lock, name, String(version), references)),
 	];
+}
+
+/**
+ * The version and integrity a project's lockfile resolves `name` to, as its root importer depends
+ * on it; refuses one the importer lacks, one resolved to no version, and one from no registry.
+ */
+export function recordOf(text, name) {
+	const lock = lockOf(text);
+	const resolved = own(own(own(own(lock.importers).get(".")).get("dependencies")).get(name)).get(
+		"version",
+	);
+	if (resolved === undefined) throw new Error(`${name}: the project does not depend on it`);
+	const target = targetOf(name, resolved);
+	if (target.local || target.alias || !semver.valid(target.version)) {
+		throw new Error(`${name}: the project resolves ${bare(resolved)}, not a version`);
+	}
+	const entry = own(lock.packages).get(`${name}@${target.version}`);
+	if (!fromRegistry(entry)) throw new Error(`${name}: resolved from no registry`);
+	return {
+		name,
+		version: target.version,
+		integrity: own(own(entry).get("resolution")).get("integrity"),
+	};
 }
 
 /** Run as an app's script: the lockfile, the record and the overrides beside it. */
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 	const read = (file) => readFileSync(file, "utf8");
+	const workspace = parseDocument(read("pnpm-workspace.yaml"), { merge: false }).toJS({
+		maxAliasCount: 0,
+	});
 	const found = refusals(
 		read("pnpm-lock.yaml"),
 		JSON.parse(read("outside-modules.json")).modules,
-		mapOf(parse(read("pnpm-workspace.yaml"))?.overrides),
+		Object.fromEntries(own(own(workspace).get("overrides"))),
 	);
 	for (const line of found) process.stdout.write(`${line}\n`);
 	process.stdout.write(

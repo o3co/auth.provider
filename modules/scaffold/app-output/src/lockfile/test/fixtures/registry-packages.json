@@ -1,0 +1,19 @@
+[
+	{ "name": "zod", "version": "4.6.7" },
+	{ "name": "zod", "version": "4.6.8" },
+	{
+		"name": "@o3co/auth-provider-oauth",
+		"version": "0.19.0",
+		"peerDependencies": { "zod": "^4.6.0" }
+	},
+	{ "name": "jose-lite", "version": "1.4.0" },
+	{ "name": "real-lib", "version": "1.1.0" },
+	{ "name": "fast-path", "version": "2.1.0" },
+	{
+		"name": "@x/grant",
+		"version": "1.2.0",
+		"dependencies": { "jose-lite": "^1.0.0", "real-alias": "npm:real-lib@^1.0.0" },
+		"optionalDependencies": { "fast-path": "^2.0.0" },
+		"peerDependencies": { "@o3co/auth-provider-oauth": "^0.19.0", "zod": "^4.6.0" }
+	}
+]
