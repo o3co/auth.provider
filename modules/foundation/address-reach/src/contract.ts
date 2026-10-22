@@ -6,9 +6,11 @@ const blockList = (family: "ipv4" | "ipv6", subnets: readonly (readonly [string,
 	for (const [net, bits] of subnets) list.addSubnet(net, bits, family);
 	return list;
 };
-// IANA's special-purpose blocks, and IPv6 outside global unicast. A BlockList checks
+// IANA's special-purpose blocks, and IPv6 outside global unicast; and Azure's platform address,
+// public but the host node's in every region (WireServer, its DNS and DHCP). A BlockList checks
 // IPv4-mapped IPv6 against IPv4 rules too.
 const specialIpv4 = blockList("ipv4", [
+	["168.63.129.16", 32],
 	["0.0.0.0", 8],
 	["10.0.0.0", 8],
 	["100.64.0.0", 10],
@@ -59,7 +61,7 @@ const inList = (lists: Record<"ipv4" | "ipv6", BlockList>, address: string) =>
 	lists[familyOf(address)].check(address, familyOf(address));
 const unbracketed = (host: string) => host.replace(/^\[(.*)\]$/, "$1");
 
-/** Whether an IP address is special-purpose: IANA's blocks not globally reachable, multicast, IPv6 outside global unicast. */
+/** Whether an IP address is special-purpose: IANA's blocks not globally reachable, multicast, IPv6 outside global unicast, Azure's platform address. */
 export const isSpecialAddress = (address: string): boolean =>
 	familyOf(address) === "ipv6"
 		? !globalUnicast.check(address, "ipv6") || specialInGlobalUnicast.check(address, "ipv6")

@@ -50,6 +50,10 @@ const blocks: Record<string, { inside: readonly string[]; outside: readonly stri
 		],
 		outside: ["2000::"],
 	},
+	"Azure's platform address": {
+		inside: ["168.63.129.16", "::ffff:168.63.129.16", "::ffff:a83f:8110"],
+		outside: ["168.63.129.15", "168.63.129.17", "168.63.128.16"],
+	},
 	"2001::/23": {
 		inside: ["2001::1", "2001:2::1", "2001:1ff:ffff:ffff:ffff:ffff:ffff:ffff"],
 		outside: ["2001:200::"],
