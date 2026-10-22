@@ -13,7 +13,7 @@
 - Both methods take other sites' requests, with the reason declared: a request arrives as the client's navigation and only starts what the user's own login and consent complete.
 - Contribution of the return path `/oauth/authorize` to `login-gates`
 - Contribution to `issuer`'s metadata items: `authorization_endpoint` (on `http`'s public origin), `response_types_supported` (`code`), `code_challenge_methods_supported` (`S256`), `response_modes_supported` (`query`), `request_uri_parameter_supported` (`false`), `authorization_response_iss_parameter_supported` (`true`)
-- Contribution of `redirect-uris`' client metadata section (`authorize`) to `clients`
+- Contribution of `redirect-uris`' client metadata section (`authorize`) to `clients`, and of its document copy to `client-documents`
 - Operator section: `login-page` (the login page. The return URL is added as `redirect_to`, and `prompt=login` and `max_age` where asked), `step-up-page` (the page that raises authentication. Optional); both https URLs (http only on a loopback host) by `url-setting`'s part for configured URLs, `oidc-mode` (`oidc-required` or `dual`), `requests` (requests per source in each window, over both methods), `window`
 - Audit events (to `audit`, declared in `./audit-events`):
   - `authorize.granted` when a code is given, with the subject, `client` and `response_type` `code`.
@@ -41,4 +41,4 @@
 - The login page is told the `prompt=login` and `max_age` a request asked, beside `redirect_to`, to hand to a login it starts elsewhere (an upstream's), so that login is new too.
 
 ## Depends on
-- `kernel`, `http`, `request-source`, `url-setting`, `clients`, `redirect-uris`, `reauth`, `session`, `consent`, `code-grant`, `issuer`, `grants` (the audience rule), `token-endpoint` (error answers), `client-allowance`, `tokens`, `login-gates`, `acr`, `rate-limit`, `audit`
+- `kernel`, `http`, `request-source`, `url-setting`, `clients`, `client-documents`, `redirect-uris`, `reauth`, `session`, `consent`, `code-grant`, `issuer`, `grants` (the audience rule), `token-endpoint` (error answers), `client-allowance`, `tokens`, `login-gates`, `acr`, `rate-limit`, `audit`

@@ -13,6 +13,7 @@
 		"@mod/acr": "workspace:*",
 		"@mod/audit": "workspace:*",
 		"@mod/client-allowance": "workspace:*",
+		"@mod/client-documents": "workspace:*",
 		"@mod/clients": "workspace:*",
 		"@mod/code-grant": "workspace:*",
 		"@mod/consent": "workspace:*",

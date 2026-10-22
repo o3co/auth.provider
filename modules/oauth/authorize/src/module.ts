@@ -1,3 +1,4 @@
+import { documentCopies } from "@mod/client-documents";
 import { metadataSections } from "@mod/clients";
 import { routes, use } from "@mod/http";
 import { metadata } from "@mod/issuer";
@@ -14,6 +15,7 @@ const navigation =
 
 export default defineModule({ name: "authorize", section }, (m) => [
 	m.contribute(metadataSections).by(() => clientMetadata.section),
+	m.contribute(documentCopies).by(() => clientMetadata.copy),
 	m.contribute(returnPaths).by(() => ({ path })),
 	m.contribute(metadata).by(async (c) => ({
 		name: "authorization_endpoint",
