@@ -85,13 +85,13 @@ or add the package to a pattern:
 npx @o3co/create-auth-provider@next my-app --pattern simple-web --add npm:@example/did-grant --outside-from outside
 ```
 
-The generator takes the version your project's lockfile resolved, and refuses the package where it lies outside the project's `node_modules`, where its manifest or its lockfile entry says other than the other, or where it breaks a rule of the first half of this page; it names every reason at once. A package outside the release is composed beside the published release alone: never with `--workspace`. The `create-app` card and its internal module `outside` hold these rules.
+The generator takes the version your project's lockfile resolved, and refuses the package where it lies outside the project's `node_modules`, where its manifest or its lockfile entry says other than the other, or where it breaks a rule of the first half of this page; it names every reason at once. A package outside the release is composed beside the published release alone, one recording the integrity of its own packages and of zod: never with `--workspace`. The `create-app` card and its internal module `outside` hold these rules.
 
 The app is installed with no version published within the last day, but the release's own. To take a newer one of your package, name it: `--allow-fresh @example/did-grant` lets that version alone be installed.
 
 ### Install the app, and check what it installed
 
-The app records each package outside the release in `outside-modules.json` (its version, its integrity, the dependencies it declares and the registries it comes from) and holds its lockfile to that record with `pnpm check:outside`:
+The app records each package outside the release in `outside-modules.json` (its version, its integrity, the dependencies it declares and the registries it comes from), with the integrity the release recorded of each of its own packages and of zod (`held`), and holds its lockfile to that record with `pnpm check:outside`:
 
 ```sh
 cd my-app
@@ -102,15 +102,14 @@ git add pnpm-lock.yaml
 
 Commit the lockfile once the check passes. The image runs the same check after installing, and refuses to build otherwise. The check holds what it uses, so nothing of the install it checks is run by it.
 
-`pnpm-workspace.yaml` holds every package of the release the app depends on, or a package outside it takes as a peer, and zod, to one version each. When you upgrade the release, upgrade those overrides with it.
+`pnpm-workspace.yaml` holds every package of the release the app depends on, or a package outside it takes as a peer, and zod, to one version each. When you upgrade the release, generate the app again with the new release's `create-auth-provider` and take both the overrides and `held` from it: they move together, and the check refuses one without the other.
 
 ## What is and is not checked
 
-Checked: that the app installs each package outside the release as recorded (its version, its integrity, its dependencies as declared, from the registry recorded), that the lockfile holds one version and one resolution of each package of the release and of zod, that each declaration and the graph of all modules keep the rules above, and that generating runs no code of the package and uses no network.
+Checked: that the app installs each package outside the release as recorded (its version, its integrity, its dependencies as declared, from the registry recorded), that the lockfile holds one version and one resolution of each package of the release and of zod, the tarball whose integrity the release recorded, that each declaration and the graph of all modules keep the rules above, and that generating runs no code of the package and uses no network.
 
 Not checked:
 
 - The code of a package outside the release. It is not part of the release, nor covered by its conformance.
 - The project you installed it into. The generator reads it as you left it; a change there between installing and generating, or a change of pnpm's store, reaches the generated app and is not found later by `pnpm check:outside`, which checks the app's install, not what was generated.
-- Which package a release package or zod resolves to. `pnpm check:outside` holds their tarball to the recorded registry's origin, but not to an integrity of their own yet, so a lockfile changed to another package's tarball on the same registry is not refused. Recording and checking it is planned.
 - A registry taken over, publishing a bad version with a good integrity: `minimumReleaseAge` only delays it.
