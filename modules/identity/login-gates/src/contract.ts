@@ -10,6 +10,12 @@ export type LoginOutcome =
 			readonly gate: string;
 			readonly answer: unknown;
 			readonly cookies: readonly string[];
+	  }
+	/** A gate refused the login: no session, and no cookies; the caller answers it with its own failure, telling nothing of why. */
+	| {
+			readonly kind: "refused";
+			readonly gate: string;
+			readonly cookies: readonly [];
 	  };
 
 /** A held login resumed at or past the deadline its caller set; no gate ran. */
