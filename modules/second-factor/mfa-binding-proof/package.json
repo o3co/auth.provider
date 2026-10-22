@@ -12,11 +12,13 @@
 		"@mod/kernel": "workspace:*",
 		"@mod/mfa": "workspace:*",
 		"@mod/mfa-extensions": "workspace:*",
+		"@mod/mfa-reading": "workspace:*",
 		"@mod/seal": "workspace:*",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"@mod/audit": "workspace:*",
+		"@mod/mfa-binding": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/login-gates": "workspace:*",
 		"@mod/mfa-entry": "workspace:*",
