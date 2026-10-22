@@ -4,6 +4,12 @@ Notable changes, newest first, in the form of [Keep a Changelog](https://keepach
 
 Changes up to 0.17.0 are in [the 0.17.0 changelog](https://github.com/o3co/auth.provider/blob/v0.17.0/CHANGELOG.md).
 
+## [Unreleased]
+
+### Security
+
+- `address-reach`: two cloud addresses in `fc00::/7` were taken as private, so `outbound.internal-hosts` and `outbound.plain-internal` reached them where a listed name came to resolve there: AWS EKS Pod Identity's credential endpoint over IPv6 (`fd00:ec2::23`) and Akamai Cloud's (Linode) metadata service over IPv6 (`fd00:a9fe:a9fe::1`). Both are now refused as special addresses, as the other cloud metadata addresses are.
+
 ## [0.18.2] - 2026-10-22
 
 ### Added
