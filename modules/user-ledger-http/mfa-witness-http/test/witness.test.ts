@@ -250,6 +250,8 @@ describe("mfa-witness-http's withdraw", () => {
 			["/w/~clear", "/w/%7Eclear"],
 			["/w/a%3Aclear", "/w/a%3aclear"],
 			["/w/clear?x=%7E", "/w/clear?x=~"],
+			// An empty path is sent as the root's slash.
+			["", "/"],
 		] as const) {
 			expect(
 				await refusedAt({ "clear-url": at(clear), "withdraw-url": at(withdraw) }),
