@@ -323,6 +323,47 @@ describe("where a package's tarball lies", () => {
 	});
 });
 
+describe("the integrity the release recorded of each package the overrides hold", () => {
+	const lock = parse(appLock);
+	/** As the release records them: each held package's integrity, from the tarball it published. */
+	const recorded = {
+		"@o3co/auth-provider-oauth": lock.packages["@o3co/auth-provider-oauth@0.19.0"].resolution
+			.integrity as string,
+		zod: lock.packages["zod@4.6.7"].resolution.integrity as string,
+	};
+	const held = (text: string, integrities: Record<string, string>) =>
+		outsideLock.refusals(text, [record], overrides, registries, integrities);
+
+	it("passes a lockfile installing each held package as the release recorded it", () => {
+		expect(held(appLock, recorded)).toEqual([]);
+	});
+
+	it("refuses a held package pointed at another tarball of its registry, though its origin is right", () => {
+		// The same registry's origin, another package's tarball and its own good integrity: the origin
+		// rule alone passes it, and only the integrity the release recorded tells it apart.
+		const swapped = changed((l) => {
+			l.packages["zod@4.6.7"].resolution = {
+				integrity: "sha512-OTHERtarballOFtheSAMEregistry==",
+				tarball: "http://127.0.0.1:4873/evil/-/evil-1.0.0.tgz",
+			};
+		});
+		expect(refusals(swapped)).toEqual([]);
+		expect(held(swapped, recorded)).toEqual([
+			`zod: integrity sha512-OTHERtarballOFtheSAMEregistry==, not ${recorded.zod} as the release recorded`,
+		]);
+	});
+
+	it("refuses a held package the record holds no integrity of", () => {
+		expect(held(appLock, { zod: recorded.zod })).toEqual([
+			"@o3co/auth-provider-oauth: the app records no integrity of it",
+		]);
+	});
+
+	it("leaves the lockfile as before where no integrity is recorded", () => {
+		expect(outsideLock.refusals(appLock, [record], overrides, registries)).toEqual([]);
+	});
+});
+
 describe("reading a lockfile as data", () => {
 	it("refuses an unknown tag, an anchor's alias, a duplicate key, another version and one over its bound", () => {
 		const read = (text: string) => () => outsideLock.refusals(text, [], {}, registries);
@@ -375,7 +416,7 @@ describe("reading a package's record from the project pnpm installed it into", (
 
 describe("the script an app runs, the file as it ships", () => {
 	/** An app's directory holding the script beside the lockfile, the record and the overrides. */
-	const appWith = (lock: string) => {
+	const appWith = (lock: string, held?: Record<string, string>) => {
 		const app = mkdtempSync(join(tmpdir(), "check-outside-"));
 		copyFileSync(outsideLock.script, join(app, "check-outside.mjs"));
 		// What the app installed is beside the script; the script reads none of it.
@@ -383,7 +424,7 @@ describe("the script an app runs, the file as it ships", () => {
 		writeFileSync(join(app, "pnpm-lock.yaml"), lock);
 		writeFileSync(
 			join(app, "outside-modules.json"),
-			JSON.stringify({ modules: [record], registries }),
+			JSON.stringify({ modules: [record], registries, ...(held ? { held } : {}) }),
 		);
 		writeFileSync(join(app, "pnpm-workspace.yaml"), stringify({ overrides }));
 		return app;
@@ -455,6 +496,27 @@ describe("the script an app runs, the file as it ships", () => {
 		expect(run(appWith("lockfileVersion: '6.0'\n"))).toEqual({
 			code: 1,
 			out: "check:outside: lockfile version 6.0, where 9.0 is read\n",
+		});
+	});
+
+	it("holds each held package to the integrity the release recorded, as the module does", () => {
+		const lock = parse(appLock);
+		const recorded = {
+			"@o3co/auth-provider-oauth": lock.packages["@o3co/auth-provider-oauth@0.19.0"].resolution
+				.integrity as string,
+			zod: lock.packages["zod@4.6.7"].resolution.integrity as string,
+		};
+		expect(run(appWith(appLock, recorded))).toEqual({ code: 0, out: "check:outside: ok\n" });
+		const swapped = changed((l) => {
+			l.packages["zod@4.6.7"].resolution = { integrity: "sha512-OTHER==" };
+		});
+		const found = outsideLock.refusals(swapped, [record], overrides, registries, recorded);
+		expect(found).toEqual([
+			`zod: integrity sha512-OTHER==, not ${recorded.zod} as the release recorded`,
+		]);
+		expect(run(appWith(swapped, recorded))).toEqual({
+			code: 1,
+			out: `${found.join("\n")}\ncheck:outside: ${found.length} refusal(s)\n`,
 		});
 	});
 

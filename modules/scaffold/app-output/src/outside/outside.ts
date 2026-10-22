@@ -49,6 +49,8 @@ export function besideRelease(
 		readonly dependencies: Readonly<Record<string, string>>;
 		readonly version: string;
 		readonly zod: string;
+		/** The integrity the release recorded of each bundle and of zod; where given, each package held is. */
+		readonly integrity?: Readonly<Record<string, string>>;
 	},
 ): Beside {
 	if (outside === undefined || outside.modules.length === 0) return nothing;
@@ -86,7 +88,12 @@ export function besideRelease(
 		minimumReleaseAge: releaseAge,
 		minimumReleaseAgeExclude: [...held, ...fresh.sort()],
 	};
-	const record = { modules: outside.modules, registries: outside.registries };
+	const integrities = heldIntegrities([...held, "zod"], app.integrity);
+	const record = {
+		modules: outside.modules,
+		registries: outside.registries,
+		...(integrities ? { held: integrities } : {}),
+	};
 	return {
 		files: {
 			[recordFile]: `${JSON.stringify(record, null, "\t")}\n`,
@@ -99,6 +106,21 @@ export function besideRelease(
 		guide: guideOf(outside.modules),
 		index: `\nPackages outside the release, not part of it: \`${recordFile}\` records each one as the app was generated.\n`,
 	};
+}
+
+/** The integrity of each package the app holds to one copy, where the release records them; refuses one it does not. */
+function heldIntegrities(
+	names: readonly string[],
+	recorded: Readonly<Record<string, string>> | undefined,
+) {
+	if (recorded === undefined) return undefined;
+	const missing = names.filter((name) => typeof recorded[name] !== "string");
+	if (missing.length > 0) {
+		throw new Error(
+			`${missing.join(", ")}: held to one copy, but the release records no integrity of it`,
+		);
+	}
+	return Object.fromEntries([...names].sort().map((name) => [name, recorded[name] as string]));
 }
 
 function guideOf(modules: readonly OutsideRecord[]): string {
