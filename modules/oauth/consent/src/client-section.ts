@@ -44,8 +44,6 @@ export const clientSection: Section<ClientShown> = {
 				"The host the client's source verified, shown only for a client the operator did not register.",
 			),
 	}),
-	fromDocument: (document, from) => copied(document, from),
-	reads: ["client_name", "client_uri"],
 };
 
 // A document never sets first-party: its client is no client the operator runs.
@@ -60,7 +58,7 @@ function copied(document: Readonly<Record<string, unknown>>, from: DocumentSourc
 export const clientCopy: DocumentCopy = {
 	section: clientSection,
 	reads: ["client_name", "client_uri"],
-	copy: (document, from) => copied(document, from),
+	copy: copied,
 };
 
 /** Whether the client needs no consent: only one the operator registered can be first-party. */

@@ -653,9 +653,6 @@ describe("consent's sections", () => {
 	it("copies a metadata document's name, page and host, refusing a name absent, not a string or blank", async () => {
 		const from = { id: "https://acme.example/client.json", host: "acme.example" };
 		const copy = (document: Record<string, unknown>) => clientCopy.copy(document, from);
-		expect(clientCopy.copy({ client_name: "Acme" }, from)).toEqual(
-			clientSection.fromDocument?.({ client_name: "Acme" }, from),
-		);
 		for (const name of [undefined, 7, " \t\n "]) {
 			expect(copy({ client_name: name }), String(name)).toEqual({ refused: "client_name" });
 		}
