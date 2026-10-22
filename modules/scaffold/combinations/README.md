@@ -8,7 +8,7 @@
 
 ## Not here
 - Whether a composition boots: the kernel's refusals.
-- The checks on what each kind depends on, and the rest of the budget's words for kinds: `guard`.
+- The kinds' words and which way a dependency between them may point: `kinds`. The checks on what each kind depends on: `guard`.
 - Generating an app, and reading an outside package into what it declares: `create-app`.
 - Running scenes: the conformance areas.
 - Checking that each feature declaring `storeWiring` has a wiring: `guard`.
@@ -24,9 +24,6 @@
 - `combinationsWith` (declarations: name, kind, needs, and as its kind takes them optIn, replaces or adapts, default, wires, joins): the offers above, over the workspace and those beside it.
 - `combinationsWith` refuses, naming each declaration: a name declared already, a kind no package beside the workspace may be (a feature, an adapter or a wiring may), a field its kind does not take, a need not declared or against `mayNeed` or on what declares forWiring, an adapter without one of replaces and adapts, a wiring of no outside feature.
 - `combinationsWith` refuses too, over all packages: a name replaced, adapted, joined or wired that is not declared, an axis with several defaults or several adapters and no default, a cycle of needs and joins; a need on what is not declared (an npm package) is no edge.
-- `kinds`: the kinds a package's manifest may name, the one place their words are written.
-- `kindOrder` (kinds from the bottom up; a kind may depend on its own level and those below) and `capabilityBlind` (kinds kept off a capability below them): which way a dependency may point, the one place it is written.
-- `mayNeed` (from, to): whether a package of one kind may depend on one of another, by `kindOrder` and `capabilityBlind`; never where either is no kind.
 
 ## Invariants
 - A wiring names the feature it `wires`; it comes with the feature, whether given or brought in.
@@ -44,7 +41,7 @@
 - The workspace's declarations, and in a bundle the index's published names, each read once per process; nothing is written.
 
 ## Depends on
-- `pnpm` (asks it for the packages the workspace definition lists); nothing in the workspace.
+- `pnpm` (asks it for the packages the workspace definition lists); `kinds` (the kinds' words, and `mayNeed` for a declaration's needs).
 
 ## Vocabulary
 - axis: an owner's adapters to outside systems; default: the adapter composed unless another is chosen.

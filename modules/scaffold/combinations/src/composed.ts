@@ -1,5 +1,5 @@
+import { kinds } from "@mod/kinds";
 import { completedWith, type Declared, type Package } from "./declared.ts";
-import { kinds } from "./kinds.ts";
 
 /** What to compose: features in named groups, an adapter (or the owner itself) by axis owner, and anything added. */
 export interface Selection {

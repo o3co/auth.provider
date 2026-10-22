@@ -14,7 +14,6 @@ import { type Declaration, declaredWith } from "./outside.ts";
 import { type Published, publishedInIndex, publishedWith } from "./published.ts";
 
 export type { Selection } from "./composed.ts";
-export { capabilityBlind, type Kind, kindOrder, kinds, mayNeed } from "./kinds.ts";
 export type { Declaration } from "./outside.ts";
 export type { Published } from "./published.ts";
 
