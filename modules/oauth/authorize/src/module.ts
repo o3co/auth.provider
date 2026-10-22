@@ -4,7 +4,7 @@ import { metadata } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
 import { returnPaths } from "@mod/login-gates";
 import { requestsPerSource } from "@mod/rate-limit";
-import { redirects } from "@mod/redirect-uris";
+import { clientMetadata } from "./client-metadata/client-metadata.ts";
 import { endpointOver, path, routeOver } from "./route/route.ts";
 import { section } from "./section.ts";
 
@@ -13,7 +13,7 @@ const navigation =
 	"An authorization request arrives as a navigation from the client's site by design; it only starts what the user's own login and consent complete.";
 
 export default defineModule({ name: "authorize", section }, (m) => [
-	m.contribute(metadataSections).by(() => redirects),
+	m.contribute(metadataSections).by(() => clientMetadata.section),
 	m.contribute(returnPaths).by(() => ({ path })),
 	m.contribute(metadata).by(async (c) => ({
 		name: "authorization_endpoint",
