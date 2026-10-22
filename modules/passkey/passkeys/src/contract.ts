@@ -43,9 +43,33 @@ export interface Registrations {
 		response: unknown,
 		nickname?: string,
 	): Promise<
-		| { readonly kind: "registered"; readonly credential: Credential }
+		| {
+				readonly kind: "registered";
+				readonly credential: Credential;
+				/** When the challenge it answered was made, on `kernel`'s clock. */
+				readonly challengedAt?: number;
+		  }
 		| { readonly kind: "refused"; readonly reason: RegistrationRefusal }
 	>;
+	/** The subject's passkeys, as its holder lists them. */
+	listed?(subject: string): Promise<readonly RegisteredPasskey[]>;
+	/** Names one of the subject's passkeys; none of them by that id is `unknown`. */
+	renamed?(subject: string, id: string, nickname: string): Promise<"renamed" | "unknown">;
+	/** Ends one of the subject's passkeys: `removed` when this call ended it, `empty` when the subject holds none after. */
+	removed?(
+		subject: string,
+		id: string,
+	): Promise<{ readonly removed: boolean; readonly empty: boolean }>;
+}
+
+/** A passkey as its holder lists it: no key or count. `at` is when it was registered, unknown for one kept before that was written. */
+export interface RegisteredPasskey {
+	readonly id: string;
+	readonly nickname?: string;
+	readonly transports?: readonly string[];
+	readonly backupEligible: boolean;
+	readonly backedUp: boolean;
+	readonly at?: number;
 }
 
 export const registrations = contract<Registrations>("passkeys.registrations");

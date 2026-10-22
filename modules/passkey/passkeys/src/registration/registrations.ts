@@ -42,8 +42,11 @@ export function registrationsOver(p: RegistrationParts): Registrations {
 			if (attested.kind === "refused") return attested;
 			const kept = await p.records.register(subject, attested.credential, p.max, nickname);
 			return kept === "registered"
-				? { kind: "registered", credential: attested.credential }
+				? { kind: "registered", credential: attested.credential, challengedAt: opened.at }
 				: refused(kept);
 		},
+		listed: (subject) => p.records.listed(subject),
+		renamed: (subject, id, nickname) => p.records.renamed(subject, id, nickname),
+		removed: (subject, id) => p.records.removed(subject, id),
 	};
 }

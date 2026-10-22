@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Unavailable } from "@mod/kernel";
 import { type Credential, credentialLimits, credentialOf, isCanonical } from "@mod/webauthn";
 import { z } from "zod";
+import type { RegisteredPasskey } from "./contract.ts";
 import type { ChallengeStore, PasskeyStore, StoredChallenge, StoredPasskey } from "./store.ts";
 
 const { handleBytes, idBytes } = credentialLimits;
@@ -35,7 +36,11 @@ const passkeyShape = z.object({
 	backupEligible: z.boolean(),
 	backedUp: z.boolean(),
 	transports: z.array(z.string()).optional(),
+	nickname: z.string().optional(),
+	at: z.number().optional(),
 });
+/** What a removed passkey leaves: its holder, and that it was removed; no key, count or name. */
+const removedShape = z.object({ v: z.literal(1), subject: z.string(), removed: z.literal(true) });
 
 /** A kept holder in the one shape written, or unavailable: a broken record decides nothing. */
 function holderOf(record: StoredPasskey): Holder {
@@ -44,10 +49,20 @@ function holderOf(record: StoredPasskey): Holder {
 	return { handle: parsed.data.handle, credentials: parsed.data.credentials };
 }
 
-function passkeyOf(id: string, record: StoredPasskey): Passkey {
-	const parsed = passkeyShape.safeParse(record);
-	if (!parsed.success) throw broken();
-	const { subject, transports, publicKey, signCount, backupEligible, backedUp } = parsed.data;
+/** A kept passkey, or the subject a removed one was held by; unavailable for any other shape. */
+function keptOf(record: StoredPasskey) {
+	const live = passkeyShape.safeParse(record);
+	if (live.success) return { kind: "passkey" as const, ...live.data };
+	const removed = removedShape.safeParse(record);
+	if (removed.success) return { kind: "removed" as const, subject: removed.data.subject };
+	throw broken();
+}
+
+/** A kept passkey; none for one removed. */
+function passkeyOf(id: string, record: StoredPasskey): Passkey | undefined {
+	const kept = keptOf(record);
+	if (kept.kind === "removed") return undefined;
+	const { subject, transports, publicKey, signCount, backupEligible, backedUp } = kept;
 	return {
 		subject,
 		credential: {
@@ -64,7 +79,7 @@ function passkeyOf(id: string, record: StoredPasskey): Passkey {
 const stored = (value: object) => value as unknown as StoredPasskey;
 
 /** Passkeys and their holders, written only in canonical form and read only in the shape written. */
-export function keptPasskeys(store: PasskeyStore) {
+export function keptPasskeys(store: PasskeyStore, now: () => number = Date.now) {
 	const holder = async (subject: string) => {
 		const record = await store.subjects.read(subjectKey(subject));
 		return record && holderOf(record);
@@ -74,7 +89,7 @@ export function keptPasskeys(store: PasskeyStore) {
 		const key = credentialKey(id);
 		const seen = await store.credentials.read(key);
 		if (!seen) throw broken();
-		const owner = await holder(passkeyOf(id, seen).subject);
+		const owner = await holder(keptOf(seen).subject);
 		if (owner?.credentials.includes(id)) return false;
 		const same = (r: StoredPasskey) => JSON.stringify(r) === JSON.stringify(seen);
 		const taken = await store.credentials.update(key, (current) =>
@@ -111,7 +126,13 @@ export function keptPasskeys(store: PasskeyStore) {
 			const kept = await holder(subject);
 			if (kept?.handle !== userHandle) return "malformed";
 			if (kept.credentials.length >= max) return "full";
-			const record = stored({ v: 1, subject, ...rest, ...(nickname ? { nickname } : {}) });
+			const record = stored({
+				v: 1,
+				subject,
+				...rest,
+				...(nickname ? { nickname } : {}),
+				at: now(),
+			});
 			const key = credentialKey(id);
 			if ((await store.credentials.save(key, record, "endless")) === "exists") {
 				if (!(await takeUnlisted(id, record))) return "conflict";
@@ -127,15 +148,82 @@ export function keptPasskeys(store: PasskeyStore) {
 		/** Moves the count on from the one judged; another change first is a lost race. */
 		count: async (judged: Credential, next: Credential): Promise<"counted" | "raced"> => {
 			const changed = await store.credentials.update(credentialKey(judged.id), (current) => {
-				if (passkeyOf(judged.id, current).credential.signCount !== judged.signCount)
+				// A removed passkey has no count to move on.
+				if (passkeyOf(judged.id, current)?.credential.signCount !== judged.signCount)
 					return undefined;
 				return {
 					value: stored({ ...current, signCount: next.signCount, backedUp: next.backedUp }),
 				};
 			});
 			// Written only over the count judged, so the count before tells whether this one wrote.
-			const before = changed && passkeyOf(judged.id, changed.before).credential.signCount;
+			const before = changed && passkeyOf(judged.id, changed.before)?.credential.signCount;
 			return before === judged.signCount ? "counted" : "raced";
+		},
+		/** The passkeys the subject's holder lists, as listed, in its order; one not held by it is left out. */
+		listed: async (subject: string): Promise<readonly RegisteredPasskey[]> => {
+			const ids = (await holder(subject))?.credentials ?? [];
+			const listed: RegisteredPasskey[] = [];
+			for (const id of ids) {
+				const record = await store.credentials.read(credentialKey(id));
+				const kept = record && keptOf(record);
+				if (kept?.kind !== "passkey" || kept.subject !== subject) continue;
+				listed.push({
+					id,
+					...(kept.nickname ? { nickname: kept.nickname } : {}),
+					...(kept.transports ? { transports: kept.transports } : {}),
+					backupEligible: kept.backupEligible,
+					backedUp: kept.backedUp,
+					...(kept.at === undefined ? {} : { at: kept.at }),
+				});
+			}
+			return listed;
+		},
+		/** Names a passkey the subject's holder lists; none named is `unknown`. */
+		renamed: async (
+			subject: string,
+			id: string,
+			nickname: string,
+		): Promise<"renamed" | "unknown"> => {
+			if (!isCanonical(id, idBytes) || !(await holder(subject))?.credentials.includes(id)) {
+				return "unknown";
+			}
+			const changed = await store.credentials.update(credentialKey(id), (current) => {
+				const kept = keptOf(current);
+				if (kept.kind !== "passkey" || kept.subject !== subject) return undefined;
+				return { value: stored({ ...current, nickname }) };
+			});
+			// An update that wrote nothing answers what was there: renamed only where the name now stands.
+			const after = changed && keptOf(changed.after);
+			return after?.kind === "passkey" && after.subject === subject && after.nickname === nickname
+				? "renamed"
+				: "unknown";
+		},
+		/**
+		 * Takes a passkey off the subject's holder, which ends its use, then strips its record to its
+		 * holder alone. `removed` says this call took it off; `empty`, that the holder lists none after.
+		 */
+		removed: async (
+			subject: string,
+			id: string,
+		): Promise<{ readonly removed: boolean; readonly empty: boolean }> => {
+			const key = subjectKey(subject);
+			const delisted = await store.subjects.update(key, (current) => {
+				const { credentials } = holderOf(current);
+				if (!credentials.includes(id)) return undefined;
+				return { value: stored({ ...current, credentials: credentials.filter((c) => c !== id) }) };
+			});
+			if (!delisted) return { removed: false, empty: true };
+			// An update that wrote nothing answers what was there: removed only where this call took it off.
+			const left = holderOf(delisted.after).credentials;
+			const removed = holderOf(delisted.before).credentials.includes(id) && !left.includes(id);
+			if (!removed) return { removed: false, empty: left.length === 0 };
+			// Only a record its holder was this subject: one another subject took over is theirs.
+			await store.credentials.update(credentialKey(id), (current) => {
+				const kept = keptOf(current);
+				if (kept.kind !== "passkey" || kept.subject !== subject) return undefined;
+				return { value: stored({ v: 1, subject, removed: true }) };
+			});
+			return { removed: true, empty: left.length === 0 };
 		},
 	};
 }
