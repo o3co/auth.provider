@@ -250,7 +250,8 @@ describe("registration from a session", () => {
 			},
 			full: { error: "credential_limit" },
 			unreadable: { error: "invalid_request", error_description: "unreadable client data" },
-		} satisfies Record<RegistrationRefusal, Record<string, string>>;
+			// `revoked` is answered as no session, apart.
+		} satisfies Record<Exclude<RegistrationRefusal, "revoked">, Record<string, string>>;
 		for (const [reason, body] of Object.entries(answers)) {
 			state.answer = { kind: "refused", reason: reason as RegistrationRefusal };
 			expect(await post("verify", { response: {} }), reason).toEqual({

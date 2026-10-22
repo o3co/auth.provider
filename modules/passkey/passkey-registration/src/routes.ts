@@ -19,8 +19,8 @@ export interface RouteParts {
 	readonly audit: Audit;
 }
 
-/** Each refusal in the words clients of these routes know. */
-const errorOf: Record<RegistrationRefusal, string> = {
+/** Each refusal in the words clients of these routes know; `revoked`, a registration a revocation reached, is answered as no session. */
+const errorOf: Record<RegistrationRefusal | "revoked", string> = {
 	origin: "origin_mismatch",
 	"top-origin": "top_origin_mismatch",
 	challenge: "challenge_mismatch",
@@ -36,6 +36,7 @@ const errorOf: Record<RegistrationRefusal, string> = {
 	conflict: "credential_id_conflict",
 	full: "credential_limit",
 	unreadable: "invalid_request",
+	revoked: "unauthorized",
 };
 const descriptionOf: Partial<Record<RegistrationRefusal, string>> = {
 	conflict: "credential ID already registered",
