@@ -10,7 +10,7 @@ import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
 import gatesModule from "@mod/login-gates/module";
 import { type FactorStore, factorStore, proofSteps, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
-import { type MfaSettings, mfaConfig } from "@mod/mfa/testing";
+import { type MfaSettings, mfaConfig, updatingTogether } from "@mod/mfa/testing";
 import { factorBinding } from "@mod/mfa-binding";
 import mfaEntry from "@mod/mfa-entry/module";
 import { factorKinds } from "@mod/mfa-extensions";
@@ -122,6 +122,7 @@ const factorStand = () => {
 					return changed;
 				},
 				scan: stand.records.scan,
+				updateTogether: updatingTogether(stand.records),
 			}),
 		),
 	]);
