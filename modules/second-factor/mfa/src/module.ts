@@ -1,10 +1,10 @@
 import { audit } from "@mod/audit";
 import { defineModule } from "@mod/kernel";
 import { amrSources } from "@mod/login-gates";
-import { factorKinds, firstBindingGates, secondFactorAmr } from "@mod/mfa-extensions";
+import { factorKinds, firstBindingGates, secondFactorAmr, witnessing } from "@mod/mfa-extensions";
 import { enrollmentWitnesses } from "@mod/mfa-witness";
 import { resealers, seal } from "@mod/seal";
-import { enforcers, factorStore, factors, proofSteps, witnessing } from "./contract.ts";
+import { enforcers, factorStore, factors, proofSteps } from "./contract.ts";
 import { addsMfa, byKind, factorDecisions } from "./factors.ts";
 import { resealerOver } from "./records/resealer.ts";
 import { section } from "./section.ts";

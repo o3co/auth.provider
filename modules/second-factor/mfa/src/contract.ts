@@ -1,7 +1,7 @@
 import { contract, extensionPoint } from "@mod/kernel";
 import type { Asked, AskedFrom, RefusedReason } from "@mod/mfa-extensions";
 
-export { type Asked, type Witnessing, witnessing } from "@mod/mfa-extensions";
+export type { Asked } from "@mod/mfa-extensions";
 
 /** A step where a user proves a factor at login; without one, a factor could never be proven. */
 export interface ProofStep {
