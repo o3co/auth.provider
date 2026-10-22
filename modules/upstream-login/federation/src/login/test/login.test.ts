@@ -98,3 +98,41 @@ it("keeps only a string email, and gives no attributes where the upstream gave n
 	expect(l.handed.map((facts) => facts.attributes?.values)).toEqual([{}, undefined]);
 	expect(l.handed.map((facts) => "attributes" in facts)).toEqual([true, false]);
 });
+
+it("answers a login a gate refuses as one with no local user, recording why, keeping no tokens", async () => {
+	const recorded: unknown[] = [];
+	const after: string[] = [];
+	const login = loginWith({
+		logins: { login: async () => ({ kind: "refused", gate: "credential-policy", cookies: [] }) },
+		users: {
+			byUpstream: async () => ({ kind: "user", user: { subject: "alice", attributes: {} } }),
+		},
+		audit: { record: (event) => void recorded.push(event) },
+		handoff: {
+			of: () => ({
+				carry: "c",
+				deadline: 0,
+				after: async (outcome) => void after.push(outcome.kind),
+			}),
+		},
+		landing: "https://app.example/",
+		heldLoginLifetimeMs: 600_000,
+	});
+	const answer = await login.complete({
+		request: testRequest(),
+		name: "corp",
+		idp: { upstreamAmr: new Map(), upstream: {} } as unknown as Idp,
+		upstreamLogin: { subject: "u-alice", amr: [] } as unknown as UpstreamLogin,
+		trip: { nonce: "n", verifier: "v", startedAt },
+		cleared: ["trip=; Max-Age=0"],
+	});
+	expect(answer).toMatchObject({ status: 401, body: { json: { error: "unknown_user" } } });
+	expect(answer.cookies).toEqual(["trip=; Max-Age=0"]);
+	expect(after).toEqual(["refused"]);
+	expect(recorded).toEqual([
+		expect.objectContaining({
+			kind: "federation.login.failed",
+			attributes: expect.objectContaining({ reason: "refused" }),
+		}),
+	]);
+});

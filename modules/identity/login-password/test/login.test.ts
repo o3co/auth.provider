@@ -4,8 +4,15 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
-import { assemble, BootRefused, defineModule, kernelConfig, type Module } from "@mod/kernel";
-import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
+import {
+	assemble,
+	BootRefused,
+	defineModule,
+	kernelConfig,
+	type Module,
+	Unavailable,
+} from "@mod/kernel";
+import { quietRuntime, recordingLog, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
 import { loginGates, logins, returnPaths } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
 import rateLimitModule from "@mod/rate-limit/module";
@@ -30,11 +37,15 @@ afterEach(async () => {
 interface Setup {
 	readonly login?: Record<string, unknown>;
 	readonly gates?: Record<string, unknown>;
+	/** In place of login-gates, a `logins` answering as a test needs. */
+	readonly logins?: Module;
 	readonly trusted?: string[];
 	readonly origin?: string;
 	readonly sessions?: Module;
 	readonly users?: Module;
 	readonly extra?: Module[];
+	/** A log in place of the quiet one. */
+	readonly log?: ReturnType<typeof recordingLog>;
 }
 
 async function serve(setup: Setup = {}) {
@@ -44,7 +55,7 @@ async function serve(setup: Setup = {}) {
 	const app = await assemble({
 		modules: [
 			http,
-			gatesModule,
+			setup.logins ?? gatesModule,
 			csrfStandIn,
 			cookiesModule,
 			setup.users ?? usersModule,
@@ -72,9 +83,9 @@ async function serve(setup: Setup = {}) {
 				testUser("carol", "pw", { attributes: carol }),
 			]),
 			"login-password": setup.login ?? {},
-			"login-gates": setup.gates ?? {},
+			...(setup.logins ? {} : { "login-gates": setup.gates ?? {} }),
 		},
-		runtime,
+		runtime: setup.log ? quietRuntime({ log: setup.log.log }) : runtime,
 	});
 	await app.start();
 	stop = () => app.stop(1000);
@@ -582,5 +593,104 @@ describe("login-password attempts per account", () => {
 		]) {
 			await expect(serve({ login }), JSON.stringify(login)).rejects.toBeInstanceOf(BootRefused);
 		}
+	});
+});
+
+describe("login-password under a gate that refuses", () => {
+	/** A `logins` whose login answers `outcome`, or throws it. */
+	const answering = (outcome: () => Promise<unknown>) =>
+		defineModule({ name: "logins-stand-in" }, (m) => [
+			m.provide(logins).by(() => ({
+				login: outcome as never,
+				resume: outcome as never,
+				achievable: () => true,
+				returnAllowed: () => true,
+			})),
+		]);
+	const budget = { "account-attempts": 2, "account-window": "1h", "account-max-wait": "1m" };
+	let sender = 60;
+	const elsewhere = () => from(`198.51.100.${sender++}`);
+
+	it("answers a refused login as a wrong password, in its answer, its record and its count", async () => {
+		const refused = async () => ({ kind: "refused", gate: "credential-policy", cookies: [] });
+		const { login, events } = await serve({ login: budget, logins: answering(refused) });
+		const wrong = await login({ username: "bob", password: "wrong" }, elsewhere());
+		const refusedOne = await login({ username: "alice", password: "correct horse" }, elsewhere());
+		expect([refusedOne.status, refusedOne.body]).toEqual([wrong.status, wrong.body]);
+		expect(refusedOne.headers.getSetCookie()).toEqual([]);
+		expect(events.map((e) => [e.kind, e.subject])).toEqual([
+			["login.failed", undefined],
+			["login.failed", undefined],
+		]);
+		// Counted as a failed guess: the identifier waits after its attempts.
+		await login({ username: "alice", password: "correct horse" }, elsewhere());
+		const held = await login({ username: "alice", password: "correct horse" }, elsewhere());
+		expect([held.status, held.body]).toEqual([429, { error: "too_many_attempts" }]);
+	});
+
+	it("hands back the guess where a gate cannot tell, answering unavailable", async () => {
+		const down = async () => {
+			throw new Unavailable("login-gates");
+		};
+		const { login } = await serve({
+			login: { ...budget, "account-attempts": 1 },
+			logins: answering(down),
+		});
+		for (let i = 0; i < 3; i++) {
+			const res = await login({ username: "alice", password: "correct horse" }, elsewhere());
+			expect([res.status, res.body], String(i)).toEqual([
+				503,
+				{ error: "temporarily_unavailable" },
+			]);
+		}
+	});
+
+	it("answers a login the gates opened or held though its run cannot be ended then, the attempt staying counted", async () => {
+		let down = () => {};
+		const outcomes = {
+			opened: { kind: "opened", session: { id: "h1" }, cookies: ["__Host-session=s1; Path=/"] },
+			held: {
+				kind: "held",
+				gate: "mfa",
+				answer: { error: "mfa_required" },
+				cookies: ["mfa=t1; Path=/"],
+			},
+		};
+		let next: keyof typeof outcomes = "opened";
+		const logged = recordingLog();
+		const { login, simulated, events } = await serve({
+			log: logged,
+			login: budget,
+			logins: answering(async () => {
+				// The store goes down once the login is made, before its run is ended.
+				down();
+				return outcomes[next];
+			}),
+		});
+		down = () => simulated.unreachable(true);
+		const answers = [];
+		for (const kind of ["opened", "held"] as const) {
+			next = kind;
+			simulated.unreachable(false);
+			const res = await login({ username: "alice", password: "correct horse" }, elsewhere());
+			answers.push([res.status, res.body, res.headers.getSetCookie()]);
+		}
+		expect(answers).toEqual([
+			[200, {}, [expect.stringMatching(/^__Host-session=s1/)]],
+			[403, { error: "mfa_required" }, [expect.stringMatching(/^mfa=t1/)]],
+		]);
+		expect(events.map((e) => [e.kind, e.subject])).toEqual([
+			["login.succeeded", "alice"],
+			["login.held", "alice"],
+		]);
+		expect(logged.lines().filter((l) => l.level === "warn")).toEqual([
+			{ level: "warn", event: "login-password.run_unended", fields: {} },
+			{ level: "warn", event: "login-password.run_unended", fields: {} },
+		]);
+		// Both left counted: the identifier, past its two attempts, waits.
+		simulated.unreachable(false);
+		down = () => {};
+		const held = await login({ username: "alice", password: "correct horse" }, elsewhere());
+		expect([held.status, held.body]).toEqual([429, { error: "too_many_attempts" }]);
 	});
 });

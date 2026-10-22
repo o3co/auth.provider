@@ -145,7 +145,6 @@ export default defineModule({ name: "login-password", section }, (m) => [
 				recordLogin(request, "failed");
 				return answer(401, { error: "invalid_credentials" });
 			}
-			await budgets.succeeded(accountAttempts, key, policy, reserved.reservation);
 			// A gate that holds the login answers this once it lets the login through.
 			const done = destination === undefined ? {} : { redirect_to: destination };
 			const facts = {
@@ -154,7 +153,22 @@ export default defineModule({ name: "login-password", section }, (m) => [
 				authenticatedAt: verifiedAt,
 				attributes: attributesOf(verified.user),
 			};
-			const outcome = await gates.login(request, facts, done);
+			const outcome = await gates.login(request, facts, done).catch(async (error) => {
+				// A gate that cannot tell judged nothing either: the guess is handed back.
+				if (isUnavailable(error))
+					await budgets.abandoned(accountAttempts, key, policy, reserved.reservation);
+				throw error;
+			});
+			// A login a gate refused fails as a wrong password does, in its answer and its count alike.
+			if (outcome.kind === "refused") {
+				recordLogin(request, "failed");
+				return answer(401, { error: "invalid_credentials" });
+			}
+			// The login is open or held already: a run that cannot be ended stays counted, the safe side, and the login is answered.
+			await budgets.succeeded(accountAttempts, key, policy, reserved.reservation).catch((error) => {
+				if (!isUnavailable(error)) throw error;
+				c.log.warn("login-password.run_unended", {});
+			});
 			if (outcome.kind === "held") {
 				recordLogin(request, "held", facts.subject);
 				return answer(403, outcome.answer, outcome.cookies);

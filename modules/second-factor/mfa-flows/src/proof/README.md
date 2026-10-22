@@ -31,7 +31,7 @@ Internal module of `mfa-flows`: holding a login or a session until a factor is p
 - A local proof of a factor guessing cannot beat grants the session a release permit (`permits`), once its login opens or its raise is written; a permit that cannot be written is logged `mfa-flows.release_permit_unrecorded` (warn) and the login goes on.
 - A login transaction's success goes on with the login after the gate `mfa`, with its held facts plus the proof's amr, `done` and `from`, and answers `done`. A step-up's success raises the session under a new cookie.
 - A login transaction held without an authentication time goes on with it `"unknown"`, never the opening time.
-- A resume that opens nothing and holds nothing (one past its caller's deadline) is answered `403 login_required` and logged `mfa-flows.login_expired`.
+- A resume a gate refused is answered `403 login_required` with the transaction's cookie cleared, logging nothing. One that opens, holds and refuses nothing (one past its caller's deadline) is answered the same, cookie and all, and logged `mfa-flows.login_expired`.
 - A login that opens after a revocation since its transaction started (one landing between the proof and the opening) has its session closed and answers `401 login_required`; its cookie never goes out.
 - What a resume carries is made only once the login opened past that check. A response it makes instead closes the session and is answered, the session's cookie never going out; a throw closes it as best it can and goes on, with no cookie either. A part unavailable there, the close included, is answered `503`, clearing the transaction's cookie.
 

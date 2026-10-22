@@ -31,7 +31,8 @@
 - The password is handed to `users` as typed, with no Unicode normalization.
 - A JSON `redirect_to` that is neither a string nor null is `invalid_redirect`; any other member that is no string counts as absent.
 - A destination is taken only where `login-gates` says a login may return, and refused before the credentials are looked at.
-- With both credentials present, a failure tells neither whether the user exists nor what was wrong.
+- With both credentials present, a failure tells neither whether the user exists nor what was wrong. A login a gate refuses is answered, recorded (`login.failed`) and counted per identifier as a wrong password is: its answer, its status and the waits after it do not tell it apart, though the time it takes may.
+- An identifier's attempt counts as succeeded only once the gates opened or held the login; one a gate cannot answer for is handed back, as a password check that cannot answer is. A login opened or held is answered even where its run cannot be ended then: the attempt stays counted as a failure, logged `login-password.run_unended`.
 - A `503` after matching, and a gate's `403`, come only with a correct password; counting attempts per source and per identifier holds that down.
 - The success answer is handed to the gates as the continuation, returned once they let the login through.
 - The login gives the session the user's attributes from `users`' answer, under `login-attributes`' source name for users (`loginSource.users`): `email`, `email_verified` (a boolean only), `name`, `picture` and `groups` (strings only), read by these names; any other is left out. `session` applies the caps.
