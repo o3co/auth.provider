@@ -477,7 +477,7 @@ Times and sizes are written with their unit (`30s`, `5m`, `64KiB`); a number wit
 | `federation-grants.refresh-before-seconds` | `federation-grants.refresh-before` | a duration, `0s` to `1h`, default `30s` |  |
 | `federation-grants.rotation-window-seconds` | `federation-grants.rotation-window` | a duration, `1s` to `1d`, default `1h` |  |
 | `federation-grants.lodge-window-seconds` | `federation-grants.lodge-window` | a duration, `1s` to `1d`, default `1m` |  |
-| `federation-grants.revocation-skew-seconds` | `federation-grants.revocation-skew` | a duration, `0s` to `5m`, default `1s` |  |
+| `federation-grants.revocation-skew-seconds` | `federation-grants.revocation-skew` | a duration, `0s` to `5m`, default `1s` | removed in 0.19: see [From 0.18 to 0.19](#from-018-to-019) |
 | `federation-grants.window-seconds` | `federation-grants.window` | a duration, `1s` to `1h`, default `1m` |  |
 | `federation-grants.connections.<name>.max-access-token-seconds` | `federation-grants.connections.<name>.max-access-token-lifetime` | a duration, `1s` to `1d`, required |  |
 | `federation-tokens.refresh-before-seconds` | `federation-tokens.refresh-before` | a duration, `0s` to `1h`, default `30s` |  |
@@ -845,6 +845,7 @@ What changes from 0.18 to 0.19. Coming from an earlier release candidate, read t
   - A removed passkey's record is kept stripped to its subject. While 0.18 and 0.19 hosts run side by side, a 0.18 host reads it as a broken record: an assertion naming that passkey answers `503` there, and the passkey is gone either way once every host runs 0.19.
   - A passkey being registered is kept pending until its registration ends, in a record a 0.18 host reads as broken: during the upgrade, an assertion there naming a passkey a 0.19 host is registering answers `503`. A registration a 0.18 host makes is usable on both.
   - `passkey-registration` comes wherever `passkeys` and a session are composed. An app whose composition brought it only because `mfa-webauthn` brought `webauthn`, with no `passkeys`, no longer serves the passkey registration routes; one that composes `passkeys` and a session still does, with or without a passkey login.
+- **`federation-grants.revocation-skew` is gone** (a breaking change): a configuration that sets it is refused at boot as an unknown key; remove it. Unset, it was `1s`, and now nothing is allowed: a grant or intent of a subject is compared with the subject's revocation in whole seconds, as sessions and tokens are, on the clocks of the hosts that wrote each. One made in the second after a revocation is no longer refused. This drops a guard: on a host whose clock runs ahead of the revoking host's, a grant or intent made just before the revocation can count as after it and outlive it; NTP keeps clocks close, not equal. See [Before you deploy](runbook.md#before-you-deploy). While 0.18 and 0.19 instances run together, with 0.18 at its default of `1s`, they judge alike everything but what was made in the second after a revocation: 0.18 counts it revoked, 0.19 does not; with an allowance of your own, 0.18's window is that long. A 0.18 instance that counts a grant revoked writes it so and erases its credentials, and 0.19 keeps that end: a revocation is never undone.
 
 ## Operational notes
 
