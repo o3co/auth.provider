@@ -370,9 +370,12 @@ jobs:
           done
 
   # On a pull request to main and on the release branches: what a release would publish.
-  # `pnpm release:check` packs every bundle and the entrance, makes an app of
-  # each pattern from them, installs it from the tarballs alone, type-checks
-  # and boots it. The tarballs are then checked to ship the root LICENSE.
+  # `pnpm release:check` packs every bundle and the entrance as the release
+  # does, the index sealed, makes an app of each pattern from them, installs it
+  # from the tarballs alone, type-checks and boots it; then composes a package
+  # outside the release from a registry of its own and checks the app is held
+  # to what the release sealed. The tarballs are then checked to ship the root
+  # LICENSE.
   release-check:
     if: (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
