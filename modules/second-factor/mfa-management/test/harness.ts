@@ -8,11 +8,13 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
 import gatesModule from "@mod/login-gates/module";
-import { type FactorStore, factorStore, factors, proofSteps, type StoredFactors } from "@mod/mfa";
+import { type FactorStore, factorStore, proofSteps, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
 import { type MfaSettings, mfaConfig } from "@mod/mfa/testing";
+import { factorBinding } from "@mod/mfa-binding";
 import mfaEntry from "@mod/mfa-entry/module";
 import { factorKinds } from "@mod/mfa-extensions";
+import { factorManaging } from "@mod/mfa-managing";
 import mfaRevocation from "@mod/mfa-revocation/module";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { memoryRecords } from "@mod/records/testing";
@@ -212,7 +214,7 @@ export async function serve(settings: Settings = {}) {
 	};
 	/** Binds a code factor for the subject through mfa, and answers its id. */
 	const bindCode = async (subject = "alice") => {
-		const decided = app.get(factors);
+		const decided = app.get(factorBinding);
 		const begun = await decided.begin(subject, "code");
 		if (begun.kind !== "begun") throw new Error(begun.kind);
 		const secret = String((begun.show as { secret: string }).secret);
@@ -221,7 +223,7 @@ export async function serve(settings: Settings = {}) {
 		const bound = await decided.bind(subject, begun.pending, proved.state);
 		if (bound.kind !== "bound") throw new Error(bound.kind);
 		// The codes are written by the reissue, as an enrollment writes them.
-		if (bound.codesDue) await decided.reissue(subject, bound.fence);
+		if (bound.codesDue) await app.get(factorManaging).reissue(subject, bound.fence);
 		return bound.factor.id;
 	};
 	return { app, call, signIn, bindCode, jar: () => jar, port: () => app.get(listening).port() };
