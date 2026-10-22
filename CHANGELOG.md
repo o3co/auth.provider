@@ -4,6 +4,12 @@ Notable changes, newest first, in the form of [Keep a Changelog](https://keepach
 
 Changes up to 0.17.0 are in [the 0.17.0 changelog](https://github.com/o3co/auth.provider/blob/v0.17.0/CHANGELOG.md).
 
+## [Unreleased]
+
+### Fixed
+
+- A generated app's `witness-backfill` script told a refused boot by the kernel's class, so where the kernel was bundled twice it threw the refusal on as a crash instead of writing each refusal and exiting 78, as the app's entry and `reseal` already did; it now tells it by the kernel's mark (`BootRefused.is`). An app generated before changes one line of `src/witness-backfill.ts`, as [From 0.18.1](docs/migration.md#from-0181) says, or is generated again.
+
 ## [0.18.1] - 2026-10-22
 
 ### Security
