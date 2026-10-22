@@ -13,6 +13,12 @@ export interface EnrollmentWitness {
 	enroll(subject: string, token: string): Promise<boolean>;
 	/** Removes the mark: after a reset clears the subject's factors, or where the call that set it finds nothing counting. */
 	clear(subject: string): Promise<void>;
+	/**
+	 * Removes the mark where it is `token`'s, leaving any other mark, or none, as it is; the same token
+	 * answers alike however often. It answers once the check and any removal are settled, and throws
+	 * Unavailable where they are not. An implementation that cannot offer it leaves it out.
+	 */
+	withdraw?(subject: string, token: string): Promise<void>;
 }
 
 /** At most one witness: the module that asks it refuses to start with two. */

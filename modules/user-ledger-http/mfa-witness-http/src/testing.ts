@@ -35,18 +35,22 @@ export interface LedgerAnswer {
 }
 
 const calls = ["/mfa-witness/read", "/mfa-witness/enroll", "/mfa-witness/clear"];
+const withdrawCall = "/mfa-witness/withdraw";
 
 /**
  * A fake ledger keeping mfa's witness as an operator's ledger does, behind a credential of its own:
- * a mark per subject, set only where none is. Its answer to mfa-witness-http's calls (none for a
- * call not its own), and the section pointing mfa-witness-http at it once it listens at `base`.
+ * a mark per subject, set only where none is, withdrawn only by its token. Its answer to
+ * mfa-witness-http's calls (none for a call not its own), and the section pointing mfa-witness-http
+ * at it once it listens at `base`. Made `withdraw: false`, it plays a ledger with no withdraw route.
  */
-export function witnessLedger() {
+export function witnessLedger(options: { readonly withdraw?: boolean } = {}) {
 	const credential = randomBytes(32).toString("base64url");
 	const marks = new Map<string, string>();
+	const withdraws = options.withdraw !== false;
+	const own = withdraws ? [...calls, withdrawCall] : calls;
 	return {
 		answer(call: LedgerCall): LedgerAnswer | undefined {
-			if (!calls.includes(call.path)) return undefined;
+			if (!own.includes(call.path)) return undefined;
 			// Anything but a call with the credential is not found, so a wrong set-up shows.
 			if (call.method !== "POST" || call.headers.authorization !== `Bearer ${credential}`) {
 				return { status: 404 };
@@ -58,6 +62,11 @@ export function witnessLedger() {
 				if (!marks.has(held)) marks.set(held, String(token));
 				return { json: { owner: marks.get(held) === token } };
 			}
+			// One row per subject: a withdraw compares the token and deletes on that row alone.
+			if (call.path === withdrawCall) {
+				if (marks.get(held) === token) marks.delete(held);
+				return { status: 204 };
+			}
 			marks.delete(held);
 			return { status: 204 };
 		},
@@ -66,6 +75,7 @@ export function witnessLedger() {
 				"read-url": `${base}/mfa-witness/read`,
 				"enroll-url": `${base}/mfa-witness/enroll`,
 				"clear-url": `${base}/mfa-witness/clear`,
+				...(withdraws ? { "withdraw-url": `${base}${withdrawCall}` } : {}),
 				credential,
 			},
 		}),
