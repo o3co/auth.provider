@@ -217,3 +217,52 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 		});
 	});
 }
+
+/** A list or a claim as `updatingTogether` writes it: kept without end. */
+type KeptFactors = { readonly value: StoredFactors; readonly lifetimeMs: "endless" };
+
+/** What `updatingTogether` needs of a records stand-in: two records of it changed as one. */
+export interface ChangingTogether {
+	changeTogether(
+		firstKey: string,
+		secondKey: string,
+		p: {
+			readonly watch?: (
+				first: StoredFactors | undefined,
+				second: StoredFactors | undefined,
+			) => readonly string[];
+			readonly decide: (
+				first: StoredFactors | undefined,
+				second: StoredFactors | undefined,
+				watched: readonly (StoredFactors | undefined)[],
+			) => { readonly first?: KeptFactors | undefined; readonly second?: KeptFactors | undefined };
+		},
+	): Promise<{
+		readonly first: {
+			readonly before: StoredFactors | undefined;
+			readonly after: StoredFactors | undefined;
+		};
+		readonly second: {
+			readonly before: StoredFactors | undefined;
+			readonly after: StoredFactors | undefined;
+		};
+	}>;
+}
+
+/** A place's `updateTogether` over a records stand-in, the list and the claim it writes kept without end. */
+export function updatingTogether(
+	records: ChangingTogether,
+): NonNullable<FactorStore["updateTogether"]> {
+	const endless = (next: { readonly value: StoredFactors } | undefined) =>
+		next && { value: next.value, lifetimeMs: "endless" as const };
+	return async (listKey, claimKey, p) => {
+		const changed = await records.changeTogether(listKey, claimKey, {
+			watch: p.watch,
+			decide: (list, claim, watched) => {
+				const next = p.change(list, claim, watched);
+				return { first: endless(next.list), second: endless(next.claim) };
+			},
+		});
+		return { list: changed.first, claim: changed.second };
+	};
+}

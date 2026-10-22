@@ -2,6 +2,7 @@ import { defineModule } from "@mod/kernel";
 import { unavailableSwitch } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
 import { type FactorStore, factorStore, type StoredFactors } from "../src/store.ts";
+import { updatingTogether } from "../src/testing.ts";
 
 /**
  * mfa's factor store on the records stand-in, its lists kept without end on the given clock; `down`
@@ -20,6 +21,7 @@ export function memoryFactors(
 		afterRead?: (key: string) => Promise<void>;
 		afterTogether?: (() => Promise<void>) | undefined;
 	} = {};
+	const joint = updatingTogether(stand.records);
 	const factors: FactorStore = down.wrap({
 		save: async (key, record) => {
 			await hooks.beforeSave?.(key);
@@ -34,18 +36,10 @@ export function memoryFactors(
 		scan: stand.records.scan,
 		...(together
 			? {
-					updateTogether: async (listKey, claimKey, p) => {
-						const changed = await stand.records.changeTogether(listKey, claimKey, {
-							watch: p.watch,
-							decide: (list, claim, watched) => {
-								const next = p.change(list, claim, watched);
-								const endless = (part: { value: StoredFactors } | undefined) =>
-									part && { value: part.value, lifetimeMs: "endless" as const };
-								return { first: endless(next.list), second: endless(next.claim) };
-							},
-						});
+					updateTogether: async (...args: Parameters<typeof joint>) => {
+						const changed = await joint(...args);
 						await hooks.afterTogether?.();
-						return { list: changed.first, claim: changed.second };
+						return changed;
 					},
 				}
 			: {}),
