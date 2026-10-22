@@ -1,3 +1,4 @@
+import type { DocumentCopy, DocumentSource } from "@mod/client-documents";
 import type { Client, Section } from "@mod/clients";
 import { z } from "zod";
 import { httpsUrl, spaceOrControl } from "./shapes.ts";
@@ -43,14 +44,23 @@ export const clientSection: Section<ClientShown> = {
 				"The host the client's source verified, shown only for a client the operator did not register.",
 			),
 	}),
-	// A document never sets first-party: its client is no client the operator runs.
-	fromDocument(document, from) {
-		const name = document.client_name;
-		if (typeof name !== "string" || name.trim() === "") return { refused: "client_name" };
-		const uri = document.client_uri;
-		return { value: { name, ...(uri === undefined ? {} : { uri }), host: from.host } };
-	},
+	fromDocument: (document, from) => copied(document, from),
 	reads: ["client_name", "client_uri"],
+};
+
+// A document never sets first-party: its client is no client the operator runs.
+function copied(document: Readonly<Record<string, unknown>>, from: DocumentSource) {
+	const name = document.client_name;
+	if (typeof name !== "string" || name.trim() === "") return { refused: "client_name" };
+	const uri = document.client_uri;
+	return { value: { name, ...(uri === undefined ? {} : { uri }), host: from.host } };
+}
+
+/** The section's copy from a client's metadata document, for `client-documents`' `documentCopies`. */
+export const clientCopy: DocumentCopy = {
+	section: clientSection,
+	reads: ["client_name", "client_uri"],
+	copy: (document, from) => copied(document, from),
 };
 
 /** Whether the client needs no consent: only one the operator registered can be first-party. */

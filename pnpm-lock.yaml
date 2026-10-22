@@ -1075,6 +1075,9 @@ importers:
       '@mod/audit':
         specifier: workspace:*
         version: link:../../foundation/audit
+      '@mod/client-documents':
+        specifier: workspace:*
+        version: link:../../identity/client-documents
       '@mod/clients':
         specifier: workspace:*
         version: link:../../identity/clients

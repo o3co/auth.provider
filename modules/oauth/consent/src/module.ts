@@ -1,8 +1,9 @@
+import { documentCopies } from "@mod/client-documents";
 import { metadataSections } from "@mod/clients";
 import { routes, site } from "@mod/http";
 import { defineModule, Unavailable } from "@mod/kernel";
 import { askKey, storedOf } from "./ask.ts";
-import { clientSection } from "./client-section.ts";
+import { clientCopy, clientSection } from "./client-section.ts";
 import { consents } from "./contract.ts";
 import { answerRoute, showRoute } from "./routes.ts";
 import { section } from "./section.ts";
@@ -21,6 +22,7 @@ const isRange = (range: readonly string[]) =>
 
 export default defineModule({ name: "consent", section }, (m) => [
 	m.contribute(metadataSections).by(() => clientSection),
+	m.contribute(documentCopies).by(() => clientCopy),
 	m.provide(consents).by(async (c) => {
 		const grants = await c.get(grantStore);
 		const asks = await c.get(askStore);

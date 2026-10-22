@@ -1,4 +1,5 @@
 import { auditStandIn } from "@mod/audit/testing";
+import { type DocumentCopy, documentCopies } from "@mod/client-documents";
 import { clientSources } from "@mod/clients";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, publicClient } from "@mod/clients/testing";
@@ -7,7 +8,7 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
-import { assemble, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
+import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
@@ -15,7 +16,7 @@ import { type Session, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
-import { type Asked, clientSection, consents, isFirstParty } from "../src/contract.ts";
+import { type Asked, clientCopy, clientSection, consents, isFirstParty } from "../src/contract.ts";
 import consentModule from "../src/module.ts";
 import { section } from "../src/section.ts";
 import type { StoredAsk, StoredGrant } from "../src/store.ts";
@@ -99,6 +100,12 @@ const documents = defineModule({ name: "documents" }, (m) => [
 	})),
 ]);
 
+/** The document copies composed, as client-documents' reader collects them. */
+const copiesSeen = contract<readonly DocumentCopy[]>("test.copies-seen");
+const copiesProbe = defineModule({ name: "copies-probe" }, (m) => [
+	m.provide(copiesSeen).by((c) => c.collect(documentCopies)),
+]);
+
 const challengeOf = (url: string) => new URL(url).searchParams.get("challenge") ?? "";
 
 /** `page` null composes consent without a consent page. */
@@ -122,6 +129,7 @@ async function serve(
 			subjectRevocationStandIn,
 			consentStoresOn({ grants, asks }),
 			consentModule,
+			copiesProbe,
 		],
 		config: {
 			...kernelConfig(),
@@ -207,7 +215,8 @@ async function serve(
 				call("POST", cookie, { challenge, decision }, headers),
 		};
 	};
-	return { grants, asks, sessionFor, pendingFor, call, given, events: recorded.events };
+	const copies = app.get(copiesSeen);
+	return { grants, asks, sessionFor, pendingFor, call, given, copies, events: recorded.events };
 }
 
 describe("consent: asking", () => {
@@ -634,11 +643,19 @@ describe("consent's sections", () => {
 		expect(await check({ name: "Acme", host: "acme.example\r\n" })).toBe("refused");
 	});
 
+	it("contributes the copy client-documents collects, for its own section", async () => {
+		const { copies } = await serve();
+		expect(copies).toEqual([clientCopy]);
+		expect(clientCopy.section).toBe(clientSection);
+		expect(clientCopy.reads).toEqual(["client_name", "client_uri"]);
+	});
+
 	it("copies a metadata document's name, page and host, refusing a name absent, not a string or blank", async () => {
 		const from = { id: "https://acme.example/client.json", host: "acme.example" };
-		const copy = (document: Record<string, unknown>) =>
-			clientSection.fromDocument?.(document, from);
-		expect(clientSection.reads).toEqual(["client_name", "client_uri"]);
+		const copy = (document: Record<string, unknown>) => clientCopy.copy(document, from);
+		expect(clientCopy.copy({ client_name: "Acme" }, from)).toEqual(
+			clientSection.fromDocument?.({ client_name: "Acme" }, from),
+		);
 		for (const name of [undefined, 7, " \t\n "]) {
 			expect(copy({ client_name: name }), String(name)).toEqual({ refused: "client_name" });
 		}

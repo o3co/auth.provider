@@ -22,7 +22,7 @@
 - The POST answers `303` to the destination for the decision; a JSON member that is not a string counts as absent.
 - Error codes: `no_session` (401), `unknown_challenge` (400), `invalid_decision` (400), `repeated_parameter` (400), `csrf` (403), `temporarily_unavailable` (503).
 - Audit events, with the subject: declared in `./audit-events`, listed in the audit event reference.
-- Client metadata section `consent`: `first-party` (default false), `name` (trimmed, cut to 200 characters), `uri` (an https URL) and `host`; from a document, `client_name` (refused absent, not a string or blank), `client_uri` as written, and the host its source checked, never `first-party`.
+- Client metadata section `consent`: `first-party` (default false), `name` (trimmed, cut to 200 characters), `uri` (an https URL) and `host`; from a document, `client_name` (refused absent, not a string or blank), `client_uri` as written, and the host its source checked, never `first-party`; that copy is contributed to `client-documents`' `documentCopies` as `clientCopy`.
 - `isFirstParty`: true only for a client the operator registered with `first-party` set.
 - Operator section: `page` (an https URL without userinfo or fragment; unset by default, so nobody is asked) and `challenge-lifetime` (written with its unit, `1m` to `1h` in whole seconds, default `10m`).
 - Store interfaces for grants and asks: save once, read, and update from what the record holds.
@@ -49,7 +49,7 @@
 - The ask store needs the same except confirmed reads, and must not keep the key in clear.
 
 ## Depends on
-- `kernel`, `http`, `url-setting`, `request-source`, `session`, `csrf`, `clients`, `audit`
+- `kernel`, `http`, `url-setting`, `request-source`, `session`, `csrf`, `clients`, `client-documents`, `audit`
 
 ## Vocabulary
 - Consent range: a set of strings from the caller; consent only takes unions of it.
