@@ -34,11 +34,11 @@
 
 ## Data
 - The configuration: the budget numbers.
-- The kinds' roles (common, wiring, capability, verification, product, taking the runtime from `kernel`), in the kind words `combinations` gives; their order and the kinds never depending on a capability are `combinations`'s.
+- The kinds' roles (common, wiring, capability, verification, product, taking the runtime from `kernel`), in the kind words `kinds` gives; their order and the kinds never depending on a capability are `kinds`'s.
 - Nothing is written; the workspace is read on each run.
 
 ## Depends on
-- `guard-imports` (the workspace as read, the scope, and the import and dependency rules), `typescript`, `combinations` (the kind words, their order, and the capability-blind kinds).
+- `guard-imports` (the workspace as read, the scope, and the import and dependency rules), `typescript`, `kinds` (the kind words, their order, and the capability-blind kinds).
 
 ## Vocabulary
 - unit: a package, or an internal module apart from it.

@@ -1,7 +1,7 @@
-import { capabilityBlind, kindOrder, kinds } from "@mod/combinations";
+import { capabilityBlind, kindOrder, kinds } from "@mod/kinds";
 import type { Budget } from "./contract.ts";
 
-/** The order and roles of the kinds: the direction as `combinations` states it, the roles in its words. */
+/** The order and roles of the kinds: the direction as `kinds` states it, the roles in its words. */
 export const kindRules = {
 	kindOrder,
 	verificationKind: kinds.verification,

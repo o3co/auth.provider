@@ -3878,12 +3878,12 @@ importers:
 
   modules/tooling/guard:
     dependencies:
-      '@mod/combinations':
-        specifier: workspace:*
-        version: link:../../scaffold/combinations
       '@mod/guard-imports':
         specifier: workspace:*
         version: link:../guard-imports
+      '@mod/kinds':
+        specifier: workspace:*
+        version: link:../../scaffold/kinds
       typescript:
         specifier: 6.0.3
         version: 6.0.3

@@ -11,8 +11,8 @@
 		".": "./src/contract.ts"
 	},
 	"dependencies": {
-		"@mod/combinations": "workspace:*",
 		"@mod/guard-imports": "workspace:*",
+		"@mod/kinds": "workspace:*",
 		"typescript": "6.0.3"
 	}
 }
