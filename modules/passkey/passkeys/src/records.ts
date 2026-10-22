@@ -104,7 +104,7 @@ export function keptPasskeys(store: PasskeyStore, now: () => number = Date.now) 
 			if (kept.kind !== "passkey" || kept.subject !== subject) return undefined;
 			return { value: stored({ v: 1, subject, removed: true }) };
 		});
-	return {
+	const records = {
 		holder,
 		/** The subject's handle; `fresh` becomes it when the subject has none yet. */
 		handleFor: async (subject: string, fresh: string): Promise<string> => {
@@ -120,13 +120,13 @@ export function keptPasskeys(store: PasskeyStore, now: () => number = Date.now) 
 			const record = await store.credentials.read(credentialKey(id));
 			return record && passkeyOf(id, record);
 		},
-		/** Keeps a new passkey for the subject, whose handle it was made for; an id its holder lists is a conflict. */
-		register: async (
+		/** Keeps a new passkey's record for the subject, whose handle it was made for, unlisted: no read takes it as a passkey until `listing`. An id its holder lists is a conflict. */
+		written: async (
 			subject: string,
 			credential: Credential,
 			max: number,
 			nickname?: string,
-		): Promise<"registered" | "conflict" | "full" | "malformed"> => {
+		): Promise<"written" | "conflict" | "full" | "malformed"> => {
 			// Only what reads back: a record no read can take would make every later use unavailable.
 			if (!credentialOf(credential)) return "malformed";
 			const { id, userHandle, ...rest } = credential;
@@ -144,6 +144,10 @@ export function keptPasskeys(store: PasskeyStore, now: () => number = Date.now) 
 			if ((await store.credentials.save(key, record, "endless")) === "exists") {
 				if (!(await takeUnlisted(id, record))) return "conflict";
 			}
+			return "written";
+		},
+		/** Lists a record `written` kept: from then on it is the subject's passkey. */
+		listing: async (subject: string, id: string, max: number): Promise<"registered" | "full"> => {
 			const listed = await store.subjects.update(subjectKey(subject), (current) => {
 				const { credentials } = holderOf(current);
 				if (credentials.includes(id) || credentials.length >= max) return undefined;
@@ -151,6 +155,13 @@ export function keptPasskeys(store: PasskeyStore, now: () => number = Date.now) 
 			});
 			if (!listed) throw broken();
 			return holderOf(listed.after).credentials.includes(id) ? "registered" : "full";
+		},
+		/** Strips a record `written` kept and no list names, as a removed passkey's: a later registration takes it over. */
+		unwritten: (subject: string, id: string) => strip(subject, id),
+		/** `written` then `listing`, with nothing between. */
+		register: async (subject: string, credential: Credential, max: number, nickname?: string) => {
+			const wrote = await records.written(subject, credential, max, nickname);
+			return wrote === "written" ? records.listing(subject, credential.id, max) : wrote;
 		},
 		/** Moves the count on from the one judged; another change first is a lost race. */
 		count: async (judged: Credential, next: Credential): Promise<"counted" | "raced"> => {
@@ -241,6 +252,7 @@ export function keptPasskeys(store: PasskeyStore, now: () => number = Date.now) 
 			return { removed: taken.length };
 		},
 	};
+	return records;
 }
 
 export type KeptPasskeys = ReturnType<typeof keptPasskeys>;

@@ -1,5 +1,5 @@
 import { auditStandIn } from "@mod/audit/testing";
-import { assemble, BootRefused, kernelConfig } from "@mod/kernel";
+import { assemble, BootRefused, isUnavailable, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import webauthn from "@mod/webauthn/module";
 import {
@@ -46,5 +46,68 @@ it("marks a subject with the witness composed once a registration is written, an
 	expect(await holders.held("sam")).toBe(true);
 	expect(await kept.removed?.("sam", response.id)).toEqual({ removed: true, empty: true });
 	expect(stand.marks.has("sam")).toBe(false);
+	await app.stop(1000);
+});
+
+/** A registration's response from `subject`'s fresh options, against `app`'s registrations. */
+async function answered(app: Awaited<ReturnType<typeof boot>>, subject: string) {
+	const kept = app.get(registrations);
+	const options = (await kept.creation(subject)).options as CreationOptions;
+	return { kept, response: softwareAuthenticator().create(options, { origin: testOrigin }) };
+}
+
+it("keeps nothing usable where the caller's check says no or fails before the passkey is listed", async () => {
+	const stand = passkeyWitnessStandIn();
+	const app = await boot([stand]);
+	for (const admitted of [
+		async () => false,
+		async (): Promise<boolean> => {
+			throw new Unavailable("subject-revocation");
+		},
+	]) {
+		const { kept, response } = await answered(app, "sam");
+		const answer = kept.register("sam", response, undefined, admitted);
+		if ((await admitted().catch(() => "throws")) === "throws") {
+			await expect(answer).rejects.toSatisfy(isUnavailable);
+		} else {
+			expect(await answer).toEqual({ kind: "refused", reason: "revoked" });
+		}
+		expect(await kept.listed?.("sam")).toEqual([]);
+		expect(stand.marks.has("sam")).toBe(false);
+	}
+	await app.stop(1000);
+});
+
+it("ends the passkey where the check says no or fails once it is listed, its mark going too", async () => {
+	const stand = passkeyWitnessStandIn();
+	const app = await boot([stand]);
+	for (const second of ["no", "throws"] as const) {
+		const { kept, response } = await answered(app, "kim");
+		let asks = 0;
+		const admitted = async () => {
+			asks += 1;
+			if (asks === 1) return true;
+			if (second === "no") return false;
+			throw new Unavailable("subject-revocation");
+		};
+		const answer = kept.register("kim", response, undefined, admitted);
+		if (second === "throws") await expect(answer, second).rejects.toSatisfy(isUnavailable);
+		else expect(await answer, second).toEqual({ kind: "refused", reason: "revoked" });
+		expect(asks, second).toBe(2);
+		expect(await kept.listed?.("kim"), second).toEqual([]);
+		expect(stand.marks.has("kim"), second).toBe(false);
+	}
+	await app.stop(1000);
+});
+
+it("keeps a passkey both asks admitted though the witness cannot mark it, answering unavailable", async () => {
+	const stand = passkeyWitnessStandIn();
+	const app = await boot([stand]);
+	const { kept, response } = await answered(app, "lee");
+	stand.failing.enroll = 4;
+	await expect(kept.register("lee", response, undefined, async () => true)).rejects.toSatisfy(
+		isUnavailable,
+	);
+	expect(await kept.listed?.("lee")).toHaveLength(1);
 	await app.stop(1000);
 });

@@ -32,16 +32,24 @@ export type RegistrationRefusal =
 	| "unreadable"
 	| "no-challenge"
 	| "conflict"
-	| "full";
+	| "full"
+	/** The caller's check found a revocation since the challenge was made: nothing of it is kept. */
+	| "revoked";
 
 /** Passkeys for a subject the caller vouches for, each answering a challenge made for it, once. Throws Unavailable when the store cannot tell. */
 export interface Registrations {
 	/** Options for a new passkey of `subject`, excluding its own; its first options make its user handle. */
 	creation(subject: string): Promise<{ readonly options: unknown }>;
+	/**
+	 * `admitted` is asked with when the challenge was made, once the passkey is written and before it
+	 * is listed, then once again after: on `false` or a throw, nothing of it stays usable (`revoked`,
+	 * or the throw passed on).
+	 */
 	register(
 		subject: string,
 		response: unknown,
 		nickname?: string,
+		admitted?: (challengedAt: number) => Promise<boolean>,
 	): Promise<
 		| {
 				readonly kind: "registered";
