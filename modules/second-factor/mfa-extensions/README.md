@@ -16,7 +16,7 @@
 - `AskedFrom` (a login with its stated email and whether the ledger vouches for it, or a session's handle): passed to kinds, proofs and gates unread.
 - `firstBindingGates`: asked by `begin`, with what the caller gave, while no counting factor is held; a gate refusing answers `binding-proof-required`.
 - `secondFactorAmr` (`mfa`): the amr a proof adds when its kind adds a second factor (RFC 8176).
-- `witnessing` (at most one, two refusing boot): who tells, beside the store, that a subject enrolled; `mfa-witnessing` contributes it over the witness composed (its card holds the rules). `Asked`: where a standing is asked (`login`, `binding`, `credentials`).
+- `witnessing` (at most one, two refusing boot): who tells, beside the store, that a subject enrolled; `mfa-witnessing` contributes it over the witness composed (its card holds the rules). `Asked`: where a standing is asked (`login`, `binding`, `credentials`). After a reset, `cleared` is given `after`, read anew each time: `counting` (a factor stands, written since), `none` (none written, the reset's write held), else `unsure`.
 
 ## Invariants
 - A kind is guessable unless it says not, as in 0.17.

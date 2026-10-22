@@ -25,8 +25,8 @@ export default defineModule({ name: "mfa-witnessing" }, (m) => [
 		return {
 			settle: backfillWith({
 				witness,
-				// As written, leaving out a factor whose binding ends as a duplicate.
-				counting: (subject) => decided().countingWritten(subject),
+				// As written, a factor whose unique value is not claimed told apart from none.
+				standing: (subject) => decided().writtenStanding(subject),
 				token,
 			}),
 		};

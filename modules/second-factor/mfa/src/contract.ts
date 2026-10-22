@@ -61,6 +61,8 @@ export interface Factors {
 	countingHeld(subject: string, at: Asked): Promise<boolean>;
 	/** Whether the subject holds a counting factor as written, not judged against the witness. One of a unique value counts once its claim names it, as before that its binding may still end as a duplicate; one written before claims were kept, unless another holds its value. */
 	countingWritten(subject: string): Promise<boolean>;
+	/** How the subject's factors of a counting kind stand as written, not judged against the witness: `counting` where one counts as `countingWritten` reads it, `unclaimed` where some are written and none counts (a unique value's claim missing or not yet made), `none` where none is written. */
+	writtenStanding(subject: string): Promise<"counting" | "unclaimed" | "none">;
 	/** Whether every session needs a second factor to be used (`mode = required`). */
 	secondFactorRequired(): boolean;
 	/** What a login asks of the subject: nothing, a proof of a factor, or a first binding. */

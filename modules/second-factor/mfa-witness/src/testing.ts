@@ -5,8 +5,8 @@ import { type EnrollmentWitness, enrollmentWitnesses } from "./contract.ts";
 /**
  * A witness in memory, keeping its promises: each call fails as unavailable while its count of
  * failures lasts, and `lost` writes take effect with their answer lost. `beforeEnroll`,
- * `afterEnroll`, `beforeRead` and `beforeWithdraw` run once around the next such call, as a request
- * racing it would. Made `withdraw: false`, it offers no withdraw, as a ledger that has none, and
+ * `afterEnroll`, `beforeRead`, `beforeWithdraw` and `beforeMarkedWith` (awaited, so a call can be
+ * held there) run once around the next such call, as a request racing it would. Made `withdraw: false`, it offers no withdraw, as a ledger that has none, and
  * so no markedWith; made `markedWith: false`, no markedWith, as a ledger whose read answers no token.
  */
 export function witnessStandIn(
@@ -21,6 +21,7 @@ export function witnessStandIn(
 		afterEnroll?: (() => void) | undefined;
 		beforeRead?: (() => void) | undefined;
 		beforeWithdraw?: (() => void) | undefined;
+		beforeMarkedWith?: (() => void | Promise<void>) | undefined;
 	} = {};
 	const fails = (call: keyof typeof failing) => {
 		if (failing[call] === 0) return;
@@ -72,6 +73,9 @@ export function witnessStandIn(
 		if (options.markedWith !== false) {
 			witness.markedWith = async (subject) => {
 				fails("markedWith");
+				const before = next.beforeMarkedWith;
+				next.beforeMarkedWith = undefined;
+				await before?.();
 				return marks.get(subject);
 			};
 		}

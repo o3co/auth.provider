@@ -29,8 +29,8 @@ const holding = (held: Record<string, string[]>, afterRead?: (n: number) => void
 		m.provide(factors).by(
 			() =>
 				({
-					countingWritten: async (subject: string) => {
-						const answer = (held[subject] ?? []).includes("code");
+					writtenStanding: async (subject: string) => {
+						const answer = (held[subject] ?? []).includes("code") ? "counting" : "none";
 						reads += 1;
 						afterRead?.(reads);
 						return answer;
@@ -83,7 +83,7 @@ it("contributes mfa's witnessing over the witness: a mark beside nothing countin
 	]);
 	await told.settle("cid", async () => true);
 	expect(witness.marks.has("cid")).toBe(true);
-	await told.cleared("cid");
+	await told.cleared("cid", async () => "none");
 	expect(witness.marks.has("cid")).toBe(false);
 });
 

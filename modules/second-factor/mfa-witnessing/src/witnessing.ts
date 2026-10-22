@@ -1,6 +1,6 @@
 import { type Audit, declaredAudit } from "@mod/audit";
 import { isUnavailable, type Log, Unavailable } from "@mod/kernel";
-import type { Asked, Witnessing } from "@mod/mfa-extensions";
+import type { AfterReset, Asked, Witnessing } from "@mod/mfa-extensions";
 import type { EnrollmentWitness } from "@mod/mfa-witness";
 import events from "./audit-events.ts";
 
@@ -17,13 +17,21 @@ export interface StandingParts {
  * recorded and unavailable, never none. A witness that cannot be read is unavailable too.
  */
 export function standingOf(p: StandingParts) {
-	const audited = declaredAudit(p.audit, events);
+	const inconsistent = inconsistencyOf(p);
 	return async (subject: string, counts: boolean, at: Asked) => {
 		if (counts) return "held" as const;
 		if (p.witness === undefined || !(await p.witness.read(subject))) return "none" as const;
+		throw inconsistent(subject, at);
+	};
+}
+
+/** Records and logs a mark not in line with the factors, where it was asked, and gives the unavailable to throw. */
+function inconsistencyOf(p: Pick<StandingParts, "audit" | "log">) {
+	const audited = declaredAudit(p.audit, events);
+	return (subject: string, at: Asked | "reset") => {
 		audited.record("mfa.enrollment_inconsistent", { subject, attributes: { at } });
 		p.log.warn("mfa.enrollment_inconsistent", { at });
-		throw new Unavailable("mfa");
+		return new Unavailable("mfa");
 	};
 }
 
@@ -112,7 +120,31 @@ export function witnessingWith(p: WitnessingParts): Witnessing {
 		standing: (subject, counts, at) => standing(subject, counts, at),
 		settle: (subject, counting) =>
 			settlingOf({ witness: p.witness, counting, token: p.token })(subject),
-		cleared: (subject) => p.witness.clear(subject),
+		cleared: clearedWith(p),
+	};
+}
+
+/** After a reset: withdraws the mark's token read once, only where `none` stands after it, then fills one beside a factor standing. */
+function clearedWith(p: WitnessingParts) {
+	const inconsistent = inconsistencyOf(p);
+	return async (subject: string, after: () => Promise<AfterReset>) => {
+		const { witness } = p;
+		if (witness.withdraw === undefined || witness.markedWith === undefined) {
+			return witness.clear(subject);
+		}
+		const token = await witness.markedWith(subject);
+		if (token === undefined) return;
+		const now = await after();
+		if (now === "counting") return;
+		if (now === "unsure") throw inconsistent(subject, "reset");
+		await removeOwn(witness, subject, token);
+		const standing = async () => {
+			const later = await after();
+			if (later === "unsure") throw inconsistent(subject, "reset");
+			return later;
+		};
+		if ((await standing()) === "none") return;
+		await backfillWith({ witness, standing, token: p.token })(subject);
 	};
 }
 
@@ -129,11 +161,22 @@ const backfillRemarks = 3;
  */
 export function backfillWith(p: {
 	readonly witness: EnrollmentWitness;
-	readonly counting: (subject: string) => Promise<boolean>;
+	readonly standing: (subject: string) => Promise<"counting" | "unclaimed" | "none">;
 	readonly token: () => string;
 }) {
 	return async (subject: string) => {
-		const counts = await p.counting(subject);
+		const read: { last: "counting" | "unclaimed" | "none" } = { last: "none" };
+		const counting = async (subject: string) => {
+			read.last = await p.standing(subject);
+			return read.last === "counting";
+		};
+		const unclaimed = () => read.last === "unclaimed";
+		const nothingCounts = async (subject: string) => {
+			if (unclaimed()) return "unclaimed" as const;
+			return (await p.witness.read(subject)) ? ("inconsistent" as const) : ("none" as const);
+		};
+		const counts = await counting(subject);
+		if (!counts && unclaimed()) return "unclaimed" as const;
 		const marked = await p.witness.read(subject);
 		if (counts && marked) return "held" as const;
 		if (!counts) return marked ? ("inconsistent" as const) : ("none" as const);
@@ -142,18 +185,16 @@ export function backfillWith(p: {
 		let ours = await markedBy(p.witness, subject, token);
 		for (let remarks = 0; ; remarks++) {
 			// Read again: a reset may have taken the factors, and another may have marked, meanwhile.
-			if (await p.counting(subject)) {
+			if (await counting(subject)) {
 				if (!(await p.witness.read(subject))) throw new Unavailable("mfa");
 				return ours ? ("marked" as const) : ("held" as const);
 			}
-			if (!ours) {
-				return (await p.witness.read(subject)) ? ("inconsistent" as const) : ("none" as const);
-			}
+			if (!ours || unclaimed()) return nothingCounts(subject);
 			await removeOwn(p.witness, subject, token);
-			if (!(await p.counting(subject))) {
+			if (!(await counting(subject))) {
 				// A withdraw leaves another's mark, which still stands beside nothing counting.
-				if (!withdraws) return "none" as const;
-				return (await p.witness.read(subject)) ? ("inconsistent" as const) : ("none" as const);
+				if (!withdraws && !unclaimed()) return "none" as const;
+				return nothingCounts(subject);
 			}
 			// A binding may have written a factor and taken this mark for its own, or a clear its mark.
 			if (remarks === backfillRemarks) throw new Unavailable("mfa");

@@ -42,6 +42,17 @@ it("tells a witness offering markedWith without withdraw from one that keeps its
 	expect(await witnessProblems(rest)).toContain("markedWith is offered without withdraw");
 });
 
+it("holds the next markedWith at its hook until the hook settles, then reads the mark as it stands", async () => {
+	const stand = witnessStandIn();
+	let resume = () => {};
+	stand.next.beforeMarkedWith = () => new Promise<void>((go) => (resume = go));
+	const held = stand.witness.markedWith?.("ann");
+	stand.marks.set("ann", "later");
+	resume();
+	expect(await held).toBe("later");
+	expect(await stand.witness.markedWith?.("ann")).toBe("later");
+});
+
 it("leaves markedWith out of a stand-in made without it or without withdraw", () => {
 	for (const options of [{ markedWith: false }, { withdraw: false }]) {
 		const without = witnessStandIn("enrollment-witness", options).witness;

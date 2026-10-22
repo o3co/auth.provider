@@ -66,7 +66,9 @@ const app = await loadConfig(source)
 	})
 	.catch(refused);
 const backfill = app.get(witnessBackfill);
-const counts = { marked: 0, held: 0, none: 0, inconsistent: 0, failed: 0 };
+const counts = { marked: 0, held: 0, none: 0, unclaimed: 0, inconsistent: 0, unknown: 0, failed: 0 };
+// The answers counted by name; one this script does not know (a later release's) is counted as unknown.
+const answers = new Set(["marked", "held", "none", "unclaimed", "inconsistent"]);
 // One subject a line, used as sent; only an empty line is skipped. No subject is ever written out.
 for await (const subject of lines(process.stdin)) {
 	if (subject === "") continue;
@@ -75,7 +77,9 @@ for await (const subject of lines(process.stdin)) {
 		continue;
 	}
 	try {
-		counts[await backfill.settle(subject)] += 1;
+		const answer: string = await backfill.settle(subject);
+		if (answers.has(answer)) counts[answer as keyof typeof counts] += 1;
+		else counts.unknown += 1;
 	} catch (error) {
 		counts.failed += 1;
 		// Anything but an outage may come again for every subject, and may carry one: stop, telling none of it.
@@ -83,9 +87,9 @@ for await (const subject of lines(process.stdin)) {
 	}
 }
 process.stdout.write(
-	`marked ${counts.marked} held ${counts.held} none ${counts.none} inconsistent ${counts.inconsistent} failed ${counts.failed}\n`,
+	`marked ${counts.marked} held ${counts.held} none ${counts.none} unclaimed ${counts.unclaimed} inconsistent ${counts.inconsistent} unknown ${counts.unknown} failed ${counts.failed}\n`,
 );
 // Stopped, though never started, so its stop hooks run; a stop that fails keeps the code.
 await app.stop().catch(() => undefined);
-// An inconsistent subject is counted, not failed: only a subject that could not be settled is 1.
-process.exit(counts.failed === 0 ? 0 : 1);
+// An inconsistent or unclaimed subject is counted, not failed: a subject that could not be settled, or an answer not known, is 1.
+process.exit(counts.failed === 0 && counts.unknown === 0 ? 0 : 1);

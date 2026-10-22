@@ -32,7 +32,11 @@ const over = (reads: boolean[], afterRead?: (n: number) => void) => {
 		stand,
 		asked,
 		settle: settlingOf({ witness: stand.witness, counting, token }),
-		backfill: backfillWith({ witness: stand.witness, counting, token }),
+		backfill: backfillWith({
+			witness: stand.witness,
+			standing: async () => ((await counting()) ? "counting" : "none"),
+			token,
+		}),
 	};
 };
 
