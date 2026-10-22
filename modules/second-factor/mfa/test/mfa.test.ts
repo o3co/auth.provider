@@ -231,7 +231,7 @@ async function serve(
 		kinds = [code, backup],
 		extra = [] as Module[],
 		enforced = true,
-		together = false,
+		together = true,
 	} = {},
 ) {
 	const audit = auditStandIn();
@@ -921,7 +921,10 @@ describe("values no two factors may hold", () => {
 	});
 
 	it("counts a factor of a unique value once its claim names it; one written before claims, unless another holds it", async () => {
-		const { decided, bindKind, place } = await serve({}, { kinds: [card, backup] });
+		const { decided, bindKind, place } = await serve(
+			{},
+			{ kinds: [card, backup], together: false },
+		);
 		await bindKind("ann", "card", "c1");
 		// Read between a binding's write of its factor and its claim on the value.
 		const seen: Record<string, boolean> = {};
@@ -963,7 +966,7 @@ describe("values no two factors may hold", () => {
 	it("refuses removing the last factor that stands while a binding beside it is not yet claimed, and ends as a duplicate", async () => {
 		const { decided, bindKind, bindCode, idOf, place } = await serve(
 			{ mode: "required" },
-			{ kinds: [code, backup, card] },
+			{ kinds: [code, backup, card], together: false },
 		);
 		await bindKind("ann", "card", "c1");
 		await bindCode("zed");
@@ -1325,7 +1328,10 @@ describe("an enrollment witness", () => {
 
 		it("answers unsure where a factor written after the reset does not stand, its claim lost or not yet made", async () => {
 			const kept = keeping();
-			const { decided, bindKind, place } = await serve({}, { kinds: [card], extra: [kept.module] });
+			const { decided, bindKind, place } = await serve(
+				{},
+				{ kinds: [card], extra: [kept.module], together: false },
+			);
 			await decided.clear("cal");
 			expect((await bindKind("cal", "card", "c-9")).kind).toBe("bound");
 			await place.records.remove(claimKeyOf("card", "c-9"));

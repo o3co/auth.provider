@@ -11,7 +11,7 @@ import { type FactorStore, factorStore, type StoredFactors } from "../src/store.
  */
 export function memoryFactors(
 	now: () => number = () => 0,
-	{ together = false }: { readonly together?: boolean } = {},
+	{ together = true }: { readonly together?: boolean } = {},
 ) {
 	const stand = memoryRecords<StoredFactors>(now, { shards: 1, perShard: 1 });
 	const down = unavailableSwitch<FactorStore>("factor-store");

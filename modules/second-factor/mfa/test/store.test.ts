@@ -1,9 +1,9 @@
 import { factorStoreContract } from "../src/testing.ts";
 import { memoryFactors } from "./stores.ts";
 
-factorStoreContract("records stand-in", async () => {
+factorStoreContract("records stand-in writing a list and its claim in two steps", async () => {
 	let now = 0;
-	const stand = memoryFactors(() => now);
+	const stand = memoryFactors(() => now, { together: false });
 	return {
 		factors: stand.factors,
 		advance: (ms) => {
