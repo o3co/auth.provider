@@ -100,14 +100,6 @@ describe("cleared, after a reset, over a witness offering withdraw", () => {
 		expect(recorded).toHaveLength(1);
 	});
 
-	it("given no after, withdraws the mark it read, and so never takes one set after its read", async () => {
-		const { stand, told } = over([]);
-		stand.marks.set("ann", "t-old");
-		stand.next.beforeWithdraw = () => stand.marks.set("ann", "t2");
-		await told.cleared("ann");
-		expect(stand.marks.get("ann")).toBe("t2");
-	});
-
 	it("clears over a witness offering no withdraw, as before", async () => {
 		const { stand, told, after, read } = over(["counting"], { withdraw: false });
 		stand.marks.set("ann", "t2");

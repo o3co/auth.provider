@@ -127,14 +127,13 @@ export function witnessingWith(p: WitnessingParts): Witnessing {
 /** After a reset: withdraws the mark's token read once, only where `none` stands after it, then fills one beside a factor standing. */
 function clearedWith(p: WitnessingParts) {
 	const inconsistent = inconsistencyOf(p);
-	return async (subject: string, after?: () => Promise<AfterReset>) => {
+	return async (subject: string, after: () => Promise<AfterReset>) => {
 		const { witness } = p;
 		if (witness.withdraw === undefined || witness.markedWith === undefined) {
 			return witness.clear(subject);
 		}
 		const token = await witness.markedWith(subject);
 		if (token === undefined) return;
-		if (after === undefined) return removeOwn(witness, subject, token);
 		const now = await after();
 		if (now === "counting") return;
 		if (now === "unsure") throw inconsistent(subject, "reset");
