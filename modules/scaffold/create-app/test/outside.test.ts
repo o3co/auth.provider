@@ -15,8 +15,14 @@ import { root } from "./full-app.ts";
 // Composing reads the whole workspace, and reading a package asks pnpm, slow on a loaded machine.
 vi.setConfig({ testTimeout: 120_000 });
 
-/** An index as distribution writes it, every module of the workspace in one bundle at 0.19.0. */
-function indexOfWorkspace(): string {
+/** What the release seals into its index: the bundle's integrity and zod's. */
+const sealed = {
+	integrity: { "@o3co/auth-provider-oauth": "sha512-OAUTH" },
+	zod: { version: "4.6.7", integrity: "sha512-ZOD" },
+};
+
+/** An index as distribution writes it, every module of the workspace in one bundle at 0.19.0, sealed as given. */
+function indexOfWorkspace(seal: Record<string, unknown> = sealed): string {
 	const file = join(mkdtempSync(join(tmpdir(), "index-")), "index.json");
 	const packages = [...workspacePackages(root).keys()]
 		.filter((name) => name.startsWith("@mod/"))
@@ -26,7 +32,7 @@ function indexOfWorkspace(): string {
 			entry: `@o3co/auth-provider-oauth/${name.slice("@mod/".length)}`,
 			manifest: { name },
 		}));
-	writeFileSync(file, JSON.stringify({ version: "0.19.0", packages }));
+	writeFileSync(file, JSON.stringify({ version: "0.19.0", packages, ...seal }));
 	return file;
 }
 
@@ -86,6 +92,10 @@ describe("an app listing a package outside the release", () => {
 			modules: [{ name: "@x/grant", version: "1.2.0" }],
 			registries: { default: "http://127.0.0.1:4873" },
 		});
+		expect(JSON.parse(await read(target, "outside-modules.json")).held).toEqual({
+			"@o3co/auth-provider-oauth": "sha512-OAUTH",
+			zod: "sha512-ZOD",
+		});
 		expect(parse(await read(target, "pnpm-workspace.yaml")).overrides).toEqual({
 			"@o3co/auth-provider-oauth": "0.19.0",
 			zod: "4.6.7",
@@ -118,6 +128,43 @@ describe("an app listing a package outside the release", () => {
 			generateListed(plan, ["@x/grant"], "@mod/log-stdout", indexOfWorkspace()),
 		).rejects.toThrow("@x/grant: it runs postinstall when installed");
 		await expect(readFile(join(target, "package.json"))).rejects.toThrow();
+	});
+
+	it("refuses to compose it beside a release whose index records no integrity, or another zod than the app's", async () => {
+		const target = () => join(mkdtempSync(join(tmpdir(), "outside-app-")), "app");
+		const outside = { from: project(), names: ["@x/grant"] };
+		await expect(
+			generateListed(
+				{ target: target(), outside },
+				["@x/grant"],
+				"@mod/log-stdout",
+				indexOfWorkspace({}),
+			),
+		).rejects.toThrow("the release's index records no integrity of its bundles");
+		const otherZod = { ...sealed, zod: { version: "4.6.8", integrity: "sha512-ZOD" } };
+		await expect(
+			generateListed(
+				{ target: target(), outside },
+				["@x/grant"],
+				"@mod/log-stdout",
+				indexOfWorkspace(otherZod),
+			),
+		).rejects.toThrow("the release's index records zod 4.6.8, where an app holds 4.6.7");
+	});
+
+	it("refuses a package outside the release taking as a peer a bundle the release records no integrity of", async () => {
+		const target = join(mkdtempSync(join(tmpdir(), "outside-app-")), "app");
+		const unsealed = { ...sealed, integrity: {} };
+		await expect(
+			generateListed(
+				{ target, outside: { from: project(), names: ["@x/grant"] } },
+				["@x/grant"],
+				"@mod/log-stdout",
+				indexOfWorkspace(unsealed),
+			),
+		).rejects.toThrow(
+			"@x/grant: takes @o3co/auth-provider-oauth as a peer, whose integrity the release records not",
+		);
 	});
 
 	it("refuses to compose it beside a linked workspace, or beside no published release", async () => {
