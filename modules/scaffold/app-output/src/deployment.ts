@@ -88,10 +88,12 @@ export async function writeDeployment(
 	const entries = await entriesOf(modules, packages.importOf, run);
 	const dependencies = packages.dependencies(names);
 	// The one place a caller without packages outside the release is read as having none.
+	const release = packages.release();
 	const beside = besideRelease(packages.outside?.(names), {
 		dependencies,
-		version: packages.release().version,
+		version: release.version,
 		zod,
+		...(release.integrity ? { integrity: release.integrity } : {}),
 	});
 	await writeProject(target, {
 		"package.json": manifestOf("node --env-file-if-exists=.env src/main.ts", dependencies, {

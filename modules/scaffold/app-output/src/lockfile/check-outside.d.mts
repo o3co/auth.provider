@@ -26,4 +26,6 @@ export function refusals(
 	records: readonly OutsideRecord[],
 	overrides: Readonly<Record<string, string>>,
 	registries: Registries,
+	/** The integrity the release recorded of each package the overrides hold; where given, each must be it. */
+	integrities?: Readonly<Record<string, string>>,
 ): string[];

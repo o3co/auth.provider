@@ -110,6 +110,37 @@ describe("what an app beside packages outside the release is given", () => {
 		expect(index).toContain("`outside-modules.json`");
 	});
 
+	it("records the integrity the release recorded of every package it holds to one copy, where the release records them", () => {
+		const integrity = {
+			"@o3co/auth-provider-identity": "sha512-IDENTITY",
+			"@o3co/auth-provider-oauth": "sha512-OAUTH",
+			"@o3co/auth-provider-other": "sha512-OTHER",
+			zod: "sha512-ZOD",
+		};
+		const record = JSON.parse(
+			besideRelease(outside, { ...app, integrity }).files["outside-modules.json"] as string,
+		);
+		expect(record.held).toEqual({
+			"@o3co/auth-provider-identity": "sha512-IDENTITY",
+			"@o3co/auth-provider-oauth": "sha512-OAUTH",
+			zod: "sha512-ZOD",
+		});
+		expect(
+			JSON.parse(besideRelease(outside, app).files["outside-modules.json"] as string),
+		).not.toHaveProperty("held");
+	});
+
+	it("refuses a held package the release records no integrity of", () => {
+		expect(() =>
+			besideRelease(outside, {
+				...app,
+				integrity: { "@o3co/auth-provider-oauth": "sha512-OAUTH" },
+			}),
+		).toThrow(
+			"@o3co/auth-provider-identity, zod: held to one copy, but the release records no integrity of it",
+		);
+	});
+
 	it("refuses a package let through as fresh that it does not record", () => {
 		expect(() => besideRelease({ ...outside, fresh: ["@x/other"] }, app)).toThrow(
 			"@x/other: let through as fresh, but not recorded",

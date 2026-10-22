@@ -294,7 +294,7 @@ function recordRefusals(lock, record, overrides, references, registries) {
  * version, why either comes from other than its registry in `registries` (the default origin and
  * each scope's), and why it was resolved with other overrides; none where it is as recorded.
  */
-export function refusals(text, records, overrides, registries) {
+export function refusals(text, records, overrides, registries, integrities) {
 	const lock = lockOf(text);
 	const versions = (map) =>
 		new Map([...own(map)].map(([name, version]) => [name, String(version)]));
@@ -311,7 +311,27 @@ export function refusals(text, records, overrides, registries) {
 			.flatMap(([name, version]) =>
 				oneCopyRefusals(lock, name, String(version), references, registries),
 			),
+		...(integrities === undefined ? [] : heldIntegrityRefusals(lock, held, own(integrities))),
 	];
+}
+
+/**
+ * Why a package the overrides hold is not the tarball the release recorded: its entry at the held
+ * version (the package, not a resolution with peers) holds another integrity, or none is recorded.
+ */
+function heldIntegrityRefusals(lock, held, integrities) {
+	return [...held]
+		.sort(([a], [b]) => (a < b ? -1 : 1))
+		.flatMap(([name, version]) => {
+			const recorded = integrities.get(name);
+			if (typeof recorded !== "string") return [`${name}: the app records no integrity of it`];
+			const entry = own(lock.packages).get(`${name}@${version}`);
+			if (entry === undefined) return [];
+			const integrity = own(own(entry).get("resolution")).get("integrity");
+			return integrity === recorded
+				? []
+				: [`${name}: integrity ${integrity}, not ${recorded} as the release recorded`];
+		});
 }
 
 /**
@@ -352,6 +372,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
 			outside.modules,
 			Object.fromEntries(own(own(workspace).get("overrides"))),
 			outside.registries,
+			outside.held,
 		);
 		for (const line of found) process.stdout.write(`${line}\n`);
 		process.stdout.write(

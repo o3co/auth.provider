@@ -8467,7 +8467,7 @@ function recordRefusals(lock, record, overrides, references, registries) {
 * version, why either comes from other than its registry in `registries` (the default origin and
 * each scope's), and why it was resolved with other overrides; none where it is as recorded.
 */
-function refusals(text, records, overrides, registries) {
+function refusals(text, records, overrides, registries, integrities) {
 	const lock = lockOf(text);
 	const versions = (map) => new Map([...own(map)].map(([name, version]) => [name, String(version)]));
 	const held = versions(overrides);
@@ -8476,8 +8476,23 @@ function refusals(text, records, overrides, registries) {
 	return [
 		...sameMap(resolvedWith, held) ? [] : ["the lockfile was resolved with other overrides than the app's"],
 		...records.flatMap((record) => recordRefusals(lock, record, held, references, registries)),
-		...[...held].sort(([a], [b]) => a < b ? -1 : 1).flatMap(([name, version]) => oneCopyRefusals(lock, name, String(version), references, registries))
+		...[...held].sort(([a], [b]) => a < b ? -1 : 1).flatMap(([name, version]) => oneCopyRefusals(lock, name, String(version), references, registries)),
+		...integrities === void 0 ? [] : heldIntegrityRefusals(lock, held, own(integrities))
 	];
+}
+/**
+* Why a package the overrides hold is not the tarball the release recorded: its entry at the held
+* version (the package, not a resolution with peers) holds another integrity, or none is recorded.
+*/
+function heldIntegrityRefusals(lock, held, integrities) {
+	return [...held].sort(([a], [b]) => a < b ? -1 : 1).flatMap(([name, version]) => {
+		const recorded = integrities.get(name);
+		if (typeof recorded !== "string") return [`${name}: the app records no integrity of it`];
+		const entry = own(lock.packages).get(`${name}@${version}`);
+		if (entry === void 0) return [];
+		const integrity = own(own(entry).get("resolution")).get("integrity");
+		return integrity === recorded ? [] : [`${name}: integrity ${integrity}, not ${recorded} as the release recorded`];
+	});
 }
 /**
 * The version and integrity a project's lockfile resolves `name` to, as its root importer depends
@@ -8505,7 +8520,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
 	try {
 		const workspace = (0, import_dist.parseDocument)(read("pnpm-workspace.yaml"), { merge: false }).toJS({ maxAliasCount: 0 });
 		const outside = JSON.parse(read("outside-modules.json"));
-		const found = refusals(read("pnpm-lock.yaml"), outside.modules, Object.fromEntries(own(own(workspace).get("overrides"))), outside.registries);
+		const found = refusals(read("pnpm-lock.yaml"), outside.modules, Object.fromEntries(own(own(workspace).get("overrides"))), outside.registries, outside.held);
 		for (const line of found) process.stdout.write(`${line}\n`);
 		process.stdout.write(found.length === 0 ? "check:outside: ok\n" : `check:outside: ${found.length} refusal(s)\n`);
 		process.exitCode = found.length === 0 ? 0 : 1;
