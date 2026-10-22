@@ -10,7 +10,7 @@
 - What an amr value means (whoever declares it).
 
 ## Offers
-- `login(request, facts, done?, from?)`: opened with the session and cookies, or held with the gate's name, answer and cookies.
+- `login(request, facts, done?, from?)`: opened with the session and cookies, held with the gate's name, answer and cookies, or refused with the gate's name and no cookies.
 - `resume(request, facts, after, done?, from?)`: the same answer, from the gates after the one named `after`; expired, with no gate run, at or past `from`'s deadline.
 - `achievable(amr)`: whether the declared amr, taken together, include every one given.
 - `returnAllowed(target)`: whether a login may send the browser back to this target.
@@ -35,5 +35,6 @@
 
 ## Vocabulary
 - held: a gate stopped the login, kept `done` and `from`, and answers the client itself.
+- refused: a gate ended the login: no session opens, and the caller answers with its own failure, as for wrong credentials.
 - done: what the caller answers once the session opens, carried across gates.
 - from: the caller to tell once a held login opens, a carry that only that caller reads, and an optional deadline on `kernel`'s clock.
