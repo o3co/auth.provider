@@ -57,7 +57,8 @@ it("fills no mark for a factor whose binding ends as a duplicate, read before it
 		if (key.startsWith("u-")) filled ??= await app.get(witnessBackfill).settle("bob");
 	};
 	expect(await bindCard("bob", "c1")).toEqual({ kind: "duplicate" });
-	expect(filled).toBe("none");
+	// Read while its claim is not yet made: written, none claimed.
+	expect(filled).toBe("unclaimed");
 	expect(witness.marks.has("bob")).toBe(false);
 });
 
@@ -81,7 +82,8 @@ it("fills no mark for a factor not yet claimed, whose value another then binds f
 		expect(await ann()).toMatchObject({ kind: "bound" });
 	};
 	expect(await bob()).toEqual({ kind: "duplicate" });
-	expect(filled).toBe("none");
+	// Read while its claim is not yet made: written, none claimed.
+	expect(filled).toBe("unclaimed");
 	expect(witness.marks.has("bob")).toBe(false);
 	expect(witness.marks.has("ann")).toBe(true);
 });
@@ -189,7 +191,7 @@ it("clears the mark after a reset's removal, and answers unavailable while it ca
 	expect((await decided.clear("jo")).count).toBe(2);
 	expect(witness.marks.has("jo")).toBe(false);
 	await bindCode("jo");
-	witness.failing.clear = 1;
+	witness.failing.markedWith = 1;
 	await expect(decided.clear("jo")).rejects.toSatisfy(isUnavailable);
 	expect([await counted("jo"), witness.marks.has("jo")]).toEqual([0, true]);
 	await expect(decided.asks("jo")).rejects.toSatisfy(isUnavailable);

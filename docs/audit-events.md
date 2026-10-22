@@ -118,7 +118,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `mfa.enrollment_inconsistent` | `at` | the witness marks a subject holding no counting factor, so its store may have lost them; `at` is the decision answered unavailable: `login`, `binding` or `credentials` |
+| `mfa.enrollment_inconsistent` | `at` | the witness marks a subject holding no counting factor, so its store may have lost them; `at` is the decision answered unavailable: `login`, `binding`, `credentials`, or `reset` (after a reset, the mark not sure to be its to remove) |
 
 ## @mod/passkey-registration
 
