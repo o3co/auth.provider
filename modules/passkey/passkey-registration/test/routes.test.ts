@@ -48,7 +48,7 @@ const credential = {
 /** The routes over a `registrations` that answers `state`, and records what it was asked. */
 async function serve(section: Record<string, unknown> = {}) {
 	const state = {
-		answer: { kind: "registered", credential } as Registered,
+		answer: { kind: "registered", credential, challengedAt: Date.now() } as Registered,
 		down: false,
 		/** Revokes the subject as its registration is written, as a reset racing it would. */
 		revokeWhileWriting: false,
@@ -180,7 +180,11 @@ describe("registration from a session", () => {
 		});
 		expect(asked).toEqual([["register", "sam", response, "laptop", expect.any(Function)]]);
 		const { transports: _, ...bare } = credential;
-		state.answer = { kind: "registered", credential: { ...bare, backedUp: false } };
+		state.answer = {
+			kind: "registered",
+			credential: { ...bare, backedUp: false },
+			challengedAt: Date.now(),
+		};
 		expect((await post("verify", { response })).body).toEqual({
 			credentialId: "Y3JlZA",
 			backedUp: false,

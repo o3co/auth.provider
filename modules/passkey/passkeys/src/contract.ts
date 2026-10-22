@@ -55,16 +55,16 @@ export interface Registrations {
 				readonly kind: "registered";
 				readonly credential: Credential;
 				/** When the challenge it answered was made, on `kernel`'s clock. */
-				readonly challengedAt?: number;
+				readonly challengedAt: number;
 		  }
 		| { readonly kind: "refused"; readonly reason: RegistrationRefusal }
 	>;
 	/** The subject's passkeys, as its holder lists them. */
-	listed?(subject: string): Promise<readonly RegisteredPasskey[]>;
+	listed(subject: string): Promise<readonly RegisteredPasskey[]>;
 	/** Names one of the subject's passkeys; none of them by that id is `unknown`. */
-	renamed?(subject: string, id: string, nickname: string): Promise<"renamed" | "unknown">;
+	renamed(subject: string, id: string, nickname: string): Promise<"renamed" | "unknown">;
 	/** Ends one of the subject's passkeys: `removed` when this call ended it, `empty` when the subject holds none after. */
-	removed?(
+	removed(
 		subject: string,
 		id: string,
 	): Promise<{ readonly removed: boolean; readonly empty: boolean }>;

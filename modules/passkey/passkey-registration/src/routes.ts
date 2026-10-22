@@ -1,7 +1,7 @@
 import { type Audit, declaredAudit } from "@mod/audit";
 import { csrfChecked } from "@mod/csrf";
 import { type HttpRequest, type HttpResponse, jsonAnswer, type Route, use } from "@mod/http";
-import { isUnavailable, Unavailable } from "@mod/kernel";
+import { isUnavailable } from "@mod/kernel";
 import { isLabel } from "@mod/labels";
 import type { RegistrationRefusal, Registrations } from "@mod/passkeys";
 import { requestsPerSource, type Window } from "@mod/rate-limit";
@@ -52,12 +52,6 @@ type Handler = (request: HttpRequest, subject: string) => Promise<HttpResponse>;
 const idIn = (request: HttpRequest) => {
 	const id = request.json?.id;
 	return typeof id === "string" && id !== "" ? id : undefined;
-};
-
-/** The optional methods of `registrations` this package asks; a provider without one cannot tell. */
-const asked = <T>(method: T | undefined): T => {
-	if (method === undefined) throw new Unavailable("passkeys");
-	return method;
 };
 
 export function registrationRoutes(p: RouteParts): {
@@ -132,7 +126,7 @@ export function registrationRoutes(p: RouteParts): {
 		changesState: false,
 		path: "/oauth/webauthn/registrations",
 		handle: entered(async (_request, subject) => {
-			const listed = await asked(p.registrations.listed)(subject);
+			const listed = await p.registrations.listed(subject);
 			return jsonAnswer(200, {
 				passkeys: listed.map((passkey) => ({
 					credentialId: passkey.id,
@@ -151,7 +145,7 @@ export function registrationRoutes(p: RouteParts): {
 		const { nickname } = request.json ?? {};
 		if (id === undefined) return invalid("id must be a credential id");
 		if (typeof nickname !== "string" || !isLabel(nickname)) return invalid("invalid nickname");
-		if ((await asked(p.registrations.renamed)(subject, id, nickname)) === "unknown") {
+		if ((await p.registrations.renamed(subject, id, nickname)) === "unknown") {
 			return jsonAnswer(404, { error: "not_found" });
 		}
 		audited.record("passkey.renamed", { subject, attributes: sourced(request) });
@@ -161,7 +155,7 @@ export function registrationRoutes(p: RouteParts): {
 	const remove = post("/oauth/webauthn/registrations/remove", async (request, subject) => {
 		const id = idIn(request);
 		if (id === undefined) return invalid("id must be a credential id");
-		const removed = await asked(p.registrations.removed)(subject, id);
+		const removed = await p.registrations.removed(subject, id);
 		if (!removed.removed) return jsonAnswer(404, { error: "not_found" });
 		audited.record("passkey.removed", { subject, attributes: sourced(request) });
 		return jsonAnswer(200, { last: removed.empty });
