@@ -15,7 +15,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import { isLabel } from "@mod/labels";
 import { logins } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
-import { factorBinding } from "@mod/mfa-binding";
+import { type FactorBinding, factorBinding } from "@mod/mfa-binding";
 import * as extensions from "@mod/mfa-extensions";
 import {
 	type Enrolled,
@@ -26,8 +26,8 @@ import {
 	type Witnessing,
 	witnessing,
 } from "@mod/mfa-extensions";
-import { factorManaging } from "@mod/mfa-managing";
-import { factorReading } from "@mod/mfa-reading";
+import { type FactorManaging, factorManaging } from "@mod/mfa-managing";
+import { type FactorReading, factorReading } from "@mod/mfa-reading";
 import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { seal } from "@mod/seal";
 import sealModule from "@mod/seal/module";
@@ -36,7 +36,7 @@ import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import * as offered from "../src/contract.ts";
-import { enforcers, factors, proofSteps } from "../src/contract.ts";
+import { enforcers, proofSteps } from "../src/contract.ts";
 import mfaModule from "../src/module.ts";
 import { claimKeyOf, listKeyOf, storedList } from "../src/records/records.ts";
 import { section } from "../src/section.ts";
@@ -254,7 +254,12 @@ async function serve(
 		runtime,
 	});
 	stop = () => app.stop(1000);
-	const decided = app.get(factors);
+	// mfa's three faces, as one for these tests.
+	const decided: FactorReading & FactorBinding & FactorManaging = {
+		...app.get(factorReading),
+		...app.get(factorBinding),
+		...app.get(factorManaging),
+	};
 	/** A code binding begun and proved for the subject, not yet bound. */
 	const provedCode = async (subject: string, passed?: string) => {
 		const begun = await decided.begin(subject, "code", passed, "t");
@@ -1224,15 +1229,15 @@ describe("the extension points mfa-extensions offers", () => {
 	});
 });
 
-it("provides reading, binding and managing as one implementation, the one factors is, in each app", async () => {
-	const { app, decided } = await serve();
-	expect(app.get(factorReading)).toBe(decided);
-	expect(app.get(factorBinding)).toBe(decided);
-	expect(app.get(factorManaging)).toBe(decided);
+it("provides reading, binding and managing as one implementation in each app", async () => {
+	const { app } = await serve();
+	const reading = app.get(factorReading);
+	expect(app.get(factorBinding)).toBe(reading);
+	expect(app.get(factorManaging)).toBe(reading);
 	// The later serve takes over the stop after each test: this app is stopped here.
 	await app.stop(1000);
 	const other = await serve();
-	expect(other.app.get(factorReading)).not.toBe(decided);
+	expect(other.app.get(factorReading)).not.toBe(reading);
 });
 
 describe("an enrollment witness", () => {
