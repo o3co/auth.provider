@@ -5,6 +5,8 @@ import { rolldown } from "rolldown";
 /** The check as written, and as bundled with `yaml` and `semver` inside: the file an app runs. */
 export const sourceFile = join(import.meta.dirname, "..", "check-outside.mjs");
 export const bundledFile = join(import.meta.dirname, "..", "check-outside.bundled.mjs");
+/** Where the bundle's paths are told from, whatever directory it is made in: the package's own. */
+const packageDir = join(import.meta.dirname, "..", "..", "..");
 
 /** Said at the top of the bundle: generated, so neither linted, formatted nor its imports sorted. */
 const generatedHeader = [
@@ -16,7 +18,12 @@ const generatedHeader = [
 
 /** The bundle of the check: its imports of `yaml` and `semver` taken in, node's builtins left to node. */
 export async function bundledCheck(): Promise<string> {
-	const build = await rolldown({ input: sourceFile, platform: "node", logLevel: "silent" });
+	const build = await rolldown({
+		input: sourceFile,
+		cwd: packageDir,
+		platform: "node",
+		logLevel: "silent",
+	});
 	const { output } = await build.generate({ format: "esm", minify: false });
 	await build.close();
 	const [chunk] = output;

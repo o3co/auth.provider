@@ -404,9 +404,22 @@ describe("the script an app runs, the file as it ships", () => {
 		expect(run(appWith(appLock))).toEqual({ code: 0, out: "check:outside: ok\n" });
 	});
 
-	it("is the bundle of the module's own file, as write-check makes it", async () => {
+	it("is the bundle of the module's own file, as write-check makes it, from wherever it is made", async () => {
 		expect(readFileSync(outsideLock.script, "utf8")).toBe(await bundledCheck());
-	});
+		const made = (cwd: string) =>
+			execFileSync(
+				"node",
+				[
+					"--input-type=module",
+					"-e",
+					`const { bundledCheck } = await import(${JSON.stringify(join(import.meta.dirname, "bundle.ts"))}); process.stdout.write(await bundledCheck());`,
+				],
+				{ cwd, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 },
+			);
+		const repository = join(import.meta.dirname, "..", "..", "..", "..", "..", "..");
+		expect(made(repository)).toBe(readFileSync(outsideLock.script, "utf8"));
+		expect(made(tmpdir())).toBe(readFileSync(outsideLock.script, "utf8"));
+	}, 120_000);
 
 	it("still refuses where the app's install holds a yaml and a semver of another's making", () => {
 		const lock = changed(
