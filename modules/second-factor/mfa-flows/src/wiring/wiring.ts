@@ -1,7 +1,7 @@
 import { audit } from "@mod/audit";
 import type { BuildContext } from "@mod/kernel";
 import { logins } from "@mod/login-gates";
-import { factors } from "@mod/mfa";
+import { factorReading } from "@mod/mfa-reading";
 import { type LockoutPolicy, lockouts } from "@mod/rate-limit";
 import { longestRecentMs, sessions } from "@mod/session";
 import { subjectRevocation } from "@mod/subject-revocation";
@@ -45,7 +45,7 @@ export async function partsIn(c: BuildContext<Settings>) {
 /** Pulls the contracts and gives each internal module only the interfaces it uses. */
 export async function handlersOver(c: BuildContext<Settings>, policy: LockoutPolicy) {
 	const shared = {
-		factors: await c.get(factors),
+		factors: await c.get(factorReading),
 		sessions: await c.get(sessions),
 		revocation: await c.get(subjectRevocation),
 		transactions: await transactionsIn(c),

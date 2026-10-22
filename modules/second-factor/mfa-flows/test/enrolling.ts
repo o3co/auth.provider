@@ -1,6 +1,7 @@
 import { jsonAnswer } from "@mod/http";
 import { defineModule } from "@mod/kernel";
-import { factors } from "@mod/mfa";
+import { factorBinding } from "@mod/mfa-binding";
+import { factorManaging } from "@mod/mfa-managing";
 import { sessions } from "@mod/session";
 import { type EnrollmentFlow, enrollmentFlow, flowParts } from "../src/contract.ts";
 
@@ -11,7 +12,8 @@ import { type EnrollmentFlow, enrollmentFlow, flowParts } from "../src/contract.
  */
 export const testEnrollment = defineModule({ name: "test-enrollment" }, (m) => [
 	m.contribute(enrollmentFlow).by(async (c): Promise<EnrollmentFlow> => {
-		const decided = await c.get(factors);
+		const decided = await c.get(factorBinding);
+		const managed = await c.get(factorManaging);
 		const open = await c.get(sessions);
 		const { transactions, askedFrom, answers, requests } = await c.get(flowParts);
 		const pendingOf = (held: unknown) => (held as { pending?: string } | undefined)?.pending;
@@ -61,7 +63,7 @@ export const testEnrollment = defineModule({ name: "test-enrollment" }, (m) => [
 				const bound = await decided.bind(t.subject, pending, proved.state, label, askedFrom(t));
 				if (bound.kind !== "bound") return jsonAnswer(400, { error: bound.kind });
 				// The codes are written by the reissue, as the enrollment writes them.
-				const reissued = bound.codesDue ? await decided.reissue(t.subject, bound.fence) : undefined;
+				const reissued = bound.codesDue ? await managed.reissue(t.subject, bound.fence) : undefined;
 				const codes = reissued?.kind === "reissued" ? { recovery_codes: reissued.codes } : {};
 				const body = { factor: bound.factor, ...codes };
 				return jsonAnswer(200, body, { cookies: [transactions.cleared()] });

@@ -5,7 +5,7 @@ import type { HttpRequest, HttpResponse } from "@mod/http";
 import { testRequest } from "@mod/http/testing";
 import { isUnavailable, Unavailable } from "@mod/kernel";
 import { recordingLog } from "@mod/kernel/testing";
-import type { Challenged, Factors } from "@mod/mfa";
+import type { Challenged, FactorReading } from "@mod/mfa-reading";
 import { expect, it } from "vitest";
 import { memoryTransactions } from "../../../test/stores.ts";
 import { transactionsOver } from "../../transactions/transactions.ts";
@@ -52,7 +52,7 @@ async function proved() {
 			sealed: "one",
 		}),
 	};
-	const factors: Pick<Factors, "asks" | "guessable" | "held" | "challenge" | "prove"> = {
+	const factors: Pick<FactorReading, "asks" | "guessable" | "held" | "challenge" | "prove"> = {
 		asks: async () => "proof",
 		guessable: async (_subject, factor) => (["mail", "key"].includes(factor) ? false : undefined),
 		held: async () => [],

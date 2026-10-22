@@ -2,8 +2,8 @@ import { listening } from "@mod/http";
 import { testRequest } from "@mod/http/testing";
 import { BootRefused, defineModule } from "@mod/kernel";
 import { openedAfterHold } from "@mod/login-gates";
-import { factors } from "@mod/mfa";
 import { type Enrolled, factorKinds } from "@mod/mfa-extensions";
+import { factorManaging } from "@mod/mfa-managing";
 import { sessions } from "@mod/session";
 import { subjectRevocation } from "@mod/subject-revocation";
 import { afterEach, describe, expect, it } from "vitest";
@@ -791,7 +791,7 @@ describe("mfa under races and misuse", () => {
 		const codes = done.body.recovery_codes as string[];
 		const one = await s.heldLogin("rex");
 		during.backup = async () => {
-			const decided = s.app.get(factors);
+			const decided = s.app.get(factorManaging);
 			const reissued = await decided.reissue("rex", await decided.fenceOf("rex"));
 			expect(reissued.kind).toBe("reissued");
 		};

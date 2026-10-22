@@ -2,7 +2,7 @@ import type { Audit } from "@mod/audit";
 import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import { isUnavailable, type Log } from "@mod/kernel";
 import type { LoginGate, Logins } from "@mod/login-gates";
-import type { Factors } from "@mod/mfa";
+import type { FactorReading } from "@mod/mfa-reading";
 import type { LockoutPolicy, Lockouts } from "@mod/rate-limit";
 import type { Sessions } from "@mod/session";
 import type { SubjectRevocation } from "@mod/subject-revocation";
@@ -26,7 +26,7 @@ import { askedFrom, type Transactions } from "../transactions/transactions.ts";
 type Proved = { readonly amr: readonly string[] };
 
 export interface GateParts {
-	readonly factors: Pick<Factors, "asks">;
+	readonly factors: Pick<FactorReading, "asks">;
 	readonly transactions: Transactions;
 }
 
@@ -130,7 +130,7 @@ export function resumeOver(p: ResumeParts) {
 }
 
 export interface ProofParts extends ResumeParts {
-	readonly factors: Pick<Factors, "guessable" | "held" | "challenge" | "prove">;
+	readonly factors: Pick<FactorReading, "guessable" | "held" | "challenge" | "prove">;
 	readonly sessions: Pick<Sessions, "enter" | "raise" | "close">;
 	readonly lockouts: Pick<Lockouts, "reserve" | "succeeded" | "abandoned">;
 	readonly policy: LockoutPolicy;

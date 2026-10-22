@@ -2597,6 +2597,9 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -2619,12 +2622,18 @@ importers:
       '@mod/login-attributes':
         specifier: workspace:*
         version: link:../../identity/login-attributes
+      '@mod/mfa-binding':
+        specifier: workspace:*
+        version: link:../mfa-binding
       '@mod/mfa-binding-proof':
         specifier: workspace:*
         version: link:../mfa-binding-proof
       '@mod/mfa-entry':
         specifier: workspace:*
         version: link:../mfa-entry
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
       '@mod/mfa-revocation':
         specifier: workspace:*
         version: link:../mfa-revocation
