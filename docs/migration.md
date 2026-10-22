@@ -843,6 +843,7 @@ What changes from 0.18 to 0.19. Coming from an earlier release candidate, read t
   - An app composed by hand that serves passkey logins or registration (`webauthn-login`, `passkey-registration`) composes `passkeys` beside `webauthn`; without it, boot is refused for the `passkeys` or `registrations` it lacks. `combinations` and `create-app` add it.
   - The passkeys kept are read as they are: `webauthn-store` keeps its name and its spaces, and the records keep their keys.
   - A removed passkey's record is kept stripped to its subject. While 0.18 and 0.19 hosts run side by side, a 0.18 host reads it as a broken record: an assertion naming that passkey answers `503` there, and the passkey is gone either way once every host runs 0.19.
+  - A passkey being registered is kept pending until its registration ends, in a record a 0.18 host reads as broken: during the upgrade, an assertion there naming a passkey a 0.19 host is registering answers `503`. A registration a 0.18 host makes is usable on both.
   - `passkey-registration` comes wherever `passkeys` and a session are composed. An app whose composition brought it only because `mfa-webauthn` brought `webauthn`, with no `passkeys`, no longer serves the passkey registration routes; one that composes `passkeys` and a session still does, with or without a passkey login.
 
 ## Operational notes
