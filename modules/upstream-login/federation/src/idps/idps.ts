@@ -87,9 +87,10 @@ export async function openIdps(parts: Parts) {
 	const types = new Map(parts.types.map((type) => [type.type, type]));
 	const idps = new Map<string, Idp>();
 	const refusals: Refusal[] = [];
-	for (const [name, { type, "upstream-amr": upstreamAmr, ...rest }] of Object.entries(
-		parts.settings,
-	)) {
+	for (const [
+		name,
+		{ type, "upstream-amr": upstreamAmr, "fresh-login-allowance": freshSeconds, ...rest },
+	] of Object.entries(parts.settings)) {
 		const where = `federation.idps.${name}`;
 		const idpType = types.get(type);
 		if (!idpType) {
@@ -126,6 +127,8 @@ export async function openIdps(parts: Parts) {
 			formPost,
 			redirectUri,
 			upstreamAmr: new Map(Object.entries(upstreamAmr)),
+			freshLoginAllowanceMs:
+				freshSeconds === undefined ? (upstream.clockSkewMs ?? 0) : freshSeconds * 1000,
 		});
 	}
 	return { idps: idps as ReadonlyMap<string, Idp>, refusals };

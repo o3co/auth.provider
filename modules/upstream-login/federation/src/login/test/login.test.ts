@@ -10,8 +10,8 @@ const startedAt = 1_800_000_000_500;
 const startSecond = 1_800_000_000_000;
 const skewMs = 30_000;
 
-/** The login continuation over stand-ins, keeping the facts it hands login-gates. */
-function loginOf(upstreamAmr: ReadonlyMap<string, string> = new Map()) {
+/** The login continuation over stand-ins, keeping the facts it hands login-gates; the IdP's fresh login allowance its clock allowance unless given. */
+function loginOf(upstreamAmr: ReadonlyMap<string, string> = new Map(), freshMs = skewMs) {
 	const handed: LoginFacts[] = [];
 	const login = loginWith({
 		logins: {
@@ -35,7 +35,11 @@ function loginOf(upstreamAmr: ReadonlyMap<string, string> = new Map()) {
 	const completing = (upstreamLogin: UpstreamLogin): Completing => ({
 		request: testRequest(),
 		name: "corp",
-		idp: { upstreamAmr, upstream: { clockSkewMs: skewMs } } as unknown as Idp,
+		idp: {
+			upstreamAmr,
+			upstream: { clockSkewMs: skewMs },
+			freshLoginAllowanceMs: freshMs,
+		} as unknown as Idp,
 		upstreamLogin,
 		trip: { nonce: "n", verifier: "v", startedAt },
 		cleared: [],
@@ -68,6 +72,14 @@ it("reports a login the upstream says came within its clock allowance before the
 		startedAt,
 		startSecond - skewMs - 1000,
 	]);
+});
+
+it("moves a login to the start by the IdP's fresh login allowance, not its clock allowance, where the two differ", async () => {
+	const l = loginOf(new Map(), 5000);
+	// Within the type's 30 s, but not the 5 s set: it stays as said, asked for no fresh login or not.
+	await l.complete({ subject: "u-1", amr: [], authenticatedAt: startSecond - 10_000 });
+	await l.complete({ subject: "u-1", amr: [], authenticatedAt: startSecond - 5000 });
+	expect(l.handed.map((facts) => facts.authenticatedAt)).toEqual([startSecond - 10_000, startedAt]);
 });
 
 it("reports a login the upstream says came after the start as said", async () => {
