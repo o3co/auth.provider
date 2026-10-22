@@ -153,6 +153,8 @@ export function handoffWith(parts: Parts): Handoff {
 				deadline,
 				after: async (outcome) => {
 					if (outcome.kind === "opened") return tell(outcome.session, idp, tokens);
+					// A refused login opens no session, now or later: nothing is kept to hand on.
+					if (outcome.kind === "refused") return;
 					const held = { idp, subject, heldAt: parts.clock.now(), tokens };
 					const sealed = parts.seal.seal(JSON.stringify(held), contextOf(carry));
 					const saved = await parts.held.save(carry, stored({ format: 1, sealed }), lifetimeMs);

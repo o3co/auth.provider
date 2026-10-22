@@ -22,6 +22,7 @@
 - Receivers are told in name order. One that throws is logged by name and error kind (`upstream-handoff.receiver_failed`); the others are still told.
 - A login that opens at once hands its tokens over at once.
 - A held login's tokens are sealed with its IdP and local subject, under a carry of 256 random bits, kept for the caller's lifetime; if they cannot be kept, that is unavailable.
+- A login a gate refused keeps nothing: it opens no session, now or later.
 - The deadline is that lifetime on from the hold, before the kept tokens are gone.
 - The kept tokens are taken once, in one rewrite, then removed after telling.
 - They go only to a session of the subject that logged in (else `upstream-handoff.held_login_refused`), their lifetime counted from the hand-over.
