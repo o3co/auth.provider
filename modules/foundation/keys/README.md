@@ -9,7 +9,7 @@
 
 ## Offers
 - `keys`: sign claims under a `typ` (adding the `kid`), and verify a token, answering valid with frozen claims or why not (`malformed`, `typ`, `kid_unknown`, `kid_expired`, `signature`). Either refuses the access token type (`at+jwt` in any case, `application/` and media type parameters too) as the caller's TypeError.
-- `accessTokenSigning`: sign claims as an access token (`at+jwt`, adding the `kid`) and verify one, under the ring and answers of `keys`: the one way to either, taken by the module `tokens` alone (any other taking it refuses boot; it binds the modules of a trusted composition, not code that imports `keys` itself).
+- `accessTokenSigning`: sign claims as an access token (`at+jwt`, adding the `kid`) and verify one, under the ring and answers of `keys`: the one way to either, taken by the module `tokens` alone (any other taking it refuses boot; it binds the modules of a trusted composition, not code that imports `keys` itself), and imported by `tokens` alone, as the manifest's `takenBy` declares.
 - Whether signing is asymmetric, the `alg` it signs with, and the path of the public key set, a route contributed to `http` that answers its listed origins.
 - `publicJwk`: a JWK the platform reads as a public key, kept as given.
 - `publicPem`: a public key written as PEM.

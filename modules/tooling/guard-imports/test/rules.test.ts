@@ -1,0 +1,609 @@
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import { importViolations, type Rules } from "../src/contract.ts";
+import type { Pkg } from "../src/workspace.ts";
+import { budget, pkg } from "./workspace.ts";
+
+// A fixture with exports has its contract surface built by the type checker, which is slow when the machine is busy.
+vi.setConfig({ testTimeout: 60_000 });
+
+const check = (packages: Pkg[], rules: Rules) => importViolations(packages, rules);
+const rules = (packages: Pkg[]) => check(packages, budget).map((v) => v.rule.split(" ")[0]);
+
+describe("guard-imports", () => {
+	// The first syntax tree loads the parser, which under a full parallel run takes longer than a test may.
+	beforeAll(() => {
+		check([pkg("@t/warm", { "src/contract.ts": "export const n = 1;\n" })], budget);
+	}, 60_000);
+
+	it("G10 refuses a lower kind depending on a higher one, and an unknown kind", () => {
+		// Without exports, so no contract surface is built: these rules read only kinds and dependencies.
+		const dep = (name: string) => ({ dependencies: { [name]: "workspace:*" } });
+		const feature = pkg("@x/feature", { "src/contract.ts": "export const f = 1;\n" }, {});
+		const base = pkg(
+			"@x/base",
+			{ "src/contract.ts": "export const b = 1;\n" },
+			dep("@x/feature"),
+			"foundation",
+		);
+		expect(rules([feature, base])).toContain("G10");
+		const upward = pkg("@x/up", { "src/contract.ts": "export const u = 1;\n" }, dep("@x/base2"));
+		const base2 = pkg("@x/base2", { "src/contract.ts": "export const b = 1;\n" }, {}, "foundation");
+		expect(rules([upward, base2])).not.toContain("G10");
+		const stray = pkg("@x/stray", { "src/contract.ts": "export const s = 1;\n" }, {}, "unknown");
+		expect(rules([stray])).toContain("G10");
+	});
+
+	it("passes a clean pair", () => {
+		const a = pkg("@t/a", { "src/contract.ts": "export const a = 1;\n" });
+		const b = pkg(
+			"@t/b",
+			{ "src/contract.ts": 'import { a } from "@t/a";\nexport const b = a;\n' },
+			{ exports: { ".": "./src/contract.ts" }, dependencies: { "@t/a": "workspace:*" } },
+		);
+		expect(check([a, b], budget)).toEqual([]);
+	});
+
+	it("finds cycles and undeclared runtime imports", () => {
+		const a = pkg(
+			"@t/c1",
+			{ "src/contract.ts": 'export { x } from "@t/c2";\n' },
+			{
+				exports: { ".": "./src/contract.ts", "./internal": "./src/x.ts" },
+				dependencies: { "@t/c2": "*" },
+			},
+		);
+		const b = pkg(
+			"@t/c2",
+			{
+				"src/contract.ts":
+					'import type { y } from "@t/c1";\nimport z from "lib";\nexport const x = z;\n',
+			},
+			{ exports: { ".": "./src/contract.ts" }, devDependencies: { "@t/c1": "*" } },
+		);
+		expect(rules([a, b]).sort()).toEqual(["G1", "G8"]);
+	});
+
+	it("keeps assembly definitions and contract tests out of product code only", () => {
+		const m = pkg(
+			"@t/m",
+			{
+				"src/module.ts":
+					'import other from "@t/o/module";\nimport { suite } from "@t/o/testing";\nexport default [other, suite];\n',
+				"test/m.test.ts": 'import other from "@t/o/module";\nexport default other;\n',
+			},
+			{ exports: { "./module": "./src/module.ts" }, dependencies: { "@t/o": "*" } },
+		);
+		const o = pkg("@t/o", { "src/contract.ts": "export const o = 1;\n" });
+		expect(rules([m, o]).sort()).toEqual(["G3", "G4"]);
+	});
+
+	it("checks a published contract test suite's imports as shipped code", () => {
+		const p = pkg(
+			"@t/suite",
+			{
+				"src/contract.ts": "export const a = 1;\n",
+				"src/testing.ts": 'import { x } from "undeclared";\nexport const t = x;\n',
+			},
+			{ exports: { ".": "./src/contract.ts", "./testing": "./src/testing.ts" } },
+		);
+		const violations = check([p], budget);
+		expect(violations.map((v) => `${v.rule.split(" ")[0]} ${v.detail}`)).toEqual(["G8 undeclared"]);
+	});
+
+	it("G14 keeps a check package that others build on free of the product's modules", () => {
+		// Without exports, so no contract surface is built: these rules read only kinds and dependencies.
+		const deps = (...names: string[]) => ({
+			dependencies: Object.fromEntries(names.map((n) => [n, "workspace:*"])),
+		});
+		const feature = pkg("@t/feature", { "src/contract.ts": "export const n = 1;\n" }, {});
+		const base = pkg(
+			"@t/base",
+			{ "src/contract.ts": "export const n = 1;\n" },
+			deps("@t/feature"),
+			"verification",
+		);
+		const area = pkg(
+			"@t/area",
+			{ "src/contract.ts": "export const n = 1;\n" },
+			deps("@t/base", "@t/feature"),
+			"verification",
+		);
+		expect(
+			check([feature, base, area], budget).map(
+				(v) => `${v.rule.split(" ")[0]} ${v.where} ${v.detail}`,
+			),
+		).toEqual(["G14 @t/base @t/feature"]);
+		const alone = pkg(
+			"@t/alone",
+			{ "src/contract.ts": "export const n = 1;\n" },
+			deps("@t/feature"),
+			"verification",
+		);
+		expect(rules([feature, alone])).not.toContain("G14");
+	});
+
+	/** Packages for the kind rules: a capability, a feature on it, wiring over both, and tests reaching up. */
+	const kinds = () => {
+		const deps = (...names: string[]) => ({
+			dependencies: Object.fromEntries(names.map((n) => [n, "workspace:*"])),
+		});
+		const capability = pkg(
+			"@t/cap",
+			{ "src/contract.ts": "export const n = 1;\n" },
+			{},
+			"capability",
+		);
+		const feature = pkg("@t/feat", { "src/contract.ts": "export const n = 1;\n" }, deps("@t/cap"));
+		const wired = pkg(
+			"@t/wired",
+			{ "src/contract.ts": "export const n = 1;\n" },
+			deps("@t/cap", "@t/feat"),
+			"wiring",
+		);
+		const tested = pkg(
+			"@t/tested",
+			{ "src/contract.ts": "export const n = 1;\n" },
+			{ devDependencies: { "@t/wired": "workspace:*" } },
+		);
+		const shipped = pkg(
+			"@t/shipped",
+			{ "src/contract.ts": "export const n = 1;\n" },
+			deps("@t/wired"),
+		);
+		const testedUp = pkg(
+			"@t/tested-up",
+			{ "src/contract.ts": "export const n = 1;\n" },
+			{ devDependencies: { "@t/tool": "workspace:*" } },
+		);
+		const tool = pkg("@t/tool", { "src/contract.ts": "export const n = 1;\n" }, {}, "verification");
+		const standIn = pkg(
+			"@t/stand-in",
+			{
+				"src/contract.ts": "export const n = 1;\n",
+				"test/x.test.ts": 'import { m } from "@t/cap/testing";\nexport const k = m;\n',
+			},
+			{ devDependencies: { "@t/cap": "workspace:*" } },
+		);
+		const reaching = pkg(
+			"@t/reaching",
+			{
+				"src/contract.ts": "export const n = 1;\n",
+				"test/x.test.ts": 'import { m } from "@t/cap";\nexport const k = m;\n',
+			},
+			{ devDependencies: { "@t/cap": "workspace:*" } },
+		);
+		return { capability, feature, wired, tested, shipped, testedUp, tool, standIn, reaching };
+	};
+
+	it("G16 refuses a feature depending on a capability, save its tests using the capability's stand-in", () => {
+		const { capability, feature, wired, standIn, reaching } = kinds();
+		expect(
+			check([capability, feature, wired], budget).map(
+				(v) => `${v.rule.split(" ")[0]} ${v.where} ${v.detail}`,
+			),
+		).toEqual(["G16 @t/feat @t/cap"]);
+		const g16 = (packages: Pkg[]) =>
+			check(packages, budget)
+				.filter((v) => v.rule.startsWith("G16"))
+				.map((v) => v.where);
+		expect(g16([capability, standIn])).toEqual([]);
+		expect(g16([capability, reaching])).toEqual(["@t/reaching"]);
+	});
+
+	it("G16 refuses a feature depending on what declares forWiring, as on a capability, save its tests using the stand-in", () => {
+		const files = {
+			"src/contract.ts": "export const s = 1;\n",
+			"src/testing.ts": "export const t = 1;\n",
+		};
+		const exports = { ".": "./src/contract.ts", "./testing": "./src/testing.ts" };
+		const storage = pkg("@w/store", files, { exports, forWiring: true }, "foundation");
+		const on = (name: string, kind: string, file: string, text: string, deps: object) =>
+			pkg(name, { [file]: text }, { exports: { ".": "./src/contract.ts" }, ...deps }, kind);
+		const runtime = on(
+			"@w/feat",
+			"feature",
+			"src/contract.ts",
+			`import { s } from "@w/store";\nexport const f = s;\n`,
+			{ dependencies: { "@w/store": "*" } },
+		);
+		const standIn = on(
+			"@w/tested",
+			"feature",
+			"test/a.test.ts",
+			`import { t } from "@w/store/testing";\nexport const x = t;\n`,
+			{ devDependencies: { "@w/store": "*" } },
+		);
+		const whole = on(
+			"@w/whole",
+			"feature",
+			"test/a.test.ts",
+			`import { s } from "@w/store";\nexport const x = s;\n`,
+			{ devDependencies: { "@w/store": "*" } },
+		);
+		const wiring = on(
+			"@w/feat-store",
+			"wiring",
+			"src/module.ts",
+			`import { s } from "@w/store";\nexport const w = s;\n`,
+			{ dependencies: { "@w/store": "*" } },
+		);
+		const loose = pkg("@w/loose", files, { exports, forWiring: "yes" }, "foundation");
+		expect(
+			check([storage, runtime, standIn, whole, wiring, loose], budget)
+				.filter((v) => v.rule.startsWith("G16"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual(["@w/feat @w/store", "@w/whole @w/store", "@w/loose forWiring is true only"]);
+	});
+
+	it("G10 lets only tests reach up to a wiring module, and no other higher kind", () => {
+		const { capability, feature, wired, tested, shipped, testedUp, tool } = kinds();
+		const g10 = (packages: Pkg[]) =>
+			check(packages, budget)
+				.filter((v) => v.rule.startsWith("G10"))
+				.map((v) => v.where);
+		expect(g10([capability, feature, wired, tested])).toEqual([]);
+		expect(g10([capability, feature, wired, shipped])).toEqual(["@t/shipped"]);
+		expect(g10([tool, testedUp])).toEqual(["@t/tested-up"]);
+	});
+
+	it("reads a kind only from the manifest, never from the card", () => {
+		const old = pkg("@t/old", { "src/contract.ts": "export const n = 1;\n" });
+		const carded = {
+			...old,
+			manifest: { exports: { ".": "./src/contract.ts" } },
+			card: "# old\n\nKind: verification\n",
+		};
+		expect(rules([carded])).toContain("G10");
+	});
+
+	it("G22 refuses a feature that declares storeWiring with no wiring naming it in wires", () => {
+		// Without exports, so no contract surface is built: this rule reads only manifests.
+		const files = { "src/contract.ts": "export const n = 1;\n" };
+		const bare = pkg("@t/bare", files, { storeWiring: true });
+		const wired = pkg("@t/wired", files, { storeWiring: true });
+		const wiring = pkg("@t/wired-store", files, { wires: "@t/wired" }, "wiring");
+		const plain = pkg("@t/unwired", files, { storeWiring: false });
+		// A package of another kind naming a feature in wires neither wires it nor passes.
+		const faked = pkg("@t/faked", files, { storeWiring: true });
+		const fake = pkg("@t/fake-store", files, { wires: "@t/faked" });
+		expect(
+			check([bare, wired, wiring, plain, faked, fake], budget)
+				.filter((v) => v.rule.startsWith("G22"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual([
+			"@t/bare no package wires it",
+			"@t/faked no package wires it",
+			"@t/fake-store kind feature",
+		]);
+	});
+
+	it("G25 holds each adapter to one axis, each axis to one default, and optIn to features", () => {
+		// Without exports, so no contract surface is built: this rule reads only manifests.
+		const files = { "src/contract.ts": "export const n = 1;\n" };
+		const adapter = (name: string, manifest: Record<string, unknown>) =>
+			pkg(name, files, manifest as Pkg["manifest"], "adapter");
+		const packages = [
+			pkg("@t/store", files, {}, "foundation"),
+			pkg("@t/audit", files, {}, "foundation"),
+			pkg("@t/mail", files, {}, "foundation"),
+			adapter("@t/redis", { replaces: "@t/store" }),
+			adapter("@t/http-audit", { adapts: "@t/audit", default: true }),
+			adapter("@t/stdout-audit", { adapts: "@t/audit" }),
+			adapter("@t/both", { replaces: "@t/store", adapts: "@t/audit" }),
+			adapter("@t/neither", {}),
+			adapter("@t/elsewhere", { adapts: "@t/nowhere" }),
+			adapter("@t/smtp", { replaces: "@t/mail" }),
+			adapter("@t/file-mail", { replaces: "@t/mail" }),
+			adapter("@t/loud", { replaces: "@t/mail", default: "yes" }),
+			pkg(
+				"@t/wording",
+				{ "src/module.ts": "export const t = (m) => m.contribute(mailTemplates);\n" },
+				{ adapts: "@t/mail", joins: ["@t/mail"] },
+				"adapter",
+			),
+			// Only a wording adapter is held to it: another may still join its owner.
+			adapter("@t/bridged", { adapts: "@t/audit", joins: ["@t/audit"] }),
+			pkg("@t/log", files, {}, "foundation"),
+			adapter("@t/log-a", { adapts: "@t/log", default: true }),
+			adapter("@t/log-b", { adapts: "@t/log", default: true }),
+			pkg("@t/extra", files, { optIn: true }),
+			pkg("@t/odd", files, { optIn: false }),
+			pkg("@t/base", files, { optIn: true }, "foundation"),
+			pkg("@t/feature-default", files, { default: true }),
+		];
+		expect(
+			check(packages, budget)
+				.filter((v) => v.rule.startsWith("G25"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual([
+			"@t/both declares replaces and adapts",
+			"@t/neither declares neither replaces nor adapts",
+			"@t/elsewhere names no workspace package: @t/nowhere",
+			"@t/loud default is not true",
+			"@t/wording joins the owner it adapts",
+			"@t/odd optIn is not true",
+			"@t/base optIn on kind foundation",
+			"@t/feature-default default on kind feature",
+			"@t/mail no default among its 4 adapters",
+			"@t/log 2 defaults among its adapters",
+		]);
+	});
+
+	it("G24 refuses a wiring that keys no guarantee by the needs its feature declares", () => {
+		// Without exports, so no contract surface is built: this rule reads the wiring's source alone.
+		const needs = "export const fNeeds = { neverEvicted: true } as const;\n";
+		const feature = pkg("@t/f", { "src/store.ts": needs }, { storeWiring: true });
+		const keyed = pkg(
+			"@t/f-store",
+			{
+				"src/module.ts": `import { type fNeeds } from "@t/f";\nexport const g: Record<keyof typeof fNeeds, string> = { neverEvicted: "no-eviction" };\n`,
+			},
+			{ wires: "@t/f" },
+			"wiring",
+		);
+		const bare = pkg("@t/g", { "src/store.ts": "export const n = 1;\n" }, { storeWiring: true });
+		const unkeyed = pkg(
+			"@t/g-store",
+			{
+				// Each falls short: no keyof, a name from elsewhere, and a test file.
+				"src/module.ts": `import { type gNeeds } from "@t/g";\nimport { type other } from "@t/f";\nexport const a: typeof gNeeds = { n: 1 };\nexport const b: Record<keyof typeof other, 1> = {};\n`,
+				"src/module.test.ts": `import { type gNeeds } from "@t/g";\nexport const c: Record<keyof typeof gNeeds, 1> = {};\n`,
+			},
+			{ wires: "@t/g" },
+			"wiring",
+		);
+		expect(
+			check([feature, keyed, bare, unkeyed], budget)
+				.filter((v) => v.rule.startsWith("G24"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual(["@t/g @t/g-store keys no guarantee by them"]);
+	});
+
+	it("G28 refuses a contract or an extension point imported from a dependency named as helpers", () => {
+		const mail = pkg("@t/mail", {
+			"src/contract.ts": `import { contract, extensionPoint } from "@t/kernel";\nexport { senders } from "./points.ts";\nexport const isAddress = (s: string) => s.includes("@");\nexport const mailer = contract<Mailer>("mail");\nexport interface Mailer { send(): void }\n`,
+			"src/points.ts": `import { extensionPoint } from "@t/kernel";\nexport const senders = extensionPoint<string>("mail.senders", { multiplicity: "many" });\n`,
+		});
+		const users = pkg(
+			"@t/users",
+			{
+				"src/contract.ts": `import { isAddress, type Mailer } from "@t/mail";\nexport const ok = (m: Mailer) => isAddress(String(m));\n`,
+				"src/module.ts": `import { mailer as m, senders } from "@t/mail";\nimport * as all from "@t/mail";\nexport const used = [m, senders, all];\n`,
+				"src/module.test.ts": `import { mailer } from "@t/mail";\nexport const t = mailer;\n`,
+			},
+			{
+				exports: { ".": "./src/contract.ts" },
+				dependencies: { "@t/mail": "*" },
+				helpers: ["@t/mail"],
+			},
+		);
+		// A dependency not named as helpers lends its contracts as ever.
+		const session = pkg(
+			"@t/session",
+			{ "src/contract.ts": `import { mailer } from "@t/mail";\nexport const s = mailer;\n` },
+			{ exports: { ".": "./src/contract.ts" }, dependencies: { "@t/mail": "*" } },
+		);
+		expect(
+			check([mail, users, session], budget)
+				.filter((v) => v.rule.startsWith("G28"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual([
+			"@t/users/src/module.ts mailer (@t/mail)",
+			"@t/users/src/module.ts senders (@t/mail)",
+			"@t/users/src/module.ts * (@t/mail)",
+		]);
+	});
+
+	it("G29 refuses a test composing a feature bridge's modules and a module contributing to it, without the bridge", () => {
+		const session = pkg(
+			"@b/session",
+			{
+				"src/contract.ts": "export const session = 1;\n",
+				"src/testing.ts": "export const sessionStandIn = 1;\nexport const sessionRecords = 2;\n",
+			},
+			{ exports: { ".": "./src/contract.ts", "./testing": "./src/testing.ts" } },
+		);
+		const reqs = pkg(
+			"@b/reqs",
+			{
+				"src/contract.ts": `import { extensionPoint } from "@b/kernel";\nexport const entryRequirements = extensionPoint("r");\nexport const helper = 1;\n`,
+				"src/module.ts": "export default 1;\n",
+			},
+			{
+				exports: { ".": "./src/contract.ts", "./module": "./src/module.ts" },
+				joins: ["@b/session"],
+			},
+		);
+		const lifecycle = pkg(
+			"@b/lifecycle",
+			{ "src/module.ts": "export default 1;\n" },
+			{ exports: { "./module": "./src/module.ts" }, replaces: "@b/session" },
+			"adapter",
+		);
+		const entry = pkg(
+			"@b/entry",
+			{
+				"src/module.ts": `import { entryRequirements } from "@b/reqs";\nexport default entryRequirements;\n`,
+				// Its own test composes it by path, beside a stand-in for the bridge's module.
+				"test/own.test.ts": `import { sessionStandIn } from "@b/session/testing";\nimport entry from "../src/module.ts";\nexport const m = [entry, sessionStandIn];\n`,
+			},
+			{ exports: { "./module": "./src/module.ts" }, dependencies: { "@b/reqs": "*" } },
+		);
+		// A foundation bridge collects what decides no answer a test reads, such as counts.
+		const meter = pkg(
+			"@b/meter",
+			{
+				"src/contract.ts": `import { extensionPoint } from "@b/kernel";\nexport const meters = extensionPoint("m");\n`,
+				"src/module.ts": "export default 1;\n",
+			},
+			{
+				exports: { ".": "./src/contract.ts", "./module": "./src/module.ts" },
+				joins: ["@b/session"],
+			},
+			"foundation",
+		);
+		const counted = pkg(
+			"@b/counted",
+			{ "src/module.ts": `import { meters } from "@b/meter";\nexport default meters;\n` },
+			{ exports: { "./module": "./src/module.ts" }, dependencies: { "@b/meter": "*" } },
+		);
+		// Takes a helper from the bridge, never its point: it contributes nothing.
+		const plain = pkg(
+			"@b/plain",
+			{ "src/module.ts": `import { helper } from "@b/reqs";\nexport default helper;\n` },
+			{ exports: { "./module": "./src/module.ts" }, dependencies: { "@b/reqs": "*" } },
+		);
+		const app = pkg("@b/app", {
+			"test/missing.test.ts": `import { sessionStandIn } from "@b/session/testing";\nimport entry from "@b/entry/module";\nexport const m = [entry, sessionStandIn];\n`,
+			"test/adapter.test.ts": `import entry from "@b/entry/module";\nimport lifecycle from "@b/lifecycle/module";\nexport const m = [entry, lifecycle];\n`,
+			"test/composed.test.ts": `import { sessionStandIn } from "@b/session/testing";\nimport entry from "@b/entry/module";\nimport reqs from "@b/reqs/module";\nexport const m = [entry, reqs, sessionStandIn];\n`,
+			"test/no-session.test.ts": `import entry from "@b/entry/module";\nexport const m = [entry];\n`,
+			"test/not-a-stand-in.test.ts": `import { sessionRecords } from "@b/session/testing";\nimport entry from "@b/entry/module";\nexport const m = [entry, sessionRecords];\n`,
+			"test/plain.test.ts": `import { sessionStandIn } from "@b/session/testing";\nimport plain from "@b/plain/module";\nexport const m = [plain, sessionStandIn];\n`,
+			"test/counted.test.ts": `import { sessionStandIn } from "@b/session/testing";\nimport counted from "@b/counted/module";\nexport const m = [counted, sessionStandIn];\n`,
+		});
+		expect(
+			check([session, reqs, meter, counted, lifecycle, entry, plain, app], budget)
+				.filter((v) => v.rule.startsWith("G29"))
+				.map((v) => `${v.where} ${v.detail}`)
+				.sort(),
+		).toEqual([
+			"@b/app/test/adapter.test.ts @b/reqs (@b/entry)",
+			"@b/app/test/missing.test.ts @b/reqs (@b/entry)",
+			"@b/entry/test/own.test.ts @b/reqs (@b/entry)",
+		]);
+	});
+
+	it("G31 refuses an import of a contract its owner's manifest declares takenBy, from a package it does not name", () => {
+		const owner = pkg(
+			"@g31/keys",
+			{
+				"src/contract.ts": [
+					`import { contract } from "@g31/kernel";`,
+					`export const signing = contract<object>("keys.signing", { takenBy: ["taker"] });`,
+					`export const open = contract<object>("keys.open");`,
+				].join("\n"),
+			},
+			{ exports: { ".": "./src/contract.ts" }, takenBy: { signing: ["@g31/taker"] } },
+		);
+		const user = (name: string, files: Record<string, string>) =>
+			pkg(name, files, {
+				exports: { ".": "./src/contract.ts" },
+				dependencies: { "@g31/keys": "*" },
+			});
+		const taker = user("@g31/taker", {
+			"src/contract.ts": `import { signing } from "@g31/keys";\nexport const s = signing;\n`,
+			"src/module.ts": `export default defineModule({ name: "taker" }, () => []);\n`,
+		});
+		const other = user("@g31/other", {
+			"src/contract.ts": `import { open } from "@g31/keys";\nexport const o = open;\n`,
+			"src/named.ts": `import { signing } from "@g31/keys";\nexport const s = signing;\n`,
+			"src/alias.ts": `import { signing as s } from "@g31/keys";\nexport const t = s;\n`,
+			"src/whole.ts": `import * as k from "@g31/keys";\nexport const t = k;\n`,
+			"src/again.ts": `export { signing } from "@g31/keys";\n`,
+			"src/every.ts": `export * from "@g31/keys";\n`,
+			"src/typed.ts": `import type { signing } from "@g31/keys";\nexport type T = typeof signing;\n`,
+			"test/other.test.ts": `import { signing } from "@g31/keys";\nexport const s = signing;\n`,
+		});
+		expect(
+			check([owner, taker, other], budget)
+				.filter((v) => v.rule.startsWith("G31"))
+				.map((v) => `${v.where} ${v.detail}`)
+				.sort(),
+		).toEqual([
+			"@g31/other/src/again.ts signing of @g31/keys",
+			"@g31/other/src/alias.ts signing of @g31/keys",
+			"@g31/other/src/every.ts signing of @g31/keys",
+			"@g31/other/src/named.ts signing of @g31/keys",
+			"@g31/other/src/whole.ts signing of @g31/keys",
+		]);
+	});
+
+	it("G31 refuses a takenBy declaration its contract's own takenBy does not match, or that names nothing known", () => {
+		const taker = pkg("@g31b/taker", {
+			"src/contract.ts": "export const x = 1;\n",
+			"src/module.ts": `export default defineModule({ name: "taker" }, () => []);\n`,
+		});
+		const bare = pkg("@g31b/bare", { "src/contract.ts": "export const x = 1;\n" });
+		const owner = pkg(
+			"@g31b/keys",
+			{
+				"src/contract.ts": [
+					`export const same = contract<object>("k.same", { takenBy: ["taker"] });`,
+					`export const apart = contract<object>("k.apart", { takenBy: ["someone"] });`,
+					`export const unbound = contract<object>("k.unbound");`,
+					`export const undeclared = contract<object>("k.undeclared", { takenBy: ["taker"] });`,
+				].join("\n"),
+			},
+			{
+				exports: { ".": "./src/contract.ts" },
+				takenBy: {
+					same: ["@g31b/taker"],
+					apart: ["@g31b/taker"],
+					unbound: ["@g31b/taker"],
+					missing: ["@g31b/taker"],
+					strange: ["@g31b/nobody"],
+					moduleless: ["@g31b/bare"],
+				},
+			},
+		);
+		expect(
+			check([owner, taker, bare], budget)
+				.filter((v) => v.rule.startsWith("G31"))
+				.map((v) => `${v.where} ${v.detail}`)
+				.sort(),
+		).toEqual([
+			"@g31b/keys apart: takenBy in code names someone, the manifest taker",
+			"@g31b/keys missing: no contract of that name declares takenBy",
+			"@g31b/keys moduleless: @g31b/bare has no module to take it",
+			"@g31b/keys strange: @g31b/nobody is no workspace package",
+			"@g31b/keys unbound: no contract of that name declares takenBy",
+			"@g31b/keys undeclared: takenBy in code, but not in the manifest",
+		]);
+	});
+
+	it("G30 refuses an audit event recorded on the audit contract itself, outside the package and its tests", () => {
+		const contract = [
+			"export interface AuditRecord { readonly kind: string }",
+			"export interface Audit { record(event: AuditRecord): void; lost(): number }",
+			"export const auditEvents = <E>(events: E) => events;",
+			'export function declaredAudit<E>(recorder: Pick<Audit, "record">, events: E) {',
+			"\treturn { record(kind: keyof E & string): void { recorder.record({ kind }); } };",
+			"}",
+		].join("\n");
+		const audit = pkg("@c/audit", {
+			"src/contract.ts": `${contract}\n`,
+			// The package itself hands events on: its own calls are not counted.
+			"src/hub.ts": `import type { Audit } from "./contract.ts";\nexport const on = (a: Audit) => a.record({ kind: "x" });\n`,
+		});
+		const feature = pkg(
+			"@c/feature",
+			{
+				"src/audit-events.ts": `import { auditEvents } from "@c/audit";\nexport default auditEvents({ "f.done": {} });\n`,
+				"src/module.ts": [
+					`import { type Audit, declaredAudit } from "@c/audit";`,
+					`import events from "./audit-events.ts";`,
+					`const records = { record: (n: number) => n };`,
+					`export const raw = (audit: Audit) => audit.record({ kind: "f.done" });`,
+					`export const picked = (p: { audit: Pick<Audit, "record"> }) => p.audit.record({ kind: "f.done" });`,
+					`export const declared = (audit: Audit) => declaredAudit(audit, events).record("f.done");`,
+					`export const other = () => records.record(1);`,
+					`export const lost = (audit: Audit) => (audit as any).record({ kind: "f.done" });`,
+				].join("\n"),
+				"test/module.test.ts": `import type { Audit } from "@c/audit";\nexport const t = (a: Audit) => a.record({ kind: "f.done" });\n`,
+			},
+			{
+				exports: { ".": "./src/module.ts", "./audit-events": "./src/audit-events.ts" },
+				dependencies: { "@c/audit": "*" },
+			},
+		);
+		expect(
+			check([audit, feature], budget)
+				.filter((v) => v.rule.startsWith("G30"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual([
+			"@c/feature/src/module.ts:4 audit.record",
+			"@c/feature/src/module.ts:5 p.audit.record",
+		]);
+	});
+});

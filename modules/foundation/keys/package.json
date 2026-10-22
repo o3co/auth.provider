@@ -14,5 +14,10 @@
 		"@mod/kernel": "workspace:*",
 		"jose": "6.2.12",
 		"zod": "4.6.7"
+	},
+	"takenBy": {
+		"accessTokenSigning": [
+			"@mod/tokens"
+		]
 	}
 }

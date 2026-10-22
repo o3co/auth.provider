@@ -1,7 +1,7 @@
 import { join, resolve, sep } from "node:path";
 import ts from "typescript";
+import { budgetsAsTest, type Scope } from "../scope.ts";
 import { importsOf, packageOf } from "../source.ts";
-import { budgetsAsTest, type Scope } from "../units.ts";
 
 const options: ts.CompilerOptions = {
 	target: ts.ScriptTarget.ES2022,

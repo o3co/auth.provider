@@ -1,5 +1,5 @@
+import type { Pkg } from "@mod/guard-imports";
 import { describe, expect, it } from "vitest";
-import type { Pkg } from "../../../src/workspace.ts";
 import { budget, pkg } from "../../../test/workspace.ts";
 import { check } from "../../contract.ts";
 

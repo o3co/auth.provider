@@ -1,7 +1,7 @@
 import { join } from "node:path";
+import type { Pkg } from "@mod/guard-imports";
 import ts from "typescript";
 import { budgetsAsTest, type Scope } from "../units.ts";
-import type { Pkg } from "../workspace.ts";
 
 /** Names that ask a resolver, and so reach the network. */
 const resolving = [
