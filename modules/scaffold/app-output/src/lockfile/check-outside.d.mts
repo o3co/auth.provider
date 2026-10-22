@@ -13,10 +13,17 @@ export interface OutsideRecord extends Recorded {
 	readonly peerDependenciesMeta: Readonly<Record<string, { readonly optional?: boolean }>>;
 }
 
-export function recordOf(text: string, name: string): Recorded;
+/** The origins packages are installed from: the default registry's, and each scope's own. */
+export interface Registries {
+	readonly default: string;
+	readonly scopes?: Readonly<Record<string, string>>;
+}
+
+export function recordOf(text: string, name: string, registries: Registries): Recorded;
 
 export function refusals(
 	text: string,
 	records: readonly OutsideRecord[],
 	overrides: Readonly<Record<string, string>>,
+	registries: Registries,
 ): string[];

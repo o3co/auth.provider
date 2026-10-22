@@ -10,19 +10,19 @@
 - Reading a manifest into a record, and writing the record, the script and the overrides into an app: their callers.
 
 ## Offers
-- `outsideLock.recordOf` (lockfile text, name): the version and integrity the root importer resolves the name to.
+- `outsideLock.recordOf` (lockfile text, name, registries): the version and integrity the root importer resolves the name to.
   - It refuses a name the importer lacks, a resolution to no version (a link, a file, an alias), and one from no registry.
-- `outsideLock.refusals` (lockfile text, records, overrides): why the lockfile is not as recorded; none where it is.
-- `outsideLock.script`: the file an app runs beside its `pnpm-lock.yaml`, `outside-modules.json` (`{ modules: records }`) and `pnpm-workspace.yaml` (its `overrides`); it prints each refusal and exits 1 on any.
+- `outsideLock.refusals` (lockfile text, records, overrides, registries: the default origin and each scope's): why the lockfile is not as recorded; none where it is.
+- `outsideLock.script`: the file an app runs beside its `pnpm-lock.yaml`, `outside-modules.json` (`{ modules: records, registries }`) and `pnpm-workspace.yaml` (its `overrides`); it prints each refusal and exits 1 on any.
 
 ## Invariants
 - A lockfile is read as data: pnpm's version 9.0 alone, at most 16 MiB, no anchor's alias resolved, no unknown tag and no duplicate key; only own keys are read, never inherited ones.
-- From a registry means an integrity, and at most an http address of the tarball; a directory, a repository or a local file is not.
+- From a registry means an integrity, and at most the address of a tarball at the origin of the package's registry (its scope's, else the default), under any path; another origin, a directory, a repository or a local file is not.
 - The app's lockfile was resolved with the app's overrides (pnpm writes them into it).
 - A record's version is the one the root importer depends on exactly and resolves, from a registry, with the recorded integrity; no other version of it is in the lockfile.
 - A peer range is compared after the app's overrides: pnpm writes an override in a range's place. The range recorded must still hold the override.
 - Every resolution of a recorded package (not the root's alone) resolves each required dependency and peer as required, and each optional one as optional; an optional declaration takes the place of a required one of its name. Each resolves to a version in its range, the overrides applied, or, declared as an alias, to a version of the package the alias names; nothing undeclared is resolved.
-- A package the overrides hold resolves, wherever it is referenced (by an importer's dependencies of any kind or by a resolution), to the held version from a registry under its own name; the lockfile holds no other version, and one resolution, of it.
+- A package the overrides hold resolves, wherever it is referenced (by an importer's dependencies of any kind or by a resolution), to the held version from its registry under its own name, and to a resolution the lockfile holds, with the package's entry; the lockfile holds no other version, and one resolution, of it.
 - The file imports nothing of the workspace: `yaml`, `semver` and node only.
 
 ## Depends on

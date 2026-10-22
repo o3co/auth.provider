@@ -73,15 +73,40 @@ function lockOf(text) {
 	return lock;
 }
 
-/** A resolution from a registry: its integrity, and at most the tarball's http address; no directory, repository or other kind. */
-function fromRegistry(entry) {
+/** The origin of an http address, or none. */
+const originOf = (address) => {
+	try {
+		const url = new URL(String(address));
+		return url.protocol === "https:" || url.protocol === "http:" ? url.origin : undefined;
+	} catch {
+		return undefined;
+	}
+};
+
+/** The origin of the registry a package is installed from: its scope's, else the default one. */
+const registryOf = (registries, name) => {
+	const scope = name.startsWith("@") ? name.slice(0, name.indexOf("/")) : undefined;
+	return originOf(own(own(registries).get("scopes")).get(scope) ?? own(registries).get("default"));
+};
+
+/**
+ * Why a package's resolution is not one from its registry: an integrity, and at most the address
+ * of a tarball at the registry's origin (any path); no directory, repository or other kind.
+ */
+function registryRefusal(entry, name, registries) {
 	const resolution = own(own(entry).get("resolution"));
-	const tarball = resolution.get("tarball");
-	return (
-		typeof resolution.get("integrity") === "string" &&
-		[...resolution.keys()].every((key) => key === "integrity" || key === "tarball") &&
-		(tarball === undefined || /^https?:\/\//.test(String(tarball)))
-	);
+	if (
+		typeof resolution.get("integrity") !== "string" ||
+		![...resolution.keys()].every((key) => key === "integrity" || key === "tarball")
+	) {
+		return `${name}: resolved from no registry`;
+	}
+	if (!resolution.has("tarball")) return undefined;
+	const at = originOf(resolution.get("tarball"));
+	const registry = registryOf(registries, name);
+	return at !== undefined && at === registry
+		? undefined
+		: `${name}: its tarball lies at ${at ?? String(resolution.get("tarball"))}, not at its registry ${registry ?? "(none recorded)"}`;
 }
 
 /** Every reference the lockfile holds: each importer's three kinds of dependency, and each snapshot's two. */
@@ -109,12 +134,16 @@ function referencesIn(lock) {
  * version from a registry, under its own name, and the lockfile holds no other version or second
  * resolution of it.
  */
-function oneCopyRefusals(lock, name, version, references, { held = true } = {}) {
+function oneCopyRefusals(lock, name, version, references, registries, { held = true } = {}) {
 	const refusals = [];
 	for (const { at, as, reference } of references) {
 		const target = targetOf(as, reference);
 		if (as === name && (target.local || target.alias || target.version !== version)) {
 			refusals.push(`${name}: ${at} resolves it to ${bare(reference)}, not ${version}`);
+		} else if (as === name && !own(lock.snapshots).has(`${name}@${reference}`)) {
+			refusals.push(
+				`${name}: ${at} resolves it to ${reference}, which the lockfile does not resolve`,
+			);
 		} else if (as !== name && target.alias && target.name === name) {
 			refusals.push(`${name}: reached as ${as} by ${at}`);
 		}
@@ -129,9 +158,12 @@ function oneCopyRefusals(lock, name, version, references, { held = true } = {}) 
 		);
 	}
 	if (!held) return refusals;
-	if (versions.includes(version) && !fromRegistry(own(lock.packages).get(`${name}@${version}`))) {
-		refusals.push(`${name}: resolved from no registry`);
-	}
+	const referenced = references.some(({ as }) => as === name);
+	const entry = own(lock.packages).get(`${name}@${version}`);
+	if (entry === undefined && referenced)
+		refusals.push(`${name}: the lockfile holds no ${name}@${version}`);
+	const unregistered = entry === undefined ? undefined : registryRefusal(entry, name, registries);
+	if (unregistered !== undefined) refusals.push(unregistered);
 	const resolved = [...own(lock.snapshots).keys()].filter((key) => nameOf(key) === name);
 	if (resolved.length > 1) {
 		refusals.push(
@@ -203,7 +235,7 @@ function snapshotRefusals(record, snapshot, overrides, say) {
 }
 
 /** Why one recorded package is not what the lockfile resolves, the app's overrides applied. */
-function recordRefusals(lock, record, overrides, references) {
+function recordRefusals(lock, record, overrides, references, registries) {
 	const { name, version } = record;
 	const say = (what) => `${name}: ${what}`;
 	const root = own(own(own(own(lock.importers).get(".")).get("dependencies")).get(name));
@@ -219,9 +251,10 @@ function recordRefusals(lock, record, overrides, references) {
 		return [say(`the app depends on it as ${root.get("specifier")}, not ${version} as recorded`)];
 	}
 	// Not held: a recorded package may resolve more than once (each resolution is checked below), and its registry is checked here.
-	const refusals = oneCopyRefusals(lock, name, version, references, { held: false });
+	const refusals = oneCopyRefusals(lock, name, version, references, registries, { held: false });
 	const entry = own(lock.packages).get(`${name}@${version}`);
-	if (!fromRegistry(entry)) return [...refusals, say("resolved from no registry")];
+	const unregistered = registryRefusal(entry, name, registries);
+	if (unregistered !== undefined) return [...refusals, unregistered];
 	const integrity = own(own(entry).get("resolution")).get("integrity");
 	if (integrity !== record.integrity) {
 		return [...refusals, say(`integrity ${integrity}, not ${record.integrity} as recorded`)];
@@ -258,9 +291,10 @@ function recordRefusals(lock, record, overrides, references) {
 /**
  * Why the lockfile does not resolve each recorded package as recorded, with the app's `overrides`
  * (name to version) applied, why it holds an overridden package in other than one copy at its
- * version, and why it was resolved with other overrides; none where it is as recorded.
+ * version, why either comes from other than its registry in `registries` (the default origin and
+ * each scope's), and why it was resolved with other overrides; none where it is as recorded.
  */
-export function refusals(text, records, overrides) {
+export function refusals(text, records, overrides, registries) {
 	const lock = lockOf(text);
 	const versions = (map) =>
 		new Map([...own(map)].map(([name, version]) => [name, String(version)]));
@@ -271,18 +305,21 @@ export function refusals(text, records, overrides) {
 		...(sameMap(resolvedWith, held)
 			? []
 			: ["the lockfile was resolved with other overrides than the app's"]),
-		...records.flatMap((record) => recordRefusals(lock, record, held, references)),
+		...records.flatMap((record) => recordRefusals(lock, record, held, references, registries)),
 		...[...held]
 			.sort(([a], [b]) => (a < b ? -1 : 1))
-			.flatMap(([name, version]) => oneCopyRefusals(lock, name, String(version), references)),
+			.flatMap(([name, version]) =>
+				oneCopyRefusals(lock, name, String(version), references, registries),
+			),
 	];
 }
 
 /**
  * The version and integrity a project's lockfile resolves `name` to, as its root importer depends
- * on it; refuses one the importer lacks, one resolved to no version, and one from no registry.
+ * on it; refuses one the importer lacks, one resolved to no version, and one from other than its
+ * registry in `registries`.
  */
-export function recordOf(text, name) {
+export function recordOf(text, name, registries) {
 	const lock = lockOf(text);
 	const resolved = own(own(own(own(lock.importers).get(".")).get("dependencies")).get(name)).get(
 		"version",
@@ -293,7 +330,8 @@ export function recordOf(text, name) {
 		throw new Error(`${name}: the project resolves ${bare(resolved)}, not a version`);
 	}
 	const entry = own(lock.packages).get(`${name}@${target.version}`);
-	if (!fromRegistry(entry)) throw new Error(`${name}: resolved from no registry`);
+	const unregistered = registryRefusal(entry, name, registries);
+	if (unregistered !== undefined) throw new Error(unregistered);
 	return {
 		name,
 		version: target.version,
@@ -301,16 +339,18 @@ export function recordOf(text, name) {
 	};
 }
 
-/** Run as an app's script: the lockfile, the record and the overrides beside it. */
+/** Run as an app's script: the lockfile, the record (its packages and registries) and the overrides beside it. */
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 	const read = (file) => readFileSync(file, "utf8");
 	const workspace = parseDocument(read("pnpm-workspace.yaml"), { merge: false }).toJS({
 		maxAliasCount: 0,
 	});
+	const outside = JSON.parse(read("outside-modules.json"));
 	const found = refusals(
 		read("pnpm-lock.yaml"),
-		JSON.parse(read("outside-modules.json")).modules,
+		outside.modules,
 		Object.fromEntries(own(own(workspace).get("overrides"))),
+		outside.registries,
 	);
 	for (const line of found) process.stdout.write(`${line}\n`);
 	process.stdout.write(

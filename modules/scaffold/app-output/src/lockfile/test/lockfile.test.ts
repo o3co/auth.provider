@@ -30,6 +30,8 @@ const record: OutsideRecord = {
 	peerDependenciesMeta: {},
 };
 const overrides = { "@o3co/auth-provider-oauth": "0.19.0", zod: "4.6.7" };
+/** The registry the fixtures were installed from. */
+const registries = { default: "http://127.0.0.1:4873" };
 const peers = "(@o3co/auth-provider-oauth@0.19.0(zod@4.6.7))(zod@4.6.7)";
 const grant = `@x/grant@1.2.0${peers}`;
 
@@ -42,7 +44,7 @@ const changed = (change: (lock: Lock) => void, from = appLock) => {
 	return stringify(lock);
 };
 const refusals = (lock: string, records = [record], held: Record<string, string> = overrides) =>
-	outsideLock.refusals(lock, records, held);
+	outsideLock.refusals(lock, records, held, registries);
 
 describe("an app's lockfile, as pnpm writes it", () => {
 	it("passes: overrides rewriting peer ranges, peers in a resolution, an optional dependency, a declared alias, a registry's own tarball address", () => {
@@ -82,11 +84,13 @@ describe("the recorded package, as the app's importer resolves it", () => {
 		]);
 		for (const resolution of [
 			{ integrity, type: "directory", directory: "../g" },
-			{ integrity, tarball: "file:g.tgz" },
 			{ directory: "../g" },
 		]) {
 			expect(refusals(resolved(resolution))).toEqual(["@x/grant: resolved from no registry"]);
 		}
+		expect(refusals(resolved({ integrity, tarball: "file:g.tgz" }))).toEqual([
+			"@x/grant: its tarball lies at file:g.tgz, not at its registry http://127.0.0.1:4873",
+		]);
 	});
 
 	it("refuses a peer range other than the record's with the app's overrides applied, or other peer marks", () => {
@@ -240,6 +244,23 @@ describe("a package the app's overrides hold to one copy", () => {
 		expect(refusals(moved)).toContain("zod: 4.6.8 in the lockfile, where 4.6.7 alone is held");
 	});
 
+	it("refuses a reference to it the lockfile does not resolve: no entry of it, or not that resolution", () => {
+		expect(refusals(changed((l) => delete l.packages["zod@4.6.7"]))).toEqual([
+			"zod: the lockfile holds no zod@4.6.7",
+		]);
+		const unresolved = refusals(changed((l) => delete l.snapshots["zod@4.6.7"]));
+		expect(unresolved).toContain(
+			"zod: the importer . resolves it to 4.6.7, which the lockfile does not resolve",
+		);
+		const moved = changed((l) => {
+			l.snapshots["zod@4.6.8"] = l.snapshots["zod@4.6.7"];
+			delete l.snapshots["zod@4.6.7"];
+		});
+		expect(refusals(moved)).toContain(
+			"zod: the importer . resolves it to 4.6.7, which the lockfile does not resolve",
+		);
+	});
+
 	it("refuses a second version or a second resolution", () => {
 		expect(
 			refusals(
@@ -273,9 +294,37 @@ describe("a package the app's overrides hold to one copy", () => {
 	});
 });
 
+describe("where a package's tarball lies", () => {
+	const tarballAt = (key: string, tarball: string) =>
+		changed((l) => (l.packages[key].resolution = { ...l.packages[key].resolution, tarball }));
+
+	it("takes a tarball at its registry's origin, under any path", () => {
+		expect(refusals(tarballAt("zod@4.6.7", "http://127.0.0.1:4873/elsewhere/zod.tgz"))).toEqual([]);
+	});
+
+	it("refuses a tarball of a held or recorded package at another origin", () => {
+		expect(refusals(tarballAt("zod@4.6.7", "https://evil.example/zod-4.6.7.tgz"))).toEqual([
+			"zod: its tarball lies at https://evil.example, not at its registry http://127.0.0.1:4873",
+		]);
+		expect(refusals(tarballAt("@x/grant@1.2.0", "https://evil.example/grant.tgz"))).toEqual([
+			"@x/grant: its tarball lies at https://evil.example, not at its registry http://127.0.0.1:4873",
+		]);
+		expect(refusals(tarballAt("zod@4.6.7", "file:zod.tgz"))).toEqual([
+			"zod: its tarball lies at file:zod.tgz, not at its registry http://127.0.0.1:4873",
+		]);
+	});
+
+	it("holds a scoped package to its scope's registry", () => {
+		const scoped = { default: "http://127.0.0.1:4873", scopes: { "@x": "https://x.example" } };
+		expect(outsideLock.refusals(appLock, [record], overrides, scoped)).toEqual([
+			"@x/grant: its tarball lies at http://127.0.0.1:4873, not at its registry https://x.example",
+		]);
+	});
+});
+
 describe("reading a lockfile as data", () => {
 	it("refuses an unknown tag, an anchor's alias, a duplicate key, another version and one over its bound", () => {
-		const read = (text: string) => () => outsideLock.refusals(text, [], {});
+		const read = (text: string) => () => outsideLock.refusals(text, [], {}, registries);
 		expect(read(`${appLock}\nextra: !evil 1\n`)).toThrow(/lockfile not read/);
 		expect(read("lockfileVersion: '9.0'\na: &x {k: 1}\nb: *x\n")).toThrow(
 			/Alias resolution is disabled/,
@@ -290,7 +339,7 @@ describe("reading a lockfile as data", () => {
 
 describe("reading a package's record from the project pnpm installed it into", () => {
 	it("reads the version and integrity the project's importer resolves, and its lockfile passes the record", () => {
-		expect(outsideLock.recordOf(stagingLock, "@x/grant")).toEqual({
+		expect(outsideLock.recordOf(stagingLock, "@x/grant", registries)).toEqual({
 			name: "@x/grant",
 			version: "1.2.0",
 			integrity,
@@ -299,7 +348,7 @@ describe("reading a package's record from the project pnpm installed it into", (
 	});
 
 	it("refuses a package the importer lacks, resolves to no version, or from no registry", () => {
-		expect(() => outsideLock.recordOf(stagingLock, "@x/none")).toThrow(
+		expect(() => outsideLock.recordOf(stagingLock, "@x/none", registries)).toThrow(
 			"@x/none: the project does not depend on it",
 		);
 		const importer = (version: string) =>
@@ -307,17 +356,17 @@ describe("reading a package's record from the project pnpm installed it into", (
 				(l) => (l.importers["."].dependencies["@x/grant"] = { specifier: version, version }),
 				stagingLock,
 			);
-		expect(() => outsideLock.recordOf(importer("link:../g"), "@x/grant")).toThrow(
+		expect(() => outsideLock.recordOf(importer("link:../g"), "@x/grant", registries)).toThrow(
 			"@x/grant: the project resolves link:../g, not a version",
 		);
-		expect(() => outsideLock.recordOf(importer("@y/grant@1.2.0"), "@x/grant")).toThrow(
+		expect(() => outsideLock.recordOf(importer("@y/grant@1.2.0"), "@x/grant", registries)).toThrow(
 			"@x/grant: the project resolves @y/grant@1.2.0, not a version",
 		);
 		const directory = changed(
 			(l) => (l.packages["@x/grant@1.2.0"].resolution = { type: "directory", directory: "../g" }),
 			stagingLock,
 		);
-		expect(() => outsideLock.recordOf(directory, "@x/grant")).toThrow(
+		expect(() => outsideLock.recordOf(directory, "@x/grant", registries)).toThrow(
 			"@x/grant: resolved from no registry",
 		);
 	});
@@ -333,7 +382,10 @@ describe("the script an app runs, the file as it ships", () => {
 			join(app, "node_modules"),
 		);
 		writeFileSync(join(app, "pnpm-lock.yaml"), lock);
-		writeFileSync(join(app, "outside-modules.json"), JSON.stringify({ modules: [record] }));
+		writeFileSync(
+			join(app, "outside-modules.json"),
+			JSON.stringify({ modules: [record], registries }),
+		);
 		writeFileSync(join(app, "pnpm-workspace.yaml"), stringify({ overrides }));
 		return app;
 	};

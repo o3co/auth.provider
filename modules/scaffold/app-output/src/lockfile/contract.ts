@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { recordOf, refusals } from "./check-outside.mjs";
 
-export type { OutsideRecord, Recorded } from "./check-outside.mjs";
+export type { OutsideRecord, Recorded, Registries } from "./check-outside.mjs";
 
 /**
  * A pnpm lockfile held to what was recorded of the packages outside the release: `recordOf` reads
