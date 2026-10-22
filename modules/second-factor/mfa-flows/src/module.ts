@@ -1,17 +1,13 @@
 import { csrfChecked } from "@mod/csrf";
 import { type Route, routes, use } from "@mod/http";
 import { defineModule, isUnavailable } from "@mod/kernel";
-import { loginGates } from "@mod/login-gates";
 import { fenceFollower, proofSteps } from "@mod/mfa";
-import { factorReading } from "@mod/mfa-reading";
 import { lockoutProblem, requestsPerSource } from "@mod/rate-limit";
 import { revocationFollowers } from "@mod/subject-revocation";
 import { flowParts } from "./contract.ts";
-import { gateOver } from "./proof/proof.ts";
 import { type Handler, unavailable } from "./routing.ts";
 import { section } from "./section.ts";
-import { transactionsIn } from "./transactions/transactions.ts";
-import { handlersOver, partsIn, policyOf } from "./wiring/wiring.ts";
+import { gating, handlersOver, partsIn, policyOf } from "./wiring/wiring.ts";
 
 type HandlerName = keyof Awaited<ReturnType<typeof handlersOver>>;
 
@@ -49,13 +45,7 @@ export default defineModule({ name: "mfa-flows", section, replicaSafe: true }, (
 		}
 		return partsIn(c);
 	}),
-	m.contribute(loginGates).by(async (c) => ({
-		name: "mfa",
-		hold: gateOver({
-			factors: await c.get(factorReading),
-			transactions: await transactionsIn(c),
-		}),
-	})),
+	gating(m),
 	...table.map(([method, path, name]) =>
 		m.contribute(routes).by(async (c): Promise<Route> => {
 			const policy = policyOf(c.section);
