@@ -459,6 +459,7 @@ From `@mod/outbound`.
 | `outbound.proxy` | string |  |  |  |  | The proxy every https request goes through by CONNECT, but to direct hosts; it resolves names and checks their addresses. |
 | `outbound.proxy-authorization` | string |  |  |  |  | The Proxy-Authorization value the proxy asks for, such as `Basic …`: printable ASCII on one line. |
 | `outbound.direct-hosts` | list of string | `[]` |  |  |  | The hosts reached directly while a proxy is set; `.name` covers the name and the names under it. |
+| `outbound.plain-ipv4` | list of string | `[]` |  |  |  | The `host:port` pairs of `plain-loopback` or `plain-internal` whose name is resolved to IPv4 addresses alone, for plain http to that host and port: only those answers are checked and reached, and IPv6 ones are neither. For a network answering a name with an IPv4 address and an IPv6 one that does not reach, as ECS Service Connect writes both in the hosts file. Each names its host by name. |
 
 ## passkey-registration
 

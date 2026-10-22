@@ -20,6 +20,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 - [From 0.18.0-rc.4](#from-0180-rc4)
 - [From 0.18.0-rc.5](#from-0180-rc5)
 - [From 0.18.0](#from-0180)
+- [From 0.18.1](#from-0181)
 - [From 0.18 to 0.19](#from-018-to-019)
 - [Operational notes](#operational-notes)
 
@@ -818,6 +819,15 @@ What changed since rc.5. Coming from an earlier release candidate, read the sect
 - **A Redis server that cannot run the store's scripts**: boot runs one of them once and is refused, naming a store script, where the server cannot run it, as one whose Lua lacks `cjson`; rc.5 booted and failed the writes with 503. The [runbook](runbook.md#managed-redisvalkey-with-replicas) says what the server must offer.
 - After boot, `/readyz` answers `503`, warning `redis.settings_unmet`, while either holds; a probe that finds them right again answers ready.
 - **A generated app's image**: it now builds on `node:24-alpine`, Node 24's latest, so each build takes Node's security fixes. An app generated before pins Node 24.21.0, which the 2026-10-21 Node.js security release left vulnerable: change its Dockerfile's `FROM` line to `FROM node:24-alpine AS base` and build the image again, or generate the app again.
+## From 0.18.0
+
+- **A generated app's pnpm**: an app generated now names `pnpm@11.28.7` in its `package.json` (`packageManager`), which its image installs with. An app generated before names `pnpm@11.3.0`, short of the 2026-10-21 pnpm security release: change its `packageManager` to `pnpm@11.28.7` and build its image again, or generate the app again.
+
+## From 0.18.1
+
+- **A generated app's `witness-backfill` script**: where the kernel is bundled twice, a refused boot is now written and exits 78, as the app's entry does, where it was thrown on as a crash. In an app generated before, change the line `if (!(error instanceof BootRefused)) throw error;` in `src/witness-backfill.ts` to `if (!BootRefused.is(error)) throw error;`, or generate the app again.
+- **A `plain-internal` pair whose name also answers an IPv6 address that does not reach**, as ECS Service Connect writes in the hosts file: 0.18.1 refused it as `plain-public`. Name the pair in `outbound.plain-ipv4` as well, and its name is resolved to IPv4 alone. An earlier version refuses boot on a configuration naming `outbound.plain-ipv4`, so a rollback takes the setting out with it.
+
 ## From 0.18 to 0.19
 
 What changes from 0.18 to 0.19. Coming from an earlier release candidate, read the sections above first.
@@ -828,10 +838,6 @@ What changes from 0.18 to 0.19. Coming from an earlier release candidate, read t
 - **The `witness-backfill` script**: replace the app's `src/witness-backfill.ts` with this release's (generate the project again, or apply the difference) before you run it on 0.19. It counts `unclaimed` (a factor whose unique value is not claimed, left as it is) and `unknown` (an answer it does not know, which makes it exit 1). The one generated before reads `unclaimed` as nothing, prints no count for it, and exits 0. Its line is now `marked … held … none … unclaimed … inconsistent … unknown … failed …`: mend any tool that reads it.
 - **Code that reads mfa's decisions** (`factors` from `@mod/mfa`): they are three contracts now, each in its own package, and `factors` and `Factors` are gone. Take the one whose members you use: `factorReading` from `@mod/mfa-reading` (`held`, `countingHeld`, `countingWritten`, `writtenStanding`, `secondFactorRequired`, `asks`, `guessable`, `guessableBoundAfter`, `challenge`, `prove`), `factorBinding` from `@mod/mfa-binding` (`begin`, `provePending`, `bind`), `factorManaging` from `@mod/mfa-managing` (`rename`, `remove`, `clear`, `reissue`, `fence`, `fenceOf`). Code that took several in one type makes the intersection where it uses them (for example `FactorBinding & Pick<FactorManaging, "reissue">`). `Shown`, `Fence`, `Proved` and `Challenged` come from `@mod/mfa-reading`; `@mod/mfa` no longer exports them. Add the package to the module's dependencies, and keep `@mod/mfa` there too, so `combinations` still composes mfa. `proofSteps`, `enforcers`, `fenceFollower`, the store interface and `@mod/mfa/testing` stay in `@mod/mfa`. Composed apps change nothing: mfa provides the three contracts.
 - **A witnessing of your own** (code that contributes to `mfa`'s `witnessing` extension point in place of `mfa-witnessing`): import `witnessing` and `Witnessing` from `@mod/mfa-extensions`; `@mod/mfa` no longer exports them. The extension point keeps its name (`mfa.witnessing`), so nothing changes in an app that composes `mfa-witnessing`. Its `cleared` now takes the reset's `after` as well, `cleared(subject, after)`: a function answering, each time it is called, what stands after the reset (`AfterReset`: `counting`, `none` or `unsure`); remove the mark only where it answers `none`. `Asked` comes from `@mod/mfa-extensions` alone; `@mod/mfa` no longer exports it.
-
-## From 0.18.0
-
-- **A generated app's pnpm**: an app generated now names `pnpm@11.28.7` in its `package.json` (`packageManager`), which its image installs with. An app generated before names `pnpm@11.3.0`, short of the 2026-10-21 pnpm security release: change its `packageManager` to `pnpm@11.28.7` and build its image again, or generate the app again.
 
 ## Operational notes
 
