@@ -66,16 +66,22 @@ The generator touches no registry. Install the package with pnpm into a project 
 mkdir outside && cd outside
 pnpm init
 pnpm add @example/did-grant@1.2.0
+cd ..
 ```
 
 pnpm resolves it from your registry with your credentials and checks its integrity; set `minimumReleaseAge` there too, so a version published a moment ago is not taken. Use pnpm (10 or later, whose default runs no dependency's build script), keep this project on your own machine, put no `overrides` in it, and do not change it while the generator reads it.
 
 ### Generate the app
 
-Name the package `npm:<name>`, where you would name a module of the release: among the packages listed, in `--add`, or as an axis's choice. Give the project with `--outside-from`:
+Name the package `npm:<name>`, where you would name a module of the release: among the packages listed, in `--add`, or as an axis's choice. Give the project with `--outside-from`, from the directory holding it. Either list the modules of the app:
 
 ```sh
 npx @o3co/create-auth-provider@next my-app @mod/tokens npm:@example/did-grant --outside-from outside
+```
+
+or add the package to a pattern:
+
+```sh
 npx @o3co/create-auth-provider@next my-app --pattern simple-web --add npm:@example/did-grant --outside-from outside
 ```
 
