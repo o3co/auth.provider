@@ -19,6 +19,11 @@ export interface EnrollmentWitness {
 	 * Unavailable where they are not. An implementation that cannot offer it leaves it out.
 	 */
 	withdraw?(subject: string, token: string): Promise<void>;
+	/**
+	 * The token the subject's mark is set to, none where it carries no mark: read as `read` is. An
+	 * implementation offering it offers `withdraw` too; one that cannot leaves it out.
+	 */
+	markedWith?(subject: string): Promise<string | undefined>;
 }
 
 /** At most one witness: the module that asks it refuses to start with two. */

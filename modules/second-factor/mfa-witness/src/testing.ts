@@ -6,14 +6,15 @@ import { type EnrollmentWitness, enrollmentWitnesses } from "./contract.ts";
  * A witness in memory, keeping its promises: each call fails as unavailable while its count of
  * failures lasts, and `lost` writes take effect with their answer lost. `beforeEnroll`,
  * `afterEnroll`, `beforeRead` and `beforeWithdraw` run once around the next such call, as a request
- * racing it would. Made `withdraw: false`, it offers no withdraw, as a ledger that has none.
+ * racing it would. Made `withdraw: false`, it offers no withdraw, as a ledger that has none, and
+ * so no markedWith; made `markedWith: false`, no markedWith, as a ledger whose read answers no token.
  */
 export function witnessStandIn(
 	name = "enrollment-witness",
-	options: { readonly withdraw?: boolean } = {},
+	options: { readonly withdraw?: boolean; readonly markedWith?: boolean } = {},
 ) {
 	const marks = new Map<string, string>();
-	const failing = { read: 0, enroll: 0, clear: 0, withdraw: 0 };
+	const failing = { read: 0, enroll: 0, clear: 0, withdraw: 0, markedWith: 0 };
 	const lost = { enroll: 0, clear: 0, withdraw: 0 };
 	const next: {
 		beforeEnroll?: (() => void) | undefined;
@@ -68,6 +69,12 @@ export function witnessStandIn(
 			if (marks.get(subject) === token) marks.delete(subject);
 			loses("withdraw");
 		};
+		if (options.markedWith !== false) {
+			witness.markedWith = async (subject) => {
+				fails("markedWith");
+				return marks.get(subject);
+			};
+		}
 	}
 	const module = defineModule({ name }, (m) => [
 		m.contribute(enrollmentWitnesses).by(() => witness),
@@ -95,7 +102,10 @@ export async function witnessProblems(witness: EnrollmentWitness): Promise<strin
 	const raced = await Promise.all([witness.enroll(two, "a"), witness.enroll(two, "b")]);
 	check(raced.filter(Boolean).length === 1, "two enrolls at once do not leave exactly one owner");
 	const withdraw = witness.withdraw?.bind(witness);
-	if (withdraw === undefined) return problems;
+	if (withdraw === undefined) {
+		check(witness.markedWith === undefined, "markedWith is offered without withdraw");
+		return problems;
+	}
 	const three = `w-${n}-3`;
 	await witness.enroll(three, "mine");
 	await withdraw(three, "other");
@@ -109,10 +119,22 @@ export async function witnessProblems(witness: EnrollmentWitness): Promise<strin
 	await witness.enroll(four, "held");
 	await Promise.all([withdraw(four, "stale"), witness.enroll(four, "late")]);
 	check(await witness.read(four), "a withdraw beside an enroll takes another token's mark");
+	const markedWith = witness.markedWith?.bind(witness);
+	if (markedWith === undefined) return problems;
+	const five = `w-${n}-5`;
+	check(
+		(await markedWith(five)) === undefined,
+		"markedWith names a token for a subject never marked",
+	);
+	await witness.enroll(five, "first");
+	await witness.enroll(five, "second");
+	check((await markedWith(five)) === "first", "markedWith misses the token an enroll owned");
+	await withdraw(five, "first");
+	check((await markedWith(five)) === undefined, "markedWith names a token after its withdraw");
 	return problems;
 }
 
-/** What mfa needs from any witness: set-if-absent by token, clear, a withdraw of its own token's mark where offered, and reads never behind an answered write. */
+/** What mfa needs from any witness: set-if-absent by token, clear, a withdraw of its own token's mark and the mark's token where offered, and reads never behind an answered write. */
 export function enrollmentWitnessContract(name: string, open: () => Promise<EnrollmentWitness>) {
 	describe(`enrollment witness contract: ${name}`, () => {
 		it("keeps the mark by its first token, clears it, and reads every answered write", async () => {

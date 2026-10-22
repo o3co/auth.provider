@@ -11,7 +11,8 @@
 - `enrollmentWitnesses`: at most one; the module that asks it refuses to start with two.
 - `EnrollmentWitness`: `read` (whether the subject carries the mark); `enroll` (subject, token: sets the mark to the token unless one is set, at once, and answers whether the mark is that token's; the same token answers alike however often); `clear` (removes the mark).
   - `withdraw` (subject, token), where an implementation offers it: removes the mark only where it is that token's, leaving any other or none; the same token answers alike. An implementation without it leaves the method out.
-- `./testing`: `witnessStandIn` (in memory, with failures, lost answers and races to set; `withdraw: false` leaves `withdraw` out), and the contract test `enrollmentWitnessContract` with `witnessProblems`, which checks `withdraw` where it is offered.
+  - `markedWith` (subject), where an implementation offers it: the token the mark is set to, none where it carries no mark, read as `read` is. An implementation offering it offers `withdraw` too.
+- `./testing`: `witnessStandIn` (in memory, with failures, lost answers and races to set; `withdraw: false` leaves `withdraw` and `markedWith` out, `markedWith: false` the latter alone), and the contract test `enrollmentWitnessContract` with `witnessProblems`, which checks `withdraw` and `markedWith` where they are offered.
 
 ## Invariants
 - Per subject, the calls are linearizable; `enroll`'s set-if-absent and `withdraw`'s compare-and-delete are atomic, on the one mark.

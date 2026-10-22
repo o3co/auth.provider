@@ -24,3 +24,28 @@ it("leaves withdraw out of a stand-in made without it, so a caller tells it is n
 	expect([typeof without.withdraw, "withdraw" in without]).toEqual(["undefined", false]);
 	expect(typeof witnessStandIn().witness.withdraw).toBe("function");
 });
+
+enrollmentWitnessContract(
+	"the stand-in without markedWith",
+	async () => witnessStandIn("enrollment-witness", { markedWith: false }).witness,
+);
+
+it("tells a witness whose markedWith misses the mark from one that keeps its promises", async () => {
+	const kept = witnessStandIn().witness;
+	const blind = { ...kept, markedWith: async () => undefined };
+	expect(await witnessProblems(blind)).toContain("markedWith misses the token an enroll owned");
+});
+
+it("tells a witness offering markedWith without withdraw from one that keeps its promises", async () => {
+	const { withdraw, ...rest } = witnessStandIn().witness;
+	expect(typeof withdraw).toBe("function");
+	expect(await witnessProblems(rest)).toContain("markedWith is offered without withdraw");
+});
+
+it("leaves markedWith out of a stand-in made without it or without withdraw", () => {
+	for (const options of [{ markedWith: false }, { withdraw: false }]) {
+		const without = witnessStandIn("enrollment-witness", options).witness;
+		expect("markedWith" in without, JSON.stringify(options)).toBe(false);
+	}
+	expect(typeof witnessStandIn().witness.markedWith).toBe("function");
+});
