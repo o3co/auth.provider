@@ -104,28 +104,30 @@ describe("the client routes", () => {
 		expect((await kept.grantCall(b.id, "token")).status).toBe(410);
 	});
 
-	it("counts a grant made within its allowance after the subject's revocation as revoked", async () => {
+	it("judges a grant by the subject's revocation in whole seconds, allowing nothing for clocks", async () => {
 		const h = await harness();
 		await h.revoke("alice");
+		// Begun and activated in the second after the boundary's: nothing allowed for clocks revokes it.
 		h.advance(1000);
-		const within = await h.connected();
-		expect(h.location(within.done).searchParams.get("error")).toBe("access_denied");
-		h.advance(1000);
-		const after = await h.connected();
-		expect(h.location(after.done).searchParams.get("error")).toBeNull();
-		// A revocation another host placed a second behind this one's activation.
+		const next = await h.connected();
+		expect(h.location(next.done).searchParams.get("error")).toBeNull();
+		// A revocation another host placed a second behind this one's activation leaves the grant.
 		h.advance(-1000);
 		await h.revoke("alice");
-		expect((await h.grantCall(after.id, "token")).status).toBe(410);
+		expect((await h.grantCall(next.id, "token")).status).toBe(200);
+		// One in the activation's own second ends it.
+		h.advance(1000);
+		await h.revoke("alice");
+		expect((await h.grantCall(next.id, "token")).status).toBe(410);
 
-		const none = await harness({ settings: { "revocation-skew": "0s" } });
-		await none.revoke("alice");
-		none.advance(1000);
-		const made = await none.connected();
-		expect(none.location(made.done).searchParams.get("error")).toBeNull();
-		none.advance(-1000);
-		await none.revoke("alice");
-		expect((await none.grantCall(made.id, "token")).status).toBe(200);
+		const kept = await harness({ settings: { "keep-on-subject-revocation": true } });
+		const made = await kept.connected();
+		kept.advance(-1000);
+		await kept.revoke("alice");
+		expect((await kept.grantCall(made.id, "token")).status).toBe(200);
+		kept.advance(1000);
+		await kept.revoke("alice");
+		expect((await kept.grantCall(made.id, "token")).status).toBe(410);
 	});
 
 	it("audits a subject's revocation of a grant only where this request wrote it", async () => {

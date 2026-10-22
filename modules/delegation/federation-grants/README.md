@@ -29,7 +29,6 @@
   - `rotations` per `rotation-window` (24 per `1h`)
   - `lodges` per `lodge-window` (60 per `1m`), lodgings and renewals together
   - `keep-on-subject-revocation` (false)
-  - `revocation-skew` (`1s`)
   - `sweep-interval` (`1h`): how often each host walks every grant kept, erasing the credentials of one ended or revoked that no request reads
   - `identity-check` (`required`)
   - `requests` per `window`
@@ -45,7 +44,7 @@
 - The upstream account matches the grant's and the client's `upstream_sub`; with `identity-check: required`, another holder or no answer refuses.
 - Only a bearer token with a refresh token, a finite life within the connection's and a scope within what was shown is held.
 - A revocation is the end: no refresh or activation writes over it, and an ordinary logout leaves grants.
-- A subject's boundary, widened by `revocation-skew`, ends a grant when read; with `keep-on-subject-revocation`, only `delegations` does.
+- A subject's boundary ends a grant when read, in whole seconds with nothing allowed for hosts' clocks; with `keep-on-subject-revocation`, only `delegations` does.
 - A failed listing is logged and passed: the boundary still refuses what the follower misses.
 - Credentials are sealed to the grant's id, subject, client and connection, and erased once revoked, sent to reauthorization, or read past the end.
 - Tokens, secrets and upstream text reach neither answers, logs nor audit.

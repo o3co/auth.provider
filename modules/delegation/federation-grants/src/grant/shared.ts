@@ -45,7 +45,6 @@ export async function sharedOver(c: BuildContext<Settings>) {
 		judge: judgeWith(await c.get(revocations), {
 			keep: c.section["keep-on-subject-revocation"],
 			maxMs,
-			allowanceMs: c.section["revocation-skew"] * 1000,
 		}),
 		listed: listingWith(await c.get(subjectGrants), c.log),
 	};

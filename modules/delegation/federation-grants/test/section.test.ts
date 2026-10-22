@@ -9,7 +9,6 @@ const times = [
 	["refresh-before", 0, 3600, "30s"],
 	["rotation-window", 1, 86_400, "1h"],
 	["lodge-window", 1, 86_400, "1m"],
-	["revocation-skew", 0, 300, "1s"],
 	["window", 1, 3600, "1m"],
 ] as const;
 
@@ -23,7 +22,6 @@ describe("federation-grants' section: its times", () => {
 				"refresh-before": "1m",
 				"rotation-window": "2h",
 				"lodge-window": "30s",
-				"revocation-skew": "2s",
 				window: "10s",
 			}),
 		).toMatchObject({
@@ -33,7 +31,6 @@ describe("federation-grants' section: its times", () => {
 			"refresh-before": 60,
 			"rotation-window": 7200,
 			"lodge-window": 30,
-			"revocation-skew": 2,
 			window: 10,
 		});
 	});
@@ -67,7 +64,6 @@ describe("federation-grants' section: its times", () => {
 			"rotation-window": 3600,
 			lodges: 60,
 			"lodge-window": 60,
-			"revocation-skew": 1,
 			"sweep-interval": 3600,
 			"keep-on-subject-revocation": false,
 			"identity-check": "required",
@@ -134,6 +130,12 @@ describe("federation-grants' section: a connection's longest access token life",
 	it("refuses a connection without it", () => {
 		expect(section.safeParse(withConnection({})).error?.issues).toMatchObject([
 			{ path: [...where, key] },
+		]);
+	});
+
+	it("refuses revocation-skew, an allowance for hosts' clocks it no longer takes", () => {
+		expect(section.safeParse({ "revocation-skew": "1s" }).error?.issues).toMatchObject([
+			{ code: "unrecognized_keys", keys: ["revocation-skew"] },
 		]);
 	});
 
