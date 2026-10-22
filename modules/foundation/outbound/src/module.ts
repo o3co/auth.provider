@@ -23,6 +23,7 @@ import {
 	type SignedOutbound,
 	signedOutbound,
 } from "./contract.ts";
+import { plainIpv4Rules, plainIpv4Setting, takesIpv4 } from "./plain-ipv4.ts";
 import { type Resolver, type Route, send, systemResolver, type Trust } from "./transport.ts";
 
 export const section = policySettings
@@ -59,10 +60,16 @@ export const section = policySettings
 		"direct-hosts": hostList.describe(
 			"The hosts reached directly while a proxy is set; `.name` covers the name and the names under it.",
 		),
+		"plain-ipv4": plainIpv4Setting,
 	})
 	.refine((s) => s["proxy-authorization"] === undefined || s.proxy !== undefined, {
 		message: "proxy-authorization is for a proxy: set proxy too",
 		path: ["proxy-authorization"],
+	})
+	.superRefine((s, context) => {
+		for (const [holds, message] of plainIpv4Rules) {
+			if (!holds(s)) context.addIssue({ code: "custom", message, path: ["plain-ipv4"] });
+		}
 	});
 
 const proxyVariables = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"].flatMap((name) => [
@@ -154,17 +161,22 @@ export function outboundOver(
 	const outsideLookups = Math.floor(lookups / 2);
 	const outsidePlace = places(outsideLookups);
 	const ownPlace = places(lookups - outsideLookups);
-	// A name already resolving is answered by that lookup, which takes one place for all who ask.
+	// A name already resolving, for the same family, is answered by that lookup, which takes one place
+	// for all who ask: a lookup for IPv4 alone never answers one for every family, nor the reverse.
 	const resolving = new Map<string, Promise<readonly string[]>>();
 	const boundedBy =
 		(place: ReturnType<typeof places>): Resolver =>
-		(host) =>
-			resolving.get(host) ??
-			place(() => {
-				const lookup = resolve(host);
-				resolving.set(host, lookup);
-				return lookup.finally(() => resolving.delete(host));
-			});
+		(host, family) => {
+			const key = `${family ?? "any"} ${host}`;
+			return (
+				resolving.get(key) ??
+				place(() => {
+					const lookup = resolve(host, family);
+					resolving.set(key, lookup);
+					return lookup.finally(() => resolving.delete(key));
+				})
+			);
+		};
 	const outsideChosen = boundedBy(outsidePlace);
 	const own = boundedBy(ownPlace);
 	const go = async (url: string, request: OutboundRequest, narrower: Narrower, signed: boolean) => {
@@ -172,8 +184,12 @@ export function outboundOver(
 		const sent = sentRequest(request, signed);
 		const admitted = policy.admit(url, narrower, signed);
 		const bounded = narrower.outsideChosen ? outsideChosen : own;
+		// A plain-ipv4 pair's name is resolved for IPv4 alone; the policy checks every answer as ever.
+		const resolving: Resolver = takesIpv4(settings["plain-ipv4"], admitted)
+			? (host) => bounded(host, 4)
+			: (host) => bounded(host);
 		return requestPlace(() =>
-			send(admitted, sent, limits, bounded, policy, route, trust, deadlineOf),
+			send(admitted, sent, limits, resolving, policy, route, trust, deadlineOf),
 		);
 	};
 	return {

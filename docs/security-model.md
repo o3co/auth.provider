@@ -167,15 +167,16 @@ Each promise below holds across every module composed. Each names what keeps it 
 
 - **Guaranteed:**
   - No host is reached by name unless `outbound.allow` lists it or `outbound.allow-any-public` is set. `outbound.deny` is checked first.
-  - A name is resolved once, every address it resolves to is checked, and the request connects only to a checked address.
-  - Loopback, link-local, the cloud metadata addresses and other special-purpose addresses are never reached, but for a `plain-loopback` pair the operator names.
-  - Private addresses are reached only by URLs a module takes from your own configuration and names so (the audit-http collector, the users-http ledger, an OpenID Connect IdP's issuer and the endpoints you give it, a GitHub Enterprise's endpoints), at hosts in `outbound.internal-hosts`, or over plain http at a `host:port` in `outbound.plain-internal`, where every address the name resolves to must be private. Each is reached only at that URL's origin: an endpoint an IdP's description names on another origin reaches public addresses only.
+  - A name is resolved once, every address it resolves to is checked, and the request connects only to a checked address. For plain http to a `host:port` in `outbound.plain-ipv4`, the name is resolved for IPv4 addresses alone: every one of those is checked, and IPv6 addresses are neither checked nor reached.
+  - Loopback, link-local, the cloud metadata addresses and other special-purpose addresses are never reached, but loopback ones over plain http at a `plain-loopback` or `plain-internal` pair the operator names.
+  - Private addresses are reached only by URLs a module takes from your own configuration and names so (the audit-http collector, the users-http ledger, an OpenID Connect IdP's issuer and the endpoints you give it, a GitHub Enterprise's endpoints), at hosts in `outbound.internal-hosts`, or over plain http at a `host:port` in `outbound.plain-internal`, where every address the name resolves to (every IPv4 one, for a pair in `outbound.plain-ipv4`) must be private or loopback. Each is reached only at that URL's origin: an endpoint an IdP's description names on another origin reaches public addresses only.
   - Redirects are refused, and only https is used, except plain http to a named `plain-loopback` or `plain-internal` pair, and signed material (whose signature is checked), fetched from its caller's named hosts.
   - Proxy environment variables are never read.
   - An IdP's authorization and end-of-session endpoints, where the browser goes and outbound never does, are https, or plain http only at a loopback name or, for an OpenID Connect IdP or a GitHub Enterprise, at the origin of an issuer or endpoint of your own configuration that `outbound.plain-internal` names; any other refuses boot. Plain http there carries the user's password and the IdP's cookies in the clear between the browser and the IdP, which the browser reaches by its own resolver, outside any mesh.
 - **Left to you:**
   - With `outbound.proxy` set, the proxy resolves names and checks where they lead (boot warns so).
   - What goes to a `plain-internal` pair, passwords, tokens and credentials among it, is in the clear: name only peers on a network trusted against reading and changing it (each boot warns `outbound.plain_internal`).
+  - Name a pair in `outbound.plain-ipv4` only where its IPv4 answers are the ones to reach, as ECS Service Connect's are: the name's IPv6 answers are not used.
   - Network egress filtering is still expected.
 
 ## Storage

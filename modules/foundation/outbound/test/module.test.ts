@@ -33,6 +33,7 @@ it("holds to the defaults: outbound-policy's for its keys, and outbound's own", 
 		"max-concurrent": 16,
 		"direct-despite-proxy": false,
 		"direct-hosts": [],
+		"plain-ipv4": [],
 	});
 });
 

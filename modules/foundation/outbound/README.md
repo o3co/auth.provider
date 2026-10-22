@@ -12,7 +12,7 @@
 - `outbound`: fetch a URL with a request and a narrower, answering status, headers and body, or throwing a destination refusal or unavailable with its failure. `isOutboundUnavailable` tells that unavailable by its mark, not its class, so a second bundled copy's is told too.
 - `outbound.signed`: the same for signed material, with the narrower's hosts always named.
 - `DestinationRefused`, `RefusalReason` and `Narrower`, `outbound-policy`'s, as `fetch` throws and takes them. Composition definition, providing `outbound-policy`'s `outbound.refusals` (`plainInternal` and `browsedRefusal` too), `outbound.credentials` and `outbound.limits` from the section; reading an answer as JSON (one frozen UTF-8 object, at the status named, `200` by default).
-- Operator section `outbound`: `outbound-policy`'s keys, `max-concurrent`, the proxy and `direct-hosts` (a host list, as `outbound-policy` reads one); its keys are in the configuration reference.
+- Operator section `outbound`: `outbound-policy`'s keys, `max-concurrent`, the proxy, `direct-hosts` (a host list, as `outbound-policy` reads one) and `plain-ipv4`; its keys are in the configuration reference.
 
 ## Invariants
 - Sends every request that leaves the deployment itself, as no other package does (`network`: `outbound`).
@@ -26,12 +26,15 @@
 - A `proxy` (an http origin alone, as the URL parser writes it, without credentials; `proxy-authorization` apart) carries every https request, but to `direct-hosts` (list internal hosts there too), by CONNECT with TLS to the destination inside. Then outbound resolves no name: it checks the name and any address in the URL; the proxy checks where a name resolves (boot warns so). A refused tunnel is `proxy-refused`.
 - Boot warns that `proxy-authorization` goes in the clear unless the proxy is a loopback address written as one (`address-reach`'s `isLoopbackAddress`): its name is never resolved here.
 - Plain http, a `plain-loopback` or `plain-internal` pair's, never goes through the proxy: outbound resolves the name and checks every address itself, a `plain-loopback` pair's by `isLoopbackAddress`.
+- For plain http taken as such a pair's (signed material too), to a host and port `plain-ipv4` names (hosts compared as the policy's lists compare them), the name is resolved to IPv4 addresses alone: every one of those is checked by the policy, the first reached, and an IPv6 one is neither checked nor reached. Other ports of the name, https to it, and plain http not taken as the pair's resolve every family.
+- A lookup for IPv4 alone shares no answer with one for every family of the same name and takes a place of its own, so lookups may be busy otherwise than before.
+- A `plain-ipv4` entry names, by name and once, a pair `plain-loopback` or `plain-internal` names; else boot is refused, naming neither host nor port.
 - Each boot that names `plain-internal` pairs warns `outbound.plain_internal`, with their count alone: what goes to them, passwords, tokens, credentials and keys, is in the clear.
-- List in `plain-internal` only peers on a network trusted against reading and changing what passes, such as one task, a closed cluster network or a service mesh; where possible, use https with an internal CA and `internal-hosts` instead.
+- List in `plain-internal` only peers on a network trusted against reading and changing what passes, such as one task, a closed cluster network or a service mesh; where possible, use https with an internal CA and `internal-hosts` instead. ECS Service Connect writes each name in the hosts file with an IPv4 address and an IPv6 one, which in the environment reported does not reach: name its pair in `plain-ipv4` too.
 - Proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, either case) are never read; with one set and no `proxy`, boot is refused, naming the variable alone, unless `direct-despite-proxy` is set.
 
 ## Depends on
-- `kernel`, `outbound-policy`, `address-reach` (`isLoopbackAddress`), `url-setting` (the proxy's origin)
+- `kernel`, `outbound-policy` (also `withinHosts`, to compare `plain-ipv4`'s hosts), `address-reach` (`isLoopbackAddress`), `url-setting` (the proxy's origin)
 
 ## Vocabulary
 - failure: why outbound is unavailable, for a caller to log by, with no value and no body: `timeout` (the deadline came), `too-large` (a body or headers past the cap), `unreachable` (no address, no connection, or the connection lost), `unsupported-answer` (a 101 or an encoded answer), `busy` (past `max-concurrent`), `proxy-refused`.
