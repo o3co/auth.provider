@@ -404,6 +404,16 @@ describe("the subject's passkeys from a session", () => {
 		});
 	});
 
+	it("limits renaming alone too", async () => {
+		const { browser } = await serve({ requests: 2, window: "1m" });
+		const renaming = await browser("lee");
+		const rename = (nickname: string) =>
+			renaming("/oauth/webauthn/registrations/rename", { id: "YQ", nickname });
+		expect((await rename("x")).status).toBe(200);
+		expect((await rename("y")).status).toBe(200);
+		expect(await rename("z")).toMatchObject({ status: 429 });
+	});
+
 	it("asks passkeys to keep nothing a revocation since its challenge reaches, answering unauthorized and recording no registration", async () => {
 		const { state, asked, browser, events } = await serve();
 		state.answer = {
