@@ -823,6 +823,7 @@ What changed since rc.5. Coming from an earlier release candidate, read the sect
 What changes from 0.18 to 0.19. Coming from an earlier release candidate, read the sections above first.
 
 - **The second-factor witness at the ledger** (`mfa-witness-http`): the provider removes a mark it set itself by withdrawing it by its token, where the ledger serves `withdraw-url`, so another binding's mark is never taken. Serve the route and check it as [Keeping the second-factor witness at the ledger](runbook.md#keeping-the-second-factor-witness-at-the-ledger) says, then set `mfa-witness-http.withdraw-url` on every instance; it must not be the same as `clear-url`. Until you do, nothing changes but a warning at each boot (`mfa-witness-http.withdraw_missing`); a later release will require it.
+- **A witnessing of your own** (code that contributes to `mfa`'s `witnessing` extension point in place of `mfa-witnessing`): import `witnessing` and `Witnessing` from `@mod/mfa-extensions`; `@mod/mfa` no longer exports them. The extension point keeps its name (`mfa.witnessing`) and its shape, so nothing changes in an app that composes `mfa-witnessing`. `Asked` is exported by both.
 
 ## From 0.18.0
 
