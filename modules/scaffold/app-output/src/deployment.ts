@@ -28,9 +28,11 @@ const paths = {
 	main: "src/main.ts",
 };
 
-/** Node 24 by version and by digest (the multi-platform index); update both together. */
-const nodeImage =
-	"node:24.21.0-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1";
+/**
+ * Node 24's latest, neither patch nor digest pinned: each build takes Node's security fixes, at the
+ * cost of a build that may differ from the last.
+ */
+const nodeImage = "node:24-alpine";
 /** The corepack that gives the image the manifest's pnpm; pinned, so a build never takes the latest. */
 const corepack = "0.36.0";
 /** http's default port: the image changes only the interface it listens on. */
@@ -227,7 +229,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["nod
 `
 		: "";
 	return `# syntax=docker/dockerfile:1
-# Node 24 pinned by version and digest, corepack pinned too; pnpm is the manifest's packageManager.
+# Node 24's latest, so a build takes its security fixes; corepack pinned; pnpm is the manifest's packageManager.
 FROM ${nodeImage} AS base
 # An init as process 1 passes signals on and reaps what node leaves behind.
 RUN apk add --no-cache tini && npm install --global corepack@${corepack} && corepack enable

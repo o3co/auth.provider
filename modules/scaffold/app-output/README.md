@@ -33,7 +33,7 @@
 - With `seal` composed, the project has a `reseal` script: the same modules, built and never started, running their resealers.
 - With `mfa-witnessing` composed, the project has a `witness-backfill` script, built and never started the same way. It settles each subject read from standard input, one a line, empty lines skipped, each other line used as sent, through `witnessBackfill`, and writes only how many were marked, held, none, inconsistent and failed (unavailable), never a subject. It exits 0 where none failed, else 1, and 78 on a refused boot.
 - Git leaves out every env file but `.env.example`, the local layer, `*.pem` and `*.key`; the image's build context leaves out those, `.env.example` and `.git`.
-- The image pins Node by version and digest and corepack by version, installs the locked production dependencies in a stage of their own, and runs node under `tini` as a user other than root.
+- The image follows Node 24's latest, neither patch nor digest pinned, so a build takes Node's security fixes over repeating the last build; it pins corepack by version, installs the locked production dependencies in a stage of their own, and runs node under `tini` as a user other than root.
 - Only an app composing `http` is given its port and interface in the image and the guide, and only one composing `http-ops` is checked for liveness (`/_healthcheck`, after a start period) or told of its endpoints.
 - The app reads the configuration files `APP_CONFIG` lists, comma-separated, layered in order; the generated configuration file when unset.
 - The app exits 78 on a refused boot, told by the kernel's mark (`BootRefused.is`), writing each refusal on standard error.
