@@ -97,13 +97,13 @@ it("answers when the challenge a registration answered was made, and lists, rena
 	const { registrations, register } = kept({ now: () => 7_000 });
 	const { answer, response } = await register("sam");
 	expect(answer).toMatchObject({ kind: "registered", challengedAt: 7_000 });
-	expect(await registrations.listed?.("sam")).toEqual([
+	expect(await registrations.listed("sam")).toEqual([
 		expect.objectContaining({ id: response.id, nickname: "laptop", at: 7_000 }),
 	]);
-	expect(await registrations.renamed?.("sam", response.id, "phone")).toBe("renamed");
-	expect(await registrations.renamed?.("kim", response.id, "mine")).toBe("unknown");
-	expect(await registrations.removed?.("sam", response.id)).toEqual({ removed: true, empty: true });
-	expect(await registrations.listed?.("sam")).toEqual([]);
+	expect(await registrations.renamed("sam", response.id, "phone")).toBe("renamed");
+	expect(await registrations.renamed("kim", response.id, "mine")).toBe("unknown");
+	expect(await registrations.removed("sam", response.id)).toEqual({ removed: true, empty: true });
+	expect(await registrations.listed("sam")).toEqual([]);
 });
 
 it("takes a challenge once, and only for the subject it was made for", async () => {

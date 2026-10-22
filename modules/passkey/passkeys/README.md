@@ -14,7 +14,7 @@
   - A caller's check (`admitted`) is asked before the record is listed and once after; its write's record (by token) becomes a passkey only as the last write, both asks admitting. A `false` (`revoked`), a throw or a failed list ends it, best effort.
   - Left: a revocation after the second ask is not seen; a registration stopped, or failing to end, leaves its record pending: if listed, it counts toward `max-credentials` until removed or `cleared`.
   - The caller answers for who the subject is: only a module that authenticated it may ask.
-  - A registration answers when its challenge was made (`challengedAt`). `listed` (id, nickname, transports, backup state, and when registered where kept), `renamed` (`renamed` / `unknown`) and `removed` (`removed`: this call ended it; `empty`: none left) take only the subject's own; they are optional in the contract until their callers are written.
+  - A registration answers when its challenge was made (`challengedAt`). `listed` (id, nickname, transports, backup state, and when registered where kept), `renamed` (`renamed` / `unknown`) and `removed` (`removed`: this call ended it; `empty`: none left) take only the subject's own.
 - `passkeyHolders`, taken only by `login-passkey` and `passkey-reset`: `held` (settled first), `cleared` (ends every passkey of the subject and has its mark go → how many it ended), `settle`, and `witnessed` (whether a witness is composed).
 - Extension point `passkeyWitnesses` (at most one, two refusing boot): `read`, `enroll` (set-if-absent by token), `withdraw` (only that token's mark), `clear` (any mark). Audit event `passkey.enrollment_inconsistent` (`at`), declared in `./audit-events`.
 - Store interfaces, which the assembly wires. The store never sees what a record holds.

@@ -58,7 +58,7 @@ it("marks a subject with the witness composed once a registration is written, an
 	expect(await kept.register("sam", response)).toMatchObject({ kind: "registered" });
 	expect(stand.marks.has("sam")).toBe(true);
 	expect(await holders.held("sam")).toBe(true);
-	expect(await kept.removed?.("sam", response.id)).toEqual({ removed: true, empty: true });
+	expect(await kept.removed("sam", response.id)).toEqual({ removed: true, empty: true });
 	expect(stand.marks.has("sam")).toBe(false);
 	await app.stop(1000);
 });
