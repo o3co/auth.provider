@@ -44,12 +44,18 @@ interface Answer {
 	readonly afterMs?: number;
 }
 
-/** A ledger keeping the witness's promises: one mark per subject, set if absent, at once. */
+/** A ledger keeping the witness's promises: one mark per subject, set if absent, at once, read with its token. */
 function keepingLedger() {
 	const marks = new Map<string, string>();
 	return (asked: Asked): Answer => {
 		const { subject, token } = JSON.parse(asked.body);
-		if (asked.path === "/w/read") return { status: 200, json: { enrolled: marks.has(subject) } };
+		if (asked.path === "/w/read") {
+			const held = marks.get(subject);
+			return {
+				status: 200,
+				json: held === undefined ? { enrolled: false } : { enrolled: true, token: held },
+			};
+		}
 		if (asked.path === "/w/enroll") {
 			if (!marks.has(subject)) marks.set(subject, token);
 			return { status: 200, json: { owner: marks.get(subject) === token } };
@@ -261,6 +267,73 @@ describe("mfa-witness-http's withdraw", () => {
 		expect(await refusedAt({ "withdraw-url": at("/w/withdraw", otherPair) })).toEqual([
 			"mfa-witness-http.credential",
 		]);
+	});
+});
+
+describe("mfa-witness-http's markedWith", () => {
+	const withWithdraw = (more: Record<string, unknown> = {}) =>
+		settings({ "withdraw-url": at("/w/withdraw"), ...more });
+
+	it("reads the mark's token from the read answer where withdraw-url is set, none where unmarked", async () => {
+		const { witness } = await open(withWithdraw());
+		expect(await witness.markedWith?.("alice")).toBeUndefined();
+		await witness.enroll("alice", "t-1");
+		await witness.enroll("alice", "t-2");
+		expect(await witness.markedWith?.("alice")).toBe("t-1");
+		const reads = received.filter((r) => r.path === "/w/read").map((r) => JSON.parse(r.body));
+		expect(reads).toEqual([{ subject: "alice" }, { subject: "alice" }]);
+	});
+
+	it("offers no markedWith without withdraw-url, reading a marked answer with no token as marked", async () => {
+		const { witness } = await open();
+		expect("markedWith" in witness).toBe(false);
+		script = () => ({ status: 200, json: { enrolled: true } });
+		expect(await witness.read("alice")).toBe(true);
+	});
+
+	it("answers unavailable where withdraw-url is set and a marked answer names no token, never clearing instead", async () => {
+		const { witness, logged } = await open(withWithdraw());
+		for (const json of [
+			{ enrolled: true },
+			{ enrolled: true, token: "" },
+			{ enrolled: true, token: 5 },
+		]) {
+			script = (asked) => (asked.path === "/w/read" ? { status: 200, json } : { status: 204 });
+			await expect(witness.markedWith?.("alice-secret"), JSON.stringify(json)).rejects.toSatisfy(
+				isUnavailable,
+			);
+			await expect(witness.read("alice-secret"), JSON.stringify(json)).rejects.toSatisfy(
+				isUnavailable,
+			);
+		}
+		expect(received.map((r) => r.path).every((path) => path === "/w/read")).toBe(true);
+		const failures = logged
+			.lines()
+			.filter((line) => line.event === "mfa-witness-http.ledger_failed")
+			.map((line) => line.fields);
+		expect(failures).toEqual(Array(6).fill({ call: "read", reason: "malformed" }));
+		expect(JSON.stringify(logged.lines())).not.toContain("alice-secret");
+	});
+
+	it("answers unavailable to a read whose token makes it larger than max-response-size, for read and markedWith alike", async () => {
+		const { witness, logged } = await open(withWithdraw({ "max-response-size": "64B" }));
+		const token = "t".repeat(200);
+		script = () => ({ status: 200, json: { enrolled: true, token } });
+		await expect(witness.read("alice")).rejects.toSatisfy(isUnavailable);
+		await expect(witness.markedWith?.("alice")).rejects.toSatisfy(isUnavailable);
+		const failures = logged
+			.lines()
+			.filter((line) => line.event === "mfa-witness-http.ledger_failed")
+			.map((line) => line.fields);
+		expect(failures).toEqual(Array(2).fill({ call: "read", reason: "too-large" }));
+		expect(JSON.stringify(logged.lines())).not.toContain(token);
+	});
+
+	it("reads an unmarked answer as no token, whatever else it names", async () => {
+		const { witness } = await open(withWithdraw());
+		script = () => ({ status: 200, json: { enrolled: false, token: "stale" } });
+		expect(await witness.markedWith?.("alice")).toBeUndefined();
+		expect(await witness.read("alice")).toBe(false);
 	});
 });
 

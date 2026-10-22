@@ -138,7 +138,7 @@ describe("mfa's witness on an app keeping it at a ledger", () => {
 		expect(onPattern({ origin, users: [] }, {}, [])).not.toHaveProperty("party");
 	});
 
-	it("answers whether a subject is enrolled, takes the first mark, and clears it, with its credential alone", async () => {
+	it("answers whether a subject is enrolled and by which token, takes the first mark, withdraws it by its token alone, and clears it, with its credential alone", async () => {
 		const ledger = await ledgerParty({ witness: true });
 		const section = ledger.config["mfa-witness-http"] ?? {};
 		const ask = (key: string, body: unknown, credential = section.credential) =>
@@ -149,7 +149,7 @@ describe("mfa's witness on an app keeping it at a ledger", () => {
 			});
 		try {
 			expect(ledger.config).not.toHaveProperty("users-http");
-			for (const key of ["read-url", "enroll-url", "clear-url"]) {
+			for (const key of ["read-url", "enroll-url", "clear-url", "withdraw-url"]) {
 				expect(new URL(String(section[key])).origin, key).toBe(ledger.base);
 			}
 			expect(await (await ask("read-url", { subject: "u-1" })).json()).toEqual({ enrolled: false });
@@ -159,7 +159,18 @@ describe("mfa's witness on an app keeping it at a ledger", () => {
 			expect(await (await ask("enroll-url", { subject: "u-1", token: "b" })).json()).toEqual({
 				owner: false,
 			});
-			expect(await (await ask("read-url", { subject: "u-1" })).json()).toEqual({ enrolled: true });
+			expect(await (await ask("read-url", { subject: "u-1" })).json()).toEqual({
+				enrolled: true,
+				token: "a",
+			});
+			expect((await ask("withdraw-url", { subject: "u-1", token: "b" })).status).toBe(204);
+			expect(await (await ask("read-url", { subject: "u-1" })).json()).toEqual({
+				enrolled: true,
+				token: "a",
+			});
+			expect((await ask("withdraw-url", { subject: "u-1", token: "a" })).status).toBe(204);
+			expect(await (await ask("read-url", { subject: "u-1" })).json()).toEqual({ enrolled: false });
+			await ask("enroll-url", { subject: "u-1", token: "c" });
 			expect((await ask("clear-url", { subject: "u-1" })).status).toBe(204);
 			expect(await (await ask("read-url", { subject: "u-1" })).json()).toEqual({ enrolled: false });
 			expect((await ask("read-url", { subject: "u-1" }, "wrong")).status).toBe(404);

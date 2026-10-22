@@ -14,7 +14,7 @@ export interface WitnessParts {
 		readonly read: string;
 		readonly enroll: string;
 		readonly clear: string;
-		/** None leaves withdraw out: the ledger has no route for it. */
+		/** None leaves withdraw and markedWith out: the ledger has no route for it, and its read need name no token. */
 		readonly withdraw?: string | undefined;
 	};
 	readonly out: Outbound;
@@ -29,6 +29,11 @@ export interface WitnessParts {
 type Call = "read" | "enroll" | "clear" | "withdraw";
 
 const readShape = z.object({ enrolled: z.boolean() });
+/** Where withdraw is offered, a marked answer names its mark's token. */
+const markShape = z.union([
+	z.object({ enrolled: z.literal(true), token: z.string().min(1) }),
+	z.object({ enrolled: z.literal(false) }),
+]);
 const enrollShape = z.object({ owner: z.boolean() });
 
 /** The kind outbound gives a failure to send, or no-answer for anything else. */
@@ -80,17 +85,25 @@ export function witnessAt(parts: WitnessParts): EnrollmentWitness {
 		const answer = await post(call, url, body);
 		if (answer.status !== 204) throw failed(call, { status: answer.status });
 	};
+	const withdrawUrl = urls.withdraw;
+	const mark = (subject: string) => answered("read", { subject }, markShape);
 	const witness: EnrollmentWitness = {
-		read: async (subject) => (await answered("read", { subject }, readShape)).enrolled,
+		read: async (subject) =>
+			withdrawUrl === undefined
+				? (await answered("read", { subject }, readShape)).enrolled
+				: (await mark(subject)).enrolled,
 		enroll: async (subject, token) =>
 			(await answered("enroll", { subject, token, deadline: deadline() }, enrollShape)).owner,
 		clear: (subject) => written("clear", urls.clear, { subject, deadline: deadline() }),
 	};
 	// Left out, not undefined, where the ledger has no route for it.
-	const withdrawUrl = urls.withdraw;
 	if (withdrawUrl !== undefined) {
 		witness.withdraw = (subject, token) =>
 			written("withdraw", withdrawUrl, { subject, token, deadline: deadline() });
+		witness.markedWith = async (subject) => {
+			const read = await mark(subject);
+			return read.enrolled ? read.token : undefined;
+		};
 	}
 	return witness;
 }
