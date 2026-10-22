@@ -20,6 +20,7 @@
 		"@mod/login-gates": "workspace:*",
 		"@mod/mfa": "workspace:*",
 		"@mod/mfa-extensions": "workspace:*",
+		"@mod/mfa-reading": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
 		"@mod/request-source": "workspace:*",
 		"@mod/session": "workspace:*",
@@ -29,8 +30,10 @@
 	},
 	"devDependencies": {
 		"@mod/login-attributes": "workspace:*",
+		"@mod/mfa-binding": "workspace:*",
 		"@mod/mfa-binding-proof": "workspace:*",
 		"@mod/mfa-entry": "workspace:*",
+		"@mod/mfa-managing": "workspace:*",
 		"@mod/mfa-revocation": "workspace:*",
 		"@mod/records": "workspace:*",
 		"@mod/seal": "workspace:*",

@@ -1,8 +1,8 @@
 import { acrEntries, isAmrSets } from "@mod/acr";
 import { assemble, BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
-import { type Factors, factors } from "@mod/mfa";
 import { secondFactorAmr } from "@mod/mfa-extensions";
+import { type FactorReading, factorReading } from "@mod/mfa-reading";
 import { expect, it } from "vitest";
 import bridge from "../src/module.ts";
 
@@ -15,7 +15,7 @@ const reader = defineModule({ name: "reader" }, (m) => [
 	}),
 ]);
 const secondFactors = defineModule({ name: "factors-stand-in" }, (m) => [
-	m.provide(factors).by(() => ({}) as Factors),
+	m.provide(factorReading).by(() => ({}) as FactorReading),
 ]);
 
 it("offers the acr met by a second factor, only where second factors are composed", async () => {

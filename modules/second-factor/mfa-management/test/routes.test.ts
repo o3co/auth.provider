@@ -1,4 +1,4 @@
-import { factors } from "@mod/mfa";
+import { factorReading } from "@mod/mfa-reading";
 import { revocations } from "@mod/subject-revocation";
 import { describe, expect, it } from "vitest";
 import {
@@ -179,7 +179,7 @@ describe("a revocation while factors are managed", () => {
 			clock.shift += 1000;
 		};
 		const answer = await s.call("POST", `/session/mfa/${path}`, { factor_id: id, ...body });
-		return { answer, held: await s.app.get(factors).held(subject) };
+		return { answer, held: await s.app.get(factorReading).held(subject) };
 	};
 
 	it("reissues no codes once the subject was revoked while they were written", async () => {

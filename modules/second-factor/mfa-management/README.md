@@ -26,4 +26,4 @@
 - The subject comes from the session, never from the body.
 
 ## Depends on
-- `kernel`, `http` (`jsonAnswer`), `csrf`, `rate-limit`, `session` (entry, `refusedEntry`), `mfa` (factor decisions, the label's shape), `mfa-entry` (`provenRecently`)
+- `kernel`, `http` (`jsonAnswer`), `csrf`, `rate-limit`, `session` (entry, `refusedEntry`), `mfa` (composed with it), `mfa-reading` (`held`), `mfa-managing` (naming and removing factors, the codes, the fence, the label's shape), `mfa-entry` (`provenRecently`)

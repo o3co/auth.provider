@@ -11,8 +11,9 @@ import {
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
-import { type Enforcer, enforcers, type Factors, factors } from "@mod/mfa";
+import { type Enforcer, enforcers } from "@mod/mfa";
 import { type FactorKind, factorKinds, secondFactorAmr } from "@mod/mfa-extensions";
+import { type FactorReading, factorReading } from "@mod/mfa-reading";
 import { sessionRules, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { type EntryRequirement, entryRequirements } from "@mod/session-requirements";
@@ -40,7 +41,7 @@ const kind = (counts: boolean, addsSecondFactor: boolean) =>
 function decided(holding: Set<string>, required = false, unreadable = new Set<string>()) {
 	const asked: string[] = [];
 	const module = defineModule({ name: "factors-stand-in" }, (m) => [
-		m.provide(factors).by(
+		m.provide(factorReading).by(
 			() =>
 				({
 					countingHeld: async (subject: string, at: string) => {
@@ -49,7 +50,7 @@ function decided(holding: Set<string>, required = false, unreadable = new Set<st
 						return holding.has(subject);
 					},
 					secondFactorRequired: () => required,
-				}) as unknown as Factors,
+				}) as unknown as FactorReading,
 		),
 	]);
 	return { module, asked };

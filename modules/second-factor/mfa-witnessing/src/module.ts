@@ -1,7 +1,7 @@
 import { audit } from "@mod/audit";
 import { defineModule } from "@mod/kernel";
-import { factors } from "@mod/mfa";
 import { witnessing } from "@mod/mfa-extensions";
+import { factorReading } from "@mod/mfa-reading";
 import { enrollmentWitnesses } from "@mod/mfa-witness";
 import { witnessBackfill } from "./contract.ts";
 import { backfillWith, witnessingWith } from "./witnessing.ts";
@@ -20,7 +20,7 @@ export default defineModule({ name: "mfa-witnessing" }, (m) => [
 		if (!witness || more.length > 0) {
 			return c.refuse("mfa-witnessing", "needs exactly one enrollment witness composed");
 		}
-		const decided = c.late(factors);
+		const decided = c.late(factorReading);
 		const token = () => Buffer.from(c.random.bytes(16)).toString("base64url");
 		return {
 			settle: backfillWith({

@@ -1,7 +1,7 @@
 import { type HttpResponse, jsonAnswer } from "@mod/http";
 import { isUnavailable } from "@mod/kernel";
 import { isLabel } from "@mod/labels";
-import type { Factors } from "@mod/mfa";
+import type { FactorBinding } from "@mod/mfa-binding";
 import type { Handler } from "@mod/mfa-flows";
 import type { bindingProofOver } from "../binding-proof/binding-proof.ts";
 import { heldOf } from "../held.ts";
@@ -17,7 +17,7 @@ type Refused<T extends (...args: never[]) => Promise<{ readonly kind: string }>,
 	Awaited<ReturnType<T>>["kind"],
 	Done
 >;
-type Refusal = Refused<Factors["begin"], "begun"> | Refused<Factors["bind"], "bound">;
+type Refusal = Refused<FactorBinding["begin"], "begun"> | Refused<FactorBinding["bind"], "bound">;
 const factorLimit = jsonAnswer(409, { error: "mfa_factor_limit" });
 /** What `mfa` refuses a binding with, as answered here; anything else refuses it too. */
 const refusals: Readonly<Partial<Record<Refusal, HttpResponse>>> = {
@@ -55,7 +55,7 @@ export function completionOver(
 		const kind = field(request, "kind") ?? "";
 		const { from } = e;
 		const transaction = "session" in e.where ? undefined : e.where.id;
-		const begin = (passed?: string) => p.factors.begin(e.subject, kind, passed, transaction, from);
+		const begin = (passed?: string) => p.binding.begin(e.subject, kind, passed, transaction, from);
 		// Begun without a pass first, mfa judges the kind before a binding proof goes out; one goes out only when asked.
 		const asks = await p.bindingProof.asks(e.subject, from);
 		let begun = await begin();
@@ -95,7 +95,7 @@ export function completionOver(
 		// Kept: inside the callback below, the check above no longer narrows it.
 		const pending = heldOf(t).pending ?? "";
 		const proved = await transactions.judged(txId, () =>
-			p.factors.provePending(t.subject, pending, proof),
+			p.binding.provePending(t.subject, pending, proof),
 		);
 		if (proved.kind === "unknown") return unknownTransaction;
 		if (proved.kind !== "valid") {
@@ -106,7 +106,7 @@ export function completionOver(
 		// Checked again just before the write, to answer early: a reset since the binding began, or a
 		// revocation once complete, is fenced inside mfa's write in any case.
 		if (await revokedSince(p.revocation, t)) return loginRequired;
-		const bound = await p.factors.bind(t.subject, pending, proved.state, label, askedFrom(t));
+		const bound = await p.binding.bind(t.subject, pending, proved.state, label, askedFrom(t));
 		// A reset or a revocation since the binding began, which ended its sessions too.
 		if (bound.kind === "fenced") return loginRequired;
 		// A first binding another factor beat: a login asks again, a session is told of the conflict.
@@ -123,7 +123,7 @@ export function completionOver(
 			// `mfa-revocation`, which moves it, and even with it a revocation's record moves its boundary
 			// before its followers move the fence.
 			if (await revokedSince(p.revocation, t)) return refused(loginRequired);
-			const reissued = await p.factors.reissue(t.subject, bound.fence);
+			const reissued = await p.managing.reissue(t.subject, bound.fence);
 			// A reset or a revocation since the binding began, or the factor gone meanwhile: no one sees codes.
 			if (reissued.kind === "fenced" || reissued.kind === "no-qualifying-factor")
 				return refused(loginRequired);

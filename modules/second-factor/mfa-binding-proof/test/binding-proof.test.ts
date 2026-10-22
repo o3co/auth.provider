@@ -5,9 +5,10 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import gatesModule from "@mod/login-gates/module";
-import { factorStore, factors, proofSteps, type StoredFactors } from "@mod/mfa";
+import { factorStore, proofSteps, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
 import { mfaConfig } from "@mod/mfa/testing";
+import { factorBinding } from "@mod/mfa-binding";
 import mfaEntry from "@mod/mfa-entry/module";
 import { factorKinds } from "@mod/mfa-extensions";
 import { memoryRecords } from "@mod/records/testing";
@@ -109,7 +110,7 @@ async function serve(mode?: "never" | "when-available" | "always", proofs = [own
 	});
 	stop = () => app.stop(1000);
 	const asking = app.get(bindingProof);
-	const decided = app.get(factors);
+	const decided = app.get(factorBinding);
 	const inAMinute = () => runtime.clock.now() + 60_000;
 	/** A pass for the subject, bound to a transaction and kind; a proof that gives none fails the test. */
 	const passOf = async (subject: string, bound = { transaction: "t", kind: "code" }) => {

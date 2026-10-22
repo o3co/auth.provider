@@ -1,4 +1,4 @@
-import { factors } from "@mod/mfa";
+import { factorManaging } from "@mod/mfa-managing";
 import { revocations } from "@mod/subject-revocation";
 import { describe, expect, it } from "vitest";
 import { clock, serve } from "../../../test/harness.ts";
@@ -6,7 +6,7 @@ import { clock, serve } from "../../../test/harness.ts";
 /** What an operator's reset does to a subject (`mfa-reset`), here without it: both boundaries, and the factors removed between them. */
 const resetting = async (s: Awaited<ReturnType<typeof serve>>, subject: string) => {
 	await s.app.get(revocations).record(subject, { keepDelegations: true });
-	await s.app.get(factors).clear(subject);
+	await s.app.get(factorManaging).clear(subject);
 	await s.app.get(revocations).record(subject, { keepDelegations: true });
 };
 

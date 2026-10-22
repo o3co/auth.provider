@@ -5,13 +5,15 @@ import { httpConfig } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import gatesModule from "@mod/login-gates/module";
+import { type FactorBinding, factorBinding } from "@mod/mfa-binding";
 import { factorKinds } from "@mod/mfa-extensions";
+import { type FactorReading, factorReading } from "@mod/mfa-reading";
 import { resealing, seal } from "@mod/seal";
 import sealModule from "@mod/seal/module";
 import { sessionStandIn } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, expect, it } from "vitest";
-import { enforcers, factors, proofSteps } from "../src/contract.ts";
+import { enforcers, proofSteps } from "../src/contract.ts";
 import mfaModule from "../src/module.ts";
 import type { StoredFactors } from "../src/store.ts";
 import { mfaConfig } from "../src/testing.ts";
@@ -86,7 +88,11 @@ async function rotated() {
 		runtime,
 	});
 	stop = () => app.stop(1000);
-	const decided = app.get(factors);
+	// mfa's faces the test binds and proves through, as one.
+	const decided: FactorReading & FactorBinding = {
+		...app.get(factorReading),
+		...app.get(factorBinding),
+	};
 	const read = async (subject: string) =>
 		(await place.factors.read(listKey(subject))) as unknown as Held;
 	const aged = async (subject: string, by: { id: string; key: string }) => {

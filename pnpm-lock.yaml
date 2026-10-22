@@ -1446,6 +1446,9 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../../second-factor/mfa-extensions
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../../second-factor/mfa-reading
 
   modules/oauth/oidc:
     dependencies:
@@ -2295,9 +2298,18 @@ importers:
       '@mod/login-gates':
         specifier: workspace:*
         version: link:../../identity/login-gates
+      '@mod/mfa-binding':
+        specifier: workspace:*
+        version: link:../mfa-binding
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/mfa-witness':
         specifier: workspace:*
         version: link:../mfa-witness
@@ -2324,6 +2336,22 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
+  modules/second-factor/mfa-binding:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
   modules/second-factor/mfa-binding-proof:
     dependencies:
       '@mod/kernel':
@@ -2335,6 +2363,9 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/seal':
         specifier: workspace:*
         version: link:../../foundation/seal
@@ -2351,6 +2382,9 @@ importers:
       '@mod/login-gates':
         specifier: workspace:*
         version: link:../../identity/login-gates
+      '@mod/mfa-binding':
+        specifier: workspace:*
+        version: link:../mfa-binding
       '@mod/mfa-entry':
         specifier: workspace:*
         version: link:../mfa-entry
@@ -2431,6 +2465,9 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../mfa
+      '@mod/mfa-binding':
+        specifier: workspace:*
+        version: link:../mfa-binding
       '@mod/mfa-binding-proof':
         specifier: workspace:*
         version: link:../mfa-binding-proof
@@ -2440,6 +2477,9 @@ importers:
       '@mod/mfa-flows':
         specifier: workspace:*
         version: link:../mfa-flows
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
@@ -2465,6 +2505,9 @@ importers:
       '@mod/mfa-entry':
         specifier: workspace:*
         version: link:../mfa-entry
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/mfa-revocation':
         specifier: workspace:*
         version: link:../mfa-revocation
@@ -2507,6 +2550,9 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/session':
         specifier: workspace:*
         version: link:../../identity/session
@@ -2560,6 +2606,9 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -2582,12 +2631,18 @@ importers:
       '@mod/login-attributes':
         specifier: workspace:*
         version: link:../../identity/login-attributes
+      '@mod/mfa-binding':
+        specifier: workspace:*
+        version: link:../mfa-binding
       '@mod/mfa-binding-proof':
         specifier: workspace:*
         version: link:../mfa-binding-proof
       '@mod/mfa-entry':
         specifier: workspace:*
         version: link:../mfa-entry
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
       '@mod/mfa-revocation':
         specifier: workspace:*
         version: link:../mfa-revocation
@@ -2624,6 +2679,12 @@ importers:
       '@mod/mfa-entry':
         specifier: workspace:*
         version: link:../mfa-entry
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -2643,6 +2704,9 @@ importers:
       '@mod/login-gates':
         specifier: workspace:*
         version: link:../../identity/login-gates
+      '@mod/mfa-binding':
+        specifier: workspace:*
+        version: link:../mfa-binding
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
@@ -2661,6 +2725,32 @@ importers:
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/second-factor/mfa-managing:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/second-factor/mfa-reading:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mfa-extensions':
+        specifier: workspace:*
+        version: link:../mfa-extensions
+    devDependencies:
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -2691,6 +2781,9 @@ importers:
       '@mod/mfa-flows':
         specifier: workspace:*
         version: link:../mfa-flows
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
@@ -2764,6 +2857,9 @@ importers:
       '@mod/mfa':
         specifier: workspace:*
         version: link:../mfa
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
       '@mod/subject-revocation':
         specifier: workspace:*
         version: link:../../identity/subject-revocation
@@ -2811,10 +2907,19 @@ importers:
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/mfa-witness':
         specifier: workspace:*
         version: link:../mfa-witness
     devDependencies:
+      '@mod/mfa-binding':
+        specifier: workspace:*
+        version: link:../mfa-binding
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
       '@mod/records':
         specifier: workspace:*
         version: link:../../foundation/records

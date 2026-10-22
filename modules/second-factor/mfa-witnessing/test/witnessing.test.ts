@@ -8,8 +8,8 @@ import {
 	kernelConfig,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
-import { type Factors, factors } from "@mod/mfa";
 import { type Witnessing, witnessing } from "@mod/mfa-extensions";
+import { type FactorReading, factorReading } from "@mod/mfa-reading";
 import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { expect, it } from "vitest";
 import { witnessBackfill } from "../src/contract.ts";
@@ -26,7 +26,7 @@ const reader = defineModule({ name: "reader" }, (m) => [
 const holding = (held: Record<string, string[]>, afterRead?: (n: number) => void) => {
 	let reads = 0;
 	return defineModule({ name: "factors-stand-in" }, (m) => [
-		m.provide(factors).by(
+		m.provide(factorReading).by(
 			() =>
 				({
 					writtenStanding: async (subject: string) => {
@@ -35,7 +35,7 @@ const holding = (held: Record<string, string[]>, afterRead?: (n: number) => void
 						afterRead?.(reads);
 						return answer;
 					},
-				}) as unknown as Factors,
+				}) as unknown as FactorReading,
 		),
 	]);
 };

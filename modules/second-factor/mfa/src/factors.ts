@@ -1,6 +1,7 @@
 import { type Audit, declaredAudit } from "@mod/audit";
 import { type Log, Unavailable } from "@mod/kernel";
 import { isLabel } from "@mod/labels";
+import type { FactorBinding } from "@mod/mfa-binding";
 import type { AfterReset, Asked, Witnessing } from "@mod/mfa-extensions";
 import {
 	type FactorKind,
@@ -8,9 +9,10 @@ import {
 	type Opened,
 	secondFactorAmr,
 } from "@mod/mfa-extensions";
+import type { FactorManaging } from "@mod/mfa-managing";
+import type { FactorReading, Fence, Shown } from "@mod/mfa-reading";
 import type { Seal } from "@mod/seal";
 import events from "./audit-events.ts";
-import type { Factors, Fence, Shown } from "./contract.ts";
 import { type Factor, factorRecords, sealContext } from "./records/records.ts";
 import type { FactorStore } from "./store.ts";
 
@@ -64,7 +66,10 @@ interface Pending {
 
 const isWayBack = (kind: FactorKind) => !kind.counts && !guessing(kind);
 
-export function factorDecisions(p: FactorParts): Factors {
+/** mfa's decisions: the members of the three contracts it provides, one implementation in each app. */
+export type Decisions = FactorReading & FactorBinding & FactorManaging;
+
+export function factorDecisions(p: FactorParts): Decisions {
 	const wayBack = (factor: Factor) => {
 		const kind = p.kinds.get(factor.kind);
 		return kind !== undefined && isWayBack(kind);

@@ -2,7 +2,8 @@ import { csrfChecked } from "@mod/csrf";
 import { type Route, routes, use } from "@mod/http";
 import { defineModule, isUnavailable } from "@mod/kernel";
 import { loginGates } from "@mod/login-gates";
-import { factors, fenceFollower, proofSteps } from "@mod/mfa";
+import { fenceFollower, proofSteps } from "@mod/mfa";
+import { factorReading } from "@mod/mfa-reading";
 import { lockoutProblem, requestsPerSource } from "@mod/rate-limit";
 import { revocationFollowers } from "@mod/subject-revocation";
 import { flowParts } from "./contract.ts";
@@ -51,7 +52,7 @@ export default defineModule({ name: "mfa-flows", section, replicaSafe: true }, (
 	m.contribute(loginGates).by(async (c) => ({
 		name: "mfa",
 		hold: gateOver({
-			factors: await c.get(factors),
+			factors: await c.get(factorReading),
 			transactions: await transactionsIn(c),
 		}),
 	})),

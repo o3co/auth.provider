@@ -1,10 +1,12 @@
 import { type HttpRequest, jsonAnswer, type Route } from "@mod/http";
-import type { Factors } from "@mod/mfa";
 import type { SecondFactors } from "@mod/mfa-entry";
+import type { FactorManaging } from "@mod/mfa-managing";
+import type { FactorReading } from "@mod/mfa-reading";
 import { refusedEntry, type Sessions } from "@mod/session";
 
 export interface HandlerParts {
-	readonly factors: Factors;
+	readonly reading: Pick<FactorReading, "held">;
+	readonly managing: Pick<FactorManaging, "rename" | "fenceOf" | "remove" | "reissue">;
 	readonly secondFactors: SecondFactors;
 	readonly sessions: Sessions;
 }
@@ -32,13 +34,13 @@ export function handlersOver(p: HandlerParts) {
 	const list: Handler = async (request) => {
 		const session = await p.sessions.enter(request);
 		if (!session) return refusedEntry({ kind: "absent" });
-		return jsonAnswer(200, { factors: await p.factors.held(session.context.subject) });
+		return jsonAnswer(200, { factors: await p.reading.held(session.context.subject) });
 	};
 
 	const rename: Handler = async (request) => {
 		const session = await managing(p.sessions, request);
 		if ("status" in session) return session;
-		const renamed = await p.factors.rename(
+		const renamed = await p.managing.rename(
 			session.context.subject,
 			request.fields.single("factor_id") ?? "",
 			request.fields.single("label") ?? "",
@@ -58,7 +60,7 @@ export function handlersOver(p: HandlerParts) {
 	const fenced = async (request: HttpRequest) => {
 		const session = await proving(request);
 		if ("status" in session) return session;
-		const fence = await p.factors.fenceOf(session.context.subject);
+		const fence = await p.managing.fenceOf(session.context.subject);
 		// Entering again reads the factors once more; `session` offers no lighter check of the boundary.
 		const still = await proving(request);
 		return "status" in still ? still : { session: still, fence };
@@ -67,7 +69,7 @@ export function handlersOver(p: HandlerParts) {
 	const remove: Handler = async (request) => {
 		const allowed = await fenced(request);
 		if ("status" in allowed) return allowed;
-		const removed = await p.factors.remove(
+		const removed = await p.managing.remove(
 			allowed.session.context.subject,
 			request.fields.single("factor_id") ?? "",
 			allowed.fence,
@@ -80,7 +82,7 @@ export function handlersOver(p: HandlerParts) {
 	const regenerate: Handler = async (request) => {
 		const allowed = await fenced(request);
 		if ("status" in allowed) return allowed;
-		const reissued = await p.factors.reissue(allowed.session.context.subject, allowed.fence);
+		const reissued = await p.managing.reissue(allowed.session.context.subject, allowed.fence);
 		if (reissued.kind === "fenced") return loginRequired;
 		// A first set another factor's binding left no place for.
 		if (reissued.kind === "full") return jsonAnswer(409, { error: "mfa_factor_limit" });

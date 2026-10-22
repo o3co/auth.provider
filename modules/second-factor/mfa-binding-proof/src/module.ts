@@ -1,6 +1,6 @@
 import { type BuildContext, defineModule, Unavailable } from "@mod/kernel";
-import { factors } from "@mod/mfa";
 import { type AskedFrom, firstBindingGates } from "@mod/mfa-extensions";
+import { factorReading } from "@mod/mfa-reading";
 import { type Seal, seal } from "@mod/seal";
 import { z } from "zod";
 import { type BindingProof, bindingProof, bindingProofs, type PassBound } from "./contract.ts";
@@ -58,7 +58,7 @@ export default defineModule({ name: "mfa-binding-proof", section }, (m) => [
 				"mode is always, but no binding proof is composed",
 			);
 		}
-		const mfa = await c.get(factors);
+		const mfa = await c.get(factorReading);
 		/** The proof asked of a subject that holds no counting factor yet. */
 		const asked = async (subject: string, from?: AskedFrom) =>
 			(await mfa.countingHeld(subject, "binding")) ? undefined : p.proofFor(subject, from);
@@ -84,7 +84,7 @@ export default defineModule({ name: "mfa-binding-proof", section }, (m) => [
 			},
 		};
 	}),
-	// mfa asks a gate only while the subject holds no counting factor; getting `factors` here would
+	// mfa asks a gate only while the subject holds no counting factor; getting `factorReading` here would
 	// cycle, as mfa collects this gate while it builds them.
 	m.contribute(firstBindingGates).by(async (c) => {
 		const p = await provingIn(c);
