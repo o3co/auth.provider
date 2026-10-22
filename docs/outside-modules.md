@@ -52,7 +52,7 @@ A package with a `preinstall`, `install` or `postinstall` script is refused.
 
 ### Write its section's example
 
-If your module has a section of the configuration, ship its example as `config.example` beside `package.json`, as the release's modules do. It holds exactly one section, whose name no other module composed takes, with placeholders only. It is read as data: a substitution (`${…}`) or an include is refused, and so is a backtick or a control character other than a line break in a key or a value, a file over 64 KiB, or keys and values over 32 KiB together. `app-output`'s cards hold these rules.
+If your module has a section of the configuration, ship its example as `config.example` beside `package.json`, as the release's modules do. It holds exactly one section, whose name no other module composed takes, with placeholders only. It is read as data: a substitution (`${…}`) or an include is refused, and so is a backtick or a control character other than a line break in a key or a value, a file over 64 KiB, or a section over 32 KiB as JSON writes it (its keys and values, with the punctuation and escapes between them). `app-output`'s cards hold these rules.
 
 `README.md` and `reference.conf` beside it are read too, as your card and your section's defaults; a `## Deployment` section of the card is pointed at from the app's guide.
 
