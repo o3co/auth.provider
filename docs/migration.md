@@ -815,6 +815,7 @@ What changed since rc.5. Coming from an earlier release candidate, read the sect
 - **A Redis store with replication**: boot is refused, named, where the confirming connection reaches another server than the operations, as a DNS name or a load balancer in front of several servers may send it; point both at one server. rc.5 booted and answered 503 to every replicated write.
 - **A Redis server that cannot run the store's scripts**: boot runs one of them once and is refused, naming a store script, where the server cannot run it, as one whose Lua lacks `cjson`; rc.5 booted and failed the writes with 503. The [runbook](runbook.md#managed-redisvalkey-with-replicas) says what the server must offer.
 - After boot, `/readyz` answers `503`, warning `redis.settings_unmet`, while either holds; a probe that finds them right again answers ready.
+- **A generated app's image**: it now builds on `node:24-alpine`, Node 24's latest, so each build takes Node's security fixes. An app generated before pins Node 24.21.0, which the 2026-10-21 Node.js security release left vulnerable: change its Dockerfile's `FROM` line to `FROM node:24-alpine AS base` and build the image again, or generate the app again.
 
 ## Operational notes
 

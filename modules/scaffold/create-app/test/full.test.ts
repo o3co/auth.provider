@@ -137,7 +137,8 @@ it("runs the image on its own interface and port, whatever the .env of a run on 
 it("writes the image, and what git and the image leave out", async () => {
 	const target = await generated();
 	const docker = await read(target, "Dockerfile");
-	expect(docker).toMatch(/^FROM node:2[4-9]\.\d+\.\d+-[a-z]+@sha256:[0-9a-f]{64} AS base$/m);
+	// A Node 24 or later image; which tag it follows is app-output's, held by its own test.
+	expect(docker).toMatch(/^FROM node:2[4-9]\S* AS base$/m);
 	// Dependencies are installed in their own stage; the image takes only what they left.
 	expect(docker.match(/^FROM .*$/gm)).toEqual([
 		"FROM " + docker.match(/^FROM (\S+) AS base$/m)?.[1] + " AS base",
