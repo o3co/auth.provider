@@ -4,12 +4,14 @@ import {
 	assemble,
 	BootRefused,
 	defineModule,
+	isUnavailable,
 	kernelConfig,
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
-import { sessionStandIn } from "@mod/session/testing";
+import { sessions } from "@mod/session";
+import { sessionStandIn, stubSessions } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { expect, it } from "vitest";
 import {
@@ -28,9 +30,14 @@ const runtime = quietRuntime({ clock: { now: () => now } });
 const facts = { subject: "alice", amr: ["pwd"], authenticatedAt: now };
 const from = { caller: "fed", carry: "sealed" };
 
-async function boot(extra: Module[], gates: Record<string, unknown> = {}, log = runtime.log) {
+async function boot(
+	extra: Module[],
+	gates: Record<string, unknown> = {},
+	log = runtime.log,
+	session: Module = sessionStandIn,
+) {
 	const app = await assemble({
-		modules: [http, sessionStandIn, subjectRevocationStandIn, gatesModule, ...extra],
+		modules: [http, session, subjectRevocationStandIn, gatesModule, ...extra],
 		config: {
 			...kernelConfig(),
 			...httpConfig({ "public-origin": "https://as.example" }),
@@ -41,8 +48,14 @@ async function boot(extra: Module[], gates: Record<string, unknown> = {}, log = 
 	return app.get(logins);
 }
 
-/** Gates `a` and `b`, contributed out of name order, that record each call; and a caller `fed` told of opens. */
-function gated({ holding = [] as string[], throwing = [] as string[] } = {}) {
+/** Gates `a` and `b` (or `names`), contributed out of name order, that record each call; and a caller `fed` told of opens. */
+function gated({
+	holding = [] as string[],
+	throwing = [] as string[],
+	refusing = [] as string[],
+	rechecking = [] as string[],
+	names = ["b", "a"],
+} = {}) {
 	const ran: string[] = [];
 	const given: (LoginFrom | undefined)[] = [];
 	const told: [unknown, string][] = [];
@@ -50,10 +63,12 @@ function gated({ holding = [] as string[], throwing = [] as string[] } = {}) {
 		defineModule({ name: `gate-${name}` }, (m) => [
 			m.contribute(loginGates).by(() => ({
 				name,
+				...(rechecking.includes(name) ? { rechecked: true } : {}),
 				hold: async (_request, asked, done, carried) => {
 					ran.push(`${name}:${asked.subject}:${JSON.stringify(done)}`);
 					given.push(carried);
 					if (throwing.includes(name)) throw new Unavailable(name);
+					if (refusing.includes(name)) return { kind: "refused" as const };
 					return holding.includes(name)
 						? { kind: "held" as const, answer: { by: name }, cookies: [`gate=${name}`] }
 						: { kind: "pass" as const };
@@ -68,7 +83,7 @@ function gated({ holding = [] as string[], throwing = [] as string[] } = {}) {
 			},
 		})),
 	]);
-	return { gates: [gate("b"), gate("a")], caller, ran, given, told };
+	return { gates: names.map(gate), caller, ran, given, told };
 }
 
 it("asks the gates in the order of their names and stops at the first that holds", async () => {
@@ -309,4 +324,101 @@ it("opens the session at the authentication time the way of logging in reported,
 
 it("reads no return targets when the operator sets none", () => {
 	expect(gatesModule.section?.parse({})).toEqual({ "return-targets": [] });
+});
+
+/** Sessions that count the opens asked of them and open none: a test that opens one fails. */
+function unopened() {
+	const asked = { opens: 0 };
+	const module = defineModule({ name: "session" }, (m) => [
+		m.provide(sessions).by(() =>
+			stubSessions({
+				complete: async () => {
+					asked.opens += 1;
+					throw new Error("no session opens in this test");
+				},
+			}),
+		),
+	]);
+	return { asked, module };
+}
+
+it("ends a login at the first gate that refuses, with no session, no cookies and no gate after it", async () => {
+	const { gates, ran } = gated({ refusing: ["a"] });
+	const { asked, module } = unopened();
+	const l = await boot(gates, {}, runtime.log, module);
+	expect(await l.login(testRequest(), facts)).toEqual({ kind: "refused", gate: "a", cookies: [] });
+	expect(ran).toEqual(["a:alice:null"]);
+	expect(asked.opens).toBe(0);
+});
+
+it("asks every rechecked gate before the one that held again on resume, by name and first, never the gates that hold", async () => {
+	const { gates, ran } = gated({
+		names: ["d", "c", "b", "a", "0"],
+		holding: ["c"],
+		rechecking: ["a", "b", "d"],
+	});
+	const l = await boot(gates);
+	expect((await l.login(testRequest(), facts)).kind).toBe("held");
+	ran.length = 0;
+	expect((await l.resume(testRequest(), facts, "c")).kind).toBe("opened");
+	// `0` passed already and is not rechecked; `d`, after the hold, runs once as any gate after it.
+	expect(ran).toEqual(["a:alice:null", "b:alice:null", "d:alice:null"]);
+});
+
+it("refuses a resumed login at the first rechecked gate that refuses, with no session, no gate after it and no caller told", async () => {
+	const { gates, caller, ran, told } = gated({
+		names: ["d", "c", "b", "a"],
+		holding: ["c"],
+		rechecking: ["a", "b"],
+		refusing: ["b"],
+	});
+	const { asked, module } = unopened();
+	const l = await boot([...gates, caller], {}, runtime.log, module);
+	expect(await l.resume(testRequest(), facts, "c", null, from)).toEqual({
+		kind: "refused",
+		gate: "b",
+		cookies: [],
+	});
+	expect(ran).toEqual(["a:alice:null", "b:alice:null"]);
+	expect([asked.opens, told]).toEqual([0, []]);
+});
+
+it("answers expired at or past the deadline before any rechecked gate runs", async () => {
+	const { gates, caller, ran } = gated({ names: ["b", "a"], holding: ["b"], rechecking: ["a"] });
+	const l = await boot([...gates, caller]);
+	expect(await l.resume(testRequest(), facts, "b", null, { ...from, deadline: now })).toEqual({
+		kind: "expired",
+	});
+	expect(ran).toEqual([]);
+});
+
+it("rejects with a rechecked gate's error, or throws TypeError where one holds, with no session and no gate after it", async () => {
+	const cases: [{ throwing?: string[]; holding: string[] }, (error: unknown) => boolean][] = [
+		[{ throwing: ["a"], holding: ["b"] }, isUnavailable],
+		[{ holding: ["a", "b"] }, (error) => error instanceof TypeError],
+	];
+	for (const [failing, expected] of cases) {
+		const { gates, ran } = gated({ names: ["c", "b", "a"], rechecking: ["a"], ...failing });
+		const { asked, module } = unopened();
+		const l = await boot(gates, {}, runtime.log, module);
+		await expect(l.resume(testRequest(), facts, "b")).rejects.toSatisfy(expected);
+		expect([ran, asked.opens]).toEqual([["a:alice:null"], 0]);
+	}
+});
+
+it("resumes through the gates composed now: one added before the hold runs only when rechecked, and the hold's own must be there", async () => {
+	const held = gated({ names: ["b"], holding: ["b"] });
+	const l = await boot(held.gates);
+	expect((await l.login(testRequest(), facts)).kind).toBe("held");
+	// The composition changes before the resume: two gates come before `b`, one of them rechecked.
+	const current = gated({ names: ["b", "a", "0"], holding: ["b"], rechecking: ["a"] });
+	const later = await boot(current.gates);
+	expect((await later.resume(testRequest(), facts, "b")).kind).toBe("opened");
+	expect(current.ran).toEqual(["a:alice:null"]);
+	// Without the gate that held, the resume is the caller's error, before any gate runs.
+	const without = gated({ names: ["a"], rechecking: ["a"] });
+	await expect(
+		(await boot(without.gates)).resume(testRequest(), facts, "b"),
+	).rejects.toBeInstanceOf(TypeError);
+	expect(without.ran).toEqual([]);
 });
