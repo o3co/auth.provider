@@ -42,11 +42,14 @@ const privately = {
 	]),
 	ipv6: blockList("ipv6", [["fc00::", 7]]),
 };
-// Alibaba Cloud's, AWS's over IPv6, Google Cloud's over IPv6; the others sit in link-local.
+// Alibaba Cloud's, AWS's over IPv6 (the instance's, and EKS Pod Identity's credentials), Google
+// Cloud's over IPv6, Akamai Cloud's (Linode) over IPv6; the others sit in link-local.
 const metadata = { ipv4: new BlockList(), ipv6: new BlockList() };
 metadata.ipv4.addAddress("100.100.100.200", "ipv4");
 metadata.ipv6.addAddress("fd00:ec2::254", "ipv6");
+metadata.ipv6.addAddress("fd00:ec2::23", "ipv6");
 metadata.ipv6.addAddress("fd20:ce::254", "ipv6");
+metadata.ipv6.addAddress("fd00:a9fe:a9fe::1", "ipv6");
 
 const familyOf = (address: string) => (isIP(address) === 6 ? "ipv6" : "ipv4");
 const inList = (lists: Record<"ipv4" | "ipv6", BlockList>, address: string) =>
