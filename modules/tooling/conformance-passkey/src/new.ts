@@ -1,5 +1,6 @@
 import { type NewPart, onNew } from "@mod/conformance";
 import { type PasskeyPart, passkeyArea } from "./area.ts";
+import { witnessLedger } from "./ledger.ts";
 
 const setUp = (part: PasskeyPart): NewPart => ({
 	modules: [
@@ -36,8 +37,12 @@ const setUp = (part: PasskeyPart): NewPart => ({
 const unvouched =
 	"a grant without a session on an app with a user ledger and verified-email: no source can vouch for the subject's email";
 
-onNew(passkeyArea, setUp, (part, _, modules) =>
-	part.login && ["@mod/users-http", "@mod/verified-email"].every((m) => modules.includes(m))
-		? { leaveOut: unvouched }
-		: setUp(part),
-);
+onNew(passkeyArea, setUp, (part, _, modules) => {
+	if (part.login && ["@mod/users-http", "@mod/verified-email"].every((m) => modules.includes(m))) {
+		return { leaveOut: unvouched };
+	}
+	// An app keeping passkeys' witness at a ledger asks it at each registration: a fake ledger keeps it.
+	if (!modules.includes("@mod/passkey-witness-http")) return setUp(part);
+	const set = setUp(part);
+	return { ...set, whole: [...(set.whole ?? []), "passkey-witness-http"], party: witnessLedger };
+});
