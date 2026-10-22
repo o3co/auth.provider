@@ -18,6 +18,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 - [From 0.18.0-rc.2](#from-0180-rc2)
 - [From 0.18.0-rc.3](#from-0180-rc3)
 - [From 0.18.0-rc.4](#from-0180-rc4)
+- [From 0.18.0-rc.5](#from-0180-rc5)
 - [Operational notes](#operational-notes)
 
 ## Before you start
@@ -30,7 +31,7 @@ This guide is for operators moving an existing 0.17 deployment. Read it once end
 
 ## Packages
 
-0.18 is published as one package per concern, `@o3co/auth-provider-<concern>`, all at the same version. Each package offers its modules as subpaths named after them: `@o3co/auth-provider-oauth/authorize` (the contract), `/authorize/module` (what an app assembles), `/authorize/testing` (test builders and contract tests; vitest is an optional peer) and, where a module records audit events, `/authorize/audit-events`. You rarely name them yourself: generate the app (`npx @o3co/create-auth-provider@next <dir> …`, or `npm create @o3co/auth-provider@next -- <dir> …`), and it depends on the packages it composes.
+0.18 is published as one package per concern, `@o3co/auth-provider-<concern>`, all at the same version. Each package offers its modules as subpaths named after them: `@o3co/auth-provider-oauth/authorize` (the contract), `/authorize/module` (what an app assembles), `/authorize/testing` (test builders and contract tests; vitest is an optional peer) and, where a module records audit events, `/authorize/audit-events`. You rarely name them yourself: generate the app (`npx @o3co/create-auth-provider <dir> …`, or `npm create @o3co/auth-provider -- <dir> …`), and it depends on the packages it composes.
 
 Where each 0.17 package went:
 
@@ -102,7 +103,7 @@ MFA factors and upstream tokens are sealed, so dumping them needs 0.17's sealing
 
 1. Generate the app with `create-auth-provider`, naming the modules you use (for example `@mod/authorize`, `@mod/code-grant`, `@mod/refresh`, `@mod/oidc`). Their default wirings and bridges are added for you, and one log sink (`log-stdout`) unless you name another.
 2. Write the app's `application.conf`, in its `config` directory, from your 0.17 settings, section by section, with the [mapping](#configuration-mapping) below. Start from the file `create-auth-provider` writes.
-3. Remove 0.17's environment variables. 0.18 reads a variable only where your HOCON writes `${?VAR}`, so a 0.17 variable left in the environment is ignored without a word, and the setting it controlled takes its 0.18 default: `OAUTH_ACCESS_TOKEN_EXPIRES_IN` left set, say, changes no access token's lifetime. Before you upgrade, delete every 0.17 variable from the environment, the orchestrator's manifests and the secret store, and write each value you keep into `application.conf`, or bind it there with `${?VAR}` under a name of your own. Boot does not tell you of one left set.
+3. Remove 0.17's environment variables. 0.18 reads a variable only where your HOCON writes `${?VAR}`, so a 0.17 variable left in the environment has no effect, and the setting it controlled takes its 0.18 default: `OAUTH_ACCESS_TOKEN_EXPIRES_IN` left set, say, changes no access token's lifetime. Before you upgrade, delete every 0.17 variable from the environment, the orchestrator's manifests and the secret store, and write each value you keep into `application.conf`, or bind it there with `${?VAR}` under a name of your own. A generated app's entry warns once at boot of each 0.17 variable left set that no configuration file reads (`warn config-files: N variables named in 0.17 are set and never read: …`), naming it, never its value, and boot goes on; an entry you wrote yourself warns only where it calls `config-files`' `legacyVariablesWarning`.
 4. Move `clients.yaml` entries into `clients.registered` and `users.yaml` entries into `users.registered`, keeping client secrets as their bcrypt hashes.
 5. Point the app at an empty Redis (or a new `redis.prefix`) that meets the [requirements](#redis).
 6. Start the app. A refused boot exits with status 78 and prints one `refused <where>: <reason>` line per problem on standard error; fix them and start again. Refusals name the setting, never its value.
@@ -750,7 +751,7 @@ What changed since rc.3. Coming from an earlier release candidate, read the sect
 - **A request carrying a re-authentication record that is not its own** (spent, unknown, or made for other parameters, as when a demand was taken out of its return): it is refused with `login_required`. A login page that returns to `redirect_to` as it was given is not affected.
 - **A request back from its login still not new enough**: it is refused with `login_required` whether the session's authentication time is known or not. rc.3 sent it to the login page again.
 - **Discovery**: the metadata says `authorization_response_iss_parameter_supported: true`; every redirect answer already carried `iss`.
-- **0.17's environment variables** are not read, and nothing warns of one left set: if the environment or secret store you carried from 0.17 still holds them, remove them as [Migration steps](#migration-steps) says, writing the values you keep into the configuration.
+- **0.17's environment variables** are not read: if the environment or secret store you carried from 0.17 still holds them, remove them as [Migration steps](#migration-steps) says, writing the values you keep into the configuration.
 - **A user ledger's lookups** read a `404` as no such user, whatever sent it: refuse a caller the ledger does not accept with `401` or `403`, never `404`, and check that each URL reaches the route itself, as [User ledger over HTTP](#user-ledger-over-http) says.
 - **Log and audit lines** have the shape they had in earlier release candidates, but no earlier guide described it, nor how 0.17's filters stop matching: see [Log and audit lines](#log-and-audit-lines).
 - **An HS256 secret carried from 0.17**: 0.18 decodes `keys.signing.secret` and takes the decoded bytes as the key, where 0.17 took the string's own bytes; a value copied as written signs with another key. The [mapping](#issuer-and-signing-keys) says how to keep 0.17's.
@@ -806,6 +807,15 @@ After upgrading an app with a second-factor witness, run its `witness-backfill` 
 - **A store of your own for revoked access tokens**: it still imports `revokedTokens` and `revokedTokensNeeds` from `tokens`, which passes on `token-denylist`'s; the contract test it runs, `revokedTokensContract`, moved from `tokens`' `./testing` to `token-denylist`'s. A boot with no such store names the contract `token-denylist.revoked-tokens`, where it named `tokens.revoked-tokens`.
 - **A passkey assertion whose request named no credential needs the user handle**, as WebAuthn asks: `webauthn`'s ceremony refuses one without it (`user-handle`). Registered passkeys and second factors need no change. A module of your own that calls `ceremonies` directly keeps the challenge `request` returns on the server and hands it back as kept, never one the client sent. A second factor's challenge made before the update and answered without a handle is refused once; a new one passes.
 - **`isLabel` is no longer exported by `mfa`**: a module of your own imports it from `labels` (`@mod/labels` in the workspace, `@o3co/auth-provider-foundation/labels` on the published packages), with the same rule.
+
+## From 0.18.0-rc.5
+
+What changed since rc.5. Coming from an earlier release candidate, read the sections above first.
+
+- **A Redis store with replication**: boot is refused, named, where the confirming connection reaches another server than the operations, as a DNS name or a load balancer in front of several servers may send it; point both at one server. rc.5 booted and answered 503 to every replicated write.
+- **A Redis server that cannot run the store's scripts**: boot runs one of them once and is refused, naming a store script, where the server cannot run it, as one whose Lua lacks `cjson`; rc.5 booted and failed the writes with 503. The [runbook](runbook.md#managed-redisvalkey-with-replicas) says what the server must offer.
+- After boot, `/readyz` answers `503`, warning `redis.settings_unmet`, while either holds; a probe that finds them right again answers ready.
+- **A generated app's image**: it now builds on `node:24-alpine`, Node 24's latest, so each build takes Node's security fixes. An app generated before pins Node 24.21.0, which the 2026-10-21 Node.js security release left vulnerable: change its Dockerfile's `FROM` line to `FROM node:24-alpine AS base` and build the image again, or generate the app again.
 
 ## Operational notes
 

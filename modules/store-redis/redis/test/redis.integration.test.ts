@@ -1,13 +1,21 @@
 import { execFileSync } from "node:child_process";
 import { createConnection, createServer, type Socket } from "node:net";
-import { assemble, BootRefused, defineModule, kernelConfig } from "@mod/kernel";
+import {
+	assemble,
+	BootRefused,
+	type BuildContext,
+	contract,
+	defineModule,
+	kernelConfig,
+} from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { spaces, store } from "@mod/store";
 import { contractSpaces, overwrite, storeContract } from "@mod/store/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import redisModule from "../src/module.ts";
 
-const image = "redis:7.4-alpine";
+/** The server the suite runs on; `STORE_REDIS_IMAGE` runs it on another, such as Valkey, by hand. */
+const image = process.env.STORE_REDIS_IMAGE ?? "redis:7.4-alpine";
 let container = "";
 let url = "";
 
@@ -295,6 +303,32 @@ describe("redis", () => {
 		);
 	});
 
+	it("boots and answers ready as a user refused EVALSHA and SCRIPT, which the store never sends", async () => {
+		const user = `u${++opened}`;
+		cli(container, "acl", "setuser", user, "on", ">pw", ...every, "-evalsha", "-script");
+		try {
+			let context: BuildContext<unknown> | undefined;
+			const asker = defineModule({ name: "asker" }, (m) => [
+				m.provide(contract<object>("asker")).by((c) => {
+					context = c;
+					return {};
+				}),
+			]);
+			const app = await open(
+				[durable, asker],
+				undefined,
+				url.replace("redis://", `redis://${user}:pw@`),
+			);
+			try {
+				expect((await context?.readinessReport(1000))?.answer).toBe("ready");
+			} finally {
+				await app.stop(1000);
+			}
+		} finally {
+			cli(container, "acl", "deluser", user);
+		}
+	});
+
 	it("boots a user held to the store's own keys, needing the confirmation key only where it confirms", async () => {
 		expect(await asUser(["~acl:{*", "&*", "+@all"], [], null, "acl")).toBe("booted");
 		expect(await asUser(["~acl:{*", "&*", "+@all"], [durable], "replicas", "acl")).toContain(
@@ -580,6 +614,33 @@ describe("redis", () => {
 		});
 		await expect(app).rejects.toBeInstanceOf(BootRefused);
 	});
+});
+
+describe("one server alone, as configured with replication none", () => {
+	const lone: string[] = [];
+	afterAll(() => {
+		for (const id of lone) docker("rm", "-f", id);
+	});
+	const replicatedOnly = defineModule({ name: "replicated-owner" }, (m) => [
+		m.contribute(spaces).by(() => ({ name: "replicated", guarantees: ["replicated"] })),
+	]);
+
+	it("boots on Redis 7.4 and 7.0 alike: one server, its run id the same to both connections, and the store's scripts run", async () => {
+		for (const version of ["redis:7.4-alpine", "redis:7.0-alpine"]) {
+			const port = await freePort();
+			const id = docker("run", "-d", "--rm", "-p", `127.0.0.1:${port}:6379`, version);
+			lone.push(id);
+			await waitFor(() => pings(id));
+			const app = await assemble({
+				modules: [redisModule, replicatedOnly],
+				config: {
+					...kernelConfig(),
+					redis: { url: `redis://127.0.0.1:${port}`, prefix: "alone", replication: "none" },
+				},
+			});
+			await app.stop(1000);
+		}
+	}, 90_000);
 });
 
 describe("a Redis 7.0 server", () => {

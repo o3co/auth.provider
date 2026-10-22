@@ -3,7 +3,7 @@ import { type Space, spaces, store } from "@mod/store";
 import { Redis } from "ioredis";
 import { z } from "zod";
 import { redisProbe } from "./probe.ts";
-import { redisStore, refusedCommands, refusedForGood } from "./redis-store.ts";
+import { redisStore, refusedCommands, refusedForGood, roundProblems } from "./redis-store.ts";
 
 const section = z.strictObject({
 	url: z.url({ protocol: /^rediss?$/ }).describe("The Redis server to connect to."),
@@ -207,6 +207,11 @@ async function unmet(
 		replication: s.replication,
 	});
 	if (refused.length > 0) return { problems: refused, declaredOnly: [], undurable: [] };
+	const round = await roundProblems(client, confirmer, {
+		prefix: s.prefix,
+		replication: s.replication,
+	});
+	if (round.length > 0) return { problems: round, declaredOnly: [], undurable: [] };
 	const role = await roleOf(client);
 	const settings = serverSettings(client, s["server-settings"] ?? {});
 	const problems = [

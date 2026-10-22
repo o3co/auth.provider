@@ -8,7 +8,7 @@ It takes a new app from generation to its first token on your machine: a user in
 
 <!-- generated:command -->
 ```sh
-npx @o3co/create-auth-provider@next my-provider --pattern simple-web
+npx @o3co/create-auth-provider my-provider --pattern simple-web
 ```
 <!-- end generated -->
 

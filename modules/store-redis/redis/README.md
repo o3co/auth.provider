@@ -23,15 +23,15 @@
 - Connects to Redis itself, through its client, apart from `outbound`, which carries HTTP alone (`network`: `redis`).
 - Boot is refused, naming what is unmet, when the server is not what Deployment states.
 - Boot sends once every command the store sends, a script's on keys of the store's own (`<prefix>:{#check}:…`) it then removes, unless the server refuses that too; one the server refuses for good (`NOPERM`, or unknown or renamed), or keys it refuses the user, refuse boot, named. The probe sends them again, answering unready and warning `redis.settings_unmet` with the name. A write refused for want of replicas leaves a command unjudged, never refused.
+- Boot then runs once what a confirmation would and a store script does: with `replication`, the confirming connection reaching another server than the operations (their run ids differ, and the operations' did not change meanwhile, as in a failover), and a store script (`read`) the server cannot run, refuse boot, named; the probe runs both again, answering unready. A replica missing or lagging is neither.
 - A setting is read by `CONFIG GET`. Where the server refuses it for good (`NOPERM`, or an unknown command or subcommand), the declared value is taken, a needed one left undeclared refusing boot, and every boot warns `redis.settings_declared` with the names taken so; where it answers, a declared value that differs refuses boot; any other error (`BUSY`, say) refuses boot.
 - `durability` `none`: the operator states the server does not fsync every write, so a crash loses the latest writes, spent assertion and proof ids and lockout records among them; every boot warns `redis.durability_none` naming the durable spaces.
 - Boot is refused on a space needing replicated or confirmed reads without `replication`.
 - A refusal or a warning never tells the URL, which may hold a password; an error event is logged by its name alone.
 - `replicas`: at runtime, no replica seen is unavailable.
 - `none`: the operator states there is no failover, so even confirmed writes are lost by one; a replica seen at runtime is unavailable.
-- A confirmation writes the confirmation key on a connection of its own, then waits until every replica ROLE shows has it.
 - A timeout, too few replicas, or another server than the one that answered is unavailable, the answer then unknown.
-- A confirmation asked during a round rides on the next round.
+- Internal module `round` (the confirmation round).
 - Every script first deletes keys whose expiry is at or before its time, as Redis still holds them then.
 - Versions are `server.epoch.n` and never repeat after a restart, a failover, or the end of the key counting them.
 - A command whose reply was lost is never sent again; a dropped connection fails at once, and nothing ends the process.
@@ -55,5 +55,3 @@
 
 ## Vocabulary
 - slot: the range of keys one node holds; a partition fits in one.
-- confirmation key: one key per prefix, written in a confirmation round, apart from idempotency marks.
-- round: one write to the confirmation key and one WAIT.

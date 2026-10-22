@@ -185,3 +185,11 @@ it("listens and exposes the port where http is composed, and checks liveness whe
 	expect(await read(live, "Dockerfile")).toContain("/_healthcheck");
 	expect(await read(live, "README.md")).toContain("Its health check asks `/_healthcheck`");
 });
+
+it("builds on Node 24's latest, so a build takes its security fixes", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/http"], fakePackages(), listedReadme("`@mod/http`"));
+	const docker = await read(target, "Dockerfile");
+	expect(docker).toMatch(/^FROM node:24-alpine AS base$/m);
+	expect(docker).not.toContain("@sha256:");
+});

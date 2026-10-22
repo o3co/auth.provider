@@ -45,6 +45,16 @@ export function fakeRedis() {
 		keysRefusedIn: [] as string[],
 	};
 	const writes = { noReplicas: false };
+	/** The run id each connection's server answers, by the order the connections came: the last for any after. */
+	const servers = {
+		runIds: ["abc"],
+		/** Called before each INFO, with the connection and how many INFOs it has sent: a test moves the servers there. */
+		onInfo: (_connection: number, _count: number) => {},
+	};
+	const infos = new Map<number, number>();
+	/** Whether a store script fails, as on a server whose Lua lacks what the scripts use. */
+	/** A store script failing, or the error of a passing state of the server it is answered with. */
+	const storeScripts = { fail: false, transient: undefined as string | undefined };
 	const writing = new Set(["SET", "INCR", "HSET", "HINCRBY", "PEXPIRE", "PEXPIREAT", "DEL"]);
 	const refusal = (name: string) =>
 		scripts.wording === "7.0"
@@ -65,18 +75,30 @@ export function fakeRedis() {
 		].flat();
 		return `*${failed.length}\r\n${failed.map(bulk).join("")}`;
 	};
-	const reply = (args: readonly string[]): string => {
+	const reply = (args: readonly string[], connection: number): string => {
 		const name = args[0]?.toUpperCase() ?? "";
 		if (refused.has(name)) {
 			return `-NOPERM User default has no permissions to run the '${name.toLowerCase()}' command\r\n`;
 		}
 		if (name === "EVAL" && scripts.keysRefused) return "-NOPERM No permissions to access a key\r\n";
-		if (name === "EVAL") return report();
+		if (name === "EVAL" && (args[1] ?? "").includes("local failed = {}")) return report();
+		if (name === "EVAL" && storeScripts.transient) return `-${storeScripts.transient}\r\n`;
+		if (name === "EVAL" && storeScripts.fail) {
+			return "-ERR user_script:1: Script attempted to access nonexistent global variable 'cjson'\r\n";
+		}
+		if (name === "EVAL") return bulk(`${runIdOf(connection)}\n{"now":"0","entries":[],"n":1}`);
 		if (name === "SET" && writes.noReplicas)
 			return "-NOREPLICAS Not enough good replicas to write.\r\n";
 		if (name === "PING") return "+PONG\r\n";
+		if (name === "INFO") {
+			const count = (infos.get(connection) ?? 0) + 1;
+			infos.set(connection, count);
+			servers.onInfo(connection, count);
+		}
 		if (name === "INFO")
-			return bulk("redis_version:7.4.0\r\ncluster_enabled:0\r\nloading:0\r\nrun_id:abc\r\n");
+			return bulk(
+				`redis_version:7.4.0\r\ncluster_enabled:0\r\nloading:0\r\nrun_id:${runIdOf(connection)}\r\n`,
+			);
 		if (name === "ROLE") return `*3\r\n${bulk(settings.role ?? "")}:0\r\n*0\r\n`;
 		const setting = args[2] ?? "";
 		if (name === "CONFIG" && settings[setting] !== undefined) {
@@ -84,7 +106,11 @@ export function fakeRedis() {
 		}
 		return "+OK\r\n";
 	};
+	let connections = 0;
+	const runIdOf = (connection: number) =>
+		servers.runIds[Math.min(connection, servers.runIds.length - 1)] ?? "abc";
 	const server: Server = createServer((socket) => {
+		const connection = connections++;
 		sockets.add(socket);
 		socket.on("close", () => sockets.delete(socket));
 		socket.on("error", () => {});
@@ -95,7 +121,7 @@ export function fakeRedis() {
 				buffer = buffer.subarray(command.used);
 				const name = command.args[0]?.toUpperCase();
 				if (name === "PING") pinged.add(socket);
-				socket.write(reply(command.args));
+				socket.write(reply(command.args, connection));
 			}
 		});
 	});
@@ -105,6 +131,8 @@ export function fakeRedis() {
 		refused,
 		scripts,
 		writes,
+		servers,
+		storeScripts,
 		listen: () =>
 			new Promise<number>((resolve) =>
 				server.listen(0, "127.0.0.1", () => {

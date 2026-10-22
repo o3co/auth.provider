@@ -62,7 +62,7 @@ auth-provider は、TypeScript で書かれた Node.js 向けのセルフホス�
 まずは `simple-web` から始めてください。ユーザーは設定で管理し、状態はメモリーに保持します。Web アプリ向けのパスワードログイン（認可コードフロー、OIDC、リフレッシュトークン）と、サービス向けのクライアントクレデンシャルを利用できます。
 
 ```sh
-npx @o3co/create-auth-provider@next my-provider --pattern simple-web
+npx @o3co/create-auth-provider my-provider --pattern simple-web
 cd my-provider
 pnpm install
 cp .env.example .env
@@ -174,10 +174,10 @@ curl -s http://127.0.0.1:8080/oauth/token -d grant_type=authorization_code -d cl
 機能の追加には `--add` を使い、`@mod/<name>` 形式のモジュール名を指定します。`<name>` は `modules/` 配下にあるモジュールのディレクトリ名です。
 
 ```sh
-npx @o3co/create-auth-provider@next my-provider-dpop --pattern simple-web --add @mod/dpop
+npx @o3co/create-auth-provider my-provider-dpop --pattern simple-web --add @mod/dpop
 ```
 
-機能ごとに `--add` を繰り返し指定してください。`simple-web` のストアを Redis にするには、`--axis @mod/store=@mod/redis` を追加します。パターンのログイン方式、グラント、その他の機能グループも置き換えられます。axis とグループのオプションは、`full` 以外のパターンで使えます。すべてのオプションは `npx @o3co/create-auth-provider@next --help` で確認できます。
+機能ごとに `--add` を繰り返し指定してください。`simple-web` のストアを Redis にするには、`--axis @mod/store=@mod/redis` を追加します。パターンのログイン方式、グラント、その他の機能グループも置き換えられます。axis とグループのオプションは、`full` 以外のパターンで使えます。すべてのオプションは `npx @o3co/create-auth-provider --help` で確認できます。
 
 パターンを選ばず、モジュールを自分で列挙する方法もあります。その場合、モジュール同士の接続に必要なものはジェネレーターが追加し、設定は自分で記述します。各種プロジェクトに含まれるものは [app-output](modules/scaffold/app-output/README.md) を参照してください。
 
