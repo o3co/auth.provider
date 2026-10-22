@@ -2295,9 +2295,18 @@ importers:
       '@mod/login-gates':
         specifier: workspace:*
         version: link:../../identity/login-gates
+      '@mod/mfa-binding':
+        specifier: workspace:*
+        version: link:../mfa-binding
       '@mod/mfa-extensions':
         specifier: workspace:*
         version: link:../mfa-extensions
+      '@mod/mfa-managing':
+        specifier: workspace:*
+        version: link:../mfa-managing
+      '@mod/mfa-reading':
+        specifier: workspace:*
+        version: link:../mfa-reading
       '@mod/mfa-witness':
         specifier: workspace:*
         version: link:../mfa-witness

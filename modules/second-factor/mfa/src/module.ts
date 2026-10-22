@@ -1,7 +1,10 @@
 import { audit } from "@mod/audit";
 import { defineModule } from "@mod/kernel";
 import { amrSources } from "@mod/login-gates";
+import { factorBinding } from "@mod/mfa-binding";
 import { factorKinds, firstBindingGates, secondFactorAmr, witnessing } from "@mod/mfa-extensions";
+import { factorManaging } from "@mod/mfa-managing";
+import { factorReading } from "@mod/mfa-reading";
 import { enrollmentWitnesses } from "@mod/mfa-witness";
 import { resealers, seal } from "@mod/seal";
 import { enforcers, factorStore, factors, proofSteps } from "./contract.ts";
@@ -48,6 +51,10 @@ export default defineModule({ name: "mfa", section, replicaSafe: true }, (m) => 
 			log: c.log,
 		});
 	}),
+	// The three faces are the one implementation `factors` is, built once in each app.
+	m.provide(factorReading).by((c) => c.get(factors)),
+	m.provide(factorBinding).by((c) => c.get(factors)),
+	m.provide(factorManaging).by((c) => c.get(factors)),
 	m
 		.contribute(resealers)
 		.by(async (c) => resealerOver(await c.get(factorStore), await c.get(seal))),

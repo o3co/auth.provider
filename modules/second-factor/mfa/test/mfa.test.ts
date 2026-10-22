@@ -15,6 +15,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import { isLabel } from "@mod/labels";
 import { logins } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
+import { factorBinding } from "@mod/mfa-binding";
 import * as extensions from "@mod/mfa-extensions";
 import {
 	type Enrolled,
@@ -25,6 +26,8 @@ import {
 	type Witnessing,
 	witnessing,
 } from "@mod/mfa-extensions";
+import { factorManaging } from "@mod/mfa-managing";
+import { factorReading } from "@mod/mfa-reading";
 import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { seal } from "@mod/seal";
 import sealModule from "@mod/seal/module";
@@ -1219,6 +1222,17 @@ describe("the extension points mfa-extensions offers", () => {
 		const other = await serve({}, { extra: [kind] });
 		expect((await other.decided.begin("amy", "other")).kind).toBe("begun");
 	});
+});
+
+it("provides reading, binding and managing as one implementation, the one factors is, in each app", async () => {
+	const { app, decided } = await serve();
+	expect(app.get(factorReading)).toBe(decided);
+	expect(app.get(factorBinding)).toBe(decided);
+	expect(app.get(factorManaging)).toBe(decided);
+	// The later serve takes over the stop after each test: this app is stopped here.
+	await app.stop(1000);
+	const other = await serve();
+	expect(other.app.get(factorReading)).not.toBe(decided);
 });
 
 describe("an enrollment witness", () => {
