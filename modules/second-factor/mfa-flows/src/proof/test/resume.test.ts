@@ -22,6 +22,7 @@ const t = {
 /** resumeOver over stand-ins; `calls` lists what reached them, the carried answer's making included. */
 function standIn() {
 	const calls: string[] = [];
+	const logged = recordingLog();
 	const set = {
 		resumed: { kind: "opened", session, cookies: ["session=s1"] } as LoginOutcome,
 		revokeOnOpen: false,
@@ -44,10 +45,11 @@ function standIn() {
 		},
 		revocation: { check: async () => (set.revoked ? "revoked" : "valid") },
 		transactions: { cleared: () => "mfa=" } as never,
-		log: recordingLog().log,
+		log: logged.log,
 	});
 	return {
 		calls,
+		lines: logged.lines,
 		set,
 		resume: (carried: Parameters<typeof resume>[3]) => resume(testRequest(), t, ["otp"], carried),
 	};
@@ -134,5 +136,18 @@ it("adds a body whatever its keys, one holding status included: only the mark te
 	const s = standIn();
 	const added = await s.resume(async () => ({ adds: { status: "pending" } }));
 	expect([added.status, added.body]).toEqual([200, { json: { next: "/home", status: "pending" } }]);
+	expect(s.calls).toEqual([]);
+});
+
+it("answers a login a gate refused on resuming 403, clearing the transaction's cookie and warning nothing", async () => {
+	const s = standIn();
+	s.set.resumed = { kind: "refused", gate: "credential-policy", cookies: [] };
+	const refused = await s.resume(undefined);
+	expect([refused.status, refused.body, refused.cookies]).toEqual([
+		403,
+		{ json: { error: "login_required" } },
+		["mfa="],
+	]);
+	expect(s.lines()).toEqual([]);
 	expect(s.calls).toEqual([]);
 });

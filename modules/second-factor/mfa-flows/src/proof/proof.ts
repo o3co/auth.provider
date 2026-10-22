@@ -106,6 +106,10 @@ export function resumeOver(p: ResumeParts) {
 		const resumed = await p.logins.resume(request, resuming, "mfa", t.done, t.from);
 		if (resumed.kind === "held")
 			return jsonAnswer(403, resumed.answer, { cookies: resumed.cookies });
+		// A gate refused it: the transaction was taken already, so its cookie goes; nothing is amiss to warn of.
+		if (resumed.kind === "refused") {
+			return jsonAnswer(403, { error: "login_required" }, { cookies: [p.transactions.cleared()] });
+		}
 		// Any other outcome opened nothing (a resume past its caller's deadline): refused as a gate would.
 		if (resumed.kind !== "opened") {
 			p.log.warn("mfa-flows.login_expired", {});
