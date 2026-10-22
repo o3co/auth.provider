@@ -2,14 +2,14 @@ import { createHash, randomBytes } from "node:crypto";
 import { isUnavailable } from "@mod/kernel";
 import { expect, it } from "vitest";
 import { keptPasskeys } from "../src/records.ts";
-import { memoryStores } from "./stores.ts";
+import { memoryStores, writeToken } from "./stores.ts";
 
 const fresh = () => randomBytes(32).toString("base64url");
 
 /** Passkey records over memory stores, and a credential for `subject` under its handle. */
 function kept(now: () => number = () => 1_000) {
 	const stores = memoryStores();
-	const records = keptPasskeys(stores.passkeys, now);
+	const records = keptPasskeys(stores.passkeys, writeToken, now);
 	const credentialFor = async (subject: string, id: string) => ({
 		id,
 		publicKey: "pQ",

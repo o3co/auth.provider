@@ -22,7 +22,7 @@ import passkeysModule from "../src/module.ts";
 import { keptChallenges, keptPasskeys } from "../src/records.ts";
 import { registrationsOver } from "../src/registration/registrations.ts";
 import { passkeysConfig } from "../src/testing.ts";
-import { memoryStores } from "./stores.ts";
+import { memoryStores, writeToken } from "./stores.ts";
 
 type Options = CreationOptions & { excludeCredentials: { id: string }[] };
 
@@ -44,7 +44,7 @@ function kept({
 	const random = (n: number) => new Uint8Array(randomBytes(n));
 	const registrations = registrationsOver({
 		ceremonies: ceremoniesFor(rp, random, now),
-		records: keptPasskeys(stores.passkeys, now),
+		records: keptPasskeys(stores.passkeys, writeToken, now),
 		challenges: keptChallenges(stores.challenges, now, 120_000),
 		verification,
 		max,

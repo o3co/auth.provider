@@ -12,7 +12,7 @@ import { expect, it } from "vitest";
 import { passkeysOver } from "../src/passkeys.ts";
 import { keptChallenges, keptPasskeys } from "../src/records.ts";
 import type { StoredChallenge } from "../src/store.ts";
-import { memoryStores } from "./stores.ts";
+import { memoryStores, writeToken } from "./stores.ts";
 
 const at = { origin: testOrigin };
 const rp = { id: "rp.example", name: "RP", origins: [testOrigin], topOrigins: [], timeoutMs: 1000 };
@@ -26,7 +26,7 @@ async function kept(authenticator = softwareAuthenticator(), storeNow?: () => nu
 		(n) => new Uint8Array(randomBytes(n)),
 		() => now,
 	);
-	const records = keptPasskeys(stores.passkeys);
+	const records = keptPasskeys(stores.passkeys, writeToken);
 	const challenges = keptChallenges(stores.challenges, () => now, 120_000);
 	const passkeys = passkeysOver({ ceremonies, records, challenges, verification: "preferred" });
 	const handle = await records.handleFor("sam", randomBytes(32).toString("base64url"));

@@ -19,10 +19,11 @@
 		"@mod/http": "workspace:*",
 		"@mod/kernel": "workspace:*",
 		"@mod/labels": "workspace:*",
+		"@mod/passkeys": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
 		"@mod/request-source": "workspace:*",
-		"@mod/passkeys": "workspace:*",
 		"@mod/session": "workspace:*",
+		"@mod/subject-revocation": "workspace:*",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
@@ -34,7 +35,6 @@
 		"@mod/seal": "workspace:*",
 		"@mod/session-requirements": "workspace:*",
 		"@mod/store": "workspace:*",
-		"@mod/subject-revocation": "workspace:*",
 		"@mod/webauthn": "workspace:*",
 		"@mod/webauthn-store": "workspace:*",
 		"vitest": "5.0.5"

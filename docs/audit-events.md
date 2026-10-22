@@ -125,6 +125,8 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | Kind | Attributes | Recorded when |
 |---|---|---|
 | `passkey.registered` | `source` | a passkey is kept for the session's subject, the event's subject |
+| `passkey.removed` | `source` | the session's subject ends one of its passkeys |
+| `passkey.renamed` | `source` | the session's subject names one of its passkeys anew |
 
 ## @mod/passkeys
 

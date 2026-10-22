@@ -6,4 +6,12 @@ export default auditEvents({
 		attributes: ["source"],
 		when: "a passkey is kept for the session's subject, the event's subject",
 	},
+	"passkey.renamed": {
+		attributes: ["source"],
+		when: "the session's subject names one of its passkeys anew",
+	},
+	"passkey.removed": {
+		attributes: ["source"],
+		when: "the session's subject ends one of its passkeys",
+	},
 });

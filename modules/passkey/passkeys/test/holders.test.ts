@@ -5,14 +5,14 @@ import { expect, it } from "vitest";
 import { holdersOver } from "../src/holders/holders.ts";
 import { type KeptPasskeys, keptPasskeys } from "../src/records.ts";
 import { passkeyWitnessContract, passkeyWitnessStandIn } from "../src/testing.ts";
-import { memoryStores } from "./stores.ts";
+import { memoryStores, writeToken } from "./stores.ts";
 
 const fresh = () => randomBytes(32).toString("base64url");
 
 /** Holdings over memory stores and a witness in memory, recording what is audited. */
 function held({ witnessed = true, around = (r: KeptPasskeys) => r } = {}) {
 	const stores = memoryStores();
-	const kept = keptPasskeys(stores.passkeys, () => 1_000);
+	const kept = keptPasskeys(stores.passkeys, writeToken, () => 1_000);
 	const records = around(kept);
 	const stand = passkeyWitnessStandIn();
 	const events: { kind: string; subject?: string; attributes?: unknown }[] = [];

@@ -18,6 +18,22 @@ export interface RegistrationParts {
 
 const refused = (reason: RegistrationRefusal) => ({ kind: "refused" as const, reason });
 
+/**
+ * What the caller's check answers, having `undo` run where it says no or throws; a throw is passed on
+ * once `undo` was tried, as that failure is the answer whether or not `undo` could run.
+ */
+async function settled(check: Promise<boolean>, undo: () => Promise<unknown>): Promise<boolean> {
+	let admitted: boolean;
+	try {
+		admitted = await check;
+	} catch (error) {
+		await undo().catch(() => undefined);
+		throw error;
+	}
+	if (!admitted) await undo();
+	return admitted;
+}
+
 /** Registrations of passkeys, each answering a challenge made for its subject. */
 export function registrationsOver(p: RegistrationParts): Registrations {
 	return {
@@ -28,7 +44,7 @@ export function registrationsOver(p: RegistrationParts): Registrations {
 			await p.challenges.open(made.challenge, { kind: "registration", subject });
 			return { options: made.options };
 		},
-		register: async (subject, response, nickname) => {
+		register: async (subject, response, nickname, admitted = async () => true) => {
 			const challenge = challengeOf(response);
 			if (challenge === undefined) return refused("unreadable");
 			const opened = await p.challenges.take(challenge);
@@ -43,11 +59,39 @@ export function registrationsOver(p: RegistrationParts): Registrations {
 				p.verification,
 			);
 			if (attested.kind === "refused") return attested;
-			const kept = await p.records.register(subject, attested.credential, p.max, nickname);
-			if (kept !== "registered") return refused(kept);
+			const { credential } = attested;
+			const wrote = await p.records.written(subject, credential, p.max, nickname);
+			if (typeof wrote === "string") return refused(wrote);
+			/** Strips this write's pending record alone: another registration's answers for itself. */
+			const unwritten = () => p.records.unwritten(subject, credential.id, wrote.token);
+			// Unlisted, the record is no passkey yet: a revocation or a failure before the list leaves nothing usable.
+			if (!(await settled(admitted(opened.at), unwritten))) return refused("revoked");
+			/** Ends what this write left, listed or not: a list that may have landed is taken off and settled. */
+			const end = async () => {
+				const removed = await p.records.ended(subject, credential.id, wrote.token);
+				await p.settle(subject, "removal", removed.removed && removed.empty);
+			};
+			// A listing whose answer is lost may have landed: ended, as no ask after it can run.
+			const listed = await p.records.listing(subject, credential.id, p.max).catch(async (error) => {
+				await end().catch(() => undefined);
+				throw error;
+			});
+			// Listed already, the id is another registration's; this write's record goes either way.
+			if (listed !== "registered") {
+				await unwritten();
+				return refused(listed);
+			}
+			// Once more, listed: a revocation landing between the first ask and the list ends it too.
+			if (!(await settled(admitted(opened.at), end))) return refused("revoked");
+			// Usable only now, both asks having admitted: one stopped before stays pending, no passkey.
+			// Not this write's record any more (written over, taken, or removed): the list lets go of it, nothing registered.
+			if ((await p.records.activated(credential.id, wrote.token)) !== "activated") {
+				await end();
+				return refused("conflict");
+			}
 			// The mark follows the write; one that cannot be set leaves the passkey as written.
 			await p.settle(subject, "registration");
-			return { kind: "registered", credential: attested.credential, challengedAt: opened.at };
+			return { kind: "registered", credential, challengedAt: opened.at };
 		},
 		listed: (subject) => p.records.listed(subject),
 		renamed: (subject, id, nickname) => p.records.renamed(subject, id, nickname),

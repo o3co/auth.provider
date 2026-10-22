@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { defineModule } from "@mod/kernel";
 import { unavailableSwitch } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
@@ -51,3 +52,6 @@ export function memoryStores(now: () => number = () => 0) {
 		raceCredentials: credentials.stand.raceNextChange,
 	};
 }
+
+/** A token naming each registration's write, as passkeys makes one. */
+export const writeToken = () => randomBytes(16).toString("base64url");

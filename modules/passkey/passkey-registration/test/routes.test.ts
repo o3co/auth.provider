@@ -12,6 +12,7 @@ import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { entryRequirements } from "@mod/session-requirements";
 import sessionRequirements from "@mod/session-requirements/module";
+import { subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import registration from "../src/module.ts";
@@ -46,7 +47,16 @@ const credential = {
 
 /** The routes over a `registrations` that answers `state`, and records what it was asked. */
 async function serve(section: Record<string, unknown> = {}) {
-	const state = { answer: { kind: "registered", credential } as Registered, down: false };
+	const state = {
+		answer: { kind: "registered", credential } as Registered,
+		down: false,
+		/** Revokes the subject as its registration is written, as a reset racing it would. */
+		revokeWhileWriting: false,
+		listed: [] as unknown[],
+		renamed: "renamed" as "renamed" | "unknown",
+		removed: { removed: true, empty: false },
+	};
+	let revoke = async (_subject: string) => {};
 	const asked: unknown[][] = [];
 	const audit = auditStandIn();
 	const standIn = defineModule({ name: "passkeys" }, (m) => [
@@ -59,7 +69,31 @@ async function serve(section: Record<string, unknown> = {}) {
 			register: async (...args) => {
 				asked.push(["register", ...args]);
 				if (state.down) throw new Unavailable("passkeys");
-				return state.answer;
+				// As passkeys does: the caller's check, asked once the record is written.
+				if (state.revokeWhileWriting) await revoke(args[0]);
+				const admitted = args[3];
+				const answer = state.answer;
+				if (
+					answer.kind === "registered" &&
+					admitted &&
+					!(await admitted(answer.challengedAt ?? 0))
+				) {
+					return { kind: "refused", reason: "revoked" } as const;
+				}
+				return answer;
+			},
+			listed: async (subject) => {
+				asked.push(["listed", subject]);
+				if (state.down) throw new Unavailable("passkeys");
+				return state.listed as never;
+			},
+			renamed: async (...args) => {
+				asked.push(["renamed", ...args]);
+				return state.renamed;
+			},
+			removed: async (...args) => {
+				asked.push(["removed", ...args]);
+				return state.removed;
 			},
 		})),
 	]);
@@ -86,6 +120,7 @@ async function serve(section: Record<string, unknown> = {}) {
 	});
 	await app.start();
 	stop = () => app.stop(1000);
+	revoke = (subject) => app.get(subjectRevocation).revoke(subject);
 	const base = `http://127.0.0.1:${app.get(listening).port()}`;
 	/** A browser signed in as `subject`, or none, posting from `from`. */
 	const browser = async (subject?: string, from = origin) => {
@@ -95,9 +130,10 @@ async function serve(section: Record<string, unknown> = {}) {
 					.complete(testRequest(), { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() })
 			: undefined;
 		const cookie = (done?.cookies ?? []).map((c) => c.split(";")[0]).join("; ");
-		return async (path: string, body?: unknown, type = "application/json") => {
-			const res = await fetch(`${base}/oauth/webauthn/registration/${path}`, {
-				method: "POST",
+		return async (path: string, body?: unknown, type = "application/json", method = "POST") => {
+			const url = path.startsWith("/") ? path : `/oauth/webauthn/registration/${path}`;
+			const res = await fetch(`${base}${url}`, {
+				method,
 				headers: {
 					origin: from,
 					"x-forwarded-proto": "https",
@@ -142,14 +178,14 @@ describe("registration from a session", () => {
 			body: { credentialId: "Y3JlZA", transports: ["internal", "hybrid"], backedUp: true },
 			cacheControl: "no-store",
 		});
-		expect(asked).toEqual([["register", "sam", response, "laptop"]]);
+		expect(asked).toEqual([["register", "sam", response, "laptop", expect.any(Function)]]);
 		const { transports: _, ...bare } = credential;
 		state.answer = { kind: "registered", credential: { ...bare, backedUp: false } };
 		expect((await post("verify", { response })).body).toEqual({
 			credentialId: "Y3JlZA",
 			backedUp: false,
 		});
-		expect(asked[1]).toEqual(["register", "sam", response, undefined]);
+		expect(asked[1]).toEqual(["register", "sam", response, undefined, expect.any(Function)]);
 		// Each passkey kept is recorded for the subject, with the source alone: no id, nickname or ceremony.
 		const registered = { kind: "passkey.registered", subject: "sam", at: expect.any(Number) };
 		const attributes = { source: "198.51.100.1" };
@@ -224,7 +260,8 @@ describe("registration from a session", () => {
 			},
 			full: { error: "credential_limit" },
 			unreadable: { error: "invalid_request", error_description: "unreadable client data" },
-		} satisfies Record<RegistrationRefusal, Record<string, string>>;
+			// `revoked` is answered as no session, apart.
+		} satisfies Record<Exclude<RegistrationRefusal, "revoked">, Record<string, string>>;
 		for (const [reason, body] of Object.entries(answers)) {
 			state.answer = { kind: "refused", reason: reason as RegistrationRefusal };
 			expect(await post("verify", { response: {} }), reason).toEqual({
@@ -267,5 +304,128 @@ describe("registration from a session", () => {
 		expect((await post("verify", { response: {} })).status).toBe(200);
 		expect(await post("options")).toMatchObject({ status: 429, retryAfter: "60" });
 		expect((await post("verify", { response: {} })).status).toBe(429);
+	});
+});
+
+describe("the subject's passkeys from a session", () => {
+	it("lists the session's subject's passkeys, without keys or counts, not cacheable", async () => {
+		const { state, asked, browser } = await serve();
+		state.listed = [
+			{ id: "YQ", nickname: "laptop", backupEligible: false, backedUp: false, at: 5 },
+			{ id: "Yg", transports: ["usb"], backupEligible: true, backedUp: true },
+		];
+		const res = await (await browser("sam"))(
+			"/oauth/webauthn/registrations",
+			undefined,
+			undefined,
+			"GET",
+		);
+		expect([res.status, res.body, res.cacheControl]).toEqual([
+			200,
+			{
+				passkeys: [
+					{
+						credentialId: "YQ",
+						nickname: "laptop",
+						backupEligible: false,
+						backedUp: false,
+						createdAt: 5,
+					},
+					{ credentialId: "Yg", transports: ["usb"], backupEligible: true, backedUp: true },
+				],
+			},
+			"no-store",
+		]);
+		expect(asked).toEqual([["listed", "sam"]]);
+		const signedOut = await (await browser())(
+			"/oauth/webauthn/registrations",
+			undefined,
+			undefined,
+			"GET",
+		);
+		expect(signedOut.status).toBe(401);
+	});
+
+	it("renames one of the subject's passkeys, refusing a body out of shape and an id it does not hold", async () => {
+		const { state, asked, browser, events } = await serve();
+		const post = await browser("sam");
+		const rename = (body: unknown) => post("/oauth/webauthn/registrations/rename", body);
+		expect((await rename({ id: "YQ", nickname: "phone" })).status).toBe(200);
+		expect(asked).toEqual([["renamed", "sam", "YQ", "phone"]]);
+		for (const body of [{ nickname: "phone" }, { id: "YQ" }, { id: "YQ", nickname: "a\nb" }]) {
+			expect((await rename(body)).body, JSON.stringify(body)).toMatchObject({
+				error: "invalid_request",
+			});
+		}
+		state.renamed = "unknown";
+		expect(await rename({ id: "Zg", nickname: "x" })).toMatchObject({
+			status: 404,
+			body: { error: "not_found" },
+		});
+		expect(events.map((e) => [e.kind, e.subject])).toEqual([["passkey.renamed", "sam"]]);
+		expect(JSON.stringify(events)).not.toMatch(/phone|YQ/);
+	});
+
+	it("removes one of the subject's passkeys, telling when it was the last", async () => {
+		const { state, asked, browser, events } = await serve();
+		const post = await browser("sam");
+		const remove = (body: unknown) => post("/oauth/webauthn/registrations/remove", body);
+		expect(await remove({ id: "YQ" })).toMatchObject({ status: 200, body: { last: false } });
+		state.removed = { removed: true, empty: true };
+		expect(await remove({ id: "Yg" })).toMatchObject({ status: 200, body: { last: true } });
+		state.removed = { removed: false, empty: true };
+		expect(await remove({ id: "Zg" })).toMatchObject({ status: 404, body: { error: "not_found" } });
+		expect((await remove({})).body).toMatchObject({ error: "invalid_request" });
+		expect(asked).toEqual([
+			["removed", "sam", "YQ"],
+			["removed", "sam", "Yg"],
+			["removed", "sam", "Zg"],
+		]);
+		expect(events.map((e) => [e.kind, e.subject])).toEqual([
+			["passkey.removed", "sam"],
+			["passkey.removed", "sam"],
+		]);
+	});
+
+	it("checks the origin and limits requests on renaming and removing too", async () => {
+		const { browser } = await serve({ requests: 2, window: "1m" });
+		const elsewhere = await browser("sam", "https://evil.example");
+		for (const path of ["rename", "remove"]) {
+			expect(
+				await elsewhere(`/oauth/webauthn/registrations/${path}`, { id: "YQ", nickname: "x" }),
+				path,
+			).toMatchObject({ status: 403, body: { error: "csrf" } });
+		}
+		const post = await browser("kim");
+		await post("/oauth/webauthn/registrations/rename", { id: "YQ", nickname: "x" });
+		await post("/oauth/webauthn/registrations/remove", { id: "YQ" });
+		expect(await post("/oauth/webauthn/registrations/remove", { id: "YQ" })).toMatchObject({
+			status: 429,
+		});
+	});
+
+	it("limits renaming alone too", async () => {
+		const { browser } = await serve({ requests: 2, window: "1m" });
+		const renaming = await browser("lee");
+		const rename = (nickname: string) =>
+			renaming("/oauth/webauthn/registrations/rename", { id: "YQ", nickname });
+		expect((await rename("x")).status).toBe(200);
+		expect((await rename("y")).status).toBe(200);
+		expect(await rename("z")).toMatchObject({ status: 429 });
+	});
+
+	it("asks passkeys to keep nothing a revocation since its challenge reaches, answering unauthorized and recording no registration", async () => {
+		const { state, asked, browser, events } = await serve();
+		state.answer = {
+			kind: "registered",
+			credential,
+			challengedAt: Date.now() - 1000,
+		} as Registered;
+		state.revokeWhileWriting = true;
+		const post = await browser("sam");
+		const res = await post("verify", { response: {} });
+		expect([res.status, res.body]).toEqual([401, { error: "unauthorized" }]);
+		expect(asked.at(-1)).toEqual(["register", "sam", {}, undefined, expect.any(Function)]);
+		expect(events).toEqual([]);
 	});
 });

@@ -40,6 +40,7 @@ export interface PasskeyPlace {
 }
 
 const handleOf = () => randomBytes(32).toString("base64url");
+const writeToken = () => randomBytes(16).toString("base64url");
 
 /** What passkeys needs from any implementation: records kept whole and apart, without end, written by passkeys in one shape. */
 export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPlace>): void {
@@ -117,7 +118,7 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 
 		it("is never given a handle or a credential id passkeys would not write", async () => {
 			const { passkeys } = await open();
-			const records = keptPasskeys(passkeys);
+			const records = keptPasskeys(passkeys, writeToken);
 			const subject = fresh();
 			const padded = `${handleOf()}=`;
 			await expect(records.handleFor(subject, padded)).rejects.toThrow(
@@ -161,7 +162,7 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 				credentials: spied(passkeys.credentials),
 				subjects: spied(passkeys.subjects),
 			};
-			const records = keptPasskeys(watched);
+			const records = keptPasskeys(watched, writeToken);
 			const userHandle = await records.handleFor(subject, handleOf());
 			const kept = {
 				id,

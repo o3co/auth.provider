@@ -21,6 +21,7 @@ import { sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import sessionRequirements from "@mod/session-requirements/module";
 import { simulatedStore } from "@mod/store/testing";
+import { subjectRevocation } from "@mod/subject-revocation";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import webauthn from "@mod/webauthn/module";
 import {
@@ -90,9 +91,10 @@ async function serve(
 			.get(sessions)
 			.complete(testRequest(), { subject, amr: ["pwd"], authenticatedAt });
 		const cookie = done.cookies.map((c) => c.split(";")[0]).join("; ");
-		return async (path: string, body?: unknown) => {
-			const res = await fetch(`${base}/oauth/webauthn/registration/${path}`, {
-				method: "POST",
+		return async (path: string, body?: unknown, method = "POST") => {
+			const url = path.startsWith("/") ? path : `/oauth/webauthn/registration/${path}`;
+			const res = await fetch(`${base}${url}`, {
+				method,
 				headers: {
 					origin: testOrigin,
 					"x-forwarded-proto": "https",
@@ -105,7 +107,12 @@ async function serve(
 			return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 		};
 	};
-	return { store, browser, sessions: app.get(sessions) };
+	return {
+		store,
+		browser,
+		sessions: app.get(sessions),
+		revoke: (subject: string) => app.get(subjectRevocation).revoke(subject),
+	};
 }
 
 type Post = Awaited<ReturnType<Awaited<ReturnType<typeof serve>>["browser"]>>;
@@ -206,4 +213,57 @@ it("needs a recent sign-in at a known time where nothing judges entry", async ()
 	expect(await (await browser("dee", "unknown"))("options")).toEqual(stepUp);
 	expect(await (await browser("old", runtime.clock.now() - 301_000))("options")).toEqual(stepUp);
 	expect((await (await browser("sam"))("options")).status).toBe(200);
+});
+
+it("lists, renames and removes the subject's passkeys through passkeys, telling when the last goes", async () => {
+	const { browser } = await serve();
+	const post = await browser("sam");
+	const { response } = await register(post);
+	const listed = await post("/oauth/webauthn/registrations", undefined, "GET");
+	expect(listed.body).toEqual({
+		passkeys: [
+			expect.objectContaining({ credentialId: response.id, nickname: "laptop", backedUp: false }),
+		],
+	});
+	expect(
+		(await post("/oauth/webauthn/registrations/rename", { id: response.id, nickname: "phone" }))
+			.status,
+	).toBe(200);
+	expect((await post("/oauth/webauthn/registrations", undefined, "GET")).body).toEqual({
+		passkeys: [expect.objectContaining({ nickname: "phone" })],
+	});
+	// Another subject cannot rename or remove it.
+	const kims = await browser("kim");
+	expect((await kims("/oauth/webauthn/registrations/remove", { id: response.id })).status).toBe(
+		404,
+	);
+	expect(await post("/oauth/webauthn/registrations/remove", { id: response.id })).toEqual({
+		status: 200,
+		body: { last: true },
+	});
+	expect((await post("/oauth/webauthn/registrations", undefined, "GET")).body).toEqual({
+		passkeys: [],
+	});
+});
+
+it("keeps nothing of a registration a revocation reaches as its record is written, through passkeys and its store", async () => {
+	const { store, browser, revoke } = await serve();
+	const post = await browser("sam");
+	const options = (await post("options")).body as unknown as Options;
+	const response = softwareAuthenticator().create(options, { origin: testOrigin });
+	// The revocation lands as passkeys writes the record, before it asks whether the subject was revoked.
+	store.beforeNext("putIfAbsent", "webauthn-store.credentials", () => revoke("sam"));
+	expect(await post("verify", { response })).toEqual({
+		status: 401,
+		body: { error: "unauthorized" },
+	});
+	const kims = await browser("kim");
+	const theirs = (await kims("options")).body as unknown as Options;
+	// The id the revoked registration wrote is free again: nothing of it was kept.
+	const taken = softwareAuthenticator().create(
+		theirs,
+		{ origin: testOrigin },
+		{ credentialId: response.id },
+	);
+	expect((await kims("verify", { response: taken })).status).toBe(200);
 });

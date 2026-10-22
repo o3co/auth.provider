@@ -35,6 +35,9 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | POST | `/oauth/webauthn/authentication/options` | `@mod/webauthn-login` | json, form, none | `rate-limit.requests-per-source` | yes | It reads no cookie and answers options the same for everyone, the challenge made for the client that asks. | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/webauthn/registration/options` | `@mod/passkey-registration` | json, none | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | POST | `/oauth/webauthn/registration/verify` | `@mod/passkey-registration` | json, none | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
+| GET | `/oauth/webauthn/registrations` | `@mod/passkey-registration` | form |  | no |  |  |  |
+| POST | `/oauth/webauthn/registrations/remove` | `@mod/passkey-registration` | json, none | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
+| POST | `/oauth/webauthn/registrations/rename` | `@mod/passkey-registration` | json, none | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | GET | `/readyz` | `@mod/http-ops` | none |  | no |  |  |  |
 | GET | `/session/csrf` | `@mod/csrf` | form |  | no |  |  |  |
 | GET | `/session/federation-grants/callback/*` | `@mod/federation-grants` | form | `rate-limit.requests-per-source` | yes | The upstream's redirect back, matched to the state of a connection this browser started. | `rate-limit.requests-per-source` |  |
