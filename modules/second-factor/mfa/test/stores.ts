@@ -3,13 +3,22 @@ import { unavailableSwitch } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
 import { type FactorStore, factorStore, type StoredFactors } from "../src/store.ts";
 
-/** mfa's factor store on the records stand-in, its lists kept without end on the given clock; `down` makes calls unavailable, and `hooks.beforeSave` runs before each save and `hooks.afterRead` after each read has taken its answer, as a request racing it would. */
-export function memoryFactors(now: () => number = () => 0) {
+/**
+ * mfa's factor store on the records stand-in, its lists kept without end on the given clock; `down`
+ * makes calls unavailable, and `hooks.beforeSave` runs before each save, `hooks.afterRead` after each
+ * read has taken its answer, as a request racing it would, and `hooks.afterTogether` after a write
+ * of a list and a claim together has taken effect, as an answer lost would. `together` offers that write.
+ */
+export function memoryFactors(
+	now: () => number = () => 0,
+	{ together = false }: { readonly together?: boolean } = {},
+) {
 	const stand = memoryRecords<StoredFactors>(now, { shards: 1, perShard: 1 });
 	const down = unavailableSwitch<FactorStore>("factor-store");
 	const hooks: {
 		beforeSave?: (key: string) => Promise<void>;
 		afterRead?: (key: string) => Promise<void>;
+		afterTogether?: (() => Promise<void>) | undefined;
 	} = {};
 	const factors: FactorStore = down.wrap({
 		save: async (key, record) => {
@@ -23,6 +32,23 @@ export function memoryFactors(now: () => number = () => 0) {
 		},
 		update: stand.records.change,
 		scan: stand.records.scan,
+		...(together
+			? {
+					updateTogether: async (listKey, claimKey, p) => {
+						const changed = await stand.records.changeTogether(listKey, claimKey, {
+							watch: p.watch,
+							decide: (list, claim, watched) => {
+								const next = p.change(list, claim, watched);
+								const endless = (part: { value: StoredFactors } | undefined) =>
+									part && { value: part.value, lifetimeMs: "endless" as const };
+								return { first: endless(next.list), second: endless(next.claim) };
+							},
+						});
+						await hooks.afterTogether?.();
+						return { list: changed.first, claim: changed.second };
+					},
+				}
+			: {}),
 	});
 	const module = defineModule({ name: "factor-store" }, (m) => [
 		m.provide(factorStore).by(() => factors),

@@ -18,6 +18,35 @@ export interface FactorStore {
 		key: string,
 		change: (record: StoredFactors) => ChangedFactors | undefined,
 	): Promise<{ readonly before: StoredFactors; readonly after: StoredFactors } | undefined>;
+	/**
+	 * Changes a subject's list and a claim as one, from what both hold and what `watch` names
+	 * besides (keys of this store); `change` runs again on a race, so it is pure, and a part it
+	 * leaves out is kept. Every record read is held to what was read. A place that cannot leaves it out.
+	 */
+	updateTogether?(
+		listKey: string,
+		claimKey: string,
+		p: {
+			readonly watch: (
+				list: StoredFactors | undefined,
+				claim: StoredFactors | undefined,
+			) => readonly string[];
+			readonly change: (
+				list: StoredFactors | undefined,
+				claim: StoredFactors | undefined,
+				watched: readonly (StoredFactors | undefined)[],
+			) => { readonly list?: ChangedFactors; readonly claim?: ChangedFactors };
+		},
+	): Promise<{
+		readonly list: {
+			readonly before: StoredFactors | undefined;
+			readonly after: StoredFactors | undefined;
+		};
+		readonly claim: {
+			readonly before: StoredFactors | undefined;
+			readonly after: StoredFactors | undefined;
+		};
+	}>;
 	/** A page of the keys holding a list or a claim, and the cursor on; none when done. A walk is no one instant. */
 	scan(cursor?: string): Promise<{ readonly keys: readonly string[]; readonly cursor?: string }>;
 }

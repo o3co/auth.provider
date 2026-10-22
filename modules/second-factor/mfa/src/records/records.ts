@@ -116,6 +116,46 @@ export function factorRecords(store: FactorStore) {
 			if (held === undefined || sameClaim(held, { listKey: keyOf(subject), factor })) return false;
 			return holding(held);
 		},
+		/**
+		 * Decides on the factors as `decide` does, and writes the list with the claim on the kind's unique
+		 * value for `factor` in the same write, where the place writes them together: `duplicate` where
+		 * another factor holds the value (its claim's list lists it), and a claim whose factor is gone is
+		 * taken. The judge answers first, so a write it refuses answers as it does. None where the place
+		 * cannot write them together.
+		 */
+		decideClaiming: async <T>(
+			subject: string,
+			claimed: { readonly kind: string; readonly value: string; readonly factor: string },
+			judge: (factors: readonly Factor[], fences: number) => Decision<T>,
+		): Promise<T | "duplicate" | undefined> => {
+			const together = store.updateTogether?.bind(store);
+			if (!together) return undefined;
+			const mine: Claim = { listKey: keyOf(subject), factor: claimed.factor };
+			let last: Decision<T> | "duplicate" | undefined;
+			await together(keyOf(subject), claimKey(claimed.kind, claimed.value), {
+				// The claim's own list tells whether it still holds the value.
+				watch: (_list, claim) => {
+					const held = claimOf(claim);
+					return held ? [held.listKey] : [];
+				},
+				change: (list, claim, [holder]) => {
+					const decision = judge(factorsOf(list), fencesOf(list));
+					last = decision;
+					if (!decision.next) return {};
+					const held = claimOf(claim);
+					if (held && factorsOf(holder).some((f) => f.id === held.factor)) {
+						last = "duplicate";
+						return {};
+					}
+					const fences = fencesOf(list) + (decision.fence ? 1 : 0);
+					return {
+						list: { value: storedList(subject, decision.next, fences) },
+						claim: { value: asClaim(mine) },
+					};
+				},
+			});
+			return last === "duplicate" ? "duplicate" : (last as Decision<T> | undefined)?.verdict;
+		},
 		/** Claims a kind's unique value for a factor already written; answers whether the factor holds it. */
 		claim: async (subject: string, kind: string, value: string, factor: string) => {
 			const key = claimKey(kind, value);
