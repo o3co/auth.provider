@@ -102,7 +102,7 @@ git add pnpm-lock.yaml
 
 Commit the lockfile once the check passes. The image runs the same check after installing, and refuses to build otherwise. The check holds what it uses, so nothing of the install it checks is run by it.
 
-`pnpm-workspace.yaml` holds every package of the release the app depends on, or a package outside it takes as a peer, and zod, to one version each. When you upgrade the release, generate the app again with the new release's `create-auth-provider` and take both the overrides and `held` from it: they move together, and the check refuses one without the other.
+`pnpm-workspace.yaml` holds every package of the release the app depends on, or a package outside it takes as a peer, and zod, to one version each. When you upgrade the release, generate the app again with the new release's `create-auth-provider` and take the overrides, `held` and `scripts/check-outside.mjs` from it: the overrides and `held` move together, and the check refuses one without the other. Take the check too, as one older than the record may not read all of it: an app generated before `held` was recorded has a check that does not read it.
 
 ## What is and is not checked
 
