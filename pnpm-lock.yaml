@@ -2245,6 +2245,9 @@ importers:
       '@mod/combinations':
         specifier: workspace:*
         version: link:../combinations
+      semver:
+        specifier: 7.8.5
+        version: 7.8.5
     devDependencies:
       '@mod/kernel':
         specifier: workspace:*
@@ -2255,9 +2258,15 @@ importers:
       '@o3co/ts.hocon':
         specifier: 1.14.3
         version: 1.14.3(yaml@2.9.1)(zod@4.6.7)
+      '@types/semver':
+        specifier: 7.8.0
+        version: 7.8.0
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
 
   modules/scaffold/trial:
     dependencies:
@@ -4601,6 +4610,9 @@ packages:
   '@types/node@26.6.5':
     resolution: {integrity: sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==}
 
+  '@types/semver@7.8.0':
+    resolution: {integrity: sha512-1mAINjtQCXXeLkJ9ehXkwOcBpqtLxiVtKhpUf83DdRNdQKV0iXZpaHYqRr7nj+wvxuJzoAmAwXI+sCNMv1CzLQ==}
+
   '@vitest/mocker@5.0.4':
     resolution: {integrity: sha512-tqAlrYWce4iUxhr3ncNohejtCTOcHeE8XWrSNZY3OhPoDn01yeGv+gnaBy64ATp7o6pb03eIbBAjzmibpc9vIQ==}
     peerDependencies:
@@ -5279,6 +5291,8 @@ snapshots:
   '@types/node@26.6.5':
     dependencies:
       undici-types: 8.9.0
+
+  '@types/semver@7.8.0': {}
 
   '@vitest/mocker@5.0.4(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))':
     dependencies:

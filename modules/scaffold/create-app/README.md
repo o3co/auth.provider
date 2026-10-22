@@ -6,6 +6,7 @@
 - Generates a pattern's deployment the same way, from what `combinations` composes of the pattern's selection and the operator's choice; its internal module `patterns` holds the patterns.
 - Gives `app-output`, which writes the project, the packages: the workspace's, or the bundle's index's.
 - Adds one log sink to a listed app: `log-stdout`, unless the plan names another.
+- Reads packages outside the release from where pnpm installed them, through its internal module `outside`.
 
 ## Not here
 - What each module's configuration means, and its fragment (`config.example` beside its package.json): each module's.
