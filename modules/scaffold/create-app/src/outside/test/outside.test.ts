@@ -384,6 +384,10 @@ describe("refusing what a manifest only seems to declare", () => {
 			"./../escape.js",
 			"./node_modules/dep/index.js",
 			"./dist/%2e%2e/escape.js",
+			"./dist%2Fmodule.js",
+			"./dist%5cmodule.js",
+			{ "0": "./unused.js", import: "./dist/module.js" },
+			{ "node-addons": null, default: "./dist/module.js" },
 			{ import: "./dist//module.js" },
 		]) {
 			refused(with_({ exports: { "./module": target } }), "@x/grant: exports no ./module");
