@@ -26,6 +26,8 @@ it("loads no blocked target, refused path, or conditions node refuses", () => {
 		"./dist%5cmodule.js",
 		"./dist/%zz.js",
 		"./dist/%ff.js",
+		"./.\t./escape.js",
+		"./.\n./escape.js",
 	]) {
 		expect(loads(target), JSON.stringify(target)).toBe(false);
 	}

@@ -14,17 +14,22 @@ const arrayIndex = (key: string) => /^(0|[1-9][0-9]*)$/.test(key) && Number(key)
 const invalidSegment =
 	/(^|\\|\/)((\.|%2e)(\.|%2e)?|(n|%6e|%4e)(o|%6f|%4f)(d|%64|%44)(e|%65|%45)(_|%5f)(m|%6d|%4d)(o|%6f|%4f)(d|%64|%44)(u|%75|%55)(l|%6c|%4c)(e|%65|%45)(s|%73|%53))?(\\|\/|$)/i;
 
+/** Where a target is resolved from: the package's directory, as a URL. */
+const packageRoot = "file:///package";
+
 /**
  * What node makes of an export's target for an app's import, as its resolver does: a path inside
- * the package (`./`, no segment it refuses; its path decoding, with no encoded separator), a target blocked (null, a path
+ * the package (`./`, no segment it refuses, inside it once normalized; its path decoding, with no encoded separator), a target blocked (null, a path
  * it refuses, or conditions with an array index's key, which node refuses whole), or none met
  * (conditions none of which apply, so node goes on to the next). An array is refused.
  */
 function targetOf(target: unknown): "usable" | "blocked" | "unmet" {
 	if (typeof target === "string") {
 		if (!target.startsWith("./") || invalidSegment.test(target.slice(2))) return "blocked";
-		// As node resolves it, under the package: its path holds no encoded separator, and decodes.
-		const { pathname } = new URL(target, "file:///package/");
+		// As node resolves it, under the package: it stays there once normalized (a tab or a line
+		// break is dropped, and may make a `..`), its path holds no encoded separator, and decodes.
+		const { pathname } = new URL(target, `${packageRoot}/`);
+		if (!pathname.startsWith(`${new URL(packageRoot).pathname}/`)) return "blocked";
 		if (/%2f|%5c/i.test(pathname)) return "blocked";
 		try {
 			decodeURIComponent(pathname);
