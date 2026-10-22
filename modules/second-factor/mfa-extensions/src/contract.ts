@@ -93,14 +93,22 @@ export const firstBindingGates = extensionPoint<FirstBindingGate>("mfa.first-bin
 /** Where a subject's standing is asked, as an inconsistency with the witness is recorded. */
 export type Asked = "login" | "binding" | "credentials";
 
+/**
+ * What stands for the subject after a reset, read anew each time: `counting` where a counting
+ * factor stands (written after it); `none` where none of a counting kind is written and the store
+ * still holds the reset's write; `unsure` otherwise (one written that does not stand, or the
+ * subject's record lost or put back since), so the mark is not the reset's to remove.
+ */
+export type AfterReset = "counting" | "none" | "unsure";
+
 /** Who tells, apart from the store, that a subject enrolled: contributed by `mfa-witnessing` where a witness is composed. */
 export interface Witnessing {
 	/** `held` for a subject holding a counting factor, `none` where nothing marks it either; unavailable, recorded, where a mark stands beside nothing counting. */
 	standing(subject: string, counts: boolean, at: Asked): Promise<"held" | "none">;
 	/** After a binding's write: brings the mark in line with the counting factors, as `counting` reads them now. */
 	settle(subject: string, counting: () => Promise<boolean>): Promise<void>;
-	/** After a reset removed every factor: the mark goes. */
-	cleared(subject: string): Promise<void>;
+	/** After a reset removed every factor: the mark goes where `after` says it may. */
+	cleared(subject: string, after?: () => Promise<AfterReset>): Promise<void>;
 }
 
 /** At most one; with none, the store alone tells. */
