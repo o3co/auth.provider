@@ -7,5 +7,11 @@ export {
 	type Setting,
 	settingsOf,
 } from "./fragments/contract.ts";
+export {
+	type OutsideRecord,
+	outsideLock,
+	type Recorded,
+	type Registries,
+} from "./lockfile/contract.ts";
 export type { Card, Packages, Release } from "./packages.ts";
 export { configFiles, kernel, mainSource, namesPackages, vacant } from "./project.ts";

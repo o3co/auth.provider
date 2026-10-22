@@ -20,6 +20,7 @@
 - `Packages`: each name's fragments, the app's dependencies for the names, what the app imports a name under, each name's card as installed (`Card`), and the release (`Release`).
 - `namesPackages` and `vacant`, for a caller to refuse a plan before it composes; `mainSource`, the app's entry; `kernel` and `configFiles`, the packages every app depends on (its entry reads its configuration files through `config-files`).
 - `fragmentsIn`, `fragmentsOf`, `fragmentFile` and `settingsOf`: the internal module `fragments`'s.
+- `outsideLock`: see the internal module `lockfile`.
 
 ## Invariants
 - A target that holds anything is refused, never overwritten; a missing or empty one is taken. Every file is made before any is written.
