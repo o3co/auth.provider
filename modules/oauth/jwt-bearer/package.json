@@ -4,6 +4,9 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "feature",
+	"grantTypes": [
+		"urn:ietf:params:oauth:grant-type:jwt-bearer"
+	],
 	"optIn": true,
 	"storeWiring": true,
 	"exports": {

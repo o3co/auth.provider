@@ -19,7 +19,8 @@ import {
 } from "./contract.ts";
 import { contributedSigners, fetchedSigners, type Signers, writtenSigners } from "./signers.ts";
 
-const grantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
+/** The grant type it serves (RFC 7523). */
+export const jwtBearerGrantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 
 /** The issuer's host, the only one its key set is fetched from; none for an issuer that is no URL. */
 const hostsOf = (issuer: string) => (URL.canParse(issuer) ? [new URL(issuer).hostname] : []);
@@ -206,7 +207,7 @@ export default defineModule({ name: "jwt-bearer", section }, (m) => [
 			return found.kind === "subject" ? found.subject : undefined;
 		};
 		return {
-			grantType,
+			grantType: jwtBearerGrantType,
 			readsAmbient: "none",
 			targets: true,
 			handle: async ({ client, param, admits, issue, target }) => {
