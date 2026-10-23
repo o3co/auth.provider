@@ -33,4 +33,4 @@
 - Holds no state, so it is safe on multiple instances.
 
 ## Depends on
-- `kernel`, `passkeys`, `outbound`, `outbound-policy`, `url-setting`, `keys` (the credential's rule)
+- `kernel`, `passkeys`, `outbound`, `outbound-policy`, `url-setting` (also `sameTarget`, telling two of its URLs at one target), `keys` (the credential's rule)
