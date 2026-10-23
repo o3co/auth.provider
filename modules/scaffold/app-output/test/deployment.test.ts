@@ -44,8 +44,8 @@ it("writes the deployment of the modules from the packages given", async () => {
 	expect(manifest.scripts).toEqual({ start: "node --env-file-if-exists=.env src/main.ts" });
 	const main = await read(target, "src/main.ts");
 	expect(main).toContain('from "@o3co/x-kernel"');
-	// It names, once as it boots, the variables 0.17 read that its configuration never reads.
-	expect(main).toContain("unreadLegacyVariables");
+	// It checks, as it boots, the variables 0.17 read that its configuration never reads.
+	expect(main).toContain("legacyVariablesCheck");
 	expect(main).toContain("warn config-files: ");
 	expect(main).toContain('import m0 from "@o3co/x-http/module";');
 	expect(main).toContain('import m1 from "@o3co/x-clients/module";');
@@ -82,6 +82,17 @@ it("points at the release's documents and the cards that ask of the deployment",
 	expect(guide).toContain("## What the composed modules ask of the deployment");
 	expect(guide).toContain("- `@mod/http`: `node_modules/@mod/http/README.md#deployment`");
 	expect(guide).toContain("https://example.invalid/auth/blob/v1.2.3/docs/recipe-first-login.md");
+});
+
+it("checks 0.17's variables in every entry through config-files' check alone, choosing nothing itself", async () => {
+	const target = await mkdtemp(join(tmpdir(), "app-output-"));
+	await writeDeployment(target, ["@mod/seal", "@mod/mfa-witnessing"], fakePackages(), readme);
+	for (const entry of ["src/main.ts", "src/reseal.ts", "src/witness-backfill.ts"]) {
+		const source = await read(target, entry);
+		expect(source, entry).toContain("await legacyVariablesCheck(source)");
+		expect(source, entry).not.toContain("unreadLegacyVariables");
+		expect(source, entry).not.toContain("APP_LEGACY_VARIABLES");
+	}
 });
 
 it("tells a refused boot in its entries by the kernel's mark, never by its class", async () => {
@@ -160,6 +171,9 @@ it("promises no http, port or health check to an app that composes no http", asy
 		expect(guide).not.toContain(http);
 	}
 	expect(guide).toContain("docker run --env-file .env -e APP_CONFIG=");
+	expect(guide).toContain(
+		"set `APP_LEGACY_VARIABLES=refuse` to refuse boot on one instead, or `ignore`",
+	);
 	expect(guide).not.toContain("{{");
 });
 
