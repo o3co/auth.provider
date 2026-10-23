@@ -11,8 +11,7 @@
 ## Offers
 - `passkeys`: a challenge the same for everyone, made for a requester, and the assertion of a discoverable passkey by that requester → subject, challenge time, user verified, backup eligible; or a refusal.
 - `registrations`: options for a subject's new passkey, and keeping the one a response creates → the credential, or a refusal (the ceremony's, `unreadable`, `no-challenge`, `conflict`, `full`, `revoked`).
-  - A caller's check (`admitted`) is asked before the record is written and once after; its write's record (by token) becomes a passkey only as the last write, both asks admitting. A `false` (`revoked`), a throw or a failed write ends it, best effort.
-  - Left: a revocation after the second ask is not seen; a registration stopped, or failing to end, leaves its record pending: if listed, it counts toward `max-credentials` until removed or `cleared`.
+  - A caller's check (`admitted`) is asked before the record is written and once after; its write's record (by token) becomes a passkey only as the last write, both asks admitting. A `false` (`revoked`), a throw or a failed write ends it, best effort; what that leaves open, the internal module `registration` says.
   - The caller answers for who the subject is: only a module that authenticated it may ask.
   - A registration answers when its challenge was made (`challengedAt`). `listed` (id, nickname, transports, backup state, and when registered where kept), `renamed` (`renamed` / `unknown`) and `removed` (`removed`: this call ended it; `empty`: none left) take only the subject's own.
 - `passkeyHolders`, taken only by `login-passkey` and `passkey-reset`: `held` (settled first), `cleared` (ends every passkey of the subject, making its holder where it has none, and has its mark go → how many it ended), `settle`, and `witnessed` (whether a witness is composed).
