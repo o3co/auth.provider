@@ -7,8 +7,8 @@ import { memoryStores, writeToken } from "./stores.ts";
 const fresh = () => randomBytes(32).toString("base64url");
 
 /** Passkey records over memory stores, and a credential for `subject` under its handle. */
-function kept(now: () => number = () => 1_000) {
-	const stores = memoryStores();
+function kept(now: () => number = () => 1_000, { together = true } = {}) {
+	const stores = memoryStores(undefined, { together });
 	const records = keptPasskeys(stores.passkeys, writeToken, now);
 	const credentialFor = async (subject: string, id: string) => ({
 		id,
@@ -22,7 +22,8 @@ function kept(now: () => number = () => 1_000) {
 }
 
 it("leaves no id taken for good when the store fails between keeping a credential and listing it", async () => {
-	const { stores, records, credentialFor } = await kept();
+	// The two writes of a store without updateTogether, until that path goes.
+	const { stores, records, credentialFor } = await kept(undefined, { together: false });
 	const id = fresh();
 	const sams = await credentialFor("sam", id);
 	stores.down.subjects.failNext("update");
@@ -33,7 +34,8 @@ it("leaves no id taken for good when the store fails between keeping a credentia
 });
 
 it("leaves no id taken for good when another registration takes the subject's last place first", async () => {
-	const { stores, records, credentialFor } = await kept();
+	// The two writes of a store without updateTogether, until that path goes.
+	const { stores, records, credentialFor } = await kept(undefined, { together: false });
 	const [id, other] = [fresh(), fresh()];
 	const sams = await credentialFor("sam", id);
 	stores.raceSubjects((record) => {

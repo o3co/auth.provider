@@ -28,10 +28,13 @@ import passkeysModule from "../src/module.ts";
 import { passkeysConfig, passkeyWitnessStandIn } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
 
-const boot = (witnesses: ReturnType<typeof passkeyWitnessStandIn>[]) =>
+const boot = (
+	witnesses: ReturnType<typeof passkeyWitnessStandIn>[],
+	{ together = true }: { readonly together?: boolean } = {},
+) =>
 	assemble({
 		modules: [
-			memoryStores().module,
+			memoryStores(undefined, { together }).module,
 			auditStandIn().module,
 			webauthn,
 			passkeysModule,
@@ -310,7 +313,8 @@ async function sameId(app: Awaited<ReturnType<typeof boot>>) {
 }
 
 it("keeps only the key of the registration both asks admitted, two of a subject's crossing on one id in either order", async () => {
-	const app = await boot([]);
+	// The two writes of a store without updateTogether, until that path goes.
+	const app = await boot([], { together: false });
 	// Admitted first: a revoked one writes over its record while it asks; neither key is kept.
 	const first = await sameId(app);
 	let crossed: unknown;

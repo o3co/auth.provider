@@ -3,9 +3,9 @@ import type { StoredPasskey } from "../src/store.ts";
 import { challengeStoreContract, passkeyStoreContract } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
 
-passkeyStoreContract("records stand-in", async () => {
+passkeyStoreContract("records stand-in writing each space apart", async () => {
 	let now = 0;
-	const stand = memoryStores(() => now);
+	const stand = memoryStores(() => now, { together: false });
 	return {
 		passkeys: stand.passkeys,
 		advance: (ms) => {

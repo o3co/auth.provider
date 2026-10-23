@@ -21,12 +21,12 @@ type Together = Required<Pick<PasskeyStore, "updateTogether">>;
 
 /**
  * passkeys' stores on the records stand-in, on the given clock, each behind a switch: credentials
- * and subjects in one stand-in, apart by their keys. `together` offers the change of records of both
+ * and subjects in one stand-in, apart by their keys. `together` (on unless asked off) offers the change of records of both
  * spaces as one; `loseNextTogether` lets the next such change take effect, its answer lost.
  */
 export function memoryStores(
 	now: () => number = () => 0,
-	{ together = false }: { readonly together?: boolean } = {},
+	{ together = true }: { readonly together?: boolean } = {},
 ) {
 	const size = { shards: 1, perShard: 1 };
 	const stand = memoryRecords<StoredPasskey>(now, size);
