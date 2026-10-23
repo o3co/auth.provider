@@ -21,10 +21,28 @@ interface Written {
 	readonly line: number;
 }
 
+/** Whether a type holds a type parameter anywhere: in a union or intersection, a template, a mapped string, or as one. */
+const holdsTypeParameter = (type: ts.Type): boolean => {
+	const deferred =
+		ts.TypeFlags.TypeParameter |
+		ts.TypeFlags.Index |
+		ts.TypeFlags.IndexedAccess |
+		ts.TypeFlags.Conditional |
+		ts.TypeFlags.Substitution;
+	if (type.flags & deferred) return true;
+	if (type.isUnionOrIntersection()) return type.types.some(holdsTypeParameter);
+	if (type.flags & ts.TypeFlags.TemplateLiteral)
+		return (type as ts.TemplateLiteralType).types.some(holdsTypeParameter);
+	if (type.flags & ts.TypeFlags.StringMapping)
+		return holdsTypeParameter((type as ts.StringMappingType).type);
+	return false;
+};
+
 /**
  * Whether an object literal's property may be written under the name `internal`: by name, or by a
- * computed key whose type the string "internal" fits, a type parameter's by its constraint (a
- * union, a template, a mapped string or a string of no known value alike).
+ * computed key whose type the string "internal" fits (a union, a template, a mapped string or a
+ * string of no known value alike), or whose type holds a type parameter anywhere, whatever it is
+ * bound to: a guard's rule follows no further.
  */
 const namesInternal = (checker: ts.TypeChecker, property: ts.ObjectLiteralElementLike) => {
 	const name = property.name;
@@ -33,8 +51,10 @@ const namesInternal = (checker: ts.TypeChecker, property: ts.ObjectLiteralElemen
 		return (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) && name.text === "internal";
 	}
 	const key = checker.getTypeAtLocation(name.expression);
-	const bound = key.isTypeParameter() ? (checker.getBaseConstraintOfType(key) ?? key) : key;
-	return checker.isTypeAssignableTo(checker.getStringLiteralType("internal"), bound);
+	return (
+		holdsTypeParameter(key) ||
+		checker.isTypeAssignableTo(checker.getStringLiteralType("internal"), key)
+	);
 };
 
 /** The type of the value a property is written with: its initializer, its shorthand name, or its getter's return. */

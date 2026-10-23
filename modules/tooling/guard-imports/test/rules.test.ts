@@ -670,6 +670,9 @@ describe("guard-imports", () => {
 						// A key whose type "internal" fits: a type parameter's constraint, a mapped string.
 						'export const generic = <K extends "internal">(key: K) => send(url, { [key]: url });',
 						"export const lower = (key: Lowercase<string>) => send(url, { [key]: url });",
+						// A key whose type holds a type parameter anywhere: counted, whatever it is bound to.
+						'export const joined = <K extends "internal">(key: K | "other") => send(url, { [key]: url });',
+						'export const narrowed = <K>(key: K) => (typeof key === "string" ? send(url, { [key]: url }) : url);',
 						// Not counted: a key no "internal" fits.
 						// biome-ignore lint/suspicious/noTemplateCurlyInString: the fixture's source holds a template type
 						"export const unrelated = (key: `unrelated-${string}`) => ({ [key]: url });",
@@ -700,6 +703,8 @@ describe("guard-imports", () => {
 					"@c/other/src/module.ts:17 internal",
 					"@c/other/src/module.ts:21 internal",
 					"@c/other/src/module.ts:22 internal",
+					"@c/other/src/module.ts:23 internal",
+					"@c/other/src/module.ts:24 internal",
 				],
 			);
 		});
