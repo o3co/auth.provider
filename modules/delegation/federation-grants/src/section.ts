@@ -35,7 +35,7 @@ export const section = z.strictObject({
 	page: page
 		.optional()
 		.describe(
-			"The page that asks the user, on this deployment's origin: an https URL (http only on a loopback host).",
+			"The page that asks the user; it posts the decision under `csrf`, so serve it on this deployment's origin (not checked at boot): an https URL (http only on a loopback host).",
 		),
 	"login-page": page
 		.optional()
