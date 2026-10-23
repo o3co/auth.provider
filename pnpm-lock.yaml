@@ -2489,6 +2489,34 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
+  modules/second-factor/mfa-email-proof:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/mfa-binding-proof':
+        specifier: workspace:*
+        version: link:../mfa-binding-proof
+      '@mod/mfa-email':
+        specifier: workspace:*
+        version: link:../mfa-email
+      '@mod/users':
+        specifier: workspace:*
+        version: link:../../identity/users
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@mod/mail':
+        specifier: workspace:*
+        version: link:../../foundation/mail
+      '@mod/subject-attributes':
+        specifier: workspace:*
+        version: link:../../identity/subject-attributes
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
   modules/second-factor/mfa-email-wording:
     dependencies:
       '@mod/kernel':
