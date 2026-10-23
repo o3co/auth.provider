@@ -27,7 +27,11 @@ export interface WitnessParts {
 
 type Call = "read" | "enroll" | "withdraw" | "clear";
 
-const readShape = z.object({ enrolled: z.boolean() });
+/** A marked answer names its mark's token, as written; an unmarked one names none. */
+const markShape = z.union([
+	z.object({ enrolled: z.literal(true), token: z.string().min(1) }),
+	z.object({ enrolled: z.literal(false) }),
+]);
 const enrollShape = z.object({ owner: z.boolean() });
 
 /** The kind outbound gives a failure to send, or no-answer for anything else. */
@@ -37,8 +41,13 @@ function kindOf(error: unknown): string {
 	return "no-answer";
 }
 
+/** The witness this adapter makes: `passkeys`' witness, with the ledger's clear it still offers. */
+export interface LedgerWitness extends PasskeyWitness {
+	clear(subject: string): Promise<void>;
+}
+
 /** The passkey witness kept at the operator's ledger: every call asks it, nothing is kept here. */
-export function witnessAt(parts: WitnessParts): PasskeyWitness {
+export function witnessAt(parts: WitnessParts): LedgerWitness {
 	const { urls, out, credential, narrower, heldMs, now, warn } = parts;
 	/** Logs why the ledger failed, by the call and its kind or status alone, and answers unavailable. */
 	const failed = (call: Call, why: { reason: string } | { status: number }) => {
@@ -66,8 +75,13 @@ export function witnessAt(parts: WitnessParts): PasskeyWitness {
 	};
 	// A write the ledger receives past its deadline is one the provider no longer waits for.
 	const deadline = () => now() + heldMs;
+	const mark = (subject: string) => answered("read", { subject }, markShape);
 	return {
-		read: async (subject) => (await answered("read", { subject }, readShape)).enrolled,
+		read: async (subject) => (await mark(subject)).enrolled,
+		markedWith: async (subject) => {
+			const read = await mark(subject);
+			return read.enrolled ? read.token : undefined;
+		},
 		enroll: async (subject, token) =>
 			(await answered("enroll", { subject, token, deadline: deadline() }, enrollShape)).owner,
 		// 204 only once the ledger has judged the token and removed what it had to: anything else is unavailable.

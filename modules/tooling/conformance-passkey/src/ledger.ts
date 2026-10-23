@@ -10,7 +10,7 @@ const calls = [
 
 /**
  * A ledger answering passkey-witness-http's calls as an operator's keeps them: a mark per subject,
- * set only where none is, withdrawn only by its token, cleared whatever it holds; and the section
+ * set only where none is, read with its token, withdrawn only by its token, cleared whatever it holds; and the section
  * that points an app at it.
  */
 export async function witnessLedger(): Promise<Party> {
@@ -22,7 +22,10 @@ export async function witnessLedger(): Promise<Party> {
 		if (asked.headers.authorization !== `Bearer ${credential}`) return { status: 404 };
 		const given = JSON.parse(asked.body) as { subject?: string; token?: string };
 		const subject = String(given.subject);
-		if (asked.path === "/passkey-witness/read") return { json: { enrolled: marks.has(subject) } };
+		if (asked.path === "/passkey-witness/read") {
+			const token = marks.get(subject);
+			return { json: token === undefined ? { enrolled: false } : { enrolled: true, token } };
+		}
 		if (asked.path === "/passkey-witness/enroll") {
 			if (!marks.has(subject)) marks.set(subject, String(given.token));
 			return { json: { owner: marks.get(subject) === given.token } };

@@ -21,7 +21,7 @@ describe("a fake ledger keeping the passkey witness", () => {
 		});
 	});
 
-	it("says whether a subject is enrolled, takes the first mark only, withdraws it only by its token, and clears it", () => {
+	it("says whether a subject is enrolled with its mark's token, takes the first mark only, withdraws it only by its token, and clears it", () => {
 		expect(ledger.answer(call("read", { subject: "u-1" }))).toEqual({ json: { enrolled: false } });
 		expect(ledger.answer(call("enroll", { subject: "u-1", token: "a" }))).toEqual({
 			json: { owner: true },
@@ -29,11 +29,15 @@ describe("a fake ledger keeping the passkey witness", () => {
 		expect(ledger.answer(call("enroll", { subject: "u-1", token: "b" }))).toEqual({
 			json: { owner: false },
 		});
-		expect(ledger.answer(call("read", { subject: "u-1" }))).toEqual({ json: { enrolled: true } });
+		expect(ledger.answer(call("read", { subject: "u-1" }))).toEqual({
+			json: { enrolled: true, token: "a" },
+		});
 		expect(ledger.answer(call("withdraw", { subject: "u-1", token: "b" }))).toEqual({
 			status: 204,
 		});
-		expect(ledger.answer(call("read", { subject: "u-1" }))).toEqual({ json: { enrolled: true } });
+		expect(ledger.answer(call("read", { subject: "u-1" }))).toEqual({
+			json: { enrolled: true, token: "a" },
+		});
 		expect(ledger.answer(call("withdraw", { subject: "u-1", token: "a" }))).toEqual({
 			status: 204,
 		});

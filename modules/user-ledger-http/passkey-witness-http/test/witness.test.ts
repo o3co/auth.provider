@@ -20,10 +20,11 @@ import {
 	policyOf,
 	policySettings,
 } from "@mod/outbound-policy";
-import { type PasskeyWitness, passkeyWitnesses } from "@mod/passkeys";
+import { passkeyWitnesses } from "@mod/passkeys";
 import { passkeyWitnessContract, passkeyWitnessProblems } from "@mod/passkeys/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import witnessHttp from "../src/module.ts";
+import type { LedgerWitness } from "../src/witness.ts";
 
 const credential = randomBytes(32).toString("hex");
 const now = 1_800_000_000_000;
@@ -43,12 +44,18 @@ interface Answer {
 	readonly afterMs?: number;
 }
 
-/** A ledger keeping the witness's promises: one mark per subject, set if absent, at once. */
+/** A ledger keeping the witness's promises: one mark per subject, set if absent, at once, read with its token. */
 function keepingLedger() {
 	const marks = new Map<string, string>();
 	return (asked: Asked): Answer => {
 		const { subject, token } = JSON.parse(asked.body);
-		if (asked.path === "/w/read") return { status: 200, json: { enrolled: marks.has(subject) } };
+		if (asked.path === "/w/read") {
+			const held = marks.get(subject);
+			return {
+				status: 200,
+				json: held === undefined ? { enrolled: false } : { enrolled: true, token: held },
+			};
+		}
 		if (asked.path === "/w/enroll") {
 			if (!marks.has(subject)) marks.set(subject, token);
 			return { status: 200, json: { owner: marks.get(subject) === token } };
@@ -121,9 +128,13 @@ const settings = (more: Record<string, unknown> = {}) => ({
 	credential,
 	...more,
 });
-const collected = contract<readonly PasskeyWitness[]>("test.witnesses");
+/** The witnesses contributed, as this adapter makes them: its own type, which keeps `clear`. */
+const collected = contract<readonly LedgerWitness[]>("test.witnesses");
 const collector = defineModule({ name: "test-collector" }, (m) => [
-	m.provide(collected).by((c) => c.collect(passkeyWitnesses)),
+	// The module contributes witnessAt's answer, so what it contributed is that type.
+	m
+		.provide(collected)
+		.by(async (c) => (await c.collect(passkeyWitnesses)) as readonly LedgerWitness[]),
 ]);
 async function open(section: unknown = settings(), outbound: Record<string, unknown> = {}) {
 	const logged = recordingLog();
@@ -144,6 +155,63 @@ async function open(section: unknown = settings(), outbound: Record<string, unkn
 passkeyWitnessContract("passkey-witness-http over a ledger keeping its promises", async () => {
 	script = keepingLedger();
 	return (await open()).witness;
+});
+
+describe("passkey-witness-http's markedWith", () => {
+	it("reads the mark's token from the read answer, none where unmarked, asking the read URL once a call", async () => {
+		const { witness } = await open();
+		expect(await witness.markedWith?.("alice")).toBeUndefined();
+		await witness.enroll("alice", "t-1");
+		await witness.enroll("alice", "t-2");
+		expect(await witness.markedWith?.("alice")).toBe("t-1");
+		const reads = received.filter((r) => r.path === "/w/read").map((r) => JSON.parse(r.body));
+		expect(reads).toEqual([{ subject: "alice" }, { subject: "alice" }]);
+	});
+
+	it("answers unavailable where a marked answer names no token, for read and markedWith alike, never withdrawing or clearing instead", async () => {
+		const { witness, logged } = await open();
+		for (const json of [
+			{ enrolled: true },
+			{ enrolled: true, token: "" },
+			{ enrolled: true, token: 5 },
+		]) {
+			script = (asked) => (asked.path === "/w/read" ? { status: 200, json } : { status: 204 });
+			await expect(witness.markedWith?.("alice-secret"), JSON.stringify(json)).rejects.toSatisfy(
+				isUnavailable,
+			);
+			await expect(witness.read("alice-secret"), JSON.stringify(json)).rejects.toSatisfy(
+				isUnavailable,
+			);
+		}
+		expect(received.map((r) => r.path).every((path) => path === "/w/read")).toBe(true);
+		const failures = logged
+			.lines()
+			.filter((line) => line.event === "passkey-witness-http.ledger_failed")
+			.map((line) => line.fields);
+		expect(failures).toEqual(Array(6).fill({ call: "read", reason: "malformed" }));
+		expect(JSON.stringify(logged.lines())).not.toContain("alice-secret");
+	});
+
+	it("answers unavailable to a read whose token makes it larger than max-response-size, for read and markedWith alike", async () => {
+		const { witness, logged } = await open(settings({ "max-response-size": "64B" }));
+		const token = "t".repeat(200);
+		script = () => ({ status: 200, json: { enrolled: true, token } });
+		await expect(witness.read("alice")).rejects.toSatisfy(isUnavailable);
+		await expect(witness.markedWith?.("alice")).rejects.toSatisfy(isUnavailable);
+		const failures = logged
+			.lines()
+			.filter((line) => line.event === "passkey-witness-http.ledger_failed")
+			.map((line) => line.fields);
+		expect(failures).toEqual(Array(2).fill({ call: "read", reason: "too-large" }));
+		expect(JSON.stringify(logged.lines())).not.toContain(token);
+	});
+
+	it("reads an unmarked answer as no token, whatever else it names", async () => {
+		const { witness } = await open();
+		script = () => ({ status: 200, json: { enrolled: false, token: "stale" } });
+		expect(await witness.markedWith?.("alice")).toBeUndefined();
+		expect(await witness.read("alice")).toBe(false);
+	});
 });
 
 describe("passkey-witness-http at a private address", () => {
@@ -265,13 +333,17 @@ describe("passkey-witness-http", () => {
 
 	it("passes on a ledger whose reads lag behind its answered writes, which the contract test then fails", async () => {
 		const marks = new Map<string, string>();
-		let seen = new Set<string>();
+		let seen = new Map<string, string>();
 		script = (asked) => {
 			const { subject, token } = JSON.parse(asked.body);
 			if (asked.path === "/w/read") {
 				// A replica a write behind: it sees what was marked before the last write.
-				const answer = { status: 200, json: { enrolled: seen.has(subject) } };
-				seen = new Set(marks.keys());
+				const behind = seen.get(subject);
+				const answer = {
+					status: 200,
+					json: behind === undefined ? { enrolled: false } : { enrolled: true, token: behind },
+				};
+				seen = new Map(marks);
 				return answer;
 			}
 			if (asked.path === "/w/enroll") {
