@@ -37,6 +37,12 @@ export interface PasskeyPlace {
 	readonly pressMemory?: () => Promise<void>;
 	/** Where reads can meet unconfirmed writes: runs `during` as the next save takes effect, unconfirmed. */
 	readonly duringNextSave?: (during: () => Promise<void>) => void;
+	/** Where another writer can come between: before the next records changed as one are written, it changes the record at `key` of `space` as given. */
+	readonly raceNextTogether?: (
+		space: "credentials" | "subjects",
+		key: string,
+		change: (record: StoredPasskey) => StoredPasskey,
+	) => void;
 }
 
 const handleOf = () => randomBytes(32).toString("base64url");
@@ -67,6 +73,129 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 				after: held({ n: 2 }),
 			});
 			expect(await passkeys.credentials.update(fresh(), plus(1))).toBeUndefined();
+		});
+
+		it("changes records of both spaces as one where it can, giving the change what it watched, each space apart", async (ctx) => {
+			const { passkeys } = await open();
+			const together = passkeys.updateTogether?.bind(passkeys);
+			if (!together) {
+				ctx.skip();
+				return;
+			}
+			// One key in both spaces, and the owner's in both: each space keeps its own.
+			const [key, owner] = [fresh(), fresh()];
+			await passkeys.subjects.save(owner, held({ n: 7 }), "endless");
+			await passkeys.credentials.save(owner, held({ n: 9 }), "endless");
+			const seen: unknown[] = [];
+			const first = await together(
+				{ credentials: [key], subjects: [key] },
+				{
+					watch: () => ({ subjects: [owner] }),
+					change: (read) => {
+						seen.push(read);
+						return {
+							credentials: [{ value: held({ n: 1 }) }],
+							subjects: [{ value: held({ n: 2 }) }],
+						};
+					},
+				},
+			);
+			expect(seen).toEqual([{ credentials: [undefined], subjects: [undefined, held({ n: 7 })] }]);
+			expect(first).toEqual({
+				credentials: [{ before: undefined, after: held({ n: 1 }) }],
+				subjects: [
+					{ before: undefined, after: held({ n: 2 }) },
+					{ before: held({ n: 7 }), after: held({ n: 7 }) },
+				],
+			});
+			expect([
+				await passkeys.credentials.read(key),
+				await passkeys.subjects.read(key),
+				await passkeys.credentials.read(owner),
+			]).toEqual([held({ n: 1 }), held({ n: 2 }), held({ n: 9 })]);
+			// A record it leaves out is kept.
+			const kept = await together(
+				{ credentials: [key], subjects: [key] },
+				{ watch: () => ({}), change: () => ({ subjects: [plus(1)(held({ n: 2 }))] }) },
+			);
+			expect(kept).toEqual({
+				credentials: [{ before: held({ n: 1 }), after: held({ n: 1 }) }],
+				subjects: [{ before: held({ n: 2 }), after: held({ n: 3 }) }],
+			});
+		});
+
+		it("writes the records it watched as well, as a subject's list and the credentials it names", async (ctx) => {
+			const { passkeys } = await open();
+			const together = passkeys.updateTogether?.bind(passkeys);
+			if (!together) {
+				ctx.skip();
+				return;
+			}
+			const [list, a, b] = [fresh(), fresh(), fresh()];
+			await passkeys.subjects.save(list, held({ ids: [a, b] }), "endless");
+			await passkeys.credentials.save(a, held({ n: 1 }), "endless");
+			const idsOf = (record: StoredPasskey | undefined) =>
+				(record as unknown as { ids?: string[] } | undefined)?.ids ?? [];
+			const cleared = await together(
+				{ credentials: [], subjects: [list] },
+				{
+					watch: ({ subjects: [held] }) => ({ credentials: idsOf(held) }),
+					change: ({ credentials }) => ({
+						subjects: [{ value: held({ ids: [] }) }],
+						credentials: credentials.map((record) => record && { value: held({ gone: true }) }),
+					}),
+				},
+			);
+			expect(cleared).toEqual({
+				credentials: [
+					{ before: held({ n: 1 }), after: held({ gone: true }) },
+					{ before: undefined, after: undefined },
+				],
+				subjects: [{ before: held({ ids: [a, b] }), after: held({ ids: [] }) }],
+			});
+			expect([await passkeys.credentials.read(a), await passkeys.credentials.read(b)]).toEqual([
+				held({ gone: true }),
+				undefined,
+			]);
+		});
+
+		it("changes records as one again where another writer changes what it watched first", async (ctx) => {
+			const { passkeys, raceNextTogether: race } = await open();
+			const together = passkeys.updateTogether?.bind(passkeys);
+			if (!together || !race) {
+				ctx.skip();
+				return;
+			}
+			const [key, owner, other] = [fresh(), fresh(), fresh()];
+			await passkeys.credentials.save(key, held({ owner }), "endless");
+			await passkeys.subjects.save(owner, held({ n: 1 }), "endless");
+			await passkeys.subjects.save(other, held({ n: 2 }), "endless");
+			const ownerOf = (record: StoredPasskey | undefined) =>
+				(record as unknown as { owner?: string } | undefined)?.owner;
+			const watched: unknown[] = [];
+			const run = () =>
+				together(
+					{ credentials: [key], subjects: [] },
+					{
+						watch: ({ credentials: [credential] }) => {
+							const o = ownerOf(credential);
+							return { subjects: o ? [o] : [] };
+						},
+						change: ({ subjects: [list] }) => {
+							watched.push(list);
+							return {};
+						},
+					},
+				);
+			// The watched list changes first: read again.
+			race("subjects", owner, () => held({ n: 10 }));
+			await run();
+			expect(watched).toEqual([held({ n: 1 }), held({ n: 10 })]);
+			// The credential's owner changes first: the new owner is watched, and read.
+			watched.length = 0;
+			race("credentials", key, () => held({ owner: other }));
+			await run();
+			expect(watched).toEqual([held({ n: 10 }), held({ n: 2 })]);
 		});
 
 		it("changes a record only from what it holds, again after a racing writer", async () => {
