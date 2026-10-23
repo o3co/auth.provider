@@ -3,7 +3,13 @@ import { Unavailable } from "@mod/kernel";
 import { type Credential, credentialLimits, credentialOf, isCanonical } from "@mod/webauthn";
 import { z } from "zod";
 import type { RegisteredPasskey } from "./contract.ts";
-import type { ChallengeStore, PasskeyStore, StoredChallenge, StoredPasskey } from "./store.ts";
+import type {
+	ChallengeStore,
+	ChangedPasskey,
+	PasskeyStore,
+	StoredChallenge,
+	StoredPasskey,
+} from "./store.ts";
 
 const { handleBytes, idBytes } = credentialLimits;
 
@@ -138,8 +144,184 @@ export function keptPasskeys(
 		const removed = holderOf(delisted.before).credentials.includes(id) && !left.includes(id);
 		return { removed, empty: left.length === 0 };
 	};
+	/** A credential's record as a removal leaves it. */
+	const removedOf = (subject: string) => stored({ v: 1, subject, removed: true });
+	/** Whether a record is the subject's passkey or pending one, as no removal left it. */
+	const heldBy = (record: StoredPasskey | undefined, subject: string) => {
+		const kept = record && keptOf(record);
+		return kept !== undefined && kept.kind !== "removed" && kept.subject === subject;
+	};
+	/** What a change of the subject's holder did to an id: `removed` where it took it off, `empty` where none is left. */
+	const delistedBy = (changed: ChangedPasskey | undefined, id: string) => {
+		const [before, after] = [changed?.before, changed?.after].map((r) =>
+			r === undefined ? [] : holderOf(r).credentials,
+		);
+		return { removed: !!before?.includes(id) && !after?.includes(id), empty: after?.length === 0 };
+	};
+	const together = store.updateTogether?.bind(store);
+	/**
+	 * With a store that changes both spaces as one: the credential's record and the subject's list,
+	 * or the list and every record it names, in one change, so a list names an id exactly while the
+	 * record names the subject, pending or a passkey.
+	 */
+	const joint = together && {
+		/**
+		 * Keeps a new passkey's record pending under `written` and lists its id, in one change. An id
+		 * the record's holder lists is a conflict; a list at `max` that lacks it is full; a record no
+		 * list holds (a removed one, or one 0.18 left) is taken over, an old entry for it kept.
+		 */
+		joined: async (
+			subject: string,
+			credential: Credential,
+			max: number,
+			nickname: string | undefined,
+			written: string,
+		): Promise<"written" | "conflict" | "full" | "malformed"> => {
+			// Only what reads back: a record no read can take would make every later use unavailable.
+			if (!credentialOf(credential)) return "malformed";
+			const { id, userHandle, ...rest } = credential;
+			if ((await holder(subject))?.handle !== userHandle) return "malformed";
+			const record = stored({
+				v: 2,
+				subject,
+				...rest,
+				...(nickname ? { nickname } : {}),
+				at: now(),
+				pending: true,
+				token: written,
+			});
+			let verdict: "written" | "conflict" | "full" = "written";
+			await together(
+				{ credentials: [credentialKey(id)], subjects: [subjectKey(subject)] },
+				{
+					// The holder another subject's record names is read with it, as its list decides.
+					watch: (read) => {
+						const kept = read.credentials[0] && keptOf(read.credentials[0]);
+						return kept && kept.kind !== "removed" && kept.subject !== subject
+							? { subjects: [subjectKey(kept.subject)] }
+							: {};
+					},
+					change: (read) => {
+						const [ours, owner] = read.subjects;
+						if (!ours) throw broken();
+						const listed = holderOf(ours).credentials;
+						const kept = read.credentials[0] && keptOf(read.credentials[0]);
+						// The list of the subject the record names, pending or a passkey: its own, or the one watched.
+						const holders =
+							kept === undefined || kept.kind === "removed"
+								? []
+								: kept.subject === subject
+									? listed
+									: owner === undefined
+										? []
+										: holderOf(owner).credentials;
+						verdict = holders.includes(id)
+							? "conflict"
+							: !listed.includes(id) && listed.length >= max
+								? "full"
+								: "written";
+						if (verdict !== "written") return {};
+						const list = listed.includes(id) ? listed : [...listed, id];
+						return {
+							credentials: [{ value: record }],
+							subjects: [{ value: stored({ ...ours, credentials: list }) }],
+						};
+					},
+				},
+			);
+			return verdict;
+		},
+		/** Ends what the write named `written` left, in one change: off the list, its record stripped; any other record stays. */
+		ended: async (subject: string, id: string, written: string) => {
+			const changed = await together(
+				{ credentials: [credentialKey(id)], subjects: [subjectKey(subject)] },
+				{
+					watch: () => ({}),
+					change: (read) => {
+						const [current, ours] = [read.credentials[0], read.subjects[0]];
+						if (!current || !pendingOf(current, written) || !ours) return {};
+						const listed = holderOf(ours).credentials;
+						return {
+							credentials: [{ value: removedOf(subject) }],
+							subjects: [
+								listed.includes(id)
+									? { value: stored({ ...ours, credentials: listed.filter((c) => c !== id) }) }
+									: undefined,
+							],
+						};
+					},
+				},
+			);
+			return delistedBy(changed.subjects[0], id);
+		},
+		/** Takes an id off the subject's list in one change, stripping its record where it is the subject's; an old entry for another's record only frees its slot. */
+		removed: async (subject: string, id: string) => {
+			const changed = await together(
+				{ credentials: [credentialKey(id)], subjects: [subjectKey(subject)] },
+				{
+					watch: () => ({}),
+					change: (read) => {
+						const ours = read.subjects[0];
+						const listed = ours === undefined ? [] : holderOf(ours).credentials;
+						if (!ours || !listed.includes(id)) return {};
+						return {
+							credentials: [
+								heldBy(read.credentials[0], subject) ? { value: removedOf(subject) } : undefined,
+							],
+							subjects: [
+								{ value: stored({ ...ours, credentials: listed.filter((c) => c !== id) }) },
+							],
+						};
+					},
+				},
+			);
+			return delistedBy(changed.subjects[0], id);
+		},
+		/** Empties the subject's list and strips every record of the subject it names, in one change. */
+		cleared: async (subject: string) => {
+			const changed = await together(
+				{ credentials: [], subjects: [subjectKey(subject)] },
+				{
+					watch: (read) => ({
+						credentials: (read.subjects[0] ? holderOf(read.subjects[0]).credentials : []).map(
+							credentialKey,
+						),
+					}),
+					change: (read) => {
+						const ours = read.subjects[0];
+						if (!ours || holderOf(ours).credentials.length === 0) return {};
+						return {
+							credentials: read.credentials.map((r) =>
+								heldBy(r, subject) ? { value: removedOf(subject) } : undefined,
+							),
+							subjects: [{ value: stored({ ...ours, credentials: [] }) }],
+						};
+					},
+				},
+			);
+			const [before, after] = [changed.subjects[0]?.before, changed.subjects[0]?.after].map((r) =>
+				r === undefined ? 0 : holderOf(r).credentials.length,
+			);
+			return { removed: (before ?? 0) - (after ?? 0) };
+		},
+	};
 	const records = {
 		holder,
+		/** Whether registrations write the record and the list as one (`joined`), the first ask before it. */
+		together: joint !== undefined,
+		/** A new token naming a registration's write, made before the write so a retry writes the same one. */
+		writeToken: token,
+		/** One change of the record and the list, for a store that has it; see `joint`. */
+		joined: async (
+			subject: string,
+			credential: Credential,
+			max: number,
+			nickname: string | undefined,
+			written: string,
+		) => {
+			if (!joint) throw new TypeError("passkeys: the store cannot change both spaces as one");
+			return joint.joined(subject, credential, max, nickname, written);
+		},
 		/** The subject's handle; `fresh` becomes it when the subject has none yet. */
 		handleFor: async (subject: string, fresh: string): Promise<string> => {
 			if (!isCanonical(fresh, handleBytes)) throw new Error("a handle must be canonical");
@@ -226,6 +408,16 @@ export function keptPasskeys(
 			),
 		/** `written`, `listing` and `activated`, with nothing between; one not this write's to keep is a `conflict`, let go of. */
 		register: async (subject: string, credential: Credential, max: number, nickname?: string) => {
+			if (joint) {
+				const written = token();
+				const joined = await joint.joined(subject, credential, max, nickname, written);
+				if (joined !== "written") return joined;
+				if ((await records.activated(credential.id, written)) === "activated") {
+					return "registered" as const;
+				}
+				await joint.ended(subject, credential.id, written);
+				return "conflict" as const;
+			}
 			const wrote = await records.written(subject, credential, max, nickname);
 			if (typeof wrote === "string") return wrote;
 			const listed = await records.listing(subject, credential.id, max);
@@ -298,6 +490,7 @@ export function keptPasskeys(
 			subject: string,
 			id: string,
 		): Promise<{ readonly removed: boolean; readonly empty: boolean }> => {
+			if (joint) return joint.removed(subject, id);
 			const delisted = await delist(subject, id);
 			if (delisted.removed) await strip(subject, id);
 			return delisted;
@@ -311,6 +504,7 @@ export function keptPasskeys(
 			id: string,
 			written: string,
 		): Promise<{ readonly removed: boolean; readonly empty: boolean }> => {
+			if (joint) return joint.ended(subject, id, written);
 			const record = await store.credentials.read(credentialKey(id));
 			if (!record) throw broken();
 			if (keptOf(record).subject === subject && !pendingOf(record, written)) {
@@ -322,6 +516,7 @@ export function keptPasskeys(
 		},
 		/** Takes every passkey off the subject's holder in one update, keeping its handle, then strips their records. `removed` counts what this call took off. */
 		cleared: async (subject: string): Promise<{ readonly removed: number }> => {
+			if (joint) return joint.cleared(subject);
 			const delisted = await store.subjects.update(subjectKey(subject), (current) => {
 				const holder = holderOf(current);
 				if (holder.credentials.length === 0) return undefined;
