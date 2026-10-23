@@ -1,17 +1,15 @@
 import { metadataSections } from "@mod/clients";
-import { sessionRedemptions } from "@mod/code-grant";
 import { type HttpRequest, type HttpResponse, routes, site, use } from "@mod/http";
 import { metadata } from "@mod/issuer";
 import { contract, defineModule } from "@mod/kernel";
 import { requestsPerSource } from "@mod/rate-limit";
-import { sessions } from "@mod/session";
 import { participants } from "@mod/session-participants";
 import { upstreamEnds } from "./contract.ts";
 import { endingFrom } from "./ending/ending.ts";
 import { type Notices, noticesFrom } from "./notices/notices.ts";
+import { remembering } from "./redemptions/redemptions.ts";
 import { registration } from "./registration/registration.ts";
 import { section } from "./section.ts";
-import { sessionClients } from "./store.ts";
 
 type Handler = (request: HttpRequest) => Promise<HttpResponse>;
 
@@ -24,23 +22,7 @@ const ending = contract<Handler>("rp-logout.ending");
 
 export default defineModule({ name, section, replicaSafe: true }, (m) => [
 	m.contribute(metadataSections).by(() => registration),
-	m.contribute(sessionRedemptions).by(async (c) => {
-		const held = await c.get(sessionClients);
-		// Late: session's own build asks the participants, this module among them.
-		const open = c.late(sessions);
-		const rememberMs = c.section["remember-for"] * 1000;
-		return {
-			name,
-			redeemed: async (session, client) => {
-				// Kept until the session ends, so its close still tells the client.
-				const entry = await open().entryOf(session);
-				const untilEnd = entry.kind === "entered" ? entry.endsAt - c.clock.now() : 0;
-				const { pushedOut } = await held.add(session, client, Math.max(rememberMs, untilEnd));
-				if (pushedOut.length > 0)
-					c.log.warn("rp-logout.clients_pushed_out", { count: pushedOut.length });
-			},
-		};
-	}),
+	remembering(m, name),
 	m.provide(shared).by(async (c) => {
 		const notices = await noticesFrom(c);
 		c.every(c.section["sweep-interval"] * 1000, async () => {
