@@ -1,6 +1,6 @@
+import { kinds, mayNeed } from "@mod/kinds";
 import { axesIn } from "./composed.ts";
 import type { Declared, Package } from "./declared.ts";
-import { kinds, mayNeed } from "./kinds.ts";
 
 /** What a package declared outside the workspace says of itself, in the words composing reads. */
 export interface Declaration {
