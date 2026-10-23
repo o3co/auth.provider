@@ -67,6 +67,14 @@ afterEach(() => {
 });
 
 /** The endpoint with `extra` modules and `clients` besides the usual, its `settings`, and http's `peer` settings. */
+/** Clients allowed the test grants, registered only where a test composes those grants. */
+const echoClients = {
+	echo: () => client("echo", "client_secret_basic", { grants: ["urn:test:echo"] }),
+	pubecho: () => client("pubecho", "none", { grants: ["urn:test:echo"] }),
+	echoes: () =>
+		client("echoes", "client_secret_basic", { grants: ["urn:test:echo", "urn:test:other"] }),
+};
+
 async function serve(
 	extra: Module[] = [],
 	{
@@ -100,9 +108,6 @@ async function serve(
 				client("noscope", "client_secret_basic", { scopes: [], "default-scopes": [] }),
 				client("emptydefault", "client_secret_basic", { "default-scopes": [] }),
 				client("nodefault", "client_secret_basic", { "default-scopes": undefined }),
-				client("echo", "client_secret_basic", { grants: ["urn:test:echo"] }),
-				client("pubecho", "none", { grants: ["urn:test:echo"] }),
-				client("echoes", "client_secret_basic", { grants: ["urn:test:echo", "urn:test:other"] }),
 				...clients,
 			]),
 			"token-endpoint": settings,
@@ -217,7 +222,9 @@ describe("the audience a request asks for", () => {
 				},
 			})),
 		]);
-		const post = await serve([echoes, narrowing("strict", true)]);
+		const post = await serve([echoes, narrowing("strict", true)], {
+			clients: [echoClients.echoes()],
+		});
 		const resource = "https://two";
 		expect((await post({ grant_type: "urn:test:echo", resource }, "echoes")).body).toEqual({
 			error: "invalid_target",
@@ -268,7 +275,7 @@ describe("the audience a request asks for", () => {
 				handle: async () => ({ kind: "issued", body: { by: "echo" } }),
 			})),
 		]);
-		const post = await serve([echo, narrowing()]);
+		const post = await serve([echo, narrowing()], { clients: [echoClients.echo()] });
 		expect(
 			(await post({ grant_type: "urn:test:echo", resource: "https://two" }, "echo")).body,
 		).toEqual({ by: "echo" });
@@ -488,13 +495,16 @@ describe("token endpoint", () => {
 					},
 				})),
 			]);
-		const post = await serve([
-			claimed("twice", [
-				{ "zeta.example": "z-value", "alpha.example": 1 },
-				{ "alpha.example": 2, "mid.example": true },
-			]),
-			claimed("none", [{}]),
-		]);
+		const post = await serve(
+			[
+				claimed("twice", [
+					{ "zeta.example": "z-value", "alpha.example": 1 },
+					{ "alpha.example": 2, "mid.example": true },
+				]),
+				claimed("none", [{}]),
+			],
+			{ clients: [echoClients.echoes()] },
+		);
 		expect((await post({ grant_type: "urn:test:echo" }, "echoes")).status).toBe(200);
 		expect(events.at(-1)).toMatchObject({
 			kind: "token.issued",
@@ -528,13 +538,13 @@ describe("token endpoint", () => {
 				})),
 			]);
 		// Eight names of 255 characters fill 2047, one space apart: all are named.
-		const fits = await serve([issuing(named(255, 8))]);
+		const fits = await serve([issuing(named(255, 8))], { clients: [echoClients.echo()] });
 		expect((await fits({ grant_type: "urn:test:echo" }, "echo")).status).toBe(200);
 		const all = events.at(-1)?.attributes;
 		expect([String(all?.claims).split(" ").length, all?.claims_left]).toEqual([8, undefined]);
 		await stop();
 		// Twelve of 200: ten fit, and two are left out.
-		const over = await serve([issuing(named(200, 12))]);
+		const over = await serve([issuing(named(200, 12))], { clients: [echoClients.echo()] });
 		expect((await over({ grant_type: "urn:test:echo" }, "echo")).status).toBe(200);
 		const cut = events.at(-1)?.attributes;
 		expect([String(cut?.claims).length <= 2048, String(cut?.claims).split(" ").length]).toEqual([
@@ -568,12 +578,12 @@ describe("token endpoint", () => {
 				})),
 			]);
 		// 8 × 227 + 8 spaces + 224 = 2048.
-		const exact = await serve([issuing(names(224))]);
+		const exact = await serve([issuing(names(224))], { clients: [echoClients.echo()] });
 		expect((await exact({ grant_type: "urn:test:echo" }, "echo")).status).toBe(200);
 		const all = events.at(-1)?.attributes;
 		expect([String(all?.claims).length, all?.claims_left]).toEqual([2048, undefined]);
 		await stop();
-		const over = await serve([issuing(names(225))]);
+		const over = await serve([issuing(names(225))], { clients: [echoClients.echo()] });
 		expect((await over({ grant_type: "urn:test:echo" }, "echo")).status).toBe(200);
 		const cut = events.at(-1)?.attributes;
 		expect([String(cut?.claims).split(" ").length, cut?.claims_left]).toEqual([8, "1"]);
@@ -600,7 +610,7 @@ describe("token endpoint", () => {
 				},
 			})),
 		]);
-		const post = await serve([polled]);
+		const post = await serve([polled], { clients: [echoClients.echo()] });
 		const cc = { grant_type: "client_credentials" };
 		expect((await post(cc, "basic")).status).toBe(200);
 		// Refused before the client is known: the authentication's failure, naming no client.
@@ -663,7 +673,7 @@ describe("token endpoint", () => {
 				},
 			})),
 		]);
-		const post = await serve([down]);
+		const post = await serve([down], { clients: [echoClients.echo()] });
 		const before = logged.lines().length;
 		const res = await post({ grant_type: "urn:test:echo", scope: "kept-out" }, "echo");
 		expect([res.status, res.body, events]).toEqual([503, { error: "temporarily_unavailable" }, []]);
@@ -717,7 +727,7 @@ describe("token endpoint", () => {
 				handle: async ({ client }) => ({ kind: "issued", body: { echo: client.id } }),
 			})),
 		]);
-		const post = await serve([extra]);
+		const post = await serve([extra], { clients: [echoClients.echo()] });
 		expect((await post({ grant_type: "urn:test:echo" }, "echo")).body).toEqual({ echo: "echo" });
 		expect((await post({ grant_type: "urn:test:echo" }, "basic")).body.error).toBe(
 			"unauthorized_client",
@@ -757,7 +767,7 @@ describe("token endpoint", () => {
 				},
 			})),
 		]);
-		const post = await serve([policed]);
+		const post = await serve([policed], { clients: [echoClients.echo()] });
 		const issued = await post({ grant_type: "urn:test:echo", session: "sid" }, "echo");
 		expect([issued.status, issued.body]).toEqual([200, { token_type: "Bearer", expires_in: 60 }]);
 		expect(asked.map(({ grantType, session }) => ({ grantType, session }))).toEqual([
@@ -819,7 +829,7 @@ describe("token endpoint", () => {
 				},
 			})),
 		]);
-		const post = await serve([continuing]);
+		const post = await serve([continuing], { clients: [echoClients.echo()] });
 		expect((await post({ grant_type: "urn:test:echo", continuing: "yes" }, "echo")).status).toBe(
 			200,
 		);
@@ -840,7 +850,7 @@ describe("token endpoint", () => {
 				},
 			})),
 		]);
-		const post = await serve([longer]);
+		const post = await serve([longer], { clients: [echoClients.echo()] });
 		expect((await post({ grant_type: "urn:test:echo" }, "echo")).body).toEqual({
 			expires_in: 7200,
 		});
@@ -870,7 +880,7 @@ describe("token endpoint", () => {
 				})),
 			),
 		]);
-		const post = await serve([echo]);
+		const post = await serve([echo], { clients: [echoClients.echo()] });
 		const { id } = (await post({ grant_type: "urn:test:echo", session: "sid" }, "echo")).body;
 		const access = { id, expiresAt: 1_800_003_600_000 };
 		expect(told).toEqual([
@@ -930,7 +940,7 @@ describe("token endpoint", () => {
 				},
 			})),
 		]);
-		const post = await serve([ahead]);
+		const post = await serve([ahead], { clients: [echoClients.echo()] });
 		expect((await post({ grant_type: "urn:test:echo", ahead: "300000" }, "echo")).status).toBe(200);
 		const refused = await post({ grant_type: "urn:test:echo", ahead: "300001" }, "echo");
 		expect([refused.status, refused.body.error]).toEqual([400, "invalid_grant"]);
@@ -962,7 +972,7 @@ describe("token endpoint", () => {
 				handle: async ({ param }) => ({ kind: "error", error: param("answer") ?? "" }),
 			})),
 		]);
-		const post = await serve([polled]);
+		const post = await serve([polled], { clients: [echoClients.echo()] });
 		for (const answer of ["authorization_pending", "slow_down", "owned_by_the_grant"]) {
 			const res = await post({ grant_type: "urn:test:echo", answer }, "echo");
 			expect([res.status, res.body.error]).toEqual([400, answer]);
@@ -990,7 +1000,7 @@ describe("token endpoint", () => {
 							},
 			})),
 		]);
-		const post = await serve([owned]);
+		const post = await serve([owned], { clients: [echoClients.echo()] });
 		const none = await post({ grant_type: "urn:test:echo", answer: "none" }, "echo");
 		expect([none.status, none.body]).toEqual([401, { error: "unauthorized" }]);
 		const stepUp = await post({ grant_type: "urn:test:echo" }, "echo");
@@ -1014,7 +1024,9 @@ describe("token endpoint", () => {
 				}),
 			})),
 		]);
-		const post = await serve([unauthorized]);
+		const post = await serve([unauthorized], {
+			clients: [echoClients.echo(), echoClients.pubecho()],
+		});
 		const echo = { grant_type: "urn:test:echo" };
 		const challenge = async (form: Record<string, string>, id?: string) => {
 			const res = await post(form, id);
@@ -1042,7 +1054,7 @@ describe("token endpoint", () => {
 				}),
 			})),
 		]);
-		const post = await serve([loose]);
+		const post = await serve([loose], { clients: [echoClients.echo()] });
 		const answered = async (error: string, members: Record<string, unknown>, status?: number) => {
 			const res = await post({ grant_type: "urn:test:echo", error, members, status }, "echo", {
 				as: "json",
@@ -1095,7 +1107,7 @@ describe("token endpoint", () => {
 				}),
 			})),
 		]);
-		const post = await serve([declared]);
+		const post = await serve([declared], { clients: [echoClients.echo()] });
 		const echo = { grant_type: "urn:test:echo", scope: "read", assertion: { id: "a", n: [1] } };
 		const json = await post(echo, "echo", { as: "json" });
 		expect([json.status, json.body]).toEqual([
@@ -1145,7 +1157,7 @@ describe("token endpoint", () => {
 				}),
 			})),
 		]);
-		const post = await serve([both]);
+		const post = await serve([both], { clients: [echoClients.echo()] });
 		const form = await post({ grant_type: "urn:test:echo", n: "1" }, "echo");
 		expect(form.body).toEqual({ n: "1", value: "1", absent: null });
 		const json = await post({ grant_type: "urn:test:echo", n: 1 }, "echo", { as: "json" });
@@ -1168,7 +1180,7 @@ describe("token endpoint", () => {
 			m.contribute(grants).by(() => echoing("urn:test:echo", ["json"])),
 			m.contribute(grants).by(() => echoing("urn:test:other", ["form", "json"])),
 		]);
-		const post = await serve([echoes]);
+		const post = await serve([echoes], { clients: [echoClients.echoes()] });
 		const mistyped = [
 			["scope", ["admin"]],
 			["code", 1],
@@ -1214,7 +1226,7 @@ describe("token endpoint", () => {
 					request.form.has("bind") ? { kind: "bound", confirmation: "k1" } : { kind: "absent" },
 			})),
 		]);
-		const post = await serve([echo]);
+		const post = await serve([echo], { clients: [echoClients.echo()] });
 		expect((await post({ grant_type: "urn:test:echo", bind: "1" }, "echo")).body.binding).toEqual({
 			member: "test",
 			confirmation: "k1",

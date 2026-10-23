@@ -99,6 +99,13 @@ describe("clients", () => {
 		});
 	});
 
+	it("lists the clients the operator registered, in the order the settings give them", async () => {
+		const c = await boot();
+		expect(c.registered().map((client) => [client.id, client.registered])).toEqual(
+			(registered as readonly { readonly id: string }[]).map((r) => [r.id, true]),
+		);
+	});
+
 	it("throws for a section no module contributed, never answering undefined", async () => {
 		const c = await boot();
 		const client = clientOf(await outcome(c, basic("conf", "s3cret"), {}));

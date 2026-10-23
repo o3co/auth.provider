@@ -5,9 +5,6 @@ import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import { contract } from "@mod/kernel";
 import { challenged } from "./route/challenges.ts";
 
-/** The built-in grant's type (RFC 6749 §4.4). */
-export const clientCredentialsGrantType = "client_credentials";
-
 /** Where the token endpoint answers, absolute on the public origin; nothing without one. */
 export interface TokenEndpointLocation {
 	readonly url: string | undefined;

@@ -4,6 +4,9 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"kind": "feature",
+	"grantTypes": [
+		"urn:o3co:oauth:grant-type:webauthn"
+	],
 	"optIn": true,
 	"exports": {
 		".": "./src/contract.ts",

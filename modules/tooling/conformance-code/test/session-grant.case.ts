@@ -33,7 +33,8 @@ const svc: ClientScene = {
 	kind: "confidential",
 	method: "client_secret_basic",
 	secret: "svc-secret-0123456789abcdef",
-	grants: ["client_credentials"],
+	// Allowed no grant, so not this one, and the scene needs no other grant composed.
+	grants: [],
 	scopes: ["read"],
 	audiences: [api],
 };

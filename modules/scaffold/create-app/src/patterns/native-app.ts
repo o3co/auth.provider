@@ -10,5 +10,6 @@ export const nativeApp: Pattern = {
 	axes: simpleWeb.axes,
 	features: { ...simpleWeb.features, binding: ["@mod/dpop"] },
 	areas: ["keys", "identity", "code", "oauth", "ops"],
-	conformanceAdd: [],
+	// The token endpoint's own checks (client authentication, introspection, CORS, DPoP) take its tokens.
+	conformanceAdd: ["@mod/client-credentials"],
 };

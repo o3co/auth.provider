@@ -124,6 +124,7 @@ What each module contains is described by that module's contract card (each modu
 | Clients whose id is a URL: fetching and judging the metadata document there, building its record from the sections' copies, keeping it, the ceiling they are allowed within | contribution / setting | clients-cimd |
 | Client metadata sections | extension point kind | clients |
 | Checking a client record as a source's is held (`checkRecord`) | contract | clients |
+| The clients the operator registered, in the settings' order (`registered`) | contract | clients |
 | Copying a section from a client's metadata document (`documentCopies`, `DocumentSource`) | extension point kind | client-documents |
 | Each section's copy from a client's metadata document | contribution | the module that contributes that section |
 | Each client metadata field | vocabulary | the module that reads that field |
@@ -174,6 +175,7 @@ What each module contains is described by that module's contract card (each modu
 | Verifying one token type for exchange | contribution | the module that verifies that type |
 | Verifying Apple's and Google's id_tokens for exchange, which client of this provider may exchange each app's id_token, and taking each once | contribution / setting / data | exchange-id-tokens |
 | The session grant: an access token for the user of the browser's session, recorded to that session | grant contribution | session-grant |
+| The client credentials grant | grant contribution | client-credentials |
 | Sender binding (binding kinds, reading a request's binding, the shape of a binding), admitting a request presenting a token at a resource | extension point kind / contract | sender-binding |
 | Certificate-bound tokens: the `x5t#S256` binding kind, certificate path validation and revocation checking, trust anchors | contribution / setting | mtls |
 | Extra checks added to access token verification | extension point kind | tokens |
@@ -182,8 +184,10 @@ What each module contains is described by that module's contract card (each modu
 | Issuance policy | plug-in point | tokens |
 | Refusing an access token to a subject whose email users has not stated verified | issuance policy contribution | verified-email |
 | grant | extension point kind | grants |
+| The index of first-party grants: each grant type name and the module that serves it, as words only, never that module's contract | contract | grants |
 | Telling of each access token issued from a session (session issuances) | extension point kind | grants |
 | Shape of OAuth error responses | contract | token-endpoint |
+| Refusing boot for a grant a registered client is allowed that no composed module serves | contract | token-endpoint |
 | grant type names | vocabulary | the module that supplies that grant |
 | Kinds of revocable tokens | extension point kind | token-control |
 | Device Authorization Grant (device authorization, the verification interface, the device code grant) | contract / setting | device-grant |

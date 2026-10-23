@@ -30,7 +30,9 @@ const scene = (withGrant: boolean) =>
 				publicPem: pem(provider.publicKey, "spki"),
 			},
 		},
-		clients: [client("app", [grantType]), client("other", ["client_credentials"])],
+		// Without the grant composed, no client may be allowed it: boot refuses a grant nothing serves.
+		// Other is allowed no grant, so not this one, and the scene needs no other grant composed.
+		clients: [client("app", withGrant ? [grantType] : []), client("other", [])],
 		...(withGrant
 			? {
 					jwtBearer: {

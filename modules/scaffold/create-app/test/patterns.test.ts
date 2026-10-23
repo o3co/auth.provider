@@ -75,6 +75,13 @@ it("tells a federation app whose logins a second factor holds to set the page th
 
 // http-ops comes only through its bridge to http: a manifest gone wrong would drop liveness,
 // readiness and the two instruments without a word.
+it("composes client credentials in the full template and in a2a alone, the pattern of services", () => {
+	expect(full()).toContain("@mod/client-credentials");
+	for (const name of named) {
+		expect(modulesOf(name).includes("@mod/client-credentials"), name).toBe(name === "a2a");
+	}
+});
+
 it("composes http-ops in the full template and in every pattern", () => {
 	expect(full()).toContain("@mod/http-ops");
 	for (const name of named) expect(modulesOf(name), name).toContain("@mod/http-ops");
@@ -234,8 +241,14 @@ it("brings to a2a by --add what its card says: token-exchange alone, clients-cim
 
 it("lists what conformance adds to a pattern for its run, each composing with the pattern", () => {
 	const adds = Object.fromEntries(patterns().map((p) => [p.name, p.conformanceAdd]));
+	// Client credentials, where the pattern does not compose it: the token endpoint's own checks take its tokens.
+	const cc = "@mod/client-credentials";
 	expect(adds).toMatchObject({
-		"sso-federated": ["@mod/login-password"],
+		"simple-web": [cc],
+		"mfa-web": [cc],
+		device: [cc],
+		"native-app": [cc],
+		"sso-federated": ["@mod/login-password", cc],
 		a2a: ["@mod/token-exchange"],
 		full: [],
 	});

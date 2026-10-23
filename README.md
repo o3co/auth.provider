@@ -20,7 +20,7 @@ The provider signs users in, manages their sessions and issues tokens to your ap
 |---|---|---|
 | Authorization code flow, with PKCE (S256) required for every client | RFC 6749, RFC 7636 | [authorize](modules/oauth/authorize/README.md), [code-grant](modules/oauth/code-grant/README.md) |
 | Refresh tokens, rotated on every use, with reuse detection | RFC 6749 | [refresh](modules/oauth/refresh/README.md) |
-| Client credentials grant | RFC 6749 | [token-endpoint](modules/oauth/token-endpoint/README.md) |
+| Client credentials grant | RFC 6749 | [client-credentials](modules/oauth/client-credentials/README.md) |
 | ID tokens and UserInfo | OpenID Connect Core 1.0 | [oidc](modules/oauth/oidc/README.md), [userinfo](modules/oauth/userinfo/README.md) |
 | Discovery documents and public signing keys (JWKS) | OpenID Connect Discovery 1.0, RFC 8414 | [discovery](modules/oauth/discovery/README.md), [keys](modules/foundation/keys/README.md) |
 | RP-initiated (client-initiated), front-channel and back-channel logout | OpenID Connect logout specifications | [rp-logout](modules/oauth/rp-logout/README.md) |
@@ -59,7 +59,7 @@ Some patterns also need an HTTP user ledger, an audit collector, an SMTP relay o
 
 ## Quick start
 
-Start with `simple-web`. It keeps users in the configuration and state in memory, and gives you password login for web apps (authorization code flow, OIDC, refresh tokens) plus client credentials for services.
+Start with `simple-web`. It keeps users in the configuration and state in memory, and gives you password login for web apps (authorization code flow, OIDC, refresh tokens). For services that use client credentials, add `--add @mod/client-credentials`.
 
 ```sh
 npx @o3co/create-auth-provider my-provider --pattern simple-web
@@ -161,7 +161,7 @@ A pattern is a ready-made selection of modules for one kind of deployment. Choos
 
 | Pattern | Use it for | Storage and outside services |
 |---|---|---|
-| `simple-web` | Password login for web apps (code flow with refresh tokens), and client credentials for services | In-memory store, one instance; users in the configuration; audit to the log |
+| `simple-web` | Password login for web apps (code flow with refresh tokens); client credentials for services with `--add @mod/client-credentials` | In-memory store, one instance; users in the configuration; audit to the log |
 | `mfa-web` | `simple-web` with TOTP, email codes and recovery codes | Redis and SMTP |
 | `device` | `simple-web` with the Device Authorization Grant, where users approve a code on another screen | In-memory store, one instance |
 | `native-app` | Native apps and single-page apps as public clients, with PKCE, refresh tokens and DPoP | In-memory store, one instance |

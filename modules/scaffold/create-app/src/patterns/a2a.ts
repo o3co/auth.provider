@@ -12,7 +12,7 @@ export const a2a: Pattern = {
 		"@mod/mail": "@mod/mail",
 	},
 	features: {
-		grants: ["@mod/jwt-bearer"],
+		grants: ["@mod/client-credentials", "@mod/jwt-bearer"],
 		"client-auth": ["@mod/client-assertion"],
 		binding: ["@mod/mtls", "@mod/dpop"],
 	},

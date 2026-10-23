@@ -4,6 +4,9 @@ import type { Grant, GrantOutcome } from "@mod/grants";
 import type { Sessions } from "@mod/session";
 import { type IssuedAccess, referenceOf, type Tokens } from "@mod/tokens";
 
+/** The grant type it serves: this provider's own, a session exchanged for a token. */
+export const sessionGrantType = "session";
+
 export interface Parts {
 	readonly evidence: OriginEvidence;
 	readonly sessions: Sessions;
@@ -54,7 +57,7 @@ export function sessionGrant(parts: Parts): Grant {
 	};
 
 	return {
-		grantType: "session",
+		grantType: sessionGrantType,
 		readsAmbient: "cookie",
 		handle: async ({ request, client, param, issue }) => {
 			// The cookie rides on requests from other sites too, so it alone proves nothing.

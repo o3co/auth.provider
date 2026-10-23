@@ -1,6 +1,6 @@
+import { clientCredentialsGrantType } from "@mod/client-credentials";
 import { defineModule } from "@mod/kernel";
 import { subjectAttributes } from "@mod/subject-attributes";
-import { clientCredentialsGrantType } from "@mod/token-endpoint";
 import { type IssuanceVerdict, issuancePolicies } from "@mod/tokens";
 import { userAttribute } from "@mod/users";
 

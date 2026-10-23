@@ -53,6 +53,7 @@ describe("allowances within a ceiling", () => {
 			}),
 		);
 		expect(allowsGrant(client, "authorization_code")).toBe(true);
+		expect(clientAllowance.grantsOf(client)).toEqual(client.section(allowances).grants);
 		expect(allowsGrant(client, "client_credentials")).toBe(false);
 		expect(allowsGrant(client, "refresh_token")).toBe(false);
 		expect(allowedIssuance(client, "admin", "https://as").kind).toBe("error");

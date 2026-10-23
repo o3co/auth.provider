@@ -1,13 +1,10 @@
 import { clientAllowance } from "@mod/client-allowance";
 import type { Grant } from "@mod/grants";
-import { issuer } from "@mod/issuer";
-import type { BuildContext } from "@mod/kernel";
-import { clientCredentialsGrantType } from "../contract.ts";
 
-/** The built-in grant, at the issuer the assembly gives. */
-export const clientCredentialsIn = async (c: BuildContext<unknown>) =>
-	clientCredentials((await c.get(issuer)).url);
+/** The grant type it serves (RFC 6749 §4.4). */
+export const clientCredentialsGrantType = "client_credentials";
 
+/** The client credentials grant at `issuer`: a confidential client takes a token for itself, within its allowance. */
 export function clientCredentials(issuer: string): Grant {
 	return {
 		grantType: clientCredentialsGrantType,

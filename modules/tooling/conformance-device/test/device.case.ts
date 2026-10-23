@@ -28,7 +28,8 @@ const scene = deviceScene({
 			publicPem: pair.publicKey.export({ format: "pem", type: "spki" }).toString(),
 		},
 	},
-	clients: [client("tv", [deviceGrant]), client("svc", ["client_credentials"])],
+	// svc is allowed no grant, so not the device grant, and the scene needs no other grant composed.
+	clients: [client("tv", [deviceGrant]), client("svc", [])],
 	users: [
 		{ identifier: "alice", password: "correct horse battery" },
 		{ identifier: "bob", password: "battery staple horse" },

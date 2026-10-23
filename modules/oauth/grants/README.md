@@ -8,6 +8,7 @@
 ## Not here
 - Each grant's own decisions (the contributing side owns them). The token format (`tokens`).
 - The token endpoint, its checks before a grant runs, and its audit (`token-endpoint`, which keeps this contract).
+- What a grant listed in `grantServers` does: the index holds its grant type and module as words alone, never its contract.
 
 ## Offers
 - Extension point `grants`: grant type → handler, one for each grant type (two refuse boot).
@@ -30,6 +31,7 @@
 - A rule may answer `untargeted` (the request's parameters, for a grant or endpoint that takes no audience) and `repeated` (a parameter's name, sent more than once) with `invalid_target`, which is then the answer.
 - `targets`: the composed rule, provided by `token-endpoint`. With none composed, the default audience, the request unread.
 - `composedGrants`: the grant types composed, answered by `token-endpoint`'s module.
+- `grantServers`: the index of first-party grants, each grant type by the module that serves it, as that module's manifest declares (`grantTypes`); a test holds the two alike. A type it does not list, a name every object has included, answers none.
 
 ## Depends on
 - `kernel`, `http`, `clients`, `sender-binding`, `tokens`; kept by `token-endpoint`.

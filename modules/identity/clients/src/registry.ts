@@ -130,6 +130,7 @@ export function registry(
 		},
 		methods: () => methods.map((m) => m.name),
 		signingAlgorithms: () => [...new Set(methods.flatMap((m) => m.signingAlgorithms ?? []))],
+		registered: () => [...registered.values()],
 		find: async (id) => {
 			const found = await lookup(id);
 			return found === "invalid" ? undefined : found;

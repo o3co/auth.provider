@@ -966,6 +966,28 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
+  modules/oauth/client-credentials:
+    dependencies:
+      '@mod/client-allowance':
+        specifier: workspace:*
+        version: link:../client-allowance
+      '@mod/grants':
+        specifier: workspace:*
+        version: link:../grants
+      '@mod/issuer':
+        specifier: workspace:*
+        version: link:../issuer
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+    devDependencies:
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../../identity/clients
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
   modules/oauth/clients-cimd:
     dependencies:
       '@mod/client-allowance':
@@ -1922,6 +1944,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mod/client-credentials':
+        specifier: workspace:*
+        version: link:../client-credentials
       '@mod/keys':
         specifier: workspace:*
         version: link:../../foundation/keys
@@ -2045,15 +2070,15 @@ importers:
 
   modules/oauth/verified-email:
     dependencies:
+      '@mod/client-credentials':
+        specifier: workspace:*
+        version: link:../client-credentials
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
       '@mod/subject-attributes':
         specifier: workspace:*
         version: link:../../identity/subject-attributes
-      '@mod/token-endpoint':
-        specifier: workspace:*
-        version: link:../token-endpoint
       '@mod/tokens':
         specifier: workspace:*
         version: link:../tokens

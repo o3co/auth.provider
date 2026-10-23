@@ -110,6 +110,26 @@ export const grants = extensionPoint<Grant>("grants", {
 /** The grant types composed at boot, as the token endpoint dispatches to them. */
 export const composedGrants = contract<ReadonlySet<string>>("grants.composed");
 
+/**
+ * The index of first-party grants: each grant type a module of this release serves, by that
+ * module's name (its package's, without the scope), as each module's manifest declares it
+ * (`grantTypes`). Words as strings alone: it reads no module's contract or behaviour, so a module
+ * named here need not be composed. It has no prototype, so a name every object has (`constructor`,
+ * `__proto__`) is a type it does not list.
+ */
+export const grantServers: Readonly<Record<string, string>> = Object.freeze(
+	Object.assign(Object.create(null) as Record<string, string>, {
+		authorization_code: "code-grant",
+		client_credentials: "client-credentials",
+		refresh_token: "refresh",
+		session: "session-grant",
+		"urn:ietf:params:oauth:grant-type:device_code": "device-grant",
+		"urn:ietf:params:oauth:grant-type:jwt-bearer": "jwt-bearer",
+		"urn:ietf:params:oauth:grant-type:token-exchange": "token-exchange",
+		"urn:o3co:oauth:grant-type:webauthn": "webauthn-login",
+	}),
+);
+
 /** Told of each access token `issue` makes from a session, before the grant answers it. */
 export interface SessionIssuance {
 	/** A failure revokes the token, and `issue` throws it on. */
