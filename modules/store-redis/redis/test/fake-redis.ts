@@ -54,7 +54,12 @@ export function fakeRedis() {
 	const infos = new Map<number, number>();
 	/** Whether a store script fails, as on a server whose Lua lacks what the scripts use. */
 	/** A store script failing, or the error of a passing state of the server it is answered with. */
-	const storeScripts = { fail: false, transient: undefined as string | undefined };
+	const storeScripts = {
+		fail: false,
+		transient: undefined as string | undefined,
+		/** Fails only the store scripts whose text holds this, as a server that runs some and not others. */
+		failWhere: undefined as string | undefined,
+	};
 	const writing = new Set(["SET", "INCR", "HSET", "HINCRBY", "PEXPIRE", "PEXPIREAT", "DEL"]);
 	const refusal = (name: string) =>
 		scripts.wording === "7.0"
@@ -83,7 +88,10 @@ export function fakeRedis() {
 		if (name === "EVAL" && scripts.keysRefused) return "-NOPERM No permissions to access a key\r\n";
 		if (name === "EVAL" && (args[1] ?? "").includes("local failed = {}")) return report();
 		if (name === "EVAL" && storeScripts.transient) return `-${storeScripts.transient}\r\n`;
-		if (name === "EVAL" && storeScripts.fail) {
+		const failing =
+			storeScripts.fail ||
+			(storeScripts.failWhere !== undefined && (args[1] ?? "").includes(storeScripts.failWhere));
+		if (name === "EVAL" && failing) {
 			return "-ERR user_script:1: Script attempted to access nonexistent global variable 'cjson'\r\n";
 		}
 		if (name === "EVAL") return bulk(`${runIdOf(connection)}\n{"now":"0","entries":[],"n":1}`);

@@ -210,6 +210,57 @@ end
 return out(remember(ikey, ARGV[3], cjson.encode({kind = 'committed', versions = versions, n = #spec.writes}), ARGV[2]))
 `;
 
+/**
+ * A batch over partitions. KEYS: the value keys, then each written partition's version key, then
+ * each touched partition's mark key (`spec.marks` from index `spec.firstMark`). ARGV: spec JSON
+ * {conditions = [{i, version|absent}], writes = [{i, v, put, kind, arg}|{i, remove}]}, deadline,
+ * digest, has mark. The mark is looked for in every partition before the deadline is judged, kept in
+ * each with one answer and one end, never rewritten when reused; a late answer is not kept.
+ */
+export const batchAcross = `${prelude}
+local spec = cjson.decode(ARGV[1])
+local marks = {}
+if ARGV[4] == '1' then
+  for j = spec.firstMark, spec.firstMark + spec.marks - 1 do table.insert(marks, KEYS[j]) end
+end
+for _, ikey in ipairs(marks) do
+  local seen = redis.call('GET', ikey)
+  if seen then
+    local record = cjson.decode(seen)
+    if record.d == ARGV[3] then return out(record.a) end
+    return out(cjson.encode({kind = 'reused'}))
+  end
+end
+if ARGV[2] ~= '' and now > tonumber(ARGV[2]) then return out(cjson.encode({kind = 'late'})) end
+local function remember_all(answer)
+  local base = ARGV[2] ~= '' and tonumber(ARGV[2]) or now + mark_without_deadline_ms
+  local record = cjson.encode({d = ARGV[3], a = answer})
+  for _, ikey in ipairs(marks) do redis.call('SET', ikey, record, 'PXAT', base + mark_past_deadline_ms) end
+  return answer
+end
+for index, c in ipairs(spec.conditions) do
+  local ver = redis.call('HGET', KEYS[c.i], 'ver')
+  local holds
+  if c.absent then holds = not ver else holds = ver == c.version end
+  if not holds then return out(remember_all(cjson.encode({kind = 'conflict', index = index - 1}))) end
+end
+local expiries = {}
+for index, w in ipairs(spec.writes) do
+  if not w.remove then expiries[index] = expiry(w.kind, w.arg, redis.call('PEXPIRETIME', KEYS[w.i])) end
+end
+local versions = {}
+for index, w in ipairs(spec.writes) do
+  if w.remove then
+    redis.call('DEL', KEYS[w.i])
+    versions[index] = cjson.null
+  else
+    -- Each key's version comes from its own partition's count, so none repeats for the key.
+    versions[index] = store_value(KEYS[w.i], KEYS[w.v], w.put, expiries[index])
+  end
+end
+return out(remember_all(cjson.encode({kind = 'committed', versions = versions, n = #spec.writes})))
+`;
+
 /** No keys. ARGV: deadline. An empty batch still honours its deadline. */
 export const deadlineOnly = `${prelude}
 if ARGV[1] ~= '' and now > tonumber(ARGV[1]) then return out(cjson.encode({kind = 'late'})) end

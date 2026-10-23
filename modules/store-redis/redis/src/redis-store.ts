@@ -146,13 +146,37 @@ export async function roundProblems(
 			);
 		}
 	}
-	try {
-		await client.eval(scripts.read, 1, `${options.prefix}:{#check}:r`);
-	} catch (error) {
-		// The script's own failure, never a passing state of the server (BUSY, LOADING and the like).
-		if (!(error instanceof ReplyError) || !/^ERR\b.*script/i.test((error as Error).message))
-			throw error;
-		problems.push("the server fails a store script (read): it lacks what the store's scripts use");
+	// Each run on a key of the store's own, writing nothing: the batch across only checks a condition.
+	const runs: readonly (readonly [string, string, readonly string[]])[] = [
+		["read", scripts.read, [`${options.prefix}:{#check}:r`]],
+		[
+			"batchAcross",
+			scripts.batchAcross,
+			[
+				`${options.prefix}:{#check}:a`,
+				JSON.stringify({
+					conditions: [{ i: 1, absent: true }],
+					writes: [],
+					firstMark: 2,
+					marks: 0,
+				}),
+				"",
+				"",
+				"0",
+			],
+		],
+	];
+	for (const [name, script, [key, ...args]] of runs) {
+		try {
+			await client.eval(script, 1, key ?? "", ...args);
+		} catch (error) {
+			// The script's own failure, never a passing state of the server (BUSY, LOADING and the like).
+			if (!(error instanceof ReplyError) || !/^ERR\b.*script/i.test((error as Error).message))
+				throw error;
+			problems.push(
+				`the server fails a store script (${name}): it lacks what the store's scripts use`,
+			);
+		}
 	}
 	return problems;
 }
@@ -321,6 +345,47 @@ export function redisStore(
 					[...names, versionKey(first), markKey(first, options?.idempotency)],
 					[JSON.stringify(spec), options?.deadline ?? "", digest(request), marked(options)],
 				);
+				await confirm(first, answer);
+				return answer.kind === "committed"
+					? { kind: "committed", versions: list<string | null>(answer.versions, answer.n) }
+					: answer;
+			},
+			batchAcross: async (conditions, writes, options) => {
+				const keys = [...conditions.map((c) => c.key), ...writes.map((w) => w.key)];
+				const [first] = keys;
+				if (!first) {
+					const empty = await run(scripts.deadlineOnly, [], [options?.deadline ?? ""]);
+					return empty.kind === "committed" ? { kind: "committed", versions: [] } : empty;
+				}
+				const names = [...new Set(keys.map(valueKey))];
+				const index = (key: Key) => names.indexOf(valueKey(key)) + 1;
+				const versionKeys = [...new Set(writes.map((w) => versionKey(w.key)))];
+				const markKeys = [...new Set(keys.map((k) => markKey(k, options?.idempotency)))];
+				const spec = {
+					conditions: conditions.map((c) =>
+						"absent" in c
+							? { i: index(c.key), absent: true }
+							: { i: index(c.key), version: c.version },
+					),
+					writes: writes.map((w) => {
+						if ("remove" in w) return { i: index(w.key), remove: true };
+						const [kind, arg] = expiryArgs(w.expiry);
+						const v = names.length + versionKeys.indexOf(versionKey(w.key)) + 1;
+						return { i: index(w.key), v, put: canonicalJson(w.put), kind, arg };
+					}),
+					firstMark: names.length + versionKeys.length + 1,
+					marks: markKeys.length,
+				};
+				const request = idempotencyRequest("batchAcross", keys, [
+					conditions.map((c) => ("absent" in c ? { absent: true } : { version: c.version })),
+					writes.map((w) => ("remove" in w ? null : [w.put, w.expiry])),
+				]);
+				const answer = await run(
+					scripts.batchAcross,
+					[...names, ...versionKeys, ...markKeys],
+					[JSON.stringify(spec), options?.deadline ?? "", digest(request), marked(options)],
+				);
+				// The spaces share their guarantees, so the first key's tells how to confirm.
 				await confirm(first, answer);
 				return answer.kind === "committed"
 					? { kind: "committed", versions: list<string | null>(answer.versions, answer.n) }

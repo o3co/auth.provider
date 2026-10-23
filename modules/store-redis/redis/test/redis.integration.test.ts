@@ -217,6 +217,12 @@ it("answers an empty batch in time as committed with no versions, as the contrac
 	expect(await s.batch([], [])).toEqual({ kind: "committed", versions: [] });
 });
 
+it("offers a batch across partitions and spaces of one guarantee, so the contract's batches across run on it", async () => {
+	const app = await open([durable], undefined, proxyUrl);
+	stops.push(() => app.stop(1000));
+	expect(typeof app.get(store).batchAcross).toBe("function");
+});
+
 storeContract("redis", {
 	open: async () => {
 		const app = await open([durable], undefined, proxyUrl);
