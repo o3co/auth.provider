@@ -11,7 +11,7 @@ import { type LoginFrom, logins } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
 import { type FactorStore, factorStore, type StoredFactors } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
-import { type MfaSettings, mfaConfig } from "@mod/mfa/testing";
+import { type MfaSettings, mfaConfig, updatingTogether } from "@mod/mfa/testing";
 import bindingProofModule from "@mod/mfa-binding-proof/module";
 import mfaEntry from "@mod/mfa-entry/module";
 import { factorKinds } from "@mod/mfa-extensions";
@@ -174,6 +174,7 @@ const afterWrite = async <T>(write: Promise<T>) => {
 /** mfa's factor lists on the records stand-in, kept without end. */
 const factorStand = () => {
 	const stand = memoryRecords<StoredFactors>(() => 0, { shards: 1, perShard: 1 });
+	const joint = updatingTogether(stand.records);
 	return defineModule({ name: "factor-store" }, (m) => [
 		m.provide(factorStore).by(() =>
 			factorsDown.wrap({
@@ -183,6 +184,7 @@ const factorStand = () => {
 				update: (...args: Parameters<typeof stand.records.change>) =>
 					afterWrite(stand.records.change(...args)),
 				scan: stand.records.scan,
+				updateTogether: (...args: Parameters<typeof joint>) => afterWrite(joint(...args)),
 			}),
 		),
 	]);

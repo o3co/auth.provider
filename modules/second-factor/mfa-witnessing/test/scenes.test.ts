@@ -42,7 +42,7 @@ it("marks no subject whose first binding another subject's factor already holds 
 });
 
 it("fills no mark for a factor whose binding ends as a duplicate, read before its claim", async () => {
-	const { app, decided, place, witness } = await witnessed({}, [card]);
+	const { app, decided, place, witness } = await witnessed({}, [card], { together: false });
 	const bindCard = async (subject: string, proof: string) => {
 		const begun = await decided.begin(subject, "card");
 		if (begun.kind !== "begun") throw new Error(begun.kind);
@@ -63,7 +63,7 @@ it("fills no mark for a factor whose binding ends as a duplicate, read before it
 });
 
 it("fills no mark for a factor not yet claimed, whose value another then binds first", async () => {
-	const { app, decided, place, witness } = await witnessed({}, [card]);
+	const { app, decided, place, witness } = await witnessed({}, [card], { together: false });
 	const proved = async (subject: string, proof: string) => {
 		const begun = await decided.begin(subject, "card");
 		if (begun.kind !== "begun") throw new Error(begun.kind);
