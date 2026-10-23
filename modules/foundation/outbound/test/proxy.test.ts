@@ -117,6 +117,22 @@ const viaProxy = () =>
 const at = (path: string) => `https://idp.example.test:${idpPort}${path}`;
 const text = (body: Uint8Array) => new TextDecoder().decode(body);
 
+it("tries each address of the proxy's name, an IPv6 one that does not answer before an IPv4 one", async () => {
+	const out = outboundOver(
+		section.parse({ allow: ["idp.example.test"], proxy: `http://proxy.test:${proxyPort}` }),
+		async () => ["::1", "127.0.0.1"],
+		{ ca: authority },
+	);
+	expect((await out.fetch(at("/.well-known/openid-configuration"))).status).toBe(200);
+});
+
+it("resolves the proxy's own name as the deployment's lookups, and nothing the proxy resolves", async () => {
+	resolved.length = 0;
+	const out = paths({ proxy: `http://proxy.test:${proxyPort}` });
+	expect((await out.fetch(at("/.well-known/openid-configuration"))).status).toBe(200);
+	expect(resolved).toEqual(["proxy.test"]);
+});
+
 it("reaches an IdP's discovery, key set and token endpoint through the proxy, as 0.17 did with HTTPS_PROXY", async () => {
 	const out = viaProxy();
 	const discovered = await out.fetch(at("/.well-known/openid-configuration"));

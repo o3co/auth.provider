@@ -15,8 +15,8 @@ import { policyOf, policySettings } from "@mod/outbound-policy";
 import { configuredUrl } from "@mod/url-setting/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { DestinationRefused, type OutboundUnavailable } from "../src/contract.ts";
-import { lookupsAtOnce, outboundOver, section } from "../src/module.ts";
-import { type Resolver, send } from "../src/transport.ts";
+import { outboundOver, section } from "../src/module.ts";
+import { type Lookup, type Resolver, send } from "../src/transport.ts";
 
 // A connection to `rerouted.from` reaches a local server instead, and is recorded: a private address
 // the transport checked is dialed, and nothing is sent anywhere else.
@@ -142,7 +142,7 @@ afterAll(() => new Promise<void>((done) => server.close(() => done())));
 /** A resolver that answers from a table and counts its calls; a name not in it never resolves. */
 function table(answers: Record<string, readonly string[]>) {
 	const calls: string[] = [];
-	const resolve: Resolver = async (host) => {
+	const resolve: Lookup = async (host) => {
 		calls.push(host);
 		const found = answers[host];
 		if (!found) return new Promise(() => {});
@@ -154,7 +154,7 @@ function table(answers: Record<string, readonly string[]>) {
 const svc = (path: string) => `http://svc.test:${port}${path}`;
 const svcResolver = () => table({ "svc.test": ["127.0.0.1"] });
 const over = (
-	resolve: Resolver,
+	resolve: Lookup,
 	settings: Record<string, unknown> = {},
 	deadlineOf?: (ms: number) => AbortSignal,
 	lookups?: number,
@@ -405,7 +405,7 @@ describe("outbound", () => {
 	it("gives a request's place back at its deadline, and lets no more names resolve at once than requests may run", async () => {
 		let settle: (addresses: readonly string[]) => void = () => {};
 		const calls: string[] = [];
-		const slow: Resolver = (host) => {
+		const slow: Lookup = (host) => {
 			calls.push(host);
 			return new Promise((done) => {
 				settle = done;
@@ -442,69 +442,9 @@ describe("outbound", () => {
 		expect(await again).toBe("unavailable: timeout");
 	});
 
-	it("lets no more names resolve at once than half the threadpool, so slow names never take all of it", async () => {
-		const settles: ((addresses: readonly string[]) => void)[] = [];
-		const slow: Resolver = () =>
-			new Promise((done) => {
-				settles.push(done);
-			});
-		const deadlines: AbortController[] = [];
-		const deadlineOf = () => {
-			const deadline = new AbortController();
-			deadlines.push(deadline);
-			return deadline.signal;
-		};
-		// Sixteen requests may run, yet a threadpool of four takes two lookups at once: one of the
-		// deployment's own, one of the names an outside party chose.
-		const url = (host: string) => `http://${host}:${port}/ok`;
-		const pairs = ["a.svc.test", "b.svc.test", "c.svc.test", "127.0.0.1"].map(
-			(host) => `${host}:${port}`,
-		);
-		const outbound = over(
-			slow,
-			{ "max-concurrent": 16, "plain-loopback": pairs },
-			deadlineOf,
-			lookupsAtOnce("4", 16),
-		);
-		const held = [
-			failure(outbound.fetch(url("a.svc.test"))),
-			failure(outbound.fetch(url("c.svc.test"), {}, { outsideChosen: true })),
-		];
-		await until(() => settles.length === 2);
-		expect(await failure(outbound.fetch(url("b.svc.test")))).toBe("unavailable: busy");
-		// An address written in the URL needs no lookup, so it is still reached.
-		expect((await outbound.fetch(`http://127.0.0.1:${port}/ok`)).status).toBe(200);
-		for (const deadline of deadlines) deadline.abort();
-		expect(await Promise.all(held)).toEqual(["unavailable: timeout", "unavailable: timeout"]);
-		for (const settle of settles) settle(["127.0.0.1"]);
-	});
-
-	it("gives lookups an outside party chose half the share, so theirs never hold every lookup", async () => {
-		const settles = new Map<string, (addresses: readonly string[]) => void>();
-		const slow: Resolver = (host) =>
-			new Promise((done) => {
-				settles.set(host, done);
-			});
-		const pairs = ["a.svc.test", "b.svc.test", "svc.test"].map((host) => `${host}:${port}`);
-		const outbound = over(slow, { "max-concurrent": 16, "plain-loopback": pairs }, undefined, 2);
-		const chosen = { outsideChosen: true } as const;
-		const url = (host: string) => `http://${host}:${port}/ok`;
-		const resolving = outbound.fetch(url("a.svc.test"), {}, chosen).catch(() => undefined);
-		await until(() => settles.has("a.svc.test"));
-		// The outside party's share, one of two, is held: another name it chose is refused at once.
-		expect(await failure(outbound.fetch(url("b.svc.test"), {}, chosen))).toBe("unavailable: busy");
-		// The rest is the deployment's own: its name still resolves.
-		const own = outbound.fetch(svc("/ok"));
-		await until(() => settles.has("svc.test"));
-		settles.get("svc.test")?.(["127.0.0.1"]);
-		expect((await own).status).toBe(200);
-		settles.get("a.svc.test")?.(["127.0.0.1"]);
-		await resolving;
-	});
-
 	it("sends plain http to a plain-internal pair only where every address is private, checked on each request", async () => {
 		let answer: readonly string[] = [];
-		const resolve: Resolver = async () => answer;
+		const resolve: Lookup = async () => answer;
 		const received: { authorization?: string; body: string }[] = [];
 		const ledgerServer = createServer((req, res) => {
 			const chunks: Buffer[] = [];
@@ -578,32 +518,6 @@ describe("outbound", () => {
 			[1, 1, 1],
 			[2, 3, 3],
 		]);
-	});
-
-	it("resolves a name once for the requests asking it at once, taking one place", async () => {
-		const calls: string[] = [];
-		let settle: (addresses: readonly string[]) => void = () => {};
-		const slow: Resolver = (host) => {
-			calls.push(host);
-			return new Promise((done) => {
-				settle = done;
-			});
-		};
-		const outbound = over(slow, { "max-concurrent": 16 }, undefined, 1);
-		const answers = [outbound.fetch(svc("/ok")), outbound.fetch(svc("/ok"))];
-		await until(() => calls.length === 1);
-		settle(["127.0.0.1"]);
-		expect((await Promise.all(answers)).map((answer) => answer.status)).toEqual([200, 200]);
-		expect(calls).toEqual(["svc.test"]);
-	});
-
-	it("takes half the threadpool, at least one and never more than max-concurrent, four threads when unset or unreadable", () => {
-		expect(
-			[undefined, "", "4", "x", "0", "-2", "1", "2", "3", "8", "64", "1024"].map((size) =>
-				lookupsAtOnce(size, 16),
-			),
-		).toEqual([2, 2, 2, 2, 2, 2, 1, 1, 2, 4, 16, 16]);
-		expect(lookupsAtOnce("8", 1)).toBe(1);
 	});
 
 	it("refuses a switch of protocols and gives its place back, and waits past an informational answer", async () => {
@@ -697,7 +611,7 @@ describe("outbound", () => {
 	});
 
 	it("is unavailable when a name does not resolve", async () => {
-		const failing: Resolver = () => Promise.reject(new Error("not found"));
+		const failing: Lookup = () => Promise.reject(new Error("not found"));
 		expect(await failure(over(failing).fetch(svc("/ok")))).toBe("unavailable: unreachable");
 	});
 
@@ -729,9 +643,11 @@ describe("outbound", () => {
 		expect(await failure(send(admitted, {}, limits, atOnce, anyPublic))).toBe(
 			"unavailable: unreachable",
 		);
-		expect(await failure(send(admitted, {}, limits, async () => atOnce(""), anyPublic))).toBe(
-			"unavailable: unreachable",
-		);
+		expect(
+			await failure(
+				send(admitted, {}, limits, async () => atOnce("", AbortSignal.timeout(1)), anyPublic),
+			),
+		).toBe("unavailable: unreachable");
 	});
 
 	it("asks with GET for the path and query unless told otherwise", async () => {

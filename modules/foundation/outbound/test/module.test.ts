@@ -34,6 +34,7 @@ it("holds to the defaults: outbound-policy's for its keys, and outbound's own", 
 		"direct-despite-proxy": false,
 		"direct-hosts": [],
 		"plain-ipv4": [],
+		resolution: "helper",
 	});
 });
 

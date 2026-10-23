@@ -6,7 +6,7 @@ import { configuredUrl } from "@mod/url-setting/testing";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DestinationRefused, type OutboundUnavailable } from "../src/contract.ts";
 import { outboundOver, section } from "../src/module.ts";
-import { type Resolver, systemResolver } from "../src/transport.ts";
+import { type Lookup, systemLookup } from "../src/transport.ts";
 
 // A name ECS Service Connect answers, as its hosts file lines give it: 127.255.0.1, which its proxy
 // takes, and 2600:f0f0::1, which in the environment reported does not reach. A connection to
@@ -37,7 +37,7 @@ const own = { internal: configuredUrl(url) };
 /** A resolver answering by family as the hosts file does, recording each lookup. */
 function serviceConnect(answers: { all?: readonly string[]; ipv4?: readonly string[] } = {}) {
 	const asked: { host: string; family: 4 | undefined }[] = [];
-	const resolve: Resolver = async (host, family) => {
+	const resolve: Lookup = async (host, family) => {
 		asked.push({ host, family });
 		return family === 4
 			? (answers.ipv4 ?? ["127.255.0.1"])
@@ -47,7 +47,7 @@ function serviceConnect(answers: { all?: readonly string[]; ipv4?: readonly stri
 }
 
 /** Outbound over the resolver given; `lookups` at once, as the threadpool would allow. */
-const over = (resolve: Resolver, settings: Record<string, unknown> = {}, lookups?: number) =>
+const over = (resolve: Lookup, settings: Record<string, unknown> = {}, lookups?: number) =>
 	outboundOver(
 		section.parse({
 			"allow-any-public": true,
@@ -118,7 +118,7 @@ describe("plain http to a pair plain-ipv4 names", () => {
 	});
 
 	it("says unreachable where the lookup fails, as before, telling it from an empty answer", async () => {
-		const failing: Resolver = async () => {
+		const failing: Lookup = async () => {
 			throw Object.assign(new Error("no IPv4"), { code: "ENOTFOUND" });
 		};
 		expect(await failure(over(failing).fetch(url, {}, own))).toBe("unavailable: unreachable");
@@ -169,7 +169,7 @@ describe("plain http to a pair plain-ipv4 names", () => {
 	it("resolves the same name at once for IPv4 alone and for every family, neither taking the other's answer", async () => {
 		const settle: Record<string, (addresses: readonly string[]) => void> = {};
 		const asked: (4 | undefined)[] = [];
-		const resolve: Resolver = (_host, family) => {
+		const resolve: Lookup = (_host, family) => {
 			asked.push(family);
 			return new Promise((done) => {
 				settle[String(family)] = done;
@@ -189,8 +189,8 @@ describe("plain http to a pair plain-ipv4 names", () => {
 
 describe("the system's resolver", () => {
 	it("answers IPv4 addresses alone where asked for them, the hosts file included", async () => {
-		const every = await systemResolver("localhost");
-		const ipv4 = await systemResolver("localhost", 4);
+		const every = await systemLookup("localhost");
+		const ipv4 = await systemLookup("localhost", 4);
 		expect(ipv4.length).toBeGreaterThan(0);
 		expect(ipv4.every((address) => /^\d+\.\d+\.\d+\.\d+$/.test(address))).toBe(true);
 		expect(every.length).toBeGreaterThanOrEqual(ipv4.length);
