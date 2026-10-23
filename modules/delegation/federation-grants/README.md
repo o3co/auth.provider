@@ -51,7 +51,7 @@
 - Tokens, secrets and upstream text reach neither answers, logs nor audit.
 
 ## Depends on
-- `kernel`, `http`, `url-setting`, `request-source`, `clients`, `session`, `csrf`, `users`, `upstreams`, `upstream-round-trip`, `seal`, `subject-revocation`, `rate-limit`, `audit`
+- `kernel`, `http`, `url-setting`, `request-source`, `clients`, `session`, `csrf`, `users`, `upstreams`, `upstream-round-trip`, `seal`, `subject-revocation`, `rate-limit`, `audit`, `login-gates`
 
 ## Vocabulary
 - intent: a client's asking for a grant, connected once by the user. connection: an entry of the operator's `connections`, and the user's steps for an intent.

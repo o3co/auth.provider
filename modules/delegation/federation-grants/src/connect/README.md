@@ -13,6 +13,7 @@ Internal module of `federation-grants`: the browser half of a connection.
 
 ## Invariants
 - Every step enters the session at `use` as the intent's subject; a short session is told whose it is at `none` before anything else.
+- A browser sent to the login page or the step-up page comes back to the connect it opened: the package contributes the connect's path to `login-gates`' return paths, so a login returns there on the public origin alone.
 - Only the subject's short session goes to the step-up page, told the requirement it falls short of, once per requirement and login; back still short of the same requirement in the same login, it is refused.
 - Whether the link's client may still use the connection is told only to the subject's session, before any trip to raise it.
 - The first session to take a question holds the intent; another browser starts again.
