@@ -184,6 +184,7 @@ What each module contains is described by that module's contract card (each modu
 | Issuance policy | plug-in point | tokens |
 | Refusing an access token to a subject whose email users has not stated verified | issuance policy contribution | verified-email |
 | grant | extension point kind | grants |
+| The index of first-party grants: each grant type name and the module that serves it, as words only, never that module's contract | contract | grants |
 | Telling of each access token issued from a session (session issuances) | extension point kind | grants |
 | Shape of OAuth error responses | contract | token-endpoint |
 | grant type names | vocabulary | the module that supplies that grant |
