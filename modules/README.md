@@ -240,6 +240,7 @@ What each module contains is described by that module's contract card (each modu
 | Conformance test base | contract | conformance |
 | Running each pattern's conformance areas on its app, and leaving out as `not-in-pattern` the scenes it cannot hold | contract | conformance |
 | Starting the legacy build, and registering legacy set-ups | contract | conformance-legacy |
+| Fake HTTP ledgers for tests and conformance scenes (the user ledger, mfa's and passkeys' witness ledgers) | contract | ledger-fakes |
 | Each area's scene terms, scenes, set-ups for legacy and new | vocabulary / contribution | each area's conformance module |
 | Repo layout (where packages go) | setting | the workspace definition |
 | Generating a project: the command, the plan, and where the packages come from (the workspace or a bundle's index) | contract | create-app |
