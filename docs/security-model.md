@@ -175,7 +175,8 @@ Each promise below holds across every module composed. Each names what keeps it 
   - Proxy environment variables are never read.
   - An IdP's authorization and end-of-session endpoints, where the browser goes and outbound never does, are https, or plain http only at a loopback name or, for an OpenID Connect IdP or a GitHub Enterprise, at the origin of an issuer or endpoint of your own configuration that `outbound.plain-internal` names; any other refuses boot. Plain http there carries the user's password and the IdP's cookies in the clear between the browser and the IdP, which the browser reaches by its own resolver, outside any mesh.
 - **Left to you:**
-  - With `outbound.proxy` set, the proxy resolves names and checks where they lead (boot warns so).
+  - With `outbound.proxy` set, the proxy resolves names and checks where they lead (boot warns so). The proxy's own name is resolved by `outbound`, within the request's deadline.
+  - Names resolve in helper processes that take none of the environment but the resolver's own variables, and answer addresses alone (`outbound.resolution = helper`, the default). A helper is started only in the one form guard G26 lets through.
   - What goes to a `plain-internal` pair, passwords, tokens and credentials among it, is in the clear: name only peers on a network trusted against reading and changing it (each boot warns `outbound.plain_internal`).
   - Name a pair in `outbound.plain-ipv4` only where its IPv4 answers are the ones to reach, as ECS Service Connect's are: the name's IPv6 answers are not used.
   - Network egress filtering is still expected.

@@ -13,6 +13,7 @@ How to run auth-provider 0.18: Redis, rotating keys, upgrading, and what to watc
 - [Keeping the second-factor witness at the ledger](#keeping-the-second-factor-witness-at-the-ledger)
 - [Second factors left without their claim](#second-factors-left-without-their-claim)
 - [Passkey list entries 0.18 left](#passkey-list-entries-018-left)
+- [Name resolution](#name-resolution)
 - [Probes and alerts](#probes-and-alerts)
 - [Stopping](#stopping)
 
@@ -27,7 +28,7 @@ The app relies on the deployment for these. Each is required, not advice.
 5. **`rate-limit.fail-mode = open` lets requests through uncounted while the store is down.** Keep the default `closed` unless an outage must not refuse requests.
 6. **`signer-keys-http` asks the ledger once for every assertion.** Each JWT bearer assertion from its issuer is one `POST` to `keys-url`, made before the assertion's signature can be checked and never cached, so a revoked device stops at once. Only the token endpoint's requests per source (`token-endpoint.requests` per `window`) bound these calls: size the ledger for that rate, from every source together.
 7. **RP-initiated logout by GET closes the session without asking** when it carries an `id_token_hint` issued within the last 24 hours, as the specification allows. A relying party, or a page that can make the browser follow its link, can log the user out.
-8. **Keep Node's threadpool at 4 threads or more where `clients-cimd` runs.** Name lookups run on the threadpool, and `outbound` resolves at most half of it at once, giving names an outside party chose (a client's metadata document) half of that, rounded down. With `UV_THREADPOOL_SIZE` at 2 or less, they get none, and `clients-cimd` refuses boot, naming it. The default, 4, gives them one.
+8. **Give names an outside party chose a share where `clients-cimd` runs.** `outbound` resolves `outbound.max-lookups` names at once (four by default) and gives names an outside party chose (a client's metadata document) half of them, rounded down: with `max-lookups` at 1 they get none, and `clients-cimd` refuses boot, naming it. With `outbound.resolution = in-process`, lookups run on Node's threadpool and at most half of it resolves at once: keep `UV_THREADPOOL_SIZE` at 4 or more there.
 
 ## Redis
 
@@ -247,6 +248,19 @@ Registering the same credential again does not free it: a registration's options
 
 No tool lists such entries yet.
 
+## Name resolution
+
+`outbound` resolves names as the system does, hosts file included. By default (`outbound.resolution = helper`) it does so in two helper processes it starts at boot, one for the deployment's own names and one for names an outside party chose, so a request whose lookup does not answer by its deadline stops waiting on it, and a helper no one waits on any more is ended and started again, within its limits on restarts.
+
+- **Size the task for them.** Each helper is a Node process of about 50 MB (Node 24.22; it follows Node's own size), so the two take about 100 MB beside the app, and boot takes about 35 ms longer. A helper whose share is none (`max-lookups` at 1) is not started.
+- **They take nothing of the app's environment** but `LOCALDOMAIN`, `RES_OPTIONS` and `HOSTALIASES`, which the system's resolver reads, and their thread count. Nothing else of the environment, secrets included, reaches them.
+- **Where no process may be started** (a seccomp profile or a process limit that forbids it), boot is refused at `outbound.resolution`. Allow the two processes, or set `outbound.resolution = in-process`: names then resolve in the app's process as in 0.18, no deadline stops a lookup, and at most half of Node's threadpool (`UV_THREADPOOL_SIZE`, 4 unless set) resolves at once. It never falls back by itself.
+- **What it warns:**
+  - `outbound.resolver_fault` (`pool`, `reason`): a helper failed (`ipc`, `answer`, `ready-timeout`, `exit`, `spawn-failed`) and is ended and started again after a backoff of 100 ms to 5 s; its running lookups are unavailable.
+  - `outbound.resolver_recovered` (`pool`): a helper started again answered.
+  - `outbound.resolver_restarts` (`pool`, `restarts`): more than 30 restarts after a fault in 60 seconds; that pool's lookups are unreachable at once until the window frees. Look at the faults before it.
+  - `outbound.resolver_stuck` (`pool`), every 30 seconds: a helper killed has not ended. Its lookups' places stay held, so that pool's lookups become unavailable. Restart the instance.
+
 ## Probes and alerts
 
 ### Probes
@@ -263,7 +277,7 @@ No tool lists such entries yet.
 - **`auth_audit_events_lost_total` rises**, by `receiver`: a receiver is not taking events, so the audit trail has a gap. The warning `audit receiver losing events` says why.
 - **`http_request_duration_seconds`**: the rate of `5xx` answers and the latency, by method and route. A `499` is a client that closed before the answer.
 - **The process**: the Node defaults, prefixed `auth_provider_` (event loop lag, memory, handles).
-- **Warnings in the log**: a failed periodic run, probe or stop hook is one warn line naming it.
+- **Warnings in the log**: a failed periodic run, probe or stop hook is one warn line naming it. `outbound.resolver_restarts` and `outbound.resolver_stuck` mean names do not resolve; see [Name resolution](#name-resolution).
 
 ## Stopping
 
