@@ -569,6 +569,12 @@ These are requests 0.17 accepted, or answered differently, that 0.18 refuses or 
 - A client that must bind its tokens (`sender-binding.required`) and sends no binding gets `400 invalid_request`; 0.17 answered `401 invalid_client`. A binding of a kind the client does not list is still `400 unauthorized_client`. Both are refused before the grant runs.
 - An unreadable `Authorization: Basic` header (bad or unpadded base64, an empty secret) and a `client_secret` without `client_id` get `400`, without a challenge; 0.17 answered `401 invalid_client`.
 
+### Access and refresh tokens
+
+- **The access token names its client by `client_id`, never `azp`** (RFC 9068). A 0.17 access token carried `azp`, the client it was issued to, and no `client_id`; a 0.18 one carries `client_id` and no `azp`. A resource server that read `azp` reads `client_id`. Introspection answers `client_id` as before, and no longer `azp` beside it.
+- **The access token names no session: it has no `sid`**, and no `family_id` either. 0.17 put the session's `sid`, and the refresh family's `family_id`, in both its tokens. A resource server that read `sid` to tie a token to its session, for example to stop honouring it once the user logs out, asks introspection (RFC 7662) instead: a session that closes ends the refresh families it started and the access tokens they issued, which introspection then answers `active: false` (where access tokens can be revoked, `tokens.revocation = denylist`). Neither `sid` nor `azp` can come back as a claim a module adds: both names are reserved.
+- **The refresh token is opaque.** 0.17 issued a signed JWT (`typ` `rt+jwt`) holding the family, `sid`, `amr`, `acr`, `auth_time`, `azp`, `scope` and `exp`. 0.18 issues a string of a family's name and a secret (`<22 characters>.<43 characters>`, base64url), and keeps the rest itself, with only the secret's hash. Nothing tells when a refresh token ends: the token response's `expires_in` is the access token's lifetime, never the refresh token's, and no answer gives the family's end (`refresh.lifetime`). A client that decoded its refresh token keeps it opaque, as it came, and sends it back when its access token ends; where the refresh is answered `invalid_grant`, the family has ended, and the client asks for a new authorization. What was granted is the token response's `scope`, and the ID token's claims. Refresh tokens issued by 0.17 do not carry over (see [What carries over](#what-carries-over)).
+
 ### Introspection and discovery
 
 - Introspection without a `token` gets `400 invalid_request`.
