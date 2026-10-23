@@ -1,77 +1,17 @@
 // What a pnpm lockfile resolves the packages outside the release to, held to what was recorded
-// of them when the app was generated. This one file is both the module app-output reads and the
-// script an app runs (`node check-outside.mjs` beside its lockfile), so it imports nothing of the
-// workspace: only `yaml`, `semver` and node.
+// of them when the app was generated: the module app-output reads, and the script an app runs.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import semver from "semver";
 import { parseDocument } from "yaml";
-
-/** The most a lockfile read may hold. */
-const lockBytes = 16 * 1024 * 1024;
-
-/** A value's own entries as a map, where it is a plain object; none otherwise. Nothing inherited is read. */
-const own = (value) =>
-	new Map(
-		value !== null && typeof value === "object" && !Array.isArray(value)
-			? Object.keys(value).map((key) => [key, value[key]])
-			: [],
-	);
+import { bare, lockOf, nameOf, own, referencesIn, specOf, targetOf } from "./reading/contract.mjs";
 
 const sameMap = (a, b) =>
 	a.size === b.size &&
 	[...a].every(
 		([key, value]) => b.has(key) && JSON.stringify(b.get(key)) === JSON.stringify(value),
 	);
-
-/** A resolution as pnpm writes it, its peers in parentheses left off. */
-const bare = (resolved) => String(resolved).replace(/\(.*$/, "");
-
-/** The name a lockfile key holds, its version and peers left off (`@s/n@1.0.0(x@1)` is `@s/n`). */
-const nameOf = (key) => {
-	const plain = bare(key);
-	return plain.slice(0, plain.lastIndexOf("@"));
-};
-
-/**
- * What a reference resolves to: a version of the name it is listed under, a version of another
- * package (an alias, `real@1.0.0`), or something local (a link, a file, a directory).
- */
-function targetOf(as, reference) {
-	const plain = bare(reference);
-	if (plain.includes(":")) return { local: plain };
-	const at = plain.lastIndexOf("@");
-	return at > 0
-		? { name: plain.slice(0, at), version: plain.slice(at + 1), alias: true }
-		: { name: as, version: plain, alias: false };
-}
-
-/** A declared range, or a declared alias (`npm:real@range`); none where it is neither. */
-function specOf(spec) {
-	const text = String(spec);
-	if (text.startsWith("npm:")) {
-		const aliased = text.slice(4);
-		const at = aliased.lastIndexOf("@");
-		const range = at > 0 ? aliased.slice(at + 1) : "*";
-		const name = at > 0 ? aliased.slice(0, at) : aliased;
-		return semver.validRange(range) ? { name, range } : undefined;
-	}
-	return semver.validRange(text) ? { range: text } : undefined;
-}
-
-/** The lockfile as data: pnpm's version 9, no anchor resolved, no unknown tag, within its bound. */
-function lockOf(text) {
-	if (Buffer.byteLength(text) > lockBytes) throw new Error(`lockfile over ${lockBytes} bytes`);
-	const doc = parseDocument(text, { merge: false, uniqueKeys: true });
-	const [problem] = [...doc.errors, ...doc.warnings];
-	if (problem) throw new Error(`lockfile not read: ${problem.message.split("\n")[0]}`);
-	const lock = doc.toJS({ maxAliasCount: 0 });
-	if (own(lock).get("lockfileVersion") !== "9.0") {
-		throw new Error(`lockfile version ${own(lock).get("lockfileVersion")}, where 9.0 is read`);
-	}
-	return lock;
-}
 
 /** The origin of an http address, or none. */
 const originOf = (address) => {
@@ -107,26 +47,6 @@ function registryRefusal(entry, name, registries) {
 	return at !== undefined && at === registry
 		? undefined
 		: `${name}: its tarball lies at ${at ?? String(resolution.get("tarball"))}, not at its registry ${registry ?? "(none recorded)"}`;
-}
-
-/** Every reference the lockfile holds: each importer's three kinds of dependency, and each snapshot's two. */
-function referencesIn(lock) {
-	const found = [];
-	for (const [at, importer] of own(lock.importers)) {
-		for (const group of ["dependencies", "devDependencies", "optionalDependencies"]) {
-			for (const [as, dep] of own(own(importer).get(group))) {
-				found.push({ at: `the importer ${at}`, as, reference: String(own(dep).get("version")) });
-			}
-		}
-	}
-	for (const [at, snapshot] of own(lock.snapshots)) {
-		for (const group of ["dependencies", "optionalDependencies"]) {
-			for (const [as, reference] of own(own(snapshot).get(group))) {
-				found.push({ at, as, reference: String(reference) });
-			}
-		}
-	}
-	return found;
 }
 
 /**
