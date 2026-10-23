@@ -14,6 +14,7 @@
 - Contribution to `mfa-binding-proof`'s binding proofs (boot is refused without `mfa-binding-proof` composed): `account-email`, available while the account states an address; a 16-character code good for ten minutes at most. A proof that passes tells `users` the address is the subject's (`verifiedContact`); past the contacts `users` keeps, it still passes, logging `mfa-email.contact_not_kept` without the address.
 - Mail purposes `mfa-email.enrollment`, `mfa-email.login`, `mfa-email.proof`, taking `code` and `minutes`; `mfa-email-wording` words them.
 - `purposes` and their type `Purpose`, for the module that words them.
+- For a proof that mails a code to the same address by the same rules: `mailedCodes` (mail, users, a session's attributes, the clock), or `mailedCodesIn` (the build context, taking them from the assembly) → `addressNow` (subject, where asked from → the address, as the invariants below choose it), `send` (purpose, address, code, end → sent with what to show and keep / limited) and `matches` (kept code, typed → whether it is the code, before its end); `longCode` and `readLongCode`.
 - Operator section: `adds-second-factor` (whether a proof adds `mfa`, and so whether the factor counts; default false), `code-lifetime` (1m–30m, default `10m`, written with its unit).
 
 ## Invariants

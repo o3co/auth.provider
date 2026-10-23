@@ -1,13 +1,13 @@
-import { type Log, sameSecret, Unavailable } from "@mod/kernel";
+import { type Log, Unavailable } from "@mod/kernel";
 import type { Mail } from "@mod/mail";
 import type { BindingProof } from "@mod/mfa-binding-proof";
-import type { AskedFrom, FactorKind, Opened, Sending } from "@mod/mfa-extensions";
+import type { FactorKind, Opened, Sending } from "@mod/mfa-extensions";
 import type { SubjectAttributes } from "@mod/subject-attributes";
-import { type Users, userAttribute } from "@mod/users";
+import type { Users } from "@mod/users";
 import { z } from "zod";
-import { addressOf, masked } from "./address.ts";
 import { longCode, readLongCode, readShortCode, shortCode } from "./codes.ts";
-import { type Purpose, purposes } from "./contract.ts";
+import { mailedCodes } from "./mailed.ts";
+import { purposes } from "./purposes.ts";
 
 /** How long the proof before a first binding stays good, at most. */
 const proofMs = 600_000;
@@ -16,8 +16,6 @@ const proofMs = 600_000;
 const keptShape = z.strictObject({ code: z.string().min(1), until: z.number() });
 /** A factor's secret, or a proof's kept code: the address, and the code mailed there. */
 const secretShape = keptShape.extend({ address: z.string().min(1) });
-type Kept = z.output<typeof keptShape>;
-const keep = (code: string, until: number) => JSON.stringify({ code, until } satisfies Kept);
 
 /** A stored value; one there but unreadable is a failure, never an answer (no attempt is spent on it). */
 const read = <T>(shape: z.ZodType<T>, text: string | undefined): T | undefined => {
@@ -46,44 +44,7 @@ export interface EmailParts {
 }
 
 export function emailFactor(p: EmailParts) {
-	/**
-	 * The address `users` stands behind now: the one the account states, else the one the login (held,
-	 * or the session's) gave when `users` vouches for it (an outside ledger's answer). Never an upstream's: its
-	 * account's taker could set the address and get the codes. None when there is no such address.
-	 */
-	const addressNow = async (subject: string, from?: AskedFrom) => {
-		const contacts = await p.users.claimedContacts(subject);
-		const claimed = Array.isArray(contacts) ? contacts.find((c) => c.kind === "email") : undefined;
-		if (claimed) return addressOf(claimed.value);
-		if (from?.kind === "login")
-			return from.vouched && from.email ? addressOf(from.email) : undefined;
-		if (from?.kind !== "session") return undefined;
-		const answer = await p.attributes().of(subject, from.handle);
-		const email =
-			answer.kind === "known" && answer.vouched && answer.attributes[userAttribute.email];
-		return typeof email === "string" ? addressOf(email) : undefined;
-	};
-	/** Mails the code, good until `until`: sent, with what the user is shown and what to keep, or limited. */
-	const mailCode = async (
-		purpose: Purpose,
-		to: string,
-		code: string,
-		until: number,
-	): Promise<Sending> => {
-		const minutes = String(Math.max(1, Math.ceil((until - p.now()) / 60_000)));
-		const answer = await p.mail.send({ purpose, to, values: { code, minutes }, expiresAt: until });
-		if (answer === "limited") return { kind: "limited" };
-		// Read again after the send: the page shows what is left once the mail went.
-		const seconds = Math.max(1, Math.ceil((until - p.now()) / 1000));
-		const show = { sent_to: masked(to), expires_in: seconds };
-		return { kind: "sent", show, kept: keep(code, until) };
-	};
-	/** Whether `typed`, read as its kind of code, is the kept code, before its end. */
-	const answers = (kept: Kept | undefined, typed: string | undefined) =>
-		kept !== undefined &&
-		typed !== undefined &&
-		p.now() <= kept.until &&
-		sameSecret(typed, kept.code);
+	const { addressNow, send: mailCode, matches: answers } = mailedCodes(p);
 
 	const kind: FactorKind = {
 		kind: "email",
