@@ -1,5 +1,5 @@
-import { randomBytes } from "node:crypto";
 import { fakeHttp, type Party } from "@mod/conformance";
+import { mfaWitnessLedger, usersLedger } from "@mod/ledger-fakes";
 import type { UserScene } from "./area.ts";
 import { addressOf } from "./pattern.ts";
 
@@ -11,98 +11,59 @@ export function unledgered(users: readonly UserScene[]): string | undefined {
 	return lacks.length > 0 ? `gives users a ledger cannot hold: ${lacks.join(", ")}` : undefined;
 }
 
-/** What a ledger keeps for mfa-witness-http: a mark per subject, set only where none is, read with its token and withdrawn only by it, as an operator's ledger keeps it. */
-function witnessKeeper() {
-	const marks = new Map<string, string>();
-	return (path: string, given: { subject?: string; token?: string }) => {
-		const subject = String(given.subject);
-		if (path === "/mfa-witness/read") {
-			const mark = marks.get(subject);
-			return { json: mark === undefined ? { enrolled: false } : { enrolled: true, token: mark } };
-		}
-		if (path === "/mfa-witness/enroll") {
-			if (!marks.has(subject)) marks.set(subject, String(given.token));
-			return { json: { owner: marks.get(subject) === given.token } };
-		}
-		// One row per subject: a withdraw compares the token and deletes on that row alone.
-		if (path === "/mfa-witness/withdraw") {
-			if (marks.get(subject) === given.token) marks.delete(subject);
-			return { status: 204 };
-		}
-		marks.delete(subject);
-		return { status: 204 };
-	};
-}
-
 /**
- * A ledger answering users-http's password call and lookups by subject and by upstream identity
- * for the users given, and mfa-witness-http's calls where `witness`; and the sections that point an
- * app at it. A copy of users-http's own fake ledger, kept here until this area may take that one.
+ * A ledger on one server answering users-http's calls for the users given (the password call, and
+ * lookups by subject and by upstream identity), and mfa-witness-http's where `witness`, each as
+ * ledger-fakes plays it; and the sections that point an app at it.
  */
 export async function ledgerParty(held: {
 	readonly users?: readonly UserScene[];
 	readonly witness?: boolean;
 }): Promise<Party> {
-	const credential = randomBytes(32).toString("hex");
-	const users = held.users;
-	const witness = held.witness ? witnessKeeper() : undefined;
-	const userCalls = users ? ["/verify", "/subject", "/upstream"] : [];
-	const witnessCalls = witness
-		? ["/mfa-witness/read", "/mfa-witness/enroll", "/mfa-witness/clear", "/mfa-witness/withdraw"]
-		: [];
-	const ledger = await fakeHttp((asked) => {
-		// Anything but the calls held with the credential is unavailable, so a wrong set-up shows.
-		const call = asked.method === "POST" && [...userCalls, ...witnessCalls].includes(asked.path);
-		if (!call || asked.headers.authorization !== `Bearer ${credential}`) return { status: 404 };
-		const given = JSON.parse(asked.body);
-		if (witness && witnessCalls.includes(asked.path)) return witness(asked.path, given);
-		// The lookup by upstream identity, as users-http's own fake answers it; this copy goes once the area takes that one.
-		const user =
-			asked.path === "/subject"
-				? users?.find((u) => (u.subject ?? u.identifier) === given.subject)
-				: asked.path === "/upstream"
-					? users?.find(
-							(u) => u.upstream?.idp === given.idp && u.upstream?.subject === given.subject,
-						)
-					: users?.find((u) => u.identifier === given.email && u.password === given.password);
-		// A lookup says it knows no such user, as users-http reads one; a bare 404 above is a wrong set-up.
-		if (!user)
-			return asked.path === "/verify"
-				? { status: 401 }
-				: { status: 404, json: { error: "not_found" } };
-		const { emailVerified } = user;
-		const email = emailVerified === undefined ? user.email : addressOf(user);
-		return {
-			json: {
-				id: user.subject ?? user.identifier,
-				username: user.identifier,
-				...(email ? { email } : {}),
-				...(emailVerified === undefined ? {} : { emailVerified }),
-			},
-		};
-	});
-	const at = (path: string) => `${ledger.base}${path}`;
+	const users =
+		held.users &&
+		usersLedger(
+			held.users.map((u) => {
+				// Its own address, or one made up where only its verification is said.
+				const email = u.emailVerified === undefined ? u.email : addressOf(u);
+				return {
+					identifier: u.identifier,
+					password: u.password,
+					...(u.subject ? { subject: u.subject } : {}),
+					...(email === undefined ? {} : { email }),
+					...(u.emailVerified === undefined ? {} : { emailVerified: u.emailVerified }),
+					...(u.upstream ? { upstream: u.upstream } : {}),
+				};
+			}),
+		);
+	const witness = held.witness ? mfaWitnessLedger() : undefined;
+	// Anything but a call one of them holds is unavailable, so a wrong set-up shows.
+	const ledger = await fakeHttp(
+		(asked) => users?.answer(asked) ?? witness?.answer(asked) ?? { status: 404 },
+	);
+	const userUrls = users?.urls(ledger.base);
+	const witnessUrls = witness?.urls(ledger.base);
 	return {
 		base: ledger.base,
 		config: {
-			...(users
+			...(users && userUrls
 				? {
 						"users-http": {
-							"verify-url": at("/verify"),
-							"subject-url": at("/subject"),
-							"upstream-url": at("/upstream"),
-							credential,
+							"verify-url": userUrls.verify,
+							"subject-url": userUrls.subject,
+							"upstream-url": userUrls.upstream,
+							credential: users.credential,
 						},
 					}
 				: {}),
-			...(witness
+			...(witness && witnessUrls
 				? {
 						"mfa-witness-http": {
-							"read-url": at("/mfa-witness/read"),
-							"enroll-url": at("/mfa-witness/enroll"),
-							"clear-url": at("/mfa-witness/clear"),
-							"withdraw-url": at("/mfa-witness/withdraw"),
-							credential,
+							"read-url": witnessUrls.read,
+							"enroll-url": witnessUrls.enroll,
+							"clear-url": witnessUrls.clear,
+							"withdraw-url": witnessUrls.withdraw,
+							credential: witness.credential,
 						},
 					}
 				: {}),
