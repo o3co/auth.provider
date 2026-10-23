@@ -1,6 +1,6 @@
 import { type Route, routes, use } from "@mod/http";
 import { contract, defineModule } from "@mod/kernel";
-import { amrSources, openedAfterHold } from "@mod/login-gates";
+import { amrSources, openedAfterHold, returnPaths } from "@mod/login-gates";
 import { requestsPerSource } from "@mod/rate-limit";
 import { handoff } from "@mod/upstream-handoff";
 import { upstreams } from "@mod/upstreams";
@@ -15,6 +15,8 @@ const federationRoute = contract<Pick<Route, "uses" | "handle">>("federation.rou
 
 export default defineModule({ name: "federation", section }, (m) => [
 	m.contribute(amrSources).by(amrSourceIn),
+	// A login may return to an IdP's start (`base/<name>`), as a step-up page returns a link's start.
+	m.contribute(returnPaths).by(() => ({ path: base, segment: true })),
 	m.provide(federationIdps).by(idpsIn),
 	m.provide(upstreams).by(upstreamsIn),
 	m.contribute(upstreamNames).by(upstreamNamesIn),

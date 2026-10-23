@@ -1,6 +1,6 @@
 import { type Audit, audit, declaredAudit } from "@mod/audit";
 import { type OriginEvidence, originEvidence } from "@mod/csrf";
-import { type HttpResponse, jsonAnswer, noStore } from "@mod/http";
+import { type HttpResponse, jsonAnswer, noStore, site } from "@mod/http";
 import type { BuildContext, Log } from "@mod/kernel";
 import { type Sessions, sessions } from "@mod/session";
 import { type Handoff, handoff, type Joined } from "@mod/upstream-handoff";
@@ -8,6 +8,7 @@ import type { UpstreamContinuation } from "@mod/upstreams";
 import { type Users, users } from "@mod/users";
 import { z } from "zod";
 import events from "./audit-events.ts";
+import type { Settings } from "./section.ts";
 
 export interface LinkParts {
 	readonly origin: Pick<OriginEvidence, "sameOrigin">;
@@ -16,6 +17,8 @@ export interface LinkParts {
 	readonly audit: Pick<Audit, "record">;
 	readonly handoff: Pick<Handoff, "joined" | "withdrawn">;
 	readonly log: Pick<Log, "warn">;
+	/** The step-up page a start short of a requirement is told of, and the public origin it comes back on. */
+	readonly stepUp?: { readonly page: string; readonly origin: string };
 }
 
 /** What a link keeps from its start: the session it is for, and its subject. */
@@ -31,7 +34,20 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 const loggable = (value: string | undefined) =>
 	(value ?? "").replace(/[^\x20-\x7e]/g, "").slice(0, 64);
 
-export async function linkIn(c: BuildContext<unknown>): Promise<UpstreamContinuation> {
+/**
+ * The step-up page for a start short of `requirement`, coming back to this start alone: spelled from
+ * the public origin, the start's path and `link=1`, never from what the browser sent besides.
+ */
+const raisedAt = (stepUp: NonNullable<LinkParts["stepUp"]>, requirement: string, path: string) => {
+	const raise = new URL(stepUp.page);
+	raise.searchParams.set("requirement", requirement);
+	raise.searchParams.set("redirect_to", `${stepUp.origin}${path}?link=1`);
+	return raise.href;
+};
+
+export async function linkIn(c: BuildContext<Settings>): Promise<UpstreamContinuation> {
+	const page = c.section["step-up-page"];
+	const origin = (await c.get(site)).origin;
 	return linkWith({
 		origin: await c.get(originEvidence),
 		sessions: await c.get(sessions),
@@ -39,6 +55,7 @@ export async function linkIn(c: BuildContext<unknown>): Promise<UpstreamContinua
 		audit: await c.get(audit),
 		handoff: await c.get(handoff),
 		log: c.log,
+		...(page === undefined || origin === undefined ? {} : { stepUp: { page, origin } }),
 	});
 }
 
@@ -84,7 +101,9 @@ export function linkWith(p: LinkParts): UpstreamContinuation {
 			if (entry.kind === "short") {
 				// The requirement's own answer, and its name.
 				const said = isObject(entry.answer) ? entry.answer : { answer: entry.answer };
-				return { answer: jsonAnswer(403, { ...said, requirement: entry.requirement }) };
+				const page = p.stepUp && raisedAt(p.stepUp, entry.requirement, request.path);
+				const named = page === undefined ? {} : { page };
+				return { answer: jsonAnswer(403, { ...said, requirement: entry.requirement, ...named }) };
 			}
 			const { id, context } = entry.session;
 			return { kept: { session: id, subject: context.subject } };

@@ -916,6 +916,21 @@ describe("federation", () => {
 		});
 	});
 
+	it("lets a login return to an IdP's start, and to nothing else under federation's path", async () => {
+		const s = await serve();
+		const gates = await s.declared(logins);
+		expect(gates.returnAllowed(`${origin}${base}/corp?link=1`)).toBe(true);
+		expect(gates.returnAllowed(`${origin}${base}/corp`)).toBe(true);
+		for (const other of [
+			`${origin}${base}?link=1`,
+			`${origin}${base}/corp/callback?code=x`,
+			`${origin}${base}/corp%2Fcallback`,
+			`https://other.example${base}/corp?link=1`,
+		]) {
+			expect(gates.returnAllowed(other), other).toBe(false);
+		}
+	});
+
 	it("adds an upstream's amr only as the operator maps it, and declares what it maps to", async () => {
 		const s = await serve({
 			federation: {

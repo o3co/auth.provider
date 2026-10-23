@@ -4082,6 +4082,9 @@ importers:
       '@mod/upstreams':
         specifier: workspace:*
         version: link:../upstreams
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../../foundation/url-setting
       '@mod/users':
         specifier: workspace:*
         version: link:../../identity/users

@@ -85,6 +85,7 @@ const setUp = (part: FederationPart, _: unknown, modules: readonly string[]): Ne
 			? { seal: { current: { id: "scene", key: randomBytes(32).toString("base64") } } }
 			: {}),
 		...(part.grants ? { "federation-grants": grantsSection(part.grants) } : {}),
+		...(part.linkStepUpPage ? { "federation-link": { "step-up-page": part.linkStepUpPage } } : {}),
 		// Every upstream is named so outbound reaches it, and those on plain http at loopback as such.
 		outbound: {
 			allow: part.idps.map((idp) => new URL(idp.issuer).hostname),
