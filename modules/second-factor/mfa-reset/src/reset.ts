@@ -94,12 +94,6 @@ export function resetOver(p: ResetParts): MfaReset {
 		return { cleared, failure, fault };
 	};
 	return {
-		reset: async (subject, options = {}) => {
-			const { cleared, failure } = await attempt(subject, options);
-			if (failure !== undefined) throw failure.error;
-			// Without a failure, the removal answered.
-			return (cleared as Removed).count;
-		},
 		run: async (subject, options = {}): Promise<ResetOutcome> => {
 			const { cleared, failure, fault } = await attempt(subject, options);
 			// The one place a step's unavailability becomes a stopped run; any other failure, at any step, is thrown.

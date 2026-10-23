@@ -21,8 +21,6 @@ export type ResetOutcome =
 
 /** An operator's reset of a subject's second factors, for the embedder that has verified who asks. */
 export interface MfaReset {
-	/** Answers how many factors went; rejects as unavailable when a step cannot be done, and running it again finishes it. */
-	reset(subject: string, options?: { readonly requestedBy?: string }): Promise<number>;
 	/** Answers how the run ended; throws a step's failure that is not unavailable, and a malformed input. */
 	run(subject: string, options?: { readonly requestedBy?: string }): Promise<ResetOutcome>;
 }
