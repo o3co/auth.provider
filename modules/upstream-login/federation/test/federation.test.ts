@@ -836,6 +836,86 @@ describe("federation", () => {
 		expect((await s.roundTrip("code=none")).status).toBe(302);
 	});
 
+	describe("a fresh login's allowance, set for each IdP apart from its clock allowance", () => {
+		const corp = (more: object) => ({
+			corp: { type: "test", issuer: "https://idp.example", ...more },
+		});
+
+		it("narrows what prompt=login and a max age allow to the one set, the type's clock allowance kept", async () => {
+			const s = await serve({
+				federation: { idps: corp({ "fresh-login-allowance": "5s" }) },
+				answers: answering(
+					["within", aliceAt(now - 5000)],
+					["beyond", aliceAt(now - 6000)],
+					["aged", aliceAt(now - 65_000)],
+					["older", aliceAt(now - 65_001)],
+				),
+			});
+			const status = async (code: string, query: string) =>
+				(await s.roundTrip(`code=${code}`, query)).status;
+			// Both lie within the type's 30 s: only the allowance set tells them apart.
+			expect(await status("within", "?prompt=login")).toBe(302);
+			expect(await status("beyond", "?prompt=login")).toBe(401);
+			// A max age is compared in milliseconds, the allowance added.
+			expect(await status("aged", "?max_age=60")).toBe(302);
+			expect(await status("older", "?max_age=60")).toBe(401);
+		});
+
+		it("with 0s, takes no login before the start's second, and still one in it, its time the start's", async () => {
+			now = start + 500;
+			const s = await serve({
+				federation: { idps: corp({ "fresh-login-allowance": "0s" }) },
+				answers: answering(
+					["same-second", aliceAt(start)],
+					["second-before", aliceAt(start - 1000)],
+					["ahead", aliceAt(now + 10_000)],
+					["unsaid", { subject: "u-alice", amr: [] }],
+				),
+			});
+			const back = await s.roundTrip("code=same-second", "?prompt=login");
+			expect(back.status).toBe(302);
+			expect((await s.contextOf(back.cookies))?.authenticatedAt).toBe(now);
+			expect((await s.roundTrip("code=second-before", "?prompt=login")).status).toBe(401);
+			// A time ahead of ours, which the type's clock allowance passes, is taken as the upstream says.
+			expect((await s.roundTrip("code=ahead", "?prompt=login")).status).toBe(302);
+			expect((await s.roundTrip("code=unsaid", "?prompt=login")).status).toBe(401);
+		});
+
+		it("keeps each IdP's allowance apart, each by default its type's clock allowance", async () => {
+			const s = await serve({
+				federation: {
+					idps: {
+						...corp({}),
+						other: { type: "test", issuer: "https://idp.example", "fresh-login-allowance": "0s" },
+					},
+				},
+				answers: answering(["earlier", aliceAt(now - 10_000)]),
+			});
+			const at = async (idp: string) => {
+				const started = await s.get(`${base}/${idp}?prompt=login`);
+				const state = new URL(started.location).searchParams.get("state") ?? "";
+				const cookie = started.cookies.find((c) => c.includes(`federation.${idp}`)) ?? "";
+				const back = await s.get(`${base}/${idp}/callback?code=earlier&state=${state}`, cookie);
+				return [back.status, back.body];
+			};
+			// The user is linked through corp alone: other's refusal is its allowance's, before the user is looked up.
+			expect((await at("corp"))[0]).toBe(302);
+			expect(await at("other")).toEqual([401, { error: "login_required" }]);
+		});
+
+		it("is taken from 0s to 5m, written with its unit, and never handed to the type", async () => {
+			const refusals = (allowance: unknown) =>
+				serve({ federation: { idps: corp({ "fresh-login-allowance": allowance }) } }).then(
+					() => [],
+					(error: BootRefused) => error.refusals.map((r) => r.where),
+				);
+			// The test type's settings are strict: a key handed on would be refused there.
+			expect(await refusals("5m")).toEqual([]);
+			expect(await refusals("301s")).toEqual(["federation.idps.corp.fresh-login-allowance"]);
+			expect(await refusals(5)).toEqual(["federation.idps.corp.fresh-login-allowance"]);
+		});
+	});
+
 	it("adds an upstream's amr only as the operator maps it, and declares what it maps to", async () => {
 		const s = await serve({
 			federation: {

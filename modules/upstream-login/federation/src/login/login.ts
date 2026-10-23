@@ -91,13 +91,11 @@ export function loginWith(p: LoginParts): Continuation {
 
 /**
  * When the upstream says the user logged in, on our clock: a time before the start but within the
- * upstream's clock allowance before the start's second was the round trip's own login: the start.
+ * IdP's fresh login allowance before the start's second was the round trip's own login: the start.
  */
 function onOurClock(at: number | undefined, startedAt: number, idp: Idp) {
 	if (at === undefined) return "unknown" as const;
-	return at < startedAt && at + (idp.upstream.clockSkewMs ?? 0) >= secondOf(startedAt)
-		? startedAt
-		: at;
+	return at < startedAt && at + idp.freshLoginAllowanceMs >= secondOf(startedAt) ? startedAt : at;
 }
 
 /**
