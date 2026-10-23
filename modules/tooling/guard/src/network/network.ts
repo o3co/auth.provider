@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { Pkg } from "@mod/guard-imports";
 import ts from "typescript";
 import { budgetsAsTest, type Scope } from "../units.ts";
+import { forksOf, importsLookupAlone, isPlainHelper, launchRefusal } from "./forks.ts";
 
 /** Names that ask a resolver, and so reach the network. */
 const resolving = [
@@ -89,6 +90,75 @@ function referenced(node: ts.Identifier): boolean {
 	return true;
 }
 
+/** What an import or a re-export binds of a module: all of it, or values and types by name. */
+interface Bound {
+	readonly specifier: string;
+	/** A default, a namespace, or `export *`: the module whole. */
+	readonly whole: boolean;
+	readonly named: readonly { readonly name: string; readonly typeOnly: boolean }[];
+}
+
+/** The binding of an import or a re-export, read alike as the card says; none for a type-only one or another statement. */
+function boundOf(statement: ts.Statement): Bound | undefined {
+	if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
+		const clause = statement.importClause;
+		if (!clause || clause.isTypeOnly) return undefined;
+		const bindings = clause.namedBindings;
+		return {
+			specifier: statement.moduleSpecifier.text,
+			whole:
+				clause.name !== undefined || (bindings !== undefined && ts.isNamespaceImport(bindings)),
+			named:
+				bindings && ts.isNamedImports(bindings)
+					? bindings.elements.map((e) => ({
+							name: (e.propertyName ?? e.name).text,
+							typeOnly: e.isTypeOnly,
+						}))
+					: [],
+		};
+	}
+	if (
+		ts.isExportDeclaration(statement) &&
+		!statement.isTypeOnly &&
+		statement.moduleSpecifier !== undefined &&
+		ts.isStringLiteral(statement.moduleSpecifier)
+	) {
+		const clause = statement.exportClause;
+		const elements =
+			clause && ts.isNamedExports(clause)
+				? clause.elements.map((e) => ({
+						name: (e.propertyName ?? e.name).text,
+						typeOnly: e.isTypeOnly,
+					}))
+				: [];
+		return {
+			specifier: statement.moduleSpecifier.text,
+			whole:
+				clause === undefined ||
+				ts.isNamespaceExport(clause) ||
+				elements.some((e) => e.name === "default" && !e.typeOnly),
+			named: elements.filter((e) => e.name !== "default"),
+		};
+	}
+	return undefined;
+}
+
+/** What a binding reaches: a client or a process, a module whole, or each value named; nothing where it binds types alone. */
+function reachedBy(bound: Bound): string[] {
+	const values = bound.named.filter((n) => !n.typeOnly).map((n) => n.name);
+	if (!bound.whole && values.length === 0) return [];
+	const client = clientOf(bound.specifier);
+	if (client) return [client];
+	const module = nodeName(bound.specifier);
+	if (processes.includes(module)) return [module];
+	const names = reaching[module];
+	if (!names) return [];
+	return [
+		...(bound.whole ? [module] : []),
+		...values.filter((v) => names.includes(v)).map((v) => `${module} ${v}`),
+	];
+}
+
 /** Each place a file reaches the network, as `module name`, `module` (imported whole), a client, or a global. */
 export function reachesOf(path: string): string[] {
 	// The file alone, bound by the compiler: a name resolves to the declaration in scope where it is used.
@@ -107,31 +177,8 @@ export function reachesOf(path: string): string[] {
 		checker.getSymbolAtLocation(name)?.declarations?.some((d) => d.getSourceFile() === file) ===
 		true;
 	for (const statement of file.statements) {
-		if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier))
-			continue;
-		const clause = statement.importClause;
-		if (!clause || clause.isTypeOnly) continue;
-		const specifier = statement.moduleSpecifier.text;
-		const client = clientOf(specifier);
-		if (client) {
-			found.push(client);
-			continue;
-		}
-		if (processes.includes(nodeName(specifier))) {
-			found.push(nodeName(specifier));
-			continue;
-		}
-		const names = reaching[nodeName(specifier)];
-		if (!names) continue;
-		const named = clause.namedBindings;
-		if (clause.name || (named && ts.isNamespaceImport(named))) found.push(nodeName(specifier));
-		if (named && ts.isNamedImports(named)) {
-			for (const element of named.elements) {
-				const name = (element.propertyName ?? element.name).text;
-				if (!element.isTypeOnly && names.includes(name))
-					found.push(`${nodeName(specifier)} ${name}`);
-			}
-		}
+		const bound = boundOf(statement);
+		if (bound !== undefined) found.push(...reachedBy(bound));
 	}
 	/** A module loaded by `import()` or `require` reaches as one imported whole; one named at run time, unknown. */
 	const loaded = (specifier: ts.Expression | undefined) => {
@@ -190,12 +237,61 @@ export function networkRules(s: Scope, p: Pkg) {
 		return ok;
 	});
 	const allowed = known.flatMap((word) => words[word] ?? []);
+	const forks = forksOf(p.manifest.forks);
+	if (forks === undefined) s.report(rule, p.name, "forks maps a shipped file to its helper's file");
+	const oneStarter = (forks?.size ?? 0) <= 1;
+	if (!oneStarter) s.report(rule, p.name, "forks names one starter and its helper");
+	/** Why a file starting a process is not the one starter starting its helper; none where it is. */
+	const forkRefusal = (file: string) => {
+		const helper = forks?.get(file);
+		if (helper === undefined) return "forks does not name it";
+		if (!known.includes("outbound")) return "forks needs the word outbound";
+		if (!oneStarter) return "forks names one starter and its helper";
+		return launchRefusal(p.dir, file, helper);
+	};
 	const reached = new Set<string>();
+	/** The starters already held to the form, by what they reach. */
+	const checked = new Set<string>();
 	for (const file of s.sources(p)) {
 		if (s.isTest(file) || budgetsAsTest(s, p, file)) continue;
-		for (const reach of reachesOf(join(p.dir, file))) {
+		const reaches = reachesOf(join(p.dir, file));
+		for (const reach of reaches) {
 			reached.add(reach);
+			if (reach === "node:child_process") {
+				checked.add(file);
+				const why = forkRefusal(file);
+				if (why !== undefined) s.report(rule, `${p.name}/${file}`, `${reach} (${why})`);
+				continue;
+			}
 			if (!covers(allowed, reach)) s.report(rule, `${p.name}/${file}`, reach);
+		}
+	}
+	// Every starter `forks` names is a shipped source this rule reads.
+	const shipped = new Set(
+		s.sources(p).filter((file) => !s.isTest(file) && !budgetsAsTest(s, p, file)),
+	);
+	for (const starter of forks?.keys() ?? []) {
+		if (!shipped.has(starter)) {
+			s.report(rule, `${p.name}/${starter}`, "(forks names it, but it is no shipped source)");
+			continue;
+		}
+		// Held to the form whatever it reaches: one starting nothing as written is refused all the same.
+		if (checked.has(starter)) continue;
+		const why = forkRefusal(starter);
+		if (why !== undefined) s.report(rule, `${p.name}/${starter}`, `node:child_process (${why})`);
+	}
+	// Every helper forks names, whether or not it is read as a source: it resolves names and nothing else.
+	for (const helper of new Set(forks?.values() ?? [])) {
+		const path = join(p.dir, helper);
+		// Never parsed unless it is one: a card, a directory or a link is no source to read.
+		if (!isPlainHelper(path)) {
+			s.report(rule, `${p.name}/${helper}`, "(forks names it, but it is no plain .mjs file)");
+			continue;
+		}
+		const reaches = reachesOf(path);
+		for (const reach of reaches) reached.add(reach);
+		if (!importsLookupAlone(path, reaches)) {
+			s.report(rule, `${p.name}/${helper}`, "(imports node:dns/promises' lookup alone)");
 		}
 	}
 	for (const word of known) {
