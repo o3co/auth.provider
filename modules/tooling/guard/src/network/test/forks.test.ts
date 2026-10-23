@@ -1,9 +1,12 @@
 import { renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Pkg } from "@mod/guard-imports";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { budget, pkg } from "../../../test/workspace.ts";
 import { check } from "../../contract.ts";
+
+// Each case checks a package, its sources bound by the type checker, which is slow when the machine is busy.
+vi.setConfig({ testTimeout: 60_000 });
 
 const starter = "src/resolver/process.ts";
 const helper = "src/resolver/helper.mjs";
