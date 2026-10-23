@@ -1,7 +1,13 @@
 import { assemble, BootRefused, defineModule, kernelConfig } from "@mod/kernel";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
-import { type ConfiguredUrl, isLoopbackName, urlSetting, urlsChecked } from "../src/contract.ts";
+import {
+	type ConfiguredUrl,
+	isLoopbackName,
+	sameTarget,
+	urlSetting,
+	urlsChecked,
+} from "../src/contract.ts";
 import { configuredUrl } from "../src/testing.ts";
 
 const https = urlSetting({ schemes: ["https"] });
@@ -443,4 +449,38 @@ it("reads a URL as a ConfiguredUrl, the type only url-setting makes, and keeps i
 	expectTypeOf(made).toEqualTypeOf<ConfiguredUrl>();
 	expect(made).toBe(read);
 	expect(() => configuredUrl("not a url")).toThrow();
+});
+
+describe("two configured URLs naming one target", () => {
+	const same = (a: string, b: string) => sameTarget(configuredUrl(a), configuredUrl(b));
+
+	it("takes an empty query, and an empty path as the root's slash, as nothing", () => {
+		// The rest a parser respells (host case, a default port, a dot segment, a fragment) url-setting
+		// refuses before: a configured URL is written as the parser writes it.
+		expect(same("https://ledger.example/w/clear", "https://ledger.example/w/clear?")).toBe(true);
+		expect(same("https://ledger.example", "https://ledger.example/")).toBe(true);
+	});
+
+	it("holds equivalent what RFC 3986 does: an unreserved character encoded or not, an encoding's hex in either case", () => {
+		expect(same("https://ledger.example/w/clear", "https://ledger.example/w/%63%6Cear")).toBe(true);
+		expect(same("https://ledger.example/w/a%3ab", "https://ledger.example/w/a%3Ab")).toBe(true);
+		expect(same("https://ledger.example/w/~x", "https://ledger.example/w/%7Ex")).toBe(true);
+		expect(same("https://ledger.example/w/clear?x=%7E", "https://ledger.example/w/clear?x=~")).toBe(
+			true,
+		);
+	});
+
+	it("tells another scheme, host, port, path or query apart, and a reserved character encoded from the character", () => {
+		const clear = "https://ledger.example/w/clear";
+		for (const other of [
+			"http://ledger.example/w/clear",
+			"https://other.example/w/clear",
+			"https://ledger.example:8443/w/clear",
+			"https://ledger.example/w/withdraw",
+			"https://ledger.example/w/clear?t=1",
+			"https://ledger.example/w%2Fclear",
+		]) {
+			expect(same(clear, other), other).toBe(false);
+		}
+	});
 });

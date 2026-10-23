@@ -9,6 +9,7 @@
 ## Offers
 - `urlSetting`: a module's `UrlRules` → a schema part for a configured URL, read as a `ConfiguredUrl`: a string only url-setting makes, so whoever holds one holds an operator's URL. `./testing`: `configuredUrl`, one made for a test, refused as url-setting refuses it.
 - `UrlRules`: the schemes, whether plain `http` is also taken, on a loopback host only (`loopbackHttp`, default no), whether a query may be part (default yes), whether a trailing `/` is kept (default) or refused, and whether only an origin is taken (`origin`: no path, not even `/`, and no query).
+- `sameTarget` (two `ConfiguredUrl`s): whether they name one target: one origin, and a path and a query RFC 3986 holds equivalent (§6.2.2: an unreserved character encoded or not, an encoding's hex in either case). A module refusing two of its URLs at one target asks it.
 - `isLoopbackName`: whether a host is a loopback one by its name alone, never resolved: `localhost` or a name under it, with or without a trailing dot; 127.0.0.0/8 as the parser writes it; `::1` or 127.0.0.0/8 mapped into IPv6. Whether its addresses are loopback is `outbound-policy`'s to check.
 - `urlsChecked` (a check of a URL, its hosts and the configured URL it is sent for → its refusal, the URLs that must parse first, the URL, hosts and configured URL (where one is named) sent at each key) → a section's refinement: once every URL parses, each one sent is checked and what the check answers is put at its key; while one is no URL, nothing is asked. The check's words are its own.
 
