@@ -48,7 +48,7 @@ beforeEach(() => {
 
 const seen = contract<{
 	kind: FactorKind;
-	proof: BindingProof;
+	proofs: readonly BindingProof[];
 	purposes: readonly string[];
 	templates: readonly string[];
 }>("seen");
@@ -87,7 +87,7 @@ const outside = defineModule({ name: "outside" }, (m) => [
 	})),
 	m.provide(seen).by(async (c) => ({
 		kind: (await c.collect(factorKinds))[0] as FactorKind,
-		proof: (await c.collect(bindingProofs))[0] as BindingProof,
+		proofs: await c.collect(bindingProofs),
 		purposes: (await c.collect(mailPurposes)).map((p) => p.purpose),
 		templates: (await c.collect(mailTemplates)).map((t) => t.purpose),
 	})),
@@ -98,9 +98,20 @@ const proofPlace = defineModule({ name: "binding-proof-place" }, (m) => [
 	m.provide(bindingProof).by(() => ({}) as BindingProofs),
 ]);
 
+/** What mfa-email-proof contributes, as far as this kind's boot asks: the proof's name. */
+const accountEmail: BindingProof = {
+	name: "account-email",
+	available: async () => false,
+	send: async () => ({ kind: "refused" }),
+	check: async () => false,
+};
+const proofStand = defineModule({ name: "account-email-stand" }, (m) => [
+	m.contribute(bindingProofs).by(() => accountEmail),
+]);
+
 async function boot(settings: Record<string, unknown> = {}) {
 	const app = await assemble({
-		modules: [outside, proofPlace, emailModule],
+		modules: [outside, proofPlace, proofStand, emailModule],
 		config: { ...kernelConfig(), "mfa-email": settings },
 		runtime,
 	});
@@ -117,14 +128,29 @@ async function annEnrolled(address = "ann@example.com", settings: Record<string,
 	return { kind, enrolled, factor: { secret: enrolled.secret, state: {} } };
 }
 
-it("refuses to boot without mfa-binding-proof composed, naming its contract, so its proof is never left unheard", async () => {
+it("refuses to boot where no account-email proof is composed, naming mfa-email-proof, so the proof is never left out", async () => {
 	await expect(
-		assemble({ modules: [outside, emailModule], config: kernelConfig(), runtime }),
+		assemble({ modules: [outside, proofPlace, emailModule], config: kernelConfig(), runtime }),
+	).rejects.toSatisfy(
+		(error) =>
+			error instanceof BootRefused &&
+			error.refusals.some((r) => r.where === "mfa-email" && r.reason.includes("mfa-email-proof")),
+	);
+});
+
+it("refuses to boot where an account-email proof is composed without mfa-binding-proof, which hears it", async () => {
+	await expect(
+		assemble({ modules: [outside, proofStand, emailModule], config: kernelConfig(), runtime }),
 	).rejects.toSatisfy(
 		(error) =>
 			error instanceof BootRefused &&
 			error.refusals.some((r) => r.where === "mfa-email" && r.reason.includes("mfa-binding-proof")),
 	);
+});
+
+it("contributes no binding proof of its own: account-email is mfa-email-proof's", async () => {
+	const { proofs } = await boot();
+	expect(proofs).toEqual([accountEmail]);
 });
 
 it("declares a guessable factor of amr email, adding mfa and counting only when told", async () => {
@@ -197,12 +223,10 @@ it("refuses while users cannot tell, and is limited at the sender's limit", asyn
 
 it("passes a sender that cannot tell on as unavailable, whatever it was sending", async () => {
 	const { kind, factor } = await annEnrolled();
-	const { proof } = await boot();
 	sent.length = 0;
 	answer = "unavailable";
 	await expect(kind.enroll("ann", [])).rejects.toSatisfy(isUnavailable);
 	await expect(kind.challenge?.("ann", factor, now + 120_000)).rejects.toSatisfy(isUnavailable);
-	await expect(proof.send("ann", now + 3_600_000)).rejects.toSatisfy(isUnavailable);
 	expect(sent).toEqual([]);
 });
 
@@ -244,14 +268,12 @@ it("sends nothing to an address the account no longer states, telling the contac
 });
 
 it("takes the address of a user users cannot tell from a session whose login users vouches for, never an upstream's", async () => {
-	const { kind, proof } = await boot();
+	const { kind } = await boot();
 	contacts.set("lee", null);
 	sessions.set("ledger", { email: "lee@example.com", vouched: true });
 	sessions.set("upstream", { email: "lee@elsewhere.example", vouched: false });
 	const fromLedger = { kind: "session" as const, handle: "ledger" };
 	const fromUpstream = { kind: "session" as const, handle: "upstream" };
-	expect(await proof.available("lee", fromLedger)).toBe(true);
-	expect(await proof.available("lee", fromUpstream)).toBe(false);
 	expect(await kind.enroll("lee", [], fromUpstream)).toEqual({ kind: "refused" });
 	const enrolled = await kind.enroll("lee", [], fromLedger);
 	if (!("secret" in enrolled)) throw new Error("not enrolled");
@@ -267,12 +289,10 @@ it("takes the address of a user users cannot tell from a session whose login use
 });
 
 it("takes the address of a held login users vouches for, never an upstream login's", async () => {
-	const { kind, proof } = await boot();
+	const { kind } = await boot();
 	contacts.set("lee", null);
 	const vouched = { kind: "login" as const, email: "lee@example.com", vouched: true as const };
 	const upstream = { kind: "login" as const, email: "lee@elsewhere.example" };
-	expect(await proof.available("lee", vouched)).toBe(true);
-	expect(await proof.available("lee", upstream)).toBe(false);
 	expect(await kind.enroll("lee", [], upstream)).toEqual({ kind: "refused" });
 	const enrolled = await kind.enroll("lee", [], vouched);
 	if (!("secret" in enrolled)) throw new Error("not enrolled");
@@ -285,14 +305,12 @@ it("takes the address of a held login users vouches for, never an upstream login
 });
 
 it("never takes an address from a login, or from a session users does not stand behind", async () => {
-	const { kind, proof } = await boot();
+	const { kind } = await boot();
 	contacts.set("lee", null);
 	const login = { kind: "login" as const, email: "lee@example.com" };
 	const session = { kind: "session" as const, handle: "h1" };
 	for (const from of [login, session, undefined]) {
 		const name = from?.kind ?? "nothing";
-		expect(await proof.available("lee", from), name).toBe(false);
-		expect(await proof.send("lee", now + 60_000, from), name).toEqual({ kind: "refused" });
 		expect(await kind.enroll("lee", [], from), name).toEqual({ kind: "refused" });
 	}
 	expect(sent).toEqual([]);
@@ -319,47 +337,6 @@ it("fails as unavailable, sending nothing and judging no code, on a stored value
 		isUnavailable,
 	);
 	await expect(kind.enroll("ann", [broken])).rejects.toSatisfy(isUnavailable);
-	const { proof } = await boot();
-	await expect(proof.check("ann", unreadable, "x")).rejects.toSatisfy(isUnavailable);
-});
-
-it("passes a right code though users keeps no more verified contacts, logging that it kept none and never the address", async () => {
-	const { proof } = await boot();
-	contacts.set("ann", "ann@example.com");
-	const asked = await proof.send("ann", now + 3_600_000);
-	if (asked.kind !== "sent") throw new Error("not sent");
-	contactsFull = true;
-	expect(await proof.check("ann", asked.kept, String(last().values.code))).toBe(true);
-	expect(verified).toEqual([]);
-	const warned = logged.lines().filter((l) => l.event === "mfa-email.contact_not_kept");
-	expect(warned).toHaveLength(1);
-	expect(JSON.stringify(warned)).not.toContain("ann@example.com");
-});
-
-it("proves the account's address before a first binding, by a long code good for ten minutes at most", async () => {
-	const { proof } = await boot();
-	contacts.set("ann", "ann@example.com");
-	expect([await proof.available("ann"), await proof.available("bob")]).toEqual([true, false]);
-	const asked = await proof.send("ann", now + 3_600_000);
-	if (asked.kind !== "sent") throw new Error("not sent");
-	expect(last()).toMatchObject({ purpose: "mfa-email.proof", values: { minutes: "10" } });
-	const code = String(last().values.code);
-	expect(await proof.check("ann", asked.kept, "0".repeat(16))).toBe(false);
-	expect(verified).toEqual([]);
-	expect(await proof.check("ann", asked.kept, code)).toBe(true);
-	// The address the code went to is the subject's now: users keeps it as verified.
-	expect(verified).toEqual([["ann", { kind: "email", value: "ann@example.com" }]]);
-	now += 600_001;
-	expect(await proof.check("ann", asked.kept, code)).toBe(false);
-	expect(await proof.send("bob", now + 60_000)).toEqual({ kind: "refused" });
-	// The caller's end, when it comes first; a limited sender keeps nothing.
-	expect(await proof.send("ann", now + 30_000)).toMatchObject({ show: { expires_in: 30 } });
-	expect(last().values.minutes).toBe("1");
-	// A mail never says a code lives no minutes, even at its very end.
-	await proof.send("ann", now);
-	expect(last().values.minutes).toBe("1");
-	answer = "limited";
-	expect(await proof.send("ann", now + 3_600_000)).toEqual({ kind: "limited" });
 });
 
 it("sends to an address in NFC, however the account states it", async () => {
