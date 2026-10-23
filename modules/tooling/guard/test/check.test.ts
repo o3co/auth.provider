@@ -127,6 +127,22 @@ describe("guard", () => {
 		]);
 	});
 
+	it("reads a unit's .mjs files as its own bytes, and a generated file not as its bytes", () => {
+		const line = "export const n = 1;\n";
+		const p = pkg("@t/mjs", {
+			"src/contract.ts": line,
+			"src/helper.mjs": line.repeat(3),
+			// Written by a tool from another file: no one reads it as written.
+			"src/check.bundled.mjs": line.repeat(500),
+		});
+		// The .ts line and the three .mjs lines; the bundle's 500 are not read.
+		const own = 4 * line.length;
+		const reading = (limit: number) =>
+			check([p], { ...budget, readRangeBytes: limit }).map((v) => `${v.where} ${v.detail}`);
+		expect(reading(own)).toEqual([]);
+		expect(reading(own - 1)).toEqual([`@t/mjs reading scope bytes ${own} > ${own - 1}`]);
+	});
+
 	it("measures each internal module, a directory with a card, apart from the rest of its package", () => {
 		const line = "export const n = 1;\n";
 		const p = pkg("@t/deep", {

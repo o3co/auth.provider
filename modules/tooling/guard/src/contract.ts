@@ -53,6 +53,8 @@ export interface Budget extends Rules {
 	readonly laidOutValues: number;
 	/** Test tables (fixtures, vectors): data for tests, not counted as test lines. */
 	readonly fixtureFile: string;
+	/** Files a tool writes from another (a bundle): no one reads them as written, so neither their bytes nor their lines count. */
+	readonly generatedFile: string;
 }
 
 const allowedExports = new Set([".", "./testing", "./module", "./audit-events"]);

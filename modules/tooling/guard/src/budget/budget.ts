@@ -70,6 +70,7 @@ export function budgetRules(
 	const { budget, byName, report, workspaceDeps } = s;
 	const fixture = new RegExp(budget.fixtureFile);
 	const counted = new RegExp(budget.countedFixtureFile);
+	const generated = new RegExp(budget.generatedFile);
 	const { cardDirs, unitOf, cardOf, whereOf } = unitsOf(p);
 	for (const unit of ["", ...cardDirs]) {
 		const where = whereOf(unit);
@@ -82,12 +83,13 @@ export function budgetRules(
 		let commentLines = 0;
 		let bytes = 0;
 		for (const file of files) {
-			if (file.endsWith(".ts") || file.endsWith("README.md")) {
+			if (generated.test(file)) continue;
+			if (file.endsWith(".ts") || file.endsWith(".mjs") || file.endsWith("README.md")) {
 				bytes += readFileSync(join(p.dir, file)).length;
 			}
 		}
 		const docs = surfaces.get(p.name)?.docs;
-		for (const file of s.sources(p).filter((f) => unitOf(f) === unit)) {
+		for (const file of s.sources(p).filter((f) => unitOf(f) === unit && !generated.test(f))) {
 			// The doc comments of the public surface are its contract, not comments on the implementation.
 			const counts = countLines(join(p.dir, file), docs?.get(file));
 			// Fixtures count as test lines; other tables, such as vectors, do not.

@@ -27,6 +27,7 @@ export const budget: Budget = {
 	laidOutValues: 2,
 	testFile: "(^|/)test/|\\.test\\.ts$",
 	fixtureFile: "(^|/)test/fixtures/|\\.vectors\\.ts$",
+	generatedFile: "\\.bundled\\.mjs$",
 	commonKind: "common",
 	runtimeFromKernel: ["foundation", "capability", "feature", "adapter"],
 	kindOrder: [
