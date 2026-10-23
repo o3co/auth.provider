@@ -4,7 +4,7 @@
 - Starts the legacy build for conformance scenes (location, how to start it, configuration file, preparation script).
 - Collects the legacy fragments each area returns (environment variables, configuration lines, files, extra packages) and starts with them.
 - Where a part asks for packages the standalone build does not load, starts its own composed entry instead: the standalone build's start-up, with those packages appended.
-- The composed entry is a combination the legacy system does not ship.
+- The composed entry is a combination the legacy system does not ship; it is the internal module `composed` (`scripts/composed`).
 - Where a part names a fake upstream for a type that fixes its hosts in code (GitHub, Google, Apple), the composed entry sends that type's requests to the fake.
 - The composed entry puts Google's type, which the standalone build loads, in place of the build's own.
 

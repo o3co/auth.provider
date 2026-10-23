@@ -19,7 +19,7 @@
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { extras as packagesOf } from "./extras.mjs";
+import { extras as packagesOf } from "../extras.mjs";
 
 const legacyDir = process.env.LEGACY_DIR;
 if (!legacyDir) throw new Error("LEGACY_DIR is not set");
