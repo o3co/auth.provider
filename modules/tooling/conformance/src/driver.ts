@@ -108,7 +108,11 @@ function sweepLeftBehind(): void {
 	);
 	for (const line of listed.split("\n").filter(Boolean)) {
 		const [id, pid] = line.split(" ");
-		if (id && !running(Number(pid))) execFileSync("docker", ["rm", "-f", id], { stdio: "ignore" });
+		if (!id || running(Number(pid))) continue;
+		// Its run may be removing it as this lists it (its stop, or `--rm`): gone or going is what this wants.
+		try {
+			execFileSync("docker", ["rm", "-f", id], { stdio: "ignore" });
+		} catch {}
 	}
 }
 
@@ -138,25 +142,34 @@ export async function startRedis(
 	};
 	const bound = execFileSync("docker", ["port", name, "6379/tcp"], { encoding: "utf8" });
 	const port = /:(\d+)\s*$/m.exec(bound)?.[1];
-	let ready = false;
-	for (let i = 0; port !== undefined && i < 100 && !ready; i++) {
-		try {
-			ready =
-				execFileSync("docker", ["exec", name, "redis-cli", "ping"], { encoding: "utf8" }).trim() ===
-				"PONG";
-		} catch {}
-		if (!ready) await new Promise((resolve) => setTimeout(resolve, 100));
-	}
-	if (!ready) {
+	/** Whether the server answers, asked again for up to ten seconds. */
+	const answers = async () => {
+		for (let i = 0; port !== undefined && i < 100; i++) {
+			try {
+				const pong = execFileSync("docker", ["exec", name, "redis-cli", "ping"], {
+					encoding: "utf8",
+				});
+				if (pong.trim() === "PONG") return true;
+			} catch {}
+			await new Promise((resolve) => setTimeout(resolve, 100));
+		}
+		return false;
+	};
+	if (!(await answers())) {
 		await stop();
 		throw new Error(`the throwaway Redis ${name} did not answer`);
 	}
 	return {
 		url: `redis://127.0.0.1:${port}`,
 		stop,
-		/** A paused server keeps its connections open and answers nothing, as a hung store does. */
+		/**
+		 * A paused server keeps its connections open and answers nothing, as a hung store does. One
+		 * resumed is back once it answers again, so the scene's next step meets a store, not one waking.
+		 */
 		pause: async (paused) => {
 			execFileSync("docker", [paused ? "pause" : "unpause", name], { stdio: "ignore" });
+			if (!paused && !(await answers()))
+				throw new Error(`the throwaway Redis ${name} did not come back`);
 		},
 	};
 }
