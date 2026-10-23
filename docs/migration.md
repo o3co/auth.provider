@@ -946,7 +946,7 @@ A request outbound refuses is logged with its `reason`:
 |---|---|---|
 | `not-allowed` | The host is not in `outbound.allow`. | Name it there, or set `allow-any-public`. |
 | `scheme` | Plain http to a `host:port` neither `plain-loopback` nor `plain-internal` names. | Name the pair in the list its addresses belong to, or write the URL with https. |
-| `plain-public` | A `plain-internal` pair whose name resolved to a public address. | Point the name at the private network, or write the URL with https. |
+| `plain-public` | A `plain-internal` pair whose name resolved to a public address. | Point the name at the private network, or write the URL with https. Where the network answers the name with an IPv6 address that does not reach as well (ECS Service Connect, say), name the pair in `outbound.plain-ipv4` too. |
 | `special-address` | The URL or its name reached a special-purpose address: link-local, metadata, or a private or loopback one no list names. | Name the host in `internal-hosts` (https) or the pair in `plain-internal` (plain http). Link-local and metadata addresses are never reached. |
 | `denied` | The host matches `outbound.deny`. | Take it out of `deny`, if it is meant to be reached. |
 
