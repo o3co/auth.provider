@@ -35,8 +35,13 @@ export interface ConnectionScene {
 }
 
 /** Federation grants: the consent page and the connections offered. */
+/** The need for a login page that a connect sends a browser with no session to, and back. */
+export const grantsLoginPage = "federation:grants-login-page";
+
 export interface GrantsPart {
 	readonly page: string;
+	/** Where a browser with no session is sent to log in, then back to the connect (`grantsLoginPage`). */
+	readonly loginPage?: string;
 	readonly connections: readonly ConnectionScene[];
 	/** How many intents one client may lodge in a window, whatever user it names. */
 	readonly lodges?: { readonly limit: number; readonly windowSeconds: number };
