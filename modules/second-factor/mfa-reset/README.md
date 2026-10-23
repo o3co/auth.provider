@@ -10,6 +10,8 @@
 ## Offers
 - `mfaReset.reset(subject, { requestedBy? })`, for an embedder that has verified who asks: answers how many factors went.
 - A reset that cannot do a step rejects as unavailable; running it again finishes it.
+- `mfaReset.run(subject, { requestedBy? })`, the same run answering how it ended (`ResetOutcome`): `done` with `removed` (how many factors went) and their `kinds`, or `stopped` with `at` (`sessions`, `factors` or `lock`) where a step was unavailable, which running it again finishes; a failure not unavailable, at any step, is thrown.
+  - A stopped run carries `removed` (`count`, `kinds`) where the factors' removal answered before it stopped: never at `factors`, always at `lock`, and at `sessions` only when the second boundary stopped it. Without it, whether the factors went is not known: a removal that failed after `mfa` removed the records (a witness that could not clear its mark) has taken them.
 - Audit event (declared in `./audit-events`): `mfa.reset` once a run gets past its input, finished or not: `by` `operator`, `kinds` and `count` once the factors went, `sessions`, `sessionsAgain` once it ran, `complete`, and `requestedBy` when given.
 
 ## Invariants

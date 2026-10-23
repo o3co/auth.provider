@@ -174,3 +174,82 @@ describe("a reset by an operator", () => {
 		expect([p.calls, p.events]).toEqual([[], []]);
 	});
 });
+
+describe("a reset run, answering how it ended", () => {
+	const removed = { count: 2, kinds: ["backup", "code"] };
+
+	it("answers done with how many factors went and their kinds", async () => {
+		const p = place();
+		expect(await p.reset.run("ann", { requestedBy: "ticket-7" })).toEqual({
+			kind: "done",
+			removed: 2,
+			kinds: ["backup", "code"],
+		});
+		expect(p.attributes().at(-1)).toMatchObject({ complete: "true", requestedBy: "ticket-7" });
+	});
+
+	it("answers where an unavailable step stopped it, with what went once the factors went", async () => {
+		const at = async (script: Parameters<typeof place>[0]) => place(script).reset.run("dee");
+		expect(await at({ records: [new Unavailable("subject-revocation")] })).toEqual({
+			kind: "stopped",
+			at: "sessions",
+		});
+		expect(await at({ records: [{ complete: false }] })).toEqual({
+			kind: "stopped",
+			at: "sessions",
+		});
+		expect(await at({ clear: new Unavailable("mfa") })).toEqual({ kind: "stopped", at: "factors" });
+		expect(await at({ release: new Unavailable("rate-limit") })).toEqual({
+			kind: "stopped",
+			at: "lock",
+			removed,
+		});
+		expect(await at({ records: [{ complete: true }, { complete: false }] })).toEqual({
+			kind: "stopped",
+			at: "sessions",
+			removed,
+		});
+	});
+
+	it("records and logs a stopped run as before, and a second run finishes it", async () => {
+		const p = place({ records: [new Unavailable("subject-revocation")] });
+		expect(await p.reset.run("dee")).toEqual({ kind: "stopped", at: "sessions" });
+		expect(p.attributes()).toEqual([{ by: "operator", sessions: "false", complete: "false" }]);
+		expect(p.lines().map((l) => l.fields)).toEqual([
+			{ stoppedAt: "sessions", error: "Unavailable" },
+		]);
+		expect(await p.reset.run("dee")).toEqual({
+			kind: "done",
+			removed: 2,
+			kinds: ["backup", "code"],
+		});
+	});
+
+	it("throws a later step's failure that is not unavailable, keeping the first failure's record and log", async () => {
+		const p = place({
+			clear: new Unavailable("mfa"),
+			records: [{ complete: true }, new TypeError("broken")],
+		});
+		await expect(p.reset.run("hal")).rejects.toThrow(new TypeError("broken"));
+		expect(p.attributes().at(-1)).toMatchObject({ complete: "false", sessionsAgain: "false" });
+		expect(p.lines().map((l) => l.fields)).toEqual([
+			{ stoppedAt: "factors", error: "Unavailable" },
+		]);
+	});
+
+	it("throws a step's failure that is not unavailable, once recorded and logged", async () => {
+		const p = place({ clear: new TypeError("broken") });
+		await expect(p.reset.run("hal")).rejects.toThrow(new TypeError("broken"));
+		expect(p.attributes().at(-1)).toMatchObject({ complete: "false" });
+		expect(p.lines().map((l) => l.fields)).toEqual([{ stoppedAt: "factors", error: "TypeError" }]);
+	});
+
+	it("refuses a malformed subject or requester before anything is done", async () => {
+		const p = place();
+		await expect(p.reset.run("")).rejects.toThrow(new RangeError("subject"));
+		await expect(p.reset.run("eli", { requestedBy: "" })).rejects.toThrow(
+			new RangeError("requestedBy"),
+		);
+		expect([p.calls, p.events]).toEqual([[], []]);
+	});
+});
