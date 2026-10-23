@@ -12,7 +12,7 @@
 - Routes `GET` and `POST /oauth/logout` (`ending`), both declared to take requests from other sites, and the GET to change state (no HEAD).
 - Extension point `upstreamEnds`: at most one; two or more refuse boot.
 - Client metadata section `rp-logout` (`registration`).
-- Contribution to `code-grant`'s session redemptions: keeps the client until the session ends, and at least `remember-for`.
+- Contribution to `code-grant`'s session redemptions (`redemptions`): keeps the client until the session ends, and at least `remember-for`.
 - `session-participants`' participant `notices`: answers once each notice is kept, then tries each once.
 - `issuer`'s metadata items: `end_session_endpoint` (on `http`'s public origin), and `frontchannel_logout_supported`, `frontchannel_logout_session_supported`, `backchannel_logout_supported` and `backchannel_logout_session_supported` (true).
 - Audit events with the subject and `sid`, and `source` and `userAgent` when known: `logout.success`, `logout.cascade_failed` (with `store` `session`, the module whose close failed); `logout.close_pending` with `sid` and `source` only, declared exactly as `logout` declares it. All declared in `./audit-events`.
