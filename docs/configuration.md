@@ -169,7 +169,7 @@ From `@mod/federation-grants`.
 
 | Key | Type | Default | Required | Variable | Example | Description |
 |---|---|---|---|---|---|---|
-| `federation-grants.page` | string |  |  | `FEDERATION_GRANTS_PAGE` | `https://login.example.invalid/federation-grants` | The page that asks the user, on this deployment's origin: an https URL (http only on a loopback host). |
+| `federation-grants.page` | string |  |  | `FEDERATION_GRANTS_PAGE` | `https://login.example.invalid/federation-grants` | The page that asks the user; it posts the decision under `csrf`, so serve it on this deployment's origin (not checked at boot): an https URL (http only on a loopback host). |
 | `federation-grants.login-page` | string |  |  | `FEDERATION_GRANTS_LOGIN_PAGE` | `https://login.example.invalid/login` | Where a browser with no session is sent to log in, then back: an https URL (http only on a loopback host). |
 | `federation-grants.step-up-page` | string |  |  |  |  | Where a session that falls short of a requirement is sent once to raise it, then back: an https URL (http only on a loopback host). |
 | `federation-grants.connections` | map | `{}` |  |  |  | What a grant may be for, by a name (a-z, 0-9 and -, at most 32): idp (a federation IdP that offers delegation), scopes (holding openid), resource, max-access-token-lifetime and scope-subsets. |
