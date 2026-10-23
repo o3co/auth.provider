@@ -230,3 +230,7 @@ location: https://app.example/callback?code=<code>&state=xyz&iss=https%3A%2F%2Fa
 ## When the second factor's store can be lost
 
 A user whose factors are lost from the store reads as never enrolled. To keep a record of who has enrolled at your ledger, add `@mod/mfa-witness-http`; its card says what the ledger must keep, and the [runbook](runbook.md#keeping-the-second-factor-witness-at-the-ledger) how to run it.
+
+## A code by email
+
+A second factor by email (`mfa-email`) mails its code. To read the codes on your machine while you develop, point `mail-smtp` at Mailpit on loopback, as [Email codes on your machine](local-mail.md) shows.
