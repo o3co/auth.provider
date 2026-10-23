@@ -9,7 +9,7 @@ import {
 	type StoredChallenge,
 	type StoredPasskey,
 } from "@mod/passkeys";
-import { recordsIn, secretRecordsIn } from "@mod/records";
+import { pairedRecordsAcross, recordsIn, secretRecordsIn } from "@mod/records";
 import { type Guarantee, type Space, spaces, store } from "@mod/store";
 
 /** Each need passkeys states for its passkeys, as the guarantee a space declares for it. */
@@ -49,7 +49,33 @@ export default defineModule({ name: "webauthn-store" }, (m) => [
 				update: records.change,
 			};
 		};
-		return { credentials: passkeyRecordsIn(credentials), subjects: passkeyRecordsIn(subjects) };
+		// Refused while it is built where the store writes no records of two partitions as one.
+		const paired = pairedRecordsAcross<StoredPasskey, StoredPasskey>(
+			{ ...place, space: credentials },
+			{ ...place, space: subjects },
+			"webauthn-store",
+			(where, reason) => c.refuse(where, reason),
+		);
+		return {
+			credentials: passkeyRecordsIn(credentials),
+			subjects: passkeyRecordsIn(subjects),
+			updateTogether: async (keys, p) => {
+				const changed = await paired.changeRecords(
+					{ first: keys.credentials, second: keys.subjects },
+					{
+						watch: (read) => {
+							const named = p.watch({ credentials: read.first, subjects: read.second });
+							return { first: named.credentials, second: named.subjects };
+						},
+						decide: (read) => {
+							const next = p.change({ credentials: read.first, subjects: read.second });
+							return { first: next.credentials, second: next.subjects };
+						},
+					},
+				);
+				return { credentials: changed.first, subjects: changed.second };
+			},
+		};
 	}),
 	m.provide(challengeStore).by(async (c): Promise<ChallengeStore> => {
 		const place = { store: await c.get(store), space: challenges, log: c.log, random: c.random };
