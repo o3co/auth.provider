@@ -19,6 +19,13 @@ export const loadConfig = async () => ({});
 // The variables 0.17 read that are set: here, any named LEGACY_*.
 export const unreadLegacyVariables = async ({ env }) => Object.keys(env).filter((name) => name.startsWith("LEGACY_")).sort();
 export const legacyVariablesWarning = (names) => (names.length === 0 ? undefined : \`\${names.length} named: \${names.join(", ")}\`);
+// config-files' one check, as far as the entry asks: refusing under refuse, else the warning.
+export const legacyVariablesCheck = async (source) => {
+	const names = await unreadLegacyVariables(source);
+	if (source.env.APP_LEGACY_VARIABLES === "refuse" && names.length > 0)
+		throw new BootRefused([{ where: "config-files", reason: names.join(", ") }]);
+	return legacyVariablesWarning(names);
+};
 export async function assemble({ runtime }) {
 	// A refusal thrown by a second copy of the kernel: its own class, the same mark.
 	if (process.env.REFUSE) throw new (await import("fake-kernel-copy")).BootRefused([{ where: "a.b", reason: "why" }]);
@@ -150,6 +157,14 @@ it("exits 78 on a boot another copy of the kernel refused, writing each refusal"
 	const run = await script();
 	const done = await run("first\n", { REFUSE: "1" });
 	expect(done.stderr).toBe("refused a.b: why\n");
+	expect(done.status).toBe(78);
+	expect(done.seen).toEqual([]);
+});
+
+it("refuses boot as config-files' check refuses, writing the refusal and exiting 78", async () => {
+	const run = await script();
+	const done = await run("first\n", { LEGACY_ONE: "v1", APP_LEGACY_VARIABLES: "refuse" });
+	expect(done.stderr).toBe("refused config-files: LEGACY_ONE\n");
 	expect(done.status).toBe(78);
 	expect(done.seen).toEqual([]);
 });

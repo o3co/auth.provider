@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { legacyVariablesWarning, loadConfig, unreadLegacyVariables } from "{{configFiles}}";
+import { legacyVariablesCheck, loadConfig } from "{{configFiles}}";
 import { assemble, BootRefused, isUnavailable } from "{{kernel}}";
 import { witnessBackfill } from "{{entry}}";
 {{imports}}
@@ -59,8 +59,8 @@ const files = (process.env.APP_CONFIG ?? "config/application.conf").split(",");
 const source = { files, env: process.env };
 const app = await loadConfig(source)
 	.then(async (config) => {
-		// A variable 0.17 read, left in the environment, is named once; boot goes on.
-		const told = legacyVariablesWarning(await unreadLegacyVariables(source));
+		// A variable 0.17 read, left in the environment, is named once, or refuses boot, as config-files says.
+		const told = await legacyVariablesCheck(source);
 		if (told !== undefined) process.stderr.write(`warn config-files: ${told}\n`);
 		return assemble({ modules: [{{modules}}], config, runtime });
 	})
