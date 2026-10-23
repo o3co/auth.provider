@@ -124,6 +124,7 @@ What each module contains is described by that module's contract card (each modu
 | Clients whose id is a URL: fetching and judging the metadata document there, building its record from the sections' copies, keeping it, the ceiling they are allowed within | contribution / setting | clients-cimd |
 | Client metadata sections | extension point kind | clients |
 | Checking a client record as a source's is held (`checkRecord`) | contract | clients |
+| The clients the operator registered, in the settings' order (`registered`) | contract | clients |
 | Copying a section from a client's metadata document (`documentCopies`, `DocumentSource`) | extension point kind | client-documents |
 | Each section's copy from a client's metadata document | contribution | the module that contributes that section |
 | Each client metadata field | vocabulary | the module that reads that field |
