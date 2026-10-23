@@ -79,9 +79,11 @@ export function scopeOf<B extends Rules>(
 		isCommon: (p) => kindOf(p) === budget.commonKind,
 		isTest: (file) => conventional.test(file),
 		sources,
+		// A peer is a run-time dependency, as G8 takes it.
 		workspaceDeps: (p, dev) =>
 			Object.keys({
 				...p.manifest.dependencies,
+				...p.manifest.peerDependencies,
 				...(dev ? p.manifest.devDependencies : {}),
 			}).filter((name) => byName.has(name)),
 		factsOf: (p, file) => {

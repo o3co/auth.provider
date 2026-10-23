@@ -113,6 +113,84 @@ describe("guard-imports", () => {
 		]);
 	});
 
+	it("G2 holds the bottom level to no workspace dependency, a peer, a dev one or one beside it included", () => {
+		// Without exports, so no contract surface is built: these rules read only kinds and dependencies.
+		const kernel = pkg("@b/kernel", { "src/contract.ts": "export const k = 1;\n" }, {}, "common");
+		const feature = pkg("@b/feature", { "src/contract.ts": "export const f = 1;\n" }, {});
+		const on = (field: string, name: string, at: string) =>
+			pkg(
+				at,
+				{ "src/contract.ts": "export const w = 1;\n" },
+				{ [field]: { [name]: "workspace:*" } },
+				"protocol",
+			);
+		const found = (packages: Pkg[]) =>
+			check(packages, budget)
+				.filter((v) => v.rule.startsWith("G2 "))
+				.map((v) => `${v.where} ${v.detail}`);
+		expect(found([kernel, on("dependencies", "@b/kernel", "@b/beside")])).toEqual([
+			"@b/beside @b/kernel",
+		]);
+		expect(found([feature, on("peerDependencies", "@b/feature", "@b/peer")])).toEqual([
+			"@b/peer @b/feature",
+		]);
+		expect(found([kernel, on("devDependencies", "@b/kernel", "@b/dev")])).toEqual([
+			"@b/dev @b/kernel",
+		]);
+		const alone = pkg("@b/wire", { "src/contract.ts": "export const w = 1;\n" }, {}, "protocol");
+		expect(found([kernel, alone])).toEqual([]);
+	});
+
+	it("G10 and G14 let every kind, a verification base included, depend on protocol", () => {
+		const deps = (...names: string[]) => ({
+			dependencies: Object.fromEntries(names.map((n) => [n, "workspace:*"])),
+		});
+		const wire = pkg("@p/wire", { "src/contract.ts": "export const w = 1;\n" }, {}, "protocol");
+		const kinds = ["foundation", "capability", "feature", "adapter", "wiring", "assembly"];
+		const users = kinds.map((kind) =>
+			pkg(`@p/${kind}`, { "src/contract.ts": "export const u = 1;\n" }, deps("@p/wire"), kind),
+		);
+		const base = pkg(
+			"@p/base",
+			{ "src/contract.ts": "export const b = 1;\n" },
+			deps("@p/wire"),
+			"verification",
+		);
+		const area = pkg(
+			"@p/area",
+			{ "src/contract.ts": "export const a = 1;\n" },
+			deps("@p/base"),
+			"verification",
+		);
+		expect(rules([wire, ...users, base, area]).filter((r) => r === "G10" || r === "G14")).toEqual(
+			[],
+		);
+	});
+
+	it("reads a workspace peer as a dependency, as G8 takes it at run time", () => {
+		const feature = pkg("@q/feature", { "src/contract.ts": "export const f = 1;\n" }, {});
+		const base = pkg(
+			"@q/base",
+			{ "src/contract.ts": "export const b = 1;\n" },
+			{ peerDependencies: { "@q/feature": "workspace:*" } },
+			"foundation",
+		);
+		expect(rules([feature, base])).toContain("G10");
+		const check2 = pkg(
+			"@q/check",
+			{ "src/contract.ts": "export const c = 1;\n" },
+			{ peerDependencies: { "@q/feature": "workspace:*" } },
+			"verification",
+		);
+		const area = pkg(
+			"@q/area",
+			{ "src/contract.ts": "export const a = 1;\n" },
+			{ dependencies: { "@q/check": "workspace:*" } },
+			"verification",
+		);
+		expect(rules([feature, check2, area])).toContain("G14");
+	});
+
 	it("G14 keeps a check package that others build on free of the product's modules", () => {
 		// Without exports, so no contract surface is built: these rules read only kinds and dependencies.
 		const deps = (...names: string[]) => ({

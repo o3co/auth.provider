@@ -103,9 +103,10 @@ export function cycles(s: Scope) {
 /** G2, G10, G14, G16: what a package may depend on. */
 export function dependencyRules(s: Scope, p: Pkg) {
 	const { budget, byName, kindOf, level, report, workspaceDeps } = s;
-	if (s.isCommon(p)) {
+	// The bottom level (common, protocol) is what every kind may build on: it builds on nothing.
+	if (level(p) === 0) {
 		for (const dep of workspaceDeps(p, true)) {
-			report("G2 common depends on nothing in the workspace", p.name, dep);
+			report("G2 the bottom level depends on nothing in the workspace", p.name, dep);
 		}
 	}
 	if (level(p) < 0) report("G10 kind direction", p.name, "no kind, or an unknown kind");
