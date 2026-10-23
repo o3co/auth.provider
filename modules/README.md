@@ -226,7 +226,8 @@ What each module contains is described by that module's contract card (each modu
 | Registering passkeys from a session (the registration routes), and their request budget | route / setting | passkey-registration |
 | Logging in with a passkey (the grant `urn:o3co:oauth:grant-type:webauthn`, its request options), and the amr it gives | grant contribution / contract / setting | webauthn-login |
 | WebAuthn as a second factor (the subject's user handle for it, its amr, the name an authenticator shows) | contribution / setting | mfa-webauthn |
-| A code by mail as a second factor, the proof of the account's address before a first binding, and their mail purposes | contribution / setting | mfa-email |
+| A code by mail as a second factor, how a code is mailed to the account's address, and the mail purposes of both below | contribution / setting / contract | mfa-email |
+| The proof of the account's address before a first binding (`account-email`), by mfa-email's rules | contribution | mfa-email-proof |
 | The wording of mfa-email's mails, which a deployment replaces | contribution | mfa-email-wording |
 | Budget numbers and invariant checks | setting | guard |
 | Kind names, their order, and which way a dependency between kinds may point | vocabulary / contract | kinds |
