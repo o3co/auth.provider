@@ -12,6 +12,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { basename, join } from "node:path";
 
+/** How long the upstream may take to answer one request, body included. */
+const upstreamLimitMs = 30_000;
 const published = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
 const tarballs = new Map<string, Buffer>();
 const documents = new Map<string, { versions: Record<string, unknown>; latest: string }>();
@@ -32,11 +34,19 @@ const server = createServer(async (request, response) => {
 	}
 	const document = documents.get(path.slice(1));
 	if (!document) {
-		const answer = await fetch(new URL((request.url ?? "/").slice(1), upstream), {
-			headers: { accept: request.headers.accept ?? "application/json" },
-		});
-		response.writeHead(answer.status, { "content-type": "application/json" });
-		response.end(Buffer.from(await answer.arrayBuffer()));
+		// An upstream that fails or is slow is answered 502, so pnpm retries a registry still up.
+		try {
+			const answer = await fetch(new URL((request.url ?? "/").slice(1), upstream), {
+				headers: { accept: request.headers.accept ?? "application/json" },
+				signal: AbortSignal.timeout(upstreamLimitMs),
+			});
+			const body = Buffer.from(await answer.arrayBuffer());
+			response.writeHead(answer.status, { "content-type": "application/json" });
+			response.end(body);
+		} catch {
+			response.writeHead(502, { "content-type": "application/json" });
+			response.end("{}");
+		}
 		return;
 	}
 	const name = path.slice(1);

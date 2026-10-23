@@ -1,15 +1,24 @@
 /** A package outside the release composed as an operator does, from a registry, held to what the release sealed. */
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { served } from "./serve.ts";
 import { swappedZod } from "./swap.ts";
 
 const grant = "@x/release-check-grant";
 
-/** Runs a command in `cwd`, answering its exit status, its standard output, and all it said. */
+/** How long one command may run: an install over the network included. */
+const commandLimitMs = 10 * 60_000;
+
+/** Runs a command in `cwd`, at most `commandLimitMs`, answering its exit status, its standard output, and all it said. */
 const ran = (command: string, args: readonly string[], cwd: string) => {
 	try {
-		const stdout = execFileSync(command, args, { cwd, encoding: "utf8", stdio: "pipe" });
+		const stdout = execFileSync(command, args, {
+			cwd,
+			encoding: "utf8",
+			stdio: "pipe",
+			timeout: commandLimitMs,
+		});
 		return { status: 0, stdout, said: stdout };
 	} catch (error) {
 		const told = error as { status?: number; stdout?: string; stderr?: string; message: string };
@@ -49,22 +58,6 @@ function packOutside(dir: string, into: string, version: string, zod: string) {
 	must("pnpm", ["pack", "--pack-destination", into], dir);
 }
 
-/** Starts the registry over the directories, before the upstream's, answering its origin and how to stop it. */
-function served(upstream: string, dirs: readonly string[]) {
-	const child = spawn("node", [join(import.meta.dirname, "registry.ts"), upstream, ...dirs], {
-		stdio: ["ignore", "pipe", "inherit"],
-	});
-	const origin = new Promise<string>((resolve, reject) => {
-		let said = "";
-		child.stdout.on("data", (chunk: Buffer) => {
-			said += chunk.toString();
-			if (said.includes("\n")) resolve(said.trim());
-		});
-		child.on("exit", (code) => reject(new Error(`the registry exited ${code}`)));
-	});
-	return { origin, stop: () => child.kill() };
-}
-
 /**
  * Serves the release's tarballs and a package outside it from a registry of its own; installs
  * `create-auth-provider` and, into a project of its own, the package from it; generates an app of
@@ -90,12 +83,12 @@ export async function outsideScene(options: {
 		cwd: options.scratch,
 		encoding: "utf8",
 	}).trim();
-	const registry = served(upstream.endsWith("/") ? upstream : `${upstream}/`, [
+	const registry = await served(upstream.endsWith("/") ? upstream : `${upstream}/`, [
 		options.tarballs,
 		outside,
 	]);
 	try {
-		const origin = await registry.origin;
+		const { origin } = registry;
 		const npmrc = `@o3co:registry=${origin}/\n@x:registry=${origin}/\n`;
 		const project = (dir: string) => {
 			const path = at(dir);
@@ -134,6 +127,6 @@ export async function outsideScene(options: {
 		}
 		return "generated from a registry, installed by version and checked; zod pointed elsewhere refused";
 	} finally {
-		registry.stop();
+		await registry.stop();
 	}
 }
