@@ -68,6 +68,24 @@ export function memoryRecords<T extends Json>(now: () => number, size: DeferredS
 			},
 		};
 	};
+	/** Writes the next of a record of the stand-in over the one read (`held`), answering what it holds after. */
+	const apply = (key: string, held: ReturnType<typeof live>, next: Next<T>) => {
+		if (next === undefined) return held?.value;
+		if ("remove" in next) {
+			kept.delete(key);
+			return undefined;
+		}
+		const ms = next.lifetimeMs;
+		const until =
+			ms === undefined
+				? (held?.until ?? Number.POSITIVE_INFINITY)
+				: ms === "endless"
+					? Number.POSITIVE_INFINITY
+					: // A lifetime under 1 ms is 1 ms, as records keeps it.
+						now() + Math.max(1, ms);
+		kept.set(key, { value: next.value, until });
+		return next.value;
+	};
 	return {
 		/** Keyed sets in memory, as records keeps them, at most `cap` to a key. */
 		keyedSets,
@@ -129,32 +147,57 @@ export function memoryRecords<T extends Json>(now: () => number, size: DeferredS
 				},
 			) => {
 				if (firstKey === secondKey) throw new Error("records changed together are two records");
-				const before = { first: live(firstKey)?.value, second: live(secondKey)?.value };
+				const read = { first: live(firstKey), second: live(secondKey) };
+				const before = { first: read.first?.value, second: read.second?.value };
 				const watched = (p.watch?.(before.first, before.second) ?? []).map(
 					(key) => live(key)?.value,
 				);
 				const decided = p.decide(before.first, before.second, watched);
-				const apply = (key: string, was: T | undefined, next: Next<T>) => {
-					if (next === undefined) return was;
-					if ("remove" in next) {
-						kept.delete(key);
-						return undefined;
-					}
-					const ms = next.lifetimeMs;
-					const held = live(key);
-					const until =
-						ms === undefined
-							? (held?.until ?? Number.POSITIVE_INFINITY)
-							: ms === "endless"
-								? Number.POSITIVE_INFINITY
-								: now() + ms;
-					kept.set(key, { value: next.value, until });
-					return next.value;
-				};
 				return {
-					first: { before: before.first, after: apply(firstKey, before.first, decided.first) },
-					second: { before: before.second, after: apply(secondKey, before.second, decided.second) },
+					first: { before: before.first, after: apply(firstKey, read.first, decided.first) },
+					second: { before: before.second, after: apply(secondKey, read.second, decided.second) },
 				};
+			},
+			/**
+			 * Changes records of this stand-in as one: the keys, and the ones `watch` names from what they
+			 * hold, as records' `changeRecords` does (nothing can come between, in memory).
+			 */
+			changeRecords: async (
+				keys: readonly string[],
+				p: {
+					readonly watch?: (read: readonly (T | undefined)[]) => readonly string[];
+					readonly decide: (
+						read: readonly (T | undefined)[],
+						watched: readonly (T | undefined)[],
+					) => { readonly targets?: readonly Next<T>[]; readonly watched?: readonly Next<T>[] };
+				},
+			) => {
+				if (keys.length === 0) throw new Error("records changed together name one at least");
+				if (new Set(keys).size !== keys.length) {
+					throw new Error("records changed together are named once each");
+				}
+				// Each record read once, before the decision, and written over what was read.
+				const held = new Map<string, ReturnType<typeof live>>();
+				const readOnce = (key: string) => {
+					if (!held.has(key)) held.set(key, live(key));
+					return held.get(key)?.value;
+				};
+				const read = keys.map(readOnce);
+				const named = p.watch?.(read) ?? [];
+				const decided = p.decide(read, named.map(readOnce));
+				const nexts = new Map<string, Next<T>>();
+				const set = (key: string, next: Next<T>) => {
+					if (next === undefined) return;
+					if (nexts.has(key)) throw new Error("a record changed together is written once");
+					nexts.set(key, next);
+				};
+				for (const [at, key] of keys.entries()) set(key, decided.targets?.[at]);
+				for (const [at, key] of named.entries()) set(key, decided.watched?.[at]);
+				const after = new Map(
+					[...held].map(([key, was]) => [key, apply(key, was, nexts.get(key))] as const),
+				);
+				const changed = (key: string) => ({ before: held.get(key)?.value, after: after.get(key) });
+				return { targets: keys.map(changed), watched: named.map(changed) };
 			},
 		},
 		deferred: {
