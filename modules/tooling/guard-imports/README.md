@@ -20,6 +20,7 @@
   - G32: shipped code writes the narrower's `internal` (a property of that name holding the type `Narrower.internal` takes), which reaches private addresses, only in the packages its owner's manifest lists in `internalBy`; each listed package writes one (the `internal-by` internal module).
 
 ## Not here
+- Hostile code: the rules hold our own code to its design, written the ordinary way; a form written to slip past them, a dependency's behaviour, prototype or reflection tricks, custom loaders and file-system races are review's.
 - The budget, the documents, the vocabulary and the source's contents (the clock, randomness, branches, the network): `guard`, which runs these rules beside its own.
 - The kinds' order and roles: given by the caller, in the kind words it holds.
 
@@ -32,7 +33,7 @@
 - Checks are derived from the repository's current state. Nothing is enumerated, and there is no place to write exceptions.
 - G29 reads a test file's imports: a `./module` (its own package's by path) is composed, a `./testing` value named `…StandIn` composes its package, and an adapter composes its owner; a stand-in named otherwise, or a composition built elsewhere or at run time, is missed, not reported. A package contributes to a bridge when its shipped code takes one of the bridge's `extensionPoint` values.
 - G29 counts feature bridges only: a foundation bridge's points collect operational counts that decide no answer a test reads. Were one to collect what decides answers, the scope is to be looked at again.
-- Internal modules `recorded` (G30), `taken` (G31) and `internal-by` (G32).
+- Internal modules `recorded` (G30), `taken` (G31) and `internal-by` (G32); `facts`, what each source file says, read by one lexical program.
 
 ## Depends on
 - `typescript`, `pnpm` (asks it for the workspace's packages).
