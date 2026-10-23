@@ -1,6 +1,8 @@
 /** The kinds a package's manifest names, each the one word the product and its checks read. */
 export const kinds = {
 	common: "common",
+	/** The contract of a wire an outside system speaks with the provider; no workspace dependency, not product. */
+	protocol: "protocol",
 	foundation: "foundation",
 	capability: "capability",
 	feature: "feature",
@@ -14,7 +16,7 @@ export type Kind = (typeof kinds)[keyof typeof kinds];
 
 /** Kinds from the bottom up: a kind may depend on its own level and those below. */
 export const kindOrder: readonly (readonly Kind[])[] = [
-	[kinds.common],
+	[kinds.common, kinds.protocol],
 	[kinds.foundation],
 	[kinds.capability],
 	[kinds.feature],
