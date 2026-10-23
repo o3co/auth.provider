@@ -251,12 +251,21 @@ it("keeps nothing of a registration a revocation reaches as its record is writte
 	const post = await browser("sam");
 	const options = (await post("options")).body as unknown as Options;
 	const response = softwareAuthenticator().create(options, { origin: testOrigin });
-	// The revocation lands as passkeys writes the record, before it asks whether the subject was revoked.
-	store.beforeNext("putIfAbsent", "webauthn-store.credentials", () => revoke("sam"));
+	// The revocation lands as passkeys writes the record, before it asks again whether the subject was
+	// revoked: the record alone (`putIfAbsent`), or with its list as one (`batchAcross`), whichever comes.
+	let revoked = false;
+	const revokeOnce = async () => {
+		if (revoked) return;
+		revoked = true;
+		await revoke("sam");
+	};
+	store.beforeNext("putIfAbsent", "webauthn-store.credentials", revokeOnce);
+	store.beforeNext("batchAcross", "webauthn-store.credentials", revokeOnce);
 	expect(await post("verify", { response })).toEqual({
 		status: 401,
 		body: { error: "unauthorized" },
 	});
+	expect(revoked).toBe(true);
 	const kims = await browser("kim");
 	const theirs = (await kims("options")).body as unknown as Options;
 	// The id the revoked registration wrote is free again: nothing of it was kept.
