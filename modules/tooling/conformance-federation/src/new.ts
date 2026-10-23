@@ -46,6 +46,7 @@ function settingsOf(idp: IdpScene): Record<string, unknown> {
 /** Federation grants' own section: the page, the connections and, where the scene sets it, the lodging limit. */
 const grantsSection = (at: GrantsPart) => ({
 	page: at.page,
+	...(at.loginPage ? { "login-page": at.loginPage } : {}),
 	connections: Object.fromEntries(
 		at.connections.map((c) => [
 			c.name,

@@ -116,6 +116,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/login-gates':
+        specifier: workspace:*
+        version: link:../../identity/login-gates
       '@mod/rate-limit':
         specifier: workspace:*
         version: link:../../foundation/rate-limit
