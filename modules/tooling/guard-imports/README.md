@@ -25,7 +25,7 @@
 - The kinds' order and roles: given by the caller, in the kind words it holds.
 
 ## Offers
-- `readWorkspace` (root → its packages, as pnpm lists them, minus the root), `scopeOf` (packages, rules, where findings go → the scope every rule reads), `surfacesOf` (packages → each one's public surface).
+- `readWorkspace` (root → its packages, as pnpm lists them, minus the root), `scopeOf` (packages, rules, where findings go → the scope every rule reads: what a manifest declares apart from what a source is seen to say, each file's `facts` by one lexical program over every package's sources and the files the caller adds (a fork's helper), and the package whose directory holds a path), `surfacesOf` (packages → each one's public surface).
 - `importRules` (scope, surfaces): every rule above, reported through the scope; `importViolations` (packages, rules → the findings).
 - The readers the other checks build on: `parse`, `importsOf`, `importedNames`, `packageOf`; `budgetsAsTest`, whether a file counts as a test (a published contract test suite does).
 
