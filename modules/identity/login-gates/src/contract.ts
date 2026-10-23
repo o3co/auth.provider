@@ -96,14 +96,19 @@ export const amrSources = extensionPoint<AmrSource>("login-gates.amr-sources", {
 	keyOf: (source) => source.name,
 });
 
-/** A path on the public origin a login may return to, contributed by the module that owns it. */
+/**
+ * A path on the public origin a login may return to, contributed by the module that owns it; with
+ * `segment`, the paths one name segment below it instead (letters, digits, `-` or `_`, up to 64),
+ * as a route that takes a name there.
+ */
 export interface ReturnPath {
 	readonly path: string;
+	readonly segment?: true;
 }
 
 export const returnPaths = extensionPoint<ReturnPath>("login-gates.return-paths", {
 	multiplicity: "keyed",
-	keyOf: (p) => p.path,
+	keyOf: (p) => (p.segment ? `${p.path}/*` : p.path),
 });
 
 /** A caller told when a login it asked for opens after a gate held it. */
