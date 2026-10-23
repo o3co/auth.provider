@@ -1,8 +1,13 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BootRefused } from "@mod/kernel";
 import { describe, expect, it } from "vitest";
-import { legacyVariablesWarning, unreadLegacyVariables } from "../src/contract.ts";
+import {
+	legacyVariablesCheck,
+	legacyVariablesWarning,
+	unreadLegacyVariables,
+} from "../src/contract.ts";
 
 async function files(...contents: string[]): Promise<string[]> {
 	const dir = await mkdtemp(join(tmpdir(), "config-files-"));
@@ -57,5 +62,49 @@ describe("legacyVariablesWarning", () => {
 
 	it("tells nothing for none", () => {
 		expect(legacyVariablesWarning([])).toBeUndefined();
+	});
+});
+
+describe("legacyVariablesCheck", () => {
+	const set = { OAUTH_ACCESS_TOKEN_EXPIRES_IN: "60", CORE_DEPLOYMENT_MODE: "multi-secret" };
+	const refusalsOf = (error: unknown) =>
+		BootRefused.is(error) ? error.refusals.map((r) => `${r.where}: ${r.reason}`) : [];
+
+	it("warns by default, and under warn, naming each and never a value", async () => {
+		const paths = await files("a = 1");
+		const warning =
+			"2 variables named in 0.17 are set and never read: CORE_DEPLOYMENT_MODE, OAUTH_ACCESS_TOKEN_EXPIRES_IN; see docs/migration.md";
+		expect(await legacyVariablesCheck({ files: paths, env: set })).toBe(warning);
+		expect(
+			await legacyVariablesCheck({ files: paths, env: { ...set, APP_LEGACY_VARIABLES: "warn" } }),
+		).toBe(warning);
+		expect(await legacyVariablesCheck({ files: paths, env: { PATH: "/bin" } })).toBeUndefined();
+	});
+
+	it("refuses boot under refuse, naming each and never a value, and passes with none set", async () => {
+		const paths = await files("a = 1");
+		const env = { ...set, APP_LEGACY_VARIABLES: "refuse" };
+		const refused = await legacyVariablesCheck({ files: paths, env }).then(() => [], refusalsOf);
+		expect(refused).toEqual([
+			"config-files: 2 variables named in 0.17 are set and never read: CORE_DEPLOYMENT_MODE, OAUTH_ACCESS_TOKEN_EXPIRES_IN; remove them, or set APP_LEGACY_VARIABLES to warn or ignore; see docs/migration.md",
+		]);
+		expect(JSON.stringify(refused)).not.toMatch(/60|multi-secret/);
+		const none = { PATH: "/bin", APP_LEGACY_VARIABLES: "refuse" };
+		expect(await legacyVariablesCheck({ files: paths, env: none })).toBeUndefined();
+	});
+
+	it("checks nothing under ignore", async () => {
+		const paths = await files("a = 1");
+		const env = { ...set, APP_LEGACY_VARIABLES: "ignore" };
+		expect(await legacyVariablesCheck({ files: paths, env })).toBeUndefined();
+	});
+
+	it("refuses boot at APP_LEGACY_VARIABLES for any other value, never showing it", async () => {
+		const paths = await files("a = 1");
+		for (const value of ["", "Warn", "off", "refuse "]) {
+			const env = { ...set, APP_LEGACY_VARIABLES: value };
+			const refused = await legacyVariablesCheck({ files: paths, env }).then(() => [], refusalsOf);
+			expect(refused, value).toEqual(["APP_LEGACY_VARIABLES: one of warn, refuse or ignore"]);
+		}
 	});
 });

@@ -55,10 +55,39 @@ export async function unreadLegacyVariables(source: ConfigSource): Promise<reado
 
 /** The boot's warning for the names `unreadLegacyVariables` gives: how many and which; none for none. */
 export function legacyVariablesWarning(names: readonly string[]): string | undefined {
-	if (names.length === 0) return undefined;
+	return names.length === 0 ? undefined : `${namedIn017(names)}; see docs/migration.md`;
+}
+
+/** How many and which, in the warning's words and the refusal's. */
+function namedIn017(names: readonly string[]): string {
 	const [count, verb] =
 		names.length === 1 ? ["1 variable", "is"] : [`${names.length} variables`, "are"];
-	return `${count} named in 0.17 ${verb} set and never read: ${names.join(", ")}; see docs/migration.md`;
+	return `${count} named in 0.17 ${verb} set and never read: ${names.join(", ")}`;
+}
+
+/** The variable an app's entry reads to choose what the check does: `warn` (unset), `refuse` or `ignore`. */
+const modeVariable = "APP_LEGACY_VARIABLES";
+
+/**
+ * The boot's check for 0.17's variables left in `source.env`, as `APP_LEGACY_VARIABLES` there says:
+ * unset or `warn`, the warning `legacyVariablesWarning` gives, or none; `refuse`, a refused boot
+ * naming them where any is set; `ignore`, nothing, as nothing is read. Any other value refuses boot
+ * at the variable, never showing it. The names come in order, never their values.
+ */
+export async function legacyVariablesCheck(source: ConfigSource): Promise<string | undefined> {
+	const mode = source.env[modeVariable] ?? "warn";
+	if (mode === "ignore") return undefined;
+	if (mode !== "warn" && mode !== "refuse") {
+		throw new BootRefused([{ where: modeVariable, reason: "one of warn, refuse or ignore" }]);
+	}
+	const names = await unreadLegacyVariables(source);
+	if (mode === "warn" || names.length === 0) return legacyVariablesWarning(names);
+	throw new BootRefused([
+		{
+			where: "config-files",
+			reason: `${namedIn017(names)}; remove them, or set ${modeVariable} to warn or ignore; see docs/migration.md`,
+		},
+	]);
 }
 
 const setOf = (env: ConfigSource["env"]) =>
