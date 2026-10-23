@@ -7,7 +7,13 @@ import {
 	policySettings,
 	type RefusalReason,
 } from "../src/contract.ts";
-import { admitAddresses, admitUrl, credentialRefusal, type Rules } from "../src/policy.ts";
+import {
+	admitAddresses,
+	admitUrl,
+	credentialRefusal,
+	type Rules,
+	remedyOf,
+} from "../src/policy.ts";
 
 const rules: Rules = {
 	allow: [],
@@ -111,6 +117,12 @@ describe("the addresses of a plain-internal pair", () => {
 		]) {
 			expect(addresses(list), list.join()).toBe("admitted");
 		}
+	});
+
+	it("tell, refused as plain-public, to name the pair in plain-ipv4 where its name answers an IPv6 address that does not reach", () => {
+		const remedy = remedyOf("plain-public", "http://ledger.internal:9092/verify", rules);
+		expect(remedy).toContain("write the URL with https, or point the name at the private network");
+		expect(remedy).toContain("outbound.plain-ipv4");
 	});
 
 	it("are refused as plain-public where one is public, in either order, beside loopback too", () => {
