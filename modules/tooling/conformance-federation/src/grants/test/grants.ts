@@ -20,7 +20,8 @@ const worker = (id: string): ClientScene => ({
 	kind: "confidential",
 	method: "client_secret_basic",
 	secret: secretOf(id),
-	grants: ["client_credentials"],
+	// Holding grants takes no OAuth grant of its own, so the scene needs none composed.
+	grants: [],
 	scopes: ["read"],
 	federationGrants: { connections: ["calendar"], returnUris: [back] },
 });
