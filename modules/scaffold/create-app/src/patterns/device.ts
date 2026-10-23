@@ -13,5 +13,6 @@ export const device: Pattern = {
 		grants: [...(simpleWeb.features.grants ?? []), "@mod/device-grant"],
 	},
 	areas: ["keys", "identity", "code", "oauth", "device", "ops"],
-	conformanceAdd: [],
+	// The token endpoint's own checks (client authentication, introspection, CORS, DPoP) take its tokens.
+	conformanceAdd: ["@mod/client-credentials"],
 };
