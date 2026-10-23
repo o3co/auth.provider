@@ -20,10 +20,11 @@ import {
 	policyOf,
 	policySettings,
 } from "@mod/outbound-policy";
-import { type PasskeyWitness, passkeyWitnesses } from "@mod/passkeys";
+import { passkeyWitnesses } from "@mod/passkeys";
 import { passkeyWitnessContract, passkeyWitnessProblems } from "@mod/passkeys/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import witnessHttp from "../src/module.ts";
+import type { LedgerWitness } from "../src/witness.ts";
 
 const credential = randomBytes(32).toString("hex");
 const now = 1_800_000_000_000;
@@ -127,9 +128,13 @@ const settings = (more: Record<string, unknown> = {}) => ({
 	credential,
 	...more,
 });
-const collected = contract<readonly PasskeyWitness[]>("test.witnesses");
+/** The witnesses contributed, as this adapter makes them: its own type, which keeps `clear`. */
+const collected = contract<readonly LedgerWitness[]>("test.witnesses");
 const collector = defineModule({ name: "test-collector" }, (m) => [
-	m.provide(collected).by((c) => c.collect(passkeyWitnesses)),
+	// The module contributes witnessAt's answer, so what it contributed is that type.
+	m
+		.provide(collected)
+		.by(async (c) => (await c.collect(passkeyWitnesses)) as readonly LedgerWitness[]),
 ]);
 async function open(section: unknown = settings(), outbound: Record<string, unknown> = {}) {
 	const logged = recordingLog();

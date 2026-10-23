@@ -41,8 +41,13 @@ function kindOf(error: unknown): string {
 	return "no-answer";
 }
 
+/** The witness this adapter makes: `passkeys`' witness, with the ledger's clear it still offers. */
+export interface LedgerWitness extends PasskeyWitness {
+	clear(subject: string): Promise<void>;
+}
+
 /** The passkey witness kept at the operator's ledger: every call asks it, nothing is kept here. */
-export function witnessAt(parts: WitnessParts): PasskeyWitness {
+export function witnessAt(parts: WitnessParts): LedgerWitness {
 	const { urls, out, credential, narrower, heldMs, now, warn } = parts;
 	/** Logs why the ledger failed, by the call and its kind or status alone, and answers unavailable. */
 	const failed = (call: Call, why: { reason: string } | { status: number }) => {
