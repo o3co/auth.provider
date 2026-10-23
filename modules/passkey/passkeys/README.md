@@ -11,7 +11,7 @@
 ## Offers
 - `passkeys`: a challenge the same for everyone, made for a requester, and the assertion of a discoverable passkey by that requester → subject, challenge time, user verified, backup eligible; or a refusal.
 - `registrations`: options for a subject's new passkey, and keeping the one a response creates → the credential, or a refusal (the ceremony's, `unreadable`, `no-challenge`, `conflict`, `full`, `revoked`).
-  - A caller's check (`admitted`) is asked before the record is listed and once after; its write's record (by token) becomes a passkey only as the last write, both asks admitting. A `false` (`revoked`), a throw or a failed list ends it, best effort.
+  - A caller's check (`admitted`) is asked before the record is written (listed, on a store that cannot write both as one) and once after; its write's record (by token) becomes a passkey only as the last write, both asks admitting. A `false` (`revoked`), a throw or a failed list ends it, best effort.
   - Left: a revocation after the second ask is not seen; a registration stopped, or failing to end, leaves its record pending: if listed, it counts toward `max-credentials` until removed or `cleared`.
   - The caller answers for who the subject is: only a module that authenticated it may ask.
   - A registration answers when its challenge was made (`challengedAt`). `listed` (id, nickname, transports, backup state, and when registered where kept), `renamed` (`renamed` / `unknown`) and `removed` (`removed`: this call ended it; `empty`: none left) take only the subject's own.
@@ -29,6 +29,7 @@
 - A user handle is made on a subject's first options and kept. Handles and credential ids are written and compared only in `webauthn`'s canonical form; a credential that would not read back is refused before a write. A record read in another shape is unavailable.
 - A credential id its holder lists is refused at registration. One no holder lists, left by a registration that failed before its list or found its subject full, is taken over; the loser answers `conflict`. Options exclude the subject's own. `conflict` tells the caller that some subject lists an id; ids are high-entropy, made by the authenticator: it answers only for an id known.
 - The count is written only over the count judged; a lost race is `raced`.
+- On a store that changes both spaces as one, a registration writes the record and the list together, as a removal, an end and a clear change them: a list names an id exactly while its record names the subject, pending or a passkey.
 - A pending record is no passkey to every read: none to assert (`unknown-credential`), list, rename or count.
 - A removed passkey leaves its holder's list, which ends its use, and its record is stripped to its subject: no key, count or name. Every read takes it as removed: no passkey (`unknown-credential`), a count `raced`, an id a new registration may take over. A record only another subject holds is never stripped.
 - A store that cannot tell is unavailable (`passkeys`), never a refusal; so is a witness that cannot read or write, wherever a settle runs.

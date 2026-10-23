@@ -1,4 +1,4 @@
-import { type Ceremonies, challengeOf, type Verification } from "@mod/webauthn";
+import { type Ceremonies, type Credential, challengeOf, type Verification } from "@mod/webauthn";
 import type { RegistrationRefusal, Registrations } from "../contract.ts";
 import type { Asked } from "../holders/holders.ts";
 import type { KeptChallenges, KeptPasskeys } from "../records.ts";
@@ -36,6 +36,44 @@ async function settled(check: Promise<boolean>, undo: () => Promise<unknown>): P
 
 /** Registrations of passkeys, each answering a challenge made for its subject. */
 export function registrationsOver(p: RegistrationParts): Registrations {
+	/**
+	 * Keeps an attested credential where the store writes its record and the list as one: asked
+	 * before the write, so a revoked registration writes nothing, and once more after it.
+	 */
+	const joined = async (
+		subject: string,
+		credential: Credential,
+		nickname: string | undefined,
+		challengedAt: number,
+		admitted: (challengedAt: number) => Promise<boolean>,
+	) => {
+		if (!(await admitted(challengedAt))) return refused("revoked");
+		// Made before the write, so a write sent again writes the same token, and an end can name it.
+		const written = p.records.writeToken();
+		/** Ends what this write left, if it was written: off the list, its record stripped, and settled. */
+		const end = async () => {
+			const removed = await p.records.ended(subject, credential.id, written);
+			await p.settle(subject, "removal", removed.removed && removed.empty);
+		};
+		// A write whose answer is lost may have landed: ended, as no ask after it can run.
+		const wrote = await p.records
+			.joined(subject, credential, p.max, nickname, written)
+			.catch(async (error) => {
+				await end().catch(() => undefined);
+				throw error;
+			});
+		if (wrote !== "written") return refused(wrote);
+		// Once more, written and listed: a revocation landing between the first ask and the write ends it.
+		if (!(await settled(admitted(challengedAt), end))) return refused("revoked");
+		// Usable only now, both asks having admitted. Not this write's record any more (removed or cleared): nothing registered.
+		if ((await p.records.activated(credential.id, written)) !== "activated") {
+			await end();
+			return refused("conflict");
+		}
+		// The mark follows the write; one that cannot be set leaves the passkey as written.
+		await p.settle(subject, "registration");
+		return { kind: "registered" as const, credential, challengedAt };
+	};
 	return {
 		creation: async (subject) => {
 			const handle = await p.records.handleFor(subject, p.freshHandle());
@@ -60,6 +98,7 @@ export function registrationsOver(p: RegistrationParts): Registrations {
 			);
 			if (attested.kind === "refused") return attested;
 			const { credential } = attested;
+			if (p.records.together) return joined(subject, credential, nickname, opened.at, admitted);
 			const wrote = await p.records.written(subject, credential, p.max, nickname);
 			if (typeof wrote === "string") return refused(wrote);
 			/** Strips this write's pending record alone: another registration's answers for itself. */

@@ -17,12 +17,12 @@ import {
 	webauthnConfig,
 } from "@mod/webauthn/testing";
 import { expect, it } from "vitest";
-import { registrations } from "../src/contract.ts";
-import passkeysModule from "../src/module.ts";
-import { keptChallenges, keptPasskeys } from "../src/records.ts";
-import { registrationsOver } from "../src/registration/registrations.ts";
-import { passkeysConfig } from "../src/testing.ts";
-import { memoryStores, writeToken } from "./stores.ts";
+import { memoryStores, writeToken } from "../../../test/stores.ts";
+import { registrations } from "../../contract.ts";
+import passkeysModule from "../../module.ts";
+import { keptChallenges, keptPasskeys } from "../../records.ts";
+import { passkeysConfig } from "../../testing.ts";
+import { registrationsOver } from "../registrations.ts";
 
 type Options = CreationOptions & { excludeCredentials: { id: string }[] };
 
