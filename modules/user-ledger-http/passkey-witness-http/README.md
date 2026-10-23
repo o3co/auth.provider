@@ -1,7 +1,7 @@
 # passkey-witness-http
 
 ## Responsibilities
-- Contributes `passkeys`' witness kept at the operator's HTTP ledger: whether a subject carries the mark, setting it to a token unless one is set, removing it only where it is a token's, and removing it, each asked of the ledger through `outbound`.
+- Contributes `passkeys`' witness kept at the operator's HTTP ledger: whether a subject carries the mark and its token, setting it to a token unless one is set, removing it only where it is a token's, and removing it, each asked of the ledger through `outbound`.
 - Reads each answer once, at this boundary, into the witness's answer.
 
 ## Not here
@@ -10,18 +10,18 @@
 ## Offers
 - Composition definition only (a contribution to `passkeys.witnesses`). Opt-in: no axis's default, so composing `passkeys` alone never brings it.
 - `./testing`: `passkeyWitnessHttpConfig`, the section of a test's configuration.
-  - `witnessLedger`, a fake ledger keeping the witness as an operator's ledger does, behind a credential of its own: its answer to these calls (none for a call not its own) and the section pointing passkey-witness-http at it, for a scene or an operator's trial.
+  - `witnessLedger`, a fake ledger keeping the witness as an operator's ledger does (its read naming the mark's token), behind a credential of its own: its answer to these calls (none for a call not its own) and the section pointing passkey-witness-http at it, for a scene or an operator's trial.
 - Operator section: `read-url`, `enroll-url`, `withdraw-url` and `clear-url` (required: each URL whole, https or a plain-http pair outbound names, no fragment, all four at one origin, `withdraw-url` another target than `clear-url`); `credential` (required: `keys`' `bearerToken` of at least 32 bytes of key material, never a `REPLACE-` sample), sent on every call; `timeout` (default 5s) and `max-response-size`, each narrowing outbound's cap, written with its unit.
 - The calls: `POST` to the URL as written, nothing added; `Content-Type` and `Accept: application/json`; `Authorization: Bearer {credential}`. A write's `deadline` is the `kernel` clock's epoch milliseconds when it is sent, plus the time outbound holds the call to (`outbound-policy`'s `outbound.limits` for the call: `timeout`, or outbound's own where shorter).
 
   | Call | Body | Answer read | Read as |
   |---|---|---|---|
-  | read | `{"subject"}` | `200`, a JSON object with `enrolled`, a boolean | whether the subject carries the mark |
+  | read | `{"subject"}` | `200`, a JSON object with `enrolled`, a boolean, and where it is `true` the mark's `token`, a non-empty string exactly as enroll sent it | whether the subject carries the mark (`read`), and its token (`markedWith`) |
   | enroll | `{"subject", "token", "deadline"}` | `200`, a JSON object with `owner`, a boolean | whether the mark is that token's |
   | withdraw | `{"subject", "token", "deadline"}` | `204`, once the ledger judged the token and removed the mark where it was the token's | withdrawn, or left as another's or none |
   | clear | `{"subject", "deadline"}` | `204` | removed |
 
-  Any other answer, `404` included, is unavailable: a subject the ledger does not know is never read as unmarked.
+  Any other answer, `404` included, is unavailable: a subject the ledger does not know is never read as unmarked, and a marked answer naming no token is never read as another call's.
 
 ## Invariants
 - Nothing is kept between calls: each asks the ledger again.

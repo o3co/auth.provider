@@ -44,7 +44,7 @@ const calls = [
 
 /**
  * A fake ledger keeping the passkey witness as an operator's ledger does, behind a credential of its
- * own: a mark per subject, set only where none is, withdrawn only by its token. Its answer to passkey-witness-http's calls (none for a
+ * own: a mark per subject, set only where none is, read with its token, withdrawn only by its token. Its answer to passkey-witness-http's calls (none for a
  * call not its own), and the section pointing passkey-witness-http at it once it listens at `base`.
  */
 export function witnessLedger() {
@@ -59,7 +59,10 @@ export function witnessLedger() {
 			}
 			const { subject, token } = JSON.parse(call.body) as { subject?: string; token?: string };
 			const held = String(subject);
-			if (call.path === "/passkey-witness/read") return { json: { enrolled: marks.has(held) } };
+			if (call.path === "/passkey-witness/read") {
+				const token = marks.get(held);
+				return { json: token === undefined ? { enrolled: false } : { enrolled: true, token } };
+			}
 			if (call.path === "/passkey-witness/enroll") {
 				if (!marks.has(held)) marks.set(held, String(token));
 				return { json: { owner: marks.get(held) === token } };
