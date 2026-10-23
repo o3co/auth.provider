@@ -8,5 +8,6 @@ export {
 	federationArea,
 	federationScene,
 	type GrantsPart,
+	grantsLoginPage,
 	type IdpScene,
 } from "./area.ts";
