@@ -4,7 +4,11 @@ import { recordingLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { memoryStores, writeToken } from "../../../test/stores.ts";
 import { type KeptPasskeys, keptPasskeys } from "../../records.ts";
-import { passkeyWitnessContract, passkeyWitnessStandIn } from "../../testing.ts";
+import {
+	passkeyWitnessContract,
+	passkeyWitnessProblems,
+	passkeyWitnessStandIn,
+} from "../../testing.ts";
 import { holdersOver } from "../holders.ts";
 
 const fresh = () => randomBytes(32).toString("base64url");
@@ -166,6 +170,63 @@ it("is unavailable while the witness cannot be read or written, the passkey writ
 });
 
 passkeyWitnessContract("the witness in memory", async () => passkeyWitnessStandIn().witness);
+passkeyWitnessContract(
+	"the witness in memory, without markedWith",
+	async () => passkeyWitnessStandIn("passkey-witness", { markedWith: false }).witness,
+);
+
+it("offers the token of the mark from the witness in memory, and leaves it out when asked to", () => {
+	expect(typeof passkeyWitnessStandIn().witness.markedWith).toBe("function");
+	expect(passkeyWitnessStandIn("w", { markedWith: false }).witness.markedWith).toBeUndefined();
+});
+
+it("names each way a witness's markedWith breaks its promise", async () => {
+	/** The witness in memory, its markedWith answering as `lie` says from what it holds. */
+	const lying = (lie: (subject: string, marks: Map<string, string>) => string | undefined) => {
+		const stand = passkeyWitnessStandIn();
+		return { ...stand.witness, markedWith: async (subject: string) => lie(subject, stand.marks) };
+	};
+	const cases: Record<string, ReturnType<typeof lying>> = {
+		"a token for a subject never marked": lying(() => "made-up"),
+		"another token than the one its enroll owned": lying((s, m) =>
+			m.has(s) ? "other" : undefined,
+		),
+		"none for a marked subject": lying(() => undefined),
+	};
+	for (const [what, witness] of Object.entries(cases)) {
+		expect(await passkeyWitnessProblems(witness), what).not.toEqual([]);
+	}
+	// One that answers a withdrawn mark's token still.
+	const stand = passkeyWitnessStandIn();
+	const remembered = new Map<string, string>();
+	const sticky = {
+		...stand.witness,
+		enroll: async (subject: string, token: string) => {
+			const owned = await stand.witness.enroll(subject, token);
+			if (owned) remembered.set(subject, token);
+			return owned;
+		},
+		markedWith: async (subject: string) => stand.marks.get(subject) ?? remembered.get(subject),
+	};
+	expect(await passkeyWitnessProblems(sticky)).toContain(
+		"markedWith answers the token of a mark withdrawn",
+	);
+	// One that answers a cleared mark's token still.
+	const kept = passkeyWitnessStandIn();
+	const before = new Map<string, string>();
+	const unforgetting = {
+		...kept.witness,
+		clear: async (subject: string) => {
+			const token = kept.marks.get(subject);
+			if (token !== undefined) before.set(subject, token);
+			await kept.witness.clear(subject);
+		},
+		markedWith: async (subject: string) => kept.marks.get(subject) ?? before.get(subject),
+	};
+	expect(await passkeyWitnessProblems(unforgetting)).toContain(
+		"markedWith answers the token of a mark cleared",
+	);
+});
 
 it("answers held as the settle saw it with the mark agreeing, so a store lost right after is caught on the next ask", async () => {
 	let lose: (() => Promise<void>) | undefined;
