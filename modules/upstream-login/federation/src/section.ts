@@ -23,7 +23,7 @@ export const section = z.strictObject({
 		)
 		.prefault({})
 		.describe(
-			"Each IdP by name (1 to 32 lowercase letters, digits and `-`, not starting with `-`): its `type`, `upstream-amr` (the upstream's amr values mapped to ours; none by default; mapping one to `mfa`, say, trusts the upstream's claim for that amr and any acr it satisfies, such as `urn:o3co:acr:mfa`), `fresh-login-allowance` (how long before a demand for a fresh login the upstream may say the user logged in, for `prompt=login` and a max age, from 0s to 5m; the type's clock allowance, `clock-skew`, by default) and the type's own settings. With none, every login answers not found, and each boot warns `federation.no_idps`.",
+			"Each IdP by name (1 to 32 lowercase letters, digits and `-`, not starting with `-`): its `type`, `upstream-amr` (the upstream's amr values mapped to ours; none by default; mapping one to `mfa`, say, trusts the upstream's claim for that amr and any acr it satisfies, such as `urn:o3co:acr:mfa`, and lets its logins past the local second factor), `fresh-login-allowance` (how long before a demand for a fresh login the upstream may say the user logged in, for `prompt=login` and a max age, from 0s to 5m; the type's clock allowance, `clock-skew`, by default) and the type's own settings. With none, every login answers not found, and each boot warns `federation.no_idps`.",
 		),
 	landing: urlSetting({ schemes: ["https"] })
 		.optional()
