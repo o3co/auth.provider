@@ -2,10 +2,10 @@ import { createHash, randomBytes } from "node:crypto";
 import { isUnavailable } from "@mod/kernel";
 import { recordingLog } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
-import { holdersOver } from "../src/holders/holders.ts";
-import { type KeptPasskeys, keptPasskeys } from "../src/records.ts";
-import { passkeyWitnessContract, passkeyWitnessStandIn } from "../src/testing.ts";
-import { memoryStores, writeToken } from "./stores.ts";
+import { memoryStores, writeToken } from "../../../test/stores.ts";
+import { type KeptPasskeys, keptPasskeys } from "../../records.ts";
+import { passkeyWitnessContract, passkeyWitnessStandIn } from "../../testing.ts";
+import { holdersOver } from "../holders.ts";
 
 const fresh = () => randomBytes(32).toString("base64url");
 
