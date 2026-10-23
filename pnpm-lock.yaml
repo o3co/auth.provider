@@ -4473,6 +4473,9 @@ importers:
       '@mod/keys':
         specifier: workspace:*
         version: link:../../foundation/keys
+      '@mod/ledger-wire':
+        specifier: workspace:*
+        version: link:../ledger-wire
       '@mod/mfa-witness':
         specifier: workspace:*
         version: link:../../second-factor/mfa-witness
