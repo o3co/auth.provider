@@ -15,25 +15,6 @@ export interface Section<T> {
 	 * configuration value.
 	 */
 	checkAtBoot?(value: T, client: Client): string | undefined;
-	/**
-	 * The section's value from a client's metadata document, before the schema checks it: nothing
-	 * when the section takes nothing from it, or `refused` naming the field (RFC 7591's word) that
-	 * refuses the client, never its text. The value holds the section's own keys alone, never the
-	 * document's, so where a check fails holds no document text. A section that widens what a
-	 * client may do takes from a document only what a document may say.
-	 */
-	fromDocument?(
-		document: Readonly<Record<string, unknown>>,
-		from: DocumentSource,
-	): { readonly value: unknown } | { readonly refused: string } | undefined;
-	/** The document's fields (RFC 7591's words) `fromDocument` reads. */
-	readonly reads?: readonly string[];
-}
-
-/** Where a client's metadata document came from: its client id, and the host its source checked. */
-export interface DocumentSource {
-	readonly id: string;
-	readonly host: string;
 }
 
 export interface Client {

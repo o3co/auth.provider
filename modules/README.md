@@ -124,7 +124,8 @@ What each module contains is described by that module's contract card (each modu
 | Clients whose id is a URL: fetching and judging the metadata document there, building its record from the sections' copies, keeping it, the ceiling they are allowed within | contribution / setting | clients-cimd |
 | Client metadata sections | extension point kind | clients |
 | Checking a client record as a source's is held (`checkRecord`) | contract | clients |
-| Each section's copy from a client's metadata document (`fromDocument`, `reads`) | contribution | the module that contributes that section |
+| Copying a section from a client's metadata document (`documentCopies`, `DocumentSource`) | extension point kind | client-documents |
+| Each section's copy from a client's metadata document | contribution | the module that contributes that section |
 | Each client metadata field | vocabulary | the module that reads that field |
 | Allowed grants, allowed scopes and audiences (client metadata fields), and what a client may be issued and may see | vocabulary / setting / contract | client-allowance |
 | The audience a request asks for: the one rule (none reads nothing), asked with each issuance's default and ceiling | extension point kind / contract | grants |

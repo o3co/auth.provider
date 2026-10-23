@@ -1,6 +1,13 @@
 import type { Client, Section } from "@mod/clients";
 import { describe, expect, it } from "vitest";
-import { answerTo, matches, redirects, redirectsAt, registrable } from "../src/contract.ts";
+import {
+	answerTo,
+	matches,
+	redirects,
+	redirectsAt,
+	redirectsCopy,
+	registrable,
+} from "../src/contract.ts";
 
 /** A client whose `authorize` section registers these redirect URIs. */
 const registering = (uris: readonly string[]): Client => ({
@@ -90,16 +97,17 @@ it("adds the answer's parameters to the redirect URI's own query, leaving out on
 	);
 });
 
-describe("redirect-uris: a document's copy", () => {
+describe("redirect-uris: the copy client-documents collects", () => {
 	const from = { id: "https://app.example/c", host: "app.example" };
 	it("copies redirect_uris under the section's own key, as given, for the schema to check", async () => {
-		expect(redirects.reads).toEqual(["redirect_uris"]);
+		expect(redirectsCopy.section).toBe(redirects);
+		expect(redirectsCopy.reads).toEqual(["redirect_uris"]);
 		const uris = ["https://app.example/cb", "http://app.example/cb"];
-		expect(redirects.fromDocument?.({ redirect_uris: uris, client_name: "App" }, from)).toEqual({
+		expect(redirectsCopy.copy({ redirect_uris: uris, client_name: "App" }, from)).toEqual({
 			value: { "redirect-uris": uris },
 		});
 		const odd = { "a-key-of-the-document": "x" };
-		expect(redirects.fromDocument?.({ redirect_uris: odd }, from)).toEqual({
+		expect(redirectsCopy.copy({ redirect_uris: odd }, from)).toEqual({
 			value: { "redirect-uris": odd },
 		});
 		const checked = await redirects.schema["~standard"].validate({ "redirect-uris": odd });
@@ -107,6 +115,6 @@ describe("redirect-uris: a document's copy", () => {
 	});
 
 	it("copies nothing from a document without redirect_uris", () => {
-		expect(redirects.fromDocument?.({ client_name: "App" }, from)).toBeUndefined();
+		expect(redirectsCopy.copy({ client_name: "App" }, from)).toBeUndefined();
 	});
 });

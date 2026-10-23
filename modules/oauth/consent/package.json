@@ -13,6 +13,7 @@
 	},
 	"dependencies": {
 		"@mod/audit": "workspace:*",
+		"@mod/client-documents": "workspace:*",
 		"@mod/clients": "workspace:*",
 		"@mod/csrf": "workspace:*",
 		"@mod/http": "workspace:*",

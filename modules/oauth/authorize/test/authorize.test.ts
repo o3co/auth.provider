@@ -6,6 +6,7 @@ import type { AuditEvent } from "@mod/audit";
 import { auditStandIn } from "@mod/audit/testing";
 import clientAllowanceModule from "@mod/client-allowance/module";
 import { allowancesFor } from "@mod/client-allowance/testing";
+import { type DocumentCopy, documentCopies } from "@mod/client-documents";
 import clientsModule from "@mod/clients/module";
 import { clientsConfig, confidentialClient, publicClient } from "@mod/clients/testing";
 import { type IdTokenRequest, idTokens } from "@mod/code-grant";
@@ -41,7 +42,7 @@ import { rateLimitStandIn } from "@mod/rate-limit/testing";
 import { type ReauthStore, reauthStore, type StoredReauth } from "@mod/reauth";
 import reauthModule from "@mod/reauth/module";
 import { memoryRecords } from "@mod/records/testing";
-import { redirects } from "@mod/redirect-uris";
+import { redirects, redirectsCopy } from "@mod/redirect-uris";
 import { redirectsFor } from "@mod/redirect-uris/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Session, sessions } from "@mod/session";
@@ -511,6 +512,15 @@ describe("authorize: the section", () => {
 			window: 60,
 		});
 		expect(redirects.schema["~standard"].validate({})).toEqual({ value: { "redirect-uris": [] } });
+	});
+
+	it("contributes the redirect URIs' document copy to client-documents", async () => {
+		const seen = contract<readonly DocumentCopy[]>("test.copies-seen");
+		const probe = defineModule({ name: "copies-probe" }, (m) => [
+			m.provide(seen).by((c) => c.collect(documentCopies)),
+		]);
+		const { app } = await serve({ extra: [probe] });
+		expect(app.get(seen)).toContain(redirectsCopy);
 	});
 });
 

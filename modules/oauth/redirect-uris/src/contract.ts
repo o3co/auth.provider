@@ -1,3 +1,4 @@
+import type { DocumentCopy } from "@mod/client-documents";
 import type { Client, Section } from "@mod/clients";
 import { z } from "zod";
 import { answerTo, matches, registrable } from "./uris.ts";
@@ -24,12 +25,20 @@ export const redirects: Section<Redirects> = {
 				"The redirect URIs the client may ask for, each matched as written: https, http to a loopback host, or a private-use reverse-domain scheme, with no fragment, userinfo or query parameter named like a response parameter.",
 			),
 	}),
+};
+
+// As given, under the section's own key: the schema checks each URI, so a document key never shows.
+function copied(document: Readonly<Record<string, unknown>>) {
+	return document.redirect_uris === undefined
+		? undefined
+		: { value: { "redirect-uris": document.redirect_uris } };
+}
+
+/** The section's copy from a client's metadata document, for `client-documents`' `documentCopies`. */
+export const redirectsCopy: DocumentCopy = {
+	section: redirects,
 	reads: ["redirect_uris"],
-	// As given, under the section's own key: the schema checks each URI, so a document key never shows.
-	fromDocument: (document) =>
-		document.redirect_uris === undefined
-			? undefined
-			: { value: { "redirect-uris": document.redirect_uris } },
+	copy: copied,
 };
 
 /**

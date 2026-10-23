@@ -10,6 +10,7 @@
 	},
 	"dependencies": {
 		"@mod/client-allowance": "workspace:*",
+		"@mod/client-documents": "workspace:*",
 		"@mod/clients": "workspace:*",
 		"@mod/code-grant": "workspace:*",
 		"@mod/grants": "workspace:*",
