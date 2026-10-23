@@ -187,6 +187,7 @@ What each module contains is described by that module's contract card (each modu
 | The index of first-party grants: each grant type name and the module that serves it, as words only, never that module's contract | contract | grants |
 | Telling of each access token issued from a session (session issuances) | extension point kind | grants |
 | Shape of OAuth error responses | contract | token-endpoint |
+| Refusing boot for a grant a registered client is allowed that no composed module serves | contract | token-endpoint |
 | grant type names | vocabulary | the module that supplies that grant |
 | Kinds of revocable tokens | extension point kind | token-control |
 | Device Authorization Grant (device authorization, the verification interface, the device code grant) | contract / setting | device-grant |
