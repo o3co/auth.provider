@@ -35,7 +35,10 @@ describe("a reset composed with mfa-flows and its stores", () => {
 		const pending = await s.heldLogin("ann");
 		await s.enrollCode("bob");
 		s.events.length = 0;
-		expect(await s.app.get(mfaReset).reset("ann", { requestedBy: "ticket-7" })).toBe(2);
+		expect(await s.app.get(mfaReset).run("ann", { requestedBy: "ticket-7" })).toMatchObject({
+			kind: "done",
+			removed: 2,
+		});
 		expect(s.events).toEqual([
 			{
 				kind: "mfa.reset",
@@ -72,7 +75,7 @@ describe("a reset composed with mfa-flows and its stores", () => {
 		const s = await serve();
 		await s.enrollCode("cal");
 		const before = runtime.clock.now() - 1000;
-		expect(await s.app.get(mfaReset).reset("cal")).toBe(2);
+		expect(await s.app.get(mfaReset).run("cal")).toMatchObject({ kind: "done", removed: 2 });
 		const boundaries = s.app.get(revocations);
 		expect(await boundaries.compare("cal", before, "sessions")).toBe("revoked");
 		expect(await boundaries.compare("cal", before, "delegations")).toBe("valid");

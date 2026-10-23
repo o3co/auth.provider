@@ -29,6 +29,6 @@ it("resets over the contracts it is given, releasing mfa-flows' lockout by its n
 		m.provide(audit).by(() => ({ record: () => {}, lost: () => ({}) })),
 	]);
 	const app = await assemble({ modules: [parts, resetModule], config: kernelConfig() });
-	expect(await app.get(mfaReset).reset("ann")).toBe(1);
+	expect(await app.get(mfaReset).run("ann")).toMatchObject({ kind: "done", removed: 1 });
 	expect(released).toEqual([["mfa", true]]);
 });
