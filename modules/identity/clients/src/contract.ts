@@ -89,6 +89,11 @@ export interface Clients {
 	 */
 	checkRecord(record: ClientRecord): Promise<readonly RecordRefusal[] | undefined>;
 	authenticate(request: HttpRequest): Promise<Authentication>;
+	/**
+	 * The clients the operator registered, in the settings' order: the `i`th is at
+	 * `clients.registered.<i>`, where a boot check names it by its place, never its id.
+	 */
+	registered(): readonly Client[];
 	/** The names of the ways a client can authenticate here, built in and contributed. */
 	methods(): readonly string[];
 	/** The algorithms those methods take signed credentials in, each once. */
