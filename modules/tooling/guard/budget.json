@@ -19,5 +19,6 @@
 	"laidOutValues": 2,
 	"testFile": "(^|/)test/|\\.test\\.ts$|\\.case\\.ts$",
 	"fixtureFile": "(^|/)test/fixtures/|\\.vectors\\.ts$",
+	"generatedFile": "\\.bundled\\.mjs$",
 	"integrationTestFile": "\\.integration\\.test\\.ts$"
 }
