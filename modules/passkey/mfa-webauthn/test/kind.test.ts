@@ -93,7 +93,7 @@ async function asserted(
 it("declares a counting second factor that guessing cannot beat", async () => {
 	expect(await boot()).toMatchObject({
 		kind: "webauthn",
-		amr: ["hwk", "swk"],
+		amr: ["pop"],
 		addsSecondFactor: true,
 		guessable: false,
 		counts: true,
@@ -108,14 +108,14 @@ it("binds a credential that need not be discoverable, under the name the operato
 		user: { name: "Example", displayName: "Example" },
 		authenticatorSelection: { residentKey: "discouraged", userVerification: "preferred" },
 	});
-	expect(amr).toEqual(["hwk"]);
+	expect(amr).toEqual(["pop"]);
 	const { proof, kept, show: request } = await asserted(kind, factor, authenticator);
 	expect(request).toMatchObject({
 		allowCredentials: [{ id: credentialIdOf(factor) }],
 	});
 	expect(await kind.verify(factor.secret, factor.state, proof, kept)).toMatchObject({
 		kind: "valid",
-		amr: ["hwk"],
+		amr: ["pop"],
 	});
 });
 
@@ -166,14 +166,14 @@ it("asks the user verification the operator sets", async () => {
 	expect(enrolled.show).toMatchObject({ authenticatorSelection: { userVerification: "required" } });
 });
 
-it("names a credential that may be backed up swk, at binding and at every assertion", async () => {
+it("names a credential that may be backed up pop too, at binding and at every assertion: nothing tells how a key is kept", async () => {
 	const kind = await boot();
 	const authenticator = softwareAuthenticator({ backupEligible: true });
 	const { factor, amr } = await bound(kind, authenticator);
-	expect(amr).toEqual(["swk"]);
+	expect(amr).toEqual(["pop"]);
 	const { proof, kept } = await asserted(kind, factor, authenticator);
 	expect(await kind.verify(factor.secret, factor.state, proof, kept)).toMatchObject({
-		amr: ["swk"],
+		amr: ["pop"],
 	});
 });
 

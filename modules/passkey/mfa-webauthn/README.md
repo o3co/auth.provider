@@ -14,7 +14,7 @@
 
 ## Invariants
 - A subject's WebAuthn factors share one user handle, made by `webauthn`'s rule (`freshHandle`), apart from its passkeys'; a subject holding none gets a new one.
-- The amr is `swk` for a credential that may be backed up, else `hwk` (RFC 8176). Here `hwk` means "not backup eligible"; `webauthn-login`'s `hwk` covers every passkey, whatever its backup eligibility.
+- The amr is `pop` (OpenID Connect EAP ACR Values), whatever the credential's backup eligibility: no attestation is asked, so nothing tells how the key is kept, in hardware or software.
 - A credential bound twice to one subject is a duplicate. One subject's credential is never compared with another's, even under the same credential id: each factor is checked within its subject's user handle.
 - A factor's credential is read as `webauthn` reads its own (`credentialOf`). A credential, a pending secret or a kept challenge that does not read is unavailable, as a store fault; no challenge kept is invalid. An assertion whose count did not go up is replayed; any other refusal is invalid. The factor keeps the count and backup state the assertion gives.
 - An authenticator that keeps no count answers alike each time: one proof passes once only because the caller hands each kept challenge over once (`mfa-flows` takes it with the attempt).
