@@ -175,6 +175,7 @@ What each module contains is described by that module's contract card (each modu
 | Verifying one token type for exchange | contribution | the module that verifies that type |
 | Verifying Apple's and Google's id_tokens for exchange, which client of this provider may exchange each app's id_token, and taking each once | contribution / setting / data | exchange-id-tokens |
 | The session grant: an access token for the user of the browser's session, recorded to that session | grant contribution | session-grant |
+| The client credentials grant | grant contribution | client-credentials |
 | Sender binding (binding kinds, reading a request's binding, the shape of a binding), admitting a request presenting a token at a resource | extension point kind / contract | sender-binding |
 | Certificate-bound tokens: the `x5t#S256` binding kind, certificate path validation and revocation checking, trust anchors | contribution / setting | mtls |
 | Extra checks added to access token verification | extension point kind | tokens |
