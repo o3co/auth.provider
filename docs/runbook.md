@@ -239,14 +239,13 @@ Nothing mends it by itself, and no release adds the claim later. Mend it by a re
 - counts toward `passkeys.max-credentials` for that subject, and is not shown by `listed`, so the user does not see it;
 - lets nobody in: an assertion checks the record's subject.
 
-To free it:
+No tool frees such an entry yet; a passkey reset (`passkey-reset`, which empties the subject's list and leaves the other subject's record as it is) is planned and not in this release. What can be done now:
 
 1. Upgrade every host to 0.19, and let the requests the 0.18 hosts took finish.
-2. Reset the subject's passkeys: the reset empties the list and leaves the other subject's record as it is. It ends the subject's usable passkeys as well: tell the user that every passkey of theirs will go and they register again.
+2. Where the id is known, a removal naming it (`passkey-registration`'s `/remove`, from the subject's own session) takes the entry off and leaves the other subject's record as it is. The user does not see the entry to name it, and no tool lists such entries yet.
+3. Where a user meets `passkeys.max-credentials` because of it, raising the limit (at most 100) gives them room to register; it frees nothing.
 
-Registering the same credential again does not free it: a registration's options exclude every id the subject's list names, this one included, so the authenticator holding it refuses to create it. Registering another credential leaves the entry as it is. A removal naming the id (`passkey-registration`'s `/remove`) takes the entry off and leaves the other subject's record as it is, where the id is known; the user does not see it to name it.
-
-No tool lists such entries yet.
+Registering the same credential again does not free it: a registration's options exclude every id the subject's list names, this one included, so the authenticator holding it refuses to create it. Registering another credential leaves the entry as it is. `mfaReset.run` does not touch passkeys.
 
 ## Name resolution
 
