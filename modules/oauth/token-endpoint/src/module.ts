@@ -7,7 +7,8 @@ import { requestsPerSource } from "@mod/rate-limit";
 import { clientCredentialsIn } from "./built-in/client-credentials.ts";
 import { composedRule } from "./built-in/targets.ts";
 import { tokenEndpointLocation } from "./contract.ts";
-import { endpointIn, tokenPath } from "./route/endpoint.ts";
+import { endpointIn } from "./endpoint-in/endpoint-in.ts";
+import { tokenPath } from "./route/endpoint.ts";
 import { section } from "./section.ts";
 
 /** A browser's public client may send a body's type and its DPoP proof, and read the nonce, the challenge and the wait. */

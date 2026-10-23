@@ -1,25 +1,11 @@
-import { type Audit, audit, declaredAudit } from "@mod/audit";
+import { type Audit, declaredAudit } from "@mod/audit";
 import { clientAllowance } from "@mod/client-allowance";
-import { type Client, type Clients, clients } from "@mod/clients";
-import {
-	type Grant,
-	type GrantInput,
-	type SessionIssuance,
-	sessionIssuances,
-	type TargetRule,
-	targets,
-} from "@mod/grants";
+import type { Client, Clients } from "@mod/clients";
+import type { Grant, GrantInput, SessionIssuance, TargetRule } from "@mod/grants";
 import { type HttpRequest, type HttpResponse, jsonAnswer, type Route } from "@mod/http";
-import type { BuildContext } from "@mod/kernel";
 import { determinedSource } from "@mod/request-source";
-import {
-	type Binding,
-	type ClientBindings,
-	clientBindings,
-	type SenderBindings,
-	senderBinding,
-} from "@mod/sender-binding";
-import { type Tokens, tokens } from "@mod/tokens";
+import type { Binding, ClientBindings, SenderBindings } from "@mod/sender-binding";
+import type { Tokens } from "@mod/tokens";
 import events from "../audit-events.ts";
 import { authenticateClient, oauthError } from "../contract.ts";
 import { answeredBody } from "./answer.ts";
@@ -80,19 +66,6 @@ export function grantInputOf(parts: {
 		...issuanceFor(tokens, grantType, binding, told, added),
 	};
 }
-
-/** The endpoint's handler over the contracts the assembly gives, dispatching to the grants composed. */
-export const endpointIn = async (c: BuildContext<unknown>, composed: readonly Grant[]) =>
-	tokenEndpoint(
-		await c.get(clients),
-		await c.get(tokens),
-		await c.collect(sessionIssuances),
-		await c.get(senderBinding),
-		await c.get(clientBindings),
-		new Map(composed.map((g) => [g.grantType, g])),
-		await c.get(targets),
-		await c.get(audit),
-	);
 
 /** The longest list of added claims' names an audit event holds. */
 const namesLimit = 2048;
