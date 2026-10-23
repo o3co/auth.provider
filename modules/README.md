@@ -229,8 +229,8 @@ What each module contains is described by that module's contract card (each modu
 | A code by mail as a second factor, the proof of the account's address before a first binding, and their mail purposes | contribution / setting | mfa-email |
 | The wording of mfa-email's mails, which a deployment replaces | contribution | mfa-email-wording |
 | Budget numbers and invariant checks | setting | guard |
-| Kind names | vocabulary | combinations |
-| Kind order and the checks each kind gets | setting | guard |
+| Kind names, their order, and which way a dependency between kinds may point | vocabulary / contract | kinds |
+| The checks each kind gets | setting | guard |
 | Conformance test base | contract | conformance |
 | Running each pattern's conformance areas on its app, and leaving out as `not-in-pattern` the scenes it cannot hold | contract | conformance |
 | Starting the legacy build, and registering legacy set-ups | contract | conformance-legacy |
