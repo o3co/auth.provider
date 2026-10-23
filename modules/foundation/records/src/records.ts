@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { type Clock, isUnavailable, type Log, type Random, Unavailable } from "@mod/kernel";
 import {
+	type BatchWrite,
 	codePointOrder,
 	type Expiry,
 	type Json,
@@ -269,12 +270,120 @@ const recordKey = (target: Target) => ({
 const sameTarget = (a: Target, b: Target) =>
 	a.place.space.name === b.place.space.name && a.key === b.key;
 
+/** What one record held before a change of records as one, and holds after. */
+export interface ChangedRecord<T = Json> {
+	readonly before: T | undefined;
+	readonly after: T | undefined;
+}
+
 /**
- * Changes two records as one, from what both hold and what `watch` names besides: `decide` runs on
- * what was read, and everything read is held by a condition of the one write, so another writer of
- * any of them first makes it read all again, `watch` too, and decide again; it must be pure. A
- * record `watch` names that is the first or second is read once and held once. Every place is on
- * one store that writes as one (`changesTogether`); the records sit in spaces of one guarantee.
+ * Changes records as one: the targets, and the records `watch` names from what they hold. `decide`
+ * runs on what was read and answers the next of each, by naming (the targets', then the watched
+ * ones'); everything read is held by a condition of the one write, so another writer of any of them
+ * first makes it read all again, `watch` too, and decide again; it must be pure. A record named
+ * twice is read once, held once, and written from one naming at most. Every place is on one store
+ * that writes as one (`changesTogether`); the records sit in spaces of one guarantee.
+ */
+export async function changeRecords(p: {
+	readonly targets: readonly Target[];
+	readonly watch?: (read: readonly (Json | undefined)[]) => readonly Target[];
+	readonly decide: (
+		read: readonly (Json | undefined)[],
+		watched: readonly (Json | undefined)[],
+	) => { readonly targets?: readonly Next<Json>[]; readonly watched?: readonly Next<Json>[] };
+}): Promise<{
+	readonly targets: readonly ChangedRecord[];
+	readonly watched: readonly ChangedRecord[];
+}> {
+	const [anchor] = p.targets;
+	if (!anchor) throw new Error("records changed together name one at least");
+	const target = anchor.place.store;
+	const batchAcross = target.batchAcross?.bind(target);
+	if (!batchAcross) throw new Error("the store writes no records of two partitions as one");
+	const checked = (named: Target) => {
+		if (named.place.store !== target) throw new Error("records changed together share one store");
+		claim(named.place, "records");
+	};
+	p.targets.forEach((named, at) => {
+		checked(named);
+		if (p.targets.slice(0, at).some((earlier) => sameTarget(earlier, named))) {
+			throw new Error("records changed together are named once each");
+		}
+	});
+	for (let attempt = 0; attempt < attempts; attempt++) {
+		const marked = markedAt(anchor.place, await target.now());
+		// Each record held once: the targets, then what the watch names besides.
+		const held: { target: Target; version: string | undefined; value: Json | undefined }[] =
+			await Promise.all(
+				p.targets.map(async (named) => {
+					const { entry } = await target.get(recordKey(named));
+					return { target: named, version: entry?.version, value: entry?.value };
+				}),
+			);
+		const read = held.map((h) => h.value);
+		const named = p.watch?.(read) ?? [];
+		for (const watched of named) {
+			checked(watched);
+			if (held.some((h) => sameTarget(h.target, watched))) continue;
+			const { entry } = await target.get(recordKey(watched));
+			held.push({ target: watched, version: entry?.version, value: entry?.value });
+		}
+		const watchedAt = named.map((w) => held.findIndex((h) => sameTarget(h.target, w)));
+		const decided = p.decide(
+			read,
+			watchedAt.map((at) => held[at]?.value),
+		);
+		const nexts: Next<Json>[] = held.map(() => undefined);
+		const set = (at: number, next: Next<Json>) => {
+			if (next === undefined) return;
+			if (nexts[at] !== undefined) throw new Error("a record changed together is written once");
+			nexts[at] = next;
+		};
+		for (const [at] of p.targets.entries()) set(at, decided.targets?.[at]);
+		for (const [n, at] of watchedAt.entries()) set(at, decided.watched?.[n]);
+		const conditions = held.map((h) =>
+			h.version === undefined
+				? { key: recordKey(h.target), absent: true as const }
+				: { key: recordKey(h.target), version: h.version },
+		);
+		const writes = held.flatMap((h, at): BatchWrite[] => {
+			const next = nexts[at];
+			if (next === undefined) return [];
+			if ("remove" in next) return [{ key: recordKey(h.target), remove: true as const }];
+			return [{ key: recordKey(h.target), put: next.value, expiry: expiryOf(next.lifetimeMs) }];
+		});
+		// Nothing to write: what was read is confirmed by a mark of its own, held by the same conditions.
+		const sent =
+			writes.length > 0
+				? writes
+				: [
+						{
+							key: { ...recordKey(anchor), name: "settled" },
+							put: true,
+							expiry: { kind: "after", ms: 1 },
+						} as const,
+					];
+		const written = await settled(() => batchAcross(conditions, sent, marked));
+		if (written.kind === "late" || written.kind === "reused") throw new Unavailable("records");
+		if (written.kind === "conflict") continue;
+		const changedAt = (at: number): ChangedRecord => {
+			const was = held[at]?.value;
+			const next = nexts[at];
+			if (next === undefined) return { before: was, after: was };
+			return { before: was, after: "remove" in next ? undefined : next.value };
+		};
+		return {
+			targets: p.targets.map((_, at) => changedAt(at)),
+			watched: watchedAt.map(changedAt),
+		};
+	}
+	throw new Unavailable("records");
+}
+
+/**
+ * Changes two records as one, from what both hold and what `watch` names besides, as
+ * `changeRecords` does; only the two are written. A record `watch` names that is the first or
+ * second is read once and held once.
  */
 export async function changeTogether<A extends Json, B extends Json>(p: {
 	readonly first: Target;
@@ -286,75 +395,114 @@ export async function changeTogether<A extends Json, B extends Json>(p: {
 		watched: readonly (Json | undefined)[],
 	) => { readonly first?: Next<A>; readonly second?: Next<B> };
 }): Promise<{
-	readonly first: { readonly before: A | undefined; readonly after: A | undefined };
-	readonly second: { readonly before: B | undefined; readonly after: B | undefined };
+	readonly first: ChangedRecord<A>;
+	readonly second: ChangedRecord<B>;
 }> {
 	const { first, second } = p;
-	const target = first.place.store;
-	const batchAcross = target.batchAcross?.bind(target);
-	if (!batchAcross) throw new Error("the store writes no records of two partitions as one");
-	if (second.place.store !== target) throw new Error("records changed together share one store");
-	if (sameTarget(first, second)) throw new Error("records changed together are two records");
-	claim(first.place, "records");
-	claim(second.place, "records");
-	for (let attempt = 0; attempt < attempts; attempt++) {
-		const marked = markedAt(first.place, await target.now());
-		const [a, b] = await Promise.all([target.get(recordKey(first)), target.get(recordKey(second))]);
-		const before = {
-			first: a.entry?.value as A | undefined,
-			second: b.entry?.value as B | undefined,
-		};
-		// Each record held once: the first and second, then what the watch names besides.
-		const held: { target: Target; version: string | undefined; value: Json | undefined }[] = [
-			{ target: first, version: a.entry?.version, value: a.entry?.value },
-			{ target: second, version: b.entry?.version, value: b.entry?.value },
-		];
-		const named = p.watch?.(before.first, before.second) ?? [];
-		for (const watched of named) {
-			if (watched.place.store !== target)
-				throw new Error("records changed together share one store");
-			if (held.some((h) => sameTarget(h.target, watched))) continue;
-			claim(watched.place, "records");
-			const { entry } = await target.get(recordKey(watched));
-			held.push({ target: watched, version: entry?.version, value: entry?.value });
-		}
-		const watchedValues = named.map((w) => held.find((h) => sameTarget(h.target, w))?.value);
-		const decided = p.decide(before.first, before.second, watchedValues);
-		const conditions = held.map((h) =>
-			h.version === undefined
-				? { key: recordKey(h.target), absent: true as const }
-				: { key: recordKey(h.target), version: h.version },
-		);
-		const writeOf = (record: Target, next: Next<Json>) => {
-			if (next === undefined) return [];
-			if ("remove" in next) return [{ key: recordKey(record), remove: true as const }];
-			return [{ key: recordKey(record), put: next.value, expiry: expiryOf(next.lifetimeMs) }];
-		};
-		const writes = [...writeOf(first, decided.first), ...writeOf(second, decided.second)];
-		// Nothing to write: what was read is confirmed by a mark of its own, held by the same conditions.
-		const sent =
-			writes.length > 0
-				? writes
-				: [
-						{
-							key: { ...recordKey(first), name: "settled" },
-							put: true,
-							expiry: { kind: "after", ms: 1 },
-						} as const,
-					];
-		const written = await settled(() => batchAcross(conditions, sent, marked));
-		if (written.kind === "late" || written.kind === "reused") throw new Unavailable("records");
-		if (written.kind === "conflict") continue;
-		const afterOf = <T>(was: T | undefined, next: Next<T>) => {
-			if (next === undefined) return was;
-			return "remove" in next ? undefined : next.value;
-		};
-		return {
-			first: { before: before.first, after: afterOf(before.first, decided.first) },
-			second: { before: before.second, after: afterOf(before.second, decided.second) },
-		};
+	if (!changesTogether(first.place.store)) {
+		throw new Error("the store writes no records of two partitions as one");
 	}
-	throw new Unavailable("records");
+	if (second.place.store !== first.place.store) {
+		throw new Error("records changed together share one store");
+	}
+	if (sameTarget(first, second)) throw new Error("records changed together are two records");
+	const { watch } = p;
+	const changed = await changeRecords({
+		targets: [first, second],
+		...(watch ? { watch: ([a, b]) => watch(a as A | undefined, b as B | undefined) } : {}),
+		decide: ([a, b], watched) => {
+			const next = p.decide(a as A | undefined, b as B | undefined, watched);
+			return { targets: [next.first, next.second] };
+		},
+	});
+	const [a, b] = changed.targets;
+	return { first: a as ChangedRecord<A>, second: b as ChangedRecord<B> };
+}
+
+/**
+ * Records of two places changed as one, by key in each, with the records of either place `watch`
+ * names besides, as `changeRecords` does. What is read, and what is decided, is by place: each
+ * place's keys, then its watched ones, in order. Where the places' store cannot, `refuse` (the
+ * builder's) is told, naming `where`: a wiring then maps it with no branch of its own.
+ */
+export function pairedRecordsAcross<A extends Json, B extends Json>(
+	first: Place,
+	second: Place,
+	where: string,
+	refuse: (where: string, reason: string) => never,
+) {
+	if (!changesTogether(first.store)) {
+		refuse(where, "its store writes no records of two partitions as one");
+	}
+	if (second.store !== first.store) throw new Error("records changed together share one store");
+	claim(first, "records");
+	claim(second, "records");
+	type Read = {
+		readonly first: readonly (A | undefined)[];
+		readonly second: readonly (B | undefined)[];
+	};
+	type Changed = {
+		readonly first: readonly ChangedRecord<A>[];
+		readonly second: readonly ChangedRecord<B>[];
+	};
+	return {
+		changeRecords: async (
+			keys: { readonly first: readonly string[]; readonly second: readonly string[] },
+			p: {
+				readonly watch?: (read: Read) => {
+					readonly first?: readonly string[] | undefined;
+					readonly second?: readonly string[] | undefined;
+				};
+				readonly decide: (read: Read) => {
+					readonly first?: readonly Next<A>[] | undefined;
+					readonly second?: readonly Next<B>[] | undefined;
+				};
+			},
+		): Promise<Changed> => {
+			const fixed = keys.first.length;
+			const targets = [
+				...keys.first.map((key) => ({ place: first, key })),
+				...keys.second.map((key) => ({ place: second, key })),
+			];
+			// The watch of the attempt deciding: each attempt runs the watch before its decision.
+			let watched = { first: [] as readonly string[], second: [] as readonly string[] };
+			const split = <T>(fixedOnes: readonly T[], watchedOnes: readonly T[]) => ({
+				first: [...fixedOnes.slice(0, fixed), ...watchedOnes.slice(0, watched.first.length)],
+				second: [...fixedOnes.slice(fixed), ...watchedOnes.slice(watched.first.length)],
+			});
+			const changed = await changeRecords({
+				targets,
+				watch: (read) => {
+					const named = p.watch?.(split(read, []) as unknown as Read) ?? {};
+					watched = { first: named.first ?? [], second: named.second ?? [] };
+					return [
+						...watched.first.map((key) => ({ place: first, key })),
+						...watched.second.map((key) => ({ place: second, key })),
+					];
+				},
+				decide: (read, found) => {
+					const next = p.decide(split(read, found) as unknown as Read);
+					const ofFirst: readonly Next<Json>[] = next.first ?? [];
+					const ofSecond: readonly Next<Json>[] = next.second ?? [];
+					const fixedSecond = keys.second.length;
+					return {
+						targets: [
+							...Array.from({ length: fixed }, (_, at) => ofFirst[at]),
+							...Array.from({ length: fixedSecond }, (_, at) => ofSecond[at]),
+						],
+						watched: [
+							...Array.from({ length: watched.first.length }, (_, at) => ofFirst[fixed + at]),
+							...Array.from(
+								{ length: watched.second.length },
+								(_, at) => ofSecond[fixedSecond + at],
+							),
+						],
+					};
+				},
+			});
+			return split(changed.targets, changed.watched) as unknown as Changed;
+		},
+	};
 }
 
 /** Records under a name made per space from an unguessable secret; the store never receives it. */
