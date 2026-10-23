@@ -6,7 +6,7 @@ import {
 	request as plainRequest,
 } from "node:http";
 import { Agent as TlsAgent, request as tlsRequest } from "node:https";
-import type { Socket } from "node:net";
+import type { LookupFunction, Socket } from "node:net";
 import { isIP, connect as plainConnect } from "node:net";
 import { connect as tlsConnect } from "node:tls";
 import { type Admitted, DestinationRefused, type Limits, type Policy } from "@mod/outbound-policy";
@@ -20,17 +20,23 @@ import {
 
 const unbracketed = (host: string) => host.replace(/^\[(.*)\]$/, "$1");
 
-/** Every address a name resolves to, once; IPv4 ones alone where `family` is 4. */
-export type Resolver = (host: string, family?: 4) => Promise<readonly string[]>;
+/** Every address a name resolves to, once, waiting no longer than the request's deadline. */
+export type Resolver = (name: string, signal: AbortSignal) => Promise<readonly string[]>;
 
-export const systemResolver: Resolver = async (host, family) =>
-	(await resolveName(host, { all: true, verbatim: true, ...(family ? { family } : {}) })).map(
+/** A lookup of every address a name resolves to; IPv4 ones alone where `family` is 4. */
+export type Lookup = (name: string, family?: 4) => Promise<readonly string[]>;
+
+/** The system's lookup in this process: every address, in its order. */
+export const systemLookup: Lookup = async (name, family) =>
+	(await resolveName(name, { all: true, verbatim: true, ...(family ? { family } : {}) })).map(
 		(found) => found.address,
 	);
 
 /** The proxy that carries requests, but to hosts it is told to leave direct; set by the operator, never read from the environment. */
 export interface Route {
 	readonly proxy: URL;
+	/** How the proxy's own name is resolved: as the deployment's own lookups. */
+	readonly resolve: Resolver;
 	readonly authorization?: string;
 	direct(host: string): boolean;
 }
@@ -83,8 +89,11 @@ async function addressesOf(admitted: Admitted, resolve: Resolver, signal: AbortS
 	const deadline = new Promise<never>((_, reject) =>
 		signal.addEventListener("abort", () => reject(unavailable("timeout"))),
 	);
-	// Started inside the chain, so a resolver that throws at once is caught as well.
-	const resolved = Promise.resolve().then(() => resolve(admitted.host));
+	// Started inside the chain, so a resolver that throws at once is caught as well. The name is
+	// resolved as the URL writes it, a trailing dot kept; the lists compare `host`.
+	const resolved = Promise.resolve().then(() =>
+		resolve(unbracketed(admitted.url.hostname), signal),
+	);
 	return Promise.race([resolved, deadline]).catch((error: unknown) => {
 		throw failedAs(error, signal);
 	});
@@ -107,12 +116,34 @@ async function bodyOf(answer: IncomingMessage, maxBytes: number, signal: AbortSi
 }
 
 /** A tunnel to the destination through the proxy, by CONNECT; the proxy resolves the name and checks its addresses. */
-function tunnel(route: Route, admitted: Admitted, signal: AbortSignal) {
+async function tunnel(route: Route, admitted: Admitted, signal: AbortSignal) {
 	const named = writtenAddress(admitted) ?? admitted.host;
 	const target = `${isIP(named) === 6 ? `[${named}]` : named}:${admitted.port}`;
+	// The proxy's name is resolved as the deployment's own, never by this process's own lookup; every
+	// address it answers is offered, so each family is tried in turn within the deadline, as before.
+	const proxyHost = unbracketed(route.proxy.hostname);
+	let addresses: readonly string[] = [proxyHost];
+	if (isIP(proxyHost) === 0) {
+		try {
+			addresses = await route.resolve(proxyHost, signal);
+		} catch (error) {
+			throw failedAs(error, signal);
+		}
+	}
+	const lookup: LookupFunction = (_name, options, answered) => {
+		const found = addresses
+			.filter((address) => !options.family || isIP(address) === options.family)
+			.map((address) => ({ address, family: isIP(address) }));
+		const [first] = found;
+		if (first === undefined) {
+			answered(Object.assign(new Error("no address"), { code: "ENOTFOUND" }), "", 0);
+		} else if (options.all) answered(null, found);
+		else answered(null, first.address, first.family);
+	};
 	return new Promise<Socket>((opened, failed) => {
 		const asking = plainRequest({
-			hostname: unbracketed(route.proxy.hostname),
+			host: proxyHost,
+			lookup,
 			port: route.proxy.port || 80,
 			method: "CONNECT",
 			path: target,

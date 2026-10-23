@@ -5,7 +5,7 @@ import { credentialPolicy } from "@mod/outbound-policy";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { DestinationRefused } from "../src/contract.ts";
 import outboundModule, { outboundOver, section } from "../src/module.ts";
-import type { Resolver } from "../src/transport.ts";
+import type { Lookup } from "../src/transport.ts";
 
 let server: Server;
 let port = 0;
@@ -21,7 +21,7 @@ beforeAll(async () => {
 });
 afterAll(() => new Promise<void>((done) => server.close(() => done())));
 
-const resolve: Resolver = async () => ["127.0.0.1"];
+const resolve: Lookup = async () => ["127.0.0.1"];
 const over = () =>
 	outboundOver(
 		section.parse({
