@@ -134,6 +134,29 @@ const configured = z.string().brand<"ConfiguredUrl">();
 /** A URL url-setting read from an operator's configuration; nothing else makes one, so a caller holding one holds the operator's URL. */
 export type ConfiguredUrl = z.output<typeof configured>;
 
+/**
+ * A path or query with what RFC 3986 holds equivalent spelled one way: an unreserved character
+ * encoded is the character, and the hex of any other encoding upper case (§6.2.2.1, §6.2.2.2).
+ */
+const equivalent = (part: string) =>
+	part.replace(/%([0-9A-Fa-f]{2})/g, (_, hex: string) => {
+		const char = String.fromCharCode(Number.parseInt(hex, 16));
+		return /[A-Za-z0-9\-._~]/.test(char) ? char : `%${hex.toUpperCase()}`;
+	});
+
+/**
+ * Whether two URLs of an operator's configuration name one target: one origin, and a path and a
+ * query RFC 3986 holds equivalent (§6.2.2), whatever their spelling.
+ */
+export function sameTarget(a: ConfiguredUrl, b: ConfiguredUrl): boolean {
+	const [x, y] = [new URL(a), new URL(b)];
+	return (
+		x.origin === y.origin &&
+		equivalent(x.pathname) === equivalent(y.pathname) &&
+		equivalent(x.search) === equivalent(y.search)
+	);
+}
+
 export function urlSetting(rules: UrlRules) {
 	return configured.superRefine((value, context) => {
 		const reason = refusal(value, rules);

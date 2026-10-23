@@ -8,8 +8,9 @@ import {
 	outboundRefusals,
 } from "@mod/outbound-policy";
 import { passkeyWitnesses } from "@mod/passkeys";
+import { sameTarget } from "@mod/url-setting";
 import { section } from "./section.ts";
-import { sameTarget, witnessAt } from "./witness.ts";
+import { witnessAt } from "./witness.ts";
 
 export default defineModule({ name: "passkey-witness-http", section, replicaSafe: true }, (m) => [
 	m.contribute(passkeyWitnesses).by(async (c) => {

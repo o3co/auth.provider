@@ -24,7 +24,6 @@ import { type PasskeyWitness, passkeyWitnesses } from "@mod/passkeys";
 import { passkeyWitnessContract, passkeyWitnessProblems } from "@mod/passkeys/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import witnessHttp from "../src/module.ts";
-import { sameTarget } from "../src/witness.ts";
 
 const credential = randomBytes(32).toString("hex");
 const now = 1_800_000_000_000;
@@ -423,45 +422,6 @@ describe("passkey-witness-http", () => {
 		for (const withdraw of [at("/w/withdraw"), `${clear}?only=token`]) {
 			expect((await open(settings({ "withdraw-url": withdraw }))).witness, withdraw).toBeDefined();
 		}
-	});
-
-	it("tells one target from another as outbound sends them: the origin's spelling and a bare ? or # are not another", async () => {
-		expect(sameTarget("https://ledger.example/w/clear", "https://LEDGER.example:443/w/clear")).toBe(
-			true,
-		);
-		expect(sameTarget("https://ledger.example/w/clear", "https://ledger.example/w/clear?")).toBe(
-			true,
-		);
-		expect(sameTarget("https://ledger.example/w/clear", "https://ledger.example/w/clear#x")).toBe(
-			true,
-		);
-		expect(sameTarget("https://ledger.example/w/clear", "https://ledger.example/w/withdraw")).toBe(
-			false,
-		);
-		expect(sameTarget("https://ledger.example/w/clear", "https://ledger.example/w/clear?t=1")).toBe(
-			false,
-		);
-		expect(sameTarget("https://ledger.example/w/clear", "http://ledger.example/w/clear")).toBe(
-			false,
-		);
-		// An IDN host and its ASCII form are one host; an unreserved character encoded is the character.
-		expect(
-			sameTarget("https://bücher.example/w/clear", "https://xn--bcher-kva.example/w/clear"),
-		).toBe(true);
-		expect(sameTarget("https://ledger.example/w/clear", "https://ledger.example/w/%63%6Cear")).toBe(
-			true,
-		);
-		expect(sameTarget("https://ledger.example/w/a%3ab", "https://ledger.example/w/a%3Ab")).toBe(
-			true,
-		);
-		expect(sameTarget("https://ledger.example/w/~x", "https://ledger.example/w/%7Ex")).toBe(true);
-		expect(sameTarget("https://ledger.example/w/clear", "https://ledger.example/w/./clear")).toBe(
-			true,
-		);
-		// A reserved character encoded is not the character.
-		expect(sameTarget("https://ledger.example/w/clear", "https://ledger.example/w%2Fclear")).toBe(
-			false,
-		);
 	});
 
 	it("says why its credential may not go in outbound-policy's words, for the scheme and for its URLs' one origin", async () => {

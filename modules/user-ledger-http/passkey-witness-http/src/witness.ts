@@ -27,26 +27,6 @@ export interface WitnessParts {
 
 type Call = "read" | "enroll" | "withdraw" | "clear";
 
-/**
- * A path or query with what RFC 3986 calls equivalent spelled one way: an unreserved character
- * encoded is the character, and the hex of any other encoding upper case (§6.2.2.1, §6.2.2.2).
- */
-const equivalent = (part: string) =>
-	part.replace(/%([0-9A-Fa-f]{2})/g, (_, hex: string) => {
-		const char = String.fromCharCode(Number.parseInt(hex, 16));
-		return /[A-Za-z0-9\-._~]/.test(char) ? char : `%${hex.toUpperCase()}`;
-	});
-
-/** Whether two URLs reach one target as outbound sends them: their origin, path and query, whatever their spelling. */
-export function sameTarget(a: string, b: string): boolean {
-	const [x, y] = [new URL(a), new URL(b)];
-	return (
-		x.origin === y.origin &&
-		equivalent(x.pathname) === equivalent(y.pathname) &&
-		equivalent(x.search) === equivalent(y.search)
-	);
-}
-
 const readShape = z.object({ enrolled: z.boolean() });
 const enrollShape = z.object({ owner: z.boolean() });
 
