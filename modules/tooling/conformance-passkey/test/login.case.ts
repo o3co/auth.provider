@@ -62,7 +62,8 @@ function sceneFor(users: string[], login: { requests: number; windowSeconds: num
 			issuer,
 			clients: [
 				confidential("app", [grantType, "refresh_token"]),
-				confidential("other", ["client_credentials"]),
+				// Allowed no grant, so not this one, and the scene needs no other grant composed.
+				confidential("other", []),
 				publicClient("web", [grantType]),
 				publicClient("spa", [grantType, "refresh_token"]),
 			],
