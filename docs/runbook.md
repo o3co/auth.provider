@@ -12,6 +12,7 @@ How to run auth-provider 0.18: Redis, rotating keys, upgrading, and what to watc
 - [Revoking a user from the ledger](#revoking-a-user-from-the-ledger)
 - [Keeping the second-factor witness at the ledger](#keeping-the-second-factor-witness-at-the-ledger)
 - [Second factors left without their claim](#second-factors-left-without-their-claim)
+- [Passkey list entries 0.18 left](#passkey-list-entries-018-left)
 - [Probes and alerts](#probes-and-alerts)
 - [Stopping](#stopping)
 
@@ -229,6 +230,22 @@ Nothing mends it by itself, and no release adds the claim later. Mend it by a re
 1. Upgrade every instance to 0.19, and let the requests the 0.18 instances took finish.
 2. Find the subjects. No tool names them yet. With a second-factor witness, run `pnpm run witness-backfill` with the subjects on standard input; it counts `unclaimed`, never naming a subject, and reads only the subjects you give it, so a count of 0 says nothing of a subject left out. It counts a subject `unclaimed` only where none of its counting factors stands: one holding a sound factor beside a factor without its claim answers `held` or `marked`. So even given every subject, a count of 0 does not show every claim in place. Give it every subject that holds a WebAuthn second factor (from the user ledger, or every subject you know); to find which subjects are `unclaimed`, run it on smaller lists, down to one subject a run. Without a witness, no script finds them. A sign to look into, never proof on its own: under `mfa.mode = required` or with a witness, removing the subject's WebAuthn second factor is refused as the last while another counting factor is listed (a recovery code does not count, so a WebAuthn factor beside codes alone is rightly the last). Reset only once you know the factor holds no claim of its own: with a witness, the backfill answering `unclaimed` for that subject alone tells it; without one, no tool tells it yet.
 3. Tell the user that their security key will be removed and they will bind it again, then reset the subject's second factors as an operator (`mfaReset.run`; where it answers `stopped`, run it again for the same subject). The reset removes the factor (and, with a witness, the mark, as the reset's own write); the user binds the key again, and the new binding writes the factor and its claim in one write.
+
+## Passkey list entries 0.18 left
+
+0.18 wrote a passkey's record and the subject's list apart, and listed an id without checking the record. Where two registrations of one credential id met, a subject's list can be left naming an id whose record is another subject's. Such an entry:
+
+- counts toward `passkeys.max-credentials` for that subject, and is not shown by `listed`, so the user does not see it;
+- lets nobody in: an assertion checks the record's subject.
+
+To free it:
+
+1. Upgrade every host to 0.19, and let the requests the 0.18 hosts took finish.
+2. Reset the subject's passkeys: the reset empties the list and leaves the other subject's record as it is. It ends the subject's usable passkeys as well: tell the user that every passkey of theirs will go and they register again.
+
+Registering the same credential again does not free it: a registration's options exclude every id the subject's list names, this one included, so the authenticator holding it refuses to create it. Registering another credential leaves the entry as it is. A removal naming the id (`passkey-registration`'s `/remove`) takes the entry off and leaves the other subject's record as it is, where the id is known; the user does not see it to name it.
+
+No tool lists such entries yet.
 
 ## Probes and alerts
 
