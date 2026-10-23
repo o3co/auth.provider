@@ -2,7 +2,7 @@
 
 The module cards are the source of truth. Where this page and a card disagree, the card wins. This page orders the steps and points to the cards; the package, the code and the exchange below are built and run against the published packages before each release, so they do not go stale.
 
-It writes an OAuth grant as an npm package outside this repository, modelled on the built-in client credentials grant, and adds it to an app the generator made.
+It writes an OAuth grant as an npm package outside this repository, modelled on the client credentials grant (`client-credentials`), and adds it to an app the generator made.
 
 ## The package
 
@@ -37,7 +37,7 @@ Export the module the app imports at `./module`, as every module of the provider
 
 ## The grant
 
-A grant is a contribution to the `grants` extension point (the `grants` card). This one gives a confidential client a token for itself, within what its allowance lets it ask, as the built-in client credentials grant does (the `token-endpoint` card). `readsAmbient` says the grant reads nothing the request carries beside its parameters; a grant that reads the session's cookie must say `cookie` and check the request's origin itself.
+A grant is a contribution to the `grants` extension point (the `grants` card). This one gives a confidential client a token for itself, within what its allowance lets it ask, as the client credentials grant does (the `client-credentials` card). `readsAmbient` says the grant reads nothing the request carries beside its parameters; a grant that reads the session's cookie must say `cookie` and check the request's origin itself.
 
 <!-- generated:module -->
 ```ts
