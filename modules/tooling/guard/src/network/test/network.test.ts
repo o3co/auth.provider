@@ -46,7 +46,7 @@ describe("G26 the network is reached through outbound, or as a package declares"
 			"src/c.ts fetch",
 			"src/d.ts fetch",
 			"src/e.ts node:dns/promises lookup",
-			"src/f.ts node:child_process",
+			"src/f.ts node:child_process (forks does not name it)",
 			"src/g.ts undici",
 			"src/i.ts fetch",
 			"src/h.ts fetch",
@@ -134,6 +134,29 @@ describe("G27 a package that talks to a server the deployment provides states th
 		};
 		const outbound = { exports: { ".": "./src/contract.ts" }, network: "outbound" };
 		expect(g27(declaring(pkg("@t/out", out, outbound), "- (`network`: `outbound`)"))).toEqual([]);
+	});
+});
+
+describe("a re-export", () => {
+	it("reaches what it re-exports, named or whole", () => {
+		const p = pkg("@t/re-export", {
+			"src/a.ts": 'export { request } from "node:https";\n',
+			"src/b.ts": 'export * from "node:net";\n',
+			"src/c.ts": 'export { exec } from "child_process";\n',
+			"src/d.ts": 'export { default as Redis } from "ioredis";\n',
+			"src/e.ts": 'export type { Socket } from "node:net";\n',
+			"src/f.ts": 'export { default as https } from "node:https";\n',
+			"src/g.ts": 'export { type ChildProcess } from "node:child_process";\n',
+			"src/h.ts": 'export { type RedisOptions } from "ioredis";\n',
+			"src/i.ts": 'import { type RedisOptions } from "ioredis";\nexport type R = RedisOptions;\n',
+		});
+		expect(said(p)).toEqual([
+			"src/a.ts node:https request",
+			"src/b.ts node:net",
+			"src/c.ts node:child_process (forks does not name it)",
+			"src/d.ts ioredis",
+			"src/f.ts node:https",
+		]);
 	});
 });
 
