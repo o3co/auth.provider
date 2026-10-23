@@ -27,7 +27,7 @@
 - Internal modules, and what each is given: `wiring`'s card. The package's module declares the routes.
 - Boot is refused where no revocation follower goes by `mfa`'s `fenceFollower` (`mfa-revocation`): a binding begun before a revocation would bind.
 - Every POST declares `csrf`'s policy, then `rate-limit`'s requests per source, and takes a form or JSON body.
-- The gate asks `mfa` what login requires: nothing lets the login through; a proof or a first enrollment starts a transaction and holds it.
+- A login whose amr holds `mfa` (`mfa-extensions`' `secondFactorAmr`) passes the gate unasked, held to no lockout; for any other, the gate asks `mfa` what login requires: nothing lets the login through; a proof or a first enrollment starts a transaction and holds it.
 - What a POST names (by the body or a header, never a URL; a proof object as its JSON text) and the answers routes share: `requests`' card; a transaction that cannot be used, or whose subject was revoked since it started: `proof`'s. A transaction is tied to its browser by its own cookie (`transactions`).
 - `GET transaction` naming none answers the browser's own transaction, whatever its purpose, by its cookie alone, with its identifier: the page a navigation lands on reads it so. No other route takes a transaction from the cookie alone.
 - A challenge sent is held sealed by `mfa`, and the next attempt takes it once; asking again voids it.
@@ -39,7 +39,7 @@
 - Transactions: one per identifier (256 random bits), kept for `transaction-lifetime`. Its needs say what the place must keep it through (a taken one coming back could finish a login twice); the wiring side meets them.
 
 ## Depends on
-- `kernel`, `http`, `cookies`, `request-source`, `csrf`, `session`, `login-gates`, `subject-revocation`, `rate-limit`, `audit`, `mfa` (composed with it; `proofSteps`, `fenceFollower`), `mfa-reading` (the reading and proving of factors)
+- `kernel`, `http`, `cookies`, `request-source`, `csrf`, `session`, `login-gates`, `subject-revocation`, `rate-limit`, `audit`, `mfa` (composed with it; `proofSteps`, `fenceFollower`), `mfa-reading` (the reading and proving of factors), `mfa-extensions` (`secondFactorAmr`)
 
 ## Vocabulary
 - Transaction: a short-lived record waiting for second-factor confirmation. Its purpose is login, login with a first enrollment, step-up, or enrollment.

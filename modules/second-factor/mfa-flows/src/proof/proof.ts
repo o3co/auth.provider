@@ -2,6 +2,7 @@ import type { Audit } from "@mod/audit";
 import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import { isUnavailable, type Log } from "@mod/kernel";
 import type { LoginGate, Logins } from "@mod/login-gates";
+import { secondFactorAmr } from "@mod/mfa-extensions";
 import type { FactorReading } from "@mod/mfa-reading";
 import type { LockoutPolicy, Lockouts } from "@mod/rate-limit";
 import type { Sessions } from "@mod/session";
@@ -30,9 +31,10 @@ export interface GateParts {
 	readonly transactions: Transactions;
 }
 
-/** The login gate: holds a login whose subject must prove a factor or bind a first one. */
+/** The login gate: holds a login whose subject must prove a factor or bind a first one, unless its amr holds one proved. */
 export function gateOver(p: GateParts): LoginGate["hold"] {
 	return async (_request, facts, done, from) => {
+		if (facts.amr.includes(secondFactorAmr)) return { kind: "pass" as const };
 		const asks = await p.factors.asks(facts.subject);
 		if (asks === "nothing") return { kind: "pass" as const };
 		const enroll = asks === "binding";
