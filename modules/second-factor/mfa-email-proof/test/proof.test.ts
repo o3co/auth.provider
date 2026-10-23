@@ -174,3 +174,11 @@ it("takes the address users stands behind: a session's or a held login's it vouc
 	}
 	expect(sent).toEqual([]);
 });
+
+it("joins mfa-email, so it comes wherever a code by email is composed, and opts in alone", async () => {
+	const { readFile } = await import("node:fs/promises");
+	const manifest = JSON.parse(
+		await readFile(new URL("../package.json", import.meta.url), "utf8"),
+	) as { joins?: unknown; optIn?: unknown };
+	expect([manifest.joins, manifest.optIn]).toEqual([["@mod/mfa-email"], true]);
+});
