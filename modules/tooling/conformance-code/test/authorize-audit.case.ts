@@ -34,7 +34,8 @@ const scene = codeScene({
 	clients: [
 		client("app", defaults),
 		client("third", { ...defaults, firstParty: false }),
-		client("nocode", { ...defaults, grants: ["client_credentials"] }),
+		// Allowed no grant, so not the code, and the scene needs no other grant composed.
+		client("nocode", { ...defaults, grants: [] }),
 		client("nodefault"),
 	],
 	users: [{ identifier: "alice", password: "correct horse battery" }],

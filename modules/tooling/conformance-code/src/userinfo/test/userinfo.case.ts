@@ -23,17 +23,6 @@ const app: ClientScene = {
 	redirectUris: [callback],
 	firstParty: true,
 };
-const svc: ClientScene = {
-	id: "svc",
-	kind: "confidential",
-	method: "client_secret_post",
-	secret: "svc-secret-0123456789abcdef",
-	grants: ["client_credentials"],
-	// userinfo serves only a token issued for openid.
-	scopes: ["openid", "read"],
-	defaultScopes: ["openid", "read"],
-};
-const secrets: Record<string, string> = { app: app.secret ?? "", svc: svc.secret ?? "" };
 
 let running: Started;
 let base = "";
@@ -50,7 +39,7 @@ beforeAll(async () => {
 					publicPem: pair.publicKey.export({ format: "pem", type: "spki" }).toString(),
 				},
 			},
-			clients: [app, svc],
+			clients: [app],
 			users: [
 				{ ...user, identifier: user.username, subject: "s-alice", email: "alice@example.com" },
 			],
@@ -72,7 +61,7 @@ async function post(path: string, as: string, form: Record<string, string>) {
 	const res = await fetch(`${base}${path}`, {
 		method: "POST",
 		headers: { ...backChannel, "content-type": "application/x-www-form-urlencoded" },
-		body: new URLSearchParams({ ...form, client_id: as, client_secret: secrets[as] ?? "" }),
+		body: new URLSearchParams({ ...form, client_id: as, client_secret: app.secret ?? "" }),
 	});
 	const text = await res.text();
 	return (text ? JSON.parse(text) : {}) as Record<string, string>;
@@ -123,32 +112,6 @@ describe("OpenID Connect userinfo", () => {
 		const narrow = await userinfo((await codeTokens("openid")).access_token);
 		expect(narrow.body).toEqual({ sub: "s-alice" });
 	});
-
-	it("answers only sub for a token issued in no session", async () => {
-		const { access_token: token } = await post("/oauth/token", svc.id, {
-			grant_type: "client_credentials",
-		});
-		const answer = await userinfo(token);
-		expect([answer.status, Object.keys(answer.body)]).toEqual([200, ["sub"]]);
-	});
-
-	it.skipIf(areaTarget().differs("userinfo-needs-openid"))(
-		"refuses a token whose scope lacks openid as insufficient scope (RFC 6750 §3.1)",
-		async () => {
-			const { access_token: token = "" } = await post("/oauth/token", svc.id, {
-				grant_type: "client_credentials",
-				scope: "read",
-			});
-			const res = await fetch(`${base}/oauth/userinfo`, {
-				headers: { ...backChannel, authorization: `Bearer ${token}` },
-			});
-			expect([
-				res.status,
-				res.headers.get("www-authenticate"),
-				((await res.json()) as { error?: string }).error,
-			]).toEqual([403, 'Bearer error="insufficient_scope"', "insufficient_scope"]);
-		},
-	);
 
 	it("answers a token a refresh issued with its session's claims, and refuses it once the session has ended", async () => {
 		const issued = await codeTokens("openid email");

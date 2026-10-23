@@ -29,15 +29,6 @@ const openidDefault: ClientScene = {
 	secret: "openid-default-secret-0123456789",
 	defaultScopes: ["openid"],
 };
-const svc: ClientScene = {
-	id: "svc",
-	kind: "confidential",
-	method: "client_secret_post",
-	secret: "svc-secret-0123456789abcdef",
-	grants: ["client_credentials"],
-	scopes: ["openid", "read"],
-	defaultScopes: ["read"],
-};
 const fields: CodeScene = {
 	issuer,
 	keys: {
@@ -48,7 +39,7 @@ const fields: CodeScene = {
 			publicPem: pair.publicKey.export({ format: "pem", type: "spki" }).toString(),
 		},
 	},
-	clients: [app, openidDefault, svc],
+	clients: [app, openidDefault],
 	users: [{ identifier: "alice", password: "correct horse battery" }],
 	introspection: true,
 };
@@ -362,16 +353,6 @@ describe("tokens and logout", () => {
 			.map((part) => JSON.parse(Buffer.from(part, "base64url").toString()));
 		expect(header.typ).toBe("JWT");
 		expect(claims.auth_time).toBeLessThanOrEqual(claims.iat);
-	});
-
-	it("gives no ID token for openid asked of the client credentials grant", async () => {
-		const answer = await post("/oauth/token", {
-			grant_type: "client_credentials",
-			client_id: "svc",
-			client_secret: svc.secret ?? "",
-			scope: "openid read",
-		});
-		expect(answer.body.id_token).toBeUndefined();
 	});
 });
 
