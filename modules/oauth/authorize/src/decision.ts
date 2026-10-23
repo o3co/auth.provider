@@ -1,5 +1,3 @@
-import type { IssuanceRefused } from "@mod/tokens";
-
 /** What a step decides for a request whose redirect URI is trusted; only `route` turns it into an answer. */
 export type Decision =
 	| {
@@ -27,15 +25,6 @@ export const recorded = (error: string, reason: string, description?: string): D
 	error,
 	...(description ? { description } : {}),
 	reason,
-});
-
-/** A refusal by an issuance policy: `access_denied` with its description, recorded with its name and reason. */
-export const policyRefusal = (refused: IssuanceRefused): Decision => ({
-	kind: "refuse",
-	error: "access_denied",
-	...(refused.description ? { description: refused.description } : {}),
-	reason: refused.reason,
-	policy: refused.policy,
 });
 
 /**
