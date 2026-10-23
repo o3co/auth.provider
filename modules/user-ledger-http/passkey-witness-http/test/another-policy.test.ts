@@ -16,7 +16,6 @@ it("logs a refusal a second copy of outbound-policy throws by its reason, not as
 			read: "https://w.example/r",
 			enroll: "https://w.example/e",
 			withdraw: "https://w.example/w",
-			clear: "https://w.example/c",
 		},
 		out: {
 			fetch: async () => {

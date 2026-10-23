@@ -19,10 +19,11 @@ export default defineModule({ name: "passkey-witness-http", section, replicaSafe
 			read: c.section["read-url"],
 			enroll: c.section["enroll-url"],
 			withdraw: c.section["withdraw-url"],
-			clear: c.section["clear-url"],
 		};
-		// One target for both would clear whoever's mark a withdraw names: the token would decide nothing.
-		if (sameTarget(urls.withdraw, urls.clear)) {
+		// `clear-url` is called no more; where it is still written, one target for both is still refused,
+		// until the key goes.
+		const clear = c.section["clear-url"];
+		if (clear !== undefined && sameTarget(urls.withdraw, clear)) {
 			return c.refuse(
 				"passkey-witness-http.withdraw-url",
 				"another target than clear-url, as outbound sends them (origin, path and query)",

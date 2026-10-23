@@ -14,7 +14,6 @@ export function passkeyWitnessHttpConfig(settings: Partial<PasskeyWitnessHttpSet
 			"read-url": "https://ledger.example.invalid/passkey-witness/read",
 			"enroll-url": "https://ledger.example.invalid/passkey-witness/enroll",
 			"withdraw-url": "https://ledger.example.invalid/passkey-witness/withdraw",
-			"clear-url": "https://ledger.example.invalid/passkey-witness/clear",
 			credential: testCredential,
 			...settings,
 		},
@@ -35,12 +34,7 @@ export interface LedgerAnswer {
 	readonly json?: unknown;
 }
 
-const calls = [
-	"/passkey-witness/read",
-	"/passkey-witness/enroll",
-	"/passkey-witness/withdraw",
-	"/passkey-witness/clear",
-];
+const calls = ["/passkey-witness/read", "/passkey-witness/enroll", "/passkey-witness/withdraw"];
 
 /**
  * A fake ledger keeping the passkey witness as an operator's ledger does, behind a credential of its
@@ -67,11 +61,8 @@ export function witnessLedger() {
 				if (!marks.has(held)) marks.set(held, String(token));
 				return { json: { owner: marks.get(held) === token } };
 			}
-			if (call.path === "/passkey-witness/withdraw") {
-				if (marks.get(held) === token) marks.delete(held);
-				return { status: 204 };
-			}
-			marks.delete(held);
+			// The withdraw: the mark goes only where it is the token's.
+			if (marks.get(held) === token) marks.delete(held);
 			return { status: 204 };
 		},
 		section: (base: string) => ({
@@ -79,7 +70,6 @@ export function witnessLedger() {
 				"read-url": `${base}/passkey-witness/read`,
 				"enroll-url": `${base}/passkey-witness/enroll`,
 				"withdraw-url": `${base}/passkey-witness/withdraw`,
-				"clear-url": `${base}/passkey-witness/clear`,
 				credential,
 			},
 		}),

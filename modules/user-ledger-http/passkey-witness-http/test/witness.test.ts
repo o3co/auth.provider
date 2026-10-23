@@ -20,11 +20,10 @@ import {
 	policyOf,
 	policySettings,
 } from "@mod/outbound-policy";
-import { passkeyWitnesses } from "@mod/passkeys";
+import { type PasskeyWitness, passkeyWitnesses } from "@mod/passkeys";
 import { passkeyWitnessContract, passkeyWitnessProblems } from "@mod/passkeys/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import witnessHttp from "../src/module.ts";
-import type { LedgerWitness } from "../src/witness.ts";
 
 const credential = randomBytes(32).toString("hex");
 const now = 1_800_000_000_000;
@@ -62,10 +61,6 @@ function keepingLedger() {
 		}
 		if (asked.path === "/w/withdraw") {
 			if (marks.get(subject) === token) marks.delete(subject);
-			return { status: 204 };
-		}
-		if (asked.path === "/w/clear") {
-			marks.delete(subject);
 			return { status: 204 };
 		}
 		return { status: 404 };
@@ -124,17 +119,12 @@ const settings = (more: Record<string, unknown> = {}) => ({
 	"read-url": at("/w/read"),
 	"enroll-url": at("/w/enroll"),
 	"withdraw-url": at("/w/withdraw"),
-	"clear-url": at("/w/clear"),
 	credential,
 	...more,
 });
-/** The witnesses contributed, as this adapter makes them: its own type, which keeps `clear`. */
-const collected = contract<readonly LedgerWitness[]>("test.witnesses");
+const collected = contract<readonly PasskeyWitness[]>("test.witnesses");
 const collector = defineModule({ name: "test-collector" }, (m) => [
-	// The module contributes witnessAt's answer, so what it contributed is that type.
-	m
-		.provide(collected)
-		.by(async (c) => (await c.collect(passkeyWitnesses)) as readonly LedgerWitness[]),
+	m.provide(collected).by((c) => c.collect(passkeyWitnesses)),
 ]);
 async function open(section: unknown = settings(), outbound: Record<string, unknown> = {}) {
 	const logged = recordingLog();
@@ -215,13 +205,12 @@ describe("passkey-witness-http's markedWith", () => {
 });
 
 describe("passkey-witness-http at a private address", () => {
-	it("names the operator's URL as internal on each of its four calls, so each reaches a ledger at a private address", async () => {
+	it("names the operator's URL as internal on each of its three calls, so each reaches a ledger at a private address", async () => {
 		const asked: { url: string; narrower: Narrower | undefined }[] = [];
 		const answers: Record<string, { status: number; body?: unknown }> = {
 			"/w/read": { status: 200, body: { enrolled: false } },
 			"/w/enroll": { status: 200, body: { owner: true } },
 			"/w/withdraw": { status: 204 },
-			"/w/clear": { status: 204 },
 		};
 		const recording = defineModule({ name: "outbound" }, (m) => [
 			m.provide(outbound).by(() => ({
@@ -245,7 +234,6 @@ describe("passkey-witness-http at a private address", () => {
 					"read-url": ledger("/w/read"),
 					"enroll-url": ledger("/w/enroll"),
 					"withdraw-url": ledger("/w/withdraw"),
-					"clear-url": ledger("/w/clear"),
 				}),
 			},
 			runtime: quietRuntime({ clock: { now: () => now } }),
@@ -254,7 +242,6 @@ describe("passkey-witness-http at a private address", () => {
 		await witness?.read("alice");
 		await witness?.enroll("alice", "t-1");
 		await witness?.withdraw("alice", "t-1");
-		await witness?.clear("alice");
 		// The operator's policy, with the ledger's host among its internal hosts.
 		const policy = policyOf(
 			policySettings.parse({ "allow-any-public": true, "internal-hosts": ["ledger.corp"] }),
@@ -263,7 +250,6 @@ describe("passkey-witness-http at a private address", () => {
 			"/w/read",
 			"/w/enroll",
 			"/w/withdraw",
-			"/w/clear",
 		]);
 		for (const { url, narrower } of asked) {
 			expect(policy.admit(url, narrower).internal, url).toBe(true);
@@ -275,18 +261,16 @@ describe("passkey-witness-http", () => {
 	it("posts each call to its URL as written, with the credential, a write with its deadline", async () => {
 		const { witness } = await open(settings({ "read-url": at("/w/read?realm=a"), timeout: "2s" }));
 		script = (asked) =>
-			asked.path === "/w/clear" || asked.path === "/w/withdraw"
+			asked.path === "/w/withdraw"
 				? { status: 204 }
 				: { status: 200, json: { enrolled: false, owner: true } };
 		await witness.read("alice");
 		await witness.enroll("alice", "t-1");
 		await witness.withdraw("alice", "t-1");
-		await witness.clear("alice");
 		expect(received.map((r) => [r.method, r.path])).toEqual([
 			["POST", "/w/read?realm=a"],
 			["POST", "/w/enroll"],
 			["POST", "/w/withdraw"],
-			["POST", "/w/clear"],
 		]);
 		for (const asked of received) {
 			expect(asked.headers).toMatchObject({
@@ -299,7 +283,6 @@ describe("passkey-witness-http", () => {
 			{ subject: "alice" },
 			{ subject: "alice", token: "t-1", deadline: now + 2000 },
 			{ subject: "alice", token: "t-1", deadline: now + 2000 },
-			{ subject: "alice", deadline: now + 2000 },
 		]);
 	});
 
@@ -309,12 +292,7 @@ describe("passkey-witness-http", () => {
 			asked.path === "/w/enroll" ? { status: 200, json: { owner: true } } : { status: 204 };
 		await witness.enroll("alice", "t-1");
 		await witness.withdraw("alice", "t-1");
-		await witness.clear("alice");
-		expect(received.map((r) => JSON.parse(r.body).deadline)).toEqual([
-			now + 500,
-			now + 500,
-			now + 500,
-		]);
+		expect(received.map((r) => JSON.parse(r.body).deadline)).toEqual([now + 500, now + 500]);
 	});
 
 	it("reads the mark and the ownership the ledger answers", async () => {
@@ -365,7 +343,6 @@ describe("passkey-witness-http", () => {
 			read: () => witness.read("alice-secret"),
 			enroll: () => witness.enroll("alice-secret", "token-secret"),
 			withdraw: () => witness.withdraw("alice-secret", "token-secret"),
-			clear: () => witness.clear("alice-secret"),
 		};
 		const answers: Record<keyof typeof calls, Answer[]> = {
 			read: [
@@ -390,7 +367,6 @@ describe("passkey-witness-http", () => {
 				{ status: 200, text: "secret-3" },
 			],
 			withdraw: [{ status: 404 }, { status: 200, json: {} }, { status: 202 }, { status: 500 }],
-			clear: [{ status: 404 }, { status: 200, json: {} }, { status: 202 }, { status: 500 }],
 		};
 		for (const [call, list] of Object.entries(answers) as [keyof typeof calls, Answer[]][]) {
 			for (const answer of list) {
@@ -422,7 +398,7 @@ describe("passkey-witness-http", () => {
 		]);
 		expect(fields).toContainEqual([
 			"passkey-witness-http.ledger_failed",
-			{ call: "clear", status: 200 },
+			{ call: "withdraw", status: 200 },
 		]);
 		expect(JSON.stringify(logged.lines())).not.toContain("secret");
 		expect(JSON.stringify(logged.lines())).not.toContain(credential);
@@ -447,7 +423,6 @@ describe("passkey-witness-http", () => {
 			[without("read-url"), "passkey-witness-http.read-url"],
 			[without("enroll-url"), "passkey-witness-http.enroll-url"],
 			[without("withdraw-url"), "passkey-witness-http.withdraw-url"],
-			[without("clear-url"), "passkey-witness-http.clear-url"],
 			[without("credential"), "passkey-witness-http.credential"],
 			[settings({ credential: "short" }), "passkey-witness-http.credential"],
 			[settings({ credential: `REPLACE-${"x".repeat(60)}` }), "passkey-witness-http.credential"],
@@ -455,7 +430,10 @@ describe("passkey-witness-http", () => {
 				settings({ "enroll-url": "https://ledger.example/w/enroll" }),
 				"passkey-witness-http.enroll-url",
 			],
-			[settings({ "clear-url": at("/w/clear", otherPair) }), "passkey-witness-http.credential"],
+			[
+				settings({ "withdraw-url": at("/w/withdraw", otherPair) }),
+				"passkey-witness-http.credential",
+			],
 		] as const) {
 			const error = await open(section).then(
 				() => undefined,
@@ -465,6 +443,24 @@ describe("passkey-witness-http", () => {
 			const refusals = (error as BootRefused).refusals;
 			expect(refusals.map((r) => r.where)).toEqual([where]);
 			expect(JSON.stringify(refusals)).not.toContain(credential);
+		}
+	});
+
+	it("offers no clear, and boots with or without clear-url, calling it never and judging no outbound rule by it", async () => {
+		const { witness } = await open();
+		expect("clear" in witness).toBe(false);
+		for (const clearUrl of [
+			at("/w/clear"),
+			at("/w/clear", otherPair),
+			"https://elsewhere.example/c",
+		]) {
+			received.length = 0;
+			const opened = await open(settings({ "clear-url": clearUrl }));
+			expect("clear" in opened.witness, clearUrl).toBe(false);
+			await opened.witness.read("alice");
+			await opened.witness.enroll("alice", "t-1");
+			await opened.witness.withdraw("alice", "t-1");
+			expect(received.map((r) => r.path).includes("/w/clear"), clearUrl).toBe(false);
 		}
 	});
 

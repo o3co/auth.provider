@@ -12,9 +12,11 @@ export const section = z.strictObject({
 	"read-url": ledgerUrl("Where whether a subject carries the mark is read."),
 	"enroll-url": ledgerUrl("Where the mark is set to a token unless one is set."),
 	"withdraw-url": ledgerUrl(
-		"Where the mark is removed only where it is the token's; another target than `clear-url`.",
+		"Where the mark is removed only where it is the token's; another target than `clear-url` where that is still written.",
 	),
-	"clear-url": ledgerUrl("Where the mark is removed, whoever's it is."),
+	"clear-url": ledgerUrl(
+		"Called no more: the mark is only withdrawn by its token. Still taken where written, and to be removed.",
+	).optional(),
 	credential: bearerToken({ atLeast: 32 }).describe(
 		"A bare bearer token (RFC 6750 b64token) of at least 32 bytes of key material, sent on every call.",
 	),
