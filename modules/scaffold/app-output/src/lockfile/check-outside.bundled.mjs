@@ -8266,14 +8266,13 @@ var require_dist = /* @__PURE__ */ __commonJSMin(((exports) => {
 }));
 
 //#endregion
-//#region src/lockfile/check-outside.mjs
+//#region src/lockfile/reading/reading.mjs
 var import_semver = /* @__PURE__ */ __toESM(require_semver(), 1);
 var import_dist = require_dist();
 /** The most a lockfile read may hold. */
 const lockBytes = 16777216;
 /** A value's own entries as a map, where it is a plain object; none otherwise. Nothing inherited is read. */
 const own = (value) => new Map(value !== null && typeof value === "object" && !Array.isArray(value) ? Object.keys(value).map((key) => [key, value[key]]) : []);
-const sameMap = (a, b) => a.size === b.size && [...a].every(([key, value]) => b.has(key) && JSON.stringify(b.get(key)) === JSON.stringify(value));
 /** A resolution as pnpm writes it, its peers in parentheses left off. */
 const bare = (resolved) => String(resolved).replace(/\(.*$/, "");
 /** The name a lockfile key holds, its version and peers left off (`@s/n@1.0.0(x@1)` is `@s/n`). */
@@ -8316,7 +8315,7 @@ function specOf(spec) {
 }
 /** The lockfile as data: pnpm's version 9, no anchor resolved, no unknown tag, within its bound. */
 function lockOf(text) {
-	if (Buffer.byteLength(text) > lockBytes) throw new Error(`lockfile over ${lockBytes} bytes`);
+	if (Buffer.byteLength(text) > 16777216) throw new Error(`lockfile over ${lockBytes} bytes`);
 	const doc = (0, import_dist.parseDocument)(text, {
 		merge: false,
 		uniqueKeys: true
@@ -8327,6 +8326,29 @@ function lockOf(text) {
 	if (own(lock).get("lockfileVersion") !== "9.0") throw new Error(`lockfile version ${own(lock).get("lockfileVersion")}, where 9.0 is read`);
 	return lock;
 }
+/** Every reference the lockfile holds: each importer's three kinds of dependency, and each snapshot's two. */
+function referencesIn(lock) {
+	const found = [];
+	for (const [at, importer] of own(lock.importers)) for (const group of [
+		"dependencies",
+		"devDependencies",
+		"optionalDependencies"
+	]) for (const [as, dep] of own(own(importer).get(group))) found.push({
+		at: `the importer ${at}`,
+		as,
+		reference: String(own(dep).get("version"))
+	});
+	for (const [at, snapshot] of own(lock.snapshots)) for (const group of ["dependencies", "optionalDependencies"]) for (const [as, reference] of own(own(snapshot).get(group))) found.push({
+		at,
+		as,
+		reference: String(reference)
+	});
+	return found;
+}
+
+//#endregion
+//#region src/lockfile/check-outside.mjs
+const sameMap = (a, b) => a.size === b.size && [...a].every(([key, value]) => b.has(key) && JSON.stringify(b.get(key)) === JSON.stringify(value));
 /** The origin of an http address, or none. */
 const originOf = (address) => {
 	try {
@@ -8352,25 +8374,6 @@ function registryRefusal(entry, name, registries) {
 	const at = originOf(resolution.get("tarball"));
 	const registry = registryOf(registries, name);
 	return at !== void 0 && at === registry ? void 0 : `${name}: its tarball lies at ${at ?? String(resolution.get("tarball"))}, not at its registry ${registry ?? "(none recorded)"}`;
-}
-/** Every reference the lockfile holds: each importer's three kinds of dependency, and each snapshot's two. */
-function referencesIn(lock) {
-	const found = [];
-	for (const [at, importer] of own(lock.importers)) for (const group of [
-		"dependencies",
-		"devDependencies",
-		"optionalDependencies"
-	]) for (const [as, dep] of own(own(importer).get(group))) found.push({
-		at: `the importer ${at}`,
-		as,
-		reference: String(own(dep).get("version"))
-	});
-	for (const [at, snapshot] of own(lock.snapshots)) for (const group of ["dependencies", "optionalDependencies"]) for (const [as, reference] of own(own(snapshot).get(group))) found.push({
-		at,
-		as,
-		reference: String(reference)
-	});
-	return found;
 }
 /**
 * Why a package that must be one copy at one version is not: each reference to it resolves to that
@@ -8419,7 +8422,8 @@ function snapshotRefusals(record, snapshot, overrides, say) {
 				refusals.push(say(declared ? `${dep} resolves as ${asRequired ? "required" : "optional"}, not as declared` : `depends on ${dep}, which the record does not declare`));
 				continue;
 			}
-			const wanted = specOf(overrides.get(dep) ?? spec);
+			const held = overrides.get(dep);
+			const wanted = specOf(held ?? spec);
 			const target = targetOf(dep, reference);
 			if (wanted === void 0) refusals.push(say(`declares ${dep} as ${spec}, which is no registry range`));
 			else if (target.local) refusals.push(say(`${dep} resolves ${target.local}, not a version`));

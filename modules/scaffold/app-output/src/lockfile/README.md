@@ -3,7 +3,7 @@
 ## Responsibilities
 - Holds a pnpm lockfile to what was recorded of the packages outside the release when an app was generated: the version its root depends on, the content, the dependencies declared, and one copy of each package the app's overrides hold.
 - Reads that record from a project pnpm installed a package into.
-- Is, in one file, the module app-output reads; its bundle, holding what it uses, is the script an app runs to check its own lockfile.
+- Is the module app-output reads, with its internal module `reading`; their bundle, holding what they use, is the one file an app runs to check its own lockfile.
 
 ## Not here
 - Fetching, authenticating, integrity on install and the age of a version: pnpm's.
@@ -16,7 +16,7 @@
 - `outsideLock.script`: the file an app runs beside its `pnpm-lock.yaml`, `outside-modules.json` (`{ modules: records, registries, held }`) and `pnpm-workspace.yaml` (its `overrides`); it prints each refusal, or why a file cannot be read, and exits 1 on any. It is `check-outside.mjs` bundled with `yaml` and `semver` inside (`pnpm check-outside` makes it, in development), so it loads nothing of the install it checks.
 
 ## Invariants
-- A lockfile is read as data: pnpm's version 9.0 alone, at most 16 MiB, no anchor's alias resolved, no unknown tag and no duplicate key; only own keys are read, never inherited ones.
+- A lockfile is read as data, as `reading` reads it: pnpm's version 9.0 alone, at most 16 MiB, no anchor's alias resolved, no unknown tag and no duplicate key; only own keys are read, never inherited ones.
 - From a registry means an integrity, and at most the address of a tarball at the origin of the package's registry (its scope's, else the default), under any path; another origin, a directory, a repository or a local file is not.
 - The app's lockfile was resolved with the app's overrides (pnpm writes them into it).
 - A record's version is the one the root importer depends on exactly and resolves, from a registry, with the recorded integrity; no other version of it is in the lockfile.
