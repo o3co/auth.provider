@@ -6,6 +6,7 @@ import {
 	type GrantsPart,
 	grantsLoginPage,
 	type IdpScene,
+	linkStepUpPage,
 } from "./area.ts";
 
 /** The lines naming an IdP's type, and the issuer where the type is not one IdP's own. */
@@ -85,8 +86,9 @@ const grantsEnv = (at: GrantsPart) => ({
 });
 
 onLegacy(federationArea, {
-	// The legacy build is given no login page for a connect here: its scenes run on this build alone.
-	cannot: ["store-fault:federation", grantsLoginPage],
+	// The legacy build is given no login page for a connect here, and its step-up page for a link
+	// names no start to come back to: these scenes run on this build alone.
+	cannot: ["store-fault:federation", grantsLoginPage, linkStepUpPage],
 	// The legacy Google type sends Google neither a request to log in again nor a max age. A login
 	// through Apple, which takes neither, is let in by the legacy build where ours refuses it.
 	differs: [

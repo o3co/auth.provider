@@ -34,10 +34,13 @@ export interface ConnectionScene {
 	readonly scopeSubsets?: boolean;
 }
 
-/** Federation grants: the consent page and the connections offered. */
 /** The need for a login page that a connect sends a browser with no session to, and back. */
 export const grantsLoginPage = "federation:grants-login-page";
 
+/** The need for a step-up page that a link's start short of a requirement names, and back. */
+export const linkStepUpPage = "federation:link-step-up-page";
+
+/** Federation grants: the consent page and the connections offered. */
 export interface GrantsPart {
 	readonly page: string;
 	/** Where a browser with no session is sent to log in, then back to the connect (`grantsLoginPage`). */
@@ -63,6 +66,8 @@ export interface FederationPart {
 	readonly grants?: GrantsPart;
 	/** The scene links an upstream identity to the account logged in, from the deployment's own page. */
 	readonly links?: boolean;
+	/** The page a link's start short of a session requirement names, on the origin (`linkStepUpPage`). */
+	readonly linkStepUpPage?: string;
 }
 
 export const federationArea = area<FederationPart>("federation");
@@ -110,6 +115,7 @@ export function federationScene(scene: FederationScene): AreaScene {
 			...(scene.keepsUpstreamTokens ? { keepsUpstreamTokens: true } : {}),
 			...(scene.grants ? { grants: scene.grants } : {}),
 			...(scene.links ? { links: true } : {}),
+			...(scene.linkStepUpPage ? { linkStepUpPage: scene.linkStepUpPage } : {}),
 		}),
 	);
 }
