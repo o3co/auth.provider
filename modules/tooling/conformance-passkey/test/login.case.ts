@@ -182,8 +182,8 @@ describe("H. passkey login at the token endpoint", () => {
 		expect(first.body).toMatchObject({ token_type: "Bearer", scope: "read write" });
 		const claims = claimsOf(first.body.access_token);
 		expect(claims).toMatchObject({ client_id: "app" });
-		// A passkey's amr: `hwk` until webauthn-login proves `pop`.
-		expect([["hwk"], ["pop"]]).toContainEqual(claims.amr);
+		// Ours proves possession alone, `pop`; the legacy build proves `hwk`.
+		expect(claims.amr).toEqual(areaTarget().differs("passkey-amr-pop") ? ["hwk"] : ["pop"]);
 		expect(typeof claims.auth_time).toBe("number");
 		const next = await c.post("/oauth/token", "app", {
 			grant_type: "refresh_token",
