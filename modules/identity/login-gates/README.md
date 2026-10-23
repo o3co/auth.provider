@@ -16,7 +16,7 @@
 - `returnAllowed(target)`: whether a login may send the browser back to this target.
 - Extension point `loginGates`: a named gate whose `hold` answers pass, held with an answer and optional cookies, or refused; a gate declared `rechecked` is asked again on resume.
 - Extension point `amrSources`: the amr that a way of logging in or a gate can prove, under its name.
-- Extension point `returnPaths`: a path on the public origin that its owner lets a login return to.
+- Extension point `returnPaths`: a path on the public origin that its owner lets a login return to, or with `segment` the paths one name segment below it.
 - Extension point `openedAfterHold`: a caller to tell, with its carry, when a held login it asked for opens.
 - Operator section `return-targets`: https URLs (http only on a loopback host), checked by `url-setting`, that a login may return to (default none).
 
@@ -28,7 +28,8 @@
 - `resume` after a name no gate has, or a `from` naming no caller, throws `TypeError` before any gate runs.
 - Only a `resume` that opens the session tells the caller that `from` names.
 - If that caller's `opened` throws, the login still opens and only the caller's name and the error's kind are logged.
-- A login returns only to a listed target exactly, or to a contributed path spelled from the public origin with any query but no fragment, whitespace or control character.
+- A return path taking a segment is a path below the root that does not end in a slash; one at the root, or ending in a slash, refuses boot.
+- A login returns only to a listed target exactly, or to a contributed path, or one name segment (letters, digits, `-` or `_`, up to 64) below a path contributed with `segment`, written as the public origin and that path exactly, with any query but no fragment, whitespace or control character: a spelling the URL parser rewrites (a dot segment, a backslash) is refused.
 - A gate that passes writes nothing, and a gate that holds cleans up its own state. A gate that refuses writes nothing the login keeps.
 
 ## Depends on

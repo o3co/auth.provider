@@ -31,15 +31,36 @@ export default defineModule({ name: "login-gates", section, replicaSafe: true },
 		const provable = new Set((await c.collect(amrSources)).flatMap((source) => source.amr));
 		const targets = new Set<string>(c.section["return-targets"]);
 		const origin = (await c.get(site)).origin;
-		const paths = new Set((await c.collect(returnPaths)).map((p) => p.path));
+		const contributed = await c.collect(returnPaths);
+		const paths = new Set(contributed.filter((p) => !p.segment).map((p) => p.path));
+		const parents = new Set(contributed.filter((p) => p.segment).map((p) => p.path));
+		// Below the root, or a path ending in a slash, a segment would be told apart by doubled slashes.
+		for (const parent of parents) {
+			if (parent === "/" || parent.endsWith("/")) {
+				c.refuse(
+					"login-gates",
+					`a return path taking a segment below it is a path below the root, not ending in a slash: ${parent}`,
+				);
+			}
+		}
+		/** A path one name segment below a parent contributed so: never empty, a dot, or encoded. */
+		const belowParent = (pathname: string) => {
+			const cut = pathname.lastIndexOf("/");
+			return (
+				parents.has(pathname.slice(0, cut)) && /^[A-Za-z0-9_-]{1,64}$/.test(pathname.slice(cut + 1))
+			);
+		};
 		const returnAllowed = (target: string) => {
 			// The URL parser drops some of these silently; a target is judged as written.
 			if (/[\s\p{Cc}]/u.test(target)) return false;
 			if (targets.has(target)) return true;
 			const url = URL.parse(target);
 			if (!url || origin === undefined || target.includes("#")) return false;
-			// Spelled from the public origin and the path itself: no userinfo, port or other origin.
-			return paths.has(url.pathname) && target.startsWith(`${origin}${url.pathname}`);
+			const known = paths.has(url.pathname) || belowParent(url.pathname);
+			// Written as the public origin and the path itself, to the query: no userinfo, port or other
+			// origin, and nothing the URL parser rewrites (dot segments, backslashes) on the way.
+			const written = target.slice(0, target.includes("?") ? target.indexOf("?") : undefined);
+			return known && written === `${origin}${url.pathname}`;
 		};
 		const callers = new Map((await c.collect(openedAfterHold)).map((told) => [told.caller, told]));
 		// Known only per call: a caller that contributed nothing is the caller's own mistake.

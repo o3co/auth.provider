@@ -250,6 +250,12 @@ it("lets a login return only to a listed target exactly, or a contributed path o
 		"https://as.example/oauth/authorize?x=1#",
 		"https://u:p@as.example/oauth/authorize?x=1",
 		"https://as.example/oauth/x/../authorize?x=1",
+		// Spellings the URL parser rewrites to the contributed path: a login returns as written only.
+		"https://as.example/oauth/authorize/../authorize?x=1",
+		"https://as.example/oauth/authorize/%2e%2e/authorize?x=1",
+		"https://as.example/oauth/authorize/.?x=1",
+		"https://as.example/oauth\\authorize?x=1",
+		"https://as.example\\oauth/authorize?x=1",
 		"https://as.example:8443/oauth/authorize?x=1",
 		"http://as.example/oauth/authorize?x=1",
 		"https://evil.example/oauth/authorize?x=1",
@@ -259,6 +265,92 @@ it("lets a login return only to a listed target exactly, or a contributed path o
 		expect(l.returnAllowed(near), near).toBe(false);
 	}
 	expect((await boot([])).returnAllowed("https://app.example/")).toBe(false);
+});
+
+it("lets a login return one name segment below a path contributed so, and nowhere deeper or around it", async () => {
+	const below = defineModule({ name: "federation" }, (m) => [
+		m.contribute(returnPaths).by(() => ({ path: "/session/oauth/federation", segment: true })),
+	]);
+	const l = await boot([below, path("device", "/device")]);
+	for (const allowed of [
+		"https://as.example/session/oauth/federation/corp?link=1",
+		"https://as.example/session/oauth/federation/idp-2",
+		"https://as.example/session/oauth/federation/A_b-9?x=1",
+	]) {
+		expect(l.returnAllowed(allowed), allowed).toBe(true);
+	}
+	for (const near of [
+		// The path itself, two segments below, and the callback under a name.
+		"https://as.example/session/oauth/federation?link=1",
+		"https://as.example/session/oauth/federation/corp/callback?code=x",
+		"https://as.example/session/oauth/federation/corp/x",
+		// An empty segment, a dot segment, and an encoded or doubled slash.
+		"https://as.example/session/oauth/federation/?link=1",
+		"https://as.example/session/oauth/federation//corp",
+		"https://as.example/session/oauth/federation/..?link=1",
+		"https://as.example/session/oauth/federation/.?link=1",
+		"https://as.example/session/oauth/federation/x/../corp?link=1",
+		"https://as.example/session/oauth/federation/corp%2Fcallback",
+		"https://as.example/session/oauth/federation/%2E%2E",
+		"https://as.example/session/oauth/federation/c%41rp",
+		// Another origin, a port, and a fragment.
+		"https://evil.example/session/oauth/federation/corp",
+		"https://as.example:8443/session/oauth/federation/corp",
+		"https://as.example/session/oauth/federation/corp#x",
+		// A path contributed whole takes nothing below it.
+		"https://as.example/device/corp",
+		// A dot is no name's, nor a trailing slash; letters past ASCII are none.
+		"https://as.example/session/oauth/federation/corp.name",
+		"https://as.example/session/oauth/federation/corp/",
+		"https://as.example/session/oauth/federation/c\u00f3rp",
+		"https://as.example/session/oauth/federation/c%C3%B3rp",
+		// Spellings the URL parser rewrites to one segment below: a login returns as written only.
+		"https://as.example/session/oauth/federation/corp/../corp",
+		"https://as.example/session/oauth/federation/corp/%2e%2e/cor",
+		"https://as.example/session/oauth/federation\\corp",
+		"https://as.example\\session/oauth/federation/corp",
+	]) {
+		expect(l.returnAllowed(near), near).toBe(false);
+	}
+	// The path contributed whole too, beside its segment: each takes its own.
+	const both = await boot([
+		below,
+		defineModule({ name: "federation-whole" }, (m) => [
+			m.contribute(returnPaths).by(() => ({ path: "/session/oauth/federation" })),
+		]),
+	]);
+	expect(
+		[
+			"https://as.example/session/oauth/federation?x=1",
+			"https://as.example/session/oauth/federation/corp",
+			"https://as.example/session/oauth/federation/corp/x",
+		].map((target) => both.returnAllowed(target)),
+	).toEqual([true, true, false]);
+	// A doubled slash at the root is no name below any path.
+	expect(l.returnAllowed("https://as.example//corp")).toBe(false);
+	// A segment is a name: letters, digits, `-` or `_`, up to 64.
+	expect(l.returnAllowed(`https://as.example/session/oauth/federation/${"a".repeat(64)}`)).toBe(
+		true,
+	);
+	expect(l.returnAllowed(`https://as.example/session/oauth/federation/${"a".repeat(65)}`)).toBe(
+		false,
+	);
+});
+
+it("refuses to start with a return path taking a segment below the root, or below a path ending in a slash", async () => {
+	for (const at of ["/", "/session/"]) {
+		const below = defineModule({ name: "below" }, (m) => [
+			m.contribute(returnPaths).by(() => ({ path: at, segment: true })),
+		]);
+		const refused = await boot([below]).catch((error: unknown) => error);
+		expect(BootRefused.is(refused), at).toBe(true);
+		expect((refused as BootRefused).refusals, at).toEqual([
+			{
+				where: "login-gates",
+				reason: `a return path taking a segment below it is a path below the root, not ending in a slash: ${at}`,
+			},
+		]);
+	}
 });
 
 it("refuses a return target with whitespace or a control character anywhere, though the URL parser drops some", async () => {
