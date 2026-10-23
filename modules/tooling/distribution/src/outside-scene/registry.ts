@@ -12,8 +12,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { basename, join } from "node:path";
 
-/** How long the upstream may take to answer one request, body included. */
-const upstreamLimitMs = 30_000;
+/** How long the upstream may take to answer one request, body included: 30 seconds, unless the starter says less. */
+const upstreamLimitMs = Number(process.env.REGISTRY_UPSTREAM_LIMIT_MS ?? 30_000);
 const published = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
 const tarballs = new Map<string, Buffer>();
 const documents = new Map<string, { versions: Record<string, unknown>; latest: string }>();

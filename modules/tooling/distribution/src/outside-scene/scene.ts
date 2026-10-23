@@ -82,6 +82,7 @@ export async function outsideScene(options: {
 	const upstream = execFileSync("pnpm", ["config", "get", "registry"], {
 		cwd: options.scratch,
 		encoding: "utf8",
+		timeout: commandLimitMs,
 	}).trim();
 	const registry = await served(upstream.endsWith("/") ? upstream : `${upstream}/`, [
 		options.tarballs,

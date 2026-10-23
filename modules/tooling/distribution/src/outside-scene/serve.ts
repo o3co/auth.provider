@@ -13,9 +13,16 @@ const startLimitMs = 30_000;
 export async function served(
 	upstream: string,
 	dirs: readonly string[],
+	limits: { readonly upstreamMs?: number } = {},
 ): Promise<{ origin: string; stop: () => Promise<void> }> {
 	const child = spawn("node", [join(import.meta.dirname, "registry.ts"), upstream, ...dirs], {
 		stdio: ["ignore", "pipe", "inherit"],
+		env: {
+			...process.env,
+			...(limits.upstreamMs === undefined
+				? {}
+				: { REGISTRY_UPSTREAM_LIMIT_MS: String(limits.upstreamMs) }),
+		},
 	});
 	const exited = new Promise<void>((resolve) => child.once("close", () => resolve()));
 	const stop = async () => {
