@@ -18,6 +18,7 @@
 		"@mod/csrf": "workspace:*",
 		"@mod/http": "workspace:*",
 		"@mod/kernel": "workspace:*",
+		"@mod/login-gates": "workspace:*",
 		"@mod/rate-limit": "workspace:*",
 		"@mod/request-source": "workspace:*",
 		"@mod/seal": "workspace:*",

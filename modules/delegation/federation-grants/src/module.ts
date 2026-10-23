@@ -3,6 +3,7 @@ import { metadataSections } from "@mod/clients";
 import { csrfChecked } from "@mod/csrf";
 import { routes, use } from "@mod/http";
 import { defineModule } from "@mod/kernel";
+import { returnPaths } from "@mod/login-gates";
 import { requestsPerSource } from "@mod/rate-limit";
 import { resealers } from "@mod/seal";
 import { revocationFollowers } from "@mod/subject-revocation";
@@ -24,6 +25,8 @@ const windowOf = (settings: Settings) => ({
 
 export default defineModule({ name, section }, (m) => [
 	m.contribute(metadataSections).by(() => clientSection),
+	// A browser sent to log in, or to raise its session, comes back to the connect it opened.
+	m.contribute(returnPaths).by(() => ({ path: `${browserBase}/connect` })),
 	m.contribute(revocationFollowers).by(followerOver),
 	m
 		.contribute(resealers)
