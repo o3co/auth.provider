@@ -20,10 +20,51 @@ export interface PasskeyRecords {
 	): Promise<{ readonly before: StoredPasskey; readonly after: StoredPasskey } | undefined>;
 }
 
+/** Keys of the passkey store, by space. */
+export interface PasskeyKeys {
+	readonly credentials: readonly string[];
+	readonly subjects: readonly string[];
+}
+
+/** What records of both spaces changed as one held, by space: the keys named, then the watched ones, in order. */
+export interface PasskeysRead {
+	readonly credentials: readonly (StoredPasskey | undefined)[];
+	readonly subjects: readonly (StoredPasskey | undefined)[];
+}
+
+/** The next of each record read, by space in the order read; none keeps it. */
+export interface PasskeysNext {
+	readonly credentials?: readonly ({ readonly value: StoredPasskey } | undefined)[];
+	readonly subjects?: readonly ({ readonly value: StoredPasskey } | undefined)[];
+}
+
+/** One record of a change as one: what it held, and holds after. */
+export interface ChangedPasskey {
+	readonly before: StoredPasskey | undefined;
+	readonly after: StoredPasskey | undefined;
+}
+
 /** Passkeys by credential, and each subject's handle and credentials, apart. Every call throws Unavailable when the place cannot tell. */
 export interface PasskeyStore {
 	readonly credentials: PasskeyRecords;
 	readonly subjects: PasskeyRecords;
+	/**
+	 * Changes records of both spaces as one: those `keys` names, and those `watch` names (in either
+	 * space) from what they hold. `change` answers the next of each, by space in the order read; it
+	 * runs again on a race, so it is pure, and a record it leaves out is kept. Every record read is
+	 * held to what was read; a record named twice is read once and written from one naming at most.
+	 * A place that cannot leaves it out.
+	 */
+	updateTogether?(
+		keys: PasskeyKeys,
+		p: {
+			readonly watch: (read: PasskeysRead) => Partial<PasskeyKeys>;
+			readonly change: (read: PasskeysRead) => PasskeysNext;
+		},
+	): Promise<{
+		readonly credentials: readonly ChangedPasskey[];
+		readonly subjects: readonly ChangedPasskey[];
+	}>;
 }
 
 export const passkeyStore = contract<PasskeyStore>("passkeys.passkey-store");

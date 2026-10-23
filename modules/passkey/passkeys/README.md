@@ -18,7 +18,7 @@
 - `passkeyHolders`, taken only by `login-passkey` and `passkey-reset`: `held` (settled first), `cleared` (ends every passkey of the subject and has its mark go → how many it ended), `settle`, and `witnessed` (whether a witness is composed).
 - Extension point `passkeyWitnesses` (at most one, two refusing boot): `read`, `enroll` (set-if-absent by token), `withdraw` (only that token's mark), `clear` (any mark). Audit event `passkey.enrollment_inconsistent` (`at`), declared in `./audit-events`.
 - Store interfaces, which the assembly wires. The store never sees what a record holds.
-  - Passkeys: credentials and subjects, each by a key passkeys makes, saved once, read, changed from what they hold, kept without end. Needs: no eviction, survives a crash, never rolled back by failover, confirmed reads.
+  - Passkeys: credentials and subjects, each by a key passkeys makes, saved once, read, changed from what they hold, kept without end; where a place can, records of both spaces and the ones a change watches from them changed as one (`updateTogether`). Needs: no eviction, survives a crash, never rolled back by failover, confirmed reads.
   - Challenges: opened for a lifetime, taken by putting a mark in place. Needs: survives a crash, never rolled back by failover, names derived from the challenge.
 - Operator section: `user-verification` (default `preferred`), `max-credentials` (per subject, default 10).
 - `./testing`: the section's test configuration builder, the contract tests of both store interfaces, a witness in memory (`passkeyWitnessStandIn`) and the witness's contract test (`passkeyWitnessContract`).
