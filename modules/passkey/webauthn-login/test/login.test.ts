@@ -168,7 +168,7 @@ const assertion = { id: "cred", response: { userHandle: "h" } };
 const asApp = { headers: { "content-type": "application/json" }, body: '{"client_id":"app"}' };
 
 describe("the passkey grant", () => {
-	it("issues the client's access token for an asserted passkey, with amr hwk and the challenge's time, and starts its family with the same", async () => {
+	it("issues the client's access token for an asserted passkey, with amr pop and the challenge's time, and starts its family with the same", async () => {
 		const s = await serve();
 		const outcome = await s.call({ assertion, scope: "read write" });
 		expect(outcome).toEqual({
@@ -191,18 +191,18 @@ describe("the passkey grant", () => {
 			issuedTo: "app",
 			audience: [origin],
 			scope: ["read", "write"],
-			amr: ["hwk"],
+			amr: ["pop"],
 			authenticatedAt: now - 5000,
 		});
 		const family = { scope: ["read", "write"], audience: [origin], authenticatedAt: now - 5000 };
-		expect(s.begun).toMatchObject([{ subject: "alice", amr: ["hwk"], ...family }]);
+		expect(s.begun).toMatchObject([{ subject: "alice", amr: ["pop"], ...family }]);
 		expect(s.begun[0]?.client.id).toBe("app");
 		const expiresAt = now + Number(outcome.body.expires_in) * 1000;
 		expect(s.begun[0]?.access).toEqual({ id: check.id, expiresAt });
 	});
 
-	it("gives amr hwk alone, whether or not the user was verified or the passkey is backup eligible", async () => {
-		expect(passkeyAmr).toEqual(["hwk"]);
+	it("gives amr pop alone, whether or not the user was verified or the passkey is backup eligible", async () => {
+		expect(passkeyAmr).toEqual(["pop"]);
 		const s = await serve();
 		for (const [userVerified, backupEligible] of [
 			[true, false],
@@ -214,8 +214,8 @@ describe("the passkey grant", () => {
 			const body = outcome.kind === "issued" ? outcome.body : {};
 			const check = await s.app.get(tokens).verifyAccess(String(body.access_token));
 			const label = `${userVerified} ${backupEligible}`;
-			expect(check.kind === "valid" && check.grant.amr, label).toEqual(["hwk"]);
-			expect(s.begun.at(-1)?.amr, label).toEqual(["hwk"]);
+			expect(check.kind === "valid" && check.grant.amr, label).toEqual(["pop"]);
+			expect(s.begun.at(-1)?.amr, label).toEqual(["pop"]);
 		}
 	});
 
