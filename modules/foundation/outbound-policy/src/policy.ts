@@ -226,7 +226,7 @@ export function remedyOf(
 				? "plain http reaches only a host:port that outbound.plain-loopback names, or, for a URL of your own configuration on a private network, one that outbound.plain-internal names; otherwise write the URL with https"
 				: "only https and http URLs are reached";
 		case "plain-public":
-			return "a host:port outbound.plain-internal names is reached over plain http at private or loopback addresses alone, and its name resolved to a public one: write the URL with https, or point the name at the private network";
+			return "a host:port outbound.plain-internal names is reached over plain http at private or loopback addresses alone, and its name resolved to a public one: write the URL with https, or point the name at the private network; where the network answers the name with an IPv6 address that does not reach as well (ECS Service Connect, say), name the host:port in outbound.plain-ipv4 too";
 		case "userinfo":
 			return "write the URL without a user or password";
 		case "port":
