@@ -7,7 +7,7 @@ import { longestRecentMs, refusedEntry, type Sessions } from "@mod/session";
 import type { SubjectRevocation } from "@mod/subject-revocation";
 import type { PermitResult, Permits } from "../permits/permits.ts";
 import { auditedBy } from "../recording/recording.ts";
-import { type Handler, unavailable } from "../routing.ts";
+import { type Handler, unavailable } from "../requests/requests.ts";
 import { lockoutName } from "../section.ts";
 
 export interface ReleaseParts {

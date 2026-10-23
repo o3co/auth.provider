@@ -17,7 +17,7 @@ import {
 	revokedSince,
 	unavailable,
 	unknownTransaction,
-} from "../routing.ts";
+} from "../requests/requests.ts";
 import { lockoutName } from "../section.ts";
 import type { Transaction } from "../transactions/records.ts";
 import { askedFrom, type Transactions } from "../transactions/transactions.ts";

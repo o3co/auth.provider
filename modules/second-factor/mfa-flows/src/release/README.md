@@ -21,4 +21,4 @@ Internal module of `mfa-flows`: a user's own release of their second-factor lock
 - A part that cannot answer fails the release as unavailable.
 
 ## Depends on
-- `audit`; `mfa` (factor decisions); `rate-limit` (lockouts); `session` (entry, the longest recent window); `subject-revocation` (check); the package's routing helpers and section (the lockout's name); `recording`
+- `audit`; `mfa` (factor decisions); `rate-limit` (lockouts); `session` (entry, the longest recent window); `subject-revocation` (check); `requests`; the package's section (the lockout's name); `recording`

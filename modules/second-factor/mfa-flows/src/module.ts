@@ -5,7 +5,7 @@ import { fenceFollower, proofSteps } from "@mod/mfa";
 import { lockoutProblem, requestsPerSource } from "@mod/rate-limit";
 import { revocationFollowers } from "@mod/subject-revocation";
 import { flowParts } from "./contract.ts";
-import { type Handler, unavailable } from "./routing.ts";
+import { type Handler, unavailable } from "./requests/requests.ts";
 import { section } from "./section.ts";
 import { gating, handlersOver, partsIn, policyOf } from "./wiring/wiring.ts";
 

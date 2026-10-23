@@ -15,7 +15,7 @@ Internal module of `mfa-flows`: what each of the package's internal modules is g
 - `gating` (the module's parts) → the gate `mfa` contributed to `login-gates`, over the factors and the transactions.
 
 ## Invariants
-- Internal modules: `transactions` keeps transactions; `proof` holds a login (the gate) or a session (step-up) until a factor is proved; `release` is the user's release of their lockout, by `permits`; `recording` records a request's audit events; `seams` shapes what the module binding factors gives and takes. `transactions` takes its own contracts; `wiring` gives the others only what they use.
+- Internal modules: `transactions` keeps transactions; `proof` holds a login (the gate) or a session (step-up) until a factor is proved; `release` is the user's release of their lockout, by `permits`; `recording` records a request's audit events; `requests` reads what a request names and holds the answers routes share; `seams` shapes what the module binding factors gives and takes. `transactions` takes its own contracts; `wiring` gives the others only what they use.
 - The enrollment routes and an enrollment's challenge go to the flow contributed to `enrollmentFlow`.
 
 ## Depends on
