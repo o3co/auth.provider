@@ -31,6 +31,7 @@
 
 ## Invariants
 - Checks are derived from the repository's current state. Nothing is enumerated, and there is no place to write exceptions.
+- The rules read each file's `facts`: G3, G4, G8 and G16 every edge to a package but a resolve; G24, G28 and G31 a file's top-level imports and re-exports (G24 the names imported by name, a default so taken too), never one inside a declared module; G29 a test's edges that load its module, a resolve or an import type composing nothing. G8 asks a declared run-time dependency of every edge that loads its module, `import { type T }` included (the hint: `import type` loads nothing).
 - G29 reads a test file's imports: a `./module` (its own package's by path) is composed, a `./testing` value named `…StandIn` composes its package, and an adapter composes its owner; a stand-in named otherwise, or a composition built elsewhere or at run time, is missed, not reported. A package contributes to a bridge when its shipped code takes one of the bridge's `extensionPoint` values.
 - G29 counts feature bridges only: a foundation bridge's points collect operational counts that decide no answer a test reads. Were one to collect what decides answers, the scope is to be looked at again.
 - Internal modules `recorded` (G30), `taken` (G31) and `internal-by` (G32); `facts`, what each source file says, read by one lexical program.

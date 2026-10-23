@@ -1,9 +1,61 @@
 import { readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join } from "node:path";
+import ts from "typescript";
+import { type Edge, type FileFacts, type Reference, realOf } from "./facts/facts.ts";
 import type { Scope } from "./scope.ts";
-import { importsOf, keyedByImports, packageOf, valuesFrom } from "./source.ts";
 import type { Surface } from "./surface.ts";
 import type { Pkg } from "./workspace.ts";
+
+/** The edges by which a file uses a package (a resolve uses none), each with its package and subpath. */
+function packagesUsed(facts: FileFacts) {
+	return facts.edges.flatMap((edge) =>
+		edge.form !== "resolve" && edge.target.kind === "package"
+			? [{ edge, name: edge.target.name, subpath: edge.target.subpath }]
+			: [],
+	);
+}
+
+/** Whether an edge loads its module yet binds types alone: `import { type T }` under verbatimModuleSyntax. */
+const typesAloneLoaded = (edge: Edge) =>
+	edge.loads && edge.bindings.length > 0 && edge.bindings.every((b) => b.typeOnly);
+
+/** The values a file takes from the module `from` by its top-level imports and re-exports (none inside a declared module): `default`, a name, or `*`. */
+export function valuesTaken(facts: FileFacts, from: string): string[] {
+	return facts.edges
+		.filter((e) => (e.form === "import" || e.form === "export-from") && e.specifier.text === from)
+		.filter((e) => ts.isSourceFile(e.node.parent))
+		.flatMap((e) => e.bindings.filter((b) => !b.typeOnly))
+		.map((b) => (b.form === "named" ? b.imported : b.form === "default" ? "default" : "*"));
+}
+
+/** The local name a reference's import binding was declared under. */
+function bindingNameOf(r: Reference): ts.Identifier | undefined {
+	const b = r.binding;
+	if (b?.kind !== "imported") return undefined;
+	return b.edge.bindings.find((x) => x.local?.text === r.node.text)?.local;
+}
+
+/** The names imported by name from `from` that a `keyof typeof` of the file keys by. */
+function keyedBy(facts: FileFacts, from: string): string[] {
+	return facts.references
+		.filter((r) => {
+			const b = r.binding;
+			const q = r.node.parent;
+			return (
+				r.role === "type-query" &&
+				b?.kind === "imported" &&
+				b.edge.form === "import" &&
+				b.edge.specifier.text === from &&
+				ts.isSourceFile(b.edge.node.parent) &&
+				// A name imported by name, the default too, never a default clause or a namespace.
+				b.edge.bindings.some((x) => x.form === "named" && x.local === bindingNameOf(r)) &&
+				ts.isTypeQueryNode(q) &&
+				ts.isTypeOperatorNode(q.parent) &&
+				q.parent.operator === ts.SyntaxKind.KeyOfKeyword
+			);
+		})
+		.map((r) => r.node.text);
+}
 
 /** G3, G4, G8: what one source file of a package may import. */
 export function fileImportRules(s: Scope, p: Pkg, file: string) {
@@ -12,19 +64,21 @@ export function fileImportRules(s: Scope, p: Pkg, file: string) {
 		Object.keys({ ...p.manifest.dependencies, ...p.manifest.peerDependencies }),
 	);
 	const exportsModule = p.manifest.exports?.["./module"] !== undefined;
-	const test = s.isTest(file);
+	if (s.isTest(file)) return;
 	const where = `${p.name}/${file}`;
-	for (const use of importsOf(join(p.dir, file))) {
-		const target = packageOf(use.specifier);
-		if (!target) continue;
-		if (!test && exportsModule && byName.has(target.name) && target.subpath === "module") {
-			report("G3 only assembly uses composition definitions", where, use.specifier);
+	for (const { edge, name, subpath } of packagesUsed(s.factsOf(p, file))) {
+		const specifier = edge.specifier.text ?? "";
+		if (exportsModule && byName.has(name) && subpath === "module") {
+			report("G3 only assembly uses composition definitions", where, specifier);
 		}
-		if (!test && byName.has(target.name) && target.subpath === "testing") {
-			report("G4 contract tests are used only from tests", where, use.specifier);
+		if (byName.has(name) && subpath === "testing") {
+			report("G4 contract tests are used only from tests", where, specifier);
 		}
-		if (!test && !use.typeOnly && !runtimeDeps.has(target.name)) {
-			report("G8 runtime dependencies as declared", where, use.specifier);
+		if (edge.loads && !runtimeDeps.has(name)) {
+			const hint = typesAloneLoaded(edge)
+				? " (it still loads the module: import type { … } binds types alone)"
+				: "";
+			report("G8 runtime dependencies as declared", where, `${specifier}${hint}`);
 		}
 	}
 }
@@ -85,12 +139,11 @@ export function dependencyRules(s: Scope, p: Pkg) {
 		for (const dep of workspaceDeps(p, true)) {
 			const target = byName.get(dep) as Pkg;
 			if (kindOf(target) !== budget.capabilityKind && target.manifest.forWiring !== true) continue;
-			const beyondStandIn = s.sources(p).some((file) =>
-				importsOf(join(p.dir, file)).some((use) => {
-					const target = packageOf(use.specifier);
-					return target?.name === dep && target.subpath !== "testing";
-				}),
-			);
+			const beyondStandIn = s
+				.sources(p)
+				.some((file) =>
+					packagesUsed(s.factsOf(p, file)).some((u) => u.name === dep && u.subpath !== "testing"),
+				);
 			if (runtime.has(dep) || beyondStandIn) report(g16, p.name, dep);
 		}
 	}
@@ -102,7 +155,7 @@ export function helperRules(s: Scope, p: Pkg, surfaces: ReadonlyMap<string, Surf
 	for (const file of s.sources(p).filter((f) => !s.isTest(f))) {
 		for (const helper of helpers) {
 			const tokens = surfaces.get(helper)?.tokens ?? new Set<string>();
-			for (const name of valuesFrom(join(p.dir, file), helper)) {
+			for (const name of valuesTaken(s.factsOf(p, file), helper)) {
 				if (tokens.has(name) || (name === "*" && tokens.size > 0)) {
 					s.report(
 						"G28 a helpers dependency lends no contract",
@@ -133,7 +186,7 @@ export function bridgeRules(s: Scope, surfaces: ReadonlyMap<string, Surface>) {
 			return shipped.some((file) => {
 				const path = join(p.dir, file);
 				if (!text(path).includes(`"${b.name}"`)) return false;
-				return valuesFrom(path, b.name).some((name) => points.has(name));
+				return valuesTaken(s.factsOf(p, file), b.name).some((name) => points.has(name));
 			});
 		};
 		contributes.set(
@@ -146,7 +199,6 @@ export function bridgeRules(s: Scope, surfaces: ReadonlyMap<string, Surface>) {
 	for (const p of s.packages) {
 		const own = p.manifest.exports?.["./module"];
 		for (const file of s.sources(p).filter((f) => s.isTest(f))) {
-			const path = join(p.dir, file);
 			const composed = new Set<string>();
 			const compose = (name: string) => {
 				composed.add(name);
@@ -154,19 +206,19 @@ export function bridgeRules(s: Scope, surfaces: ReadonlyMap<string, Surface>) {
 				const owner = q && ownerOf(q);
 				if (owner) composed.add(owner);
 			};
-			for (const use of importsOf(path)) {
-				if (use.specifier.startsWith(".")) {
-					if (own && resolve(dirname(path), use.specifier) === resolve(p.dir, own)) compose(p.name);
-					continue;
-				}
-				const target = packageOf(use.specifier);
-				if (!target || !s.byName.has(target.name)) continue;
-				if (target.subpath === "module") compose(target.name);
+			const facts = s.factsOf(p, file);
+			const ownModule = own && realOf(join(p.dir, own));
+			// Loading the module composes it; resolving its path or importing its type does not.
+			const ownTarget = (e: Edge) =>
+				e.loads && e.target.kind === "file" && e.target.path === ownModule;
+			if (ownModule && facts.edges.some(ownTarget)) compose(p.name);
+			for (const { edge, name, subpath } of packagesUsed(facts).filter((u) => u.edge.loads)) {
+				if (!s.byName.has(name)) continue;
+				if (subpath === "module") compose(name);
 				// A stand-in is a value a package's `./testing` names `…StandIn`.
-				const standIn = (name: string) => name.endsWith("StandIn");
-				if (target.subpath === "testing" && valuesFrom(path, use.specifier).some(standIn)) {
-					compose(target.name);
-				}
+				const standIn = (value: string) => value.endsWith("StandIn");
+				const specifier = edge.specifier.text ?? "";
+				if (subpath === "testing" && valuesTaken(facts, specifier).some(standIn)) compose(name);
 			}
 			for (const name of composed) {
 				for (const b of contributes.get(name) ?? []) {
@@ -198,7 +250,7 @@ export function wiringRules(s: Scope) {
 		const keyed = s
 			.sources(w)
 			.filter((file) => !s.isTest(file))
-			.some((file) => keyedByImports(join(w.dir, file), feature).length > 0);
+			.some((file) => keyedBy(s.factsOf(w, file), feature).length > 0);
 		if (!keyed) {
 			report(
 				"G24 a wired feature declares its store's needs",

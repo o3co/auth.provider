@@ -90,6 +90,29 @@ describe("guard-imports", () => {
 		expect(violations.map((v) => `${v.rule.split(" ")[0]} ${v.detail}`)).toEqual(["G8 undeclared"]);
 	});
 
+	it("G8 asks a declared run-time dependency of an import that loads its module, types alone named or not", () => {
+		const x = pkg("@v/x", { "src/contract.ts": "export type T = 1;\n" }, {});
+		const user = pkg(
+			"@v/user",
+			{
+				"src/a.ts": 'import { type T } from "@v/x";\nexport type A = T;\n',
+				"src/b.ts": 'import type { T } from "@v/x";\nexport type B = T;\n',
+				"src/c.ts": 'import {} from "@v/x";\n',
+				// A declaration loads nothing, whatever form names the module.
+				"src/d.d.ts": 'export declare class Pool extends (require("@v/x").Pool) {}\n',
+			},
+			{ devDependencies: { "@v/x": "*" } },
+		);
+		expect(
+			check([x, user], budget)
+				.filter((v) => v.rule.startsWith("G8"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual([
+			"@v/user/src/a.ts @v/x (it still loads the module: import type { … } binds types alone)",
+			"@v/user/src/c.ts @v/x",
+		]);
+	});
+
 	it("G14 keeps a check package that others build on free of the product's modules", () => {
 		// Without exports, so no contract surface is built: these rules read only kinds and dependencies.
 		const deps = (...names: string[]) => ({
@@ -352,11 +375,34 @@ describe("guard-imports", () => {
 			{ wires: "@t/g" },
 			"wiring",
 		);
+		const named = pkg("@t/h", { "src/store.ts": needs }, { storeWiring: true });
+		const byDefault = pkg(
+			"@t/h-store",
+			{
+				// The default taken by name keys as any name does.
+				"src/module.ts": `import { default as hNeeds } from "@t/h";\nexport const g: Record<keyof typeof hNeeds, string> = {};\n`,
+			},
+			{ wires: "@t/h" },
+			"wiring",
+		);
+		const ambientFeature = pkg("@t/k", { "src/store.ts": needs }, { storeWiring: true });
+		const ambient = pkg(
+			"@t/k-store",
+			{
+				// An import inside a declared module keys nothing the wiring runs.
+				"src/module.ts": `declare module "other" {\n\timport { kNeeds } from "@t/k";\n\ttype A = keyof typeof kNeeds;\n}\nexport {};\n`,
+			},
+			{ wires: "@t/k" },
+			"wiring",
+		);
 		expect(
-			check([feature, keyed, bare, unkeyed], budget)
+			check([feature, keyed, bare, unkeyed, named, byDefault, ambientFeature, ambient], budget)
 				.filter((v) => v.rule.startsWith("G24"))
 				.map((v) => `${v.where} ${v.detail}`),
-		).toEqual(["@t/g @t/g-store keys no guarantee by them"]);
+		).toEqual([
+			"@t/g @t/g-store keys no guarantee by them",
+			"@t/k @t/k-store keys no guarantee by them",
+		]);
 	});
 
 	it("G28 refuses a contract or an extension point imported from a dependency named as helpers", () => {
@@ -370,6 +416,8 @@ describe("guard-imports", () => {
 				"src/contract.ts": `import { isAddress, type Mailer } from "@t/mail";\nexport const ok = (m: Mailer) => isAddress(String(m));\n`,
 				"src/module.ts": `import { mailer as m, senders } from "@t/mail";\nimport * as all from "@t/mail";\nexport const used = [m, senders, all];\n`,
 				"src/module.test.ts": `import { mailer } from "@t/mail";\nexport const t = mailer;\n`,
+				// An import inside a declared module's types takes no value at run time.
+				"src/types.ts": `declare module "@t/other" {\n\timport { mailer } from "@t/mail";\n}\nexport {};\n`,
 			},
 			{
 				exports: { ".": "./src/contract.ts" },
@@ -426,6 +474,10 @@ describe("guard-imports", () => {
 				"src/module.ts": `import { entryRequirements } from "@b/reqs";\nexport default entryRequirements;\n`,
 				// Its own test composes it by path, beside a stand-in for the bridge's module.
 				"test/own.test.ts": `import { sessionStandIn } from "@b/session/testing";\nimport entry from "../src/module.ts";\nexport const m = [entry, sessionStandIn];\n`,
+				// An import type of its module, as resolving its path, composes nothing.
+				"test/typed.test.ts": `import { sessionStandIn } from "@b/session/testing";\nexport type M = typeof import("../src/module.ts");\nexport const m = [sessionStandIn];\n`,
+				// Resolving its module's path composes nothing.
+				"test/resolved.test.ts": `import { sessionStandIn } from "@b/session/testing";\nexport const at = import.meta.resolve("../src/module.ts");\nexport const m = [sessionStandIn];\n`,
 			},
 			{ exports: { "./module": "./src/module.ts" }, dependencies: { "@b/reqs": "*" } },
 		);
