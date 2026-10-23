@@ -23,7 +23,8 @@ interface Written {
 
 /**
  * Whether an object literal's property may be written under the name `internal`: by name, or by a
- * computed key whose type is that string, a union holding it, or a string of no known value.
+ * computed key whose type the string "internal" fits, a type parameter's by its constraint (a
+ * union, a template, a mapped string or a string of no known value alike).
  */
 const namesInternal = (checker: ts.TypeChecker, property: ts.ObjectLiteralElementLike) => {
 	const name = property.name;
@@ -32,12 +33,8 @@ const namesInternal = (checker: ts.TypeChecker, property: ts.ObjectLiteralElemen
 		return (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) && name.text === "internal";
 	}
 	const key = checker.getTypeAtLocation(name.expression);
-	const keys = key.isUnion() ? key.types : [key];
-	return keys.some((k) =>
-		k.isStringLiteral()
-			? k.value === "internal"
-			: (k.flags & (ts.TypeFlags.String | ts.TypeFlags.TemplateLiteral)) !== 0,
-	);
+	const bound = key.isTypeParameter() ? (checker.getBaseConstraintOfType(key) ?? key) : key;
+	return checker.isTypeAssignableTo(checker.getStringLiteralType("internal"), bound);
 };
 
 /** The type of the value a property is written with: its initializer, its shorthand name, or its getter's return. */
