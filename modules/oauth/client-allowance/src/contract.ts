@@ -18,6 +18,8 @@ export interface Issued {
 /** What a client may be issued and may see, decided over its `client-allowance` section. */
 export interface ClientAllowance {
 	allowsGrant(client: Client, grantType: string): boolean;
+	/** The grant types a client is allowed, as its allowance lists them. */
+	grantsOf(client: Client): readonly string[];
 	/** Whether a client may be issued this one scope. */
 	allowsScope(client: Client, scope: string): boolean;
 	/** Whether an earlier issuance is within the allowance now: each scope, and exactly one audience it may be issued. */
@@ -79,6 +81,7 @@ const covers: ClientAllowance["covers"] = (client, issued, issuer) => {
 
 export const clientAllowance: ClientAllowance = Object.freeze({
 	allowsGrant: (client, grantType) => client.section(allowances).grants.includes(grantType),
+	grantsOf: (client) => client.section(allowances).grants,
 	allowsScope: (client, scope) => client.section(allowances).scopes.includes(scope),
 	covers,
 	allowsAudience: (client, audience, issuer) =>

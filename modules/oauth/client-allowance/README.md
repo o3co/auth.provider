@@ -11,7 +11,7 @@
 
 ## Offers
 - `clientAllowance`, decisions over a client's section:
-  - `allowsGrant`: a grant is allowed only when its allowed grants list it.
+  - `allowsGrant`: a grant is allowed only when its allowed grants list it; `grantsOf` answers that list, as a boot check that compares it with the grants composed reads it.
   - `allowsScope`: one scope is allowed only when its allowed scopes list it.
   - `allowedIssuance`: the scope and audience for a requested scope. No scope asked gives the defaults; an explicit empty default gives no scope, and no default at all is refused while scopes are allowed. A scope outside the allowed ones is refused. The audience is the first allowed one, else the issuer.
   - `covers`: an earlier issuance (`Issued`) has every scope allowed, and exactly one audience the client may be issued.
