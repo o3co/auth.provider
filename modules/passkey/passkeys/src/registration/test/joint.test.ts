@@ -154,7 +154,10 @@ it("leaves a registration whose listed pending a removal took off with nothing u
 	let asks = 0;
 	const answer = await registrations.register("sam", response, undefined, async () => {
 		if (++asks === 2) {
-			expect(await t.records.removed("sam", response.id)).toEqual({ removed: true, empty: true });
+			expect(await t.records.removed("sam", response.id)).toMatchObject({
+				removed: true,
+				empty: true,
+			});
 		}
 		return true;
 	});
@@ -170,12 +173,12 @@ it("takes a registration activated before a clear away with it, and leaves one a
 		const response = await answered("sam");
 		let asks = 0;
 		const answer = await registrations.register("sam", response, undefined, async () => {
-			if (++asks === 2 && when === "cleared first") await t.records.cleared("sam");
+			if (++asks === 2 && when === "cleared first") await t.records.cleared("sam", fresh());
 			return true;
 		});
 		if (when === "activated first") {
 			expect(answer, when).toMatchObject({ kind: "registered" });
-			expect(await t.records.cleared("sam"), when).toEqual({ removed: 1 });
+			expect((await t.records.cleared("sam", fresh())).removed, when).toBe(1);
 		} else {
 			expect(answer, when).toEqual({ kind: "refused", reason: "conflict" });
 		}

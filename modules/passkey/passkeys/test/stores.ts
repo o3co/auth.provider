@@ -152,6 +152,19 @@ export function memoryStores(now: () => number = () => 0) {
 		raceNextTogether: (run: () => Promise<void>) => {
 			raceTogether = run;
 		},
+		/** The store forgets the subject's holder, or the id's record, as one that lost what it was given. */
+		lose: {
+			holder: (subject: string) => stand.records.remove(at("subjects", keys.subject(subject))),
+			record: (id: string) => stand.records.remove(at("credentials", keys.credential(id))),
+		},
+		/** The subject's holder as kept now, raw. */
+		holderCopy: (subject: string) => stand.peek(at("subjects", keys.subject(subject))),
+		/** Puts `record` in the place of the subject's holder, as a store gone back to an old copy. */
+		backTo: async (subject: string, record: object) => {
+			const key = at("subjects", keys.subject(subject));
+			await stand.records.remove(key);
+			await stand.records.create(key, stored(record), "endless");
+		},
 	};
 }
 

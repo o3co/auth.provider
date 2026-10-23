@@ -2,7 +2,7 @@ import { type Audit, declaredAudit } from "@mod/audit";
 import { isUnavailable, type Log, Unavailable } from "@mod/kernel";
 import events from "../audit-events.ts";
 import type { PasskeyHolders } from "../contract.ts";
-import type { KeptPasskeys } from "../records.ts";
+import type { Emptied, KeptPasskeys } from "../records.ts";
 import type { PasskeyWitness } from "../witness.ts";
 
 export interface HolderParts {
@@ -13,6 +13,8 @@ export interface HolderParts {
 	readonly log: Pick<Log, "warn">;
 	/** A new token for a mark this call sets. */
 	readonly token: () => string;
+	/** A new holder's handle, for a reset of a subject that has none. */
+	readonly handle: () => string;
 }
 
 /** Where a settle was asked, as an inconsistency found there is recorded. */
@@ -23,11 +25,11 @@ const enrollRetries = 3;
 /** A settle marks this often at most, then is unavailable. */
 const settleMarks = 2;
 
-/** Whether the witness's mark is `token`'s, asked again while it is unavailable. */
-async function markedBy(witness: PasskeyWitness, subject: string, token: string) {
+/** `ask`'s answer, asked again while it is unavailable. */
+async function retried<T>(ask: () => Promise<T>) {
 	for (let attempt = 0; ; attempt++) {
 		try {
-			return await witness.enroll(subject, token);
+			return await ask();
 		} catch (error) {
 			if (!isUnavailable(error) || attempt === enrollRetries) throw error;
 		}
@@ -44,17 +46,39 @@ export function holdersOver(p: HolderParts) {
 		return new Unavailable("passkeys");
 	};
 	/**
-	 * Marks a subject holding a passkey with no mark, under a new token. A mark beside none goes by
-	 * `withdraw` where this call set it, by `clear` where this call emptied the list (`emptied`), and is
-	 * otherwise read once more, then recorded and unavailable: the store may have lost the passkeys.
-	 * After any write it reads both again; it marks twice at most, then is unavailable. Answers whether
-	 * the subject holds a passkey, as the read the mark agreed with saw it.
+	 * After a write that emptied the list left `emptied`: withdraws the mark by the token read first,
+	 * only where the holder then holds none for sure, and marks again where a passkey came meanwhile.
 	 */
-	const settle = async (subject: string, at: Asked, emptied = false): Promise<boolean> => {
+	const withdrawn = async (
+		witness: PasskeyWitness,
+		subject: string,
+		at: Asked,
+		emptied: Emptied,
+	) => {
+		// The mark before the holdings: a registration lists before it marks.
+		const token = await witness.markedWith(subject);
+		if (token === undefined) return false;
+		const held = await p.records.afterRemoval(subject, emptied);
+		if (held === "unsure") throw inconsistent(subject, at);
+		if (held !== "none") return held === "passkey";
+		await retried(() => witness.withdraw(subject, token));
+		const after = await p.records.afterRemoval(subject, emptied);
+		if (after === "unsure") throw inconsistent(subject, at);
+		// A pending one marks once admitted.
+		return after === "passkey" ? settle(subject, at) : false;
+	};
+	/**
+	 * Marks a subject holding a passkey with no mark, under a new token. A mark beside none goes by
+	 * `withdraw` where this call set it, as `withdrawn` says where this call emptied the list
+	 * (`emptied`), and is otherwise read once more, then recorded and unavailable: the store may have
+	 * lost the passkeys. After any write it reads both again; it marks twice at most, then is
+	 * unavailable. Answers whether the subject holds a passkey, as the read the mark agreed with saw it.
+	 */
+	const settle = async (subject: string, at: Asked, emptied?: Emptied): Promise<boolean> => {
 		const witness = p.witness;
 		if (witness === undefined) return holds(subject);
+		if (emptied !== undefined) return withdrawn(witness, subject, at, emptied);
 		let mine: string | undefined;
-		let clearing = emptied;
 		for (let marks = 0; ; ) {
 			const held = await holds(subject);
 			const marked = await witness.read(subject);
@@ -66,12 +90,7 @@ export function holdersOver(p: HolderParts) {
 					mine = undefined;
 					continue;
 				}
-				if (clearing) {
-					await witness.clear(subject);
-					clearing = false;
-					continue;
-				}
-				// Read once more: a last removal may lie between emptying the list and its clear.
+				// Read once more: a last removal may lie between emptying the list and its withdraw.
 				const again = await holds(subject);
 				const still = await witness.read(subject);
 				if (again === still) return again;
@@ -80,17 +99,17 @@ export function holdersOver(p: HolderParts) {
 			if (marks === settleMarks) throw new Unavailable("passkeys");
 			marks += 1;
 			const token = p.token();
-			mine = (await markedBy(witness, subject, token)) ? token : undefined;
+			mine = (await retried(() => witness.enroll(subject, token))) ? token : undefined;
 		}
 	};
 	const holders: PasskeyHolders = {
 		// What the settle saw, the mark agreeing: never a read of the passkeys alone after it.
 		held: (subject) => settle(subject, "held"),
 		cleared: async (subject) => {
-			const cleared = await p.records.cleared(subject);
+			const { removed, emptied } = await p.records.cleared(subject, p.handle());
 			// A reset ends the mark whatever the list held: a mark beside none is what it mends.
-			await settle(subject, "reset", true);
-			return cleared;
+			await settle(subject, "reset", emptied);
+			return { removed };
 		},
 		settle: async (subject) => {
 			await settle(subject, "settle");

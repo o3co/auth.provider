@@ -16,6 +16,14 @@ const { handleBytes, idBytes } = credentialLimits;
 export interface Holder {
 	readonly handle: string;
 	readonly credentials: readonly string[];
+	/** Moved on by each write that empties the list; 0 where none has (or 0.18 kept the holder). */
+	readonly fence: number;
+}
+
+/** The holder a write that emptied its list left: its handle, which names the holder's incarnation, and its fence. */
+export interface Emptied {
+	readonly handle: string;
+	readonly fence: number;
 }
 
 export interface Passkey {
@@ -33,6 +41,7 @@ const holderShape = z.object({
 	v: z.literal(1),
 	handle: canonical(handleBytes),
 	credentials: z.array(z.string()),
+	fence: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
 });
 const passkeyShape = z.object({
 	v: z.literal(1),
@@ -59,7 +68,8 @@ const removedShape = z.object({ v: z.literal(1), subject: z.string(), removed: z
 function holderOf(record: StoredPasskey): Holder {
 	const parsed = holderShape.safeParse(record);
 	if (!parsed.success) throw broken();
-	return { handle: parsed.data.handle, credentials: parsed.data.credentials };
+	const { handle, credentials, fence = 0 } = parsed.data;
+	return { handle, credentials, fence };
 }
 
 /** A kept passkey, or the subject a removed one was held by; unavailable for any other shape. */
@@ -118,12 +128,26 @@ export function keptPasskeys(
 		const kept = record && keptOf(record);
 		return kept !== undefined && kept.kind !== "removed" && kept.subject === subject;
 	};
-	/** What a change of the subject's holder did to an id: `removed` where it took it off, `empty` where none is left. */
+	/** The holder a change left, where it emptied the list. */
+	const emptiedBy = (changed: ChangedPasskey | undefined): Emptied | undefined => {
+		const [before, after] = [changed?.before, changed?.after].map((r) => r && holderOf(r));
+		if (!after || after.credentials.length > 0 || after.fence === before?.fence) return undefined;
+		return { handle: after.handle, fence: after.fence };
+	};
+	/** What a change of the subject's holder did to an id: `removed` where it took it off, `empty` where none is left, `emptied` the holder left where it emptied the list. */
 	const delistedBy = (changed: ChangedPasskey | undefined, id: string) => {
 		const [before, after] = [changed?.before, changed?.after].map((r) =>
 			r === undefined ? [] : holderOf(r).credentials,
 		);
-		return { removed: !!before?.includes(id) && !after?.includes(id), empty: after?.length === 0 };
+		const removed = !!before?.includes(id) && !after?.includes(id);
+		const emptied = removed ? emptiedBy(changed) : undefined;
+		return { removed, empty: after?.length === 0, ...(emptied && { emptied }) };
+	};
+	/** The subject's holder listing `list`, its fence moved on where `list` empties it. */
+	const listing = (ours: StoredPasskey, list: readonly string[]) => {
+		const held = holderOf(ours);
+		const fence = list.length === 0 && held.credentials.length > 0 ? held.fence + 1 : held.fence;
+		return stored({ ...ours, credentials: list, fence });
 	};
 	const together = store.updateTogether.bind(store);
 	/**
@@ -157,7 +181,7 @@ export function keptPasskeys(
 				pending: true,
 				token: written,
 			});
-			let verdict: "written" | "conflict" | "full" = "written";
+			let verdict: "written" | "conflict" | "full" | "malformed" = "written";
 			await together(
 				{ credentials: [credentialKey(id)], subjects: [subjectKey(subject)] },
 				{
@@ -171,6 +195,11 @@ export function keptPasskeys(
 					change: (read) => {
 						const [ours, owner] = read.subjects;
 						if (!ours) throw broken();
+						// Checked again in the change: the holder may have been made anew since.
+						if (holderOf(ours).handle !== userHandle) {
+							verdict = "malformed";
+							return {};
+						}
 						const listed = holderOf(ours).credentials;
 						const kept = read.credentials[0] && keptOf(read.credentials[0]);
 						// The list of the subject the record names, pending or a passkey: its own, or the one watched.
@@ -208,13 +237,10 @@ export function keptPasskeys(
 						const [current, ours] = [read.credentials[0], read.subjects[0]];
 						if (!current || !pendingOf(current, written) || !ours) return {};
 						const listed = holderOf(ours).credentials;
+						const rest = listed.filter((c) => c !== id);
 						return {
 							credentials: [{ value: removedOf(subject) }],
-							subjects: [
-								listed.includes(id)
-									? { value: stored({ ...ours, credentials: listed.filter((c) => c !== id) }) }
-									: undefined,
-							],
+							subjects: [listed.includes(id) ? { value: listing(ours, rest) } : undefined],
 						};
 					},
 				},
@@ -231,21 +257,20 @@ export function keptPasskeys(
 						const ours = read.subjects[0];
 						const listed = ours === undefined ? [] : holderOf(ours).credentials;
 						if (!ours || !listed.includes(id)) return {};
+						const rest = listed.filter((c) => c !== id);
 						return {
 							credentials: [
 								heldBy(read.credentials[0], subject) ? { value: removedOf(subject) } : undefined,
 							],
-							subjects: [
-								{ value: stored({ ...ours, credentials: listed.filter((c) => c !== id) }) },
-							],
+							subjects: [{ value: listing(ours, rest) }],
 						};
 					},
 				},
 			);
 			return delistedBy(changed.subjects[0], id);
 		},
-		/** Empties the subject's list and strips every record of the subject it names, in one change. */
-		cleared: async (subject: string) => {
+		/** Empties the subject's list and strips every record of the subject it names, in one change, moving its fence on; a subject with no holder gets one, under `fresh`. */
+		cleared: async (subject: string, fresh: string) => {
 			const changed = await together(
 				{ credentials: [], subjects: [subjectKey(subject)] },
 				{
@@ -256,20 +281,26 @@ export function keptPasskeys(
 					}),
 					change: (read) => {
 						const ours = read.subjects[0];
-						if (!ours || holderOf(ours).credentials.length === 0) return {};
+						const made = stored({ v: 1, handle: fresh, credentials: [], fence: 1 });
+						if (!ours) return { subjects: [{ value: made }] };
+						const held = holderOf(ours);
 						return {
 							credentials: read.credentials.map((r) =>
 								heldBy(r, subject) ? { value: removedOf(subject) } : undefined,
 							),
-							subjects: [{ value: stored({ ...ours, credentials: [] }) }],
+							subjects: [{ value: stored({ ...ours, credentials: [], fence: held.fence + 1 }) }],
 						};
 					},
 				},
 			);
 			const [before, after] = [changed.subjects[0]?.before, changed.subjects[0]?.after].map((r) =>
-				r === undefined ? 0 : holderOf(r).credentials.length,
+				r === undefined ? undefined : holderOf(r),
 			);
-			return { removed: (before ?? 0) - (after ?? 0) };
+			if (!after) throw broken();
+			return {
+				removed: (before?.credentials.length ?? 0) - after.credentials.length,
+				emptied: { handle: after.handle, fence: after.fence },
+			};
 		},
 	};
 	const records = {
@@ -375,6 +406,37 @@ export function keptPasskeys(
 		ended: joint.ended,
 		/** Takes every passkey off the subject's holder, keeping its handle; see `joint`. `removed` counts what this call took off. */
 		cleared: joint.cleared,
+		/**
+		 * What the subject holds after a write that emptied its list left `emptied`, in one read that
+		 * writes nothing: a `passkey` or a `pending` one listed; `none` where the holder is that one at
+		 * that fence or later and every listed record reads as none of the subject's; else `unsure`.
+		 * A holder that changes between its two reads is read from the start once more.
+		 */
+		afterRemoval: async (
+			subject: string,
+			emptied: Emptied,
+		): Promise<"passkey" | "pending" | "none" | "unsure"> => {
+			for (let tries = 0; tries < 2; tries++) {
+				const first = await holder(subject);
+				if (!first) return "unsure";
+				let held: "passkey" | "pending" | "none" = "none";
+				let missing = false;
+				for (const id of first.credentials) {
+					const record = await store.credentials.read(credentialKey(id));
+					const kept = record && keptOf(record);
+					if (kept === undefined) missing = true;
+					else if (kept.kind !== "removed" && kept.subject === subject) {
+						held = kept.kind === "passkey" ? "passkey" : held === "none" ? "pending" : held;
+					}
+				}
+				const again = await holder(subject);
+				if (again?.handle !== first.handle || again.fence !== first.fence) continue;
+				if (held !== "none") return held;
+				const same = first.handle === emptied.handle && first.fence >= emptied.fence;
+				return same && !missing ? "none" : "unsure";
+			}
+			return "unsure";
+		},
 	};
 	return records;
 }

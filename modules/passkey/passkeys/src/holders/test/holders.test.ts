@@ -27,6 +27,7 @@ function held({ witnessed = true, around = (r: KeptPasskeys) => r } = {}) {
 		audit: { record: (event) => void events.push(event) },
 		log: recordingLog().log,
 		token: () => `t${++n}`,
+		handle: fresh,
 	});
 	/** Registers a passkey for `subject` as a registration does: the write, then the settle. */
 	const register = async (subject: string, id = fresh()) => {
@@ -42,11 +43,11 @@ function held({ witnessed = true, around = (r: KeptPasskeys) => r } = {}) {
 		await settle(subject, "registration");
 		return id;
 	};
-	/** Removes a passkey as a removal does: the update, then the settle it says it may clear in. */
+	/** Removes a passkey as a removal does: the update, then the settle, handed the holder it left where it emptied the list. */
 	const remove = async (subject: string, id: string) => {
 		const removed = await records.removed(subject, id);
-		await settle(subject, "removal", removed.removed && removed.empty);
-		return removed;
+		await settle(subject, "removal", removed.emptied);
+		return { removed: removed.removed, empty: removed.empty };
 	};
 	return { stores, records, stand, events, holders, settle, register, remove };
 }
@@ -113,7 +114,7 @@ it("withdraws only its own mark where the passkey went meanwhile, never another'
 	const enroll = stand.witness.enroll;
 	stand.witness.enroll = async (subject, token) => {
 		const owned = await enroll(subject, token);
-		if (subject === "sam") await records.cleared("sam");
+		if (subject === "sam") await records.cleared("sam", fresh());
 		return owned;
 	};
 	await register("sam");
@@ -171,13 +172,13 @@ it("is unavailable while the witness cannot be read or written, the passkey writ
 
 passkeyWitnessContract("the witness in memory", async () => passkeyWitnessStandIn().witness);
 passkeyWitnessContract(
-	"the witness in memory, without markedWith",
-	async () => passkeyWitnessStandIn("passkey-witness", { markedWith: false }).witness,
+	"the witness in memory, without clear",
+	async () => passkeyWitnessStandIn("passkey-witness", { clear: false }).witness,
 );
 
-it("offers the token of the mark from the witness in memory, and leaves it out when asked to", () => {
-	expect(typeof passkeyWitnessStandIn().witness.markedWith).toBe("function");
-	expect(passkeyWitnessStandIn("w", { markedWith: false }).witness.markedWith).toBeUndefined();
+it("offers clear from the witness in memory, and leaves it out when asked to", () => {
+	expect(typeof passkeyWitnessStandIn().witness.clear).toBe("function");
+	expect(passkeyWitnessStandIn("w", { clear: false }).witness.clear).toBeUndefined();
 });
 
 it("names each way a witness's markedWith breaks its promise", async () => {
@@ -193,6 +194,10 @@ it("names each way a witness's markedWith breaks its promise", async () => {
 		),
 		"none for a marked subject": lying(() => undefined),
 	};
+	const { markedWith: _, ...untold } = passkeyWitnessStandIn().witness;
+	expect(await passkeyWitnessProblems(untold as never)).toContain(
+		"the witness does not tell its mark's token",
+	);
 	for (const [what, witness] of Object.entries(cases)) {
 		expect(await passkeyWitnessProblems(witness), what).not.toEqual([]);
 	}
@@ -219,7 +224,7 @@ it("names each way a witness's markedWith breaks its promise", async () => {
 		clear: async (subject: string) => {
 			const token = kept.marks.get(subject);
 			if (token !== undefined) before.set(subject, token);
-			await kept.witness.clear(subject);
+			await kept.witness.clear?.(subject);
 		},
 		markedWith: async (subject: string) => kept.marks.get(subject) ?? before.get(subject),
 	};
@@ -262,7 +267,7 @@ it("reads both again after withdrawing its mark, and records another's mark left
 		const owned = await enroll(subject, token);
 		if (subject === "sam") {
 			// The passkeys go, and another binding's mark replaces this call's before it withdraws.
-			await records.cleared("sam");
+			await records.cleared("sam", fresh());
 			stand.next.beforeWithdraw = () => stand.marks.set("sam", "theirs");
 		}
 		return owned;

@@ -1,6 +1,9 @@
+import { randomBytes } from "node:crypto";
 import { isUnavailable, Unavailable } from "@mod/kernel";
 import { expect, it } from "vitest";
 import { jointStores } from "./stores.ts";
+
+const fresh = () => randomBytes(32).toString("base64url");
 
 it("writes a registration's record and listing as one, deciding again on a race, its token made once", async () => {
 	const t = jointStores();
@@ -29,7 +32,7 @@ it("answers a clear by what its last decision took off, deciding again on a race
 		expect(await t.records.register("sam", c, 10)).toBe("registered");
 	});
 	const before = t.counted.decisions;
-	expect(await t.records.cleared("sam")).toEqual({ removed: 3 });
+	expect((await t.records.cleared("sam", fresh())).removed).toBe(3);
 	// The clear decided twice, the registration between once.
 	expect(t.counted.decisions - before).toBe(3);
 	expect(await t.listOf("sam")).toEqual([]);
@@ -47,7 +50,7 @@ it("leaves no passkey off its list where an activation lands as a clear writes a
 		expect(await t.records.activated(c.id, "t-pending")).toBe("activated");
 		throw new Unavailable("passkeys");
 	});
-	await expect(t.records.cleared("sam")).rejects.toSatisfy(isUnavailable);
+	await expect(t.records.cleared("sam", fresh())).rejects.toSatisfy(isUnavailable);
 	expect(landed).toBe(true);
 	expect(await t.agreed("sam", c.id)).toBe(true);
 });
@@ -60,7 +63,7 @@ it("ends nothing of a registration that replaced the ended one's, of the subject
 			await t.records.joined("sam", await t.credentialFor("sam", id), 10, undefined, "t-one"),
 		).toBe("written");
 		// A removal takes the pending one; another registration then keeps the id.
-		expect(await t.records.removed("sam", id)).toEqual({ removed: true, empty: true });
+		expect(await t.records.removed("sam", id)).toMatchObject({ removed: true, empty: true });
 		const theirs = await t.credentialFor(replacing, id);
 		expect(await t.records.register(replacing, theirs, 10), replacing).toBe("registered");
 		const before = { ...t.counted };
@@ -117,7 +120,7 @@ it("clears a list of 100 and every record of the subject it names in one change,
 	expect(await t.records.register("kim", kims, 10)).toBe("registered");
 	await t.listAs18("sam", [...ids, kims.id]);
 	const before = { ...t.counted };
-	expect(await t.records.cleared("sam")).toEqual({ removed: 101 });
+	expect((await t.records.cleared("sam", fresh())).removed).toBe(101);
 	expect([t.counted.together - before.together, t.counted.single - before.single]).toEqual([1, 0]);
 	expect(await t.listOf("sam")).toEqual([]);
 	for (const id of ids)
@@ -130,7 +133,7 @@ it("leaves everything as it was where a clear fails", async () => {
 	const [a, b] = [await t.credentialFor("sam"), await t.credentialFor("sam")];
 	for (const c of [a, b]) expect(await t.records.register("sam", c, 10)).toBe("registered");
 	t.stores.down.together.failNext("updateTogether");
-	await expect(t.records.cleared("sam")).rejects.toSatisfy(isUnavailable);
+	await expect(t.records.cleared("sam", fresh())).rejects.toSatisfy(isUnavailable);
 	expect(await t.listOf("sam")).toEqual([a.id, b.id]);
 	for (const c of [a, b]) expect((await t.records.passkey(c.id))?.subject).toBe("sam");
 });
@@ -168,7 +171,7 @@ it("takes over a record 0.18 left on no list, and mends an old entry once the re
 		expect(await t.records.register(subject, asked, 10), subject).toBe("conflict");
 	}
 	// Once kim lists it no longer, sam registering it again uses the old entry, listed once.
-	expect(await t.records.removed("kim", kims.id)).toEqual({ removed: true, empty: true });
+	expect(await t.records.removed("kim", kims.id)).toMatchObject({ removed: true, empty: true });
 	expect(await t.records.register("sam", await t.credentialFor("sam", kims.id), 10)).toBe(
 		"registered",
 	);

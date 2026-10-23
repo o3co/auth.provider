@@ -1,7 +1,7 @@
 import { type Ceremonies, type Credential, challengeOf, type Verification } from "@mod/webauthn";
 import type { RegistrationRefusal, Registrations } from "../contract.ts";
 import type { Asked } from "../holders/holders.ts";
-import type { KeptChallenges, KeptPasskeys } from "../records.ts";
+import type { Emptied, KeptChallenges, KeptPasskeys } from "../records.ts";
 
 export interface RegistrationParts {
 	readonly ceremonies: Ceremonies;
@@ -12,8 +12,8 @@ export interface RegistrationParts {
 	readonly max: number;
 	/** A new subject's handle: 32 random bytes, unpadded base64url. */
 	freshHandle(): string;
-	/** Brings the witness's mark in line after a write; `emptied` where this call emptied the list. */
-	settle(subject: string, at: Asked, emptied?: boolean): Promise<unknown>;
+	/** Brings the witness's mark in line after a write; `emptied`, the holder left, where this call emptied the list. */
+	settle(subject: string, at: Asked, emptied?: Emptied): Promise<unknown>;
 }
 
 const refused = (reason: RegistrationRefusal) => ({ kind: "refused" as const, reason });
@@ -53,7 +53,7 @@ export function registrationsOver(p: RegistrationParts): Registrations {
 		/** Ends what this write left, if it was written: off the list, its record stripped, and settled. */
 		const end = async () => {
 			const removed = await p.records.ended(subject, credential.id, written);
-			await p.settle(subject, "removal", removed.removed && removed.empty);
+			await p.settle(subject, "removal", removed.emptied);
 		};
 		// A write whose answer is lost may have landed: ended, as no ask after it can run.
 		const wrote = await p.records
@@ -104,9 +104,10 @@ export function registrationsOver(p: RegistrationParts): Registrations {
 		renamed: (subject, id, nickname) => p.records.renamed(subject, id, nickname),
 		removed: async (subject, id) => {
 			const removed = await p.records.removed(subject, id);
-			// Only the call whose own update emptied the list may clear a mark it did not set.
-			await p.settle(subject, "removal", removed.removed && removed.empty);
-			return removed;
+			// Only the call whose own update emptied the list may withdraw a mark it did not set.
+			await p.settle(subject, "removal", removed.emptied);
+			// The holder it left stays inside: its handle is the subject's.
+			return { removed: removed.removed, empty: removed.empty };
 		},
 	};
 }
