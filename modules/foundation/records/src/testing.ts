@@ -1,6 +1,6 @@
 import { Unavailable } from "@mod/kernel";
 import { codePointOrder, type Json } from "@mod/store";
-import { type Changed, checkedCap, type KeyedSets, overCap } from "./records.ts";
+import { type Changed, checkedCap, type KeyedSets, type Next, overCap } from "./records.ts";
 import { type DeferredSize, shardOf } from "./shards.ts";
 
 /** Jobs that all land in one shard of deferred work, and how many that shard keeps before it refuses. */
@@ -111,6 +111,50 @@ export function memoryRecords<T extends Json>(now: () => number, size: DeferredS
 					ms === undefined ? found.until : ms === "endless" ? Number.POSITIVE_INFINITY : now() + ms;
 				kept.set(key, { value: changed.value, until });
 				return { before: found.value, after: changed.value };
+			},
+			/**
+			 * Changes two records of this stand-in as one, from what both hold and the records `watch`
+			 * names besides, as records' `changeTogether` does (nothing can come between, in memory).
+			 */
+			changeTogether: async (
+				firstKey: string,
+				secondKey: string,
+				p: {
+					readonly watch?: (first: T | undefined, second: T | undefined) => readonly string[];
+					readonly decide: (
+						first: T | undefined,
+						second: T | undefined,
+						watched: readonly (T | undefined)[],
+					) => { readonly first?: Next<T>; readonly second?: Next<T> };
+				},
+			) => {
+				if (firstKey === secondKey) throw new Error("records changed together are two records");
+				const before = { first: live(firstKey)?.value, second: live(secondKey)?.value };
+				const watched = (p.watch?.(before.first, before.second) ?? []).map(
+					(key) => live(key)?.value,
+				);
+				const decided = p.decide(before.first, before.second, watched);
+				const apply = (key: string, was: T | undefined, next: Next<T>) => {
+					if (next === undefined) return was;
+					if ("remove" in next) {
+						kept.delete(key);
+						return undefined;
+					}
+					const ms = next.lifetimeMs;
+					const held = live(key);
+					const until =
+						ms === undefined
+							? (held?.until ?? Number.POSITIVE_INFINITY)
+							: ms === "endless"
+								? Number.POSITIVE_INFINITY
+								: now() + ms;
+					kept.set(key, { value: next.value, until });
+					return next.value;
+				};
+				return {
+					first: { before: before.first, after: apply(firstKey, before.first, decided.first) },
+					second: { before: before.second, after: apply(secondKey, before.second, decided.second) },
+				};
 			},
 		},
 		deferred: {
