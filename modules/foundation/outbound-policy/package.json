@@ -7,6 +7,16 @@
 	"exports": {
 		".": "./src/contract.ts"
 	},
+	"internalBy": [
+		"@mod/audit-http",
+		"@mod/external-jwt",
+		"@mod/idp-github",
+		"@mod/idp-oidc",
+		"@mod/mfa-witness-http",
+		"@mod/passkey-witness-http",
+		"@mod/signer-keys-http",
+		"@mod/users-http"
+	],
 	"dependencies": {
 		"@mod/address-reach": "workspace:*",
 		"@mod/kernel": "workspace:*",
