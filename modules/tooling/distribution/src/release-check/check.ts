@@ -8,6 +8,7 @@ import { readBundles } from "../contract.ts";
 import { outsideScene } from "../outside-scene/contract.ts";
 import { packedOf, packRelease, zodOf } from "../release/contract.ts";
 import { releaseOf } from "../workspace.ts";
+import { helperScene } from "./helpers.ts";
 import { dockerMissing, images, overridesFile } from "./image.ts";
 
 /**
@@ -163,7 +164,17 @@ for (const name of patterns().map((pattern) => pattern.name)) {
 			],
 			{ cwd: app, stdio: "pipe" },
 		);
-		say(`${name}: ${await run.booted(app, run.build(app, name))}`);
+		const image = run.build(app, name);
+		say(`${name}: ${await run.booted(app, image)}`);
+		// The resolver's helpers as a deployment constrains them, on one pattern's image.
+		if (name === "simple-web") {
+			try {
+				say(`helpers: ${await helperScene(run, app, image)}`);
+			} catch (error) {
+				problems.push(`helpers: ${error instanceof Error ? error.message : String(error)}`);
+				say("helpers: failed");
+			}
+		}
 	} catch (error) {
 		const told = error as { stdout?: Buffer; stderr?: Buffer; message: string };
 		problems.push(`${name}: ${told.stdout ?? ""}${told.stderr ?? ""}${told.message}`);
