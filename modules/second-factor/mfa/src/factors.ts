@@ -13,7 +13,7 @@ import type { FactorManaging } from "@mod/mfa-managing";
 import type { FactorReading, Fence, Shown } from "@mod/mfa-reading";
 import type { Seal } from "@mod/seal";
 import events from "./audit-events.ts";
-import { type Factor, factorRecords, sealContext } from "./records/records.ts";
+import { type Decision, type Factor, factorRecords, sealContext } from "./records/records.ts";
 import type { FactorStore } from "./store.ts";
 
 export interface FactorParts {
@@ -335,18 +335,29 @@ export function factorDecisions(p: FactorParts): Decisions {
 			};
 			const backed = [...p.kinds.values()].some(isWayBack);
 			// Decided on the factors as written: of two first bindings at once, one binds.
-			const written = await records.decide<"full" | "closed" | "fenced" | { due: boolean }>(
-				subject,
-				(all, fences) => {
-					if (fences !== found.fences) return { verdict: "fenced" };
-					// A first binding another counting factor beat to the subject binds nothing: it was let begin as the first.
-					if (asFirst && counting(all, p.kinds).length > 0) return { verdict: "closed" };
-					// A subject holding no codes keeps them a place, for the reissue to write them in.
-					const due = backed && !all.some(wayBack);
-					if (all.length + 1 + (due ? 1 : 0) > p.maxFactors) return { verdict: "full" };
-					return { next: [...all, factor], verdict: { due } };
-				},
-			);
+			const judge = (
+				all: readonly Factor[],
+				fences: number,
+			): Decision<"full" | "closed" | "fenced" | { due: boolean }> => {
+				if (fences !== found.fences) return { verdict: "fenced" };
+				// A first binding another counting factor beat to the subject binds nothing: it was let begin as the first.
+				if (asFirst && counting(all, p.kinds).length > 0) return { verdict: "closed" };
+				// A subject holding no codes keeps them a place, for the reissue to write them in.
+				const due = backed && !all.some(wayBack);
+				if (all.length + 1 + (due ? 1 : 0) > p.maxFactors) return { verdict: "full" };
+				return { next: [...all, factor], verdict: { due } };
+			};
+			// Where the store writes a list and a claim together, the factor and its claim come at once.
+			const together =
+				unique === undefined
+					? undefined
+					: await records.decideClaiming(
+							subject,
+							{ kind: factor.kind, value: unique, factor: fid },
+							judge,
+						);
+			if (together === "duplicate") return { kind: "duplicate" };
+			const written = together ?? (await records.decide(subject, judge));
 			if (written === "fenced") return { kind: "fenced" };
 			if (written === "full") return { kind: "full" };
 			if (written === "closed") return closed(subject, factor.kind, "competing");
@@ -356,7 +367,11 @@ export function factorDecisions(p: FactorParts): Decisions {
 			if (!(await records.list(subject)).some((f) => f.id === fid)) {
 				return closed(subject, factor.kind, "reset-cleared");
 			}
-			if (unique !== undefined && !(await records.claim(subject, factor.kind, unique, fid))) {
+			if (
+				together === undefined &&
+				unique !== undefined &&
+				!(await records.claim(subject, factor.kind, unique, fid))
+			) {
 				// Another factor holds the value: this one goes again.
 				await records.decide(subject, (all) => ({
 					next: all.filter((f) => !ours.has(f.id)),

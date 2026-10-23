@@ -226,10 +226,16 @@ const enforcer = defineModule({ name: "enforcer" }, (m) => [
 
 async function serve(
 	settings: Partial<MfaSettings> = {},
-	{ steps = [step], kinds = [code, backup], extra = [] as Module[], enforced = true } = {},
+	{
+		steps = [step],
+		kinds = [code, backup],
+		extra = [] as Module[],
+		enforced = true,
+		together = false,
+	} = {},
 ) {
 	const audit = auditStandIn();
-	const place = memoryFactors();
+	const place = memoryFactors(undefined, { together });
 	const app = await assemble({
 		modules: [
 			http,
@@ -1388,5 +1394,63 @@ describe("an enrollment witness", () => {
 		await bindCode("lee");
 		await place.factors.update(listKeyOf("lee"), () => ({ value: storedList("lee", []) }));
 		expect(await decided.asks("lee")).toBe("nothing");
+	});
+});
+
+describe("a binding over a store writing a list and a claim together", () => {
+	it("writes the factor of a unique value and its claim in one write, never one without the other", async () => {
+		const { decided, bindKind, place } = await serve({}, { kinds: [card], together: true });
+		const saved: string[] = [];
+		place.hooks.beforeSave = async (key) => void saved.push(key);
+		expect((await bindKind("ann", "card", "c-1")).kind).toBe("bound");
+		expect(saved).toEqual([]);
+		expect(place.peek(claimKeyOf("card", "c-1"))).toEqual({
+			listKey: listKeyOf("ann"),
+			factor: (await decided.held("ann"))[0]?.id,
+		});
+		expect(await decided.writtenStanding("ann")).toBe("counting");
+	});
+
+	it("binds nothing where another factor holds the value, and takes a claim its factor left", async () => {
+		const { decided, bindKind, place } = await serve({}, { kinds: [card], together: true });
+		expect((await bindKind("ann", "card", "c-2")).kind).toBe("bound");
+		expect((await bindKind("bob", "card", "c-2")).kind).toBe("duplicate");
+		expect(await decided.held("bob")).toEqual([]);
+		await decided.clear("ann");
+		expect((await bindKind("bob", "card", "c-2")).kind).toBe("bound");
+		expect((place.peek(claimKeyOf("card", "c-2")) as unknown as { listKey: string }).listKey).toBe(
+			listKeyOf("bob"),
+		);
+	});
+
+	it("leaves the factor with its claim where the write's answer is lost, so it counts though the bind is unavailable", async () => {
+		const { decided, bindKind, place } = await serve({}, { kinds: [card], together: true });
+		place.hooks.afterTogether = async () => {
+			throw new Unavailable("factor-store");
+		};
+		await expect(bindKind("cid", "card", "c-3")).rejects.toSatisfy(isUnavailable);
+		place.hooks.afterTogether = undefined;
+		expect(await decided.writtenStanding("cid")).toBe("counting");
+		expect((await bindKind("dee", "card", "c-3")).kind).toBe("duplicate");
+	});
+
+	it("answers full as before, writing no claim for it", async () => {
+		const { decided, bindKind, place } = await serve(
+			{ "max-factors": 2 },
+			{ kinds: [card], together: true },
+		);
+		expect((await bindKind("eve", "card", "c-4")).kind).toBe("bound");
+		// Two bindings begun while one place is left: the second to bind finds none.
+		const proved = async (proof: string) => {
+			const begun = await decided.begin("eve", "card");
+			if (begun.kind !== "begun") throw new Error(begun.kind);
+			const done = await decided.provePending("eve", begun.pending, proof);
+			if (done.kind !== "valid") throw new Error(done.kind);
+			return { pending: begun.pending, state: done.state };
+		};
+		const [five, six] = [await proved("c-5"), await proved("c-6")];
+		expect((await decided.bind("eve", five.pending, five.state)).kind).toBe("bound");
+		expect((await decided.bind("eve", six.pending, six.state)).kind).toBe("full");
+		expect(place.peek(claimKeyOf("card", "c-6"))).toBeUndefined();
 	});
 });
