@@ -12,12 +12,17 @@ const keys = {
 		publicPem: pair.publicKey.export({ format: "pem", type: "spki" }).toString(),
 	},
 };
-const client = (id: string, method: ClientScene["method"]): ClientScene => ({
+/** A client allowed `grants`, none unless given, so a scene needs no grant composed for it. */
+const client = (
+	id: string,
+	method: ClientScene["method"],
+	grants: readonly string[] = [],
+): ClientScene => ({
 	id,
 	kind: method === "none" ? "public" : "confidential",
 	method,
 	...(method === "none" ? {} : { secret: `${id}-secret-0123456789abcdef` }),
-	grants: ["client_credentials"],
+	grants: [...grants],
 	scopes: ["read"],
 	defaultScopes: ["read"],
 });
@@ -80,12 +85,22 @@ describe("the metadata document", () => {
 		});
 	});
 
-	it("lists the grants it takes and the ways clients authenticate at the token endpoint", async () => {
+	it("lists the ways clients authenticate at the token endpoint", async () => {
 		const { body } = await get("/.well-known/openid-configuration");
-		expect(body.grant_types_supported).toContain("client_credentials");
 		expect(body.token_endpoint_auth_methods_supported).toEqual(
 			expect.arrayContaining(["client_secret_basic", "client_secret_post", "none"]),
 		);
+	});
+});
+
+describe("the metadata document of a deployment with the client credentials grant", () => {
+	const get = running("https://issuer.example", {
+		clients: [client("svc", "client_secret_basic", ["client_credentials"])],
+	});
+
+	it("lists the grant", async () => {
+		const { body } = await get("/.well-known/openid-configuration");
+		expect(body.grant_types_supported).toContain("client_credentials");
 	});
 });
 

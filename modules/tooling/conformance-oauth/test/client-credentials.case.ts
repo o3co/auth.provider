@@ -38,7 +38,8 @@ const scene = oauthScene({
 			audiences: ["https://api.example", "https://other.example"],
 		}),
 		confidential("post", "client_secret_post"),
-		confidential("nogrant", "client_secret_basic", { grants: ["authorization_code"] }),
+		// Allowed no grant: one nothing composed serves would refuse boot.
+		confidential("nogrant", "client_secret_basic", { grants: [] }),
 		withoutDefaults(confidential("nodefault", "client_secret_basic")),
 		confidential("emptydefault", "client_secret_basic", { defaultScopes: [] }),
 		{ id: "pub", kind: "public", method: "none", grants: ["client_credentials"], scopes: ["read"] },

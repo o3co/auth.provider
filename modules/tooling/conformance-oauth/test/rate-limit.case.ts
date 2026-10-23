@@ -20,7 +20,8 @@ const scene = oauthScene({
 			kind: "confidential",
 			method: "client_secret_post",
 			secret: "app-secret-0123456789abcdef",
-			grants: ["client_credentials"],
+			// Allowed no grant: its requests fail authentication before any grant is read.
+			grants: [],
 			scopes: ["read"],
 		},
 	],

@@ -31,7 +31,10 @@ const scene = (resourceIndicators: boolean, withJwtBearer = false) =>
 				publicPem: pem(provider.publicKey, "spki"),
 			},
 		},
-		clients: [client("app", ["client_credentials"]), client("bearer", [jwtBearer])],
+		// Each scene only the client of its grant, so it needs no other grant composed.
+		clients: withJwtBearer
+			? [client("bearer", [jwtBearer])]
+			: [client("app", ["client_credentials"])],
 		resourceIndicators,
 		...(withJwtBearer
 			? {

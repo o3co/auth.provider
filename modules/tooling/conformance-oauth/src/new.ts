@@ -85,6 +85,10 @@ function setUp(part: OauthPart, scene: AreaScene): NewPart {
 			"@mod/sender-binding",
 			"@mod/tokens",
 			"@mod/token-endpoint",
+			// The client credentials grant is a module of its own: composed where a client is allowed it.
+			...(part.clients.some((c) => c.grants.includes("client_credentials"))
+				? ["@mod/client-credentials"]
+				: []),
 			"@mod/client-allowance",
 			// The token endpoint and token-control limit requests per source.
 			"@mod/rate-limit",
