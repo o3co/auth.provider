@@ -10,7 +10,6 @@
 ## Offers
 - Composition definition only (a contribution to `passkeys.witnesses`). Opt-in: no axis's default, so composing `passkeys` alone never brings it.
 - `./testing`: `passkeyWitnessHttpConfig`, the section of a test's configuration.
-  - `witnessLedger`, a fake ledger keeping the witness as an operator's ledger does (its read naming the mark's token), behind a credential of its own: its answer to these calls (none for a call not its own) and the section pointing passkey-witness-http at it, for a scene or an operator's trial.
 - Operator section:
   - `read-url`, `enroll-url` and `withdraw-url` (required: each URL whole, https or a plain-http pair outbound names, no fragment, all three at one origin).
   - A section still naming `clear-url` refuses boot at `passkey-witness-http`, naming the key: the mark is only withdrawn by its token.
@@ -35,4 +34,4 @@
 - Holds no state, so it is safe on multiple instances.
 
 ## Depends on
-- `kernel`, `passkey-witness`, `outbound`, `outbound-policy`, `url-setting`, `keys` (the credential's rule)
+- `kernel`, `passkey-witness`, `outbound`, `outbound-policy`, `url-setting`, `keys` (the credential's rule), `ledger-wire` (the wire's words)

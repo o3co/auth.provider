@@ -4504,6 +4504,9 @@ importers:
       '@mod/keys':
         specifier: workspace:*
         version: link:../../foundation/keys
+      '@mod/ledger-wire':
+        specifier: workspace:*
+        version: link:../ledger-wire
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound

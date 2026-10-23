@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import type { z } from "zod";
 import type { section } from "./section.ts";
 
@@ -17,61 +16,5 @@ export function passkeyWitnessHttpConfig(settings: Partial<PasskeyWitnessHttpSet
 			credential: testCredential,
 			...settings,
 		},
-	};
-}
-
-/** A call made to a fake ledger, as a fake HTTP server hands it on; header names lower case. */
-export interface LedgerCall {
-	readonly method: string;
-	readonly path: string;
-	readonly headers: Readonly<Record<string, string | undefined>>;
-	readonly body: string;
-}
-
-/** A fake ledger's answer: a status, or a JSON body answered 200. */
-export interface LedgerAnswer {
-	readonly status?: number;
-	readonly json?: unknown;
-}
-
-const calls = ["/passkey-witness/read", "/passkey-witness/enroll", "/passkey-witness/withdraw"];
-
-/**
- * A fake ledger keeping the passkey witness as an operator's ledger does, behind a credential of its
- * own: a mark per subject, set only where none is, read with its token, withdrawn only by its token. Its answer to passkey-witness-http's calls (none for a
- * call not its own), and the section pointing passkey-witness-http at it once it listens at `base`.
- */
-export function witnessLedger() {
-	const credential = randomBytes(32).toString("base64url");
-	const marks = new Map<string, string>();
-	return {
-		answer(call: LedgerCall): LedgerAnswer | undefined {
-			if (!calls.includes(call.path)) return undefined;
-			// Anything but a call with the credential is not found, so a wrong set-up shows.
-			if (call.method !== "POST" || call.headers.authorization !== `Bearer ${credential}`) {
-				return { status: 404 };
-			}
-			const { subject, token } = JSON.parse(call.body) as { subject?: string; token?: string };
-			const held = String(subject);
-			if (call.path === "/passkey-witness/read") {
-				const token = marks.get(held);
-				return { json: token === undefined ? { enrolled: false } : { enrolled: true, token } };
-			}
-			if (call.path === "/passkey-witness/enroll") {
-				if (!marks.has(held)) marks.set(held, String(token));
-				return { json: { owner: marks.get(held) === token } };
-			}
-			// The withdraw: the mark goes only where it is the token's.
-			if (marks.get(held) === token) marks.delete(held);
-			return { status: 204 };
-		},
-		section: (base: string) => ({
-			"passkey-witness-http": {
-				"read-url": `${base}/passkey-witness/read`,
-				"enroll-url": `${base}/passkey-witness/enroll`,
-				"withdraw-url": `${base}/passkey-witness/withdraw`,
-				credential,
-			},
-		}),
 	};
 }
