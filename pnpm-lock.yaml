@@ -2064,15 +2064,15 @@ importers:
 
   modules/oauth/verified-email:
     dependencies:
+      '@mod/client-credentials':
+        specifier: workspace:*
+        version: link:../client-credentials
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
       '@mod/subject-attributes':
         specifier: workspace:*
         version: link:../../identity/subject-attributes
-      '@mod/token-endpoint':
-        specifier: workspace:*
-        version: link:../token-endpoint
       '@mod/tokens':
         specifier: workspace:*
         version: link:../tokens
