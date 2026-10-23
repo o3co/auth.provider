@@ -53,9 +53,8 @@ export interface PasskeyStore {
 	 * space) from what they hold. `change` answers the next of each, by space in the order read; it
 	 * runs again on a race, so it is pure, and a record it leaves out is kept. Every record read is
 	 * held to what was read; a record named twice is read once and written from one naming at most.
-	 * A place that cannot leaves it out.
 	 */
-	updateTogether?(
+	updateTogether(
 		keys: PasskeyKeys,
 		p: {
 			readonly watch: (read: PasskeysRead) => Partial<PasskeyKeys>;

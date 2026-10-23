@@ -39,20 +39,14 @@ it("answers a clear by what its last decision took off, deciding again on a race
 it("leaves no passkey off its list where an activation lands as a clear writes and the clear fails", async () => {
 	const t = jointStores();
 	const c = await t.credentialFor("sam");
-	const wrote = await t.records.written("sam", c, 10);
-	if (typeof wrote === "string") throw new Error(`not written: ${wrote}`);
-	expect(await t.records.listing("sam", c.id, 10)).toBe("registered");
-	// Once, wherever the clear writes: the registration's activation lands, then the clear's write fails.
+	expect(await t.records.joined("sam", c, 10, undefined, "t-pending")).toBe("written");
+	// Once the clear has read and decided, the registration's activation lands, then the clear's write fails.
 	let landed = false;
-	const land = async () => {
-		if (landed) return;
+	t.stores.raceNextTogether(async () => {
 		landed = true;
-		expect(await t.records.activated(c.id, wrote.token)).toBe("activated");
+		expect(await t.records.activated(c.id, "t-pending")).toBe("activated");
 		throw new Unavailable("passkeys");
-	};
-	// Written one record at a time, a clear writes a record after emptying the list.
-	t.stores.beforeNextUpdate("credentials", land);
-	t.stores.raceNextTogether(land);
+	});
 	await expect(t.records.cleared("sam")).rejects.toSatisfy(isUnavailable);
 	expect(landed).toBe(true);
 	expect(await t.agreed("sam", c.id)).toBe(true);

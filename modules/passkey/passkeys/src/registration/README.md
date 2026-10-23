@@ -15,7 +15,7 @@ Internal module of `passkeys`: registering passkeys.
 - A challenge counts only for the subject it was made for, once. Client data that does not read takes no challenge.
 - A subject's handle is made on its first options, and kept.
 - A passkey is made usable only after both of the caller's asks admitted it; anything stopping the registration before leaves its record pending.
-- Where the store writes the record and the list as one, the first ask comes before the write, so a revoked registration writes nothing.
+- The first ask comes before the record and its listing are written, as one, so a revoked registration writes nothing.
 
 ## Depends on
 - `webauthn` (the ceremonies); the package's contract and records

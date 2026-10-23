@@ -42,9 +42,8 @@ export interface Registrations {
 	creation(subject: string): Promise<{ readonly options: unknown }>;
 	/**
 	 * `admitted` is asked with when the challenge was made, before the passkey is written, then once
-	 * again after it is written and listed (on a store that cannot write both as one: once it is
-	 * written, then once it is listed): on `false` or a throw, nothing of it stays usable (`revoked`,
-	 * or the throw passed on).
+	 * again after it is written and listed: on `false` or a throw, nothing of it stays usable
+	 * (`revoked`, or the throw passed on).
 	 */
 	register(
 		subject: string,

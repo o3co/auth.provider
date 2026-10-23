@@ -3,21 +3,9 @@ import type { StoredPasskey } from "../src/store.ts";
 import { challengeStoreContract, passkeyStoreContract } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
 
-passkeyStoreContract("records stand-in writing each space apart", async () => {
-	let now = 0;
-	const stand = memoryStores(() => now, { together: false });
-	return {
-		passkeys: stand.passkeys,
-		advance: (ms) => {
-			now += ms;
-		},
-		raceNextUpdate: (_key, change) => stand.raceSubjects(change),
-	};
-});
-
 passkeyStoreContract("records stand-in changing records of both spaces as one", async () => {
 	let now = 0;
-	const stand = memoryStores(() => now, { together: true });
+	const stand = memoryStores(() => now);
 	return {
 		passkeys: stand.passkeys,
 		advance: (ms) => {

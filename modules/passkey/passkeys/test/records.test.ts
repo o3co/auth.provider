@@ -2,13 +2,13 @@ import { createHash, randomBytes } from "node:crypto";
 import { isUnavailable } from "@mod/kernel";
 import { expect, it } from "vitest";
 import { keptPasskeys } from "../src/records.ts";
-import { memoryStores, writeToken } from "./stores.ts";
+import { heldState, memoryStores, writeToken } from "./stores.ts";
 
 const fresh = () => randomBytes(32).toString("base64url");
 
 /** Passkey records over memory stores, and a credential for `subject` under its handle. */
-function kept(now: () => number = () => 1_000, { together = true } = {}) {
-	const stores = memoryStores(undefined, { together });
+function kept(now: () => number = () => 1_000) {
+	const stores = memoryStores();
 	const records = keptPasskeys(stores.passkeys, writeToken, now);
 	const credentialFor = async (subject: string, id: string) => ({
 		id,
@@ -21,28 +21,36 @@ function kept(now: () => number = () => 1_000, { together = true } = {}) {
 	return { stores, records, credentialFor };
 }
 
-it("leaves no id taken for good when the store fails between keeping a credential and listing it", async () => {
-	// The two writes of a store without updateTogether, until that path goes.
-	const { stores, records, credentialFor } = await kept(undefined, { together: false });
+it("leaves no id taken for good when the store fails as a registration writes", async () => {
+	const { stores, records, credentialFor } = await kept();
 	const id = fresh();
 	const sams = await credentialFor("sam", id);
-	stores.down.subjects.failNext("update");
+	stores.down.together.failNext("updateTogether");
 	await expect(records.register("sam", sams, 10)).rejects.toSatisfy(isUnavailable);
+	// Nothing of it, read raw before any later registration writes.
+	expect(await heldState(stores.passkeys, ["sam", "kim"], [id])).toEqual({
+		lists: { sam: [], kim: [] },
+		records: { [id]: undefined },
+	});
 	expect(await records.register("kim", await credentialFor("kim", id), 10)).toBe("registered");
 	expect((await records.passkey(id))?.subject).toBe("kim");
 	expect((await records.holder("sam"))?.credentials).toEqual([]);
 });
 
 it("leaves no id taken for good when another registration takes the subject's last place first", async () => {
-	// The two writes of a store without updateTogether, until that path goes.
-	const { stores, records, credentialFor } = await kept(undefined, { together: false });
+	const { stores, records, credentialFor } = await kept();
 	const [id, other] = [fresh(), fresh()];
 	const sams = await credentialFor("sam", id);
-	stores.raceSubjects((record) => {
-		const holder = record as unknown as { credentials: string[] };
-		return { ...holder, credentials: [...holder.credentials, other] } as unknown as typeof record;
+	// Another of sam's registrations takes the last place once this one has read and decided.
+	stores.raceNextTogether(async () => {
+		expect(await records.register("sam", await credentialFor("sam", other), 1)).toBe("registered");
 	});
 	expect(await records.register("sam", sams, 1)).toBe("full");
+	// Only the registration that took the place, read raw before any later registration writes.
+	expect(await heldState(stores.passkeys, ["sam", "kim"], [id, other])).toEqual({
+		lists: { sam: [other], kim: [] },
+		records: { [id]: undefined, [other]: { subject: "sam", as: "passkey" } },
+	});
 	expect(await records.register("kim", await credentialFor("kim", id), 1)).toBe("registered");
 	expect((await records.passkey(id))?.subject).toBe("kim");
 });
