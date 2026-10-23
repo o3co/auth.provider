@@ -138,6 +138,14 @@ export function reachesIn(facts: FileFacts): string[] {
 export const reachesOf = (path: string): string[] =>
 	reachesIn(lexicalAnalysis([path]).factsOf(path));
 
+/** The plain helpers each package's `forks` names, by path: files a run reads beside the sources. */
+export const helpersOf = (packages: readonly Pkg[]) =>
+	packages.flatMap((p) =>
+		[...(forksOf(p.manifest.forks)?.values() ?? [])]
+			.map((helper) => join(p.dir, helper))
+			.filter(isPlainHelper),
+	);
+
 /** Whether a declared word lets a package reach this; a module imported whole needs a word that names it. */
 const covers = (allowed: readonly string[], reach: string) =>
 	allowed.includes(reach) || allowed.some((a) => a.split(" ")[0] === reach);
@@ -163,7 +171,7 @@ export function networkRules(s: Scope, p: Pkg) {
 		if (helper === undefined) return "forks does not name it";
 		if (!known.includes("outbound")) return "forks needs the word outbound";
 		if (!oneStarter) return "forks names one starter and its helper";
-		return launchRefusal(p.dir, file, helper);
+		return launchRefusal(s.factsOf(p, file), p.dir, file, helper);
 	};
 	const reached = new Set<string>();
 	/** The starters already held to the form, by what they reach. */
@@ -204,9 +212,10 @@ export function networkRules(s: Scope, p: Pkg) {
 			s.report(rule, `${p.name}/${helper}`, "(forks names it, but it is no plain .mjs file)");
 			continue;
 		}
-		const reaches = reachesOf(path);
+		const facts = s.factsOf(p, helper);
+		const reaches = reachesIn(facts);
 		for (const reach of reaches) reached.add(reach);
-		if (!importsLookupAlone(path, reaches)) {
+		if (!importsLookupAlone(facts, reaches)) {
 			s.report(rule, `${p.name}/${helper}`, "(imports node:dns/promises' lookup alone)");
 		}
 	}

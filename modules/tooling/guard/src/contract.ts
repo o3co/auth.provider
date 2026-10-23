@@ -11,7 +11,7 @@ import {
 } from "@mod/guard-imports";
 import { budgetRules, dependencyCards } from "./budget/budget.ts";
 import { laidOut } from "./documents.ts";
-import { networkRules } from "./network/network.ts";
+import { helpersOf, networkRules } from "./network/network.ts";
 import { foreignFiles, namesLine } from "./references.ts";
 import { branchesOf, clockReads, commentsOf, randomReads } from "./source.ts";
 import { budgetsAsTest, type Scope } from "./units.ts";
@@ -143,8 +143,11 @@ export function check(
 	documents: readonly Doc[] = [],
 ): Violation[] {
 	const violations: Violation[] = [];
-	const s = scopeOf(packages, budget, (rule, where, detail) =>
-		violations.push({ rule, where, detail }),
+	const s = scopeOf(
+		packages,
+		budget,
+		(rule, where, detail) => violations.push({ rule, where, detail }),
+		helpersOf(packages),
 	);
 	const surfaces = surfacesOf(packages);
 	const importedCards = new Map(dependencyCards(packages, budget).map((u) => [u.where, u.bytes]));
