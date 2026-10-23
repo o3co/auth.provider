@@ -2194,6 +2194,34 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
+  modules/passkey/passkey-reset:
+    dependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/passkeys':
+        specifier: workspace:*
+        version: link:../passkeys
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
+    devDependencies:
+      '@mod/store':
+        specifier: workspace:*
+        version: link:../../foundation/store
+      '@mod/webauthn':
+        specifier: workspace:*
+        version: link:../webauthn
+      '@mod/webauthn-store':
+        specifier: workspace:*
+        version: link:../../templates/webauthn-store
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
   modules/passkey/passkeys:
     dependencies:
       '@mod/audit':

@@ -128,6 +128,12 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | `passkey.removed` | `source` | the session's subject ends one of its passkeys |
 | `passkey.renamed` | `source` | the session's subject names one of its passkeys anew |
 
+## @mod/passkey-reset
+
+| Kind | Attributes | Recorded when |
+|---|---|---|
+| `passkey.reset` | `by`, `count`, `sessions`, `sessionsAgain`, `complete`, `requestedBy` | an operator's passkey reset gets past its input, finished or not (`complete`) |
+
 ## @mod/passkeys
 
 | Kind | Attributes | Recorded when |
