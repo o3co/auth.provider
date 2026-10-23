@@ -1,6 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { onLegacy } from "@mod/conformance-legacy";
-import { type FederationPart, federationArea, type GrantsPart, type IdpScene } from "./area.ts";
+import {
+	type FederationPart,
+	federationArea,
+	type GrantsPart,
+	grantsLoginPage,
+	type IdpScene,
+} from "./area.ts";
 
 /** The lines naming an IdP's type, and the issuer where the type is not one IdP's own. */
 const typed = (idp: IdpScene) =>
@@ -79,7 +85,8 @@ const grantsEnv = (at: GrantsPart) => ({
 });
 
 onLegacy(federationArea, {
-	cannot: ["store-fault:federation"],
+	// The legacy build is given no login page for a connect here: its scenes run on this build alone.
+	cannot: ["store-fault:federation", grantsLoginPage],
 	// The legacy Google type sends Google neither a request to log in again nor a max age. A login
 	// through Apple, which takes neither, is let in by the legacy build where ours refuses it.
 	differs: [
