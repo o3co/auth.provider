@@ -134,8 +134,8 @@ export function factorDecisions(p: FactorParts): Decisions {
 				? ("held" as const)
 				: ("none" as const);
 	/**
-	 * A counting factor with a unique value counts once its claim names it: before, its binding may
-	 * still end as a duplicate. One written before claims were kept counts unless another holds it.
+	 * A counting factor with a unique value counts while its claim names it: one 0.18 left without its
+	 * claim may yet be another's. One written before claims were kept counts unless another holds it.
 	 */
 	const stands = async (subject: string, factor: Factor) => {
 		const unique = p.kinds
@@ -347,37 +347,23 @@ export function factorDecisions(p: FactorParts): Decisions {
 				if (all.length + 1 + (due ? 1 : 0) > p.maxFactors) return { verdict: "full" };
 				return { next: [...all, factor], verdict: { due } };
 			};
-			// Where the store writes a list and a claim together, the factor and its claim come at once.
-			const together =
+			// A factor with a unique value is written with its claim on it, at once.
+			const written =
 				unique === undefined
-					? undefined
+					? await records.decide(subject, judge)
 					: await records.decideClaiming(
 							subject,
 							{ kind: factor.kind, value: unique, factor: fid },
 							judge,
 						);
-			if (together === "duplicate") return { kind: "duplicate" };
-			const written = together ?? (await records.decide(subject, judge));
+			if (written === "duplicate") return { kind: "duplicate" };
 			if (written === "fenced") return { kind: "fenced" };
 			if (written === "full") return { kind: "full" };
 			if (written === "closed") return closed(subject, factor.kind, "competing");
 			const { due } = written;
-			const ours = new Set([fid]);
 			// A reset since the write took what was written: nothing stands for this binding.
 			if (!(await records.list(subject)).some((f) => f.id === fid)) {
 				return closed(subject, factor.kind, "reset-cleared");
-			}
-			if (
-				together === undefined &&
-				unique !== undefined &&
-				!(await records.claim(subject, factor.kind, unique, fid))
-			) {
-				// Another factor holds the value: this one goes again.
-				await records.decide(subject, (all) => ({
-					next: all.filter((f) => !ours.has(f.id)),
-					verdict: undefined,
-				}));
-				return { kind: "duplicate" };
 			}
 			recorded("factor.enrolled", subject, { kind: factor.kind, factor: fid });
 			// The mark follows the factor: a write that fails leaves none, and a missing one is filled here.
@@ -409,7 +395,7 @@ export function factorDecisions(p: FactorParts): Decisions {
 					const rest = all.filter((f) => f.id !== target);
 					const counted = counting(rest, p.kinds).length > 0;
 					// Under a witness only a reset ends an enrollment: its mark stays, so no factor would stand for it.
-					// One not yet claimed may still end as a duplicate, so it does not stand for the subject.
+					// One whose claim is missing may yet be another's, so it does not stand for the subject.
 					const stays = rest.some((f) => stood.has(f.id));
 					if ((p.required || p.witnessing) && !stays) return { verdict: "last" };
 					// A way back left alone would hold every login once its codes run out: it goes with the last counting factor.

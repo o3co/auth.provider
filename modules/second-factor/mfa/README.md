@@ -17,7 +17,8 @@
 - Audit events, with the subject, once written (never for a refused or raced decision but a first binding another factor beat, nor a reset, never with a secret, proof or code): declared in `./audit-events`, listed in the audit event reference.
 - Contributions: `login-gates` amr (each kind's, and `mfa` if one adds it); `seal`'s `resealers`, a resealer sealing again what a `previous` key sealed.
 - Section: `mode` (`optional`, or `required` by default), `max-factors` (default 10).
-- Store interface `factorStore`: factor lists and claims on unique values, by keys mfa makes, contents opaque; save once, read, change from what it holds, kept without end; where a place can, a list and a claim changed as one (`updateTogether`), a binding then writing its factor and the claim on its unique value at once. Needs: never evicted, survives a crash and a failover, reads only what is confirmed. `./testing`: its contract test, a config builder, `updatingTogether` on records' stand-in.
+- Store interface `factorStore`: factor lists and claims on unique values, by keys mfa makes, contents opaque; save once, read, change from what it holds, kept without end; a list and a claim changed as one (`updateTogether`), a binding writing its factor and the claim on its unique value at once; mfa refuses to start over a store without it. Needs: never evicted, survives a crash and a failover, reads only what is confirmed.
+- `./testing`: the store's contract test, a config builder, and `updatingTogether`, a place's `updateTogether` over records' stand-in.
 
 ## Invariants
 - "required" refuses to boot unless a composed kind counts.

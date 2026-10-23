@@ -68,13 +68,9 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 			expect((await place.factors.update(key, plus(1)))?.after).toEqual(asStored({ n: 21 }));
 		});
 
-		it("changes a list and a claim as one where it can, giving the change the records it watched", async (ctx) => {
+		it("changes a list and a claim as one, giving the change the records it watched", async () => {
 			const { factors } = await open();
-			const together = factors.updateTogether?.bind(factors);
-			if (!together) {
-				ctx.skip();
-				return;
-			}
+			const together = factors.updateTogether.bind(factors);
 			const [list, claimKey, owner] = [fresh(), fresh(), fresh()];
 			await factors.save(owner, asStored({ n: 7 }), "endless");
 			const seen: unknown[] = [];
@@ -107,8 +103,8 @@ export function factorStoreContract(name: string, open: () => Promise<FactorPlac
 
 		it("changes a list and a claim again where another writer changes what it watched, or the claim's owner, first", async (ctx) => {
 			const { factors, raceNextTogether: race } = await open();
-			const together = factors.updateTogether?.bind(factors);
-			if (!together || !race) {
+			const together = factors.updateTogether.bind(factors);
+			if (!race) {
 				ctx.skip();
 				return;
 			}
@@ -250,9 +246,7 @@ export interface ChangingTogether {
 }
 
 /** A place's `updateTogether` over a records stand-in, the list and the claim it writes kept without end. */
-export function updatingTogether(
-	records: ChangingTogether,
-): NonNullable<FactorStore["updateTogether"]> {
+export function updatingTogether(records: ChangingTogether): FactorStore["updateTogether"] {
 	const endless = (next: { readonly value: StoredFactors } | undefined) =>
 		next && { value: next.value, lifetimeMs: "endless" as const };
 	return async (listKey, claimKey, p) => {

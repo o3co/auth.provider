@@ -10,14 +10,14 @@ Internal module of `mfa`: how the factor lists and the claims on unique values a
 - What the factors decide: `mfa`'s `factors`. Sealing itself: `seal`.
 
 ## Offers
-- `factorRecords` (store): a subject's list, and a decision written over the list it read; whether a unique value is taken, and a claim on it.
+- `factorRecords` (store): a subject's list, and a decision written over the list it read, or over the list and a claim on a unique value as one; whether a unique value is taken.
 - `resealerOver` (store, seal): the resealer `mfa` contributes.
 - `sealContext`, `listKeyOf`, `storedList`, `factorsOf`, `subjectOf`: the keys, contexts and record shapes the two share.
 
 ## Invariants
 - A factor list's record holds its subject, so its secrets can be sealed again; the store's key is the subject's hash.
 - A secret, and what a challenge kept, are sealed to the subject and the factor; a pending binding, to the subject.
-- A factor is written before its claim, so a claim whose list lacks its factor is stale.
+- A factor of a unique value is written with its claim, as one; a claim whose list lacks its factor is stale, and a binding takes it.
 - A list counts how far the subject's fence has moved (none read as 0): a clear moves it in its own write, and `fence` moves it alone, each writing even an empty list; every other write keeps it, so it never goes back while the list is kept.
 - A secret a `previous` key sealed is sealed again in the write a proof of its factor makes, and by the resealer, which walks every list and writes only over the secret read; one no key opens, or a list whose subject is not its key's, is left.
 

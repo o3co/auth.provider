@@ -21,9 +21,9 @@ export interface FactorStore {
 	/**
 	 * Changes a subject's list and a claim as one, from what both hold and what `watch` names
 	 * besides (keys of this store); `change` runs again on a race, so it is pure, and a part it
-	 * leaves out is kept. Every record read is held to what was read. A place that cannot leaves it out.
+	 * leaves out is kept. Every record read is held to what was read.
 	 */
-	updateTogether?(
+	updateTogether(
 		listKey: string,
 		claimKey: string,
 		p: {
