@@ -11,6 +11,7 @@
 - Opening the session (`session`, through `login-gates`).
 
 ## Offers
+- A `login-gates` return path: each IdP's start.
 - Composition definition: `GET /session/oauth/federation/<idp>` (start: `redirect_to`, `prompt` (only `login` is passed on), `max_age`, `link` (`1` or `true` chooses the continuation named `link`; any other value is a login)) and `…/<idp>/callback` (`code`, `state`, `iss`, `error`; by POST for an IdP that answers in a posted form, else GET; the other method is 405); starts and callbacks are limited per source
 - Provides `upstreams`, as its default adapter.
 - Declares to `users` (`upstreamNames`) each IdP's name with the issuer its upstream says.
