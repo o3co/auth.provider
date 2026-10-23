@@ -30,6 +30,35 @@ describe("G26 the network is reached through outbound, or as a package declares"
 		]);
 	});
 
+	it("reads a declared class's extends, in a source and in a declaration file, as reaching nothing", () => {
+		const p = pkg("@t/ambient", {
+			"src/a.ts": "export declare class Socket extends WebSocket {}\n",
+			"src/b.d.ts": "export declare class Socket extends WebSocket {}\n",
+			"src/c.ts": "export declare class Socket extends globalThis.WebSocket {}\n",
+			"src/d.d.ts": 'export declare class Pool extends (require("undici").Pool) {}\n',
+		});
+		expect(said(p)).toEqual([]);
+	});
+
+	it("reads a module's default taken by name as a value it binds", () => {
+		const p = pkg("@t/named-default", {
+			"src/a.ts": 'import { default as fetch } from "node-fetch";\nexport const a = fetch;\n',
+			"src/b.ts": 'import { default as cp } from "node:child_process";\nexport const b = cp;\n',
+		});
+		expect(said(p)).toEqual([
+			"src/a.ts node-fetch",
+			"src/b.ts node:child_process (forks does not name it)",
+		]);
+	});
+
+	it("reads a global named by a shorthand property, and a require in parentheses, as any other read", () => {
+		const p = pkg("@t/forms", {
+			"src/a.ts": "export const a = { fetch };\n",
+			"src/b.ts": 'export const b = (require)("node:https");\n',
+		});
+		expect(said(p)).toEqual(["src/a.ts fetch", "src/b.ts node:https"]);
+	});
+
 	it("refuses the network reached by a dynamic import, a global's property, a resolver or a process", () => {
 		const p = pkg("@t/around", {
 			"src/a.ts": 'export const a = async () => (await import("node:https")).request;\n',
