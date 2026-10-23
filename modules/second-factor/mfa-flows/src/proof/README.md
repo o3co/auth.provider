@@ -15,6 +15,8 @@ Internal module of `mfa-flows`: holding a login or a session until a factor is p
 
 ## Invariants
 - The gate starts a login transaction when the subject must prove a factor, and a first-enrollment one when it must bind one; it holds the login's facts, `done` and `from` unread.
+- A transaction that cannot be used (unknown, another browser's, used, expired, or named differently by body and header) is answered the same `400`, using nothing up.
+- If the subject was revoked after the transaction started, every route naming it answers `401 login_required`, and a POST ends it. If the revocation store cannot answer, `503`, never a negative verdict.
 - Verify takes only login and step-up transactions, a step-up one only from the session that started it. Challenge takes these and an enrollment's, which the enrollment flow answers.
 - A challenge is asked with the transaction's deadline as its latest end, for whom `transactions` names (`askedFrom`), and asking voids the challenge before, unavailable included. A sent one is kept sealed; the next attempt takes it, and passes it to the proof only for the factor it was sent for.
 - A challenge sent is answered `200` with what to show, recorded as `mfa.challenge.sent` with `kind` and `purpose`. A factor whose kind sends none is answered `200` with nothing; limited is `429 rate_limited`; refused is `403 mfa_factor_refused`, recorded as `mfa.email_address_mismatch` with `kind` and `purpose` only when the kind says the factor's contact changed.
@@ -36,4 +38,4 @@ Internal module of `mfa-flows`: holding a login or a session until a factor is p
 - What a resume carries is made only once the login opened past that check. A response it makes instead closes the session and is answered, the session's cookie never going out; a throw closes it as best it can and goes on, with no cookie either. A part unavailable there, the close included, is answered `503`, clearing the transaction's cookie.
 
 ## Depends on
-- `audit`; `http` (the request and response types); `kernel` (the log); `login-gates` (the gate type, going on with a login); `mfa` (factor decisions); `rate-limit` (lockouts); `session` (entering, raising); `subject-revocation`; `transactions`; the package's routing helpers; `recording`
+- `audit`; `http` (the request and response types); `kernel` (the log); `login-gates` (the gate type, going on with a login); `mfa` (factor decisions); `rate-limit` (lockouts); `session` (entering, raising); `subject-revocation`; `transactions`; `requests`; `recording`

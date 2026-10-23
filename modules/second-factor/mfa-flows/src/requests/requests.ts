@@ -1,7 +1,7 @@
 import { type HttpRequest, type HttpResponse, jsonAnswer } from "@mod/http";
 import { refusedEntry, type Sessions } from "@mod/session";
 import type { SubjectRevocation } from "@mod/subject-revocation";
-import type { Transaction } from "./transactions/records.ts";
+import type { Transaction } from "../transactions/records.ts";
 
 /** What each internal module gives the package for one route. */
 export type Handler = (request: HttpRequest) => Promise<HttpResponse>;
