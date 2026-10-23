@@ -12,7 +12,7 @@ export interface ResetParts {
 	readonly lockouts: Pick<Lockouts, "releaseUnder">;
 	/** `mfa-flows`' lockout: its name and policy. */
 	readonly lockout: { readonly name: string; readonly policy: LockoutPolicy };
-	readonly audit: Audit;
+	readonly audit: Pick<Audit, "record">;
 	readonly log: Log;
 }
 

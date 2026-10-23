@@ -44,7 +44,7 @@ const place = (
 			},
 		},
 		lockout: { name: "mfa", policy },
-		audit: { record: (event) => events.push(event), lost: () => ({}) },
+		audit: { record: (event) => events.push(event) },
 		log: logged.log,
 	});
 	const lines = () => logged.lines().filter((l) => l.event.startsWith("mfa-flows.reset"));
