@@ -30,6 +30,8 @@ export interface Pkg {
 		readonly takenBy?: unknown;
 		/** The packages that may write the narrower's `internal` (G32). */
 		readonly internalBy?: unknown;
+		/** The one shipped file that may start a helper process, mapped to the helper's file (guard's G26). */
+		readonly forks?: unknown;
 		readonly exports?: Record<string, string>;
 		readonly dependencies?: Record<string, string>;
 		readonly peerDependencies?: Record<string, string>;

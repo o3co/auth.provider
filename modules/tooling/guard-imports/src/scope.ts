@@ -62,7 +62,8 @@ export function scopeOf<B extends Rules>(
 		level: (p) => budget.kindOrder.findIndex((kinds) => kinds.includes(kindOf(p))),
 		isCommon: (p) => kindOf(p) === budget.commonKind,
 		isTest: (file) => conventional.test(file),
-		sources: (p) => p.files.filter((f) => f.endsWith(".ts") && !f.endsWith(".config.ts")),
+		sources: (p) =>
+			p.files.filter((f) => (f.endsWith(".ts") && !f.endsWith(".config.ts")) || f.endsWith(".mjs")),
 		workspaceDeps: (p, dev) =>
 			Object.keys({
 				...p.manifest.dependencies,

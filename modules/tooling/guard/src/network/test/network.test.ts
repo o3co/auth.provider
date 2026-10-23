@@ -2,6 +2,7 @@ import type { Pkg } from "@mod/guard-imports";
 import { describe, expect, it } from "vitest";
 import { budget, pkg } from "../../../test/workspace.ts";
 import { check } from "../../contract.ts";
+import { reachesOf } from "../network.ts";
 
 /** What G26 says of a package, as `where detail`. */
 const said = (p: Pkg) =>
@@ -133,5 +134,15 @@ describe("G27 a package that talks to a server the deployment provides states th
 		};
 		const outbound = { exports: { ".": "./src/contract.ts" }, network: "outbound" };
 		expect(g27(declaring(pkg("@t/out", out, outbound), "- (`network`: `outbound`)"))).toEqual([]);
+	});
+});
+
+describe("a source written as .mjs", () => {
+	it("is read for what it reaches, as a .ts file is", () => {
+		const p = pkg("@t/mjs-reach", {
+			"src/helper.mjs":
+				'import { request } from "node:https";\nexport const go = () => request("https://x.example");\nfetch("https://y.example");\n',
+		});
+		expect(reachesOf(`${p.dir}/src/helper.mjs`)).toEqual(["node:https request", "fetch"]);
 	});
 });

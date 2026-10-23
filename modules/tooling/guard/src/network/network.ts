@@ -92,7 +92,13 @@ function referenced(node: ts.Identifier): boolean {
 /** Each place a file reaches the network, as `module name`, `module` (imported whole), a client, or a global. */
 export function reachesOf(path: string): string[] {
 	// The file alone, bound by the compiler: a name resolves to the declaration in scope where it is used.
-	const program = ts.createProgram([path], { noLib: true, noResolve: true, types: [] });
+	// JavaScript sources too: a `.mjs` file is read as a `.ts` one is.
+	const program = ts.createProgram([path], {
+		noLib: true,
+		noResolve: true,
+		types: [],
+		allowJs: true,
+	});
 	const file = program.getSourceFile(path) as ts.SourceFile;
 	const checker = program.getTypeChecker();
 	const found: string[] = [];
