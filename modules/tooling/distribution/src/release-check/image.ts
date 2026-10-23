@@ -3,18 +3,22 @@ import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { basename, join } from "node:path";
 import { trialLayer } from "@mod/trial";
-import { noSuchContainer, within } from "./container.ts";
-import { buildWithin, docker, dockerStarted } from "./docker.ts";
+import { type Container, withContainer } from "./containers/container.ts";
+import { DockerFailed, docker } from "./containers/docker.ts";
 import { refusalsIn } from "./refused.ts";
 
+const commandWithin = 60_000;
+const buildWithin = 15 * 60_000;
+const bootWithin = 3 * 60_000;
+
 /** Why Docker cannot build and run the images, or nothing when it can. */
-export function dockerMissing(): string | undefined {
+export async function dockerMissing(): Promise<string | undefined> {
 	try {
-		docker(["info", "--format", "{{.ServerVersion}}"]);
+		await docker(["info", "--format", "{{.ServerVersion}}"], commandWithin);
 		return undefined;
 	} catch (error) {
-		const told = error as { stderr?: string; message: string };
-		return told.stderr?.trim() || told.message;
+		if (error instanceof DockerFailed) return error.told.trim() || error.message;
+		throw error;
 	}
 }
 
@@ -33,6 +37,24 @@ const freePort = () =>
 		});
 	});
 
+/** A booted container once it answers ready (`answered`) or ends, within `ms`; neither fails, its output told. */
+export async function settled(c: Container, answered: () => Promise<boolean>, ms: number) {
+	let state: Awaited<ReturnType<Container["state"]>>;
+	const ready = await c.until(
+		async () => {
+			state = await c.state();
+			return !state?.running || (await answered());
+		},
+		250,
+		ms,
+	);
+	if (!ready)
+		throw new Error(`neither ready nor ended within ${ms / 1000} seconds:\n${await c.logs()}`);
+	const now = state;
+	if (now === undefined) throw new Error(`${c.name} was removed while booting`);
+	return now;
+}
+
 /**
  * Builds and runs apps' images, tagged `run`. The registry has no tarball of an unreleased version,
  * so each Dockerfile's `deps` stage is replaced by the same install, `--prod` in the Dockerfile's
@@ -48,10 +70,10 @@ export function images(
 		Object.entries(tarballs.byName).map(([name, path]) => [name, `/tarballs/${basename(path)}`]),
 	);
 
-	function build(app: string, name: string): string {
+	async function build(app: string, name: string): Promise<string> {
 		const base = `${run}:base`;
 		if (!built.includes(base)) {
-			docker(["build", "-q", "--target", "base", "-t", base, app], buildWithin);
+			await docker(["build", "-q", "--target", "base", "-t", base, app], buildWithin);
 			built.push(base);
 		}
 		const deps = join(scratch, `deps-${name}`, "app");
@@ -60,10 +82,8 @@ export function images(
 		writeFileSync(join(deps, "pnpm-workspace.yaml"), overridesFile(inContainer));
 		const cache = join(scratch, "image-cache");
 		const mounts = [`${deps}:/app`, `${tarballs.dir}:/tarballs:ro`, `${cache}:/cache`];
-		docker(
-			[
-				"run",
-				"--rm",
+		await withContainer({ run, purpose: `install-${name}`, within: buildWithin }, (c) =>
+			c.run([
 				...mounts.flatMap((mount) => ["-v", mount]),
 				"-e",
 				"COREPACK_HOME=/cache/corepack",
@@ -76,11 +96,10 @@ export function images(
 				"--no-frozen-lockfile",
 				"--store-dir",
 				"/cache/store",
-			],
-			buildWithin,
+			]),
 		);
 		const image = `${run}:${name}`;
-		docker(
+		await docker(
 			["build", "-q", "-t", image, "--build-context", `deps=${join(deps, "..")}`, app],
 			buildWithin,
 		);
@@ -90,16 +109,21 @@ export function images(
 
 	/**
 	 * Runs the image, with `constraints` added to `docker run`: ready at /readyz, or refused (exit 78)
-	 * with every refusal it wrote; anything else fails. `whileReady` runs on the ready container.
+	 * with every refusal it wrote; anything else fails. `whileReady` looks at the ready container.
 	 */
 	async function booted(
 		app: string,
 		image: string,
 		constraints: readonly string[] = [],
-		whileReady?: (container: string) => void,
+		whileReady?: (container: Container) => Promise<void>,
 	): Promise<string> {
 		const exposed = Object.keys(
-			JSON.parse(docker(["image", "inspect", "--format", "{{json .Config.ExposedPorts}}", image])),
+			JSON.parse(
+				await docker(
+					["image", "inspect", "--format", "{{json .Config.ExposedPorts}}", image],
+					commandWithin,
+				),
+			),
 		);
 		const listens = exposed[0]?.split("/")[0];
 		if (exposed.length !== 1 || !listens)
@@ -108,92 +132,39 @@ export function images(
 		const local = await trialLayer(app, { redisUrl: "redis://127.0.0.1:1" });
 		const conf = join(app, "config", "local.conf");
 		writeFileSync(conf, local);
-		const container = image.replace(":", "-");
-		const child = dockerStarted([
-			"run",
-			"--rm",
-			"--name",
-			container,
-			"-p",
-			`127.0.0.1:${port}:${listens}`,
-			"-v",
-			`${conf}:/app/config/local.conf:ro`,
-			"-e",
-			"APP_CONFIG=config/local.conf,config/application.conf",
-			...constraints,
-			image,
-		]);
-		let output = "";
-		child.stdout.on("data", (chunk) => {
-			output += chunk;
-		});
-		child.stderr.on("data", (chunk) => {
-			output += chunk;
-		});
-		const exited = new Promise<number | null>((resolve) =>
-			child.once("exit", (code) => resolve(code)),
-		);
-		const ending = (...how: string[]) => {
-			try {
-				docker([...how, container]);
-			} catch (error) {
-				if (!noSuchContainer(error)) throw error;
-			}
-		};
-		/** Fails the run with `error`, the container removed and its `docker run` let go first. */
-		const failing = (error: unknown): never => {
-			child.kill("SIGKILL");
-			ending("rm", "-f");
-			throw error;
-		};
-		const ended = () =>
-			within(exited, 30_000, `${container} did not end within 30 seconds`).catch(failing);
-		for (const until = Date.now() + 60_000; Date.now() < until; ) {
-			if (child.exitCode !== null) break;
-			const ready = await fetch(`http://127.0.0.1:${port}/readyz`, {
-				signal: AbortSignal.timeout(5_000),
-			}).then(
-				(answer) => answer.status === 200,
-				() => false,
-			);
-			if (ready) {
-				// A look that fails still ends the container, within its deadline, before failing.
-				let looked: { readonly failed: unknown } | undefined;
-				try {
-					whileReady?.(container);
-				} catch (failed) {
-					looked = { failed };
-				}
-				// One ended while ready, as a scene may end it, is gone already.
-				if (child.exitCode === null) {
-					try {
-						ending("stop");
-					} catch (error) {
-						failing(error);
-					}
-				}
-				await ended();
-				if (looked !== undefined) throw looked.failed;
+		const purpose = `boot-${image.slice(image.indexOf(":") + 1)}`;
+		return withContainer({ run, purpose, within: bootWithin }, async (c) => {
+			await c.run([
+				"-d",
+				"-p",
+				`127.0.0.1:${port}:${listens}`,
+				"-v",
+				`${conf}:/app/config/local.conf:ro`,
+				"-e",
+				"APP_CONFIG=config/local.conf,config/application.conf",
+				...constraints,
+				image,
+			]);
+			const answered = () =>
+				fetch(`http://127.0.0.1:${port}/readyz`, { signal: AbortSignal.timeout(5_000) }).then(
+					(answer) => answer.status === 200,
+					() => false,
+				);
+			const state = await settled(c, answered, 60_000);
+			if (state.running) {
+				await whileReady?.(c);
 				return "ready";
 			}
-			await new Promise((resolve) => setTimeout(resolve, 250));
-		}
-		if (child.exitCode === null) {
-			try {
-				ending("rm", "-f");
-			} catch (error) {
-				failing(error);
-			}
-		}
-		const code = await ended();
-		const refusals = refusalsIn(output);
-		if (code === 78 && refusals.length > 0) return `refused: ${refusals.join("; ")}`;
-		throw new Error(`exited ${code}:\n${output}`);
+			const output = await c.logs();
+			const refusals = refusalsIn(output);
+			if (state.exitCode === 78 && refusals.length > 0) return `refused: ${refusals.join("; ")}`;
+			throw new Error(`exited ${state.exitCode}:\n${output}`);
+		});
 	}
 
 	/** Removes every image this run built; Docker's build cache stays for the next run. */
-	const remove = () => {
-		if (built.length > 0) docker(["image", "rm", "-f", ...built]);
+	const remove = async () => {
+		if (built.length > 0) await docker(["image", "rm", "-f", ...built], commandWithin);
 	};
 
 	return { build, booted, remove };
