@@ -99,11 +99,6 @@ export const section = z.strictObject({
 		.describe(
 			"The window a client's lodged and renewed intents are counted in: a duration with a unit, from 1s to 1d, e.g. 1m.",
 		),
-	"revocation-skew": seconds(0, 300)
-		.prefault("1s")
-		.describe(
-			"How far apart hosts' clocks may be: a grant made this soon after its subject's revocation counts as revoked. A duration with a unit, from 0s to 5m, e.g. 1s.",
-		),
 	"sweep-interval": seconds(60, 86_400)
 		.prefault("1h")
 		.describe(

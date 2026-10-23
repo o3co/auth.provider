@@ -205,7 +205,6 @@ export async function connector(
 		judge: judgeWith(app.get(revocations), {
 			keep: settings["keep-on-subject-revocation"],
 			maxMs: settings["max-lifetime"] * 1000,
-			allowanceMs: settings["revocation-skew"] * 1000,
 		}),
 		listed: listingWith(stores.subjects, logged.log),
 		audit: app.get(audit),

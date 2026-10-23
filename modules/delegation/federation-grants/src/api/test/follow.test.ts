@@ -24,6 +24,18 @@ describe("following a subject's revocation", () => {
 		expect(await listed(h)).toEqual([late]);
 	});
 
+	it("ends a pending intent begun in the revocation's second, and leaves one begun in the next, allowing nothing for clocks", async () => {
+		const h = await harness();
+		const same = String((await h.lodge()).json?.grant_id);
+		h.advance(1000);
+		const next = String((await h.lodge()).json?.grant_id);
+		h.advance(-1000);
+		await h.revoke("alice");
+		expect(h.stores.peek(same)).not.toMatchObject({ status: "pending" });
+		expect(h.stores.peek(next)).toMatchObject({ status: "pending" });
+		expect(await listed(h)).toEqual([next]);
+	});
+
 	it("writes nothing over a revocation or a renewal another writer made meanwhile", async () => {
 		const h = await harness();
 		const { id } = await h.connected();

@@ -22,16 +22,6 @@ export const sectionCases = [
 	{ name: "a login page at http", settings: { "login-page": "http://a.example/x" }, ok: false },
 	{ name: "a step-up page at http", settings: { "step-up-page": "http://a.example/x" }, ok: false },
 	{
-		name: "an allowance for clocks of 300 seconds",
-		settings: { "revocation-skew": "300s" },
-		ok: true,
-	},
-	{
-		name: "an allowance for clocks past 300 seconds",
-		settings: { "revocation-skew": "301s" },
-		ok: false,
-	},
-	{
 		name: "an access token's longest life past a day",
 		settings: { connections: { cal: { ...conn, "max-access-token-lifetime": "86401s" } } },
 		ok: false,
