@@ -196,6 +196,14 @@ From `@mod/federation-grants-store`.
 | `federation-grants-store.pending-per-client-and-subject` | integer (1–1000) | `16` |  |  |  | How many first-time intents a client may have waiting for one subject; past it, the one ending first is pushed out. |
 | `federation-grants-store.grants-per-subject` | integer (1–10000) | `100` |  |  |  | How many grants a subject's listing keeps; past it, the one ending first is pushed out. |
 
+## federation-link
+
+From `@mod/federation-link`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `federation-link.step-up-page` | string |  |  |  |  | Where a link's start that falls short of a session requirement sends the browser once to raise it, then back to the start: an https URL (http only on a loopback host). Without it, the start's 403 names no page. |
+
 ## federation-tokens
 
 From `@mod/federation-tokens`.
