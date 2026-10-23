@@ -175,13 +175,15 @@ describe("H. passkey login at the token endpoint", () => {
 	);
 	const c = calls(() => s.at.base);
 
-	it("gives the client its tokens for a registered passkey, with amr hwk; the refresh token rotates and the client can revoke", async () => {
+	it("gives the client its tokens for a registered passkey, with a passkey's amr; the refresh token rotates and the client can revoke", async () => {
 		const { authenticator } = await c.register("alice");
 		const first = await c.login("app", await c.assertion(authenticator), { scope: "read write" });
 		expect(first.status).toBe(200);
 		expect(first.body).toMatchObject({ token_type: "Bearer", scope: "read write" });
 		const claims = claimsOf(first.body.access_token);
-		expect(claims).toMatchObject({ client_id: "app", amr: ["hwk"] });
+		expect(claims).toMatchObject({ client_id: "app" });
+		// Ours proves possession alone, `pop`; the legacy build proves `hwk`.
+		expect(claims.amr).toEqual(areaTarget().differs("passkey-amr-pop") ? ["hwk"] : ["pop"]);
 		expect(typeof claims.auth_time).toBe("number");
 		const next = await c.post("/oauth/token", "app", {
 			grant_type: "refresh_token",
@@ -189,7 +191,7 @@ describe("H. passkey login at the token endpoint", () => {
 		});
 		expect(next.status).toBe(200);
 		expect(claimsOf(next.body.access_token)).toMatchObject({
-			amr: ["hwk"],
+			amr: claims.amr,
 			auth_time: claims.auth_time,
 		});
 		const token = String(next.body.access_token);

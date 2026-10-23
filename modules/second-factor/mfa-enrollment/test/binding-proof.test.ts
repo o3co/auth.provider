@@ -47,7 +47,7 @@ const toldKind = defineModule({ name: "kind-told" }, (m) => [
 		verify: async () => ({ kind: "invalid" as const }),
 	})),
 ]);
-/** A counting kind declaring two amr values, as a WebAuthn one does; a proof adds one. */
+/** A counting kind declaring two amr values; a proof adds one. */
 const pairKind = defineModule({ name: "kind-pair" }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "pair",

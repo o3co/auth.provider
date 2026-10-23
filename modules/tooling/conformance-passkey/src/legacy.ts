@@ -46,5 +46,7 @@ onLegacy(passkeyArea, {
 		"passkey-challenge-bound-to-client",
 		// With a verified email required, passkey login does not start over a users file.
 		"email-gate-without-subject-lookup",
+		// The legacy build's passkeys prove `hwk` (or `swk` as a second factor), ours `pop`: no attestation tells how a key is kept.
+		"passkey-amr-pop",
 	],
 });
