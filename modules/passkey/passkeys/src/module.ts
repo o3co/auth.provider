@@ -34,6 +34,7 @@ const holdingOf = async (c: Context) => {
 		audit: await c.get(audit),
 		log: c.log,
 		token: tokenOf(c),
+		handle: () => freshHandle(c.random.bytes),
 	});
 };
 const twoWitnesses = "more than one passkey witness is composed";

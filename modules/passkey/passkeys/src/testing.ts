@@ -373,14 +373,14 @@ export function challengeStoreContract(name: string, open: () => Promise<Challen
 
 /**
  * A passkey witness in memory, keeping its promises: each call fails as unavailable while its count
- * of failures lasts, and `lost` writes take effect with their answer lost. It tells its mark's token
- * (`markedWith`) unless made without it. `beforeEnroll`,
+ * of failures lasts, and `lost` writes take effect with their answer lost. It offers `clear` unless
+ * made without it. `beforeEnroll`,
  * `afterEnroll`, `beforeRead` and `beforeWithdraw` run once around the next such call, as a request
  * racing it would.
  */
 export function passkeyWitnessStandIn(
 	name = "passkey-witness",
-	{ markedWith = true }: { readonly markedWith?: boolean } = {},
+	{ clear = true }: { readonly clear?: boolean } = {},
 ) {
 	const marks = new Map<string, string>();
 	const failing = { read: 0, markedWith: 0, enroll: 0, withdraw: 0, clear: 0 };
@@ -427,15 +427,15 @@ export function passkeyWitnessStandIn(
 			if (marks.get(subject) === token) marks.delete(subject);
 			loses("withdraw");
 		},
-		clear: async (subject) => {
-			fails("clear");
-			marks.delete(subject);
-			loses("clear");
+		markedWith: async (subject) => {
+			fails("markedWith");
+			return marks.get(subject);
 		},
-		...(markedWith && {
-			markedWith: async (subject: string) => {
-				fails("markedWith");
-				return marks.get(subject);
+		...(clear && {
+			clear: async (subject: string) => {
+				fails("clear");
+				marks.delete(subject);
+				loses("clear");
 			},
 		}),
 	};
@@ -450,9 +450,12 @@ export async function passkeyWitnessProblems(witness: PasskeyWitness): Promise<s
 	const check = (holds: boolean, what: string) => {
 		if (!holds) problems.push(what);
 	};
-	/** Where the witness tells its mark's token, whether it answers `token`. */
+	// Built where no type is checked, a witness may lack it.
+	if (typeof witness.markedWith !== "function")
+		return ["the witness does not tell its mark's token"];
+	/** Whether the witness tells `token` as its mark's. */
 	const tokenIs = async (subject: string, token: string | undefined, what: string) => {
-		if (witness.markedWith) check((await witness.markedWith(subject)) === token, what);
+		check((await witness.markedWith(subject)) === token, what);
 	};
 	const one = `p-${n}-1`;
 	check(!(await witness.read(one)), "a subject never marked reads as marked");
@@ -471,9 +474,11 @@ export async function passkeyWitnessProblems(witness: PasskeyWitness): Promise<s
 	await witness.withdraw(one, "t1");
 	check(!(await witness.read(one)), "a withdraw where no mark is set made one");
 	check(await witness.enroll(one, "t3"), "a token after a withdraw does not own the mark");
-	await witness.clear(one);
-	check(!(await witness.read(one)), "a read after an answered clear still sees the mark");
-	await tokenIs(one, undefined, "markedWith answers the token of a mark cleared");
+	if (witness.clear) {
+		await witness.clear(one);
+		check(!(await witness.read(one)), "a read after an answered clear still sees the mark");
+		await tokenIs(one, undefined, "markedWith answers the token of a mark cleared");
+	}
 	const two = `p-${n}-2`;
 	const raced = await Promise.all([witness.enroll(two, "a"), witness.enroll(two, "b")]);
 	check(raced.filter(Boolean).length === 1, "two enrolls at once do not leave exactly one owner");
@@ -482,10 +487,10 @@ export async function passkeyWitnessProblems(witness: PasskeyWitness): Promise<s
 	return problems;
 }
 
-/** What passkeys needs from any witness: set-if-absent by token, withdraw by token, clear, the mark's token where it tells it, and reads never behind an answered write. */
+/** What passkeys needs from any witness: set-if-absent by token, withdraw by token, the mark's token, clear where it offers it, and reads never behind an answered write. */
 export function passkeyWitnessContract(name: string, open: () => Promise<PasskeyWitness>) {
 	describe(`passkey witness contract: ${name}`, () => {
-		it("keeps the mark by its first token, withdraws it only by that token, clears it, and reads every answered write", async () => {
+		it("keeps the mark by its first token, withdraws it only by that token, tells its token, clears it where it can, and reads every answered write", async () => {
 			expect(await passkeyWitnessProblems(await open())).toEqual([]);
 		});
 	});

@@ -13,10 +13,10 @@ export interface PasskeyWitness {
 	enroll(subject: string, token: string): Promise<boolean>;
 	/** Removes the mark only where it is `token`'s, as one atomic step; any other mark, and none, stay as they are. */
 	withdraw(subject: string, token: string): Promise<void>;
-	/** The mark's token, whoever set it; none where no mark is set. Kept as `read` is, never behind an answered write. A witness that cannot tell it leaves this out. */
-	markedWith?(subject: string): Promise<string | undefined>;
-	/** Removes the mark, whoever's it is: where the subject's last passkey has gone. */
-	clear(subject: string): Promise<void>;
+	/** The mark's token, whoever set it; none where no mark is set. Kept as `read` is, never behind an answered write. */
+	markedWith(subject: string): Promise<string | undefined>;
+	/** Removes the mark, whoever's it is. passkeys never asks it; a witness may leave it out. */
+	clear?(subject: string): Promise<void>;
 }
 
 /** At most one witness: passkeys refuses to start with two. */
