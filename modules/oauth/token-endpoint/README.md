@@ -2,12 +2,11 @@
 
 ## Responsibilities
 - Answers the token endpoint: authenticates the client, then dispatches to a grant by its grant type.
-- Built-in grant: client credentials (`clientCredentialsGrantType`).
 - Owns the shape of OAuth error responses.
 
 ## Not here
 - What a grant is given, and how its answer is answered (`grants`).
-- What a client may be issued, and its client metadata section (`client-allowance`).
+- What a client may be issued, and its client metadata section (`client-allowance`). Each grant, the client credentials grant included (`client-credentials`).
 
 ## Offers
 - Route `POST /oauth/token`: a form, JSON or no body (any other `415`); cross-origin requests from the operator's origins (`http`) may send `content-type` and `dpop`, and read `dpop-nonce`, `www-authenticate` and `retry-after`.
@@ -28,6 +27,7 @@
 - A repeated parameter is `invalid_request` unless the rule's `repeated` answers it, as is an OAuth parameter sent in JSON as neither a string nor `null` (as if left out); `assertion` is its grant's to define.
 - A body the grant does not take is `invalid_request`; a request with no body is read as a form.
 - A grant type nothing dispatches to is `unsupported_grant_type`, and is never named in the audit or the log.
+- Boot is refused for each grant a registered client is allowed and nothing composed serves, at `clients.registered.<i>.sections.client-allowance.grants.<j>`, naming the module to compose by `grants`' index (`grantServers`), never the client's id or the grant type.
 - A grant `client-allowance` does not allow the client is `unauthorized_client`.
 - The binding is read through `sender-binding`: its refusal is answered with its own code and headers, unavailable as `503`, and two bindings are `invalid_request`. A client that must bind and shows none is `invalid_request`, and one bound by a kind it does not name `unauthorized_client`.
 - A grant's `401` carries the challenges `clients` answers with the client: its method's, or every method's when it names none.

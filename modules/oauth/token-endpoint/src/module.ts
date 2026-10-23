@@ -4,7 +4,7 @@ import { routes, site, use } from "@mod/http";
 import { metadata } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
 import { requestsPerSource } from "@mod/rate-limit";
-import { clientCredentialsIn } from "./built-in/client-credentials.ts";
+import { unservedGrants } from "./allowed/allowed.ts";
 import { composedRule } from "./built-in/targets.ts";
 import { tokenEndpointLocation } from "./contract.ts";
 import { endpointIn } from "./endpoint-in/endpoint-in.ts";
@@ -18,7 +18,6 @@ const cors = {
 };
 
 export default defineModule({ name: "token-endpoint", section }, (m) => [
-	m.contribute(grants).by(clientCredentialsIn),
 	m.provide(targets).by(composedRule),
 	m
 		.provide(composedGrants)
@@ -49,6 +48,12 @@ export default defineModule({ name: "token-endpoint", section }, (m) => [
 	}),
 	m.contribute(routes).by(async (c) => {
 		const composed = await c.collect(grants);
+		// A grant a registered client is allowed and nothing serves would go missing in silence.
+		const unserved = unservedGrants(
+			(await c.get(clients)).registered(),
+			new Set(composed.map((g) => g.grantType)),
+		);
+		if (unserved.length > 0) return c.refuseAll(unserved);
 		// The route has no own-site policy: it relies on each grant saying whether it reads a cookie.
 		const silent = composed.filter((g) => g.readsAmbient !== "none" && g.readsAmbient !== "cookie");
 		if (silent.length > 0) {

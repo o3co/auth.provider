@@ -1,3 +1,4 @@
+import clientCredentialsModule from "@mod/client-credentials/module";
 import clientsModule from "@mod/clients/module";
 import http from "@mod/http/module";
 import { type HttpSettings, httpConfig } from "@mod/http/testing";
@@ -22,6 +23,7 @@ export const endpointModules = (...extra: Module[]): Module[] => [
 	clientsModule,
 	secretHashModule,
 	tokenEndpoint,
+	clientCredentialsModule,
 	...extra,
 ];
 
