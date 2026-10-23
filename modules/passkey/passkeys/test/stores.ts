@@ -21,18 +21,14 @@ type Together = Required<Pick<PasskeyStore, "updateTogether">>;
 
 /**
  * passkeys' stores on the records stand-in, on the given clock, each behind a switch: credentials
- * and subjects in one stand-in, apart by their keys. `together` (on unless asked off) offers the change of records of both
- * spaces as one; `loseNextTogether` lets the next such change take effect, its answer lost.
+ * and subjects in one stand-in, apart by their keys, changed one at a time or both spaces as one;
+ * `loseNextTogether` lets the next change of both take effect, its answer lost.
  */
-export function memoryStores(
-	now: () => number = () => 0,
-	{ together = true }: { readonly together?: boolean } = {},
-) {
+export function memoryStores(now: () => number = () => 0) {
 	const size = { shards: 1, perShard: 1 };
 	const stand = memoryRecords<StoredPasskey>(now, size);
 	const at = (space: Space, key: string) => `${space}/${key}`;
 	const races: Partial<Record<Space, Race>> = {};
-	const beforeUpdate: Partial<Record<Space, () => Promise<void>>> = {};
 	const keyed = (space: Space): PasskeyRecords => ({
 		save: (key, record) => stand.records.create(at(space, key), record, "endless"),
 		read: (key) => stand.records.read(at(space, key)),
@@ -40,9 +36,6 @@ export function memoryStores(
 		// on what it read, the other writer writes, and the change runs again on that. A missing record,
 		// or a change that throws on what it read, leaves the race waiting for this space.
 		update: async (key, change) => {
-			const before = beforeUpdate[space];
-			delete beforeUpdate[space];
-			await before?.();
 			const race = races[space];
 			const read = stand.peek(at(space, key));
 			if (!race || read === undefined) return stand.records.change(at(space, key), change);
@@ -130,7 +123,7 @@ export function memoryStores(
 	const passkeys: PasskeyStore = {
 		credentials: down.credentials.wrap(keyed("credentials")),
 		subjects: down.subjects.wrap(keyed("subjects")),
-		...(together ? down.together.wrap({ updateTogether: changeTogether }) : {}),
+		...down.together.wrap({ updateTogether: changeTogether }),
 	};
 	const challenges = down.challenges.wrap({
 		open: challengesStand.records.create,
@@ -159,10 +152,6 @@ export function memoryStores(
 		raceNextTogether: (run: () => Promise<void>) => {
 			raceTogether = run;
 		},
-		/** Runs `run` just before the next change of one record of `space`. */
-		beforeNextUpdate: (space: Space, run: () => Promise<void>) => {
-			beforeUpdate[space] = run;
-		},
 	};
 }
 
@@ -181,6 +170,35 @@ const live18 = (subject: string) =>
 	stored({ v: 1, subject, publicKey: "pQ", signCount: 0, backupEligible: false, backedUp: false });
 
 /**
+ * What `store` holds, read raw: each subject's list, and what each id's record names (its subject,
+ * and whether it is pending, removed or a passkey), so a test sees what no read of passkeys mends.
+ */
+export async function heldState(
+	store: PasskeyStore,
+	subjects: readonly string[],
+	ids: readonly string[],
+) {
+	const lists = await Promise.all(
+		subjects.map(async (subject) => {
+			const holder = (await store.subjects.read(keys.subject(subject))) as
+				| { credentials?: string[] }
+				| undefined;
+			return [subject, holder?.credentials ?? []] as const;
+		}),
+	);
+	const records = await Promise.all(
+		ids.map(async (id) => {
+			const record = (await store.credentials.read(keys.credential(id))) as
+				| { subject?: string; pending?: boolean; removed?: boolean }
+				| undefined;
+			const as = record?.removed ? "removed" : record?.pending ? "pending" : "passkey";
+			return [id, record && { subject: record.subject, as }] as const;
+		}),
+	);
+	return { lists: Object.fromEntries(lists), records: Object.fromEntries(records) };
+}
+
+/**
  * Passkey records over `store`, what they write counted: each change of both spaces as one, each
  * run of such a change's decision, each write of one space alone, and each token made.
  */
@@ -197,20 +215,18 @@ export function jointOver(store: PasskeyStore, now: () => number = () => 1_000) 
 			return records.update(...args);
 		},
 	});
-	const together = store.updateTogether?.bind(store);
+	const together = store.updateTogether.bind(store);
 	const counting: PasskeyStore = {
 		credentials: one(store.credentials),
 		subjects: one(store.subjects),
-		...(together && {
-			updateTogether: (named: PasskeyKeys, p: Parameters<Together["updateTogether"]>[1]) => {
-				counted.together += 1;
-				const change = (read: Parameters<typeof p.change>[0]) => {
-					counted.decisions += 1;
-					return p.change(read);
-				};
-				return together(named, { watch: p.watch, change });
-			},
-		}),
+		updateTogether: (named, p) => {
+			counted.together += 1;
+			const change = (read: Parameters<typeof p.change>[0]) => {
+				counted.decisions += 1;
+				return p.change(read);
+			};
+			return together(named, { watch: p.watch, change });
+		},
 	};
 	const token = () => {
 		counted.tokens += 1;
@@ -262,6 +278,6 @@ export function jointOver(store: PasskeyStore, now: () => number = () => 1_000) 
 
 /** `jointOver` the memory stores, which change both spaces as one. */
 export function jointStores(now: () => number = () => 1_000) {
-	const stores = memoryStores(now, { together: true });
+	const stores = memoryStores(now);
 	return { stores, ...jointOver(stores.passkeys, now) };
 }

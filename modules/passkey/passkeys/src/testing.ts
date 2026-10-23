@@ -75,13 +75,9 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 			expect(await passkeys.credentials.update(fresh(), plus(1))).toBeUndefined();
 		});
 
-		it("changes records of both spaces as one where it can, giving the change what it watched, each space apart", async (ctx) => {
+		it("changes records of both spaces as one, giving the change what it watched, each space apart", async () => {
 			const { passkeys } = await open();
-			const together = passkeys.updateTogether?.bind(passkeys);
-			if (!together) {
-				ctx.skip();
-				return;
-			}
+			const together = passkeys.updateTogether.bind(passkeys);
 			// One key in both spaces, and the owner's in both: each space keeps its own.
 			const [key, owner] = [fresh(), fresh()];
 			await passkeys.subjects.save(owner, held({ n: 7 }), "endless");
@@ -124,13 +120,9 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 			});
 		});
 
-		it("writes the records it watched as well, as a subject's list and the credentials it names", async (ctx) => {
+		it("writes the records it watched as well, as a subject's list and the credentials it names", async () => {
 			const { passkeys } = await open();
-			const together = passkeys.updateTogether?.bind(passkeys);
-			if (!together) {
-				ctx.skip();
-				return;
-			}
+			const together = passkeys.updateTogether.bind(passkeys);
 			const [list, a, b] = [fresh(), fresh(), fresh()];
 			await passkeys.subjects.save(list, held({ ids: [a, b] }), "endless");
 			await passkeys.credentials.save(a, held({ n: 1 }), "endless");
@@ -161,8 +153,8 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 
 		it("changes records as one again where another writer changes what it watched first", async (ctx) => {
 			const { passkeys, raceNextTogether: race } = await open();
-			const together = passkeys.updateTogether?.bind(passkeys);
-			if (!together || !race) {
+			const together = passkeys.updateTogether.bind(passkeys);
+			if (!race) {
 				ctx.skip();
 				return;
 			}
@@ -287,9 +279,14 @@ export function passkeyStoreContract(name: string, open: () => Promise<PasskeyPl
 				},
 			});
 			const [subject, id] = [fresh(), randomBytes(16).toString("base64url")];
-			const watched = {
+			const watched: PasskeyStore = {
 				credentials: spied(passkeys.credentials),
 				subjects: spied(passkeys.subjects),
+				// A registration writes its record together with its listing: its key is the first named.
+				updateTogether: (named, p) => {
+					keys.push(...named.credentials);
+					return passkeys.updateTogether(named, p);
+				},
 			};
 			const records = keptPasskeys(watched, writeToken);
 			const userHandle = await records.handleFor(subject, handleOf());

@@ -25,16 +25,14 @@ import {
 	registrations,
 } from "../src/contract.ts";
 import passkeysModule from "../src/module.ts";
+import type { PasskeyStore } from "../src/store.ts";
 import { passkeysConfig, passkeyWitnessStandIn } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
 
-const boot = (
-	witnesses: ReturnType<typeof passkeyWitnessStandIn>[],
-	{ together = true }: { readonly together?: boolean } = {},
-) =>
+const boot = (witnesses: ReturnType<typeof passkeyWitnessStandIn>[]) =>
 	assemble({
 		modules: [
-			memoryStores(undefined, { together }).module,
+			memoryStores().module,
 			auditStandIn().module,
 			webauthn,
 			passkeysModule,
@@ -43,6 +41,28 @@ const boot = (
 		config: { ...kernelConfig(), ...webauthnConfig(), ...passkeysConfig() },
 		runtime: quietRuntime(),
 	});
+
+it("refuses to boot a passkey store that cannot change both its spaces as one", async () => {
+	const stores = memoryStores();
+	// Built where no type is checked: the type requires `updateTogether`, so boot checks it too.
+	const lacking = {
+		credentials: stores.passkeys.credentials,
+		subjects: stores.passkeys.subjects,
+	} as unknown as PasskeyStore;
+	const apart = defineModule({ name: "stores-apart" }, (m) => [
+		m.provide(passkeyStore).by(() => lacking),
+		m.provide(challengeStore).by(() => stores.challenges),
+	]);
+	const refused = await assemble({
+		modules: [apart, auditStandIn().module, webauthn, passkeysModule],
+		config: { ...kernelConfig(), ...webauthnConfig(), ...passkeysConfig() },
+		runtime: quietRuntime(),
+	}).catch((error: unknown) => error);
+	expect(refused).toBeInstanceOf(BootRefused);
+	expect((refused as BootRefused).refusals).toEqual([
+		expect.objectContaining({ where: "passkeys", reason: expect.stringMatching(/as one/) }),
+	]);
+});
 
 it("refuses to boot with two passkey witnesses", async () => {
 	await expect(
@@ -129,22 +149,19 @@ it("keeps a passkey both asks admitted though the witness cannot mark it, answer
 	await app.stop(1000);
 });
 
-it("ends a passkey whose listing may have landed though its answer was lost", async () => {
+it("ends a passkey whose write may have landed though its answer was lost", async () => {
 	const stores = memoryStores();
 	let lose = false;
 	const lossy = defineModule({ name: "lossy-stores" }, (m) => [
 		m.provide(passkeyStore).by(() => ({
-			credentials: stores.passkeys.credentials,
-			subjects: {
-				...stores.passkeys.subjects,
-				update: async (key, change) => {
-					const done = await stores.passkeys.subjects.update(key, change);
-					if (lose) {
-						lose = false;
-						throw new Unavailable("passkey-store");
-					}
-					return done;
-				},
+			...stores.passkeys,
+			updateTogether: async (keys, p) => {
+				const done = await stores.passkeys.updateTogether(keys, p);
+				if (lose) {
+					lose = false;
+					throw new Unavailable("passkey-store");
+				}
+				return done;
 			},
 		})),
 		m.provide(challengeStore).by(() => stores.challenges),
@@ -159,7 +176,7 @@ it("ends a passkey whose listing may have landed though its answer was lost", as
 	let asks = 0;
 	const admitted = async () => {
 		asks += 1;
-		// The listing's answer goes missing right after the first ask admits.
+		// The write's answer goes missing right after the first ask admits.
 		lose = true;
 		return true;
 	};
@@ -194,7 +211,7 @@ it("ends only the new passkey where the check says no once it is listed, the sub
 
 it("leaves no usable passkey where the registration is stopped and its end cannot be written", async () => {
 	const stores = memoryStores();
-	/** `lose`: the next list update lands and its answer is lost; `down`: no update lands. */
+	/** `lose`: the next write lands and its answer is lost; `down`: no write lands. */
 	const fails = { lose: false, down: false };
 	const failing = <S extends { update: (...a: never[]) => Promise<unknown> }>(store: S): S => ({
 		...store,
@@ -213,6 +230,16 @@ it("leaves no usable passkey where the registration is stopped and its end canno
 		m.provide(passkeyStore).by(() => ({
 			credentials: failing(stores.passkeys.credentials),
 			subjects: failing(stores.passkeys.subjects),
+			updateTogether: async (keys, p) => {
+				if (fails.down) throw new Unavailable("passkey-store");
+				const done = await stores.passkeys.updateTogether(keys, p);
+				if (fails.lose) {
+					fails.lose = false;
+					fails.down = true;
+					throw new Unavailable("passkey-store");
+				}
+				return done;
+			},
 		})),
 		m.provide(challengeStore).by(() => stores.challenges),
 	]);
@@ -234,8 +261,8 @@ it("leaves no usable passkey where the registration is stopped and its end canno
 			fails.down = true;
 			throw new Unavailable("subject-revocation");
 		},
-		// The listing lands, its answer is lost, and the store goes down before the end is written.
-		"listing lost": () => {
+		// The write lands, its answer is lost, and the store goes down before the end is written.
+		"write lost": () => {
 			fails.lose = true;
 			return true;
 		},
@@ -313,9 +340,8 @@ async function sameId(app: Awaited<ReturnType<typeof boot>>) {
 }
 
 it("keeps only the key of the registration both asks admitted, two of a subject's crossing on one id in either order", async () => {
-	// The two writes of a store without updateTogether, until that path goes.
-	const app = await boot([], { together: false });
-	// Admitted first: a revoked one writes over its record while it asks; neither key is kept.
+	const app = await boot([]);
+	// Admitted first: a revoked one asks while it does; asked before it writes, it writes nothing.
 	const first = await sameId(app);
 	let crossed: unknown;
 	const admittedFirst = await first.kept.register(
@@ -333,14 +359,14 @@ it("keeps only the key of the registration both asks admitted, two of a subject'
 		},
 	);
 	expect([admittedFirst, crossed]).toEqual([
-		{ kind: "refused", reason: "conflict" },
+		expect.objectContaining({ kind: "registered" }),
 		{ kind: "refused", reason: "revoked" },
 	]);
 	expect([await first.signsIn(first.one), await first.signsIn(first.two)]).toEqual([
-		"refused",
+		"sam",
 		"refused",
 	]);
-	// Revoked first: the admitted one writes over its record while it asks, and is kept alone.
+	// Revoked first: the admitted one registers while it asks, and is kept alone.
 	const second = await sameId(app);
 	let admitted: unknown;
 	const revokedFirst = await second.kept.register(

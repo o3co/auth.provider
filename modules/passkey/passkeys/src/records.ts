@@ -106,43 +106,10 @@ export function keptPasskeys(
 		const record = await store.subjects.read(subjectKey(subject));
 		return record && holderOf(record);
 	};
-	/** Takes over a credential no holder lists (a failed registration's, or one between its writes), while it holds what was read. */
-	const takeUnlisted = async (id: string, record: StoredPasskey): Promise<boolean> => {
-		const key = credentialKey(id);
-		const seen = await store.credentials.read(key);
-		if (!seen) throw broken();
-		const owner = await holder(keptOf(seen).subject);
-		if (owner?.credentials.includes(id)) return false;
-		const same = (r: StoredPasskey) => JSON.stringify(r) === JSON.stringify(seen);
-		const taken = await store.credentials.update(key, (current) =>
-			same(current) ? { value: record } : undefined,
-		);
-		return taken !== undefined && same(taken.before);
-	};
-	/** Strips a passkey's record to its subject, only where that subject holds it: one another subject took over is theirs. */
-	const strip = (subject: string, id: string) =>
-		store.credentials.update(credentialKey(id), (current) => {
-			const kept = keptOf(current);
-			if (kept.kind === "removed" || kept.subject !== subject) return undefined;
-			return { value: stored({ v: 1, subject, removed: true }) };
-		});
 	/** The pending record the write named `written` kept, if the record is still that one. */
 	const pendingOf = (record: StoredPasskey, written: string) => {
 		const kept = keptOf(record);
 		return kept.kind === "pending" && kept.token === written ? kept : undefined;
-	};
-	/** Takes an id off the subject's holder: `removed` where this call took it off, `empty` where none is left. */
-	const delist = async (subject: string, id: string) => {
-		const delisted = await store.subjects.update(subjectKey(subject), (current) => {
-			const { credentials } = holderOf(current);
-			if (!credentials.includes(id)) return undefined;
-			return { value: stored({ ...current, credentials: credentials.filter((c) => c !== id) }) };
-		});
-		if (!delisted) return { removed: false, empty: true };
-		// An update that wrote nothing answers what was there: removed only where this call took it off.
-		const left = holderOf(delisted.after).credentials;
-		const removed = holderOf(delisted.before).credentials.includes(id) && !left.includes(id);
-		return { removed, empty: left.length === 0 };
 	};
 	/** A credential's record as a removal leaves it. */
 	const removedOf = (subject: string) => stored({ v: 1, subject, removed: true });
@@ -158,13 +125,13 @@ export function keptPasskeys(
 		);
 		return { removed: !!before?.includes(id) && !after?.includes(id), empty: after?.length === 0 };
 	};
-	const together = store.updateTogether?.bind(store);
+	const together = store.updateTogether.bind(store);
 	/**
-	 * With a store that changes both spaces as one: the credential's record and the subject's list,
-	 * or the list and every record it names, in one change, so a list names an id exactly while the
-	 * record names the subject, pending or a passkey.
+	 * The writes of a registration, an end, a removal and a clear: the credential's record and the
+	 * subject's list, or the list and every record it names, in one change, so a list names an id
+	 * exactly while the record names the subject, pending or a passkey.
 	 */
-	const joint = together && {
+	const joint = {
 		/**
 		 * Keeps a new passkey's record pending under `written` and lists its id, in one change. An id
 		 * the record's holder lists is a conflict; a list at `max` that lacks it is full; a record no
@@ -307,21 +274,9 @@ export function keptPasskeys(
 	};
 	const records = {
 		holder,
-		/** Whether registrations write the record and the list as one (`joined`), the first ask before it. */
-		together: joint !== undefined,
 		/** A new token naming a registration's write, made before the write so a retry writes the same one. */
 		writeToken: token,
-		/** One change of the record and the list, for a store that has it; see `joint`. */
-		joined: async (
-			subject: string,
-			credential: Credential,
-			max: number,
-			nickname: string | undefined,
-			written: string,
-		) => {
-			if (!joint) throw new TypeError("passkeys: the store cannot change both spaces as one");
-			return joint.joined(subject, credential, max, nickname, written);
-		},
+		joined: joint.joined,
 		/** The subject's handle; `fresh` becomes it when the subject has none yet. */
 		handleFor: async (subject: string, fresh: string): Promise<string> => {
 			if (!isCanonical(fresh, handleBytes)) throw new Error("a handle must be canonical");
@@ -337,55 +292,6 @@ export function keptPasskeys(
 			return record && passkeyOf(id, record);
 		},
 		/**
-		 * Keeps a new passkey's record for the subject, whose handle it was made for, pending under a
-		 * new token naming this write: no read takes it as a passkey until `listing` and `activated`.
-		 * An id its holder lists is a conflict.
-		 */
-		written: async (
-			subject: string,
-			credential: Credential,
-			max: number,
-			nickname?: string,
-		): Promise<{ readonly token: string } | "conflict" | "full" | "malformed"> => {
-			// Only what reads back: a record no read can take would make every later use unavailable.
-			if (!credentialOf(credential)) return "malformed";
-			const { id, userHandle, ...rest } = credential;
-			const kept = await holder(subject);
-			if (kept?.handle !== userHandle) return "malformed";
-			if (kept.credentials.length >= max) return "full";
-			// Pending: listed or not, no read takes it as a passkey until `activated` names this write.
-			const written = token();
-			const record = stored({
-				v: 2,
-				subject,
-				...rest,
-				...(nickname ? { nickname } : {}),
-				at: now(),
-				pending: true,
-				token: written,
-			});
-			const key = credentialKey(id);
-			if ((await store.credentials.save(key, record, "endless")) === "exists") {
-				if (!(await takeUnlisted(id, record))) return "conflict";
-			}
-			return { token: written };
-		},
-		/** Lists a record `written` kept: `registered` only where this update added the id; one listed already is another registration's (`conflict`). */
-		listing: async (
-			subject: string,
-			id: string,
-			max: number,
-		): Promise<"registered" | "conflict" | "full"> => {
-			const listed = await store.subjects.update(subjectKey(subject), (current) => {
-				const { credentials } = holderOf(current);
-				if (credentials.includes(id) || credentials.length >= max) return undefined;
-				return { value: stored({ ...current, credentials: [...credentials, id] }) };
-			});
-			if (!listed) throw broken();
-			if (holderOf(listed.before).credentials.includes(id)) return "conflict";
-			return holderOf(listed.after).credentials.includes(id) ? "registered" : "full";
-		},
-		/**
 		 * Makes the pending record the write `written` named the subject's passkey, and no other:
 		 * `taken` where another registration wrote over it, another subject took it, or a removal ended it.
 		 */
@@ -399,34 +305,15 @@ export function keptPasskeys(
 			// Written only over this write's pending record, so the record before tells whether this one wrote.
 			return changed && pendingOf(changed.before, written) ? "activated" : "taken";
 		},
-		/** Strips the pending record the write `written` named, as a removed passkey's: a later registration takes it over. Another write's is its own. */
-		unwritten: (subject: string, id: string, written: string) =>
-			store.credentials.update(credentialKey(id), (current) =>
-				pendingOf(current, written)
-					? { value: stored({ v: 1, subject, removed: true }) }
-					: undefined,
-			),
-		/** `written`, `listing` and `activated`, with nothing between; one not this write's to keep is a `conflict`, let go of. */
+		/** `joined` and `activated`, with nothing between; one not this write's to keep is a `conflict`, let go of. */
 		register: async (subject: string, credential: Credential, max: number, nickname?: string) => {
-			if (joint) {
-				const written = token();
-				const joined = await joint.joined(subject, credential, max, nickname, written);
-				if (joined !== "written") return joined;
-				if ((await records.activated(credential.id, written)) === "activated") {
-					return "registered" as const;
-				}
-				await joint.ended(subject, credential.id, written);
-				return "conflict" as const;
+			const written = token();
+			const joined = await joint.joined(subject, credential, max, nickname, written);
+			if (joined !== "written") return joined;
+			if ((await records.activated(credential.id, written)) === "activated") {
+				return "registered" as const;
 			}
-			const wrote = await records.written(subject, credential, max, nickname);
-			if (typeof wrote === "string") return wrote;
-			const listed = await records.listing(subject, credential.id, max);
-			if (listed !== "registered") {
-				await records.unwritten(subject, credential.id, wrote.token);
-				return listed;
-			}
-			if ((await records.activated(credential.id, wrote.token)) === "activated") return listed;
-			await records.ended(subject, credential.id, wrote.token);
+			await joint.ended(subject, credential.id, written);
 			return "conflict" as const;
 		},
 		/** Moves the count on from the one judged; another change first is a lost race. */
@@ -482,52 +369,12 @@ export function keptPasskeys(
 				? "renamed"
 				: "unknown";
 		},
-		/**
-		 * Takes a passkey off the subject's holder, which ends its use, then strips its record to its
-		 * holder alone. `removed` says this call took it off; `empty`, that the holder lists none after.
-		 */
-		removed: async (
-			subject: string,
-			id: string,
-		): Promise<{ readonly removed: boolean; readonly empty: boolean }> => {
-			if (joint) return joint.removed(subject, id);
-			const delisted = await delist(subject, id);
-			if (delisted.removed) await strip(subject, id);
-			return delisted;
-		},
-		/**
-		 * Ends what the write named `written` left: the id off the subject's holder and its pending record
-		 * stripped. A record another registration of the subject's left answers for itself, and stays.
-		 */
-		ended: async (
-			subject: string,
-			id: string,
-			written: string,
-		): Promise<{ readonly removed: boolean; readonly empty: boolean }> => {
-			if (joint) return joint.ended(subject, id, written);
-			const record = await store.credentials.read(credentialKey(id));
-			if (!record) throw broken();
-			if (keptOf(record).subject === subject && !pendingOf(record, written)) {
-				return { removed: false, empty: false };
-			}
-			const delisted = await delist(subject, id);
-			await records.unwritten(subject, id, written);
-			return delisted;
-		},
-		/** Takes every passkey off the subject's holder in one update, keeping its handle, then strips their records. `removed` counts what this call took off. */
-		cleared: async (subject: string): Promise<{ readonly removed: number }> => {
-			if (joint) return joint.cleared(subject);
-			const delisted = await store.subjects.update(subjectKey(subject), (current) => {
-				const holder = holderOf(current);
-				if (holder.credentials.length === 0) return undefined;
-				return { value: stored({ ...current, credentials: [] }) };
-			});
-			if (!delisted) return { removed: 0 };
-			const left = new Set(holderOf(delisted.after).credentials);
-			const taken = holderOf(delisted.before).credentials.filter((id) => !left.has(id));
-			for (const id of taken) await strip(subject, id);
-			return { removed: taken.length };
-		},
+		/** Takes an id off the subject's holder, which ends its use; see `joint`. `removed` says this call took it off; `empty`, that the holder lists none after. */
+		removed: joint.removed,
+		/** Ends what the write named `written` left; see `joint`. */
+		ended: joint.ended,
+		/** Takes every passkey off the subject's holder, keeping its handle; see `joint`. `removed` counts what this call took off. */
+		cleared: joint.cleared,
 	};
 	return records;
 }

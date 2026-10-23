@@ -1,5 +1,5 @@
 import { audit } from "@mod/audit";
-import { type BuildContext, defineModule } from "@mod/kernel";
+import { type BuildContext, contract, defineModule } from "@mod/kernel";
 import { ceremonies, freshHandle } from "@mod/webauthn";
 import {
 	challengeStore,
@@ -11,15 +11,16 @@ import {
 } from "./contract.ts";
 import { holdersOver } from "./holders/holders.ts";
 import { passkeysOver } from "./passkeys.ts";
-import { keptChallenges, keptPasskeys } from "./records.ts";
+import { type KeptPasskeys, keptChallenges, keptPasskeys } from "./records.ts";
 import { registrationsOver } from "./registration/registrations.ts";
 import { type Settings, section } from "./section.ts";
 
 type Context = BuildContext<Settings>;
 /** A new token: 16 random bytes, unpadded base64url. */
 const tokenOf = (c: Context) => () => Buffer.from(c.random.bytes(16)).toString("base64url");
-const passkeysOf = async (c: Context) =>
-	keptPasskeys(await c.get(passkeyStore), tokenOf(c), c.clock.now);
+/** The passkey records, made once for the module's parts. */
+const kept = contract<KeptPasskeys>("passkeys.records");
+const passkeysOf = (c: Context) => c.get(kept);
 // A challenge lives as long as the relying party lets one be answered.
 const challengesOf = async (c: Context) =>
 	keptChallenges(await c.get(challengeStore), c.clock.now, (await c.get(ceremonies)).lifetimeMs);
@@ -38,6 +39,15 @@ const holdingOf = async (c: Context) => {
 const twoWitnesses = "more than one passkey witness is composed";
 
 export default defineModule({ name: "passkeys", section, replicaSafe: true }, (m) => [
+	// Over a store that changes both its spaces as one: typed as required, and checked here for a
+	// store built where no type is checked.
+	m.provide(kept).by(async (c) => {
+		const store = await c.get(passkeyStore);
+		if (typeof store.updateTogether !== "function") {
+			return c.refuse("passkeys", "its passkey store cannot change both its spaces as one");
+		}
+		return keptPasskeys(store, tokenOf(c), c.clock.now);
+	}),
 	m.provide(passkeys).by(async (c) =>
 		passkeysOver({
 			ceremonies: await c.get(ceremonies),
