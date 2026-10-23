@@ -3936,6 +3936,9 @@ importers:
       '@mod/conformance-second-factor':
         specifier: workspace:*
         version: link:../conformance-second-factor
+      '@mod/ledger-fakes':
+        specifier: workspace:*
+        version: link:../ledger-fakes
       '@mod/trial':
         specifier: workspace:*
         version: link:../../scaffold/trial
