@@ -7,6 +7,7 @@
 ## Not here
 - Forming, checking and building the bundles: the package's.
 - Publishing: the release workflow's.
+- Checking the release as an operator meets it: `release-check`.
 
 ## Offers
 - `pnpm release-pack <dir>` (after `pnpm bundles`): packs every bundle but the one holding the index, seals the index with their integrity and zod's, then packs the index's bundle and the entrances, into `dir`. Prints each problem and exits 1.

@@ -7,7 +7,7 @@
 	"scripts": {
 		"check": "node src/main.ts",
 		"bundles": "node src/bundles.ts",
-		"release-check": "node src/release-check.ts",
+		"release-check": "node src/release-check/check.ts",
 		"release-pack": "node src/release/pack.ts",
 		"release-published": "node src/release/check-published.ts"
 	},
