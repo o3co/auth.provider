@@ -3,12 +3,21 @@ import { type Codes, codeGrantType, codes } from "@mod/code-grant";
 import type { BuildContext, Clock } from "@mod/kernel";
 import { type Reauths, reauths as reauthsContract } from "@mod/reauth";
 import { type Sessions, sessions } from "@mod/session";
-import { type Tokens, tokens } from "@mod/tokens";
+import { type IssuanceRefused, type Tokens, tokens } from "@mod/tokens";
 import { checkRequest, checkScope, type TargetCheck, targetCheckOver } from "../checks/checks.ts";
 import { type ConsentDecision, consentDecisionOver } from "../consent-decision/consent-decision.ts";
-import { type Again, type Decision, policyRefusal, refusal } from "../decision.ts";
+import { type Again, type Decision, refusal } from "../decision.ts";
 import type { Settings } from "../section.ts";
 import { type StepUp, stepUpOver } from "../step-up/step-up.ts";
+
+/** A refusal by an issuance policy: `access_denied` with its description, recorded with its name and reason. */
+const policyRefusal = (refused: IssuanceRefused): Decision => ({
+	kind: "refuse",
+	error: "access_denied",
+	...(refused.description ? { description: refused.description } : {}),
+	reason: refused.reason,
+	policy: refused.policy,
+});
 
 /** A request whose client and redirect URI are confirmed, as `route` read it. */
 export interface Trusted {
