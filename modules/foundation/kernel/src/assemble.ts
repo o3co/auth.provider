@@ -1,6 +1,6 @@
 import { readSections } from "./config/sections.ts";
 import type { KernelSettings } from "./config/settings.ts";
-import type { Contract, ExtensionPoint } from "./handles.ts";
+import type { Contract, ExtensionPoint, Handle } from "./handles.ts";
 import { periodic } from "./lifecycle/every.ts";
 import {
 	isTimerMs,
@@ -82,6 +82,65 @@ function indexParts(modules: readonly Module[], refusals: Refusal[]) {
 	return { providers, contributions };
 }
 
+/** Why a contract refuses a module taking it, by its takenBy; none where it may. */
+function takenByRefusal(contract: Contract<unknown>, module: Module): string | undefined {
+	const { takenBy } = contract;
+	if (takenBy === undefined || takenBy.includes(module.name)) return undefined;
+	return takenBy.length === 0
+		? `${contract.label} is taken by no module`
+		: `${contract.label} is taken by ${takenBy.join(", ")} alone`;
+}
+
+/** Why a point's rule refuses this many contributions; none where it holds. */
+function countRefusal(rule: { readonly multiplicity: string }, count: number): string | undefined {
+	if (rule.multiplicity === "one" && count !== 1) {
+		return `needs exactly one contribution (${count})`;
+	}
+	if (rule.multiplicity === "some" && count === 0) return "needs at least one contribution";
+	return undefined;
+}
+
+/**
+ * Each module's takes, held against what the modules provide and contribute before anything is
+ * built: a contract no other module provides, one its takenBy does not let it take, and a point
+ * whose registered contributions (one that fails as it builds among them) break its rule, each
+ * point once by identity. A function is asked only with a section that passed. Answers the takes
+ * each declaring module is held to while it is built.
+ */
+function checkTakes(
+	modules: readonly Module[],
+	sections: Map<Module, unknown>,
+	parts: ReturnType<typeof indexParts>,
+	refusals: Refusal[],
+): Map<Module, ReadonlySet<Handle>> {
+	const held = new Map<Module, ReadonlySet<Handle>>();
+	const pointsChecked = new Set<Handle>();
+	for (const module of modules) {
+		const { takes } = module;
+		if (takes === undefined) continue;
+		const passed = module.section === undefined || sections.has(module);
+		if (typeof takes === "function" && !passed) continue;
+		const handles = new Set(typeof takes === "function" ? takes(sections.get(module)) : takes);
+		held.set(module, handles);
+		const own = new Set((module.provides ?? []).map((provision) => provision.contract));
+		for (const handle of handles) {
+			if (handle.kind === "contract") {
+				const taken = takenByRefusal(handle, module);
+				if (taken) refusals.push({ where: module.name, reason: taken });
+				if (!own.has(handle) && !parts.providers.has(handle)) {
+					refusals.push({ where: module.name, reason: `no module provides ${handle.label}` });
+				}
+			} else if (!pointsChecked.has(handle)) {
+				pointsChecked.add(handle);
+				const count = parts.contributions.get(handle as ExtensionPoint<unknown>)?.length ?? 0;
+				const broken = countRefusal(handle.rule, count);
+				if (broken) refusals.push({ where: handle.label, reason: broken });
+			}
+		}
+	}
+	return held;
+}
+
 function refuseIfAny(refusals: readonly Refusal[]): void {
 	if (refusals.length > 0) throw new BootRefused(refusals);
 }
@@ -120,8 +179,11 @@ export async function assemble(input: AssemblyInput): Promise<Assembly> {
 				log: routedLog(kernel.logging.level, systemClock, () => sinkList),
 			};
 	checkReplicas(modules, sections, kernel.deployment, refusals);
-	refuseIfAny(refusals);
-	const { providers, contributions } = indexParts(modules, refusals);
+	// One preflight before any factory runs: every structural gap is named in one refusal, and a
+	// refused boot has built nothing, so no stop hook is left to run.
+	const parts = indexParts(modules, refusals);
+	const { providers, contributions } = parts;
+	const heldTakes = checkTakes(modules, sections, parts, refusals);
 	refuseIfAny(refusals);
 
 	const built = new Map<Item, Promise<unknown>>();
@@ -149,15 +211,25 @@ export async function assemble(input: AssemblyInput): Promise<Assembly> {
 	};
 	/** A module a contract does not name taking it is refused, recorded even where the taker catches the throw. */
 	const mayTake = (contract: Contract<unknown>, item: Item) => {
-		const { takenBy } = contract;
-		if (takenBy === undefined || takenBy.includes(item.module.name)) return;
-		refusals.push({
-			where: item.module.name,
-			reason:
-				takenBy.length === 0
-					? `${contract.label} is taken by no module`
-					: `${contract.label} is taken by ${takenBy.join(", ")} alone`,
-		});
+		const taken = takenByRefusal(contract, item.module);
+		if (taken === undefined) return;
+		refusals.push({ where: item.module.name, reason: taken });
+		throw new DependencyFailed();
+	};
+	/** Each take beyond a declaring module's takes, refused once, even where the taker catches the throw. */
+	const beyondTakes = new Map<Module, Set<Handle>>();
+	const mayName = (handle: Handle, item: Item) => {
+		const held = heldTakes.get(item.module);
+		if (held === undefined || held.has(handle)) return;
+		if (item.module.provides?.some((provision) => provision.contract === handle)) return;
+		const refused = beyondTakes.get(item.module) ?? new Set<Handle>();
+		if (!refused.has(handle)) {
+			refusals.push({
+				where: item.module.name,
+				reason: `takes ${handle.label}, which its takes do not name`,
+			});
+		}
+		beyondTakes.set(item.module, refused.add(handle));
 		throw new DependencyFailed();
 	};
 	/** What a factory sees while `item` is built; `next` is the stack its requests extend. */
@@ -165,6 +237,7 @@ export async function assemble(input: AssemblyInput): Promise<Assembly> {
 		...runtime,
 		section: sections.get(item.module),
 		get: async <T>(contract: Contract<T>) => {
+			mayName(contract as Contract<unknown>, item);
 			mayTake(contract as Contract<unknown>, item);
 			const provider = providers.get(contract as Contract<unknown>);
 			if (!provider) {
@@ -177,6 +250,7 @@ export async function assemble(input: AssemblyInput): Promise<Assembly> {
 			return (await build(provider, next)) as T;
 		},
 		collect: async <T>(point: ExtensionPoint<T>) => {
+			mayName(point, item);
 			const list = contributions.get(point as ExtensionPoint<unknown>) ?? [];
 			const values: T[] = [];
 			// Each collector builds the contributions itself, so a cycle through it is still seen.
@@ -197,6 +271,7 @@ export async function assemble(input: AssemblyInput): Promise<Assembly> {
 			}
 		},
 		late: <T>(contract: Contract<T>) => {
+			mayName(contract as Contract<unknown>, item);
 			mayTake(contract as Contract<unknown>, item);
 			lateNamed.push({ contract: contract as Contract<unknown>, by: item.module.name });
 			return () => {
@@ -330,41 +405,26 @@ function checkPoint<T>(point: ExtensionPoint<T>, values: T[], refusals: Refusal[
 	// One level only: the values a contribution holds (schemas and the like) keep internal state.
 	for (const value of values) if (value !== null && typeof value === "object") Object.freeze(value);
 	const rule = point.rule;
-	switch (rule.multiplicity) {
-		case "one":
-			if (values.length !== 1) {
-				refusals.push({
-					where: point.label,
-					reason: `needs exactly one contribution (${values.length})`,
-				});
-				throw new DependencyFailed();
-			}
-			break;
-		case "some":
-			if (values.length === 0) {
-				refusals.push({ where: point.label, reason: "needs at least one contribution" });
-				throw new DependencyFailed();
-			}
-			break;
-		case "keyed": {
-			const seen = new Set<string>();
-			const twice = new Set<string>();
-			for (const value of values) {
-				const key = rule.keyOf(value);
-				if (seen.has(key)) twice.add(key);
-				seen.add(key);
-			}
-			for (const key of twice) {
-				refusals.push({
-					where: `${point.label}:${key}`,
-					reason: "more than one contribution for the same key",
-				});
-			}
-			if (twice.size > 0) throw new DependencyFailed();
-			break;
+	const broken = countRefusal(rule, values.length);
+	if (broken) {
+		refusals.push({ where: point.label, reason: broken });
+		throw new DependencyFailed();
+	}
+	if (rule.multiplicity === "keyed") {
+		const seen = new Set<string>();
+		const twice = new Set<string>();
+		for (const value of values) {
+			const key = rule.keyOf(value);
+			if (seen.has(key)) twice.add(key);
+			seen.add(key);
 		}
-		case "many":
-			break;
+		for (const key of twice) {
+			refusals.push({
+				where: `${point.label}:${key}`,
+				reason: "more than one contribution for the same key",
+			});
+		}
+		if (twice.size > 0) throw new DependencyFailed();
 	}
 	return Object.freeze(values);
 }

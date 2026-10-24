@@ -569,14 +569,14 @@ describe("assemble", () => {
 		).resolves.toBeDefined();
 	});
 
-	it("reports the sections' refusals alone, before looking at what the modules provide", async () => {
+	it("reports the sections' refusals with a contract provided twice, building nothing", async () => {
 		const twice = contract<number>("twice");
 		const providing = (name: string) =>
 			defineModule({ name }, (m) => [m.provide(twice).by(() => 1)]);
 		const refusals = await refusalsOf(
 			assemble({ modules: [providing("a"), providing("b")], config: { ...single, ghost: {} } }),
 		);
-		expect(refusals.map((r) => r.where)).toEqual(["ghost"]);
+		expect(refusals.map((r) => r.where)).toEqual(["ghost", "twice"]);
 	});
 
 	it("refuses with the module's name when a factory refuses with an empty list", async () => {

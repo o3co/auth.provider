@@ -21,6 +21,7 @@ Internal module of `kernel`: what runs once the assembly starts, and how it stop
 - A warn line names the thrown value's type, `unknown` where reading it throws (a revoked proxy, a `name` getter that throws), so a malformed throw never stops the hooks left.
 - A stop leaves its process free to end; a rollback (`during: "refusal"`) keeps it alive until its hooks end or the deadline passes, so the refusal reaches its host, and marks its warn lines `during`.
 - Rollback: an assembly refused after its builds takes its refusals, then runs the stop hooks registered before its factories settled, in reverse, within `stop-deadline` (for asynchronous waits; blocking code runs on), and throws the refusals it took; a failed or late hook is a warn line, never a refusal. Dependents stop first only where each registered after its dependencies resolved; late references order nothing. One refused before any build runs none.
+- A failed periodic run, probe or stop hook is one warn line naming it, with the error's type, never its text. A stop hook past the deadline is one too.
 
 ## Depends on
 - `runtime` (the log and the runtime's types); the package's handles and freezing

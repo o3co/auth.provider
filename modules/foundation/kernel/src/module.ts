@@ -1,5 +1,5 @@
 import type { ZodType } from "zod";
-import type { Contract, ExtensionPoint } from "./handles.ts";
+import type { Contract, ExtensionPoint, Handle } from "./handles.ts";
 import type { ReadinessReport } from "./lifecycle/readiness.ts";
 import type { Refusal } from "./refusal/refusal.ts";
 import type { Runtime } from "./runtime/runtime.ts";
@@ -53,6 +53,12 @@ export interface ModuleHead<S> {
 	readonly section?: ZodType<S>;
 	/** A function is asked only with a section that passed its schema. */
 	readonly replicaSafe?: boolean | ((section: S) => boolean);
+	/**
+	 * What its factories take from other modules: each contract they `get` or hold `late`, and each
+	 * point they `collect`; a contract it provides itself is not named. A function is asked only
+	 * with a section that passed its schema. Without it, the module takes as it will.
+	 */
+	readonly takes?: readonly Handle[] | ((section: S) => readonly Handle[]);
 }
 
 export interface ModuleDefinition<S = unknown> extends ModuleHead<S> {

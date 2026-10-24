@@ -17,6 +17,19 @@ export interface ExtensionPoint<T> {
 	readonly __type?: T;
 }
 
+/**
+ * A handle a module takes: a contract, or an extension point whatever its contributions are. It is
+ * the handle itself, matched by identity, never by label; a typed point is one as it stands.
+ */
+export type Handle =
+	| Contract<unknown>
+	| {
+			readonly kind: "extension-point";
+			readonly label: string;
+			/** The rule the point's contributions are held to; what they are is erased. */
+			readonly rule: { readonly multiplicity: ExtensionRule<never>["multiplicity"] };
+	  };
+
 export function contract<T>(
 	label: string,
 	options: { readonly takenBy?: readonly string[] } = {},
