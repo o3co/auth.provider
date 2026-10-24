@@ -6,7 +6,7 @@ import { pendingNotices, sessionClients } from "../src/store.ts";
 export function memoryStores(now: () => number, cap = 4) {
 	const stand = memoryRecords<string>(now, { shards: 4, perShard: 100 });
 	const clients = stand.keyedSets(cap);
-	const module = defineModule({ name: "rp-logout-stores" }, (m) => [
+	const module = defineModule({ name: "rp-logout-stores", takes: [] }, (m) => [
 		m.provide(sessionClients).by(() => clients),
 		m.provide(pendingNotices).by(() => stand.deferred),
 	]);

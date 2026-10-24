@@ -76,7 +76,7 @@ export async function harness(
 	const recorded = auditStandIn();
 	const sent: Sent[] = [];
 	const answering = { answer: async (_url: string): Promise<number> => 200 };
-	const outside = defineModule({ name: "outbound-stand-in" }, (m) => [
+	const outside = defineModule({ takes: [], name: "outbound-stand-in" }, (m) => [
 		m.provide(outbound).by(
 			(): Outbound => ({
 				fetch: async (url, request) => {
@@ -87,16 +87,19 @@ export async function harness(
 			}),
 		),
 	]);
-	const reader = defineModule({ name: "reader" }, (m) => [
-		m.provide(probed).by(async (c) => {
-			const [redemption] = await c.collect(sessionRedemptions);
-			return {
-				routes: await c.collect(routes),
-				items: await c.collect(metadata),
-				redeemed: (session, client) => redemption?.redeemed(session, client) ?? Promise.resolve(),
-			};
-		}),
-	]);
+	const reader = defineModule(
+		{ takes: [sessionRedemptions, routes, metadata], name: "reader" },
+		(m) => [
+			m.provide(probed).by(async (c) => {
+				const [redemption] = await c.collect(sessionRedemptions);
+				return {
+					routes: await c.collect(routes),
+					items: await c.collect(metadata),
+					redeemed: (session, client) => redemption?.redeemed(session, client) ?? Promise.resolve(),
+				};
+			}),
+		],
+	);
 	const registered = Object.entries(
 		options.sections ?? {
 			app: {
@@ -115,7 +118,7 @@ export async function harness(
 		}),
 	);
 	// redirect-uris' section, which the front-channel URL is judged against; authorize is not composed.
-	const redirectsSection = defineModule({ name: "authorize-section" }, (m) => [
+	const redirectsSection = defineModule({ takes: [], name: "authorize-section" }, (m) => [
 		m.contribute(metadataSections).by(() => redirects),
 	]);
 	const app = await assemble({
