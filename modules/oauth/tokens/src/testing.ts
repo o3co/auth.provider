@@ -516,110 +516,118 @@ export function tokensContract(
 export function tokensStandIn(
 	options: { readonly revocable?: boolean; readonly lifetimeSeconds?: number } = {},
 ) {
-	return defineModule({ name: "tokens" }, (m) => [
-		m.provide(tokens).by(async (c) => {
-			const revocable = options.revocable ?? true;
-			const conditions = [
-				...(await c.collect(accessConditions)),
-				...(await c.collect(subjectChecks)),
-			];
-			type Kept = {
-				grant: AccessGrant;
-				id: string;
-				issuedAt: number;
-				expiresAt: number;
-				binding?: Binding;
-			};
-			// The token type of each binding kind of the composition, by its `cnf` member, as tokens reads it.
-			const kinds = new Map(
-				(await c.collect(senderBindings)).map((kind) => [kind.member, kind.tokenType]),
-			);
-			const issued = new Map<string, Kept>();
-			// tokens' own denylist, over a store in memory.
-			const revoked = new Set<string>();
-			const denylist = denylistOver(
-				revocable
-					? {
-							save: async (id) => {
-								const kept = revoked.has(id);
-								revoked.add(id);
-								return kept ? "exists" : "created";
-							},
-							holds: async (id) => revoked.has(id),
-						}
-					: undefined,
-				c.clock,
-			);
-			const live = (token: string, allowanceMs = 0) => {
-				const kept = issued.get(token);
-				return kept && kept.expiresAt + allowanceMs > c.clock.now() ? kept : undefined;
-			};
-			const verify = async (token: string): Promise<AccessCheck> => {
-				if (!issued.has(token)) return { kind: "invalid", reason: "shape" };
-				const kept = live(token);
-				if (!kept) return { kind: "invalid", reason: "expired" };
-				if (await denylist.holds(kept.id)) return { kind: "invalid", reason: "revoked" };
-				const issuedFor = { id: kept.id, subject: kept.grant.subject, issuedAt: kept.issuedAt };
-				for (const condition of conditions) {
-					if ((await condition.holds(issuedFor)) === "revoked")
-						return { kind: "invalid", reason: "revoked" };
-				}
-				const tokenType = kept.binding ? kinds.get(kept.binding.member) : "Bearer";
-				if (tokenType === undefined) return { kind: "invalid", reason: "shape" };
-				return {
-					kind: "valid",
-					id: kept.id,
-					grant: kept.grant,
-					expiresAt: kept.expiresAt,
-					tokenType,
-					...(kept.binding ? { binding: { ...kept.binding, tokenType } } : {}),
+	return defineModule(
+		{
+			name: "tokens",
+			takes: [accessConditions, subjectChecks, senderBindings, issuancePolicies],
+		},
+		(m) => [
+			m.provide(tokens).by(async (c) => {
+				const revocable = options.revocable ?? true;
+				const conditions = [
+					...(await c.collect(accessConditions)),
+					...(await c.collect(subjectChecks)),
+				];
+				type Kept = {
+					grant: AccessGrant;
+					id: string;
+					issuedAt: number;
+					expiresAt: number;
+					binding?: Binding;
 				};
-			};
-			const judge = judging(await c.collect(issuancePolicies), c.clock.now);
-			const issueAccess: IssueAccess = async (grant, limits) => {
-				const configured = options.lifetimeSeconds ?? defaultLifetimeSeconds;
-				const lifetime = lifetimeOf(limits?.lifetimeSeconds, configured);
-				const { iat, exp } = expiryOf(c.clock.now(), lifetime, limits?.notAfter);
-				const id = tokenId(c.random);
-				const token = `stand-in.${id}`;
-				const binding = limits?.binding;
-				issued.set(token, {
-					grant: keptGrant(grant, iat),
-					id,
-					issuedAt: iat * 1000,
-					expiresAt: exp * 1000,
-					...(binding ? { binding: Object.freeze({ ...binding }) } : {}),
-				});
-				return {
-					token,
-					id,
-					expiresAt: exp * 1000,
-					expiresIn: exp - iat,
-					tokenType: binding?.tokenType ?? "Bearer",
-					...(grant.claims ? { addedClaims: Object.freeze(Object.keys(grant.claims).sort()) } : {}),
+				// The token type of each binding kind of the composition, by its `cnf` member, as tokens reads it.
+				const kinds = new Map(
+					(await c.collect(senderBindings)).map((kind) => [kind.member, kind.tokenType]),
+				);
+				const issued = new Map<string, Kept>();
+				// tokens' own denylist, over a store in memory.
+				const revoked = new Set<string>();
+				const denylist = denylistOver(
+					revocable
+						? {
+								save: async (id) => {
+									const kept = revoked.has(id);
+									revoked.add(id);
+									return kept ? "exists" : "created";
+								},
+								holds: async (id) => revoked.has(id),
+							}
+						: undefined,
+					c.clock,
+				);
+				const live = (token: string, allowanceMs = 0) => {
+					const kept = issued.get(token);
+					return kept && kept.expiresAt + allowanceMs > c.clock.now() ? kept : undefined;
 				};
-			};
-			const stand: Tokens = {
-				revocable: () => denylist.revocable,
-				...issuing(judge, issueAccess),
-				verifyAccess: verify,
-				issuedToOf: async (token) => {
-					const kept = live(token, denylistAllowanceMs);
-					return kept ? { kind: "issued", issuedTo: kept.grant.issuedTo } : { kind: "invalid" };
-				},
-				revokeAccess: async (token) => {
-					if (!denylist.revocable) return { kind: "unsupported" };
-					const kept = live(token, denylistAllowanceMs);
-					return kept ? denylist.revoke(kept.id, kept.expiresAt) : { kind: "invalid" };
-				},
-				revokeReferenced: async (reference) => {
-					const referenced = namedBy(reference);
-					return referenced
-						? denylist.revoke(referenced.id, referenced.expiresAt)
-						: { kind: "invalid" };
-				},
-			};
-			return stand;
-		}),
-	]);
+				const verify = async (token: string): Promise<AccessCheck> => {
+					if (!issued.has(token)) return { kind: "invalid", reason: "shape" };
+					const kept = live(token);
+					if (!kept) return { kind: "invalid", reason: "expired" };
+					if (await denylist.holds(kept.id)) return { kind: "invalid", reason: "revoked" };
+					const issuedFor = { id: kept.id, subject: kept.grant.subject, issuedAt: kept.issuedAt };
+					for (const condition of conditions) {
+						if ((await condition.holds(issuedFor)) === "revoked")
+							return { kind: "invalid", reason: "revoked" };
+					}
+					const tokenType = kept.binding ? kinds.get(kept.binding.member) : "Bearer";
+					if (tokenType === undefined) return { kind: "invalid", reason: "shape" };
+					return {
+						kind: "valid",
+						id: kept.id,
+						grant: kept.grant,
+						expiresAt: kept.expiresAt,
+						tokenType,
+						...(kept.binding ? { binding: { ...kept.binding, tokenType } } : {}),
+					};
+				};
+				const judge = judging(await c.collect(issuancePolicies), c.clock.now);
+				const issueAccess: IssueAccess = async (grant, limits) => {
+					const configured = options.lifetimeSeconds ?? defaultLifetimeSeconds;
+					const lifetime = lifetimeOf(limits?.lifetimeSeconds, configured);
+					const { iat, exp } = expiryOf(c.clock.now(), lifetime, limits?.notAfter);
+					const id = tokenId(c.random);
+					const token = `stand-in.${id}`;
+					const binding = limits?.binding;
+					issued.set(token, {
+						grant: keptGrant(grant, iat),
+						id,
+						issuedAt: iat * 1000,
+						expiresAt: exp * 1000,
+						...(binding ? { binding: Object.freeze({ ...binding }) } : {}),
+					});
+					return {
+						token,
+						id,
+						expiresAt: exp * 1000,
+						expiresIn: exp - iat,
+						tokenType: binding?.tokenType ?? "Bearer",
+						...(grant.claims
+							? { addedClaims: Object.freeze(Object.keys(grant.claims).sort()) }
+							: {}),
+					};
+				};
+				const stand: Tokens = {
+					revocable: () => denylist.revocable,
+					...issuing(judge, issueAccess),
+					verifyAccess: verify,
+					issuedToOf: async (token) => {
+						const kept = live(token, denylistAllowanceMs);
+						return kept ? { kind: "issued", issuedTo: kept.grant.issuedTo } : { kind: "invalid" };
+					},
+					revokeAccess: async (token) => {
+						if (!denylist.revocable) return { kind: "unsupported" };
+						const kept = live(token, denylistAllowanceMs);
+						return kept ? denylist.revoke(kept.id, kept.expiresAt) : { kind: "invalid" };
+					},
+					revokeReferenced: async (reference) => {
+						const referenced = namedBy(reference);
+						return referenced
+							? denylist.revoke(referenced.id, referenced.expiresAt)
+							: { kind: "invalid" };
+					},
+				};
+				return stand;
+			}),
+		],
+	);
 }
