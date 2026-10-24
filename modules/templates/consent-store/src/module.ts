@@ -27,7 +27,7 @@ const { namesFromSecret: askRecordsFor, ...askGuaranteeFor } = {
 const grants: Space = { name: "consent-store.grants", guarantees: Object.values(guaranteeFor) };
 const asks: Space = { name: "consent-store.asks", guarantees: Object.values(askGuaranteeFor) };
 
-export default defineModule({ name: "consent-store" }, (m) => [
+export default defineModule({ name: "consent-store", takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => grants),
 	m.contribute(spaces).by(() => asks),
 	m.provide(grantStore).by(async (c) => {
