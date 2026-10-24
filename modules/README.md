@@ -217,6 +217,8 @@ What each module contains is described by that module's contract card (each modu
 | Second factor transactions, contributions to the login completion gate and to step-up, the enrollment routes and their seam, lockout numbers | contract / setting / data | mfa-flows |
 | Binding a new second factor: enrollment, its binding proof, the recovery codes shown | contribution | mfa-enrollment |
 | An operator's reset of a subject's second factors | contract | mfa-reset |
+| A reset's parts: what a module holds that an operator's reset removes beside the second factors | extension point kind | mfa-reset |
+| Removing what a part holds for a subject | contribution | the module contributing that part |
 | A subject's own release of their second-factor lockout, after a proof guessing cannot beat | route | mfa-flows |
 | A session's management of its own factors (listing, naming and removing them, reissuing recovery codes), and its request budget | route / setting | mfa-management |
 | Each second factor kind | contribution | the module that contributes that kind |
