@@ -31,7 +31,7 @@ const listings: Space = {
 	guarantees: Object.values(listedGuaranteeFor),
 };
 
-export default defineModule({ name: "mfa-flows-store" }, (m) => [
+export default defineModule({ name: "mfa-flows-store", takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => transactions),
 	m.contribute(spaces).by(() => listings),
 	m.provide(transactionStore).by(async (c) => {
