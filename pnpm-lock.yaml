@@ -4630,6 +4630,22 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
+  modules/upstream-login/upstream-handoff-seal:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/seal':
+        specifier: workspace:*
+        version: link:../../foundation/seal
+      '@mod/upstream-handoff':
+        specifier: workspace:*
+        version: link:../upstream-handoff
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
   modules/upstream-login/upstream-round-trip:
     dependencies:
       '@mod/cookies':
