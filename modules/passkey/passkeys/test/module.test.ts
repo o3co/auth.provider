@@ -2,6 +2,7 @@ import { auditStandIn } from "@mod/audit/testing";
 import {
 	assemble,
 	BootRefused,
+	contract,
 	defineModule,
 	isUnavailable,
 	kernelConfig,
@@ -22,6 +23,7 @@ import {
 	challengeStore,
 	type PasskeyWitnessing,
 	passkeyHolders,
+	passkeyReading,
 	passkeyStore,
 	passkeys,
 	passkeyWitnessing,
@@ -494,4 +496,34 @@ it("refuses to boot with two passkey witnessings contributed", async () => {
 		where: "passkeys",
 		reason: "more than one passkey witnessing is contributed",
 	});
+});
+
+it("reads what a subject's list names as written, for passkey-witnessing alone", async () => {
+	const app = await boot([]);
+	expect(await app.get(passkeyReading).writtenHolding("sam")).toBe("none");
+	const { kept, response } = await answered(app, "sam");
+	expect((await kept.register("sam", response)).kind).toBe("registered");
+	expect(await app.get(passkeyReading).writtenHolding("sam")).toBe("passkey");
+	const took = contract<unknown>("test.took");
+	const taker = (name: string) =>
+		defineModule({ name }, (m) => [m.provide(took).by(async (c) => c.get(passkeyReading))]);
+	const composedWith = (name: string) =>
+		assemble({
+			modules: [
+				memoryStores().module,
+				auditStandIn().module,
+				webauthn,
+				passkeysModule,
+				taker(name),
+			],
+			config: { ...kernelConfig(), ...webauthnConfig(), ...passkeysConfig() },
+			runtime: quietRuntime(),
+		}).then((composed) => composed.get(took));
+	await expect(composedWith("passkey-witnessing")).resolves.toBeDefined();
+	const refused = await composedWith("someone-else").catch((error: unknown) => error);
+	expect((refused as BootRefused).refusals).toContainEqual({
+		where: "someone-else",
+		reason: "passkeys.reading is taken by passkey-witnessing alone",
+	});
+	await app.stop(1000);
 });

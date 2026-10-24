@@ -16,6 +16,7 @@ import {
 } from "@mod/webauthn/testing";
 import webauthnStore from "@mod/webauthn-store/module";
 import { afterEach, describe, expect, it } from "vitest";
+import { passkeyBackfill } from "../src/contract.ts";
 import witnessingModule from "../src/module.ts";
 import { lossy } from "./lossy.ts";
 
@@ -111,6 +112,7 @@ async function composed() {
 	return {
 		stand,
 		broken,
+		backfill: app.get(passkeyBackfill),
 		holders,
 		regs,
 		hooks,
@@ -401,4 +403,28 @@ it("refuses boot without exactly one witness composed", async () => {
 		where: "passkey-witnessing",
 		reason: "exactly one passkey witness must be composed",
 	});
+});
+
+it("fills the mark of a subject registered before the witness was composed, through the backfill", async () => {
+	const h = await composed();
+	await h.register("sam");
+	// As if registered while no witness was composed.
+	h.stand.marks.delete("sam");
+	expect(await h.backfill.settle("sam")).toBe("marked");
+	expect(h.stand.marks.has("sam")).toBe(true);
+	expect(await h.backfill.settle("sam")).toBe("held");
+	expect(await h.holders.held("sam")).toBe(true);
+});
+
+it("tells none, pending and inconsistent apart through the backfill, setting no mark and recording nothing", async () => {
+	const h = await composed();
+	expect(await h.backfill.settle("kim")).toBe("none");
+	const b = await h.pending("lee");
+	expect(await h.backfill.settle("lee")).toBe("pending");
+	expect(h.stand.marks.has("lee")).toBe(false);
+	await b.admit();
+	h.stand.marks.set("dee", "lost");
+	expect(await h.backfill.settle("dee")).toBe("inconsistent");
+	expect(h.stand.marks.get("dee")).toBe("lost");
+	expect(h.inconsistencies()).toEqual([]);
 });
