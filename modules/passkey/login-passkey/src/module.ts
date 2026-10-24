@@ -2,11 +2,14 @@ import { routes } from "@mod/http";
 import { defineModule } from "@mod/kernel";
 import { amrSources, loginGates } from "@mod/login-gates";
 import { amrOf } from "./facts/facts.ts";
-import { gateIn } from "./gate/gate.ts";
-import { routesIn } from "./routes/routes.ts";
+import { gateIn, gateTakes } from "./gate/gate.ts";
+import { routesIn, routesTakes } from "./routes/routes.ts";
 import { section } from "./section.ts";
 
-export default defineModule({ name: "login-passkey", section }, (m) => [
+/** What the module takes: its helpers' (`routesIn`, `gateIn`); its amr source takes nothing. */
+const takes = [...routesTakes, ...gateTakes];
+
+export default defineModule({ name: "login-passkey", section, takes }, (m) => [
 	m.contribute(amrSources).by((c) => ({
 		name: "login-passkey",
 		amr: amrOf(true, c.section["counts-as-mfa"]),

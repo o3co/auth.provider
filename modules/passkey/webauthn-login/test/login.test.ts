@@ -16,7 +16,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { type Passkeys, passkeys } from "@mod/passkeys";
 import rateLimitModule from "@mod/rate-limit/module";
 import { type Beginning, lineage } from "@mod/refresh";
@@ -85,7 +85,7 @@ async function serve(section: Record<string, unknown> = {}, extra: Module[] = []
 		down: false,
 		family: "fam.secret" as string | undefined,
 	};
-	const standIns = defineModule({ name: "stand-ins" }, (m) => [
+	const standIns = defineModule({ name: "stand-ins", takes: [] }, (m) => [
 		m.provide(passkeys).by(() => ({
 			challenge: async (requester) => {
 				requesters.asked.push(requester);
@@ -110,7 +110,7 @@ async function serve(section: Record<string, unknown> = {}, extra: Module[] = []
 	]);
 	const allowed = (grants: string[]) =>
 		allowancesFor({ grants, scopes: ["read", "write"], "default-scopes": ["read"] });
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			clientsModule,
@@ -146,7 +146,8 @@ async function serve(section: Record<string, unknown> = {}, extra: Module[] = []
 			"webauthn-login": section,
 		},
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
 	const call = (params: Record<string, unknown>, as = "app", confirmation?: string) =>
@@ -161,11 +162,16 @@ async function serve(section: Record<string, unknown> = {}, extra: Module[] = []
 	const base = `http://127.0.0.1:${app.get(listening).port()}`;
 	const ask = (init: RequestInit = asApp) =>
 		fetch(`${base}/oauth/webauthn/authentication/options`, { method: "POST", ...init });
-	return { app, state, seen, requesters, begun, events: recorded.events, call, ask };
+	return { app, input, state, seen, requesters, begun, events: recorded.events, call, ask };
 }
 
 const assertion = { id: "cred", response: { userHandle: "h" } };
 const asApp = { headers: { "content-type": "application/json" }, body: '{"client_id":"app"}' };
+
+it("takes all it names", async () => {
+	const s = await serve();
+	expect(await takesUnused(s.input)).toEqual({});
+});
 
 describe("the passkey grant", () => {
 	it("issues the client's access token for an asserted passkey, with amr pop and the challenge's time, and starts its family with the same", async () => {
@@ -275,7 +281,7 @@ describe("the passkey grant", () => {
 
 	it("issues through the issuance policies without a session, starting no family when they refuse", async () => {
 		const asked: IssuanceRequest[] = [];
-		const refusing = defineModule({ name: "refusing" }, (m) => [
+		const refusing = defineModule({ name: "refusing", takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "test-policy",
 				judge: async (request) => {

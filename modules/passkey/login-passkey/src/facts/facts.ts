@@ -33,5 +33,8 @@ export function factsOver(p: {
 	};
 }
 
+/** What `factsIn` takes from the build context. */
+export const factsTakes = [users] as const;
+
 export const factsIn = async (c: BuildContext<Settings>) =>
 	factsOver({ users: await c.get(users), countsAsMfa: c.section["counts-as-mfa"] });

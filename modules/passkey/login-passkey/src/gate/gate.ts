@@ -1,7 +1,7 @@
 import type { BuildContext } from "@mod/kernel";
 import type { LoginGate } from "@mod/login-gates";
 import { type PasskeyHolders, passkeyHolders } from "@mod/passkeys";
-import { type Recorded, recordedIn } from "../audited/audited.ts";
+import { type Recorded, recordedIn, recordedTakes } from "../audited/audited.ts";
 import type { Settings } from "../section.ts";
 
 /**
@@ -29,6 +29,9 @@ export function credentialPolicy(p: {
 		},
 	};
 }
+
+/** What `gateIn` takes from the build context, its own and the records' it asks. */
+export const gateTakes = [passkeyHolders, ...recordedTakes] as const;
 
 export const gateIn = async (c: BuildContext<Settings>) => {
 	const refuses = c.section.password === "refused-when-held";

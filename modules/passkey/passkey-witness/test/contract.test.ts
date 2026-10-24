@@ -1,3 +1,5 @@
+import { kernelConfig } from "@mod/kernel";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import {
 	passkeyWitnessContract,
@@ -6,6 +8,14 @@ import {
 } from "../src/testing.ts";
 
 passkeyWitnessContract("the witness in memory", async () => passkeyWitnessStandIn().witness);
+it("takes all its stand-in names", async () => {
+	const input = {
+		modules: [passkeyWitnessStandIn().module],
+		config: kernelConfig(),
+		runtime: quietRuntime(),
+	};
+	expect(await takesUnused(input)).toEqual({});
+});
 it("offers no clear from the witness in memory: passkeys withdraws only by token", () => {
 	expect("clear" in passkeyWitnessStandIn().witness).toBe(false);
 });

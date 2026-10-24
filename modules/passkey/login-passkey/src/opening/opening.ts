@@ -4,8 +4,8 @@ import { type Logins, logins } from "@mod/login-gates";
 import { type PasskeyHolders, passkeyHolders } from "@mod/passkeys";
 import { type Sessions, sessions } from "@mod/session";
 import { type SubjectRevocation, subjectRevocation } from "@mod/subject-revocation";
-import { type Recorded, recordedIn } from "../audited/audited.ts";
-import { type Asserted, factsIn, type factsOver } from "../facts/facts.ts";
+import { type Recorded, recordedIn, recordedTakes } from "../audited/audited.ts";
+import { type Asserted, factsIn, type factsOver, factsTakes } from "../facts/facts.ts";
 import type { Settings } from "../section.ts";
 
 export interface OpeningParts {
@@ -60,6 +60,16 @@ export function openingOver(p: OpeningParts) {
 }
 
 export type Opening = ReturnType<typeof openingOver>;
+
+/** What `openingIn` takes from the build context, its own and the facts' and records' it asks. */
+export const openingTakes = [
+	passkeyHolders,
+	subjectRevocation,
+	logins,
+	sessions,
+	...factsTakes,
+	...recordedTakes,
+] as const;
 
 export const openingIn = async (c: BuildContext<Settings>) =>
 	openingOver({

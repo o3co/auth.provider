@@ -129,7 +129,7 @@ export function memoryStores(now: () => number = () => 0) {
 		open: challengesStand.records.create,
 		take: (challenge, mark) => challengesStand.records.change(challenge, () => ({ value: mark })),
 	});
-	const module = defineModule({ name: "webauthn-stores" }, (m) => [
+	const module = defineModule({ name: "webauthn-stores", takes: [] }, (m) => [
 		m.provide(passkeyStore).by(() => passkeys),
 		m.provide(challengeStore).by(() => challenges),
 	]);

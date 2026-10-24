@@ -5,7 +5,7 @@ import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import loginGates from "@mod/login-gates/module";
 import { proofSteps } from "@mod/mfa";
 import mfaModule from "@mod/mfa/module";
@@ -42,18 +42,18 @@ afterEach(() => stop());
 type Options = CreationOptions & { excludeCredentials: { id: string }[] };
 
 /** A step that proves factors, as a login flow contributes one: mfa boots with none otherwise. */
-const step = defineModule({ name: "step" }, (m) => [
+const step = defineModule({ name: "step", takes: [] }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "step" })),
 ]);
 
-/** The routes over webauthn on a simulated store, with mfa judging entry when asked; `browser` signs in a subject. */
-async function serve(
+/** The routes over webauthn on a simulated store, with mfa judging entry when asked. */
+function composition(
 	settings: Parameters<typeof passkeysConfig>[0] = {},
 	{ withMfa = false } = {},
+	store = simulatedStore(),
 ) {
-	const store = simulatedStore();
 	const mfa = withMfa ? [sealModule, loginGates, mfaStore, mfaModule, mfaEntry, step] : [];
-	const app = await assemble({
+	return {
 		modules: [
 			http,
 			csrfStandIn,
@@ -78,7 +78,16 @@ async function serve(
 			...(withMfa ? { ...sealConfig(), ...mfaConfig() } : {}),
 		},
 		runtime,
-	});
+	};
+}
+
+/** The routes of `composition`, served; `browser` signs in a subject. */
+async function serve(
+	settings: Parameters<typeof passkeysConfig>[0] = {},
+	{ withMfa = false } = {},
+) {
+	const store = simulatedStore();
+	const app = await assemble(composition(settings, { withMfa }, store));
 	await app.start();
 	stop = () => app.stop(1000);
 	const base = `http://127.0.0.1:${app.get(listening).port()}`;
@@ -123,6 +132,11 @@ async function register(post: Post, twist: Twist = {}) {
 	const response = softwareAuthenticator().create(options, { origin: testOrigin }, twist);
 	return { options, response, answer: await post("verify", { response, nickname: "laptop" }) };
 }
+
+it("takes all it names, with mfa and without", async () => {
+	expect(await takesUnused(composition())).toEqual({});
+	expect(await takesUnused(composition({}, { withMfa: true }))).toEqual({});
+});
 
 it("registers a passkey for the session's subject, and excludes it from the next options", async () => {
 	const { browser } = await serve();

@@ -23,7 +23,7 @@ let stop = async () => {};
 afterEach(() => stop());
 
 /** Subjects named `held-*` are short of what changing credentials asks. */
-const holding = defineModule({ name: "holding" }, (m) => [
+const holding = defineModule({ name: "holding", takes: [] }, (m) => [
 	m.contribute(entryRequirements).by(() => ({
 		name: "holding",
 		judges: ["credentials"],
@@ -59,7 +59,7 @@ async function serve(section: Record<string, unknown> = {}) {
 	let revoke = async (_subject: string) => {};
 	const asked: unknown[][] = [];
 	const audit = auditStandIn();
-	const standIn = defineModule({ name: "passkeys" }, (m) => [
+	const standIn = defineModule({ name: "passkeys", takes: [] }, (m) => [
 		m.provide(registrations).by(() => ({
 			creation: async (subject) => {
 				asked.push(["creation", subject]);

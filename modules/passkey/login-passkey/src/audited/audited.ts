@@ -29,4 +29,7 @@ export function recordedOver(recorder: Pick<Audit, "record">) {
 
 export type Recorded = ReturnType<typeof recordedOver>;
 
+/** What `recordedIn` takes from the build context. */
+export const recordedTakes = [audit] as const;
+
 export const recordedIn = async (c: BuildContext<unknown>) => recordedOver(await c.get(audit));

@@ -11,7 +11,7 @@ const relyingParty = (s: Settings) => ({
 	timeoutMs: s["challenge-lifetime"] * 1000,
 });
 
-export default defineModule({ name: "webauthn", section, replicaSafe: true }, (m) => [
+export default defineModule({ name: "webauthn", section, replicaSafe: true, takes: [] }, (m) => [
 	m
 		.provide(ceremonies)
 		.by((c) => ceremoniesFor(relyingParty(c.section), c.random.bytes, c.clock.now)),

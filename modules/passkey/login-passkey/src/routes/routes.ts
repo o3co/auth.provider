@@ -6,8 +6,8 @@ import { type Logins, logins } from "@mod/login-gates";
 import { type Passkeys, passkeys } from "@mod/passkeys";
 import { attemptsPerSource, type Window } from "@mod/rate-limit";
 import { ceremonies } from "@mod/webauthn";
-import { type Recorded, recordedIn } from "../audited/audited.ts";
-import { type Opening, openingIn } from "../opening/opening.ts";
+import { type Recorded, recordedIn, recordedTakes } from "../audited/audited.ts";
+import { type Opening, openingIn, openingTakes } from "../opening/opening.ts";
 import type { Settings } from "../section.ts";
 
 export interface RouteParts {
@@ -94,6 +94,16 @@ export function loginRoutes(p: RouteParts): Route[] {
 		},
 	];
 }
+
+/** What `routesIn` takes from the build context, its own and the opening's and records' it asks. */
+export const routesTakes = [
+	passkeys,
+	cookies,
+	logins,
+	ceremonies,
+	...openingTakes,
+	...recordedTakes,
+] as const;
 
 export const routesIn = async (c: BuildContext<Settings>) =>
 	loginRoutes({

@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { auditStandIn } from "@mod/audit/testing";
 import { assemble, defineModule, isUnavailable, kernelConfig, Unavailable } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { passkeyWitnessStandIn } from "@mod/passkey-witness/testing";
 import { challengeStore, passkeyHolders, passkeyStore, registrations } from "@mod/passkeys";
 import passkeysModule from "@mod/passkeys/module";
@@ -57,7 +57,7 @@ async function composed() {
 	});
 	const broken = lossy(inner.get(passkeyStore));
 	const challenges = inner.get(challengeStore);
-	const stores = defineModule({ name: "lossy-stores" }, (m) => [
+	const stores = defineModule({ name: "lossy-stores", takes: [] }, (m) => [
 		m.provide(passkeyStore).by(() => broken.store),
 		m.provide(challengeStore).by(() => challenges),
 	]);
@@ -381,6 +381,23 @@ it("records a mark beside no passkey where passkeys asks, through the witnessing
 	expect(h.inconsistencies()).toEqual([
 		expect.objectContaining({ subject: "dee", attributes: { at: "held" } }),
 	]);
+});
+
+it("takes all it names", async () => {
+	const input = {
+		modules: [
+			simulatedStore().module,
+			webauthnStore,
+			webauthn,
+			passkeysModule,
+			witnessingModule,
+			passkeyWitnessStandIn().module,
+			auditStandIn().module,
+		],
+		config: { ...kernelConfig(), ...webauthnConfig(), ...passkeysConfig() },
+		runtime: quietRuntime(),
+	};
+	expect(await takesUnused(input)).toEqual({});
 });
 
 it("refuses boot without exactly one witness composed", async () => {

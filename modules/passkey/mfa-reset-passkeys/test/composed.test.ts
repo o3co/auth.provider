@@ -41,7 +41,7 @@ async function composed({ withBridge = true } = {}) {
 		boundary?: ((n: number) => void) | undefined;
 	} = {};
 	let boundaries = 0;
-	const base = defineModule({ name: "base" }, (m) => [
+	const base = defineModule({ name: "base", takes: [] }, (m) => [
 		m.provide(flowParts).by(() => ({ lockout: { name: "mfa", policy: { budget: 10 } } }) as never),
 		m.provide(factorManaging).by(
 			() =>

@@ -60,7 +60,9 @@ export function passkeyWitnessStandIn(name = "passkey-witness") {
 			return marks.get(subject);
 		},
 	};
-	const module = defineModule({ name }, (m) => [m.contribute(passkeyWitnesses).by(() => witness)]);
+	const module = defineModule({ name, takes: [] }, (m) => [
+		m.contribute(passkeyWitnesses).by(() => witness),
+	]);
 	return { module, witness, marks, failing, lost, next };
 }
 
