@@ -4,7 +4,7 @@ import type { ClientScene } from "@mod/conformance-oauth";
 import { exportJWK, SignJWT } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { codeScene } from "../../main.ts";
-import { backChannel } from "../../testing.ts";
+import { backChannel, succeeded } from "../../testing.ts";
 
 const issuer = "https://issuer.example";
 const pair = generateKeyPairSync("ed25519");
@@ -78,7 +78,7 @@ async function boundToken() {
 			client_secret: svc.secret ?? "",
 		}),
 	});
-	const answer = (await res.json()) as Record<string, string>;
+	const answer = (await succeeded(res, "the token endpoint")) as Record<string, string>;
 	expect(answer.token_type).toBe("DPoP");
 	return answer.access_token ?? "";
 }

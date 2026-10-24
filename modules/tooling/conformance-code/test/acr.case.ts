@@ -13,7 +13,7 @@ import {
 } from "@mod/conformance-second-factor/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type CodeScene, codeScene } from "../src/main.ts";
-import { backChannel, browserAt } from "../src/testing.ts";
+import { backChannel, browserAt, succeeded } from "../src/testing.ts";
 
 const callback = "https://app.example/cb";
 const pair = generateKeyPairSync("ed25519");
@@ -69,7 +69,7 @@ const claimsOf = async (base: string, code: string) => {
 			code_verifier: verifier,
 		}),
 	});
-	const token = String(((await res.json()) as { id_token?: string }).id_token ?? "");
+	const token = String((await succeeded(res, "the token endpoint")).id_token ?? "");
 	return JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString()) as {
 		acr?: string;
 	};

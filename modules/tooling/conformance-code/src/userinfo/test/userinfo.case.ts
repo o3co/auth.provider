@@ -3,7 +3,7 @@ import { areaTarget, type Started } from "@mod/conformance";
 import type { ClientScene } from "@mod/conformance-oauth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { codeScene } from "../../main.ts";
-import { backChannel, browserAt } from "../../testing.ts";
+import { backChannel, browserAt, succeeded } from "../../testing.ts";
 
 const issuer = "https://issuer.example";
 const callback = "https://app.example/cb";
@@ -57,13 +57,14 @@ afterAll(async () => {
 	if (running?.kind === "running") await running.stop();
 });
 
-async function post(path: string, as: string, form: Record<string, string>) {
-	const res = await fetch(`${base}${path}`, {
+const sent = (path: string, as: string, form: Record<string, string>) =>
+	fetch(`${base}${path}`, {
 		method: "POST",
 		headers: { ...backChannel, "content-type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams({ ...form, client_id: as, client_secret: app.secret ?? "" }),
 	});
-	const text = await res.text();
+async function post(path: string, as: string, form: Record<string, string>) {
+	const text = await (await sent(path, as, form)).text();
 	return (text ? JSON.parse(text) : {}) as Record<string, string>;
 }
 /** A fresh login's tokens for `scope`, by the code flow. */
@@ -78,12 +79,13 @@ async function codeTokens(scope: string) {
 		code_challenge: challenge,
 		code_challenge_method: "S256",
 	});
-	return post("/oauth/token", app.id, {
+	const answer = await sent("/oauth/token", app.id, {
 		grant_type: "authorization_code",
 		code: res.at?.searchParams.get("code") ?? "",
 		redirect_uri: callback,
 		code_verifier: verifier,
 	});
+	return (await succeeded(answer, "the token endpoint")) as Record<string, string>;
 }
 /** Userinfo's answer to `token` as a Bearer token, or to no token at all. */
 async function userinfo(token?: string, method = "GET") {

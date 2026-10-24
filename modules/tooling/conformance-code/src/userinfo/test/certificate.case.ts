@@ -4,7 +4,7 @@ import { type Issued, issue, pemOf, thumbprintOf } from "@mod/conformance-mtls";
 import type { ClientScene } from "@mod/conformance-oauth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { codeScene } from "../../main.ts";
-import { backChannel } from "../../testing.ts";
+import { backChannel, succeeded } from "../../testing.ts";
 
 const issuer = "https://issuer.example";
 const header = "x-client-cert";
@@ -64,7 +64,10 @@ async function boundTo(issued: Issued) {
 			client_secret: svc.secret ?? "",
 		}),
 	});
-	const { access_token: token = "" } = (await res.json()) as Record<string, string>;
+	const { access_token: token = "" } = (await succeeded(res, "the token endpoint")) as Record<
+		string,
+		string
+	>;
 	const claims = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString());
 	expect(claims.cnf).toEqual({ "x5t#S256": thumbprintOf(issued.der) });
 	return token;

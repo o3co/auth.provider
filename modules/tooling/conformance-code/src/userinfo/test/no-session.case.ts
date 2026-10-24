@@ -3,7 +3,7 @@ import { areaTarget, type Started } from "@mod/conformance";
 import type { ClientScene } from "@mod/conformance-oauth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { codeScene } from "../../main.ts";
-import { backChannel } from "../../testing.ts";
+import { backChannel, succeeded } from "../../testing.ts";
 
 // A token issued in no session comes from the client credentials grant: a scene of its own, so
 // userinfo's other checks run where that grant is not composed.
@@ -58,7 +58,9 @@ async function issued(scope?: string) {
 			...(scope ? { scope } : {}),
 		}),
 	});
-	return ((await res.json()) as { access_token?: string }).access_token ?? "";
+	return (
+		((await succeeded(res, "the token endpoint")) as { access_token?: string }).access_token ?? ""
+	);
 }
 
 describe("OpenID Connect userinfo: a token issued in no session", () => {

@@ -4,7 +4,7 @@ import { httpLedger } from "@mod/conformance-identity";
 import type { ClientScene } from "@mod/conformance-oauth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { codeScene } from "../src/main.ts";
-import { backChannel, browserAt } from "../src/testing.ts";
+import { backChannel, browserAt, succeeded } from "../src/testing.ts";
 
 const issuer = "https://issuer.example";
 const callback = "https://app.example/cb";
@@ -63,7 +63,7 @@ async function idTokenClaims(scope: string): Promise<Record<string, unknown>> {
 			code_verifier: verifier,
 		}),
 	});
-	const { id_token: token } = (await answer.json()) as { id_token?: string };
+	const { id_token: token } = await succeeded(answer, "the token endpoint");
 	return JSON.parse(Buffer.from(String(token).split(".")[1] ?? "", "base64url").toString());
 }
 
