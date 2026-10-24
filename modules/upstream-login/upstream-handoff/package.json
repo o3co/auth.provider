@@ -18,9 +18,6 @@
 		"@mod/upstreams": "workspace:*",
 		"zod": "4.6.7"
 	},
-	"optional": [
-		"@mod/seal"
-	],
 	"peerDependencies": {
 		"vitest": "5.0.5"
 	},

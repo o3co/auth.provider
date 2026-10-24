@@ -105,6 +105,8 @@ What each module contains is described by that module's contract card (each modu
 | Opening the configured IdPs through their types, as `upstreams`' default | contract implementation | federation |
 | One authorization round trip to an upstream: its state, nonce, verifier and cookie, kept and taken once at its callback | contract | upstream-round-trip |
 | Handing a login's upstream tokens to the receivers once its session opens, a held login's kept sealed until then, and a link's join | contract | upstream-handoff |
+| The seal a held login's tokens are kept under | extension point kind | upstream-handoff |
+| Giving the handoff the composed seal | contribution | upstream-handoff-seal |
 | Upstream IdP types | extension point kind | upstreams |
 | Receiving the upstream tokens of a login once its session opens, or once a link joins it | extension point kind | upstreams |
 | An upstream's refresh, end of session and offline delegation, by IdP name | contract | upstreams |

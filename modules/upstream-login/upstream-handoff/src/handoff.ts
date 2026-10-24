@@ -2,12 +2,13 @@ import {
 	type BuildContext,
 	type Clock,
 	contract,
+	extensionPoint,
 	type Log,
 	type Random,
 	Unavailable,
 } from "@mod/kernel";
 import type { LoginOutcome } from "@mod/login-gates";
-import { type Seal, seal } from "@mod/seal";
+import type { Seal } from "@mod/seal";
 import type { Session } from "@mod/session";
 import {
 	type Receipt,
@@ -15,8 +16,8 @@ import {
 	type UpstreamTokens,
 	upstreamLoginReceivers,
 } from "@mod/upstreams";
-import { z } from "zod";
-import { type HeldLoginStore, heldLoginStore, type StoredHeldLogin } from "./store.ts";
+import { heldOver } from "./held/held.ts";
+import { type HeldLoginStore, heldLoginStore } from "./store.ts";
 
 declare const joinedMark: unique symbol;
 /** What a join gave each receiver, read by the handoff alone; its caller holds it for `withdrawn`. */
@@ -54,6 +55,11 @@ export interface Handoff {
 
 export const handoff = contract<Handoff>("upstream-handoff.handoff");
 
+/** The seal a held login's tokens are kept under: at most one. */
+export const handoffSealing = extensionPoint<Seal>("upstream-handoff.sealing", {
+	multiplicity: "many",
+});
+
 export const noHandoff: Handoff = {
 	of: () => undefined,
 	opened: async () => {},
@@ -70,45 +76,27 @@ interface Parts {
 	readonly log: Log;
 }
 
-const tokensShape = z.strictObject({
-	accessToken: z.string(),
-	tokenType: z.string(),
-	refreshToken: z.string().optional(),
-	idToken: z.string().optional(),
-	expiresInSeconds: z.number().optional(),
-	scope: z.array(z.string()),
-});
-const heldShape = z.strictObject({
-	idp: z.string(),
-	subject: z.string(),
-	heldAt: z.number(),
-	tokens: tokensShape,
-});
-const keptShape = z.strictObject({
-	format: z.literal(1),
-	sealed: z.string(),
-	taken: z.literal(true).optional(),
-});
-type Kept = z.output<typeof keptShape>;
-const keptOf = (stored: StoredHeldLogin | undefined) => {
-	const read = keptShape.safeParse(stored);
-	return read.success ? read.data : undefined;
-};
-const stored = (kept: Kept) => kept as unknown as StoredHeldLogin;
-const contextOf = (carry: string) => `upstream-handoff.held-login\n${carry}`;
-
 /** The handoff over the receivers in name order, or none where no module receives upstream tokens. */
 export async function handoffIn(
-	c: Pick<BuildContext<unknown>, "collect" | "get" | "clock" | "random" | "log">,
+	c: Pick<BuildContext<unknown>, "collect" | "get" | "refuse" | "clock" | "random" | "log">,
 ): Promise<Handoff> {
 	const receivers = (await c.collect(upstreamLoginReceivers)).toSorted((a, b) =>
 		a.name < b.name ? -1 : 1,
 	);
 	// Sealing is needed only where a module receives upstream tokens.
 	if (receivers.length === 0) return noHandoff;
+	const [contributed, ...others] = await c.collect(handoffSealing);
+	if (others.length > 0)
+		return c.refuse("upstream-handoff", "more than one sealing is contributed");
+	if (!contributed) {
+		return c.refuse(
+			"upstream-handoff",
+			"a module receives upstream tokens and no sealing is contributed: compose upstream-handoff-seal",
+		);
+	}
 	return handoffWith({
 		receivers,
-		seal: await c.get(seal),
+		seal: contributed,
 		held: await c.get(heldLoginStore),
 		clock: c.clock,
 		random: c.random,
@@ -137,11 +125,7 @@ export function handoffWith(parts: Parts): Handoff {
 			}
 		}
 	};
-	const opened = (kept: Kept, carry: string, subject: string) => {
-		const plain = parts.seal.open(kept.sealed, contextOf(carry));
-		const held = plain.kind === "opened" ? heldShape.safeParse(JSON.parse(plain.plain)) : undefined;
-		return held?.success && held.data.subject === subject ? held.data : undefined;
-	};
+	const held = heldOver(parts.seal, parts.held);
 	return {
 		of: (idp, subject, tokens, lifetimeMs) => {
 			if (tokens === undefined) return undefined;
@@ -155,36 +139,23 @@ export function handoffWith(parts: Parts): Handoff {
 					if (outcome.kind === "opened") return tell(outcome.session, idp, tokens);
 					// A refused login opens no session, now or later: nothing is kept to hand on.
 					if (outcome.kind === "refused") return;
-					const held = { idp, subject, heldAt: parts.clock.now(), tokens };
-					const sealed = parts.seal.seal(JSON.stringify(held), contextOf(carry));
-					const saved = await parts.held.save(carry, stored({ format: 1, sealed }), lifetimeMs);
-					if (saved !== "created") throw new Unavailable("upstream-handoff");
+					await held.keep(carry, { idp, subject, heldAt: parts.clock.now(), tokens }, lifetimeMs);
 				},
 			};
 		},
-		opened: async (session, carry) => {
-			const taking = await parts.held.update(carry, (record) => {
-				const kept = keptOf(record);
-				return kept && !kept.taken ? { value: stored({ ...kept, taken: true }) } : undefined;
-			});
-			const kept = keptOf(taking?.before);
-			if (!kept || kept.taken || keptOf(taking?.after)?.taken !== true) return;
-			try {
-				const held = opened(kept, carry, session.context.subject);
-				if (!held) return parts.log.warn("upstream-handoff.held_login_refused", {});
+		opened: (session, carry) =>
+			held.take(carry, session.context.subject, async (login) => {
+				if (!login) return parts.log.warn("upstream-handoff.held_login_refused", {});
 				// Said from the hold; handed over now, so the time since is spent.
-				const spent = Math.ceil((parts.clock.now() - held.heldAt) / 1000);
-				const { expiresInSeconds: expires, ...rest } = held.tokens;
+				const spent = Math.ceil((parts.clock.now() - login.heldAt) / 1000);
+				const { expiresInSeconds: expires, ...rest } = login.tokens;
 				const tokens = (
 					expires === undefined
 						? rest
 						: { ...rest, expiresInSeconds: Math.max(0, expires - Math.max(0, spent)) }
 				) as UpstreamTokens;
-				await tell(session, held.idp, tokens);
-			} finally {
-				await parts.held.remove(carry);
-			}
-		},
+				await tell(session, login.idp, tokens);
+			}),
 		joined: async (session, idp, tokens) => {
 			const given: Given[] = [];
 			for (const receiver of parts.receivers) {

@@ -29,6 +29,7 @@ import { simulatedStore } from "@mod/store/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { heldLoginStore, type StoredHeldLogin } from "@mod/upstream-handoff";
 import handoffModule from "@mod/upstream-handoff/module";
+import handoffSealModule from "@mod/upstream-handoff-seal/module";
 import { roundTripStore, type StoredRoundTrip } from "@mod/upstream-round-trip";
 import roundTripModule from "@mod/upstream-round-trip/module";
 import {
@@ -166,7 +167,7 @@ async function serve(setup: Setup = {}) {
 			roundTripModule,
 			setup.trips ?? trips,
 			...(setup.extra ?? []),
-			...(receiving.length > 0 ? [sealModule, ...receiving] : []),
+			...(receiving.length > 0 ? [sealModule, handoffSealModule, ...receiving] : []),
 		],
 		config: {
 			...kernelConfig(),
