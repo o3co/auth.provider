@@ -3,7 +3,8 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { configFiles, entriesOf, kernel } from "../src/project.ts";
+import { configFiles, kernel } from "../../project.ts";
+import { entriesOf } from "../contract.ts";
 
 /** Stand-ins for the kernel (with config-files' `loadConfig`) and mfa-witnessing, as packages the written script imports. */
 const fakes: Record<string, Record<string, string>> = {

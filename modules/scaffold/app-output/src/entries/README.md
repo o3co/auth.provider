@@ -1,0 +1,23 @@
+# entries
+
+Internal module of `app-output`: a generated app's entries besides `start`.
+
+## Responsibilities
+- Writes each entry an app's composed modules call for, as a script of the app's manifest and a file under `src/`: the same modules, built and never started, running what that module offers.
+
+## Not here
+- The app's own entry (`mainSource`) and the manifest and files around them: the package's.
+- What each entry runs: the module it runs for, through its contract.
+
+## Offers
+- `entriesOf` (the composed modules, what each is imported as, the command that runs a file) → each entry's script and file.
+
+## Invariants
+- With `seal` composed, the project has a `reseal` script, running the modules' resealers.
+- With `mfa-witnessing` composed, the project has a `witness-backfill` script. It settles each subject read from standard input, one a line, empty lines skipped, each other line used as sent, through `witnessBackfill`, and writes only how many were marked, held, none, unclaimed, inconsistent, unknown (an answer it does not know) and failed (unavailable), never a subject.
+- The `witness-backfill` script exits 0 where none failed and none was unknown, else 1, and 78 on a refused boot, told by the kernel's mark as the app's is.
+- With `passkey-witnessing` composed, the project has a `passkey-backfill` script, read and exiting as `witness-backfill` does, through `passkeyBackfill`: it writes only how many were marked, held, none, pending, inconsistent, unknown and failed.
+- The entries that read subjects read them one way: a line longer than a subject may be (255 bytes) is counted failed, and no more of it is held.
+
+## Depends on
+- The package's `filled` and the packages every app depends on (`kernel`, `configFiles`).
