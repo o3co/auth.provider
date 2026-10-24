@@ -14,6 +14,7 @@ Internal module of `mfa-flows`: holding a login or a session until a factor is p
 - `proofOver` (`mfa`'s factor decisions, `session`, `login-gates`, `rate-limit`'s lockouts and the package's policy, `subject-revocation`, `transactions`, `audit`, `kernel`'s log, the enrollment flow's answer to a challenge) → the handlers of challenge, verify, the transaction's view, and step-up.
 
 ## Invariants
+- A login whose amr holds `secondFactorAmr` (`mfa`) passes the gate, nothing asked of its subject's factors and no transaction started: the amr is the login's own word, so a first factor's module, or an operator mapping an upstream's amr to `mfa`, decides it.
 - The gate starts a login transaction when the subject must prove a factor, and a first-enrollment one when it must bind one; it holds the login's facts, `done` and `from` unread.
 - A transaction that cannot be used (unknown, another browser's, used, expired, or named differently by body and header) is answered the same `400`, using nothing up.
 - If the subject was revoked after the transaction started, every route naming it answers `401 login_required`, and a POST ends it. If the revocation store cannot answer, `503`, never a negative verdict.
@@ -38,4 +39,4 @@ Internal module of `mfa-flows`: holding a login or a session until a factor is p
 - What a resume carries is made only once the login opened past that check. A response it makes instead closes the session and is answered, the session's cookie never going out; a throw closes it as best it can and goes on, with no cookie either. A part unavailable there, the close included, is answered `503`, clearing the transaction's cookie.
 
 ## Depends on
-- `audit`; `http` (the request and response types); `kernel` (the log); `login-gates` (the gate type, going on with a login); `mfa` (factor decisions); `rate-limit` (lockouts); `session` (entering, raising); `subject-revocation`; `transactions`; `requests`; `recording`
+- `audit`; `http` (the request and response types); `kernel` (the log); `login-gates` (the gate type, going on with a login); `mfa` (factor decisions); `mfa-extensions` (`secondFactorAmr`); `rate-limit` (lockouts); `session` (entering, raising); `subject-revocation`; `transactions`; `requests`; `recording`
