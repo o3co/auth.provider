@@ -14,7 +14,7 @@ function text(line: LogLine): string {
 	return `${JSON.stringify(object)}\n`;
 }
 
-export default defineModule({ name: "log-stdout", replicaSafe: true }, (m) => [
+export default defineModule({ name: "log-stdout", replicaSafe: true, takes: [] }, (m) => [
 	m.contribute(logSinks).by(() => ({
 		write: (line) => {
 			process.stdout.write(text(line));
