@@ -35,6 +35,13 @@ const entries: readonly {
 			answers: '"marked", "held", "none", "pending", "inconsistent"',
 		},
 	},
+	{
+		script: "unclaimed-factors",
+		file: "src/unclaimed-factors.ts",
+		template: "unclaimed-factors.ts.template",
+		runs: "@mod/mfa-reset",
+		fill: { contract: "resetCandidates" },
+	},
 ];
 
 /**
