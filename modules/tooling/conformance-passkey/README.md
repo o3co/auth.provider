@@ -21,4 +21,4 @@
 - Touches only the HTTP interface and boot refusals.
 
 ## Depends on
-- `conformance`, `conformance-legacy`, `conformance-oauth`; `webauthn` in tests, for its software authenticator
+- `conformance`, `conformance-legacy`, `conformance-oauth`, `ledger-fakes` (the fake passkey witness ledger); `webauthn` in tests, for its software authenticator

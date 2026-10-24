@@ -26,4 +26,4 @@
 - Touches only the HTTP interface and boot refusals.
 
 ## Depends on
-- `conformance`, `conformance-legacy`
+- `conformance`, `conformance-legacy`, `ledger-fakes` (the fake user ledger and mfa's witness ledger)

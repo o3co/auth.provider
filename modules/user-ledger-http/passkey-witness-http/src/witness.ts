@@ -1,4 +1,5 @@
 import { deepFreeze, type LogFields, Unavailable } from "@mod/kernel";
+import { witnessWire } from "@mod/ledger-wire";
 import {
 	DestinationRefused,
 	isOutboundUnavailable,
@@ -7,7 +8,7 @@ import {
 	type Outbound,
 } from "@mod/outbound";
 import type { PasskeyWitness } from "@mod/passkey-witness";
-import { z } from "zod";
+import type { z } from "zod";
 
 export interface WitnessParts {
 	readonly urls: {
@@ -25,13 +26,6 @@ export interface WitnessParts {
 }
 
 type Call = "read" | "enroll" | "withdraw";
-
-/** A marked answer names its mark's token, as written; an unmarked one names none. */
-const markShape = z.union([
-	z.object({ enrolled: z.literal(true), token: z.string().min(1) }),
-	z.object({ enrolled: z.literal(false) }),
-]);
-const enrollShape = z.object({ owner: z.boolean() });
 
 /** The kind outbound gives a failure to send, or no-answer for anything else. */
 function kindOf(error: unknown): string {
@@ -69,7 +63,8 @@ export function witnessAt(parts: WitnessParts): PasskeyWitness {
 	};
 	// A write the ledger receives past its deadline is one the provider no longer waits for.
 	const deadline = () => now() + heldMs;
-	const mark = (subject: string) => answered("read", { subject }, markShape);
+	const mark = (subject: string) =>
+		answered("read", witnessWire.read(subject), witnessWire.markAnswer);
 	return {
 		read: async (subject) => (await mark(subject)).enrolled,
 		markedWith: async (subject) => {
@@ -77,11 +72,18 @@ export function witnessAt(parts: WitnessParts): PasskeyWitness {
 			return read.enrolled ? read.token : undefined;
 		},
 		enroll: async (subject, token) =>
-			(await answered("enroll", { subject, token, deadline: deadline() }, enrollShape)).owner,
+			(
+				await answered(
+					"enroll",
+					witnessWire.enroll(subject, token, deadline()),
+					witnessWire.enrollAnswer,
+				)
+			).owner,
 		// 204 only once the ledger has judged the token and removed what it had to: anything else is unavailable.
 		withdraw: async (subject, token) => {
-			const answer = await post("withdraw", { subject, token, deadline: deadline() });
-			if (answer.status !== 204) throw failed("withdraw", { status: answer.status });
+			const answer = await post("withdraw", witnessWire.withdraw(subject, token, deadline()));
+			if (answer.status !== witnessWire.written)
+				throw failed("withdraw", { status: answer.status });
 		},
 	};
 }

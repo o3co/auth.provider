@@ -14,6 +14,7 @@
 		"@mod/conformance": "workspace:*",
 		"@mod/conformance-legacy": "workspace:*",
 		"@mod/conformance-oauth": "workspace:*",
+		"@mod/ledger-fakes": "workspace:*",
 		"vitest": "5.0.5"
 	},
 	"devDependencies": {

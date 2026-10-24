@@ -3902,6 +3902,9 @@ importers:
       '@mod/conformance-legacy':
         specifier: workspace:*
         version: link:../conformance-legacy
+      '@mod/ledger-fakes':
+        specifier: workspace:*
+        version: link:../ledger-fakes
       bcryptjs:
         specifier: 3.0.3
         version: 3.0.3
@@ -4012,6 +4015,9 @@ importers:
       '@mod/conformance-oauth':
         specifier: workspace:*
         version: link:../conformance-oauth
+      '@mod/ledger-fakes':
+        specifier: workspace:*
+        version: link:../ledger-fakes
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
@@ -4062,6 +4068,9 @@ importers:
       '@mod/conformance-second-factor':
         specifier: workspace:*
         version: link:../conformance-second-factor
+      '@mod/ledger-fakes':
+        specifier: workspace:*
+        version: link:../ledger-fakes
       '@mod/trial':
         specifier: workspace:*
         version: link:../../scaffold/trial
@@ -4120,6 +4129,19 @@ importers:
       typescript:
         specifier: 6.0.3
         version: 6.0.3
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
+  modules/tooling/ledger-fakes:
+    dependencies:
+      '@mod/ledger-wire':
+        specifier: workspace:*
+        version: link:../../user-ledger-http/ledger-wire
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
     devDependencies:
       vitest:
         specifier: 5.0.5
@@ -4566,6 +4588,15 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
+  modules/user-ledger-http/ledger-wire:
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+
   modules/user-ledger-http/mfa-witness-http:
     dependencies:
       '@mod/kernel':
@@ -4574,6 +4605,9 @@ importers:
       '@mod/keys':
         specifier: workspace:*
         version: link:../../foundation/keys
+      '@mod/ledger-wire':
+        specifier: workspace:*
+        version: link:../ledger-wire
       '@mod/mfa-witness':
         specifier: workspace:*
         version: link:../../second-factor/mfa-witness
@@ -4602,6 +4636,9 @@ importers:
       '@mod/keys':
         specifier: workspace:*
         version: link:../../foundation/keys
+      '@mod/ledger-wire':
+        specifier: workspace:*
+        version: link:../ledger-wire
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound
@@ -4725,6 +4762,9 @@ importers:
       '@mod/keys':
         specifier: workspace:*
         version: link:../../foundation/keys
+      '@mod/ledger-wire':
+        specifier: workspace:*
+        version: link:../ledger-wire
       '@mod/outbound':
         specifier: workspace:*
         version: link:../../foundation/outbound

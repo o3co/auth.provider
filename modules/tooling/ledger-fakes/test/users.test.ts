@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type LedgerCall, usersLedger } from "../src/testing.ts";
+import { type LedgerCall, usersLedger } from "../src/contract.ts";
 
 const alice = {
 	identifier: "alice",
@@ -15,21 +15,20 @@ const notFound = { status: 404, json: { error: "not_found" } };
 
 describe("a fake ledger speaking users-http's calls", () => {
 	const ledger = usersLedger([alice]);
-	const section = ledger.section("http://127.0.0.1:1")["users-http"];
-	const call = (path: string, body: unknown, credential = section.credential): LedgerCall => ({
+	const call = (path: string, body: unknown, credential = ledger.credential): LedgerCall => ({
 		method: "POST",
 		path,
 		headers: { authorization: `Bearer ${credential}` },
 		body: JSON.stringify(body),
 	});
 
-	it("points users-http at its calls, under a credential of its own", () => {
-		expect(section).toEqual({
-			"verify-url": "http://127.0.0.1:1/verify",
-			"subject-url": "http://127.0.0.1:1/subject",
-			"upstream-url": "http://127.0.0.1:1/upstream",
-			credential: expect.stringMatching(/^[0-9a-f]{64}$/),
+	it("serves its calls at one origin, under a credential of its own", () => {
+		expect(ledger.urls("http://127.0.0.1:1")).toEqual({
+			verify: "http://127.0.0.1:1/verify",
+			subject: "http://127.0.0.1:1/subject",
+			upstream: "http://127.0.0.1:1/upstream",
 		});
+		expect(ledger.credential).toMatch(/^[0-9a-f]{64}$/);
 	});
 
 	it("verifies the right password, and looks a user up by subject, in the shape users-http reads", () => {

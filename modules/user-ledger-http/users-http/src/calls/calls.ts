@@ -1,4 +1,5 @@
 import { deepFreeze, type LogFields, Unavailable } from "@mod/kernel";
+import { usersWire } from "@mod/ledger-wire";
 import {
 	DestinationRefused,
 	isOutboundUnavailable,
@@ -25,8 +26,6 @@ export interface Calls {
 }
 
 const none: Verified = deepFreeze({ kind: "none" });
-/** What a lookup's 404 and 410 must say in their body to mean no such user. */
-const noneSaid: Readonly<Record<number, string>> = { 404: "not_found", 410: "gone" };
 /** The ledger's fields kept as given, each with users' name for it. */
 const keptFields = [
 	["email", userAttribute.email],
@@ -92,10 +91,10 @@ export function calls(parts: CallParts): Calls {
 	return {
 		async verify(url, identifier, password) {
 			// The identifier under the name the ledger's password call reads.
-			const answer = await post(url, { email: identifier, password });
+			const answer = await post(url, usersWire.verify(identifier, password));
 			// A 401 alone refuses the user: a 403 may come from a proxy before the ledger while it fails, and
 			// read as a wrong password it would hold the account's logins back.
-			if (answer.status === 401) {
+			if (answer.status === usersWire.refused) {
 				// A challenge refuses the credential; with none sent, it can only refuse the user.
 				const challenged = challengesBearer(answer.headers.get("www-authenticate"));
 				if (credential === undefined || !challenged) return none;
@@ -107,7 +106,7 @@ export function calls(parts: CallParts): Calls {
 			const answer = await post(url, asked);
 			// Not known, or known and refused, only where the ledger says so: a bare 404 may be a wrong
 			// path, a gateway or a ledger hiding itself, never no such user.
-			const said = noneSaid[answer.status];
+			const said = usersWire.noUser[answer.status];
 			if (said !== undefined) {
 				const read = jsonObjectOf(answer, answer.status);
 				if (read.kind === "object" && read.value.error === said) return none;

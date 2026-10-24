@@ -1,5 +1,6 @@
 import { deepFreeze, defineModule, setting } from "@mod/kernel";
 import { bearerToken } from "@mod/keys";
+import { usersWire } from "@mod/ledger-wire";
 import { outbound } from "@mod/outbound";
 import {
 	credentialPolicy,
@@ -95,13 +96,15 @@ export default defineModule({ name: "users-http", section, replicaSafe: true }, 
 			verify: async (identifier, password) =>
 				verifyUrl === undefined ? none : ask.verify(verifyUrl, identifier, password),
 			bySubject: async (subject) =>
-				subjectUrl === undefined ? unanswerable : ask.lookup(subjectUrl, { subject }),
+				subjectUrl === undefined
+					? unanswerable
+					: ask.lookup(subjectUrl, usersWire.bySubject(subject)),
 			// Only a ledger asked by upstream identity answers it; users then reads no link of its own.
 			...(upstreamUrl === undefined
 				? {}
 				: {
 						byUpstream: async (idp: string, subject: string) =>
-							ask.lookup(upstreamUrl, { idp, subject }),
+							ask.lookup(upstreamUrl, usersWire.byUpstream(idp, subject)),
 					}),
 		};
 	}),

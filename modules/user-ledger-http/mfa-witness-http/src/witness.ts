@@ -1,4 +1,5 @@
 import { deepFreeze, type LogFields, Unavailable } from "@mod/kernel";
+import { witnessWire } from "@mod/ledger-wire";
 import type { EnrollmentWitness } from "@mod/mfa-witness";
 import {
 	DestinationRefused,
@@ -7,7 +8,7 @@ import {
 	type Narrower,
 	type Outbound,
 } from "@mod/outbound";
-import { z } from "zod";
+import type { z } from "zod";
 
 export interface WitnessParts {
 	readonly urls: {
@@ -27,14 +28,6 @@ export interface WitnessParts {
 }
 
 type Call = "read" | "enroll" | "clear" | "withdraw";
-
-const readShape = z.object({ enrolled: z.boolean() });
-/** Where withdraw is offered, a marked answer names its mark's token. */
-const markShape = z.union([
-	z.object({ enrolled: z.literal(true), token: z.string().min(1) }),
-	z.object({ enrolled: z.literal(false) }),
-]);
-const enrollShape = z.object({ owner: z.boolean() });
 
 /** The kind outbound gives a failure to send, or no-answer for anything else. */
 function kindOf(error: unknown): string {
@@ -83,23 +76,31 @@ export function witnessAt(parts: WitnessParts): EnrollmentWitness {
 		body: Record<string, unknown>,
 	) => {
 		const answer = await post(call, url, body);
-		if (answer.status !== 204) throw failed(call, { status: answer.status });
+		if (answer.status !== witnessWire.written) throw failed(call, { status: answer.status });
 	};
 	const withdrawUrl = urls.withdraw;
-	const mark = (subject: string) => answered("read", { subject }, markShape);
+	// Where withdraw is offered, a marked answer names its mark's token.
+	const mark = (subject: string) =>
+		answered("read", witnessWire.read(subject), witnessWire.markAnswer);
 	const witness: EnrollmentWitness = {
 		read: async (subject) =>
 			withdrawUrl === undefined
-				? (await answered("read", { subject }, readShape)).enrolled
+				? (await answered("read", witnessWire.read(subject), witnessWire.readAnswer)).enrolled
 				: (await mark(subject)).enrolled,
 		enroll: async (subject, token) =>
-			(await answered("enroll", { subject, token, deadline: deadline() }, enrollShape)).owner,
-		clear: (subject) => written("clear", urls.clear, { subject, deadline: deadline() }),
+			(
+				await answered(
+					"enroll",
+					witnessWire.enroll(subject, token, deadline()),
+					witnessWire.enrollAnswer,
+				)
+			).owner,
+		clear: (subject) => written("clear", urls.clear, witnessWire.clear(subject, deadline())),
 	};
 	// Left out, not undefined, where the ledger has no route for it.
 	if (withdrawUrl !== undefined) {
 		witness.withdraw = (subject, token) =>
-			written("withdraw", withdrawUrl, { subject, token, deadline: deadline() });
+			written("withdraw", withdrawUrl, witnessWire.withdraw(subject, token, deadline()));
 		witness.markedWith = async (subject) => {
 			const read = await mark(subject);
 			return read.enrolled ? read.token : undefined;

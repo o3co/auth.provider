@@ -12,6 +12,7 @@
 	"dependencies": {
 		"@mod/kernel": "workspace:*",
 		"@mod/keys": "workspace:*",
+		"@mod/ledger-wire": "workspace:*",
 		"@mod/mfa-witness": "workspace:*",
 		"@mod/outbound": "workspace:*",
 		"@mod/outbound-policy": "workspace:*",

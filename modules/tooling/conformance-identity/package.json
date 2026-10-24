@@ -13,6 +13,7 @@
 	"dependencies": {
 		"@mod/conformance": "workspace:*",
 		"@mod/conformance-legacy": "workspace:*",
+		"@mod/ledger-fakes": "workspace:*",
 		"bcryptjs": "3.0.3"
 	},
 	"devDependencies": {
