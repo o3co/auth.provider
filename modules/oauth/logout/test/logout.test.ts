@@ -5,7 +5,7 @@ import { listening } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
 import { assemble, defineModule, kernelConfig } from "@mod/kernel";
-import { quietRuntime, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, switchedModule, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { type Sessions, sessions } from "@mod/session";
 import { sessionStandIn } from "@mod/session/testing";
 import { participants } from "@mod/session-participants";
@@ -22,7 +22,7 @@ async function serve() {
 	const failing = { on: false };
 	const down = unavailableSwitch<Sessions>("sessions");
 	const audit = auditStandIn();
-	const participant = defineModule({ name: "participant" }, (m) => [
+	const participant = defineModule({ name: "participant", takes: [] }, (m) => [
 		m.contribute(participants).by(() => ({
 			name: "test",
 			closing: async () => {
@@ -30,7 +30,8 @@ async function serve() {
 			},
 		})),
 	]);
-	const app = await assemble({
+	// The composition as one value, for a test of what its modules take.
+	const input = {
 		modules: [
 			csrfStandIn,
 			cookiesModule,
@@ -47,7 +48,8 @@ async function serve() {
 			...httpConfig({ "trusted-proxies": ["127.0.0.1"], "public-origin": "https://as.example" }),
 		},
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
 	const s = app.get(sessions);
@@ -73,7 +75,7 @@ async function serve() {
 			body: text && JSON.parse(text),
 		};
 	};
-	return { cookie, sid, inside, logout, failing, down, events: audit.events };
+	return { input, cookie, sid, inside, logout, failing, down, events: audit.events };
 }
 
 it("closes the request's session and clears its cookie, only with CSRF evidence", async () => {
@@ -152,4 +154,9 @@ it("records a logout answered as done, and one whose close is pending, with the 
 		["logout.succeeded", "alice", { source: "198.51.100.7", sid }],
 	]);
 	expect(JSON.stringify(events)).not.toContain(cookie.split("=")[1]);
+});
+
+it("takes all it names", async () => {
+	const { input } = await serve();
+	expect(await takesUnused(input)).toEqual({});
 });

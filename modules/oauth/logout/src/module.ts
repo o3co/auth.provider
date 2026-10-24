@@ -6,7 +6,7 @@ import { determinedSource } from "@mod/request-source";
 import { sessions } from "@mod/session";
 import events from "./audit-events.ts";
 
-export default defineModule({ name: "logout" }, (m) => [
+export default defineModule({ name: "logout", takes: [sessions, audit] }, (m) => [
 	m.contribute(routes).by(async (c) => {
 		const opened = await c.get(sessions);
 		const recorded = declaredAudit(await c.get(audit), events);
