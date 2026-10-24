@@ -27,7 +27,9 @@ afterEach(() => {
 });
 
 const probeModule = (probe: Probe) =>
-	defineModule({ name: `probe-${probe.name}` }, (m) => [m.contribute(probes).by(() => probe)]);
+	defineModule({ name: `probe-${probe.name}`, takes: [] }, (m) => [
+		m.contribute(probes).by(() => probe),
+	]);
 
 function boot(probe: Probe, settings: Record<string, unknown> = {}) {
 	return assembled([probeModule(probe)], quiet, settings);

@@ -1,9 +1,10 @@
 import { routes } from "@mod/http";
-import { BootRefused, defineModule } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { BootRefused, defineModule, kernelConfig } from "@mod/kernel";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { metrics } from "@mod/metrics";
 import metricsModule from "@mod/metrics/module";
 import { describe, expect, it } from "vitest";
+import httpOps from "../src/module.ts";
 import { assembled } from "./harness.ts";
 
 const runtime = quietRuntime({
@@ -11,7 +12,7 @@ const runtime = quietRuntime({
 	random: { bytes: (n) => new Uint8Array(n) },
 });
 
-const handlers = defineModule({ name: "handlers" }, (m) => [
+const handlers = defineModule({ name: "handlers", takes: [] }, (m) => [
 	m
 		.contribute(routes)
 		.by(() => ({ method: "GET", path: "/slow", handle: () => ({ status: 204 }) })),
@@ -53,7 +54,7 @@ describe("liveness", () => {
 	});
 
 	it("refuses boot when another module takes the same route", async () => {
-		const taken = defineModule({ name: "other" }, (m) => [
+		const taken = defineModule({ name: "other", takes: [] }, (m) => [
 			m.contribute(routes).by(() => ({
 				method: "GET",
 				path: "/_healthcheck",
@@ -112,4 +113,9 @@ describe("request duration", () => {
 		end({ method: "GET", route: "/slow", status: 204, ms: 0 });
 		expect(Object.keys(seriesOf(app))).toEqual(["GET /slow 204"]);
 	});
+});
+
+it("takes every handle its takes name: the probes and routes it collects", async () => {
+	const config = { ...kernelConfig(), "http-ops": {} };
+	expect(await takesUnused({ modules: [httpOps], config })).toEqual({});
 });

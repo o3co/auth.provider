@@ -1,7 +1,8 @@
 import { assemble, defineModule, kernelConfig, type Runtime } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { type Space, spaces, store } from "../src/contract.ts";
+import storeModule from "../src/module.ts";
 import { overwrite, simulatedStore } from "../src/testing.ts";
 
 const space: Space = { name: "simulated", guarantees: ["no-eviction", "durable", "replicated"] };
@@ -22,7 +23,7 @@ const fullyConfirmed: Space = {
 /** A simulated store over the spaces given, on the test's clock unless another is given. */
 async function open(declared: readonly Space[] = [space], clock: Runtime["clock"] = runtime.clock) {
 	const simulated = simulatedStore();
-	const caller = defineModule({ name: "caller" }, (m) =>
+	const caller = defineModule({ name: "caller", takes: [] }, (m) =>
 		declared.map((d) => m.contribute(spaces).by(() => d)),
 	);
 	const app = await assemble({
@@ -489,4 +490,14 @@ it("loses on failover a batch across whose answer was lost, mark and all, and ke
 		kind: "committed",
 		versions: entries.map((e) => e?.version),
 	});
+});
+
+it("takes every handle its takes name, the store and its simulated stand-in alike", async () => {
+	const caller = defineModule({ name: "caller", takes: [] }, (m) => [
+		m.contribute(spaces).by(() => space),
+	]);
+	const accepting = { ...kernelConfig(), store: { "accept-volatile": true } };
+	expect(await takesUnused({ modules: [storeModule, caller], config: accepting })).toEqual({});
+	const simulated = simulatedStore().module;
+	expect(await takesUnused({ modules: [simulated, caller], config: kernelConfig() })).toEqual({});
 });

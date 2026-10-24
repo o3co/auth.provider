@@ -12,7 +12,7 @@ const duration = contract<Duration>("http-ops.request-duration");
 /** The readiness run `/readyz` and the dependency gauge share, one per assembly. */
 const readiness = contract<SharedReadiness>("http-ops.shared-readiness");
 
-export default defineModule({ name: "http-ops", section }, (m) => [
+export default defineModule({ name: "http-ops", section, takes: [routes, probes] }, (m) => [
 	m
 		.provide(readiness)
 		.by((c) =>

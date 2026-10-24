@@ -69,7 +69,7 @@ export async function serveWith(handlers: Module, settings = {}, runtime = quiet
 
 /** A module contributing these policy rules, then these routes. */
 export function handlers(list: readonly Route[], rules: readonly PolicyRule[] = []): Module {
-	return defineModule({ name: "handlers" }, (m) => [
+	return defineModule({ name: "handlers", takes: [] }, (m) => [
 		...rules.map((rule) => m.contribute(policies).by(() => rule)),
 		...list.map((route) => m.contribute(routes).by(() => declared(route))),
 	]);

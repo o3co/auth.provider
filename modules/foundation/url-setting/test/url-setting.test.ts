@@ -52,7 +52,7 @@ it("refuses userinfo, a fragment, whitespace, control characters and backslashes
 const marker = "mk7q";
 const refusedAt = async (page: string) => {
 	const section = z.strictObject({ upstream: z.strictObject({ page: https }) });
-	const using = defineModule({ name: "using", section }, () => []);
+	const using = defineModule({ name: "using", section, takes: [] }, () => []);
 	const config = { ...kernelConfig(), using: { upstream: { page } } };
 	const refused = await assemble({ modules: [using], config }).catch((error: unknown) => error);
 	expect(refused, page).toBeInstanceOf(BootRefused);
@@ -202,7 +202,7 @@ it("refuses a query or a trailing / only where the rules say", () => {
 
 it("refuses to boot with a configured URL it does not take", async () => {
 	const section = z.strictObject({ page: urlSetting({ schemes: ["https"] }) });
-	const using = defineModule({ name: "using", section }, () => []);
+	const using = defineModule({ name: "using", section, takes: [] }, () => []);
 	const boot = (page: string) =>
 		assemble({ modules: [using], config: { ...kernelConfig(), using: { page } } });
 	await expect(boot("https://u@a.example")).rejects.toThrow(BootRefused);
@@ -342,7 +342,7 @@ it("decides plain http's loopback host on the parser's form only, each edge refu
 
 it("names no part of a plain http URL it refuses for its host", async () => {
 	const section = z.strictObject({ page: urlSetting({ schemes: ["https"], loopbackHttp: true }) });
-	const using = defineModule({ name: "using", section }, () => []);
+	const using = defineModule({ name: "using", section, takes: [] }, () => []);
 	const boot = (page: string) =>
 		assemble({ modules: [using], config: { ...kernelConfig(), using: { page } } });
 	await expect(boot("http://localhost:3000/login")).resolves.toBeDefined();

@@ -23,7 +23,7 @@ const seen = contract<{
 }>("test.seen");
 
 /** Stands where http collects, so http-ops is tested without http's server. */
-const collecting = defineModule({ name: "collecting" }, (m) => [
+const collecting = defineModule({ name: "collecting", takes: [requestEnds, routes] }, (m) => [
 	m.provide(seen).by(async (c) => ({
 		routes: await c.collect(routes),
 		ends: await c.collect(requestEnds),

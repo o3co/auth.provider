@@ -9,7 +9,7 @@ import { accessSigner, signer } from "./signing/signer.ts";
 const ring = contract<Ring>("keys.ring");
 const keySetPath = "/.well-known/jwks.json";
 
-export default defineModule({ name: "keys", section }, (m) => [
+export default defineModule({ name: "keys", section, takes: [] }, (m) => [
 	m.provide(ring).by((c) => {
 		const read = readRing(c.section);
 		if ("unreadable" in read)

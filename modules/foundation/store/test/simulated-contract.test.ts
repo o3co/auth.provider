@@ -9,7 +9,7 @@ import {
 } from "../src/testing.ts";
 
 let current: SimulatedStore | undefined;
-const owner = defineModule({ name: "contract" }, (m) =>
+const owner = defineModule({ name: "contract", takes: [] }, (m) =>
 	contractSpaces.map((space) => m.contribute(spaces).by(() => space)),
 );
 

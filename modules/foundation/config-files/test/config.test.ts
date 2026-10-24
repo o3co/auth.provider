@@ -100,7 +100,7 @@ describe("loadConfig", () => {
 describe("sections read from loaded files", () => {
 	const seen = contract<unknown>("seen");
 	const server = defineModule(
-		{ name: "server", section: z.strictObject({ port: z.number(), tls: z.boolean() }) },
+		{ name: "server", section: z.strictObject({ port: z.number(), tls: z.boolean() }), takes: [] },
 		(m) => [m.provide(seen).by((c) => c.section)],
 	);
 	async function boot(env: Record<string, string>) {
@@ -132,6 +132,7 @@ describe("sections read from loaded files", () => {
 		const limits = defineModule({
 			name: "m",
 			section: z.strictObject({ limits: z.record(z.string(), z.number()) }),
+			takes: [],
 		});
 		const paths = await files(
 			'kernel.deployment = single\nm { limits { "__proto__" = 54321, ok = 1 } }',
@@ -154,6 +155,7 @@ describe("sections read from loaded files", () => {
 						z.strictObject({ "max-seconds": z.number().int(), subsets: z.boolean() }),
 					),
 				}),
+				takes: [],
 			},
 			(m) => [m.provide(seen).by((c) => c.section)],
 		);
@@ -170,6 +172,7 @@ describe("sections read from loaded files", () => {
 		const limits = defineModule({
 			name: "m",
 			section: z.strictObject({ limits: z.record(z.string(), z.number()), n: z.number() }),
+			takes: [],
 		});
 		const paths = await files(
 			'kernel.deployment = single\nm { limits { "__proto__" = 5 }, n = "x" }',

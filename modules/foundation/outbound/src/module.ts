@@ -262,7 +262,7 @@ function inProcessPools(
 
 const paths = contract<Paths>("outbound.paths");
 
-export default defineModule({ name: "outbound", section, replicaSafe: true }, (m) => [
+export default defineModule({ name: "outbound", section, replicaSafe: true, takes: [] }, (m) => [
 	m.provide(paths).by(async (c) => {
 		const { proxy } = c.section;
 		// Their count alone: what goes to them, passwords, tokens, credentials and keys, is in the clear.
