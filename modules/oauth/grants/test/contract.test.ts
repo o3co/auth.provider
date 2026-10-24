@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import { grants, tokenTies } from "../src/contract.ts";
 
 const echo = (name: string, grantType = "urn:test:echo") =>
-	defineModule({ name }, (m) => [
+	defineModule({ name, takes: [] }, (m) => [
 		m.contribute(grants).by(() => ({
 			grantType,
 			readsAmbient: "none",
@@ -11,7 +11,7 @@ const echo = (name: string, grantType = "urn:test:echo") =>
 		})),
 	]);
 const types = contract<readonly string[]>("types");
-const reader = defineModule({ name: "reader" }, (m) => [
+const reader = defineModule({ name: "reader", takes: [grants] }, (m) => [
 	m.provide(types).by(async (c) => (await c.collect(grants)).map((g) => g.grantType)),
 ]);
 
@@ -25,11 +25,11 @@ it("takes one grant for each grant type, and refuses boot when two name the same
 
 it("takes any number of token ties, one for each name, and refuses boot when two share one", async () => {
 	const tie = (module: string, name: string) =>
-		defineModule({ name: module }, (m) => [
+		defineModule({ name: module, takes: [] }, (m) => [
 			m.contribute(tokenTies).by(() => ({ name, tieOf: async () => ({ kind: "none" as const }) })),
 		]);
 	const names = contract<readonly string[]>("names");
-	const read = defineModule({ name: "tie-reader" }, (m) => [
+	const read = defineModule({ name: "tie-reader", takes: [tokenTies] }, (m) => [
 		m.provide(names).by(async (c) => (await c.collect(tokenTies)).map((t) => t.name)),
 	]);
 	const boot = (...modules: ReturnType<typeof tie>[]) =>
