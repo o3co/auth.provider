@@ -196,7 +196,7 @@ From `@mod/federation-grants-connect`.
 | `federation-grants-connect.page` | string |  |  | `FEDERATION_GRANTS_CONNECT_PAGE` | `https://login.example.invalid/federation-grants` | The page that asks the user; it posts the decision under `csrf`, so serve it on this deployment's origin (not checked at boot): an https URL (http only on a loopback host). Connections refuse boot without it. |
 | `federation-grants-connect.login-page` | string |  |  | `FEDERATION_GRANTS_CONNECT_LOGIN_PAGE` | `https://login.example.invalid/login` | Where a browser with no session is sent to log in, then back: an https URL (http only on a loopback host). |
 | `federation-grants-connect.step-up-page` | string |  |  |  |  | Where a session that falls short of a requirement is sent once to raise it, then back: an https URL (http only on a loopback host). |
-| `federation-grants-connect.identity-check` | required \| none |  |  |  |  | required refuses a callback whose upstream account another user holds; none does not check. Unset, for now the one federation-grants' section holds (required unless set). |
+| `federation-grants-connect.identity-check` | required \| none | `required` |  |  |  | required refuses a callback whose upstream account another user holds; none does not check. |
 
 ## federation-grants-store
 

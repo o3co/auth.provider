@@ -14,7 +14,6 @@
 - Operator section:
   - `page`, `login-page`, `step-up-page` (https; http only on a loopback host)
   - `identity-check` (`required`)
-  - Until these leave federation-grants' section (TODO 96), one left out here is read there.
 
 ## Invariants
 - Connections refuse boot without the page that asks the user.

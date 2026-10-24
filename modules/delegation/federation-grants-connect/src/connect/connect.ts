@@ -18,7 +18,7 @@ import {
 	type Upstreams,
 	upstreams,
 } from "@mod/upstreams";
-import { name, type Section, type Settings, settingsOf } from "../section.ts";
+import { name, type Settings } from "../section.ts";
 import {
 	type UpstreamAccounts,
 	upstreamAccountOver,
@@ -366,22 +366,18 @@ export function connectWith(p: ConnectParts): GrantsBrowser {
 	};
 }
 
-/**
- * The browser half over the contracts the assembly gives, with its settings, else those
- * federation-grants' section still holds; connections refuse boot without the page that asks the user.
- */
-export const connectOver = async (c: BuildContext<Section>) => {
+/** The browser half over the contracts the assembly gives; connections refuse boot without the page that asks the user. */
+export const connectOver = async (c: BuildContext<Settings>) => {
 	const intents = await c.get(grantIntents);
-	const settings = settingsOf(c.section, intents.legacySettings);
-	if (intents.connected && !settings.page)
+	if (intents.connected && !c.section.page)
 		c.refuse(name, "connections need the page that asks the user");
 	return connectWith({
 		sessions: await c.get(sessions),
-		upstreamAccount: await upstreamAccountOver(c, settings["identity-check"]),
+		upstreamAccount: await upstreamAccountOver(c, c.section["identity-check"]),
 		upstreams: await c.get(upstreams),
 		trips: await c.get(roundTrips),
 		intents,
-		settings,
+		settings: c.section,
 		log: c.log,
 	});
 };

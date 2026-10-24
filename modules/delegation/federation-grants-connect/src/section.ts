@@ -23,38 +23,10 @@ export const section = z.strictObject({
 		),
 	"identity-check": z
 		.enum(["required", "none"])
-		.optional()
+		.prefault("required")
 		.describe(
-			"required refuses a callback whose upstream account another user holds; none does not check. Unset, for now the one federation-grants' section holds (required unless set).",
+			"required refuses a callback whose upstream account another user holds; none does not check.",
 		),
 });
 
-export type Section = z.output<typeof section>;
-
-/** The browser half's settings: its own, else, for now, those federation-grants' section still holds (TODO 96). */
-export interface Settings {
-	readonly page?: string;
-	readonly "login-page"?: string;
-	readonly "step-up-page"?: string;
-	readonly "identity-check": "required" | "none";
-}
-
-export const settingsOf = (
-	own: Section,
-	legacy: {
-		readonly page?: string;
-		readonly loginPage?: string;
-		readonly stepUpPage?: string;
-		readonly identityCheck: "required" | "none";
-	},
-): Settings => {
-	const page = own.page ?? legacy.page;
-	const login = own["login-page"] ?? legacy.loginPage;
-	const stepUp = own["step-up-page"] ?? legacy.stepUpPage;
-	return {
-		...(page === undefined ? {} : { page }),
-		...(login === undefined ? {} : { "login-page": login }),
-		...(stepUp === undefined ? {} : { "step-up-page": stepUp }),
-		"identity-check": own["identity-check"] ?? legacy.identityCheck,
-	};
-};
+export type Settings = z.output<typeof section>;

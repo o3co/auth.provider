@@ -10,7 +10,7 @@ Internal module of `federation-grants-connect`: the browser half of a connection
 
 ## Offers
 - `connectWith` (sessions, `upstream-account`'s check, upstreams, round trips, `grantIntents`, settings, log) → `connect`, `question`, `decide`, `callback`, the package's contribution at `grantsBrowsers`.
-- `connectOver`, from the build context: the package's section, else what federation-grants' section still holds (`settingsOf`); it refuses boot when connections lack the page that asks the user.
+- `connectOver`, from the build context and the package's section; it refuses boot when connections lack the page that asks the user.
 
 ## Invariants
 - It reads and changes intents only through `grantIntents`, never federation-grants' stores.
