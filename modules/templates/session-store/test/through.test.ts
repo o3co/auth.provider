@@ -22,7 +22,7 @@ const withCookie = (cookie: string) =>
 async function boot() {
 	const simulated = simulatedStore();
 	const closer = { failing: false, calls: 0 };
-	const participant = defineModule({ name: "closer" }, (m) => [
+	const participant = defineModule({ name: "closer", takes: [] }, (m) => [
 		m.contribute(participants).by(() => ({
 			name: "closer",
 			closing: async () => {

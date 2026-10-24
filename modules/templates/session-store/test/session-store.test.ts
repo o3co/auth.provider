@@ -62,7 +62,7 @@ sessionStoreContract("session-store on records, on a simulated replicated store"
 
 it("confirms its reads of each subject's sessions, so a revocation never reads a list older than a login", async () => {
 	const declared = contract<readonly Space[]>("declared");
-	const reader = defineModule({ name: "reader" }, (m) => [
+	const reader = defineModule({ name: "reader", takes: [spaces] }, (m) => [
 		m.provide(declared).by(async (c) => c.collect(spaces)),
 	]);
 	const simulated = simulatedStore();
