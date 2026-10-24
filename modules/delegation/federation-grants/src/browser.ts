@@ -77,6 +77,16 @@ export type Back =
  * browser half sees views and refs, never a record.
  */
 export interface GrantIntents {
+	/**
+	 * For now, the browser half's settings as federation-grants' section still holds them, for a
+	 * browser half whose own section leaves them out; it goes once the settings have moved (TODO 96).
+	 */
+	readonly legacySettings: {
+		readonly page?: string;
+		readonly loginPage?: string;
+		readonly stepUpPage?: string;
+		readonly identityCheck: "required" | "none";
+	};
 	/** The connect link a client sends the user to, on the public origin. */
 	connectUrl(handle: string): string;
 	/** A connection's upstream callback, on the public origin. */

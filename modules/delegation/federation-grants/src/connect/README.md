@@ -9,7 +9,8 @@ Internal module of `federation-grants`: the browser half of a connection.
 - The client routes (`api`), session entry (`session`), the CSRF policy (`csrf`, declared by the package), the upstream's requests (the IdP type). Whose upstream account a callback reached, and the identity check (`upstream-account`).
 
 ## Offers
-- `browser`, built by `connectOver` from the build context through `connectWith` (sessions, `upstream-account`'s check, upstreams, round trips, the package's `grantIntents`, settings, log) → `connect`, `question`, `decide`, `callback`. It reads and changes intents only through `grantIntents`, never the store interfaces.
+- `connectOver`, from the build context through `connectWith` (sessions, `upstream-account`'s check, upstreams, round trips, the package's `grantIntents`, settings, log) → `connect`, `question`, `decide`, `callback`. It reads and changes intents only through `grantIntents`, never the store interfaces. It refuses boot when connections lack the page that asks the user.
+- `browser`, built once by `browserFrom` for the package's browser routes until the browser half moves out (TODO 96): the one `grantsBrowsers` contribution, else `connectOver`'s, built only then; more than one refuses boot. `browserAmong` is its choice alone.
 
 ## Invariants
 - Every step enters the session at `use` as the intent's subject; a short session is told whose it is at `none` before anything else.

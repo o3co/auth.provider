@@ -11,9 +11,16 @@ import {
 	type Upstreams,
 	upstreams,
 } from "@mod/upstreams";
-import { type Back, type GrantIntents, grantIntents, type IntentRef } from "../browser.ts";
+import {
+	type Back,
+	type GrantIntents,
+	type GrantsBrowser,
+	grantIntents,
+	grantsBrowsers,
+	type IntentRef,
+} from "../browser.ts";
 import { browserBase } from "../intents/intents.ts";
-import { connectionName, type Settings } from "../section.ts";
+import { connectionName, name, type Settings } from "../section.ts";
 import {
 	type UpstreamAccounts,
 	upstreamAccountOver,
@@ -363,12 +370,14 @@ export function connectWith(p: ConnectParts) {
 	};
 }
 
-/** The browser half, built once for its routes. */
-export const browser = contract<ReturnType<typeof connectWith>>("federation-grants.browser");
+/** The browser half the package's routes answer through, built once for them. */
+export const browser = contract<GrantsBrowser>("federation-grants.browser");
 
-/** The browser half over the contracts the assembly gives. */
-export const connectOver = async (c: BuildContext<Settings>) =>
-	connectWith({
+/** The browser half over the contracts the assembly gives; connections refuse boot without the page that asks the user. */
+export const connectOver = async (c: BuildContext<Settings>) => {
+	if (Object.keys(c.section.connections).length > 0 && !c.section.page)
+		c.refuse(name, "connections need the page that asks the user");
+	return connectWith({
 		sessions: await c.get(sessions),
 		upstreamAccount: await upstreamAccountOver(c),
 		upstreams: await c.get(upstreams),
@@ -377,3 +386,18 @@ export const connectOver = async (c: BuildContext<Settings>) =>
 		settings: c.section,
 		log: c.log,
 	});
+};
+
+/**
+ * Until the browser half is its own package's (TODO 96): the one contributed, else this module's;
+ * two or more is no browser half at all.
+ */
+export const browserAmong = <T>(contributed: readonly T[]): T | "none" | "many" =>
+	contributed.length > 1 ? "many" : (contributed[0] ?? "none");
+
+/** The browser half contributed, else this module's, built (and its page asked for) only then. */
+export const browserFrom = async (c: BuildContext<Settings>): Promise<GrantsBrowser> => {
+	const chosen = browserAmong(await c.collect(grantsBrowsers));
+	if (chosen === "many") return c.refuse(name, "more than one browser half is contributed");
+	return chosen === "none" ? connectOver(c) : chosen;
+};

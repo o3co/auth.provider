@@ -10,7 +10,7 @@ Internal module of `federation-grants`: what a grant and a browser step are, and
 - When records are written (`api`, `connect`, `refresh`), sealing itself (`seal`), the boundaries (`subject-revocation`).
 
 ## Offers
-- `shared`, built by `sharedOver` from the build context: the public origin, `recordsWith`, `judgeWith` and `listingWith` over its contracts, once for the package. It refuses boot when connections lack the origin, the page, or their IdP's delegation. The other internal modules take the contracts they use from the build context; the package's module only declares the routes and contributions they fill, and starts the sweep with these shared parts.
+- `shared`, built by `sharedOver` from the build context: the public origin, `recordsWith`, `judgeWith` and `listingWith` over its contracts, once for the package. It refuses boot when connections lack the origin or their IdP's delegation. The other internal modules take the contracts they use from the build context; the package's module only declares the routes and contributions they fill, and starts the sweep with these shared parts.
 - `recordsOver`: the records alone, for the follower, which `shared` cannot wait for.
 - `recordsWith` (seal): `grantOf`, `stored`, `stepOf`, `storedStep`, `open`, `seal`.
 - `judgeWith` (revocations, keep, longest life): `revoked`, `intentRevoked`, `endOf`.

@@ -30,8 +30,6 @@ export async function sharedOver(c: BuildContext<Settings>) {
 	const origin = (await c.get(site)).origin;
 	const named = Object.entries(c.section.connections);
 	if (named.length > 0 && !origin) c.refuse(name, "connections need the public origin");
-	if (named.length > 0 && !c.section.page)
-		c.refuse(name, "connections need the page that asks the user");
 	const found = await c.get(upstreams);
 	for (const [connection, { idp }] of named) {
 		if (!found.of(idp)?.delegation) {

@@ -12,6 +12,7 @@ import { csrfStandIn } from "@mod/csrf/testing";
 import { type HttpRequest, type HttpResponse, type Route, routes } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig, testRequest } from "@mod/http/testing";
+import type { Module } from "@mod/kernel";
 import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { rateLimitStandIn } from "@mod/rate-limit/testing";
@@ -131,6 +132,8 @@ export async function harness(
 		readonly stores?: ReturnType<typeof memoryStores>;
 		/** The seal section in place of the test's one key: a ring with past keys, say. */
 		readonly seal?: Readonly<Record<string, unknown>>;
+		/** Modules composed beside federation-grants. */
+		readonly modules?: readonly Module[];
 	} = {},
 ) {
 	let now = 1_800_000_000_000;
@@ -218,6 +221,7 @@ export async function harness(
 			stores.module,
 			stubs,
 			federationGrants,
+			...(options.modules ?? []),
 		],
 		config: {
 			...kernelConfig(),
