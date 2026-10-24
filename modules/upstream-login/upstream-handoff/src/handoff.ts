@@ -2,6 +2,7 @@ import {
 	type BuildContext,
 	type Clock,
 	contract,
+	extensionPoint,
 	type Log,
 	type Random,
 	Unavailable,
@@ -54,6 +55,11 @@ export interface Handoff {
 
 export const handoff = contract<Handoff>("upstream-handoff.handoff");
 
+/** The seal a held login's tokens are kept under: at most one. */
+export const handoffSealing = extensionPoint<Seal>("upstream-handoff.sealing", {
+	multiplicity: "many",
+});
+
 export const noHandoff: Handoff = {
 	of: () => undefined,
 	opened: async () => {},
@@ -72,16 +78,19 @@ interface Parts {
 
 /** The handoff over the receivers in name order, or none where no module receives upstream tokens. */
 export async function handoffIn(
-	c: Pick<BuildContext<unknown>, "collect" | "get" | "clock" | "random" | "log">,
+	c: Pick<BuildContext<unknown>, "collect" | "get" | "refuse" | "clock" | "random" | "log">,
 ): Promise<Handoff> {
 	const receivers = (await c.collect(upstreamLoginReceivers)).toSorted((a, b) =>
 		a.name < b.name ? -1 : 1,
 	);
 	// Sealing is needed only where a module receives upstream tokens.
 	if (receivers.length === 0) return noHandoff;
+	const [contributed, ...others] = await c.collect(handoffSealing);
+	if (others.length > 0)
+		return c.refuse("upstream-handoff", "more than one sealing is contributed");
 	return handoffWith({
 		receivers,
-		seal: await c.get(seal),
+		seal: contributed ?? (await c.get(seal)),
 		held: await c.get(heldLoginStore),
 		clock: c.clock,
 		random: c.random,
