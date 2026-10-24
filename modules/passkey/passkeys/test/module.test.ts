@@ -8,7 +8,7 @@ import {
 	kernelConfig,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { passkeyWitnessStandIn as witnessStandIn } from "@mod/passkey-witness/testing";
 import webauthn from "@mod/webauthn/module";
 import {
@@ -53,24 +53,30 @@ const scriptedWitnessing = (name = "witnessing") => {
 			if ((await after()) === "none") marks.delete(subject);
 		},
 	};
-	const module = defineModule({ name }, (m) => [
+	const module = defineModule({ name, takes: [] }, (m) => [
 		m.contribute(passkeyWitnessing).by(() => witnessing),
 	]);
 	return { module, marks, failing };
 };
 
+const composition = (witnesses: { readonly module: ReturnType<typeof defineModule> }[]) => ({
+	modules: [
+		memoryStores().module,
+		auditStandIn().module,
+		webauthn,
+		passkeysModule,
+		...witnesses.map((w) => w.module),
+	],
+	config: { ...kernelConfig(), ...webauthnConfig(), ...passkeysConfig() },
+	runtime: quietRuntime(),
+});
 const boot = (witnesses: { readonly module: ReturnType<typeof defineModule> }[]) =>
-	assemble({
-		modules: [
-			memoryStores().module,
-			auditStandIn().module,
-			webauthn,
-			passkeysModule,
-			...witnesses.map((w) => w.module),
-		],
-		config: { ...kernelConfig(), ...webauthnConfig(), ...passkeysConfig() },
-		runtime: quietRuntime(),
-	});
+	assemble(composition(witnesses));
+
+it("takes all it names, with a witnessing and without", async () => {
+	expect(await takesUnused(composition([]))).toEqual({});
+	expect(await takesUnused(composition([scriptedWitnessing()]))).toEqual({});
+});
 
 it("refuses to boot a passkey store that cannot change both its spaces as one", async () => {
 	const stores = memoryStores();
@@ -79,7 +85,7 @@ it("refuses to boot a passkey store that cannot change both its spaces as one", 
 		credentials: stores.passkeys.credentials,
 		subjects: stores.passkeys.subjects,
 	} as unknown as PasskeyStore;
-	const apart = defineModule({ name: "stores-apart" }, (m) => [
+	const apart = defineModule({ name: "stores-apart", takes: [] }, (m) => [
 		m.provide(passkeyStore).by(() => lacking),
 		m.provide(challengeStore).by(() => stores.challenges),
 	]);
@@ -184,7 +190,7 @@ it("keeps a passkey both asks admitted though the witness cannot mark it, answer
 it("ends a passkey whose write may have landed though its answer was lost", async () => {
 	const stores = memoryStores();
 	let lose = false;
-	const lossy = defineModule({ name: "lossy-stores" }, (m) => [
+	const lossy = defineModule({ name: "lossy-stores", takes: [] }, (m) => [
 		m.provide(passkeyStore).by(() => ({
 			...stores.passkeys,
 			updateTogether: async (keys, p) => {
@@ -258,7 +264,7 @@ it("leaves no usable passkey where the registration is stopped and its end canno
 			return done;
 		},
 	});
-	const down = defineModule({ name: "failing-stores" }, (m) => [
+	const down = defineModule({ name: "failing-stores", takes: [] }, (m) => [
 		m.provide(passkeyStore).by(() => ({
 			credentials: failing(stores.passkeys.credentials),
 			subjects: failing(stores.passkeys.subjects),
@@ -474,7 +480,7 @@ it("ends only its own write where a removal and another registration of the id l
 
 it("refuses to boot with two passkey witnessings contributed", async () => {
 	const witnessing = (name: string) =>
-		defineModule({ name }, (m) => [
+		defineModule({ name, takes: [] }, (m) => [
 			m.contribute(passkeyWitnessing).by(() => ({
 				settle: async () => false,
 				emptied: async () => {},
@@ -506,7 +512,9 @@ it("reads what a subject's list names as written, for passkey-witnessing alone",
 	expect(await app.get(passkeyReading).writtenHolding("sam")).toBe("passkey");
 	const took = contract<unknown>("test.took");
 	const taker = (name: string) =>
-		defineModule({ name }, (m) => [m.provide(took).by(async (c) => c.get(passkeyReading))]);
+		defineModule({ name, takes: [passkeyReading] }, (m) => [
+			m.provide(took).by(async (c) => c.get(passkeyReading)),
+		]);
 	const composedWith = (name: string) =>
 		assemble({
 			modules: [
