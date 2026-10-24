@@ -81,7 +81,7 @@ const unanswered = async (): Promise<HttpResponse> => ({ status: 501, headers: {
  * The browser half contributed, so the browser routes answer without federation-grants' own: each a
  * plain 501. The harness walks intents with `intents`' `browserStandIn` instead.
  */
-const unansweredBrowser = defineModule({ name: "browser-stand-in" }, (m) => [
+const unansweredBrowser = defineModule({ name: "browser-stand-in", takes: [] }, (m) => [
 	m.contribute(grantsBrowsers).by(() => ({
 		connect: unanswered,
 		question: unanswered,
@@ -170,7 +170,7 @@ export async function harness(
 			return next ?? ({ kind: "refreshed", tokens: fresh } as UpstreamRefresh);
 		},
 	};
-	const stubs = defineModule({ name: "stubs" }, (m) => [
+	const stubs = defineModule({ name: "stubs", takes: [routes] }, (m) => [
 		m.provide(upstreams).by(() => ({
 			of: (idp) => (idp === "corp" && !script.withdrawn ? { delegation } : undefined),
 		})),

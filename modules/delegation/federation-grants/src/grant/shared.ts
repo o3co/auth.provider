@@ -14,6 +14,8 @@ import {
 	recordsWith,
 } from "./grant.ts";
 
+export const sharedTakes = [seal, site, upstreams, revocations, subjectGrants] as const;
+
 /** The records over `seal`. */
 export const recordsOver = async (c: BuildContext<Settings>) => recordsWith(await c.get(seal));
 

@@ -22,7 +22,7 @@ import {
 	withoutCredentials,
 } from "../grant/grant.ts";
 import { shared } from "../grant/shared.ts";
-import { type Current, type Refresh, refreshOver } from "../refresh/refresh.ts";
+import { type Current, type Refresh, refreshOver, refreshTakes } from "../refresh/refresh.ts";
 import type { Connection, Settings } from "../section.ts";
 import {
 	type GrantStore,
@@ -605,6 +605,17 @@ export function apiWith(p: ApiParts) {
 		}
 	};
 }
+
+export const apiTakes = [
+	...refreshTakes,
+	clients,
+	grantStore,
+	stepStore,
+	pendingIntents,
+	attemptLimit,
+	upstreams,
+	audit,
+] as const;
 
 /** The client routes' handler, over the contracts the assembly gives. */
 export async function apiOver(c: BuildContext<Settings>) {

@@ -53,7 +53,7 @@ export function memoryStores(now: () => number = () => 0, cap = 16) {
 		hold: (name, mark, lifetimeMs) => held.create(name, mark, lifetimeMs),
 		update: held.change,
 	};
-	const module = defineModule({ name: "federation-grants-stores" }, (m) => [
+	const module = defineModule({ name: "federation-grants-stores", takes: [] }, (m) => [
 		m.provide(grantStore).by(() => grantRecords),
 		m.provide(stepStore).by(() => stepRecords),
 		m.provide(pendingIntents).by(() => pending),

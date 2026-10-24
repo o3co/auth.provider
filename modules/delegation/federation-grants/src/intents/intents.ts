@@ -375,6 +375,15 @@ export function intentsWith(p: IntentsParts): GrantIntents {
 	};
 }
 
+export const intentsTakes = [
+	clients,
+	upstreams,
+	grantStore,
+	stepStore,
+	pendingIntents,
+	audit,
+] as const;
+
 /** The intents over the contracts the assembly gives. */
 export const intentsOver = async (c: BuildContext<Settings>) =>
 	intentsWith({
