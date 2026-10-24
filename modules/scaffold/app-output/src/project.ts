@@ -64,8 +64,15 @@ export async function filled(template: string, fill: Readonly<Record<string, str
 }
 
 /** The app's entry, importing each module under what `importOf` names it (the workspace's name, unless published). */
-export const mainSource = (modules: readonly string[], importOf = (name: string) => name) =>
+/**
+ * An entry's answer to a refused boot, with `written`, which waits for what it writes to be handed
+ * on: every entry's mark `refused`.
+ */
+export const refusedPart = () => filled("refused.ts.part", {});
+
+export const mainSource = async (modules: readonly string[], importOf = (name: string) => name) =>
 	filled("main.ts.template", {
+		refused: await refusedPart(),
 		kernel: importOf(kernel),
 		configFiles: importOf(configFiles),
 		imports: modules.map((name, i) => `import m${i} from "${importOf(name)}/module";`).join("\n"),

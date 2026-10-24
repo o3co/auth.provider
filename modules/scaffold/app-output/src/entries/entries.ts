@@ -1,4 +1,4 @@
-import { configFiles, filled, kernel } from "../project.ts";
+import { configFiles, filled, kernel, refusedPart } from "../project.ts";
 
 /**
  * The app's entries besides `start`, each for an app that composes its package: the same modules,
@@ -64,9 +64,10 @@ export async function entriesOf(
 			imports: modules.map((name, i) => `import m${i} from "${importOf(name)}/module";`).join("\n"),
 			modules: modules.map((_, i) => `m${i}`).join(", "),
 		};
+		const shared = { ...fill, refused: await refusedPart() };
 		files[entry.file] = await filled(entry.template, {
-			...fill,
-			subjects: await filled("subjects.ts.part", fill),
+			...shared,
+			subjects: await filled("subjects.ts.part", shared),
 		});
 	}
 	const scripts = Object.fromEntries(called.map((entry) => [entry.script, run(entry.file)]));
