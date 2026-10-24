@@ -5,7 +5,7 @@ import { idpType, idpTypes } from "@mod/upstreams";
 import { settingsOf } from "./settings.ts";
 import { opened } from "./upstream.ts";
 
-export default defineModule({ name: "idp-github" }, (m) => [
+export default defineModule({ name: "idp-github", takes: [outbound, outboundRefusals] }, (m) => [
 	m.contribute(idpTypes).by(async (c) => {
 		const out = await c.get(outbound);
 		const settings = settingsOf(await c.get(outboundRefusals));

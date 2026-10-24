@@ -1,0 +1,21 @@
+import { defineModule, kernelConfig } from "@mod/kernel";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
+import { outbound } from "@mod/outbound";
+import { outboundRefusals } from "@mod/outbound-policy";
+import { expect, it } from "vitest";
+import idpModule from "../src/module.ts";
+
+/** Outbound and its refusals, never asked: the type is only built. */
+const stubs = defineModule({ name: "outbound", takes: [] }, (m) => [
+	m.provide(outbound).by(() => ({}) as never),
+	m.provide(outboundRefusals).by(() => ({ explained: () => undefined }) as never),
+]);
+
+it("takes all it names", async () => {
+	const input = {
+		modules: [stubs, idpModule],
+		config: kernelConfig(),
+		runtime: quietRuntime(),
+	};
+	expect(await takesUnused(input)).toEqual({});
+});
