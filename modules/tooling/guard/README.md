@@ -2,9 +2,9 @@
 
 ## Responsibilities
 - Checks the workspace's invariants, each reported by its id, place and what went over:
-  - The import and dependency rules (G1–G4, G8, G10, G14, G16, G22, G24, G25, G28–G31): `guard-imports`', run beside these.
+  - The import and dependency rules (G1–G4, G8, G10, G14, G16, G22, G24, G25, G28–G32, G34): `guard-imports`', run beside these.
   - G5: a package exports `.`, `./testing`, `./module` and `./audit-events` (its events, as `audit` declares them) only.
-  - G6: no feature vocabulary in common: common's contract and imports hold no name another package's contract owns.
+  - G6: the bottom level (common, protocol) holds no name another package's contract owns, in its contract or its imports.
   - G7: the budget, measured by the internal module `budget`.
   - G9: types in public signatures are exported.
   - G11: no line numbers in comments and documents.
@@ -15,6 +15,7 @@
   - G21: no document copies a list of the configuration.
   - G26: product code reaches the network through `outbound`, or as the words its manifest declares let it (the `network` internal module).
   - G27: a package whose declared `network` word reaches a server the deployment provides (`redis`, `smtp`) states what that server must be in a `## Deployment` section of its card (the `network` internal module).
+  - G33: a protocol package holds a wire's contract alone: it imports `zod` and its own files alone, reaches only the globals that hold no behaviour of the host, and keeps no state nor runs code as it loads (the `protocol` internal module).
 - Measures each package's public surface: its exported values, and the members of its exported interfaces and type aliases.
 
 ## Not here
@@ -34,7 +35,7 @@
 
 ## Data
 - The configuration: the budget numbers.
-- The kinds' roles (common, wiring, capability, verification, product, taking the runtime from `kernel`), in the kind words `kinds` gives; their order and the kinds never depending on a capability are `kinds`'s.
+- The kinds' roles (common, protocol, wiring, capability, verification, product, taking the runtime from `kernel`), in the kind words `kinds` gives; their order and the kinds never depending on a capability are `kinds`'s.
 - Nothing is written; the workspace is read on each run.
 
 ## Depends on

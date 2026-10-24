@@ -12,6 +12,7 @@ import {
 import { budgetRules, dependencyCards } from "./budget/budget.ts";
 import { laidOut } from "./documents.ts";
 import { helpersOf, networkRules } from "./network/network.ts";
+import { protocolRules } from "./protocol/protocol.ts";
 import { foreignFiles, namesLine } from "./references.ts";
 import { branchesOf, clockReads, commentsOf, randomReads } from "./source.ts";
 import { budgetsAsTest, type Scope } from "./units.ts";
@@ -22,6 +23,8 @@ export type { Doc, Pkg, Violation };
 
 /** The configuration: the budget numbers, beside the rules guard-imports reads. */
 export interface Budget extends Rules {
+	/** The kind of a wire's contract, held to it alone (G33). */
+	readonly protocolKind: string;
 	readonly readRangeBytes: number;
 	readonly sourceLines: number;
 	readonly testLines: number;
@@ -91,17 +94,17 @@ function sourceRules(s: Scope, p: Pkg) {
 	}
 }
 
-/** G6: common's contract and imports hold no name another package's contract owns. */
+/** G6: the bottom level's contract and imports (common's, protocol's) hold no name another package's contract owns. */
 function commonVocabulary(s: Scope, p: Pkg, surfaces: ReadonlyMap<string, Surface>) {
-	if (!s.isCommon(p)) return;
+	if (s.level(p) !== 0) return;
 	const foreign = new Map<string, string>();
 	for (const [owner, surface] of surfaces) {
-		const q = s.byName.get(owner);
-		if (q && !s.isCommon(q)) {
+		// Every other package's names, those beside it on the bottom level too; its own are its own.
+		if (owner !== p.name && s.byName.has(owner)) {
 			for (const name of [...surface.values, ...surface.types]) foreign.set(name, owner);
 		}
 	}
-	const rule = "G6 no feature vocabulary in common";
+	const rule = "G6 the bottom level holds no name another contract owns";
 	const own = surfaces.get(p.name);
 	for (const name of new Set([...(own?.values ?? []), ...(own?.types ?? [])])) {
 		const owner = foreign.get(name);
@@ -155,6 +158,7 @@ export function check(
 	for (const p of packages) {
 		sourceRules(s, p);
 		networkRules(s, p);
+		protocolRules(s, p);
 		commonVocabulary(s, p, surfaces);
 		budgetRules(s, p, surfaces, importedCards);
 	}
