@@ -3,7 +3,7 @@ import { areaTarget, type Fake, fakeHttp, type Started } from "@mod/conformance"
 import type { ClientScene } from "@mod/conformance-oauth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type CodeScene, codeScene } from "../../main.ts";
-import { backChannel, browserAt } from "../../testing.ts";
+import { backChannel, browserAt, succeeded } from "../../testing.ts";
 
 const issuer = "https://issuer.example";
 const back = "https://app.example/after";
@@ -121,7 +121,10 @@ async function signedIn(id = "app") {
 				code_verifier: verifier,
 			}),
 		});
-		const body = (await res.json()) as { id_token?: string; access_token?: string };
+		const body = (await succeeded(res, "the token endpoint")) as {
+			id_token?: string;
+			access_token?: string;
+		};
 		return { idToken: String(body.id_token), accessToken: String(body.access_token) };
 	};
 	return { browser, ...(await tokensFor(id)), tokensFor };
