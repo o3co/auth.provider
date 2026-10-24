@@ -21,9 +21,9 @@ type Options = CreationOptions & { excludeCredentials: { id: string }[] };
 /**
  * Registrations and holdings wired as the package wires them, over memory stores and a witness in
  * memory. `paused` runs once right after the next write that empties a list answers, before its
- * settle; `firstRemoval` runs once in place of the next withdraw or clear, handed that call to land.
+ * settle; `firstRemoval` runs once in place of the next withdraw, handed that call to land.
  */
-function wired({ clear = true } = {}) {
+function wired() {
 	const stores = memoryStores(() => Date.now());
 	const kept = keptPasskeys(stores.passkeys, writeToken, Date.now);
 	const reads = { markedWith: 0, afterRemoval: 0 };
@@ -45,8 +45,7 @@ function wired({ clear = true } = {}) {
 		},
 	};
 	const stand = passkeyWitnessStandIn();
-	const { clear: _, ...withoutClear } = stand.witness;
-	const witness: PasskeyWitness = clear ? stand.witness : withoutClear;
+	const witness: PasskeyWitness = stand.witness;
 	const markedWith = stand.witness.markedWith;
 	witness.markedWith = async (subject) => {
 		reads.markedWith += 1;
@@ -58,9 +57,8 @@ function wired({ clear = true } = {}) {
 		removal = undefined;
 		return run ? run(land) : land();
 	};
-	const { withdraw, clear: clearing } = witness;
+	const { withdraw } = witness;
 	witness.withdraw = (subject, token) => once(() => withdraw(subject, token));
-	if (clearing) witness.clear = (subject) => once(() => clearing(subject));
 	const events: { kind: string; attributes?: unknown }[] = [];
 	let n = 0;
 	const { holders, settle } = holdersOver({
@@ -414,13 +412,6 @@ describe.each(Object.entries(callers))("after %s", (_, { at, setUp }) => {
 		expect(h.reads).toEqual({ markedWith: 1, afterRemoval: 1 });
 		expect(ended).toBe("unavailable");
 		expect(h.events).toEqual([]);
-	});
-
-	it("withdraws through a witness that offers no clear", async () => {
-		const h = wired({ clear: false });
-		const empty = await setUp(h);
-		await empty();
-		expect(h.stand.marks.has("sam")).toBe(false);
 	});
 });
 

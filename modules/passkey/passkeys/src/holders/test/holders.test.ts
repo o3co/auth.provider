@@ -89,10 +89,10 @@ it("records a mark beside no passkey as inconsistent and unavailable, never clea
 	expect(JSON.stringify(events)).not.toMatch(/lost/);
 });
 
-it("reads once more before telling a mark inconsistent, as a last removal's clear may land meanwhile", async () => {
+it("reads once more before telling a mark inconsistent, as a last removal's withdraw may land meanwhile", async () => {
 	const { holders, stand, records, events, register } = held();
 	const id = await register("sam");
-	// The last removal emptied the list; its clear lands between this call's two reads.
+	// The last removal emptied the list; its withdraw lands between this call's two reads.
 	await records.removed("sam", id);
 	let reads = 0;
 	stand.next.beforeRead = () => {
@@ -171,14 +171,8 @@ it("is unavailable while the witness cannot be read or written, the passkey writ
 });
 
 passkeyWitnessContract("the witness in memory", async () => passkeyWitnessStandIn().witness);
-passkeyWitnessContract(
-	"the witness in memory, without clear",
-	async () => passkeyWitnessStandIn("passkey-witness", { clear: false }).witness,
-);
-
-it("offers clear from the witness in memory, and leaves it out when asked to", () => {
-	expect(typeof passkeyWitnessStandIn().witness.clear).toBe("function");
-	expect(passkeyWitnessStandIn("w", { clear: false }).witness.clear).toBeUndefined();
+it("offers no clear from the witness in memory: passkeys withdraws only by token", () => {
+	expect("clear" in passkeyWitnessStandIn().witness).toBe(false);
 });
 
 it("names each way a witness's markedWith breaks its promise", async () => {
@@ -215,21 +209,6 @@ it("names each way a witness's markedWith breaks its promise", async () => {
 	};
 	expect(await passkeyWitnessProblems(sticky)).toContain(
 		"markedWith answers the token of a mark withdrawn",
-	);
-	// One that answers a cleared mark's token still.
-	const kept = passkeyWitnessStandIn();
-	const before = new Map<string, string>();
-	const unforgetting = {
-		...kept.witness,
-		clear: async (subject: string) => {
-			const token = kept.marks.get(subject);
-			if (token !== undefined) before.set(subject, token);
-			await kept.witness.clear?.(subject);
-		},
-		markedWith: async (subject: string) => kept.marks.get(subject) ?? before.get(subject),
-	};
-	expect(await passkeyWitnessProblems(unforgetting)).toContain(
-		"markedWith answers the token of a mark cleared",
 	);
 });
 
