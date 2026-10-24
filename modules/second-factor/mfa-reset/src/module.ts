@@ -2,9 +2,10 @@ import { audit } from "@mod/audit";
 import { defineModule } from "@mod/kernel";
 import { flowParts } from "@mod/mfa-flows";
 import { factorManaging } from "@mod/mfa-managing";
+import { factorReading } from "@mod/mfa-reading";
 import { lockouts } from "@mod/rate-limit";
 import { revocations } from "@mod/subject-revocation";
-import { mfaReset, resetParts } from "./contract.ts";
+import { mfaReset, resetCandidates, resetParts } from "./contract.ts";
 import { resetOver } from "./reset.ts";
 
 export default defineModule({ name: "mfa-reset" }, (m) => [
@@ -19,4 +20,8 @@ export default defineModule({ name: "mfa-reset" }, (m) => [
 			parts: await c.collect(resetParts),
 		}),
 	),
+	m.provide(resetCandidates).by(async (c) => {
+		const reading = await c.get(factorReading);
+		return { unclaimed: (subject) => reading.unclaimedWritten(subject) };
+	}),
 ]);

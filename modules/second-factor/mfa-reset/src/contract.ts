@@ -38,6 +38,18 @@ export interface MfaReset {
 
 export const mfaReset = contract<MfaReset>("mfa-reset.reset");
 
+/** Whom a reset is for, read without changing anything: for an operator finding the subjects to reset. */
+export interface ResetCandidates {
+	/**
+	 * How many of the subject's counting second factors are written and stand for nothing (a unique
+	 * value's claim missing, or another's), one beside a factor that stands included: a reset removes
+	 * them, and the user binds again. Throws Unavailable where the store cannot tell.
+	 */
+	unclaimed(subject: string): Promise<number>;
+}
+
+export const resetCandidates = contract<ResetCandidates>("mfa-reset.candidates");
+
 /** A part of a subject's reset: what a module holds that the reset removes beside the second factors. */
 export interface ResetPart {
 	/** What it removes, in its own words; the audit names it. */
