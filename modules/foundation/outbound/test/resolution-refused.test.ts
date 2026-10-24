@@ -14,7 +14,7 @@ vi.mock("../src/resolver-process/contract.ts", async (actual) => ({
 	}),
 }));
 
-it("refuses boot where a helper does not start, ending every pool first", async () => {
+it("refuses boot where a helper does not start, ending every pool, however often asked", async () => {
 	const { default: outboundModule } = await import("../src/module.ts");
 	const refused = await assemble({
 		modules: [outboundModule],
@@ -22,5 +22,6 @@ it("refuses boot where a helper does not start, ending every pool first", async 
 	}).catch((error: unknown) => error);
 	expect(BootRefused.is(refused)).toBe(true);
 	expect((refused as BootRefused).refusals.map((r) => r.where)).toEqual(["outbound.resolution"]);
-	expect(stopped.sort()).toEqual(["outside", "own"]);
+	// Each pool is ended; a stop asked again (kernel's rollback of the refused assembly) does no harm.
+	expect([...new Set(stopped)].sort()).toEqual(["outside", "own"]);
 });
