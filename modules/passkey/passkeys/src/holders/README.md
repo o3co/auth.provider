@@ -13,7 +13,7 @@ Internal module of `passkeys`: whether subjects hold passkeys, and the settle th
 
 ## Invariants
 - A settle reads the passkeys and the mark again after each write, its own withdraw included, and marks twice at most: the limit is judged before a mark, so the last mark is checked too, then it is unavailable while they still differ. It answers whether the subject holds a passkey as the read the mark agreed with saw it, and `held` answers that, never a read of the passkeys alone after.
-- Its own mark, by the latest `enroll`'s token, goes by `withdraw`, which leaves another's; it never asks `clear`.
+- Its own mark, by the latest `enroll`'s token, goes by `withdraw`, which leaves another's.
 - Where its call emptied the list (a last removal, an end, `cleared`), it reads the mark's token, then what the holder that write left holds (`afterRemoval`), and withdraws that token only where that answers none.
 - None holds only where all three hold: the holder's handle is the one that write left (no holder lost or made anew since); its fence is that write's or later (no write of it lost, no copy from before it put back); and every record its list names reads, none being the subject's pending or live passkey (a missing record is lost, never none). Anything else not held is unsure; a holder that changes between its two reads is read again from the start, once.
 - Held (the subject's pending or live passkey listed) leaves the mark; unsure records it as inconsistent and is unavailable, the mark kept.

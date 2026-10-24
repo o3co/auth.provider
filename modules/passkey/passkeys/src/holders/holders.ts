@@ -84,7 +84,7 @@ export function holdersOver(p: HolderParts) {
 			const marked = await witness.read(subject);
 			if (held === marked) return held;
 			if (!held) {
-				// After its own withdraw or clear, both are read again: another may have marked meanwhile.
+				// After its own withdraw, both are read again: another may have marked meanwhile.
 				if (mine !== undefined) {
 					await witness.withdraw(subject, mine);
 					mine = undefined;

@@ -15,8 +15,6 @@ export interface PasskeyWitness {
 	withdraw(subject: string, token: string): Promise<void>;
 	/** The mark's token, whoever set it; none where no mark is set. Kept as `read` is, never behind an answered write. */
 	markedWith(subject: string): Promise<string | undefined>;
-	/** Removes the mark, whoever's it is. passkeys never asks it; a witness may leave it out. */
-	clear?(subject: string): Promise<void>;
 }
 
 /** At most one witness: passkeys refuses to start with two. */

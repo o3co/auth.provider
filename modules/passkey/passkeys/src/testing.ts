@@ -373,18 +373,14 @@ export function challengeStoreContract(name: string, open: () => Promise<Challen
 
 /**
  * A passkey witness in memory, keeping its promises: each call fails as unavailable while its count
- * of failures lasts, and `lost` writes take effect with their answer lost. It offers `clear` unless
- * made without it. `beforeEnroll`,
+ * of failures lasts, and `lost` writes take effect with their answer lost. `beforeEnroll`,
  * `afterEnroll`, `beforeRead` and `beforeWithdraw` run once around the next such call, as a request
  * racing it would.
  */
-export function passkeyWitnessStandIn(
-	name = "passkey-witness",
-	{ clear = true }: { readonly clear?: boolean } = {},
-) {
+export function passkeyWitnessStandIn(name = "passkey-witness") {
 	const marks = new Map<string, string>();
-	const failing = { read: 0, markedWith: 0, enroll: 0, withdraw: 0, clear: 0 };
-	const lost = { enroll: 0, withdraw: 0, clear: 0 };
+	const failing = { read: 0, markedWith: 0, enroll: 0, withdraw: 0 };
+	const lost = { enroll: 0, withdraw: 0 };
 	const next: {
 		beforeEnroll?: (() => void) | undefined;
 		afterEnroll?: (() => void) | undefined;
@@ -431,13 +427,6 @@ export function passkeyWitnessStandIn(
 			fails("markedWith");
 			return marks.get(subject);
 		},
-		...(clear && {
-			clear: async (subject: string) => {
-				fails("clear");
-				marks.delete(subject);
-				loses("clear");
-			},
-		}),
 	};
 	const module = defineModule({ name }, (m) => [m.contribute(passkeyWitnesses).by(() => witness)]);
 	return { module, witness, marks, failing, lost, next };
@@ -474,11 +463,6 @@ export async function passkeyWitnessProblems(witness: PasskeyWitness): Promise<s
 	await witness.withdraw(one, "t1");
 	check(!(await witness.read(one)), "a withdraw where no mark is set made one");
 	check(await witness.enroll(one, "t3"), "a token after a withdraw does not own the mark");
-	if (witness.clear) {
-		await witness.clear(one);
-		check(!(await witness.read(one)), "a read after an answered clear still sees the mark");
-		await tokenIs(one, undefined, "markedWith answers the token of a mark cleared");
-	}
 	const two = `p-${n}-2`;
 	const raced = await Promise.all([witness.enroll(two, "a"), witness.enroll(two, "b")]);
 	check(raced.filter(Boolean).length === 1, "two enrolls at once do not leave exactly one owner");
