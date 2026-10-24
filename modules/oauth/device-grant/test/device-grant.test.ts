@@ -26,7 +26,7 @@ import {
 	kernelConfig,
 	type Module,
 } from "@mod/kernel";
-import { quietRuntime, recordingLog, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import rateLimitModule from "@mod/rate-limit/module";
 import secretHashModule from "@mod/secret-hash/module";
 import { sessions } from "@mod/session";
@@ -79,16 +79,17 @@ const allowed = (grants: string[]) =>
 	allowancesFor({ grants, scopes: ["read", "write"], "default-scopes": ["read"] });
 
 const published = contract<readonly MetadataItem[]>("published");
-const reader = defineModule({ name: "reader" }, (m) => [
+const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
 	m.provide(published).by((c) => c.collect(metadata)),
 ]);
 
 /** What records a token issued in a session to it, as session-tokens does where composed. */
-const recording = defineModule({ name: "recording" }, (m) => [
+const recording = defineModule({ name: "recording", takes: [] }, (m) => [
 	m.contribute(sessionIssuances).by(() => ({ issued: async () => {} })),
 ]);
 
-async function serve(
+/** What `serve` assembles, with the stores and stand-ins it reaches into. */
+function assembly(
 	settings: Partial<DeviceGrantSettings> = {},
 	extra: Module[] = [],
 	site: { readonly "public-origin"?: string } = { "public-origin": origin },
@@ -101,7 +102,7 @@ async function serve(
 	};
 	/** Time that passes before the next rewrite of a device reads it, as when the store is slow. */
 	let stall = 0;
-	const stores = defineModule({ name: "device-stores" }, (m) => [
+	const stores = defineModule({ name: "device-stores", takes: [] }, (m) => [
 		m.provide(deviceStore).by(() =>
 			down.devices.wrap({
 				...kept.devices,
@@ -115,7 +116,7 @@ async function serve(
 		m.provide(userCodes).by(() => down.codes.wrap(kept.userCodes)),
 	]);
 	const audit = auditStandIn();
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			clientsModule,
@@ -150,7 +151,16 @@ async function serve(
 			...deviceGrantConfig(settings),
 		},
 		runtime,
-	});
+	};
+	const slowNextUpdate = (ms: number) => {
+		stall = ms;
+	};
+	return { input, kept, down, audit, slowNextUpdate };
+}
+
+async function serve(...given: Parameters<typeof assembly>) {
+	const { input, kept, down, audit, slowNextUpdate } = assembly(...given);
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
 	const base = `http://127.0.0.1:${app.get(listening).port()}`;
@@ -210,9 +220,6 @@ async function serve(
 	/** What the store keeps for a device. */
 	const stored = async (code: string) =>
 		(await kept.devices.read(kept.devices.nameOf(code))) as unknown as Record<string, unknown>;
-	const slowNextUpdate = (ms: number) => {
-		stall = ms;
-	};
 	return {
 		app,
 		down,
@@ -264,7 +271,7 @@ describe("device authorization", () => {
 	});
 
 	it("refuses a resource where the composed rule refuses one to what takes no audience", async () => {
-		const strict = defineModule({ name: "strict" }, (m) => [
+		const strict = defineModule({ name: "strict", takes: [] }, (m) => [
 			m.contribute(targetRules).by(() => ({
 				target: ({ audience }) => ({ kind: "audience", audience }),
 				untargeted: ({ param }) =>
@@ -495,7 +502,7 @@ describe("polling", () => {
 
 	it("issues nothing a contributed policy refuses, and leaves the approved code to a later poll", async () => {
 		const denying = { on: false };
-		const policy = defineModule({ name: "deny-alice" }, (m) => [
+		const policy = defineModule({ name: "deny-alice", takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "deny-alice",
 				judge: async (request) =>
@@ -520,7 +527,7 @@ describe("polling", () => {
 
 	it("refuses and records an approval a contributed policy refuses, before keeping it, as 0.17 refused an unverified email", async () => {
 		const denying = { on: true, description: "not now" };
-		const policy = defineModule({ name: "deny-alice" }, (m) => [
+		const policy = defineModule({ name: "deny-alice", takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "deny-alice",
 				judge: async (request) =>
@@ -562,7 +569,7 @@ describe("polling", () => {
 
 	it("asks the issuance policies with the approving session, at approval and at the poll", async () => {
 		const asked: (string | undefined)[] = [];
-		const policy = defineModule({ name: "watching" }, (m) => [
+		const policy = defineModule({ name: "watching", takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "watching",
 				judge: async (request) => {
@@ -609,7 +616,7 @@ describe("polling", () => {
 
 	it("issues nothing while the approving session falls short of a requirement to be used, as a closed one", async () => {
 		const short = { now: false };
-		const requirement = defineModule({ name: "short-to-use" }, (m) => [
+		const requirement = defineModule({ name: "short-to-use", takes: [] }, (m) => [
 			m.contribute(entryRequirements).by(() => ({
 				name: "mfa",
 				judges: ["use"],
@@ -627,7 +634,7 @@ describe("polling", () => {
 	it("answers no token issued while the approving session closed", async () => {
 		let asked = 0;
 		let close = async () => {};
-		const closing = defineModule({ name: "closing" }, (m) => [
+		const closing = defineModule({ name: "closing", takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "closing",
 				judge: async () => {
@@ -859,7 +866,7 @@ describe("verification", () => {
 	});
 
 	it("asks the session's entry requirements at use for an approval, and at none for the rest", async () => {
-		const strict = defineModule({ name: "strict" }, (m) => [
+		const strict = defineModule({ name: "strict", takes: [] }, (m) => [
 			m.contribute(entryRequirements).by(() => ({
 				name: "fresh",
 				judges: ["use"],
@@ -984,4 +991,10 @@ it("refuses to start where nothing records a token to its session, so a logout c
 		where: "device-grant",
 		reason: expect.stringMatching(/recorded to the session/),
 	});
+});
+
+it("takes all its module names, with a public origin and without", async () => {
+	for (const site of [{ "public-origin": origin }, {}]) {
+		expect(await takesUnused(assembly({}, [], site).input), JSON.stringify(site)).toEqual({});
+	}
 });
