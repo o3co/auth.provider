@@ -1,5 +1,6 @@
 import { certificateForwarding } from "@mod/client-certificate";
 import { BootRefused } from "@mod/kernel";
+import { urlSetting } from "@mod/url-setting";
 import { describe, expect, it } from "vitest";
 import { type HttpRequest, listening, site } from "../../contract.ts";
 import { boot, handlers, serveWith, warning } from "../../serving/test/serve.ts";
@@ -29,11 +30,24 @@ it("takes origins as url-setting does: an origin alone, in the form the parser w
 	expect(await refusals({ "public-origin": "https://as.example/" })).toEqual([
 		{ where: "http.public-origin", reason: alone },
 	]);
-	for (const origin of ["https://*.example", "https://App.example", "https://app.example:443"]) {
-		expect(await refusals({ "cors-origins": [origin] }), origin).toEqual([
-			{ where: "http.cors-origins.0", reason: expect.any(String) },
-		]);
+	// A CORS origin is refused in url-setting's own words, each in full, and a pattern in http's.
+	const origin = urlSetting({ schemes: ["https"], origin: true });
+	for (const url of [
+		"https://App.example",
+		"https://app.example:443",
+		"https://as.example/",
+		"https://app.example/x",
+		"http://app.example",
+	]) {
+		const said = origin.safeParse(url).error?.issues.map((issue) => issue.message) ?? [];
+		expect(said.length, url).toBeGreaterThan(0);
+		expect(await refusals({ "cors-origins": [url] }), url).toEqual(
+			said.map((reason) => ({ where: "http.cors-origins.0", reason })),
+		);
 	}
+	expect(await refusals({ "cors-origins": ["https://*.example"] })).toEqual([
+		{ where: "http.cors-origins.0", reason: "an exact origin, without a pattern" },
+	]);
 });
 
 it("refuses an empty or unparsable public origin or CORS origin at boot, never throwing on it", async () => {
