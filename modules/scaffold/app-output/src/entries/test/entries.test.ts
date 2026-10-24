@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { configFiles, kernel } from "../../project.ts";
+import { configFiles, kernel, mainSource } from "../../project.ts";
 import { entriesOf } from "../contract.ts";
 
 /** Stand-ins for the kernel (with config-files' `loadConfig`) and mfa-witnessing, as packages the written script imports. */
@@ -30,10 +30,14 @@ export const legacyVariablesCheck = async (source) => {
 export async function assemble({ runtime }) {
 	// A refusal thrown by a second copy of the kernel: its own class, the same mark.
 	if (process.env.REFUSE) throw new (await import("fake-kernel-copy")).BootRefused([{ where: "a.b", reason: "why" }]);
+	// Many refusals, each long, so their lines fill a pipe read slowly.
+	if (process.env.REFUSE_MANY) throw new BootRefused(Array.from({ length: Number(process.env.REFUSE_MANY) }, (_, i) => ({ where: \`at.\${i}\`, reason: "r".repeat(100) })));
 	// Without the script's own runtime, the composed sink would write this line.
 	(runtime?.log ?? { warn: (event) => process.stdout.write(\`LOG \${event}\\n\`) }).warn("fake.assembled");
 	const { backfill, candidates } = await import("fake-witnessing");
-	return { get: (asked) => (asked === "resetCandidates" ? candidates : backfill), stop: async () => {} };
+	const resealer = { reseal: async () => Array.from({ length: Number(process.env.HOLDERS ?? 1) }, (_, i) => ({ name: \`holder-\${i}-\${"h".repeat(100)}\`, resealed: 0, left: 0 })) };
+	const asked = { resetCandidates: candidates, resealing: resealer };
+	return { get: (what) => asked[what] ?? backfill, start: async () => {}, stop: async () => {} };
 }`,
 	},
 	"fake-kernel-copy": {
@@ -49,6 +53,7 @@ import { appendFileSync } from "node:fs";
 export const witnessBackfill = "witnessBackfill";
 export const passkeyBackfill = "passkeyBackfill";
 export const resetCandidates = "resetCandidates";
+export const resealing = "resealing";
 export const candidates = {
 	unclaimed: async (subject) => {
 		appendFileSync(process.env.SEEN, \`\${JSON.stringify(subject)}\\n\`);
@@ -86,11 +91,17 @@ async function script(runs = "@mod/mfa-witnessing", file = "src/witness-backfill
 		name === kernel || name === configFiles ? "fake-kernel" : "fake-witnessing";
 	const { files } = await entriesOf([runs], importOf, (path) => `node ${path}`);
 	await mkdir(join(target, "src"));
-	await writeFile(join(target, file), files[file] ?? "");
+	// The app's own entry, as `start` runs it, beside the one asked for.
+	await writeFile(join(target, "src", "main.ts"), await mainSource([], importOf));
+	if (files[file] !== undefined) await writeFile(join(target, file), files[file]);
 	/** A run whose standard output is read only after a while, as a slow pipe reads it. */
-	const slowly = (input: string) =>
+	const slowly = (
+		input: string,
+		more: Record<string, string> = {},
+		held: "stdout" | "stderr" = "stdout",
+	) =>
 		new Promise<{ stdout: string; stderr: string; status: number | null }>((resolve) => {
-			const env = { ...process.env, SEEN: join(target, `seen-${Math.random()}`) };
+			const env = { ...process.env, ...more, SEEN: join(target, `seen-${Math.random()}`) };
 			const child = spawn(process.execPath, [file], { cwd: target, env });
 			let stdout = "";
 			let stderr = "";
@@ -101,14 +112,14 @@ async function script(runs = "@mod/mfa-witnessing", file = "src/witness-backfill
 				stdout += chunk;
 			});
 			// Held back for a while, as a slow reader holds the pipe full.
-			child.stdout.pause();
-			setTimeout(() => child.stdout.resume(), 3000);
+			child[held].pause();
+			setTimeout(() => child[held].resume(), 3000);
 			// Ended only once read: what the script handed on before it exited, and nothing it dropped.
 			let status: number | null = null;
 			child.on("exit", (code) => {
 				status = code;
 			});
-			child.stdout.on("end", () => child.on("close", () => resolve({ stdout, stderr, status })));
+			child[held].on("end", () => child.on("close", () => resolve({ stdout, stderr, status })));
 			child.stdin.end(input);
 		});
 	const run = (input: string, env: Record<string, string> = {}) => {
@@ -241,4 +252,29 @@ it("hands on every subject it names before it exits, though the pipe it writes t
 	const done = await run.slowly(`${subjects.join("\n")}\n`);
 	expect(done.stdout.split("\n").filter((line) => line !== "")).toEqual(subjects);
 	expect([done.stderr, done.status]).toEqual(["named 10000 clear 0 failed 0\n", 0]);
+}, 60_000);
+
+it("hands on every refusal of a refused boot before it exits 78, from the app's entry and the others, though standard error is read slowly", async () => {
+	const lines = Array.from({ length: 5000 }, (_, i) => `refused at.${i}: ${"r".repeat(100)}`);
+	for (const file of ["src/main.ts", "src/reseal.ts", "src/witness-backfill.ts"]) {
+		const run = await script(
+			file === "src/witness-backfill.ts" ? "@mod/mfa-witnessing" : "@mod/seal",
+			file,
+		);
+		const done = await run.slowly("", { REFUSE_MANY: "5000" }, "stderr");
+		expect(
+			done.stderr.split("\n").filter((l) => l !== ""),
+			file,
+		).toEqual(lines);
+		expect(done.status, file).toBe(78);
+	}
+}, 120_000);
+
+it("hands on every holder reseal tells before it exits, though standard output is read slowly", async () => {
+	const run = await script("@mod/seal", "src/reseal.ts");
+	const done = await run.slowly("", { HOLDERS: "5000" });
+	const told = done.stdout.split("\n").filter((l) => l !== "" && !l.startsWith("LOG "));
+	expect(told).toHaveLength(5001);
+	expect(told.at(-1)).toBe("previous keys may be retired");
+	expect(done.status).toBe(0);
 }, 60_000);
