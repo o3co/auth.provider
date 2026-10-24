@@ -16,7 +16,7 @@ import {
 import { clock, during, serve } from "./harness.ts";
 
 /** A kind that sends a challenge, and takes what the challenge kept as the proof after it. */
-const sending = defineModule({ name: "kind-sending" }, (m) => [
+const sending = defineModule({ name: "kind-sending", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "sending",
 		amr: ["otp"],
@@ -34,7 +34,7 @@ const sending = defineModule({ name: "kind-sending" }, (m) => [
 
 /** How the told kind answers its next enrollment; its secret is the value no two factors may hold. */
 const told = { answer: undefined as Enrolled | undefined };
-const _toldKind = defineModule({ name: "kind-told" }, (m) => [
+const _toldKind = defineModule({ name: "kind-told", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "told",
 		amr: ["otp"],
@@ -171,7 +171,7 @@ describe("mfa at login", () => {
 
 	it("tells the caller a login came from once the proof opens it, and no one for a login from nowhere", async () => {
 		const told: [string, string][] = [];
-		const upstream = defineModule({ name: "upstream-stand-in" }, (m) => [
+		const upstream = defineModule({ name: "upstream-stand-in", takes: [] }, (m) => [
 			m.contribute(openedAfterHold).by(() => ({
 				caller: "upstream",
 				opened: async (session, carry) => void told.push([session.context.subject, carry]),
@@ -613,7 +613,7 @@ const verifies = { guess: 0 };
 afterEach(() => {
 	verifies.guess = 0;
 });
-const slowOnce = defineModule({ name: "kind-slow-once" }, (m) => [
+const slowOnce = defineModule({ name: "kind-slow-once", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "once",
 		amr: ["hwk"],
@@ -634,7 +634,7 @@ const slowOnce = defineModule({ name: "kind-slow-once" }, (m) => [
 		},
 	})),
 ]);
-const slowGuess = defineModule({ name: "kind-slow-guess" }, (m) => [
+const slowGuess = defineModule({ name: "kind-slow-guess", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "guess",
 		amr: ["otp"],

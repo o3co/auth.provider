@@ -31,7 +31,7 @@ export function memoryTransactions(now: () => number) {
 	});
 	const listingsDown = unavailableSwitch<TransactionListings>("transaction listings");
 	const listings = listingsDown.wrap(stand.keyedSets(transactionsPerHolder));
-	const module = defineModule({ name: "transaction-store" }, (m) => [
+	const module = defineModule({ name: "transaction-store", takes: [] }, (m) => [
 		m.provide(transactionStore).by(() => transactions),
 		m.provide(transactionListings).by(() => listings),
 	]);

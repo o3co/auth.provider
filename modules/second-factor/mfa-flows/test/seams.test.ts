@@ -1,5 +1,6 @@
 import { jsonAnswer } from "@mod/http";
 import { BootRefused, contract, defineModule } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { type EnrollmentFlow, enrollmentFlow, type FlowParts, flowParts } from "../src/contract.ts";
 import { serve } from "./harness.ts";
@@ -17,7 +18,7 @@ it("hands the enrollment routes and an enrollment's challenge to the flow contri
 		},
 		challenge: async () => jsonAnswer(200, { by: "flow" }),
 	};
-	const contributing = defineModule({ name: "enrolling" }, (m) => [
+	const contributing = defineModule({ name: "enrolling", takes: [] }, (m) => [
 		m.contribute(enrollmentFlow).by(() => flow),
 	]);
 	const s = await serve({}, [contributing], null);
@@ -33,7 +34,7 @@ it("hands the enrollment routes and an enrollment's challenge to the flow contri
 
 it("offers its parts for the module binding factors: transactions, resume, recording, answers, requests, and the lockout", async () => {
 	const parts = contract<FlowParts>("test.parts");
-	const reading = defineModule({ name: "reading" }, (m) => [
+	const reading = defineModule({ name: "reading", takes: [flowParts] }, (m) => [
 		m.provide(parts).by((c) => c.get(flowParts)),
 	]);
 	const s = await serve({}, [reading]);
@@ -59,4 +60,8 @@ it("refuses to boot where no module binding factors contributes the enrollment f
 	expect((refused as BootRefused).refusals.map((r) => r.where)).toContain(
 		"mfa-flows.enrollment-flow",
 	);
+});
+
+it("takes all it names", async () => {
+	expect(await takesUnused((await serve()).input)).toEqual({});
 });

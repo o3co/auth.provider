@@ -5,7 +5,7 @@ import { serve } from "./harness.ts";
 
 const mail = { answer: undefined as Sending | undefined };
 /** A counting kind that sends its challenge to a contact, as an email one does. */
-const mailKind = defineModule({ name: "kind-mail" }, (m) => [
+const mailKind = defineModule({ name: "kind-mail", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "mail",
 		amr: ["otp"],

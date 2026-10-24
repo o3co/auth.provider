@@ -5,7 +5,7 @@ import { serve } from "../../../test/harness.ts";
 
 /** Every proof the kind was given, in order; it takes only an object's JSON text. */
 const given: string[] = [];
-const echo = defineModule({ name: "kind-echo" }, (m) => [
+const echo = defineModule({ name: "kind-echo", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "echo",
 		amr: ["hwk"],

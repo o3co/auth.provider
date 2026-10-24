@@ -7,7 +7,15 @@ import { revocationFollowers } from "@mod/subject-revocation";
 import { flowParts } from "./contract.ts";
 import { type Handler, unavailable } from "./requests/requests.ts";
 import { section } from "./section.ts";
-import { gating, handlersOver, partsIn, policyOf } from "./wiring/wiring.ts";
+import {
+	gating,
+	gatingTakes,
+	handlersOver,
+	handlersTakes,
+	partsIn,
+	partsTakes,
+	policyOf,
+} from "./wiring/wiring.ts";
 
 type HandlerName = keyof Awaited<ReturnType<typeof handlersOver>>;
 
@@ -33,7 +41,10 @@ const withUnavailable =
 		}
 	};
 
-export default defineModule({ name: "mfa-flows", section, replicaSafe: true }, (m) => [
+/** What the module takes: the revocation followers, and its helpers' (`gating`, `partsIn`, `handlersOver`). */
+const takes = [revocationFollowers, ...gatingTakes, ...partsTakes, ...handlersTakes];
+
+export default defineModule({ name: "mfa-flows", section, replicaSafe: true, takes }, (m) => [
 	m.contribute(proofSteps).by(() => ({ name: "mfa-flows" })),
 	m.provide(flowParts).by(async (c) => {
 		// A completed revocation stops a binding begun before it only where something moves mfa's fence.
