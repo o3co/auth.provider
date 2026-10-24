@@ -65,11 +65,27 @@ export class BuildRefused extends Error {
 }
 
 /**
+ * What `read` makes of a thrown value, or `otherwise` where reading it throws: a thrown value is
+ * anyone's, its getters and proxy traps included, so the kernel reads one only through this.
+ */
+export function readThrown<T>(read: () => T, otherwise: T): T {
+	try {
+		return read();
+	} catch {
+		return otherwise;
+	}
+}
+
+/** The type a warn line names for a thrown value: its name, or `unknown` where reading it throws. */
+export const thrownKind = (error: unknown): string =>
+	readThrown(() => (error instanceof Error ? String(error.name) : typeof error), "unknown");
+
+/**
  * The refusal a thrown value is, read once and never throwing: one marked, whose where and reason
  * are each a diagnostic line; none for any other, or one whose reading throws.
  */
 export function buildRefusalOf(error: unknown): Refusal | undefined {
-	try {
+	return readThrown(() => {
 		if (typeof error !== "object" || error === null) return undefined;
 		const told = error as {
 			readonly [buildRefusedMark]?: unknown;
@@ -81,9 +97,7 @@ export function buildRefusalOf(error: unknown): Refusal | undefined {
 		return isDiagnostic(where, whereMax) && isDiagnostic(reason, reasonMax)
 			? { where, reason }
 			: undefined;
-	} catch {
-		return undefined;
-	}
+	}, undefined);
 }
 
 /** Thrown by refuse and refuseAll inside a factory; assembly records its refusals. Never leaves the kernel. */

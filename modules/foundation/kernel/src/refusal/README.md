@@ -13,6 +13,7 @@ Internal module of `kernel`: what a refused boot and an outage are, as values ev
 - `Unavailable` (a dependency gave no answer, as distinct from a negative answer; what gave none), and `isUnavailable`.
 - `BuildRefused` (where, and why), what a library called in a factory throws to refuse the boot, holding no build context; and `BuildRefused.is`, which never throws.
 - `buildRefusalOf`, for assembly: the refusal a thrown value is, read once, or none.
+- `readThrown` (read, otherwise): what a read makes of a thrown value, or `otherwise` where it throws; `thrownKind`, the type a warn line names (an error's name, the value's type, or `unknown`). The kernel reads a thrown value only through them.
 - `RefusalSignal`, what `refuse` and `refuseAll` throw inside a factory; it never leaves the kernel.
 
 ## Invariants

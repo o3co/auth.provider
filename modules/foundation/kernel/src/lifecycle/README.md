@@ -24,4 +24,4 @@ Internal module of `kernel`: what runs once the assembly starts, and how it stop
 - A failed periodic run, probe or stop hook is one warn line naming it, with the error's type, never its text. A stop hook past the deadline is one too.
 
 ## Depends on
-- `runtime` (the log and the runtime's types); the package's handles and freezing
+- `runtime` (the log and the runtime's types); the package's handles and freezing; `refusal` (`thrownKind`)

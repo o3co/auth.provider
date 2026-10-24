@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BuildRefused } from "../src/contract.ts";
+import { unreadable } from "./refusals.ts";
 
 describe("BuildRefused.is", () => {
 	it("tells a library's refusal by the mark every copy of the kernel puts on it, with where and why", () => {
@@ -45,14 +46,7 @@ describe("BuildRefused.is", () => {
 			throwing(mark),
 			throwing("where"),
 			throwing("reason"),
-			new Proxy(
-				{},
-				{
-					get() {
-						throw new Error("x");
-					},
-				},
-			),
+			...unreadable(),
 		];
 		for (const value of looking) expect(BuildRefused.is(value)).toBe(false);
 	});

@@ -11,7 +11,13 @@ import {
 } from "./lifecycle/readiness.ts";
 import { type StopHook, stopWithin } from "./lifecycle/stop.ts";
 import type { BuildContext, Module } from "./module.ts";
-import { BootRefused, buildRefusalOf, type Refusal, RefusalSignal } from "./refusal/refusal.ts";
+import {
+	BootRefused,
+	buildRefusalOf,
+	type Refusal,
+	RefusalSignal,
+	readThrown,
+} from "./refusal/refusal.ts";
 import { guardedLog, logSinks, routedLog } from "./runtime/log.ts";
 import { type LogSink, type Runtime, systemClock, systemRandom } from "./runtime/runtime.ts";
 
@@ -151,18 +157,18 @@ function refuseIfAny(refusals: readonly Refusal[]): void {
  */
 function recordFailure(error: unknown, where: string, refusals: Refusal[]): void {
 	const failed = { where, reason: "failed during assembly" };
-	try {
-		if (error instanceof RefusalSignal) {
-			refusals.push(...error.refusals);
-			return;
-		}
-		if (error instanceof DependencyFailed) return;
-	} catch {
-		refusals.push(failed);
-		return;
-	}
+	const seen = readThrown(
+		() =>
+			error instanceof RefusalSignal
+				? "signal"
+				: error instanceof DependencyFailed
+					? "dependency"
+					: "other",
+		"unreadable",
+	);
+	if (seen === "signal") refusals.push(...(error as RefusalSignal).refusals);
 	// A library's refusal names its own where and reason; any other error's text is never kept.
-	refusals.push(buildRefusalOf(error) ?? failed);
+	else if (seen !== "dependency") refusals.push(buildRefusalOf(error) ?? failed);
 }
 
 /** What a test may watch of the takes as the assembly holds them; nothing an app is given. */
