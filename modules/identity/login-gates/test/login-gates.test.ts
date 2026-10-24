@@ -9,7 +9,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { sessions } from "@mod/session";
 import { sessionStandIn, stubSessions } from "@mod/session/testing";
 import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
@@ -60,7 +60,7 @@ function gated({
 	const given: (LoginFrom | undefined)[] = [];
 	const told: [unknown, string][] = [];
 	const gate = (name: string) =>
-		defineModule({ name: `gate-${name}` }, (m) => [
+		defineModule({ name: `gate-${name}`, takes: [] }, (m) => [
 			m.contribute(loginGates).by(() => ({
 				name,
 				...(rechecking.includes(name) ? { rechecked: true } : {}),
@@ -75,7 +75,7 @@ function gated({
 				},
 			})),
 		]);
-	const caller = defineModule({ name: "caller" }, (m) => [
+	const caller = defineModule({ name: "caller", takes: [] }, (m) => [
 		m.contribute(openedAfterHold).by(() => ({
 			caller: "fed",
 			opened: async (session, carry) => {
@@ -99,7 +99,7 @@ it("asks the gates in the order of their names and stops at the first that holds
 });
 
 it("answers a hold that sets no cookies with an empty list", async () => {
-	const bare = defineModule({ name: "gate-bare" }, (m) => [
+	const bare = defineModule({ name: "gate-bare", takes: [] }, (m) => [
 		m.contribute(loginGates).by(() => ({
 			name: "bare",
 			hold: async () => ({ kind: "held" as const, answer: null }),
@@ -194,7 +194,7 @@ it("still opens the login when the caller's opened throws, and logs the caller a
 		["sealed", "string"],
 	]) {
 		const recorded = recordingLog();
-		const failing = defineModule({ name: "failing" }, (m) => [
+		const failing = defineModule({ name: "failing", takes: [] }, (m) => [
 			m.contribute(openedAfterHold).by(() => ({
 				caller: "fed",
 				opened: async () => {
@@ -215,7 +215,7 @@ it("still opens the login when the caller's opened throws, and logs the caller a
 
 it("answers whether the declared ways of logging in can prove every one of a set of amr", async () => {
 	const source = (name: string, amr: string[]) =>
-		defineModule({ name: `source-${name}` }, (m) => [
+		defineModule({ name: `source-${name}`, takes: [] }, (m) => [
 			m.contribute(amrSources).by(() => ({ name, amr })),
 		]);
 	const l = await boot([source("one", ["a"]), source("two", ["b", "c"])]);
@@ -225,7 +225,7 @@ it("answers whether the declared ways of logging in can prove every one of a set
 });
 
 const path = (name: string, at: string) =>
-	defineModule({ name }, (m) => [m.contribute(returnPaths).by(() => ({ path: at }))]);
+	defineModule({ name, takes: [] }, (m) => [m.contribute(returnPaths).by(() => ({ path: at }))]);
 
 it("lets a login return only to a listed target exactly, or a contributed path on the public origin", async () => {
 	const l = await boot([path("authorize", "/oauth/authorize"), path("device", "/device")], {
@@ -268,7 +268,7 @@ it("lets a login return only to a listed target exactly, or a contributed path o
 });
 
 it("lets a login return one name segment below a path contributed so, and nowhere deeper or around it", async () => {
-	const below = defineModule({ name: "federation" }, (m) => [
+	const below = defineModule({ name: "federation", takes: [] }, (m) => [
 		m.contribute(returnPaths).by(() => ({ path: "/session/oauth/federation", segment: true })),
 	]);
 	const l = await boot([below, path("device", "/device")]);
@@ -315,7 +315,7 @@ it("lets a login return one name segment below a path contributed so, and nowher
 	// The path contributed whole too, beside its segment: each takes its own.
 	const both = await boot([
 		below,
-		defineModule({ name: "federation-whole" }, (m) => [
+		defineModule({ name: "federation-whole", takes: [] }, (m) => [
 			m.contribute(returnPaths).by(() => ({ path: "/session/oauth/federation" })),
 		]),
 	]);
@@ -339,7 +339,7 @@ it("lets a login return one name segment below a path contributed so, and nowher
 
 it("refuses to start with a return path taking a segment below the root, or below a path ending in a slash", async () => {
 	for (const at of ["/", "/session/"]) {
-		const below = defineModule({ name: "below" }, (m) => [
+		const below = defineModule({ name: "below", takes: [] }, (m) => [
 			m.contribute(returnPaths).by(() => ({ path: at, segment: true })),
 		]);
 		const refused = await boot([below]).catch((error: unknown) => error);
@@ -421,7 +421,7 @@ it("reads no return targets when the operator sets none", () => {
 /** Sessions that count the opens asked of them and open none: a test that opens one fails. */
 function unopened() {
 	const asked = { opens: 0 };
-	const module = defineModule({ name: "session" }, (m) => [
+	const module = defineModule({ name: "session", takes: [] }, (m) => [
 		m.provide(sessions).by(() =>
 			stubSessions({
 				complete: async () => {
@@ -513,4 +513,10 @@ it("resumes through the gates composed now: one added before the hold runs only 
 		(await boot(without.gates)).resume(testRequest(), facts, "b"),
 	).rejects.toBeInstanceOf(TypeError);
 	expect(without.ran).toEqual([]);
+});
+
+it("takes every handle its takes name", async () => {
+	const modules = [http, sessionStandIn, subjectRevocationStandIn, gatesModule];
+	const config = { ...kernelConfig(), ...httpConfig({ "public-origin": "https://as.example" }) };
+	expect(await takesUnused({ modules, config })).toEqual({});
 });
