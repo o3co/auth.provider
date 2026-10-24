@@ -1,5 +1,5 @@
 import { assemble, BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { type Seal, seal } from "@mod/seal";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
@@ -9,7 +9,7 @@ import bridge from "../src/module.ts";
 
 const runtime = quietRuntime();
 const seen = contract<readonly Seal[]>("test.seen");
-const reader = defineModule({ name: "reader" }, (m) => [
+const reader = defineModule({ name: "reader", takes: [handoffSealing] }, (m) => [
 	m.provide(seen).by((c) => c.collect(handoffSealing)),
 ]);
 
@@ -30,4 +30,13 @@ it("refuses to boot where no seal is composed", async () => {
 		runtime,
 	}).catch((error: unknown) => error);
 	expect(refused).toBeInstanceOf(BootRefused);
+});
+
+it("takes all it names", async () => {
+	const input = {
+		modules: [sealModule, bridge, reader],
+		config: { ...kernelConfig(), ...sealConfig() },
+		runtime,
+	};
+	expect(await takesUnused(input)).toEqual({});
 });
