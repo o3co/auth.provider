@@ -3,7 +3,7 @@ import { listening, routes, use } from "@mod/http";
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { metrics } from "@mod/metrics";
 import metricsModule from "@mod/metrics/module";
 import { store } from "@mod/store";
@@ -514,7 +514,7 @@ describe("releasing a lockout under terms", () => {
 
 const window = { limit: 2, ms: 60_000 };
 /** Routes counted by each policy under the name `test`, two to a window. */
-const routed = defineModule({ name: "routed" }, (m) => [
+const routed = defineModule({ name: "routed", takes: [] }, (m) => [
 	m.contribute(routes).by(() => ({
 		method: "GET",
 		path: "/attempts",
@@ -711,4 +711,9 @@ it("counts attempts by any key in counts kept through a failover, apart from rat
 	expect(await attempts.hit("guess", "bob", window)).toEqual({ kind: "allowed" });
 	simulated.unreachable(true);
 	await expect(attempts.hit("guess", "carol", window)).rejects.toSatisfy(isUnavailable);
+});
+
+it("takes every handle its takes name", async () => {
+	const modules = [rateLimitModule, simulatedStore().module, auditStandIn().module];
+	expect(await takesUnused({ modules, config: kernelConfig() })).toEqual({});
 });

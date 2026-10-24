@@ -57,7 +57,7 @@ const memory = contract<{
 const noAudit = { record: () => {} };
 
 /** Every limit, lockout and per-source policy, counted in memory with no store and no audit. */
-export const rateLimitStandIn = defineModule({ name: "rate-limit" }, (m) => [
+export const rateLimitStandIn = defineModule({ name: "rate-limit", takes: [] }, (m) => [
 	m.provide(memory).by((c) => ({
 		windows: memoryCounter(c.clock.now),
 		attempts: memoryCounter(c.clock.now),

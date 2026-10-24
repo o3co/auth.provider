@@ -57,7 +57,7 @@ const section = z.strictObject({
 		),
 });
 
-export default defineModule({ name: "rate-limit", section }, (m) => [
+export default defineModule({ name: "rate-limit", section, takes: [audit, store] }, (m) => [
 	m.provide(uncounted).by(() =>
 		metricCounter({
 			name: "auth_rate_limit_uncounted_total",
