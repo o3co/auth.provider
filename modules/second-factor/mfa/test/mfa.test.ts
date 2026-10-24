@@ -15,7 +15,7 @@ import { quietRuntime } from "@mod/kernel/testing";
 import { isLabel } from "@mod/labels";
 import { logins } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
-import { type FactorBinding, factorBinding } from "@mod/mfa-binding";
+import { factorBinding } from "@mod/mfa-binding";
 import * as extensions from "@mod/mfa-extensions";
 import {
 	type Enrolled,
@@ -26,7 +26,7 @@ import {
 	type Witnessing,
 	witnessing,
 } from "@mod/mfa-extensions";
-import { type FactorManaging, factorManaging } from "@mod/mfa-managing";
+import { factorManaging } from "@mod/mfa-managing";
 import { type FactorReading, factorReading } from "@mod/mfa-reading";
 import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { seal } from "@mod/seal";
@@ -37,6 +37,7 @@ import { subjectRevocationStandIn } from "@mod/subject-revocation/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import * as offered from "../src/contract.ts";
 import { enforcers, proofSteps } from "../src/contract.ts";
+import type { Decisions, UnclaimedReading } from "../src/factors.ts";
 import mfaModule from "../src/module.ts";
 import { claimKeyOf, listKeyOf, storedList } from "../src/records/records.ts";
 import { section } from "../src/section.ts";
@@ -261,8 +262,8 @@ async function serve(
 	});
 	stop = () => app.stop(1000);
 	// mfa's three faces, as one for these tests.
-	const decided: FactorReading & FactorBinding & FactorManaging = {
-		...app.get(factorReading),
+	const decided: Decisions = {
+		...(app.get(factorReading) as FactorReading & UnclaimedReading),
 		...app.get(factorBinding),
 		...app.get(factorManaging),
 	};
@@ -1366,6 +1367,20 @@ describe("an enrollment witness", () => {
 		await place.records.remove(claimKeyOf("card", "c-7"));
 		expect(await decided.writtenStanding("gus")).toBe("unclaimed");
 		expect(await decided.countingWritten("gus")).toBe(false);
+	});
+
+	it("counts the subject's counting factors written that do not stand, one beside a factor that does included", async () => {
+		const { decided, bindKind, place } = await serve({}, { kinds: [card] });
+		expect(await decided.unclaimedWritten("gus")).toBe(0);
+		expect((await bindKind("gus", "card", "c-7")).kind).toBe("bound");
+		expect((await bindKind("gus", "card", "c-8")).kind).toBe("bound");
+		expect(await decided.unclaimedWritten("gus")).toBe(0);
+		await place.records.remove(claimKeyOf("card", "c-7"));
+		// One stands, so the subject reads as counting: only this count tells the other.
+		expect(await decided.writtenStanding("gus")).toBe("counting");
+		expect(await decided.unclaimedWritten("gus")).toBe(1);
+		await place.records.remove(claimKeyOf("card", "c-8"));
+		expect(await decided.unclaimedWritten("gus")).toBe(2);
 	});
 
 	it("tells whether every session needs a second factor, as the mode says", async () => {

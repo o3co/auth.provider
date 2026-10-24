@@ -67,7 +67,15 @@ interface Pending {
 const isWayBack = (kind: FactorKind) => !kind.counts && !guessing(kind);
 
 /** mfa's decisions: the members of the three contracts it provides, one implementation in each app. */
-export type Decisions = FactorReading & FactorBinding & FactorManaging;
+/**
+ * What mfa reads besides `FactorReading`'s members, until mfa-reading's contract names it: how many
+ * of the subject's counting factors are written and do not stand.
+ */
+export interface UnclaimedReading {
+	unclaimedWritten(subject: string): Promise<number>;
+}
+
+export type Decisions = FactorReading & UnclaimedReading & FactorBinding & FactorManaging;
 
 export function factorDecisions(p: FactorParts): Decisions {
 	const wayBack = (factor: Factor) => {
@@ -202,6 +210,13 @@ export function factorDecisions(p: FactorParts): Decisions {
 		},
 		countingWritten: (subject) => countsNow(subject),
 		writtenStanding,
+		unclaimedWritten: async (subject) => {
+			let left = 0;
+			for (const factor of counting(await records.list(subject), p.kinds)) {
+				if (!(await stands(subject, factor))) left += 1;
+			}
+			return left;
+		},
 		secondFactorRequired: () => p.required,
 		asks: async (subject) => {
 			const all = await records.list(subject);
