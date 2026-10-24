@@ -5,7 +5,7 @@ import { metadata } from "@mod/issuer";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, BootRefused, defineModule, kernelConfig, type Module } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import keysModule from "@mod/keys/module";
 import { keysConfig } from "@mod/keys/testing";
 import { afterEach, expect, it } from "vitest";
@@ -16,21 +16,24 @@ let stop = async () => {};
 afterEach(() => stop());
 
 const item = (name: string, value: unknown) =>
-	defineModule({ name: `item-${name}` }, (m) => [
+	defineModule({ name: `item-${name}`, takes: [] }, (m) => [
 		m.contribute(metadata).by(() => ({ name, value })),
 	]);
 
+/** discovery beside http, keys and issuer, with these modules besides. */
+const composition = (extra: Module[], url = "https://as.example", corsOrigins: string[] = []) => ({
+	modules: [http, keysModule, issuerModule, discovery, ...extra],
+	config: {
+		...kernelConfig(),
+		...httpConfig(corsOrigins.length > 0 ? { "cors-origins": corsOrigins } : {}),
+		...keysConfig(),
+		...issuerConfig({ url }),
+	},
+	runtime,
+});
+
 async function serve(extra: Module[], url = "https://as.example", corsOrigins: string[] = []) {
-	const app = await assemble({
-		modules: [http, keysModule, issuerModule, discovery, ...extra],
-		config: {
-			...kernelConfig(),
-			...httpConfig(corsOrigins.length > 0 ? { "cors-origins": corsOrigins } : {}),
-			...keysConfig(),
-			...issuerConfig({ url }),
-		},
-		runtime,
-	});
+	const app = await assemble(composition(extra, url, corsOrigins));
 	await app.start();
 	stop = () => app.stop(1000);
 	const base = `http://127.0.0.1:${app.get(listening).port()}`;
@@ -98,7 +101,7 @@ it("refuses to start when two modules contribute one member", async () => {
 	expect(
 		await refused([
 			item("same", 1),
-			defineModule({ name: "again" }, (m) => [
+			defineModule({ name: "again", takes: [] }, (m) => [
 				m.contribute(metadata).by(() => ({ name: "same", value: 2 })),
 			]),
 		]),
@@ -115,5 +118,11 @@ it("lets a listed origin's page read the document at each of its names, and no o
 			"https://app.example",
 		);
 		expect((await get(path, "GET", "https://evil.example")).allowed, path).toBeNull();
+	}
+});
+
+it("takes all it names, with items and with none", async () => {
+	for (const extra of [[], [item("a_endpoint", "https://as.example/a")]]) {
+		expect(await takesUnused(composition(extra))).toEqual({});
 	}
 });
