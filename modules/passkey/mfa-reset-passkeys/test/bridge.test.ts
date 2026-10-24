@@ -1,13 +1,14 @@
 import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
 import { type ResetPart, resetParts } from "@mod/mfa-reset";
 import { type PasskeyResetPart, passkeyResetPart } from "@mod/passkey-reset";
 import { expect, it } from "vitest";
 import bridge from "../src/module.ts";
 
-/** The bridge over a part answering `answer`, and the reset part it contributes. */
-async function contributed(answer: PasskeyResetPart["passkeys"]) {
+/** The bridge over a part answering `answer`, with a probe reading the reset parts. */
+function composition(answer: PasskeyResetPart["passkeys"]) {
 	const asked: string[] = [];
-	const scripted = defineModule({ name: "scripted-part" }, (m) => [
+	const scripted = defineModule({ name: "scripted-part", takes: [] }, (m) => [
 		m.provide(passkeyResetPart).by(() => ({
 			passkeys: async (subject) => {
 				asked.push(subject);
@@ -16,15 +17,26 @@ async function contributed(answer: PasskeyResetPart["passkeys"]) {
 		})),
 	]);
 	const parts = contract<readonly ResetPart[]>("test.parts");
-	const probe = defineModule({ name: "probe" }, (m) => [
+	const probe = defineModule({ name: "probe", takes: [resetParts] }, (m) => [
 		m.provide(parts).by((c) => c.collect(resetParts)),
 	]);
-	const app = await assemble({ modules: [scripted, bridge, probe], config: kernelConfig() });
+	return { input: { modules: [scripted, bridge, probe], config: kernelConfig() }, parts, asked };
+}
+
+/** The bridge over a part answering `answer`, and the reset part it contributes. */
+async function contributed(answer: PasskeyResetPart["passkeys"]) {
+	const { input, parts, asked } = composition(answer);
+	const app = await assemble(input);
 	const [part, ...more] = app.get(parts);
 	expect(more).toEqual([]);
 	if (!part) throw new Error("no part contributed");
 	return { part, asked };
 }
+
+it("takes all it names", async () => {
+	const { input } = composition(async () => ({ kind: "done", removed: 0 }));
+	expect(await takesUnused(input)).toEqual({});
+});
 
 it("contributes the part named passkeys, as the reset's audit names it", async () => {
 	const { part } = await contributed(async () => ({ kind: "done", removed: 0 }));
