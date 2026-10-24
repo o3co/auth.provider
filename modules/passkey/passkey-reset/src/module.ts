@@ -9,15 +9,18 @@ import { resetOver } from "./reset.ts";
 const made = contract<ReturnType<typeof resetOver>>("passkey-reset.made");
 const madeOf = (c: BuildContext<unknown>) => c.get(made);
 
-export default defineModule({ name: "passkey-reset" }, (m) => [
-	m.provide(made).by(async (c) =>
-		resetOver({
-			revocations: await c.get(revocations),
-			holders: await c.get(passkeyHolders),
-			audit: await c.get(audit),
-			log: c.log,
-		}),
-	),
-	m.provide(passkeyReset).by(async (c) => (await madeOf(c)).reset),
-	m.provide(passkeyResetPart).by(async (c) => (await madeOf(c)).part),
-]);
+export default defineModule(
+	{ name: "passkey-reset", takes: [audit, passkeyHolders, revocations] },
+	(m) => [
+		m.provide(made).by(async (c) =>
+			resetOver({
+				revocations: await c.get(revocations),
+				holders: await c.get(passkeyHolders),
+				audit: await c.get(audit),
+				log: c.log,
+			}),
+		),
+		m.provide(passkeyReset).by(async (c) => (await madeOf(c)).reset),
+		m.provide(passkeyResetPart).by(async (c) => (await madeOf(c)).part),
+	],
+);

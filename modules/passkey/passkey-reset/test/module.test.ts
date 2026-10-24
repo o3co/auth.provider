@@ -1,5 +1,6 @@
 import { audit } from "@mod/audit";
 import { assemble, type BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
 import { passkeyHolders } from "@mod/passkeys";
 import { revocations } from "@mod/subject-revocation";
 import { expect, it } from "vitest";
@@ -8,7 +9,7 @@ import resetModule from "../src/module.ts";
 
 /** The contracts the reset takes, answering as scripted, recording what they were asked. */
 const parts = (calls: string[]) =>
-	defineModule({ name: "parts" }, (m) => [
+	defineModule({ name: "parts", takes: [] }, (m) => [
 		m.provide(revocations).by(
 			() =>
 				({
@@ -30,6 +31,12 @@ const parts = (calls: string[]) =>
 		m.provide(audit).by(() => ({ record: () => {}, lost: () => ({}) })),
 	]);
 
+it("takes all it names", async () => {
+	expect(await takesUnused({ modules: [parts([]), resetModule], config: kernelConfig() })).toEqual(
+		{},
+	);
+});
+
 it("resets over the contracts it is given, and offers the passkeys' step alone over the same holdings", async () => {
 	const calls: string[] = [];
 	const app = await assemble({ modules: [parts(calls), resetModule], config: kernelConfig() });
@@ -43,7 +50,9 @@ it("resets over the contracts it is given, and offers the passkeys' step alone o
 it("gives the passkeys' step to the bridge alone, refusing boot to any other module that takes it", async () => {
 	const took = contract<unknown>("test.took");
 	const taker = (name: string) =>
-		defineModule({ name }, (m) => [m.provide(took).by(async (c) => c.get(passkeyResetPart))]);
+		defineModule({ name, takes: [passkeyResetPart] }, (m) => [
+			m.provide(took).by(async (c) => c.get(passkeyResetPart)),
+		]);
 	const composedWith = (name: string) =>
 		assemble({
 			modules: [parts([]), resetModule, taker(name)],
