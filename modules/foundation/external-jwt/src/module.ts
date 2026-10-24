@@ -14,7 +14,7 @@ export const section = z.strictObject({
 		),
 });
 
-export default defineModule({ name: "external-jwt", section }, (m) => [
+export default defineModule({ name: "external-jwt", section, takes: [outbound] }, (m) => [
 	m.provide(externalJwt).by(async (c) =>
 		externalJwtOver({
 			clock: c.clock,

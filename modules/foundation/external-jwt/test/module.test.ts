@@ -1,5 +1,5 @@
 import { assemble, BootRefused, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { outbound } from "@mod/outbound";
 import outboundModule from "@mod/outbound/module";
 import { expect, it } from "vitest";
@@ -40,7 +40,7 @@ async function composed(section: Record<string, unknown> | undefined) {
 	const signer = await testSigner("EdDSA", "k1");
 	let now = 1_800_000_000_000;
 	let up = true;
-	const fake = defineModule({ name: "fake-outbound" }, (m) => [
+	const fake = defineModule({ name: "fake-outbound", takes: [] }, (m) => [
 		m.provide(outbound).by(() => ({
 			fetch: async () => {
 				if (!up) throw new Unavailable("outbound");
@@ -111,4 +111,17 @@ it("refuses a section outside its bounds", async () => {
 			JSON.stringify(refused),
 		).rejects.toBeInstanceOf(BootRefused);
 	}
+});
+
+it("takes every handle its takes name", async () => {
+	const fake = defineModule({ name: "fake-outbound", takes: [] }, (m) => [
+		m.provide(outbound).by(() => ({
+			fetch: async () => {
+				throw new Unavailable("outbound");
+			},
+		})),
+	]);
+	expect(await takesUnused({ modules: [fake, externalJwtModule], config: kernelConfig() })).toEqual(
+		{},
+	);
 });
