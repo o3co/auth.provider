@@ -221,7 +221,7 @@ export function simulatedStore(): SimulatedStore {
 		},
 	});
 	return {
-		module: defineModule({ name: "store", replicaSafe: false }, (m) => [
+		module: defineModule({ name: "store", replicaSafe: false, takes: [spaces] }, (m) => [
 			m.provide(store).by(async (c) => {
 				const declared = await c.collect(spaces);
 				storeNow = () => c.clock.now() + shift;
