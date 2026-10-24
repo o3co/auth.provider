@@ -17,7 +17,7 @@ const heldLogins: Space = {
 	guarantees: Object.values(guaranteeFor),
 };
 
-export default defineModule({ name: "upstream-handoff-store" }, (m) => [
+export default defineModule({ name: "upstream-handoff-store", takes: [store] }, (m) => [
 	m.contribute(spaces).by(() => heldLogins),
 	m.provide(heldLoginStore).by(async (c) => {
 		const place = { store: await c.get(store), space: heldLogins, log: c.log, random: c.random };
