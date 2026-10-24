@@ -16,7 +16,7 @@ const section = z.strictObject({
 		),
 });
 
-export default defineModule({ name: "secret-hash", section, replicaSafe: true }, (m) => [
+export default defineModule({ name: "secret-hash", section, replicaSafe: true, takes: [] }, (m) => [
 	m.provide(secretCheckers).by((c) => {
 		const places = placesOf(c.section["max-concurrent"]);
 		return { checkerOf: (inUse) => checkerWith(inUse, c.random.bytes, matches, places) };

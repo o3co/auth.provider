@@ -4,6 +4,9 @@ import { sampledGauge } from "./gauge.ts";
 import { attach } from "./instrument.ts";
 import { kept, problemsOf } from "./registry.ts";
 
+/** What a metrics provision built here takes from other modules. */
+export const metricsTakes = [instruments] as const;
+
 /** How long a sample waits on a gauge's read. */
 export const gaugeBoundMs = 2000;
 

@@ -1,6 +1,6 @@
 import { defineModule } from "@mod/kernel";
 import { describe, expect, it, vi } from "vitest";
-import { metricsBy } from "./build.ts";
+import { metricsBy, metricsTakes } from "./build.ts";
 import { counter, gauge, type Instrument, type Metrics, metrics } from "./contract.ts";
 
 /** A composition holding the instruments a scene made, as one implementation of the contract does. */
@@ -115,7 +115,7 @@ export function metricsContract(
  * sees a late read without waiting for the module's bound.
  */
 export function metricsStandIn(boundMs: number) {
-	return defineModule({ name: "metrics", replicaSafe: true }, (m) => [
+	return defineModule({ name: "metrics", replicaSafe: true, takes: metricsTakes }, (m) => [
 		m.provide(metrics).by(metricsBy(boundMs)),
 	]);
 }

@@ -7,7 +7,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { resealers, resealing, seal } from "../src/contract.ts";
 import sealModule from "../src/module.ts";
@@ -168,7 +168,7 @@ it("refuses to start with keys beside current, with neither, or with an id twice
 it("reseals through each holder in name order, answering counts alone, past a holder that fails", async () => {
 	const ran: string[] = [];
 	const holder = (name: string, fails = false) =>
-		defineModule({ name: `holder-${name}` }, (m) => [
+		defineModule({ name: `holder-${name}`, takes: [] }, (m) => [
 			m.contribute(resealers).by(() => ({
 				name,
 				reseal: async () => {
@@ -192,4 +192,9 @@ it("reseals through each holder in name order, answering counts alone, past a ho
 	expect(
 		await (await bootWith({ current: { id: "a", key: key() } })).get(resealing).reseal(),
 	).toEqual([]);
+});
+
+it("takes every handle its takes name", async () => {
+	const config = { ...kernelConfig(), seal: { current: { id: "a", key: key() } } };
+	expect(await takesUnused({ modules: [sealModule], config })).toEqual({});
 });

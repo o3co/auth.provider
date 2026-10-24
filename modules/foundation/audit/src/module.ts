@@ -45,117 +45,126 @@ const abortOf = (signal: AbortSignal) =>
 		else signal.addEventListener("abort", () => resolve(), { once: true });
 	});
 
-export default defineModule({ name: "audit", section, replicaSafe: true }, (m) => [
-	m.provide(lostEvents).by((c) => {
-		const named = c.section.receivers === "none" ? [] : c.section.receivers;
-		const spec = {
-			name: "auth_audit_events_lost_total",
-			help: "Audit events a receiver lost since boot: past max-pending, failed, or under way at the stop deadline.",
-		};
-		// A label needs one value at least; with no receiver the counter has no label and no series.
-		if (named.length === 0) return counter({ ...spec, labels: {} });
-		return counter({ ...spec, labels: { receiver: named } });
-	}),
-	m.contribute(instruments).by((c) => c.get(lostEvents)),
-	m.provide(audit).by(async (c) => {
-		const contributed = await c.collect(auditReceivers);
-		const named = c.section.receivers === "none" ? [] : c.section.receivers;
-		const builtIns = new Map([["log", logReceiver(c.log)]]);
-		const known = new Map(builtIns);
-		const refusals: Refusal[] = [];
-		for (const receiver of contributed) {
-			if (builtIns.has(receiver.name)) {
-				refusals.push({ where: "audit.receivers", reason: `${receiver.name} is a built-in name` });
-			} else if (!named.includes(receiver.name)) {
-				refusals.push({
-					where: "audit.receivers",
-					reason: `${receiver.name} is composed but not named`,
-				});
-			}
-			known.set(receiver.name, receiver);
-		}
-		// A name written in the list is a configured value: it is told by its place alone.
-		for (const [at, name] of named.entries()) {
-			if (!known.has(name))
-				refusals.push({ where: `audit.receivers.${at}`, reason: "names no receiver" });
-		}
-		if (refusals.length > 0) c.refuseAll(refusals);
-		const max = c.section["max-pending"];
-		/** One receiver's events under way, lost since boot, and lost since it last took one. */
-		const lanes = named.map((name) => ({
-			receiver: known.get(name) as AuditReceiver,
-			pending: 0,
-			lost: 0,
-			losing: 0,
-		}));
-		type Lane = (typeof lanes)[number];
-		const counted = await c.get(lostEvents);
-		/** Past the stop deadline: what settles after is neither taken nor lost again. */
-		let closed = false;
-		const underWay = new Set<Promise<void>>();
-		/** `failure` is the kind alone (`backlog`, `stopped`, or the error's name), never a message a receiver wrote. */
-		const lose = (lane: Lane, failure: string) => {
-			lane.lost += 1;
-			counted.add({ receiver: lane.receiver.name });
-			lane.losing += 1;
-			if (lane.losing === 1) {
-				c.log.warn("audit receiver losing events", {
-					receiver: lane.receiver.name,
-					lost: 1,
-					failure,
-				});
-			}
-		};
-		const took = (lane: Lane) => {
-			if (lane.losing === 0) return;
-			c.log.warn("audit receiver recovered", { receiver: lane.receiver.name, lost: lane.losing });
-			lane.losing = 0;
-		};
-		// At stop, deliveries under way get until the deadline; what is still under way then is lost.
-		c.onStop(async (signal) => {
-			await Promise.race([Promise.allSettled([...underWay]), abortOf(signal)]);
-			closed = true;
-			for (const lane of lanes) {
-				for (; lane.pending > 0; lane.pending -= 1) lose(lane, "stopped");
-			}
-		});
-		return Object.freeze<Audit>({
-			record: (event) => {
-				const { attributes, ...rest } = event;
-				// Copied, so freezing the event leaves the emitter's own attributes as they were.
-				const copied = attributes
-					? {
-							attributes: Object.fromEntries(
-								Object.entries(attributes).map(([k, v]) => [k, k === requestText ? bounded(v) : v]),
-							),
-						}
-					: {};
-				const stamped: AuditEvent = deepFreeze({ ...rest, ...copied, at: c.clock.now() });
-				for (const lane of lanes) {
-					if (lane.pending >= max) {
-						lose(lane, "backlog");
-						continue;
-					}
-					lane.pending += 1;
-					// Deferred, so record returns first, and a receiver that throws at once fails like one that rejects.
-					const delivery = Promise.resolve()
-						.then(() => lane.receiver.receive(stamped))
-						.then(
-							() => {
-								if (!closed) took(lane);
-							},
-							(error: unknown) => {
-								if (!closed) lose(lane, error instanceof Error ? error.name : "thrown");
-							},
-						)
-						.finally(() => {
-							if (!closed) lane.pending -= 1;
-							underWay.delete(delivery);
-						});
-					underWay.add(delivery);
+export default defineModule(
+	{ name: "audit", section, replicaSafe: true, takes: [auditReceivers] },
+	(m) => [
+		m.provide(lostEvents).by((c) => {
+			const named = c.section.receivers === "none" ? [] : c.section.receivers;
+			const spec = {
+				name: "auth_audit_events_lost_total",
+				help: "Audit events a receiver lost since boot: past max-pending, failed, or under way at the stop deadline.",
+			};
+			// A label needs one value at least; with no receiver the counter has no label and no series.
+			if (named.length === 0) return counter({ ...spec, labels: {} });
+			return counter({ ...spec, labels: { receiver: named } });
+		}),
+		m.contribute(instruments).by((c) => c.get(lostEvents)),
+		m.provide(audit).by(async (c) => {
+			const contributed = await c.collect(auditReceivers);
+			const named = c.section.receivers === "none" ? [] : c.section.receivers;
+			const builtIns = new Map([["log", logReceiver(c.log)]]);
+			const known = new Map(builtIns);
+			const refusals: Refusal[] = [];
+			for (const receiver of contributed) {
+				if (builtIns.has(receiver.name)) {
+					refusals.push({
+						where: "audit.receivers",
+						reason: `${receiver.name} is a built-in name`,
+					});
+				} else if (!named.includes(receiver.name)) {
+					refusals.push({
+						where: "audit.receivers",
+						reason: `${receiver.name} is composed but not named`,
+					});
 				}
-			},
-			lost: () => Object.freeze(Object.fromEntries(lanes.map((l) => [l.receiver.name, l.lost]))),
-		});
-	}),
-]);
+				known.set(receiver.name, receiver);
+			}
+			// A name written in the list is a configured value: it is told by its place alone.
+			for (const [at, name] of named.entries()) {
+				if (!known.has(name))
+					refusals.push({ where: `audit.receivers.${at}`, reason: "names no receiver" });
+			}
+			if (refusals.length > 0) c.refuseAll(refusals);
+			const max = c.section["max-pending"];
+			/** One receiver's events under way, lost since boot, and lost since it last took one. */
+			const lanes = named.map((name) => ({
+				receiver: known.get(name) as AuditReceiver,
+				pending: 0,
+				lost: 0,
+				losing: 0,
+			}));
+			type Lane = (typeof lanes)[number];
+			const counted = await c.get(lostEvents);
+			/** Past the stop deadline: what settles after is neither taken nor lost again. */
+			let closed = false;
+			const underWay = new Set<Promise<void>>();
+			/** `failure` is the kind alone (`backlog`, `stopped`, or the error's name), never a message a receiver wrote. */
+			const lose = (lane: Lane, failure: string) => {
+				lane.lost += 1;
+				counted.add({ receiver: lane.receiver.name });
+				lane.losing += 1;
+				if (lane.losing === 1) {
+					c.log.warn("audit receiver losing events", {
+						receiver: lane.receiver.name,
+						lost: 1,
+						failure,
+					});
+				}
+			};
+			const took = (lane: Lane) => {
+				if (lane.losing === 0) return;
+				c.log.warn("audit receiver recovered", { receiver: lane.receiver.name, lost: lane.losing });
+				lane.losing = 0;
+			};
+			// At stop, deliveries under way get until the deadline; what is still under way then is lost.
+			c.onStop(async (signal) => {
+				await Promise.race([Promise.allSettled([...underWay]), abortOf(signal)]);
+				closed = true;
+				for (const lane of lanes) {
+					for (; lane.pending > 0; lane.pending -= 1) lose(lane, "stopped");
+				}
+			});
+			return Object.freeze<Audit>({
+				record: (event) => {
+					const { attributes, ...rest } = event;
+					// Copied, so freezing the event leaves the emitter's own attributes as they were.
+					const copied = attributes
+						? {
+								attributes: Object.fromEntries(
+									Object.entries(attributes).map(([k, v]) => [
+										k,
+										k === requestText ? bounded(v) : v,
+									]),
+								),
+							}
+						: {};
+					const stamped: AuditEvent = deepFreeze({ ...rest, ...copied, at: c.clock.now() });
+					for (const lane of lanes) {
+						if (lane.pending >= max) {
+							lose(lane, "backlog");
+							continue;
+						}
+						lane.pending += 1;
+						// Deferred, so record returns first, and a receiver that throws at once fails like one that rejects.
+						const delivery = Promise.resolve()
+							.then(() => lane.receiver.receive(stamped))
+							.then(
+								() => {
+									if (!closed) took(lane);
+								},
+								(error: unknown) => {
+									if (!closed) lose(lane, error instanceof Error ? error.name : "thrown");
+								},
+							)
+							.finally(() => {
+								if (!closed) lane.pending -= 1;
+								underWay.delete(delivery);
+							});
+						underWay.add(delivery);
+					}
+				},
+				lost: () => Object.freeze(Object.fromEntries(lanes.map((l) => [l.receiver.name, l.lost]))),
+			});
+		}),
+	],
+);

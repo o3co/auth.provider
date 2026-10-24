@@ -1,7 +1,7 @@
 import http from "@mod/http/module";
 import { testRequest } from "@mod/http/testing";
 import { assemble, kernelConfig } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { describe, expect, it } from "vitest";
 import { type CookieLookup, cookies, cookiesFor } from "../src/contract.ts";
 import cookiesModule from "../src/module.ts";
@@ -140,4 +140,9 @@ describe("lookup", () => {
 			),
 		).toEqual({ kind: "withheld", reason: "duplicate" });
 	});
+});
+
+it("takes every handle its takes name, on a site of its own", async () => {
+	const config = { ...kernelConfig(), http: { port: 0, "public-origin": "https://app.example" } };
+	expect(await takesUnused({ modules: [http, cookiesModule], config })).toEqual({});
 });

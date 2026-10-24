@@ -1,5 +1,5 @@
 import { assemble, BootRefused, defineModule, kernelConfig, type Module } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { metrics } from "@mod/metrics";
 import metricsModule from "@mod/metrics/module";
 import { beforeEach, expect, it } from "vitest";
@@ -11,7 +11,7 @@ import { section } from "../src/section.ts";
 let recorded = recordingLog();
 const lines = () => recorded.lines();
 const receiving = (name: string, receive: AuditReceiver["receive"]): Module =>
-	defineModule({ name: `receiver-${name}` }, (m) => [
+	defineModule({ name: `receiver-${name}`, takes: [] }, (m) => [
 		m.contribute(auditReceivers).by(() => ({ name, receive })),
 	]);
 /** A composition naming `receivers`, with the receiving modules and settings a test adds. */
@@ -300,4 +300,9 @@ it("counts each receiver's lost events as a metric", async () => {
 
 it("lets each receiver hold 1000 deliveries at once when the operator sets no limit", () => {
 	expect(section.parse({ receivers: "none" })).toEqual({ receivers: "none", "max-pending": 1000 });
+});
+
+it("takes every handle its takes name", async () => {
+	const config = { ...kernelConfig(), audit: { receivers: ["log"] } };
+	expect(await takesUnused({ modules: [auditModule], config })).toEqual({});
 });
