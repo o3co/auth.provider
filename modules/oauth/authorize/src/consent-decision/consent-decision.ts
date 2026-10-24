@@ -52,5 +52,8 @@ export function consentDecisionWith({ consents: kept }: ConsentDecisionParts): C
 }
 
 /** The decision over `consent`'s records the assembly gives. */
+/** What `consentDecisionOver` takes. */
+export const consentDecisionTakes = [consents];
+
 export const consentDecisionOver = async (c: BuildContext<Settings>) =>
 	consentDecisionWith({ consents: await c.get(consents) });

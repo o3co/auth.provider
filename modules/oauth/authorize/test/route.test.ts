@@ -88,7 +88,7 @@ it("leaves Unavailable before the redirect URI is trusted to http, which answers
 	const app = await assemble({
 		modules: [
 			http,
-			defineModule({ name: "authorize-route" }, (m) => [
+			defineModule({ name: "authorize-route", takes: [] }, (m) => [
 				m.contribute(routes).by(() => ({
 					method: "GET",
 					path: "/oauth/authorize",

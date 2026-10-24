@@ -34,7 +34,13 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime, recordingLog, switchedModule, unavailableSwitch } from "@mod/kernel/testing";
+import {
+	quietRuntime,
+	recordingLog,
+	switchedModule,
+	takesUnused,
+	unavailableSwitch,
+} from "@mod/kernel/testing";
 import { amrSources } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
 import rateLimitModule from "@mod/rate-limit/module";
@@ -103,7 +109,7 @@ async function serve(
 		asking?: boolean;
 	} = {},
 ) {
-	const proving = defineModule({ name: "proving" }, (m) => [
+	const proving = defineModule({ name: "proving", takes: [] }, (m) => [
 		m
 			.contribute(amrSources)
 			.by(() => ({ name: "proving", amr: options.proves ?? ["pwd", "otp", "mfa"] })),
@@ -114,7 +120,7 @@ async function serve(
 		reauths: unavailableSwitch<ReauthStore>("reauth store"),
 		tokens: unavailableSwitch<Tokens>("tokens"),
 	};
-	const reauthStand = defineModule({ name: "reauth-store" }, (m) => [
+	const reauthStand = defineModule({ name: "reauth-store", takes: [] }, (m) => [
 		m
 			.provide(reauthStore)
 			.by(() =>
@@ -127,7 +133,8 @@ async function serve(
 	});
 	const audit = auditStandIn();
 	recorded = audit.events;
-	const app = await assemble({
+	// The composition as one value, for a test of what its modules take.
+	const input = {
 		modules: [
 			http,
 			switchedModule(tokensStandIn({ revocable: options.revocable ?? true }), tokens, down.tokens),
@@ -222,7 +229,8 @@ async function serve(
 			...codeGrantConfig({ "code-lifetime": "1m", ...options.codeGrant }),
 		},
 		runtime,
-	});
+	};
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
 	const base = `http://127.0.0.1:${app.get(listening).port()}`;
@@ -268,7 +276,18 @@ async function serve(
 		const described = outcome.description ? { error_description: outcome.description } : {};
 		return { status: 400, body: { error: outcome.error, ...described } };
 	};
-	return { app, simulated, down, login, authorize, token, opened, base, events: audit.events };
+	return {
+		app,
+		input,
+		simulated,
+		down,
+		login,
+		authorize,
+		token,
+		opened,
+		base,
+		events: audit.events,
+	};
 }
 
 const request = (extra: Record<string, string> = {}) => ({
@@ -516,7 +535,7 @@ describe("authorize: the section", () => {
 
 	it("contributes the redirect URIs' document copy to client-documents", async () => {
 		const seen = contract<readonly DocumentCopy[]>("test.copies-seen");
-		const probe = defineModule({ name: "copies-probe" }, (m) => [
+		const probe = defineModule({ name: "copies-probe", takes: [documentCopies] }, (m) => [
 			m.provide(seen).by((c) => c.collect(documentCopies)),
 		]);
 		const { app } = await serve({ extra: [probe] });
@@ -539,7 +558,7 @@ afterEach(() => {
 	recorded = [];
 });
 /** A rule narrowing to the `resource` asked when the issuance may have it, as resource indicators do. */
-const narrowing = defineModule({ name: "narrowing" }, (m) => [
+const narrowing = defineModule({ name: "narrowing", takes: [] }, (m) => [
 	m.contribute(targetRules).by(() => ({
 		target: ({ param, audience, within }) => {
 			const asked = param("resource");
@@ -588,7 +607,7 @@ describe("authorize: the audience a request asks for", () => {
 	});
 
 	it("sends a parameter the rule reads, sent twice, back as the rule says, and any other as invalid_request", async () => {
-		const strict = defineModule({ name: "strict" }, (m) => [
+		const strict = defineModule({ name: "strict", takes: [] }, (m) => [
 			m.contribute(targetRules).by(() => ({
 				target: ({ audience }) => ({ kind: "audience", audience }),
 				repeated: (name) =>
@@ -618,7 +637,7 @@ describe("authorize: the audience a request asks for", () => {
 
 	it("asks the issuance policies for the audience asked, and gives their refusal before invalid_target", async () => {
 		const asked: IssuanceRequest[] = [];
-		const policy = defineModule({ name: "refusing-bob" }, (m) => [
+		const policy = defineModule({ name: "refusing-bob", takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "refusing-bob",
 				judge: async (request) => {
@@ -992,7 +1011,7 @@ it("revokes a code's token when its session logs out later", async () => {
 
 it("adds an ID token through code-grant when the scope holds the maker's, with the code's facts", async () => {
 	const asked: IdTokenRequest[] = [];
-	const maker = defineModule({ name: "maker" }, (m) => [
+	const maker = defineModule({ name: "maker", takes: [] }, (m) => [
 		m.contribute(idTokens).by(() => ({
 			scope: "openid",
 			make: async (r: IdTokenRequest) => {
@@ -1223,7 +1242,7 @@ it("meets an acr by the amr sets its table names, and sends a session that falls
 
 it("binds to the code the first acr met in the order asked, past any not met", async () => {
 	const asked: IdTokenRequest[] = [];
-	const maker = defineModule({ name: "maker" }, (m) => [
+	const maker = defineModule({ name: "maker", takes: [] }, (m) => [
 		m.contribute(idTokens).by(() => ({
 			scope: "openid",
 			make: async (r: IdTokenRequest) => {
@@ -1349,7 +1368,7 @@ it("asks a session whose authentication time is unknown to log in again for an e
 
 it("offers a contributed acr unless the operator's table names the same acr", async () => {
 	const offered = (acr: string) =>
-		defineModule({ name: `offers-${acr}` }, (m) => [
+		defineModule({ name: `offers-${acr}`, takes: [] }, (m) => [
 			m.contribute(acrEntries).by(() => ({ acr, sets: [["mfa"]] })),
 		]);
 	const s = await serve({
@@ -1368,7 +1387,7 @@ it("offers a contributed acr unless the operator's table names the same acr", as
 
 it("names among the issuer's metadata where it is, that it answers with a code in the query, PKCE by S256 alone, no request_uri, and `iss` on every redirect answer", async () => {
 	const published = contract<readonly MetadataItem[]>("published");
-	const reader = defineModule({ name: "reader" }, (m) => [
+	const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
 		m.provide(published).by((c) => c.collect(metadata)),
 	]);
 	const { app } = await serve({ extra: [reader] });
@@ -1549,7 +1568,7 @@ describe("authorize: audit events", () => {
 describe("authorize: the issuance policies", () => {
 	/** A policy that refuses bob, as one would a user whose email is not verified, and keeps what it was asked. */
 	const refusingBob = (asked: IssuanceRequest[], down = false) =>
-		defineModule({ name: "refusing-bob" }, (m) => [
+		defineModule({ name: "refusing-bob", takes: [] }, (m) => [
 			m.contribute(issuancePolicies).by(() => ({
 				name: "refusing-bob",
 				judge: async (request) => {
@@ -1672,4 +1691,9 @@ describe("authorize: the issuance policies", () => {
 		).toEqual([{ what: "refusing-bob", route: "/oauth/authorize" }]);
 		expect(events).toEqual([]);
 	});
+});
+
+it("takes all it names, in the composition its tests serve", async () => {
+	const { input } = await serve();
+	expect(await takesUnused(input)).toEqual({});
 });

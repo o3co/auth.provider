@@ -6,14 +6,14 @@ import { defineModule } from "@mod/kernel";
 import { returnPaths } from "@mod/login-gates";
 import { requestsPerSource } from "@mod/rate-limit";
 import { clientMetadata } from "./client-metadata/client-metadata.ts";
-import { endpointOver, path, routeOver } from "./route/route.ts";
+import { endpointOver, path, routeOver, routeTakes } from "./route/route.ts";
 import { section } from "./section.ts";
 
 /** Why the endpoint takes other sites' requests. */
 const navigation =
 	"An authorization request arrives as a navigation from the client's site by design; it only starts what the user's own login and consent complete.";
 
-export default defineModule({ name: "authorize", section }, (m) => [
+export default defineModule({ name: "authorize", section, takes: routeTakes }, (m) => [
 	m.contribute(metadataSections).by(() => clientMetadata.section),
 	m.contribute(documentCopies).by(() => clientMetadata.copy),
 	m.contribute(returnPaths).by(() => ({ path })),
