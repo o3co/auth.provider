@@ -446,48 +446,21 @@ describe("passkey-witness-http", () => {
 		}
 	});
 
-	it("offers no clear, and boots with or without clear-url, calling it never and judging no outbound rule by it", async () => {
+	it("offers no clear, and refuses to start on a clear-url still written, naming the key and never a value", async () => {
 		const { witness } = await open();
 		expect("clear" in witness).toBe(false);
-		for (const clearUrl of [
-			at("/w/clear"),
-			at("/w/clear", otherPair),
-			"https://elsewhere.example/c",
-		]) {
-			received.length = 0;
-			const opened = await open(settings({ "clear-url": clearUrl }));
-			expect("clear" in opened.witness, clearUrl).toBe(false);
-			await opened.witness.read("alice");
-			await opened.witness.enroll("alice", "t-1");
-			await opened.witness.withdraw("alice", "t-1");
-			expect(received.map((r) => r.path).includes("/w/clear"), clearUrl).toBe(false);
-		}
+		const error = await open(settings({ "clear-url": at("/w/clear-secret") })).catch(
+			(e: unknown) => e,
+		);
+		expect(error).toBeInstanceOf(BootRefused);
+		const refusals = (error as BootRefused).refusals;
+		expect(refusals.map((r) => r.where)).toEqual(["passkey-witness-http"]);
+		expect(JSON.stringify(refusals)).toContain("clear-url");
+		expect(JSON.stringify(refusals)).not.toContain("clear-secret");
 	});
 
-	it("refuses to start where withdraw-url reaches clear-url's target, however each is spelled", async () => {
-		const clear = at("/w/clear");
-		for (const withdraw of [
-			clear,
-			`${clear}?`,
-			// Spellings the URL setting refuses as not the parser's, at the same key.
-			at("/w/./clear"),
-			at("/w/x/../clear"),
-			`${clear}#x`,
-			// An unreserved character encoded is the character.
-			at("/w/%63lear"),
-			at("/w/cle%61r"),
-		]) {
-			const error = await open(settings({ "withdraw-url": withdraw, "clear-url": clear })).catch(
-				(e: unknown) => e,
-			);
-			expect(error, withdraw).toBeInstanceOf(BootRefused);
-			expect(
-				(error as BootRefused).refusals.map((r) => r.where),
-				withdraw,
-			).toEqual(["passkey-witness-http.withdraw-url"]);
-		}
-		// Another path or query is another target.
-		for (const withdraw of [at("/w/withdraw"), `${clear}?only=token`]) {
+	it("takes a withdraw-url at any path of the ledger's origin, the old clear path included", async () => {
+		for (const withdraw of [at("/w/withdraw"), at("/w/clear"), `${at("/w/clear")}?only=token`]) {
 			expect((await open(settings({ "withdraw-url": withdraw }))).witness, withdraw).toBeDefined();
 		}
 	});
