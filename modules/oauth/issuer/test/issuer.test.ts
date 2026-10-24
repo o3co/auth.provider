@@ -1,6 +1,7 @@
 import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { assemble, type BootRefused, contract, defineModule, kernelConfig } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { issuer, type MetadataItem, metadata } from "../src/contract.ts";
 import issuerModule from "../src/module.ts";
@@ -60,8 +61,10 @@ it("refuses an origin other than the public origin, and takes a path under it", 
 it("collects the items this server names itself by, refusing two contributions of one item or one of the issuer item", async () => {
 	const named = contract<readonly MetadataItem[]>("named");
 	const item = (module: string, name: string, value: unknown) =>
-		defineModule({ name: module }, (m) => [m.contribute(metadata).by(() => ({ name, value }))]);
-	const reader = defineModule({ name: "reader" }, (m) => [
+		defineModule({ name: module, takes: [] }, (m) => [
+			m.contribute(metadata).by(() => ({ name, value })),
+		]);
+	const reader = defineModule({ name: "reader", takes: [metadata] }, (m) => [
 		m.provide(named).by((c) => c.collect(metadata)),
 	]);
 	const bootWith = (...modules: ReturnType<typeof item>[]) =>
@@ -86,5 +89,15 @@ it("collects the items this server names itself by, refusing two contributions o
 		expect(await refusedAt(bootWith(item("a", "issuer", value)))).toEqual([
 			"issuer.metadata:issuer",
 		]);
+	}
+});
+
+it("takes all it names, with a public origin and without one", async () => {
+	for (const origin of [{ "public-origin": "https://issuer.example" }, {}]) {
+		const input = {
+			modules: [http, issuerModule],
+			config: { ...kernelConfig(), ...httpConfig(origin), ...issuerConfig() },
+		};
+		expect(await takesUnused(input), JSON.stringify(origin)).toEqual({});
 	}
 });
