@@ -1,7 +1,7 @@
 # passkeys
 
 ## Responsibilities
-- Keeps passkeys: each subject's user handle, and the credentials registered for it; its internal module `registration` registers them.
+- Keeps passkeys: each subject's user handle, and the credentials registered for it; its internal module `registration` registers them, and `records` reads and writes them in the shape written.
 - Answers assertions by the passkeys it keeps, through `webauthn`'s ceremonies; its internal module `challenges` keeps the challenges both answer.
 - Keeps a witness's mark in line with whether each subject holds a passkey, so losing the store never reads as holding none; its internal module `holders` settles them.
 
@@ -25,7 +25,7 @@
 ## Invariants
 - A challenge is taken once, within `webauthn`'s `lifetimeMs` on `kernel`'s clock, whatever the store's expiry. An assertion's challenge is redeemed by its requester alone; any other is `challenge`, after the challenge is taken. Its record keeps the requester's SHA-256, never the requester: the assertion makes the digest and compares it.
 - `registrations`' creation options require a discoverable credential, as `passkeys` lists none to ask for. `passkeys` refuses an assertion without a user handle before any store is read; the handle must be its holder's, judged after the signature.
-- A user handle is made on a subject's first options, or by `cleared` where the subject has no holder, and kept; a credential is listed only on the holder whose handle it was made under. Handles and credential ids are written and compared only in `webauthn`'s canonical form; a credential that would not read back is refused before a write. A record read in another shape is unavailable.
+- A user handle is made on a subject's first options, or by `cleared` where the subject has no holder, and kept; a credential is listed only on the holder whose handle it was made under. A credential that would not read back is refused before a write. A record read in another shape is unavailable.
 - A credential id its holder lists is refused at registration. One no holder lists (removed, or left by 0.18) is taken over in the same write. Options exclude the subject's own. `conflict` tells the caller that some subject lists an id; ids are high-entropy, made by the authenticator: it answers only for an id known.
 - The count is written only over the count judged; a lost race is `raced`.
 - A registration writes the record and the list together, as a removal, an end and a clear change them: in what 0.19 writes, a list names an id exactly while its record names the subject, pending or a passkey. An orphan record or an old entry 0.18 left stays the accepted exception.
