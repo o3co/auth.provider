@@ -37,7 +37,10 @@ async function handlerOf(c: BuildContext<unknown>): Promise<Route["handle"]> {
 	};
 }
 
-export default defineModule({ name: "userinfo", replicaSafe: true }, (m) => [
+/** What its routes and its metadata take. */
+const moduleTakes = [senderBinding, tokens, sessionTokens, sessions, releasedClaims, site];
+
+export default defineModule({ name: "userinfo", replicaSafe: true, takes: moduleTakes }, (m) => [
 	...(["GET", "POST"] as const).map((method) =>
 		m.contribute(routes).by(async (c) => ({
 			method,

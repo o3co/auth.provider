@@ -3,7 +3,7 @@ import http from "@mod/http/module";
 import { httpConfig } from "@mod/http/testing";
 import { type MetadataItem, metadata } from "@mod/issuer";
 import { assemble, contract, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
-import { quietRuntime, recordingLog } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused } from "@mod/kernel/testing";
 import { releasedClaims } from "@mod/oidc";
 import { senderBinding } from "@mod/sender-binding";
 import { sessions } from "@mod/session";
@@ -22,7 +22,7 @@ afterEach(async () => {
 let failing: "unavailable" | "bug" | undefined;
 const items = contract<readonly MetadataItem[]>("items");
 /** The parts userinfo reads: every token is admitted, issued in a session no longer open. */
-const parts = defineModule({ name: "parts" }, (m) => [
+const parts = defineModule({ name: "parts", takes: [metadata] }, (m) => [
 	m.provide(senderBinding).by(
 		() =>
 			({
@@ -57,7 +57,16 @@ const parts = defineModule({ name: "parts" }, (m) => [
 let logged = recordingLog();
 async function serve() {
 	logged = recordingLog();
-	const app = await assemble({
+	const app = await assemble(composition());
+	await app.start();
+	stop = () => app.stop(1000);
+	const url = `http://127.0.0.1:${app.get(listening).port()}/oauth/userinfo`;
+	return { app, url };
+}
+
+/** userinfo beside http and the parts it reads, on many instances. */
+function composition() {
+	return {
 		modules: [http, parts, userinfoModule],
 		config: {
 			// Many instances: userinfo keeps nothing, so it never refuses them.
@@ -69,11 +78,7 @@ async function serve() {
 			}),
 		},
 		runtime: quietRuntime({ log: logged.log }),
-	});
-	await app.start();
-	stop = () => app.stop(1000);
-	const url = `http://127.0.0.1:${app.get(listening).port()}/oauth/userinfo`;
-	return { app, url };
+	};
 }
 
 it("serves GET and POST, with or without a body, refusing a token whose session ended, never stored", async () => {
@@ -157,4 +162,8 @@ it("names itself in the issuer's metadata", async () => {
 		name: "userinfo_endpoint",
 		value: "https://as.example/oauth/userinfo",
 	});
+});
+
+it("takes all it names", async () => {
+	expect(await takesUnused(composition())).toEqual({});
 });
