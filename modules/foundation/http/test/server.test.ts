@@ -26,8 +26,8 @@ import {
 	use,
 } from "../src/contract.ts";
 import http from "../src/module.ts";
+import { declared } from "../src/serving/test/declared.ts";
 import { testRequest } from "../src/testing.ts";
-import { declared } from "./declared.ts";
 
 const quiet = quietRuntime({
 	clock: { now: () => 0 },
