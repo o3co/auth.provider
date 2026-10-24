@@ -2,8 +2,8 @@ import { connect } from "node:net";
 import { assemble, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { afterEach, expect, it } from "vitest";
-import { listening, type RequestEnd, requestEnds, routes } from "../src/contract.ts";
-import http from "../src/module.ts";
+import { listening, type RequestEnd, requestEnds, routes } from "../../contract.ts";
+import http from "../../module.ts";
 
 let now = 0;
 const runtime = quietRuntime({

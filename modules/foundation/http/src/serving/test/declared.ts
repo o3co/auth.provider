@@ -1,4 +1,4 @@
-import type { Route } from "../src/contract.ts";
+import type { Route } from "../../contract.ts";
 
 /** A test's route as boot checks it: a GET that changes no state, any other with a test's reasons; what it declares stands. */
 export const declared = (route: Route): Route =>

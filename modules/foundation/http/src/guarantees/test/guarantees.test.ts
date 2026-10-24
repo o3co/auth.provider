@@ -13,8 +13,8 @@ import {
 	type Route,
 	routes,
 	use,
-} from "../src/contract.ts";
-import http from "../src/module.ts";
+} from "../../contract.ts";
+import http from "../../module.ts";
 
 const runtime = quietRuntime({
 	clock: { now: () => 0 },

@@ -3,9 +3,9 @@ import { connect } from "node:net";
 import { assemble, defineModule, kernelConfig, Unavailable } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import { afterEach, describe, expect, it } from "vitest";
-import { type Loads, listening, type Route, routes } from "../src/contract.ts";
-import http from "../src/module.ts";
-import { declared } from "./declared.ts";
+import { type Loads, listening, type Route, routes } from "../../contract.ts";
+import http from "../../module.ts";
+import { declared } from "../../serving/test/declared.ts";
 
 const quiet = quietRuntime({
 	clock: { now: () => 0 },
