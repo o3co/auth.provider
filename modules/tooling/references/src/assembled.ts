@@ -120,18 +120,21 @@ async function collectedIn(root: string): Promise<Assembled> {
 		read: (route) => seenRoute(route, marked),
 	};
 	const probed = contract<readonly (readonly unknown[])[]>("references.collected");
-	const probe = defineModule({ name: "references-probe" }, (m) => [
-		m
-			.provide(probed)
-			.by(async (c) =>
-				Promise.all([
-					c.collect(clients.point),
-					c.collect(types.point),
-					c.collect(routes.point),
-					c.collect(http.marks),
-				]),
-			),
-	]);
+	const probe = defineModule(
+		{ name: "references-probe", takes: [clients.point, types.point, routes.point, http.marks] },
+		(m) => [
+			m
+				.provide(probed)
+				.by(async (c) =>
+					Promise.all([
+						c.collect(clients.point),
+						c.collect(types.point),
+						c.collect(routes.point),
+						c.collect(http.marks),
+					]),
+				),
+		],
+	);
 	const config = await trialConfig(root);
 	const app = await assemble({ modules: [...modules.map((m) => m.module), probe], config });
 	const [sections = [], idps = [], served = [], contributedMarks = []] = app.get(probed);
