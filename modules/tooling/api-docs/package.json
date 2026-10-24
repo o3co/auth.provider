@@ -1,0 +1,17 @@
+{
+	"name": "@mod/api-docs",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "assembly",
+	"scripts": {
+		"api-docs": "node src/main.ts"
+	},
+	"dependencies": {
+		"typedoc": "0.28.20",
+		"typescript": "6.0.3"
+	},
+	"devDependencies": {
+		"vitest": "5.0.5"
+	}
+}
