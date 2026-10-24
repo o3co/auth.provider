@@ -19,7 +19,7 @@ const enrollRetries = 3;
 const settleMarks = 2;
 
 /** `ask`'s answer, asked again while it is unavailable. */
-async function retried<T>(ask: () => Promise<T>) {
+export async function retried<T>(ask: () => Promise<T>) {
 	for (let attempt = 0; ; attempt++) {
 		try {
 			return await ask();
