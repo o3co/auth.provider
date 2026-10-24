@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { defineModule, isUnavailable, Unavailable } from "@mod/kernel";
+import { type PasskeyWitness, passkeyWitnesses } from "@mod/passkey-witness";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import { keptPasskeys } from "./records.ts";
@@ -11,7 +12,6 @@ import type {
 	StoredChallenge,
 	StoredPasskey,
 } from "./store.ts";
-import { type PasskeyWitness, passkeyWitnesses } from "./witness.ts";
 
 export type PasskeysSettings = z.input<typeof section>;
 

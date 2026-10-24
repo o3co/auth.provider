@@ -2240,6 +2240,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/passkey-witness':
+        specifier: workspace:*
+        version: link:../passkey-witness
       '@mod/webauthn':
         specifier: workspace:*
         version: link:../webauthn

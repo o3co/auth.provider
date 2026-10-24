@@ -15,6 +15,7 @@
 	"dependencies": {
 		"@mod/audit": "workspace:*",
 		"@mod/kernel": "workspace:*",
+		"@mod/passkey-witness": "workspace:*",
 		"@mod/webauthn": "workspace:*",
 		"zod": "4.6.7"
 	},
