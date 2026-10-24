@@ -96,6 +96,17 @@ it("writes a witness-backfill script where the enrollment witness is kept, and n
 	expect(plain.scripts["witness-backfill"]).toBeUndefined();
 });
 
+it("writes a passkey-backfill script where passkey logins keep the passkey witness, and none where it is not", async () => {
+	const kept = await generated(["@mod/webauthn-login", "@mod/passkey-witness-http"]);
+	const pkg = JSON.parse(await read(kept, "package.json"));
+	expect(pkg.scripts["passkey-backfill"]).toBe(
+		"node --env-file-if-exists=.env src/passkey-backfill.ts",
+	);
+	expect(await read(kept, "src/passkey-backfill.ts")).toMatch(/passkeyBackfill/);
+	const plain = JSON.parse(await read(await generated(), "package.json"));
+	expect(plain.scripts["passkey-backfill"]).toBeUndefined();
+});
+
 it("assembles the features added, with their wirings, bridges and default adapters", async () => {
 	const add = ["@mod/device-grant", "@mod/mfa-email"];
 	const target = await generated(add);
