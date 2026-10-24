@@ -13,7 +13,7 @@ export function mailConfig(settings: Partial<MailSettings> = {}) {
 }
 
 /** Declares the purposes the contract tests send, with their templates. */
-export const contractTemplates: Module = defineModule({ name: "mail-contract" }, (m) => [
+export const contractTemplates: Module = defineModule({ name: "mail-contract", takes: [] }, (m) => [
 	m.contribute(mailPurposes).by(() => ({ purpose: "contract.notice" })),
 	m.contribute(mailPurposes).by(() => ({ purpose: "contract.broken" })),
 	m.contribute(mailPurposes).by(() => ({ purpose: "contract.broken-text" })),
@@ -163,7 +163,7 @@ export function mailContract(name: string, harness: MailHarness): void {
 		);
 
 		it("refuses to boot when a declared purpose has no template", async () => {
-			const bare = defineModule({ name: "mail-contract-bare" }, (m) => [
+			const bare = defineModule({ name: "mail-contract-bare", takes: [] }, (m) => [
 				m.contribute(mailPurposes).by(() => ({ purpose: "contract.bare" })),
 			]);
 			await expect(harness.boot([bare])).rejects.toBeInstanceOf(BootRefused);
