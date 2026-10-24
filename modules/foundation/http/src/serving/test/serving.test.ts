@@ -1,104 +1,27 @@
 import { connect } from "node:net";
-import { certificateForwarding } from "@mod/client-certificate";
-import {
-	assemble,
-	BootRefused,
-	contract,
-	defineModule,
-	kernelConfig,
-	type Module,
-	type Runtime,
-	Unavailable,
-} from "@mod/kernel";
+import { contract, defineModule, type Module, Unavailable } from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
 	applying,
 	type HttpRequest,
 	type HttpResponse,
 	listening,
-	type PolicyRule,
-	policies,
 	policy,
 	type Route,
-	routes,
-	site,
 	use,
-} from "../src/contract.ts";
-import http from "../src/module.ts";
-import { declared } from "../src/serving/test/declared.ts";
-import { testRequest } from "../src/testing.ts";
+} from "../../contract.ts";
 
-const quiet = quietRuntime({
-	clock: { now: () => 0 },
-	random: { bytes: (n) => new Uint8Array(n) },
-});
-
-/** A runtime that keeps the events it warns of, its clock at `at()`. */
-function warning(at: () => number = () => 0) {
-	const recorded = recordingLog();
-	const runtime = quietRuntime({ ...quiet, clock: { now: at }, log: recorded.log });
-	const count = (event: string) =>
-		recorded.lines().filter((line) => line.level === "warn" && line.event === event).length;
-	return { runtime, count };
-}
-
-/** Sends raw bytes and reads the status line of the answer. */
-function rawStatus(port: number, request: string): Promise<number> {
-	return new Promise((resolve, reject) => {
-		const socket = connect(port, "127.0.0.1", () => socket.end(request));
-		let text = "";
-		socket.on("data", (chunk) => {
-			text += chunk.toString();
-		});
-		socket.on("end", () => resolve(Number(/^HTTP\/1\.1 (\d{3})/.exec(text)?.[1] ?? 0)));
-		socket.on("error", reject);
-	});
-}
-
-let stop: () => Promise<void> = async () => {};
-afterEach(async () => {
-	await stop();
-	stop = async () => {};
-});
-
-/** http with these http settings and modules, on any free port. */
-function boot(
-	settings: Record<string, unknown> = {},
-	options: { modules?: Module[]; runtime?: Runtime } = {},
-) {
-	return assemble({
-		modules: [http, ...(options.modules ?? [])],
-		config: { ...kernelConfig(), http: { port: 0, ...settings } },
-		runtime: options.runtime ?? quiet,
-	});
-}
-
-/** Boots and starts http with these handlers; the base URL. */
-async function serveWith(handlers: Module, settings = {}, runtime = quiet) {
-	const app = await boot(settings, { modules: [handlers], runtime });
-	await app.start();
-	stop = () => app.stop(1000);
-	return `http://127.0.0.1:${app.get(listening).port()}`;
-}
-
-/** A module contributing these policy rules, then these routes. */
-function handlers(list: readonly Route[], rules: readonly PolicyRule[] = []): Module {
-	return defineModule({ name: "handlers" }, (m) => [
-		...rules.map((rule) => m.contribute(policies).by(() => rule)),
-		...list.map((route) => m.contribute(routes).by(() => declared(route))),
-	]);
-}
-
-/** The refusals a boot is refused with, as [where, reason]. */
-async function refusalsOf(booting: Promise<unknown>) {
-	const error = await booting.then(
-		() => undefined,
-		(e: unknown) => e,
-	);
-	expect(error).toBeInstanceOf(BootRefused);
-	return (error as BootRefused).refusals.map((r) => [r.where, r.reason]);
-}
+import {
+	boot,
+	handlers,
+	quiet,
+	rawStatus,
+	refusalsOf,
+	served,
+	serveWith,
+	warning,
+} from "./serve.ts";
 
 describe("http", () => {
 	it("sends each cookie as its own Set-Cookie header, and tells the handler the source", async () => {
@@ -135,7 +58,7 @@ describe("http", () => {
 		const forwarded = { headers: { "x-forwarded-for": "198.51.100.1, 10.0.0.2" } };
 		const trusted = ["127.0.0.1", "10.0.0.0/8"];
 		await fetch(await serveWith(route, { "trusted-proxies": trusted }), forwarded);
-		await stop();
+		await served.stop();
 		await fetch(await serveWith(route, { "trusted-proxies": trusted, "proxy-hops": 2 }), forwarded);
 		expect(sources).toEqual(["10.0.0.2", "198.51.100.1"]);
 	});
@@ -165,55 +88,6 @@ describe("http", () => {
 		}
 		expect(seen?.query.get("a")).toEqual(["1", "2"]);
 		expect([seen?.query.single("a"), seen?.query.repeated()]).toEqual([undefined, ["a"]]);
-	});
-
-	it("reads form bodies with repeated names and ignores other bodies", async () => {
-		const forms: unknown[] = [];
-		const base = await serveWith(
-			handlers([
-				{
-					method: "POST",
-					path: "/form",
-					handle: (request) => {
-						forms.push(Object.fromEntries(request.form));
-						return { status: 204 };
-					},
-				},
-			]),
-		);
-		await fetch(`${base}/form`, {
-			method: "POST",
-			headers: { "content-type": "application/x-www-form-urlencoded; charset=utf-8" },
-			body: "a=1&a=2&b=%20x",
-		});
-		await fetch(`${base}/form`, { method: "POST", body: JSON.stringify({ a: 1 }) });
-		expect(forms).toEqual([{ a: ["1", "2"], b: [" x"] }, {}]);
-	});
-
-	it("answers 400 to a query whose percent-escapes are not UTF-8, and reads one that is", async () => {
-		const seen: unknown[] = [];
-		const base = await serveWith(
-			handlers([
-				{
-					method: "GET",
-					path: "/q",
-					handle: (request) => {
-						seen.push(Object.fromEntries(request.query));
-						return { status: 204 };
-					},
-				},
-			]),
-		);
-		for (const query of ["a=%C3%28", "a=%E9", "%E9=1"]) {
-			const res = await fetch(`${base}/q?${query}`);
-			expect([res.status, res.headers.get("cache-control"), await res.text()], query).toEqual([
-				400,
-				"no-store",
-				"",
-			]);
-		}
-		expect((await fetch(`${base}/q?a=%C3%A9&b=x+y&c=&d=%zz`)).status).toBe(204);
-		expect(seen).toEqual([{ a: ["é"], b: ["x y"], c: [""], d: ["%zz"] }]);
 	});
 
 	it("answers 400 to a request target it cannot read as a URL, and keeps serving", async () => {
@@ -382,7 +256,7 @@ describe("http", () => {
 			handle: () => ({ status: 202 }),
 		};
 		for (const order of [[...declaredRoutes, changing], [...declaredRoutes, changing].reverse()]) {
-			await stop();
+			await served.stop();
 			const port = Number(new URL(await serveWith(handlers(order))).port);
 			const status = (target: string, method = "GET") =>
 				rawStatus(
@@ -554,7 +428,7 @@ describe("stop", () => {
 	async function started(modules: Module[]) {
 		const app = await boot({}, { modules });
 		await app.start();
-		stop = () => app.stop(1000);
+		served.stop = () => app.stop(1000);
 		return { app, port: app.get(listening).port() };
 	}
 
@@ -678,47 +552,6 @@ describe("stop", () => {
 	});
 });
 
-it("says it is reached through a proxy only when it trusts one", async () => {
-	expect((await boot()).get(site).proxied).toBe(false);
-	expect((await boot({ "trusted-proxies": ["10.0.0.0/8"] })).get(site).proxied).toBe(true);
-});
-
-it("states the public origin it was given, and refuses one with a path", async () => {
-	const app = await boot({ "public-origin": "https://as.example" });
-	expect(app.get(site).origin).toBe("https://as.example");
-	expect(app.get(site).secureCookies).toBe(true);
-	expect(Object.isFrozen(app.get(site))).toBe(true);
-	for (const origin of ["https://as.example/x", "ws://as.example", "ftp://as.example"]) {
-		await expect(boot({ "public-origin": origin }), origin).rejects.toThrow(BootRefused);
-	}
-});
-
-it("takes origins as url-setting does: an origin alone, in the form the parser writes it, with no pattern", async () => {
-	const refusals = (http: Record<string, unknown>) =>
-		boot(http).then(
-			() => [],
-			(error: BootRefused) => error.refusals,
-		);
-	const alone = "a URL: an origin alone, with no path (not even a trailing `/`) and no query";
-	expect(await refusals({ "public-origin": "https://as.example/" })).toEqual([
-		{ where: "http.public-origin", reason: alone },
-	]);
-	for (const origin of ["https://*.example", "https://App.example", "https://app.example:443"]) {
-		expect(await refusals({ "cors-origins": [origin] }), origin).toEqual([
-			{ where: "http.cors-origins.0", reason: expect.any(String) },
-		]);
-	}
-});
-
-it("refuses an empty or unparsable public origin or CORS origin at boot, never throwing on it", async () => {
-	for (const origin of ["", "not a url", "https://"]) {
-		await expect(boot({ "public-origin": origin }), `public ${origin}`).rejects.toThrow(
-			BootRefused,
-		);
-		await expect(boot({ "cors-origins": [origin] }), `cors ${origin}`).rejects.toThrow(BootRefused);
-	}
-});
-
 it("answers 500 for an answer whose headers cannot be written, and keeps serving", async () => {
 	const base = await serveWith(
 		handlers([
@@ -771,23 +604,6 @@ it("does not warn when a trusted proxy sends forwarded headers", async () => {
 	);
 	await fetch(base, { headers: { "x-forwarded-for": "198.51.100.1" } });
 	expect(count("http.forwarded_from_untrusted_peer")).toBe(0);
-});
-
-it("refuses a plain-http public origin unless it is accepted explicitly, and then says cookies cannot be secure", async () => {
-	await expect(boot({ "public-origin": "http://as.example" })).rejects.toThrow(BootRefused);
-	const app = await boot({ "public-origin": "http://as.example", "insecure-origin": true });
-	expect(app.get(site).secureCookies).toBe(false);
-});
-
-it("refuses a port an environment variable gives empty, signed, fractional or not in decimal", async () => {
-	for (const port of ["", " ", "-1", "+80", "1.5", "0x1f90", 1.5, -1, true]) {
-		await expect(boot({ port }), JSON.stringify(port)).rejects.toBeInstanceOf(BootRefused);
-	}
-	expect((await boot({ port: "8080" })).get(listening)).toBeDefined();
-});
-
-it("refuses a key its section does not know", async () => {
-	await expect(boot({ "trusted-proxy": ["127.0.0.1"] })).rejects.toThrow(BootRefused);
 });
 
 it("listens only on the address it is given", async () => {
@@ -874,324 +690,19 @@ it("keeps serving, raising no unhandled rejection, when an answer fails after it
 	}
 });
 
-describe("route policies", () => {
-	const gate = policy<{ readonly open: boolean }>("test.gate");
-	const mark = policy("test.mark");
-	const failing = policy("test.failing");
-
-	it("applies the policies a route uses in order before its handler, and a policy may answer instead", async () => {
-		const seen: string[] = [];
-		const handled = () => {
-			seen.push("handled");
-			return { status: 204 };
-		};
-		const base = await serveWith(
-			handlers(
-				[
-					{
-						method: "GET",
-						path: "/open",
-						uses: [use(mark), use(gate, { open: true })],
-						handle: handled,
-					},
-					{
-						method: "GET",
-						path: "/shut",
-						uses: [use(gate, { open: false }), use(mark)],
-						handle: handled,
-					},
-					{ method: "GET", path: "/failing", uses: [use(failing)], handle: handled },
-				],
-				[
-					applying(gate, (_request, options) => {
-						seen.push(`gate ${options.open}`);
-						return options.open ? "pass" : { status: 403, body: { json: { error: "shut" } } };
-					}),
-					applying(mark, () => {
-						seen.push("mark");
-						return "pass";
-					}),
-					applying(failing, async () => {
-						throw new Unavailable("test");
-					}),
-				],
-			),
-		);
-		expect((await fetch(`${base}/open`)).status).toBe(204);
-		expect(seen).toEqual(["mark", "gate true", "handled"]);
-		seen.length = 0;
-		const shut = await fetch(`${base}/shut`);
-		expect([shut.status, await shut.json()]).toEqual([403, { error: "shut" }]);
-		expect(seen).toEqual(["gate false"]);
-		expect((await fetch(`${base}/failing`)).status).toBe(503);
-	});
-
-	it("refuses at boot a route that uses a policy no module applies, naming the route and the policy", async () => {
-		const booting = serveWith(
-			handlers(
-				[
-					// Named like a policy that has a rule, yet another value: matched by value, it has none.
-					{
-						method: "POST",
-						path: "/lonely",
-						uses: [use(policy("test.mark"))],
-						handle: () => ({ status: 204 }),
-					},
-					{ method: "GET", path: "/alone", uses: [use(failing)], handle: () => ({ status: 204 }) },
-				],
-				[applying(mark, () => "pass")],
-			),
-		);
-		expect(await refusalsOf(booting)).toEqual([
-			["http.routes:POST /lonely", "uses a policy no module applies: test.mark"],
-			["http.routes:GET /alone", "uses a policy no module applies: test.failing"],
-		]);
-	});
-
-	it("keeps two policies of the same name from different owners apart", async () => {
-		const theirs = policy("shared.name");
-		const ours = policy("shared.name");
-		const base = await serveWith(
-			handlers(
-				[
-					{ method: "GET", path: "/theirs", uses: [use(theirs)], handle: () => ({ status: 204 }) },
-					{ method: "GET", path: "/ours", uses: [use(ours)], handle: () => ({ status: 204 }) },
-				],
-				[applying(theirs, () => ({ status: 401 })), applying(ours, () => "pass")],
-			),
-		);
-		const statuses = [(await fetch(`${base}/theirs`)).status, (await fetch(`${base}/ours`)).status];
-		expect(statuses).toEqual([401, 204]);
-	});
-
-	it("makes a policy and a route's use of it frozen values", () => {
-		expect([Object.isFrozen(gate), Object.isFrozen(use(gate, { open: true }))]).toEqual([
-			true,
-			true,
-		]);
-	});
-
-	it("refuses at boot two routes taking one method and path, naming the route", async () => {
-		const route: Route = { method: "GET", path: "/x", handle: () => ({ status: 204 }) };
-		const twice = handlers([route, { ...route, method: "POST" }, route]);
-		expect(await refusalsOf(serveWith(twice))).toEqual([
-			["http.routes:GET /x", "more than one contribution for the same key"],
-		]);
-	});
-
-	it("refuses at boot two routes of one method and the same shape with a middle *, naming the route", async () => {
-		const route: Route = { method: "GET", path: "/x/*/y", handle: () => ({ status: 204 }) };
-		expect(await refusalsOf(serveWith(handlers([route, route])))).toEqual([
-			["http.routes:GET /x/*/y", "more than one contribution for the same key"],
-		]);
-	});
-
-	it("refuses at boot two rules for one policy", async () => {
-		const ours = policy("shared.name");
-		const twice = handlers([], [applying(ours, () => "pass"), applying(ours, () => "pass")]);
-		expect(await refusalsOf(serveWith(twice))).toEqual([
-			["http.policies", "more than one rule for a policy: shared.name"],
-		]);
-	});
-});
-
-describe("the client's certificate", () => {
-	const der = Uint8Array.from([48, 3, 2, 1, 1]);
-	const sent = { "client-cert": `:${Buffer.from(der).toString("base64")}:` };
-	let seen: HttpRequest["source"]["clientCertificate"];
-	const reading = handlers([
-		{
-			method: "GET",
-			path: "/",
-			handle: (request) => {
-				seen = request.source.clientCertificate;
-				return { status: 204 };
-			},
-		},
+it("refuses at boot two routes taking one method and path, naming the route", async () => {
+	const route: Route = { method: "GET", path: "/x", handle: () => ({ status: 204 }) };
+	const twice = handlers([route, { ...route, method: "POST" }, route]);
+	expect(await refusalsOf(serveWith(twice))).toEqual([
+		["http.routes:GET /x", "more than one contribution for the same key"],
 	]);
-	const forwarding = (trusted: string[]) => ({
-		"trusted-proxies": trusted,
-		"client-certificate": { dialect: "rfc9440" },
-	});
-
-	it("is handed to a handler as a trusted proxy forwards it, with no warning", async () => {
-		const { runtime, count } = warning();
-		await fetch(await serveWith(reading, forwarding(["127.0.0.1"]), runtime), { headers: sent });
-		expect(seen).toEqual({ kind: "certificate", leaf: der, chain: [] });
-		expect(count("http.client_certificate_ignored")).toBe(0);
-	});
-
-	it("is ignored from a peer not trusted, with a warning once a minute", async () => {
-		const { runtime, count } = warning();
-		const base = await serveWith(reading, forwarding([]), runtime);
-		await fetch(base, { headers: sent });
-		expect(seen).toBeUndefined();
-		await fetch(base, { headers: sent });
-		expect(count("http.client_certificate_ignored")).toBe(1);
-	});
-
-	it("is read where the operator names it, in a form it names", async () => {
-		const forwarded = (certificate: unknown) => boot({ "client-certificate": certificate });
-		await expect(forwarded({ dialect: "rfc9440" })).resolves.toBeDefined();
-		await expect(forwarded({ dialect: "pem", header: "x-client-cert" })).resolves.toBeDefined();
-		const xfcc = await forwarded({ dialect: "xfcc" });
-		expect(xfcc.get(certificateForwarding)).toEqual({ configured: true });
-		expect((await boot()).get(certificateForwarding)).toEqual({ configured: false });
-		for (const bad of [
-			{ dialect: "pem" },
-			{ dialect: "der" },
-			{ dialect: "rfc9440", header: "Bad Name" },
-			{ dialect: "xfcc", "chain-header": "x-chain" },
-		]) {
-			await expect(forwarded(bad), JSON.stringify(bad)).rejects.toBeInstanceOf(BootRefused);
-		}
-	});
 });
 
-describe("request bodies", () => {
-	const gate = policy("test.json-gate");
-	const object = JSON.stringify({ a: "1", nested: { b: [2] } });
-	const large = JSON.stringify({ a: "x".repeat(70 * 1024) });
-	/** What a handler read of the name `a`. */
-	const read = (request: HttpRequest) => ({
-		json: request.json,
-		form: request.form.get("a"),
-		fields: request.fields.get("a"),
-	});
-
-	/** Routes taking each set of bodies; the requests handled, what the gate saw, ways to post. */
-	async function servedBodies() {
-		const handled: HttpRequest[] = [];
-		const gated: number[] = [];
-		const route = (path: string, takes?: Route["takes"]): Route => ({
-			method: "POST",
-			path,
-			...(takes ? { takes } : {}),
-			...(path === "/form" || path === "/json" ? { uses: [use(gate)] } : {}),
-			handle: (request) => {
-				handled.push(request);
-				return { status: 204 };
-			},
-		});
-		const base = await serveWith(
-			handlers(
-				[
-					route("/json", ["json"]),
-					route("/form", ["form"]),
-					route("/both", ["form", "json"]),
-					route("/optional", ["form", "json", "none"]),
-					route("/loose"),
-				],
-				[
-					applying(gate, (request) => {
-						gated.push(request.fields.size);
-						return request.headers.get("x-shut") ? { status: 403 } : "pass";
-					}),
-				],
-			),
-		);
-		const post = (path: string, type: string, body: string, headers = {}) =>
-			fetch(`${base}${path}`, {
-				method: "POST",
-				headers: { "content-type": type, ...headers },
-				body,
-			}).then((res) => res.status);
-		const untyped = (path: string, body?: Uint8Array) =>
-			fetch(`${base}${path}`, { method: "POST", ...(body ? { body } : {}) }).then((r) => r.status);
-		return { handled, gated, post, untyped };
-	}
-
-	it("reads a JSON object for a route that takes JSON: frozen, its string members as fields, others as mistyped", async () => {
-		const { handled, post } = await servedBodies();
-		expect(await post("/json", "application/json; charset=utf-8", object)).toBe(204);
-		expect(await post("/json", "application/json", JSON.stringify({ n: null, a: "1" }))).toBe(204);
-		expect(await post("/json", "application/json", JSON.stringify({ a: "1" }))).toBe(204);
-		expect(
-			handled.map((request) => ({
-				json: request.json,
-				nestedFrozen: Object.isFrozen(request.json?.nested),
-				formSize: request.form.size,
-				fields: [...request.fields],
-				mistyped: request.mistyped && [...request.mistyped],
-			})),
-		).toEqual([
-			{
-				json: { a: "1", nested: { b: [2] } },
-				nestedFrozen: true,
-				formSize: 0,
-				fields: [["a", ["1"]]],
-				mistyped: ["nested"],
-			},
-			{
-				json: { n: null, a: "1" },
-				nestedFrozen: true,
-				formSize: 0,
-				fields: [["a", ["1"]]],
-				mistyped: ["n"],
-			},
-			{
-				json: { a: "1" },
-				nestedFrozen: true,
-				formSize: 0,
-				fields: [["a", ["1"]]],
-				mistyped: undefined,
-			},
-		]);
-		const fields = handled[2]?.fields as unknown as Map<string, never>;
-		expect(() => fields.delete("a")).toThrow(TypeError);
-		expect(Object.isFrozen(fields.get("a"))).toBe(true);
-	});
-
-	it("answers 415, 400 and 413 for a body it cannot take, after the route's policies have seen it", async () => {
-		const { handled, gated, post } = await servedBodies();
-		expect(await post("/json", "application/x-www-form-urlencoded", "a=1")).toBe(415);
-		for (const unread of ["[1]", "null", "{nope", '{"a":"1","a":"2"}']) {
-			expect(await post("/json", "application/json", unread), unread).toBe(400);
-		}
-		expect(await post("/json", "application/json", large)).toBe(413);
-		expect(await post("/form", "application/json", object)).toBe(415);
-		expect(await post("/form", "application/x-www-form-urlencoded", "a=%C3%28")).toBe(400);
-		expect(gated).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
-		expect(await post("/json", "application/json", object, { "x-shut": "1" })).toBe(403);
-		expect(await post("/json", "application/json", "{nope", { "x-shut": "1" })).toBe(403);
-		expect(handled).toEqual([]);
-	});
-
-	it("reads each body by its type on a route that takes several; any other, or none, is 415", async () => {
-		const { handled, post, untyped } = await servedBodies();
-		expect(await post("/form", "application/x-www-form-urlencoded", "a=1&a=2")).toBe(204);
-		expect(await post("/both", "application/x-www-form-urlencoded", "a=1")).toBe(204);
-		expect(await post("/both", "application/json", object)).toBe(204);
-		expect(await post("/both", "text/plain", "a=1")).toBe(415);
-		expect(await untyped("/both")).toBe(415);
-		expect(handled.map(read)).toEqual([
-			{ json: undefined, form: ["1", "2"], fields: ["1", "2"] },
-			{ json: undefined, form: ["1"], fields: ["1"] },
-			{ json: { a: "1", nested: { b: [2] } }, form: undefined, fields: ["1"] },
-		]);
-	});
-
-	it("answers a request without a body on a route that also takes none, but not an untyped body", async () => {
-		const { handled, post, untyped } = await servedBodies();
-		expect(await untyped("/optional")).toBe(204);
-		expect(await untyped("/optional", new Uint8Array([97, 61, 49]))).toBe(415);
-		expect(await post("/optional", "text/plain", "a=1")).toBe(415);
-		expect(await post("/optional", "application/json", object)).toBe(204);
-		expect(handled.map(read)).toEqual([
-			{ json: undefined, form: undefined, fields: undefined },
-			{ json: { a: "1", nested: { b: [2] } }, form: undefined, fields: ["1"] },
-		]);
-	});
-
-	it("reads a form on a route that declares nothing, and ignores any other body", async () => {
-		const { handled, post } = await servedBodies();
-		expect(await post("/loose", "application/json", object)).toBe(204);
-		expect(await post("/loose", "application/x-www-form-urlencoded", "a=1")).toBe(204);
-		expect(handled.map(read)).toEqual([
-			{ json: undefined, form: undefined, fields: undefined },
-			{ json: undefined, form: ["1"], fields: ["1"] },
-		]);
-	});
+it("refuses at boot two routes of one method and the same shape with a middle *, naming the route", async () => {
+	const route: Route = { method: "GET", path: "/x/*/y", handle: () => ({ status: 204 }) };
+	expect(await refusalsOf(serveWith(handlers([route, route])))).toEqual([
+		["http.routes:GET /x/*/y", "more than one contribution for the same key"],
+	]);
 });
 
 describe("HEAD", () => {
@@ -1222,120 +733,6 @@ describe("HEAD", () => {
 		expect(methods).toEqual(["GET", "HEAD"]);
 		const post = await fetch(`${base}/post`, { method: "HEAD" });
 		expect([post.status, post.headers.get("allow")]).toEqual([405, "POST"]);
-	});
-});
-
-describe("cross-origin routes", () => {
-	const app = "https://app.example";
-	const failing = policy("test.cors-failing");
-	const crossOrigin = handlers(
-		[
-			{
-				method: "POST",
-				path: "/token",
-				cors: { headers: ["content-type", "dpop"], exposes: ["dpop-nonce"] },
-				handle: () => ({ status: 200, headers: { vary: "Accept" }, body: { json: {} } }),
-			},
-			{ method: "GET", path: "/token", cors: {}, handle: () => ({ status: 200, body: "doc" }) },
-			{
-				method: "GET",
-				path: "/down",
-				cors: {},
-				uses: [use(failing)],
-				handle: () => ({ status: 204 }),
-			},
-			{ method: "GET", path: "/plain", handle: () => ({ status: 204 }) },
-		],
-		[
-			applying(failing, async () => {
-				throw new Unavailable("test");
-			}),
-		],
-	);
-	const from = (origin: string, init: RequestInit = {}) => ({
-		...init,
-		headers: { origin, ...(init.headers as Record<string, string>) },
-	});
-	const cors = (res: Response) =>
-		[...res.headers].filter(([name]) => name.startsWith("access-control-") || name === "vary");
-
-	it("lets an origin the operator lists read a declared route, naming that origin and never credentials", async () => {
-		const base = await serveWith(crossOrigin, { "cors-origins": [app] });
-		const posted = await fetch(`${base}/token`, from(app, { method: "POST" }));
-		expect(posted.status).toBe(200);
-		expect(cors(posted)).toEqual([
-			["access-control-allow-origin", app],
-			["access-control-expose-headers", "dpop-nonce"],
-			["vary", "Accept, Origin"],
-		]);
-		const got = await fetch(`${base}/token`, from(app));
-		expect(cors(got)).toEqual([
-			["access-control-allow-origin", app],
-			["vary", "Origin"],
-		]);
-		const head = await fetch(`${base}/token`, from(app, { method: "HEAD" }));
-		expect(cors(head)).toEqual(cors(got));
-		const down = await fetch(`${base}/down`, from(app));
-		expect([down.status, down.headers.get("access-control-allow-origin")]).toEqual([503, app]);
-	});
-
-	it("gives an origin it does not list, and a route that does not declare it, nothing to read by", async () => {
-		const base = await serveWith(crossOrigin, { "cors-origins": [app] });
-		for (const origin of ["https://other.example", "https://app.example.evil", "null"]) {
-			const res = await fetch(`${base}/token`, from(origin, { method: "POST" }));
-			expect([res.status, cors(res)]).toEqual([200, [["vary", "Accept, Origin"]]]);
-		}
-		const plain = await fetch(`${base}/plain`, from(app));
-		expect([plain.status, cors(plain)]).toEqual([204, []]);
-		const none = await serveWith(crossOrigin);
-		expect(cors(await fetch(`${none}/token`, from(app)))).toEqual([["vary", "Origin"]]);
-	});
-
-	it("answers a preflight for a declared route with what that route takes", async () => {
-		const base = await serveWith(crossOrigin, { "cors-origins": [app] });
-		const preflight = (origin: string, method: string, path = "/token") =>
-			fetch(
-				`${base}${path}`,
-				from(origin, {
-					method: "OPTIONS",
-					headers: { "access-control-request-method": method },
-				}),
-			);
-		const allowed = await preflight(app, "POST");
-		expect(allowed.status).toBe(204);
-		expect(cors(allowed)).toEqual([
-			["access-control-allow-headers", "content-type, dpop"],
-			["access-control-allow-methods", "POST, GET"],
-			["access-control-allow-origin", app],
-			["access-control-max-age", "600"],
-			["vary", "Origin"],
-		]);
-		for (const refused of [
-			await preflight("https://other.example", "POST"),
-			await preflight(app, "DELETE"),
-		]) {
-			expect([refused.status, cors(refused)]).toEqual([204, [["vary", "Origin"]]]);
-		}
-		const plain = await preflight(app, "GET", "/plain");
-		expect([plain.status, cors(plain)]).toEqual([405, []]);
-		const head = await preflight(app, "HEAD");
-		expect(head.headers.get("access-control-allow-origin")).toBe(app);
-		const bare = await fetch(`${base}/token`, from(app, { method: "OPTIONS" }));
-		expect(bare.status).toBe(405);
-		const asking = { "access-control-request-method": "POST" };
-		const posted = await fetch(`${base}/token`, from(app, { method: "POST", headers: asking }));
-		expect([posted.status, await posted.text()]).toEqual([200, "{}"]);
-	});
-
-	it("refuses an origin that is not https, not an origin, or a pattern", async () => {
-		for (const origin of [
-			"http://app.example",
-			"https://app.example/",
-			"https://app.example/x",
-			"https://*.example",
-		]) {
-			await expect(boot({ "cors-origins": [origin] })).rejects.toThrow(BootRefused);
-		}
 	});
 });
 
@@ -1381,34 +778,5 @@ describe("limits", () => {
 		await new Promise((resolve) => setTimeout(resolve, 50));
 		expect(await stalled(port, "GET /p HTTP/1.1\r\nHost: x\r\n\r\n")).toBe("");
 		held.destroy();
-	});
-});
-
-describe("test requests", () => {
-	it("give fields from their JSON or form, as the server does", () => {
-		const form = new Map([["a", ["1", "2"]]]);
-		expect([...testRequest({ form }).fields]).toEqual([...form]);
-		expect(testRequest({ form }).fields.repeated()).toEqual(["a"]);
-		expect(testRequest({ query: new Map([["q", ["1"]]]) }).query.single("q")).toBe("1");
-		expect([...testRequest({ json: { a: "1", n: 2 } }).fields]).toEqual([["a", ["1"]]]);
-		expect([...(testRequest({ json: { a: "1", n: 2 } }).mistyped ?? [])]).toEqual(["n"]);
-		expect(testRequest({ form }).mistyped).toBeUndefined();
-		const mistyped = testRequest({ json: { n: 2 } }).mistyped as Set<string>;
-		expect(() => mistyped.add("x")).toThrow(TypeError);
-		expect(() => mistyped.delete("n")).toThrow(TypeError);
-		expect(() => mistyped.clear()).toThrow(TypeError);
-		expect(testRequest().fields.size).toBe(0);
-	});
-
-	it("are read-only as the server's are", () => {
-		const json = { a: "1", nested: { b: [2] } };
-		const sent = new Map([["x", "1"]]);
-		const request = testRequest({ json, headers: sent });
-		expect(() => (request.headers as Map<string, string>).set("y", "2")).toThrow(TypeError);
-		expect(sent.set("y", "2").get("y")).toBe("2");
-		expect(Object.isFrozen(request.json?.nested)).toBe(true);
-		expect(Object.isFrozen(json)).toBe(false);
-		expect(Object.isFrozen(request.source)).toBe(true);
-		expect(Object.isFrozen(request)).toBe(true);
 	});
 });
