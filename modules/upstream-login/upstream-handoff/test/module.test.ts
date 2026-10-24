@@ -1,4 +1,4 @@
-import { assemble, BootRefused, defineModule, kernelConfig } from "@mod/kernel";
+import { assemble, BootRefused, defineModule, kernelConfig, type Module } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
 import type { Seal } from "@mod/seal";
 import sealModule from "@mod/seal/module";
@@ -16,45 +16,15 @@ const unusedStore = defineModule({ name: "held" }, (m) => [
 		remove: async () => {},
 	})),
 ]);
-
-it("is no handoff where no module receives upstream tokens, asking for no seal", async () => {
-	const app = await assemble({
-		modules: [unusedStore, handoffModule],
-		config: kernelConfig(),
-		runtime,
-	});
-	expect(app.get(handoff)).toBe(noHandoff);
-});
-
-it("hands tokens over where a module receives them, over the composed seal", async () => {
-	const told: string[] = [];
-	const receiver = defineModule({ name: "receiver" }, (m) => [
+/** A receiver of upstream tokens, recording each access token it is told. */
+const receiving = (told: string[] = []) =>
+	defineModule({ name: "receiver" }, (m) => [
 		m.contribute(upstreamLoginReceivers).by(() => ({
 			name: "one",
 			received: async (at) => void told.push(at.tokens.accessToken),
 			withdrawn: async () => {},
 		})),
 	]);
-	const app = await assemble({
-		modules: [unusedStore, sealModule, receiver, handoffModule],
-		config: { ...kernelConfig(), ...sealConfig() },
-		runtime,
-	});
-	const session = { id: "s", context: { subject: "alice", amr: [], authenticatedAt: 0 } };
-	await app
-		.get(handoff)
-		.of("corp", "alice", { accessToken: "a", tokenType: "Bearer", scope: [] }, 1000)
-		?.after({ kind: "opened", session } as never);
-	expect(told).toEqual(["a"]);
-});
-
-const receiver = defineModule({ name: "receiver" }, (m) => [
-	m.contribute(upstreamLoginReceivers).by(() => ({
-		name: "one",
-		received: async () => {},
-		withdrawn: async () => {},
-	})),
-]);
 /** A seal that records the context of each value it seals. */
 const recording = (sealed: string[]): Seal => ({
 	seal: (plain, context) => {
@@ -66,14 +36,35 @@ const recording = (sealed: string[]): Seal => ({
 const sealing = (name: string, value: Seal) =>
 	defineModule({ name }, (m) => [m.contribute(handoffSealing).by(() => value)]);
 const tokens = { accessToken: "a", tokenType: "Bearer", scope: [] };
+const boot = (modules: readonly Module[]) =>
+	assemble({ modules: [unusedStore, ...modules, handoffModule], config: kernelConfig(), runtime });
+
+it("is no handoff where no module receives upstream tokens, asking for no seal", async () => {
+	const app = await boot([]);
+	expect(app.get(handoff)).toBe(noHandoff);
+});
+
+it("is no handoff where no module receives upstream tokens, a sealing contributed going unused", async () => {
+	const sealed: string[] = [];
+	const app = await boot([sealing("sealing", recording(sealed))]);
+	expect(app.get(handoff)).toBe(noHandoff);
+	expect(sealed).toEqual([]);
+});
+
+it("hands tokens over where a module receives them", async () => {
+	const told: string[] = [];
+	const app = await boot([receiving(told), sealing("sealing", recording([]))]);
+	const session = { id: "s", context: { subject: "alice", amr: [], authenticatedAt: 0 } };
+	await app
+		.get(handoff)
+		.of("corp", "alice", tokens, 1000)
+		?.after({ kind: "opened", session } as never);
+	expect(told).toEqual(["a"]);
+});
 
 it("seals a held login's tokens with the sealing contributed, asking for no seal", async () => {
 	const sealed: string[] = [];
-	const app = await assemble({
-		modules: [unusedStore, receiver, sealing("sealing", recording(sealed)), handoffModule],
-		config: kernelConfig(),
-		runtime,
-	});
+	const app = await boot([receiving(), sealing("sealing", recording(sealed))]);
 	await app
 		.get(handoff)
 		.of("corp", "alice", tokens, 1000)
@@ -81,18 +72,28 @@ it("seals a held login's tokens with the sealing contributed, asking for no seal
 	expect(sealed).toEqual(["upstream-handoff.held-login"]);
 });
 
-it("refuses to boot two sealings where a module receives upstream tokens", async () => {
+it("refuses to boot a module receiving upstream tokens with no sealing, though a seal is composed", async () => {
 	const refused = await assemble({
-		modules: [
-			unusedStore,
-			receiver,
-			sealing("one", recording([])),
-			sealing("two", recording([])),
-			handoffModule,
-		],
-		config: kernelConfig(),
+		modules: [unusedStore, sealModule, receiving(), handoffModule],
+		config: { ...kernelConfig(), ...sealConfig() },
 		runtime,
 	}).catch((error: unknown) => error);
+	expect(refused).toBeInstanceOf(BootRefused);
+	expect((refused as BootRefused).refusals).toEqual([
+		{
+			where: "upstream-handoff",
+			reason:
+				"a module receives upstream tokens and no sealing is contributed: compose upstream-handoff-seal",
+		},
+	]);
+});
+
+it("refuses to boot two sealings where a module receives upstream tokens", async () => {
+	const refused = await boot([
+		receiving(),
+		sealing("one", recording([])),
+		sealing("two", recording([])),
+	]).catch((error: unknown) => error);
 	expect(refused).toBeInstanceOf(BootRefused);
 	expect((refused as BootRefused).refusals).toEqual([
 		{ where: "upstream-handoff", reason: "more than one sealing is contributed" },

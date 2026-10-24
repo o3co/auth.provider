@@ -8,7 +8,7 @@ import {
 	Unavailable,
 } from "@mod/kernel";
 import type { LoginOutcome } from "@mod/login-gates";
-import { type Seal, seal } from "@mod/seal";
+import type { Seal } from "@mod/seal";
 import type { Session } from "@mod/session";
 import {
 	type Receipt,
@@ -88,9 +88,15 @@ export async function handoffIn(
 	const [contributed, ...others] = await c.collect(handoffSealing);
 	if (others.length > 0)
 		return c.refuse("upstream-handoff", "more than one sealing is contributed");
+	if (!contributed) {
+		return c.refuse(
+			"upstream-handoff",
+			"a module receives upstream tokens and no sealing is contributed: compose upstream-handoff-seal",
+		);
+	}
 	return handoffWith({
 		receivers,
-		seal: contributed ?? (await c.get(seal)),
+		seal: contributed,
 		held: await c.get(heldLoginStore),
 		clock: c.clock,
 		random: c.random,

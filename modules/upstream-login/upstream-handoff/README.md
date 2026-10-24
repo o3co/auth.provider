@@ -14,8 +14,8 @@
 - `handoff.opened` (session, carry): the gates' news that a held login opened.
 - `handoff.joined` (session, IdP, tokens): a link's tokens, handed at once to the open session it joined, answering what it gave each receiver; `handoff.withdrawn` (session id, IdP, that answer) takes them back.
 - `noHandoff`, where no module receives upstream tokens.
-- Extension point `handoffSealing`: the seal a held login's tokens are kept under, at most one (two refuse boot where some module receives upstream tokens).
-- Composition definition (`./module`): provides `handoff` over the receivers in name order, taking the held login store and the sealing contributed, else `seal`, only where some module receives upstream tokens.
+- Extension point `handoffSealing`: the seal a held login's tokens are kept under. Where some module receives upstream tokens, none or two refuse boot.
+- Composition definition (`./module`): provides `handoff` over the receivers in name order, taking the held login store and the sealing contributed only where some module receives upstream tokens. `upstream-handoff-seal` contributes the composed `seal`.
 - Store interface for held logins, its needs (survives failover, names from the secret) and contract test (`./testing`).
 
 ## Invariants
@@ -33,7 +33,7 @@
 - The held login record: the internal module `held`'s.
 
 ## Depends on
-- `kernel`, `upstreams` (the receivers, the tokens), `seal` (only with token receivers), `login-gates` (a login's outcome), `session` (the session)
+- `kernel`, `upstreams` (the receivers, the tokens), `seal` (the sealing's interface), `login-gates` (a login's outcome), `session` (the session)
 
 ## Vocabulary
 - held login: a login a gate held, its tokens sealed until it opens.
