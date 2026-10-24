@@ -255,7 +255,7 @@ The [operations runbook](docs/runbook.md) covers deployment, rotating the signin
 
 Find the contract you need in the [owner map](modules/README.md), then read that module's README.
 
-Define your module with `defineModule` from `@o3co/auth-provider-foundation/kernel`, and add it to the module list that the generated `src/main.ts` passes to `assemble`. The [recipe for a grant of your own](docs/recipe-external-grant.md) walks through one, as a package of its own, built against the published packages. To have the generator compose such a package, see [packages outside the release](docs/outside-modules.md). The [kernel README](modules/foundation/kernel/README.md) describes the module API.
+Define your module with `defineModule` from `@o3co/auth-provider-foundation/kernel`, and add it to the module list that the generated `src/main.ts` passes to `assemble`. The [recipe for a grant of your own](docs/recipe-external-grant.md) walks through one, as a package of its own, built against the published packages. To have the generator compose such a package, see [packages outside the release](docs/outside-modules.md). The [kernel README](modules/foundation/kernel/README.md) describes the module API. Each release's contracts, from 0.19, are on the [API site](https://o3co.github.io/auth.provider/), each by the name you import it by.
 
 To replace an implementation, such as the store or the user ledger, implement its contract and run the contract tests published at its `testing` subpath, for example `@o3co/auth-provider-foundation/store/testing`.
 

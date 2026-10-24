@@ -10,6 +10,7 @@ How a maintainer cuts a release. The release workflow (`release.yml`) does the b
 - [What the workflow does](#what-the-workflow-does)
 - [A package name never published before](#a-package-name-never-published-before)
 - [When a publish stops partway](#when-a-publish-stops-partway)
+- [The API site](#the-api-site)
 - [After the release](#after-the-release)
 
 ## What a release publishes
@@ -37,6 +38,7 @@ Tag the merge commit on `main` as `v<version>` and push the tag. The workflow re
 5. Creates a draft GitHub release with generated notes.
 6. Publishes each tarball with provenance, the entrance last since it depends on the others. Each is authenticated by the run's own token, through the package's trusted publisher; no npm token is stored.
 7. Publishes the draft release.
+8. For a final release (never a prerelease), builds its API from the bundles it published, installed from npm, into the minor's dir of the API site on GitHub Pages (`v<major>.<minor>/`, each patch writing over it), and points the site's root at the newest minor. The **API site** workflow (`api-docs.yml`) builds a released tag again by hand.
 
 ## A package name never published before
 
@@ -61,9 +63,16 @@ The check stops for one of two reasons, and its output names which for each pack
 - npm's answer could not be read ("the registry's answer is unread": a network or authentication error, an answer that is no JSON or holds no sha512 integrity). Nothing is known to differ: re-run the job once the registry answers.
 - A package of this version is on npm with another integrity than this run's tarball ("published with another integrity"). What is on npm is not what the index of this version names, and no rerun changes that: publish the next version instead.
 
+## The API site
+
+The site on GitHub Pages is built from the `gh-pages` branch: one dir per minor, the root and `versions.html` (`modules/tooling/api-docs`). Only the release workflow and the API site workflow write it.
+
+Once, before the 0.19.0 tag: the branch still holds the 0.17 site (v0.3.0 to v0.17.0, and files a deploy left in by mistake). Remove every file but `.nojekyll` in one commit to `gh-pages`, with a placeholder `index.html` saying the 0.19 API comes with 0.19.0 and that the old system's API is in the source at tag v0.17.0. Never force-push: the old pages stay in the branch's history.
+
 ## After the release
 
 - Install the entrance from npm (`npx @o3co/create-auth-provider@<version>`), generate a pattern and boot it.
 - For a final release, check that `latest` names the version for every package, the placeholders' included.
 - The cross-component tests in the umbrella repository run by hand (`umbrella-e2e.yml`); its header says against which revisions.
-- At the first final 0.18 release: deprecate the 0.17 packages with `npm deprecate`, each by version range (`<0.18.0`), so a name 0.18 reuses keeps its new versions undeprecated, and mark the 0.17 API site on GitHub Pages as 0.17's. The [migration guide](migration.md#packages) says which 0.17 package went where.
+- At the first final 0.18 release: deprecate the 0.17 packages with `npm deprecate`, each by version range (`<0.18.0`), so a name 0.18 reuses keeps its new versions undeprecated.
+- Open the API site and check the release's minor shows its version in each page's title. The [migration guide](migration.md#packages) says which 0.17 package went where.
