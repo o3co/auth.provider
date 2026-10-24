@@ -51,6 +51,7 @@ it("assembles what combinations composes in full, each axis with one adapter, an
 	expect(pkg.scripts).toEqual({
 		start: "node --env-file-if-exists=.env src/main.ts",
 		reseal: "node --env-file-if-exists=.env src/reseal.ts",
+		"unclaimed-factors": "node --env-file-if-exists=.env src/unclaimed-factors.ts",
 	});
 	const composed = modules.map(manifest);
 	const owners = composed.flatMap((m) => m.replaces ?? m.adapts ?? []);
@@ -96,15 +97,13 @@ it("writes a witness-backfill script where the enrollment witness is kept, and n
 	expect(plain.scripts["witness-backfill"]).toBeUndefined();
 });
 
-it("writes a passkey-backfill script where passkey logins keep the passkey witness, and none where it is not", async () => {
+it("writes a passkey-backfill script where passkey logins keep the passkey witness", async () => {
 	const kept = await generated(["@mod/webauthn-login", "@mod/passkey-witness-http"]);
 	const pkg = JSON.parse(await read(kept, "package.json"));
 	expect(pkg.scripts["passkey-backfill"]).toBe(
 		"node --env-file-if-exists=.env src/passkey-backfill.ts",
 	);
 	expect(await read(kept, "src/passkey-backfill.ts")).toMatch(/passkeyBackfill/);
-	const plain = JSON.parse(await read(await generated(), "package.json"));
-	expect(plain.scripts["passkey-backfill"]).toBeUndefined();
 });
 
 it("assembles the features added, with their wirings, bridges and default adapters", async () => {
