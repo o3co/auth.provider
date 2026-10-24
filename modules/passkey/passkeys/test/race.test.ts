@@ -9,8 +9,9 @@ import {
 	testOrigin,
 } from "@mod/webauthn/testing";
 import { expect, it } from "vitest";
+import { keptChallenges } from "../src/challenges/challenges.ts";
 import { passkeysOver } from "../src/passkeys.ts";
-import { keptChallenges, keptPasskeys } from "../src/records.ts";
+import { keptPasskeys } from "../src/records.ts";
 import { heldState, memoryStores, writeToken } from "./stores.ts";
 
 const at = { origin: testOrigin };

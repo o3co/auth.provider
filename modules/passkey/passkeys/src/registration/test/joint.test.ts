@@ -8,7 +8,7 @@ import {
 } from "@mod/webauthn/testing";
 import { expect, it } from "vitest";
 import { jointStores, memoryStores } from "../../../test/stores.ts";
-import { keptChallenges } from "../../records.ts";
+import { keptChallenges } from "../../challenges/challenges.ts";
 import type { ChallengeStore } from "../../store.ts";
 import { registrationsOver } from "../registrations.ts";
 

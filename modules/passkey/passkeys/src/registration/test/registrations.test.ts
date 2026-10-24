@@ -18,9 +18,10 @@ import {
 } from "@mod/webauthn/testing";
 import { expect, it } from "vitest";
 import { memoryStores, writeToken } from "../../../test/stores.ts";
+import { keptChallenges } from "../../challenges/challenges.ts";
 import { registrations } from "../../contract.ts";
 import passkeysModule from "../../module.ts";
-import { keptChallenges, keptPasskeys } from "../../records.ts";
+import { keptPasskeys } from "../../records.ts";
 import { passkeysConfig } from "../../testing.ts";
 import { registrationsOver } from "../registrations.ts";
 

@@ -9,8 +9,9 @@ import {
 } from "@mod/webauthn/testing";
 import { describe, expect, it } from "vitest";
 import { memoryStores, writeToken } from "../../../test/stores.ts";
+import { keptChallenges } from "../../challenges/challenges.ts";
 import { type Asked, holdersOver } from "../../holders/holders.ts";
-import { type KeptPasskeys, keptChallenges, keptPasskeys } from "../../records.ts";
+import { type KeptPasskeys, keptPasskeys } from "../../records.ts";
 import { passkeyWitnessStandIn } from "../../testing.ts";
 import type { PasskeyWitness } from "../../witness.ts";
 import { registrationsOver } from "../registrations.ts";

@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { type Ceremonies, challengeOf, type Verification } from "@mod/webauthn";
+import type { KeptChallenges } from "./challenges/challenges.ts";
 import type { Passkeys } from "./contract.ts";
-import type { KeptChallenges, KeptPasskeys } from "./records.ts";
+import type { KeptPasskeys } from "./records.ts";
 
 export interface PasskeyParts {
 	readonly ceremonies: Ceremonies;

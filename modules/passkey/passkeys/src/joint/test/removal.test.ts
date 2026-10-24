@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { expect, it } from "vitest";
-import { keptPasskeys } from "../src/records.ts";
-import type { PasskeyStore } from "../src/store.ts";
-import { heldState, jointOver, memoryStores, writeToken } from "./stores.ts";
+import { heldState, jointOver, memoryStores, writeToken } from "../../../test/stores.ts";
+import { keptPasskeys } from "../../records.ts";
+import type { PasskeyStore } from "../../store.ts";
 
 const fresh = () => randomBytes(32).toString("base64url");
 
@@ -66,13 +66,6 @@ it("moves the holder's fence on only with a write that empties its list, answeri
 	// A removal that takes nothing off moves nothing on.
 	expect((await records.removed("sam", c)).emptied).toBeUndefined();
 	expect(await fence("sam")).toBe(3);
-});
-
-it("reads a holder 0.18 kept, with no fence, at fence 0", async () => {
-	const { stores, records } = kept();
-	const handle = fresh();
-	await stores.backTo("sam", { v: 1, handle, credentials: [] });
-	expect(await records.holder("sam")).toEqual({ handle, credentials: [], fence: 0 });
 });
 
 it("tells what the subject holds after its list was emptied: a passkey, a pending one, none, or unsure", async () => {

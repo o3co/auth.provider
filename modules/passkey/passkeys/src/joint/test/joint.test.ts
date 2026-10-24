@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { isUnavailable, Unavailable } from "@mod/kernel";
 import { expect, it } from "vitest";
-import { jointStores } from "./stores.ts";
+import { jointStores } from "../../../test/stores.ts";
 
 const fresh = () => randomBytes(32).toString("base64url");
 
