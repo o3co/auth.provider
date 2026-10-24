@@ -96,7 +96,7 @@ const settings = (more: Record<string, unknown> = {}) => ({
 	...more,
 });
 const collected = contract<readonly SignerKeys[]>("test.signer-keys");
-const collector = defineModule({ name: "test-collector" }, (m) => [
+const collector = defineModule({ name: "test-collector", takes: [signerKeys] }, (m) => [
 	m.provide(collected).by((c) => c.collect(signerKeys)),
 ]);
 async function open(section: unknown = settings(), allow = ["127.0.0.1"]) {
@@ -116,7 +116,7 @@ async function open(section: unknown = settings(), allow = ["127.0.0.1"]) {
 }
 
 /** jwt-bearer's spent assertions on records' stand-in, as a wiring would keep them. */
-const spent = defineModule({ name: "spent-assertions" }, (m) => [
+const spent = defineModule({ name: "spent-assertions", takes: [] }, (m) => [
 	m.provide(spentAssertions).by((c) => {
 		const stand = memoryRecords<true>(c.clock.now, { shards: 1, perShard: 1 });
 		return {
@@ -244,7 +244,7 @@ it("says which of outbound's keys lets a keys-url it refuses through, naming no 
 });
 
 it("says why its credential may not go to keys-url in outbound-policy's words", async () => {
-	const standIn = defineModule({ name: "outbound" }, (m) => [
+	const standIn = defineModule({ name: "outbound", takes: [] }, (m) => [
 		m.provide(outbound).by(() => ({
 			fetch: async () => {
 				throw new Error("never sent");
@@ -267,7 +267,7 @@ describe("signer-keys-http under jwt-bearer", () => {
 	const issuer = "https://as.example";
 	const grantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 	async function serve() {
-		const location = defineModule({ name: "token-endpoint-location" }, (m) => [
+		const location = defineModule({ name: "token-endpoint-location", takes: [] }, (m) => [
 			m.provide(tokenEndpointLocation).by(() => ({ url: `${issuer}/oauth/token` })),
 		]);
 		const app = await assemble({
