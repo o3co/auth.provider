@@ -24,7 +24,7 @@ describe("introspection", () => {
 
 	it("tells a resource server how an access token is bound", async () => {
 		/** The binding kind the bound token is issued with, so tokens reads its member back. */
-		const keyed = defineModule({ name: "keyed-binding" }, (m) => [
+		const keyed = defineModule({ name: "keyed-binding", takes: [] }, (m) => [
 			m
 				.contribute(senderBindings)
 				.by(() => ({ member: "key", tokenType: "Keyed", read: async () => ({ kind: "absent" }) })),
@@ -79,7 +79,7 @@ describe("introspection", () => {
 
 	it("answers 503 when a condition on access tokens cannot tell, never inactive, recording and warning so", async () => {
 		const down = unavailableSwitch<AccessCondition>();
-		const condition = defineModule({ name: "condition" }, (m) => [
+		const condition = defineModule({ name: "condition", takes: [] }, (m) => [
 			m
 				.contribute(accessConditions)
 				.by(() => down.wrap({ name: "test", holds: async () => "holds" as const })),
