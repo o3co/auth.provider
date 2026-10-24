@@ -12,7 +12,7 @@ import senderBindingModule from "../src/module.ts";
 const reads: string[] = [];
 
 const kind = (member: string, header: string, explicit = false) =>
-	defineModule({ name: `binding-${member}` }, (m) => [
+	defineModule({ name: `binding-${member}`, takes: [] }, (m) => [
 		m.contribute(senderBindings).by(() => ({
 			member,
 			tokenType: member.toUpperCase(),

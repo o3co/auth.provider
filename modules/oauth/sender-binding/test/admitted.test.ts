@@ -25,7 +25,7 @@ beforeEach(() => {
  * own challenge, `down` is unavailable.
  */
 const kind = (member: string, tokenType: string, header: string) =>
-	defineModule({ name: `binding-${member}` }, (m) => [
+	defineModule({ name: `binding-${member}`, takes: [] }, (m) => [
 		m.contribute(senderBindings).by(() => ({
 			member,
 			tokenType,
