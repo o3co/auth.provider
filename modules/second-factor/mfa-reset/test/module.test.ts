@@ -12,7 +12,7 @@ import resetModule from "../src/module.ts";
 it("resets over the contracts it is given, releasing mfa-flows' lockout by its name and policy", async () => {
 	const released: unknown[] = [];
 	const policy = { budget: 10 };
-	const parts = defineModule({ name: "parts" }, (m) => [
+	const parts = defineModule({ name: "parts", takes: [] }, (m) => [
 		m.provide(flowParts).by(() => ({ lockout: { name: "mfa", policy } }) as never),
 		m
 			.provide(factorManaging)
@@ -36,7 +36,7 @@ it("resets over the contracts it is given, releasing mfa-flows' lockout by its n
 });
 
 it("refuses two parts of one name, and calls a part composed", async () => {
-	const base = defineModule({ name: "base" }, (m) => [
+	const base = defineModule({ name: "base", takes: [] }, (m) => [
 		m.provide(flowParts).by(() => ({ lockout: { name: "mfa", policy: { budget: 10 } } }) as never),
 		m.provide(factorManaging).by(() => ({ clear: async () => ({ count: 0, kinds: [] }) }) as never),
 		m.provide(revocations).by(() => ({ record: async () => ({ complete: true }) }) as never),
@@ -46,7 +46,7 @@ it("refuses two parts of one name, and calls a part composed", async () => {
 	]);
 	const removed: string[] = [];
 	const part = (module: string, name: string) =>
-		defineModule({ name: module }, (m) => [
+		defineModule({ name: module, takes: [] }, (m) => [
 			m.contribute(resetParts).by(() => ({
 				name,
 				remove: async (subject: string) => {
@@ -71,7 +71,7 @@ it("refuses two parts of one name, and calls a part composed", async () => {
 
 it("tells how many of a subject's counting factors are written and stand for nothing, as mfa reads them", async () => {
 	const asked: string[] = [];
-	const base = defineModule({ name: "base" }, (m) => [
+	const base = defineModule({ name: "base", takes: [] }, (m) => [
 		m.provide(flowParts).by(() => ({ lockout: { name: "mfa", policy: { budget: 10 } } }) as never),
 		m.provide(factorManaging).by(() => ({ clear: async () => ({ count: 0, kinds: [] }) }) as never),
 		m.provide(revocations).by(() => ({ record: async () => ({ complete: true }) }) as never),

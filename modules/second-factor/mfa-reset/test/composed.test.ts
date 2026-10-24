@@ -1,5 +1,6 @@
 import { testRequest } from "@mod/http/testing";
 import { defineModule, Unavailable } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
 import { type Witnessing, witnessing } from "@mod/mfa-extensions";
 import { sessions } from "@mod/session";
 import { revocations } from "@mod/subject-revocation";
@@ -97,7 +98,7 @@ describe("a reset composed with mfa-flows and its stores", () => {
 				throw new Unavailable("witness");
 			},
 		};
-		const witness = defineModule({ name: "failing-witness" }, (m) => [
+		const witness = defineModule({ name: "failing-witness", takes: [] }, (m) => [
 			m.contribute(witnessing).by(() => failing),
 		]);
 		const s = await serve({}, [witness]);
@@ -107,4 +108,8 @@ describe("a reset composed with mfa-flows and its stores", () => {
 		clock.shift += 1000;
 		expect((await s.login("dot")).kind).toBe("opened");
 	});
+});
+
+it("takes all it names, composed with mfa-flows and its stores", async () => {
+	expect(await takesUnused((await serve()).input)).toEqual({});
 });
