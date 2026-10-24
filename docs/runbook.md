@@ -13,6 +13,7 @@ How to run auth-provider 0.18: Redis, rotating keys, upgrading, and what to watc
 - [Keeping the second-factor witness at the ledger](#keeping-the-second-factor-witness-at-the-ledger)
 - [Second factors left without their claim](#second-factors-left-without-their-claim)
 - [Passkey list entries 0.18 left](#passkey-list-entries-018-left)
+- [Filling the passkey witness's marks](#filling-the-passkey-witnesss-marks)
 - [Name resolution](#name-resolution)
 - [Probes and alerts](#probes-and-alerts)
 - [Stopping](#stopping)
@@ -240,13 +241,32 @@ Nothing mends it by itself, and no release adds the claim later. Mend it by a re
 - counts toward `passkeys.max-credentials` for that subject, and is not shown by `listed`, so the user does not see it;
 - lets nobody in: an assertion checks the record's subject.
 
-No tool frees such an entry yet; a passkey reset (`passkey-reset`, which empties the subject's list and leaves the other subject's record as it is) is planned and not in this release. What can be done now:
+An operator's passkey reset frees such an entry: `passkeyReset.reset` (`passkey-reset`) empties the subject's list, the entry among them, and leaves the other subject's record as it is. It also ends every passkey of the subject's own, so the user registers again. What can be done:
 
 1. Upgrade every host to 0.19, and let the requests the 0.18 hosts took finish.
 2. Where the id is known, a removal naming it (`passkey-registration`'s `/remove`, from the subject's own session) takes the entry off and leaves the other subject's record as it is. The user does not see the entry to name it, and no tool lists such entries yet.
 3. Where a user meets `passkeys.max-credentials` because of it, raising the limit (at most 100) gives them room to register; it frees nothing.
+4. Where the entry must go and the id is not known, reset the subject's passkeys as an operator (above), and tell the user first that their passkeys will be removed.
 
-Registering the same credential again does not free it: a registration's options exclude every id the subject's list names, this one included, so the authenticator holding it refuses to create it. Registering another credential leaves the entry as it is. `mfaReset.run` does not touch passkeys.
+Registering the same credential again does not free it: a registration's options exclude every id the subject's list names, this one included, so the authenticator holding it refuses to create it. Registering another credential leaves the entry as it is. `mfaReset.run` removes the subject's passkeys too, as a passkey reset does, where `mfa-reset-passkeys` (with `passkey-reset`) is composed; where it is not, it leaves them as they are.
+
+## Filling the passkey witness's marks
+
+With a passkey witness (`passkey-witness-http`, matched with the passkeys by `passkey-witnessing`), a subject is marked at the ledger once it registers a passkey, so a passkey store that loses its records never reads as holding none. A subject who registered before the witness was composed, and has registered nothing since, carries no mark: if the store then loses its passkeys, the subject reads as holding none.
+
+Once the witness is composed on every instance, run `pnpm run passkey-backfill` in the app, with its configuration, giving it the subjects on standard input, one a line (for example `pnpm run passkey-backfill < subjects.txt`). It reads only the subjects it is given: give it every subject that may hold a passkey (from the user ledger, or every subject you know). It builds the app without serving anything, and marks each subject that holds a passkey and carries no mark. It prints only how many it found in each case, never a subject:
+
+- `marked`: the subject held a passkey with no mark, and now has one.
+- `held`: the mark was there already, or another request set it meanwhile.
+- `none`: no passkey written and no mark.
+- `pending`: only a registration not yet finished is written; the mark is left as it is. Run it again for the subject once the registration ends or its time runs out.
+- `inconsistent`: a mark stands that the backfill did not set, beside no passkey written; it is left as it is (see below).
+- `unknown`: an answer the script does not know (a later release's).
+- `failed`: the ledger or the store could not answer, or a line was longer than a subject may be.
+
+It exits 0 when none failed and none was unknown, else 1: run it again on the same list until it exits 0. It exits 78 when the app's boot is refused. The app's `src/passkey-backfill.ts` comes with an app generated with 0.19 that composes `passkey-witnessing`; for one generated before, generate the project again.
+
+**A mark beside no passkey** (`inconsistent`) is either a store that lost the subject's passkeys, the case the mark is there for, or a mark that outlived them (a removal that emptied the list while the ledger could not answer). Check the passkey store first: where it lost records, restore it before anything else. Where you know the subject holds no passkey, an operator's passkey reset of the subject (`passkeyReset.reset`, or `mfaReset.run` where `mfa-reset-passkeys` is composed) withdraws the mark; run the backfill once more and check `none`.
 
 ## Name resolution
 
