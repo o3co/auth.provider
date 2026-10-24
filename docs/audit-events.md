@@ -112,7 +112,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 
 | Kind | Attributes | Recorded when |
 |---|---|---|
-| `mfa.reset` | `by`, `kinds`, `count`, `sessions`, `sessionsAgain`, `complete`, `requestedBy` | an operator's reset gets past its input, finished or not (`complete`) |
+| `mfa.reset` | `by`, `kinds`, `count`, `parts`, `partsStopped`, `sessions`, `sessionsAgain`, `complete`, `requestedBy` | an operator's reset gets past its input, finished or not (`complete`) |
 
 ## @mod/mfa-witnessing
 
