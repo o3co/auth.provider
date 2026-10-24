@@ -26,7 +26,7 @@ async function placeOver(
 	let failing = false;
 	const closed: string[] = [];
 	const stores = memoryStores();
-	const around = defineModule({ name: "around" }, (m) => [
+	const around = defineModule({ name: "around", takes: [] }, (m) => [
 		// Where credentials are judged, only a strong login changes them.
 		...(credentialsJudged
 			? [
@@ -115,7 +115,7 @@ describe("entry requirements", () => {
 				return { kind: "admit" as const };
 			},
 		});
-		const unsorted = defineModule({ name: "unsorted" }, (m) => [
+		const unsorted = defineModule({ name: "unsorted", takes: [] }, (m) => [
 			m.contribute(entryRequirements).by(() => requirement("b")),
 			m.contribute(entryRequirements).by(() => requirement("a")),
 		]);
@@ -145,7 +145,7 @@ describe("participants", () => {
 				if (fails) throw new Error("not yet");
 			},
 		});
-		const two = defineModule({ name: "two" }, (m) => [
+		const two = defineModule({ name: "two", takes: [] }, (m) => [
 			m.contribute(participants).by(() => participant("b", true)),
 			m.contribute(participants).by(() => participant("a", false)),
 		]);
