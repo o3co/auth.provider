@@ -80,7 +80,7 @@ export function witnessStandIn(
 			};
 		}
 	}
-	const module = defineModule({ name }, (m) => [
+	const module = defineModule({ name, takes: [] }, (m) => [
 		m.contribute(enrollmentWitnesses).by(() => witness),
 	]);
 	return { module, witness, marks, failing, lost, next };

@@ -1,3 +1,5 @@
+import { kernelConfig } from "@mod/kernel";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { expect, it } from "vitest";
 import { enrollmentWitnessContract, witnessProblems, witnessStandIn } from "../src/testing.ts";
 
@@ -6,6 +8,15 @@ enrollmentWitnessContract(
 	"the stand-in without withdraw",
 	async () => witnessStandIn("enrollment-witness", { withdraw: false }).witness,
 );
+
+it("takes all its stand-in names", async () => {
+	const input = {
+		modules: [witnessStandIn().module],
+		config: kernelConfig(),
+		runtime: quietRuntime(),
+	};
+	expect(await takesUnused(input)).toEqual({});
+});
 
 it("tells a witness answering from a lagging replica from one that keeps its promises", async () => {
 	const behind = witnessStandIn().witness;
