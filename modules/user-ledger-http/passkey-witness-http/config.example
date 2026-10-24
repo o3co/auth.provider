@@ -2,6 +2,5 @@ passkey-witness-http {
 	read-url = "https://ledger.example.invalid/passkey-witness/read"
 	enroll-url = "https://ledger.example.invalid/passkey-witness/enroll"
 	withdraw-url = "https://ledger.example.invalid/passkey-witness/withdraw"
-	clear-url = "https://ledger.example.invalid/passkey-witness/clear"
 	credential = "REPLACE-RANDOM-BEARER-TOKEN-32-BYTES"
 }

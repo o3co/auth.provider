@@ -11,17 +11,16 @@ describe("a fake ledger keeping the passkey witness", () => {
 		body: JSON.stringify(body),
 	});
 
-	it("points passkey-witness-http at its four calls at one origin, under a credential of its own", () => {
+	it("points passkey-witness-http at its three calls at one origin, under a credential of its own", () => {
 		expect(section).toEqual({
 			"read-url": "http://127.0.0.1:1/passkey-witness/read",
 			"enroll-url": "http://127.0.0.1:1/passkey-witness/enroll",
 			"withdraw-url": "http://127.0.0.1:1/passkey-witness/withdraw",
-			"clear-url": "http://127.0.0.1:1/passkey-witness/clear",
 			credential: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
 		});
 	});
 
-	it("says whether a subject is enrolled with its mark's token, takes the first mark only, withdraws it only by its token, and clears it", () => {
+	it("says whether a subject is enrolled with its mark's token, takes the first mark only, and withdraws it only by its token", () => {
 		expect(ledger.answer(call("read", { subject: "u-1" }))).toEqual({ json: { enrolled: false } });
 		expect(ledger.answer(call("enroll", { subject: "u-1", token: "a" }))).toEqual({
 			json: { owner: true },
@@ -45,8 +44,11 @@ describe("a fake ledger keeping the passkey witness", () => {
 		expect(ledger.answer(call("enroll", { subject: "u-1", token: "c" }))).toEqual({
 			json: { owner: true },
 		});
-		expect(ledger.answer(call("clear", { subject: "u-1" }))).toEqual({ status: 204 });
-		expect(ledger.answer(call("read", { subject: "u-1" }))).toEqual({ json: { enrolled: false } });
+		// The adapter calls no clear: the ledger keeps no route for it.
+		expect(ledger.answer(call("clear", { subject: "u-1" }))).toBeUndefined();
+		expect(ledger.answer(call("read", { subject: "u-1" }))).toEqual({
+			json: { enrolled: true, token: "c" },
+		});
 	});
 
 	it("answers 404 to its calls without its credential, and nothing to a call not its own", () => {

@@ -8,7 +8,6 @@ import {
 	outboundRefusals,
 } from "@mod/outbound-policy";
 import { passkeyWitnesses } from "@mod/passkeys";
-import { sameTarget } from "@mod/url-setting";
 import { section } from "./section.ts";
 import { witnessAt } from "./witness.ts";
 
@@ -19,15 +18,7 @@ export default defineModule({ name: "passkey-witness-http", section, replicaSafe
 			read: c.section["read-url"],
 			enroll: c.section["enroll-url"],
 			withdraw: c.section["withdraw-url"],
-			clear: c.section["clear-url"],
 		};
-		// One target for both would clear whoever's mark a withdraw names: the token would decide nothing.
-		if (sameTarget(urls.withdraw, urls.clear)) {
-			return c.refuse(
-				"passkey-witness-http.withdraw-url",
-				"another target than clear-url, as outbound sends them (origin, path and query)",
-			);
-		}
 		// The operator's own URLs, at one origin as their credential's rule holds them: reached at a
 		// private address there alone, for a host in `internal-hosts` or a `plain-internal` pair.
 		const narrower = {

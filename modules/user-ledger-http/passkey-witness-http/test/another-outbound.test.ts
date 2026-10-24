@@ -16,7 +16,6 @@ it("logs the failure a second copy of outbound throws by its kind, not as no ans
 			read: "https://w.example/r",
 			enroll: "https://w.example/e",
 			withdraw: "https://w.example/w",
-			clear: "https://w.example/c",
 		},
 		out: {
 			fetch: async () => {

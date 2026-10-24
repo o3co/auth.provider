@@ -7,7 +7,7 @@
 - Sets up the passkey area's parts (relying party, origins, framing pages, user verification, challenge lifetime, passkeys per user, the login and its options' limit, WebAuthn as a second factor) on each of the legacy and new targets.
 - On the legacy target, DPoP comes with the passkey login when the OAuth part asks for it.
 - WebAuthn as a second factor needs the second-factor area's part beside it.
-- On a pattern's app that keeps passkeys' witness at a ledger (`passkey-witness-http`), a fake ledger keeps it for every scene: whether a subject is marked and with what token, the first mark, withdrawing it by its token alone, and clearing it.
+- On a pattern's app that keeps passkeys' witness at a ledger (`passkey-witness-http`), a fake ledger keeps it for every scene: whether a subject is marked and with what token, the first mark, and withdrawing it by its token alone (no clear: passkey-witness-http calls none).
 
 ## Not here
 - Scene composition and drivers (`conformance`). The software authenticator (`webauthn`'s test tools). Starting the legacy system (`conformance-legacy`). Key, user, OAuth, code and second-factor parts.
