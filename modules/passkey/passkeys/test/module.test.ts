@@ -25,6 +25,7 @@ import {
 	passkeyHolders,
 	passkeyStore,
 	passkeys,
+	passkeyWitnessing,
 	registrations,
 } from "../src/contract.ts";
 import passkeysModule from "../src/module.ts";
@@ -449,4 +450,30 @@ it("offers the witness's extension point as passkey-witness holds it, so a witne
 	await expect(boot([passkeyWitnessStandIn("one"), witnessStandIn("two")])).rejects.toBeInstanceOf(
 		BootRefused,
 	);
+});
+
+it("refuses to boot with two passkey witnessings contributed", async () => {
+	const witnessing = (name: string) =>
+		defineModule({ name }, (m) => [
+			m.contribute(passkeyWitnessing).by(() => ({
+				settle: async () => false,
+				emptied: async () => {},
+			})),
+		]);
+	const refused = await assemble({
+		modules: [
+			memoryStores().module,
+			auditStandIn().module,
+			webauthn,
+			passkeysModule,
+			witnessing("one"),
+			witnessing("two"),
+		],
+		config: { ...kernelConfig(), ...webauthnConfig(), ...passkeysConfig() },
+		runtime: quietRuntime(),
+	}).catch((error: unknown) => error);
+	expect((refused as BootRefused).refusals).toContainEqual({
+		where: "passkeys",
+		reason: "more than one passkey witnessing is contributed",
+	});
 });

@@ -1,4 +1,4 @@
-import { contract } from "@mod/kernel";
+import { contract, extensionPoint } from "@mod/kernel";
 import type { CeremonyRefusal, Credential } from "@mod/webauthn";
 
 /** Assertions by the discoverable passkeys this package keeps. Throws Unavailable when the store cannot tell. */
@@ -97,6 +97,35 @@ export interface PasskeyHolders {
 /** Taken by the modules that log in with passkeys and reset them, as it can end every passkey a subject holds. */
 export const passkeyHolders = contract<PasskeyHolders>("passkeys.holders", {
 	takenBy: ["login-passkey", "passkey-reset"],
+});
+
+/** Where a settle was asked, as an inconsistency found there is recorded. */
+export type Asked = "held" | "registration" | "removal" | "reset" | "settle";
+
+/**
+ * What a subject holds after a write that emptied its list, read anew each time and writing
+ * nothing: `passkey` or `pending` where its list names one of the subject's; `none` where the holder
+ * is the one that write left, at its fence or later, and every listed record reads as none of the
+ * subject's, the only answer under which the mark may go; `unsure` otherwise, which keeps the mark.
+ */
+export type AfterRemoval = "passkey" | "pending" | "none" | "unsure";
+
+/** Who tells, apart from the store, that a subject holds a passkey: contributed by `passkey-witnessing` where a witness is composed. */
+export interface PasskeyWitnessing {
+	/** Brings the mark in line with what the subject holds, as `holds` reads it anew; answers whether it holds, as the read the mark agreed with saw it. */
+	settle(subject: string, at: Asked, holds: () => Promise<boolean>): Promise<boolean>;
+	/** After a write that emptied the list: the mark goes only where `after` answers none, and is set again where a passkey came meanwhile. */
+	emptied(
+		subject: string,
+		at: Asked,
+		after: () => Promise<AfterRemoval>,
+		holds: () => Promise<boolean>,
+	): Promise<void>;
+}
+
+/** At most one; with none, passkeys matches the witness composed itself, or the store alone tells. */
+export const passkeyWitnessing = extensionPoint<PasskeyWitnessing>("passkeys.witnessing", {
+	multiplicity: "many",
 });
 
 export { type PasskeyWitness, passkeyWitnesses } from "@mod/passkey-witness";

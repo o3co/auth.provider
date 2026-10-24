@@ -9,9 +9,10 @@ Internal module of `passkeys`: whether subjects hold passkeys, and the settle th
 - How passkeys are written and listed (the package's records). The witness's promises and its wire (the witness composed). Who asks a settle, and when (the package's registrations, and the modules taking `passkeyHolders`).
 
 ## Offers
-- `holdersOver` (records, witness, audit, log, a fresh token, a fresh handle) → `holders` (the package's `PasskeyHolders`) and `settle` (subject, where asked, the holder its call's write left where it emptied the list), for the package's registrations.
+- `holdersOver` (records, witness, the witnessing contributed, audit, log, a fresh token, a fresh handle) → `holders` (the package's `PasskeyHolders`) and `settle` (subject, where asked, the holder its call's write left where it emptied the list), for the package's registrations.
 
 ## Invariants
+- Where a witnessing is contributed, it is asked in this module's place: `settle` (held, a registration, a removal that leaves a passkey, `settle`) and `emptied` (a removal or an end that empties the list, a reset), handed reads anew that write nothing. This module's own matching runs only without one.
 - A settle reads the passkeys and the mark again after each write, its own withdraw included, and marks twice at most: the limit is judged before a mark, so the last mark is checked too, then it is unavailable while they still differ. It answers whether the subject holds a passkey as the read the mark agreed with saw it, and `held` answers that, never a read of the passkeys alone after.
 - Its own mark, by the latest `enroll`'s token, goes by `withdraw`, which leaves another's.
 - Where its call emptied the list (a last removal, an end, `cleared`), it reads the mark's token, then what the holder that write left holds (`afterRemoval`), and withdraws that token only where that answers none.

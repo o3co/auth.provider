@@ -2,13 +2,15 @@ import { type Audit, declaredAudit } from "@mod/audit";
 import { isUnavailable, type Log, Unavailable } from "@mod/kernel";
 import type { PasskeyWitness } from "@mod/passkey-witness";
 import events from "../audit-events.ts";
-import type { PasskeyHolders } from "../contract.ts";
+import type { Asked, PasskeyHolders, PasskeyWitnessing } from "../contract.ts";
 import type { Emptied, KeptPasskeys } from "../records.ts";
 
 export interface HolderParts {
 	readonly records: KeptPasskeys;
 	/** None composed leaves the store alone to tell. */
 	readonly witness: PasskeyWitness | undefined;
+	/** Where one is contributed, it matches the mark with the passkeys in this module's place. */
+	readonly witnessing?: PasskeyWitnessing | undefined;
 	readonly audit: Pick<Audit, "record">;
 	readonly log: Pick<Log, "warn">;
 	/** A new token for a mark this call sets. */
@@ -17,8 +19,7 @@ export interface HolderParts {
 	readonly handle: () => string;
 }
 
-/** Where a settle was asked, as an inconsistency found there is recorded. */
-export type Asked = "held" | "registration" | "removal" | "reset" | "settle";
+export type { Asked } from "../contract.ts";
 
 /** A witness unavailable is asked again this often, with the same token, which answers alike. */
 const enrollRetries = 3;
@@ -75,6 +76,19 @@ export function holdersOver(p: HolderParts) {
 	 * unavailable. Answers whether the subject holds a passkey, as the read the mark agreed with saw it.
 	 */
 	const settle = async (subject: string, at: Asked, emptied?: Emptied): Promise<boolean> => {
+		const witnessing = p.witnessing;
+		if (witnessing !== undefined) {
+			const holding = () => holds(subject);
+			if (emptied === undefined) return witnessing.settle(subject, at, holding);
+			await witnessing.emptied(
+				subject,
+				at,
+				() => p.records.afterRemoval(subject, emptied),
+				holding,
+			);
+			// After an emptying write no caller reads the answer: it tells nothing of the mark.
+			return false;
+		}
 		const witness = p.witness;
 		if (witness === undefined) return holds(subject);
 		if (emptied !== undefined) return withdrawn(witness, subject, at, emptied);
@@ -114,7 +128,7 @@ export function holdersOver(p: HolderParts) {
 		settle: async (subject) => {
 			await settle(subject, "settle");
 		},
-		witnessed: p.witness !== undefined,
+		witnessed: p.witnessing !== undefined || p.witness !== undefined,
 	};
 	return { holders, settle };
 }
