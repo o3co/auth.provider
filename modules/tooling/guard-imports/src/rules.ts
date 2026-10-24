@@ -83,6 +83,29 @@ export function fileImportRules(s: Scope, p: Pkg, file: string) {
 	}
 }
 
+/** The file a target names: one found, or where a missing one would be. */
+const fileNamed = (target: Edge["target"]) =>
+	target.kind === "file" || target.kind === "unresolved" ? target.path : undefined;
+
+/** G34: each file a source of the package names, tests' too, is the package's own; a resolve names one, taking no dependency. */
+export function ownFileRules(s: Scope, p: Pkg, file: string) {
+	const rule = "G34 a relative import stays within its package";
+	const where = `${p.name}/${file}`;
+	for (const edge of s.factsOf(p, file).edges) {
+		if (edge.form === "resolve") continue;
+		const { text, fragment } = edge.specifier;
+		if (text === undefined) {
+			// Named at run time, it cannot be held to the package.
+			if (fragment?.startsWith(".")) {
+				s.report(rule, where, `${fragment}\${…}: a relative import named at run time`);
+			}
+			continue;
+		}
+		const named = fileNamed(edge.target);
+		if (named !== undefined && s.ownerOf(named)?.name !== p.name) s.report(rule, where, text);
+	}
+}
+
 /** G1 */
 export function cycles(s: Scope) {
 	const state = new Map<string, "open" | "done">();

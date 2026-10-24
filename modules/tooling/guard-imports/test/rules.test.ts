@@ -1,3 +1,5 @@
+import { mkdirSync, symlinkSync } from "node:fs";
+import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { importViolations, type Rules } from "../src/contract.ts";
 import type { Pkg } from "../src/workspace.ts";
@@ -189,6 +191,141 @@ describe("guard-imports", () => {
 			"verification",
 		);
 		expect(rules([feature, check2, area])).toContain("G14");
+	});
+
+	it("G34 holds a relative import to its own package, a climb within it let through", () => {
+		const other = pkg("@r/other", { "src/contract.ts": "export const o = 1;\n" }, {});
+		const within = pkg(
+			"@r/within",
+			{
+				"src/contract.ts": 'import { l } from "../lib/l.ts";\nexport const w = l;\n',
+				"lib/l.ts": "export const l = 1;\n",
+				"test/w.test.ts": 'import { w } from "../src/contract.ts";\nexport const t = w;\n',
+			},
+			{},
+		);
+		const out = pkg(
+			"@r/out",
+			{
+				"src/contract.ts":
+					'import { o } from "../../@r_other/src/contract.ts";\nexport { o };\nexport * from "../../@r_other/src/contract.ts";\nexport const d = () => import("../../@r_other/src/contract.ts");\n',
+				"test/o.test.ts":
+					'import { o } from "../../@r_other/src/contract.ts";\nexport const t = o;\n',
+			},
+			{},
+		);
+		expect(
+			check([other, within, out], budget)
+				.filter((v) => v.rule.startsWith("G34"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual([
+			"@r/out/src/contract.ts ../../@r_other/src/contract.ts",
+			"@r/out/src/contract.ts ../../@r_other/src/contract.ts",
+			"@r/out/src/contract.ts ../../@r_other/src/contract.ts",
+			"@r/out/test/o.test.ts ../../@r_other/src/contract.ts",
+		]);
+	});
+
+	it("G34 reads a template's import and an import type, and refuses a relative import named at run time", () => {
+		const other = pkg("@s/other", { "src/contract.ts": "export const o = 1;\n" }, {});
+		const out = pkg(
+			"@s/out",
+			{
+				"src/contract.ts": [
+					"export const t = () => import(`../../@s_other/src/contract.ts`);",
+					'export type O = import("../../@s_other/src/contract.ts").O;',
+					"export const n = (name: string) => import(`../${name}.ts`);",
+					"export const i = () => import(`./in.ts`);",
+					'import O = require("../../@s_other/src/contract.ts");',
+					"export const r = O;",
+					"",
+				].join("\n"),
+				"src/in.ts": "export const i = 1;\n",
+			},
+			{},
+		);
+		expect(
+			check([other, out], budget)
+				.filter((v) => v.rule.startsWith("G34"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual([
+			"@s/out/src/contract.ts ../../@s_other/src/contract.ts",
+			"@s/out/src/contract.ts ../../@s_other/src/contract.ts",
+			"@s/out/src/contract.ts ../${…}: a relative import named at run time",
+			"@s/out/src/contract.ts ../../@s_other/src/contract.ts",
+		]);
+	});
+
+	it("G34 follows a link out of the package, as the import would", () => {
+		const other = pkg("@l/other", { "src/contract.ts": "export const o = 1;\n" }, {});
+		const linked = pkg(
+			"@l/linked",
+			{ "src/contract.ts": 'export { o } from "../lib/contract.ts";\n' },
+			{},
+		);
+		symlinkSync(join(other.dir, "src"), join(linked.dir, "lib"));
+		expect(
+			check([other, linked], budget)
+				.filter((v) => v.rule.startsWith("G34"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual(["@l/linked/src/contract.ts ../lib/contract.ts"]);
+	});
+
+	it("G34 resolves a specifier as Node's loader does: encoded dots, a query, and the file's own place", () => {
+		const other = pkg(
+			"@u/other",
+			{
+				"src/helper.mjs": "export const h = 1;\n",
+				"src/linked.ts": 'export { h } from "./helper.mjs";\n',
+			},
+			{},
+		);
+		const own = pkg(
+			"@u/own",
+			{
+				"src/contract.ts": [
+					'export const e = () => import("./%2e%2e/%2e%2e/@u_other/src/helper.mjs");',
+					'export { h } from "../lib/helper.mjs?v=1";',
+					'export const inner = () => import("./inner.mjs?v=1");',
+					"",
+				].join("\n"),
+				"src/inner.mjs": "export const i = 1;\n",
+			},
+			{},
+		);
+		mkdirSync(join(own.dir, "lib"));
+		symlinkSync(join(other.dir, "src", "helper.mjs"), join(own.dir, "lib", "helper.mjs"));
+		symlinkSync(join(other.dir, "src", "linked.ts"), join(own.dir, "src", "linked.ts"));
+		const reading = { ...own, files: [...own.files, "src/linked.ts"] };
+		expect(
+			check([other, reading], budget)
+				.filter((v) => v.rule.startsWith("G34"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual([
+			"@u/own/src/contract.ts ./%2e%2e/%2e%2e/@u_other/src/helper.mjs",
+			"@u/own/src/contract.ts ../lib/helper.mjs?v=1",
+			"@u/own/src/linked.ts ./helper.mjs",
+		]);
+	});
+
+	it("G34 reads a require too, and leaves a resolve, which names a file and takes no dependency", () => {
+		const other = pkg("@q/other", { "src/contract.ts": "export const o = 1;\n" }, {});
+		const out = pkg(
+			"@q/out",
+			{
+				"src/contract.ts": [
+					'export const r = require("../../@q_other/src/contract.ts");',
+					'export const at = import.meta.resolve("../../@q_other/src/contract.ts");',
+					"",
+				].join("\n"),
+			},
+			{},
+		);
+		expect(
+			check([other, out], budget)
+				.filter((v) => v.rule.startsWith("G34"))
+				.map((v) => `${v.where} ${v.detail}`),
+		).toEqual(["@q/out/src/contract.ts ../../@q_other/src/contract.ts"]);
 	});
 
 	it("G14 keeps a check package that others build on free of the product's modules", () => {
