@@ -61,3 +61,25 @@ it("reads a holder 0.18 kept, with no fence, at fence 0", async () => {
 	await stores.backTo("sam", { v: 1, handle, credentials: [] });
 	expect(await records.holder("sam")).toEqual({ handle, credentials: [], fence: 0 });
 });
+
+it("tells what the subject's list names as written: a passkey, only pending ones, or neither", async () => {
+	const { stores, records, credentialFor } = kept();
+	expect(await records.writtenHolding("sam")).toBe("none");
+	const id = fresh();
+	const written = writeToken();
+	expect(await records.joined("sam", await credentialFor("sam", id), 10, undefined, written)).toBe(
+		"written",
+	);
+	expect(await records.writtenHolding("sam")).toBe("pending");
+	expect(await records.activated(id, written)).toBe("activated");
+	expect(await records.writtenHolding("sam")).toBe("passkey");
+	// Another subject's record on the list, as 0.18 left it, is neither.
+	const theirs = fresh();
+	expect(await records.register("kim", await credentialFor("kim", theirs), 10)).toBe("registered");
+	await records.handleFor("dee", fresh());
+	await stores.passkeys.subjects.update(
+		`s-${createHash("sha256").update("dee").digest("base64url")}`,
+		(current) => ({ value: { ...(current as object), credentials: [theirs] } as never }),
+	);
+	expect(await records.writtenHolding("dee")).toBe("none");
+});

@@ -9,7 +9,7 @@ Internal module of `passkeys`: the passkey records, read in the shape written, a
 - The writes that change a list, and the fence they move (`joint`). Challenges (`challenges`). Where records are kept (the package's store interface).
 
 ## Offers
-- `recordsOver` (the passkey store) → `holder`, `handleFor`, `passkey`, `activated`, `count`, `listed`, `renamed`.
+- `recordsOver` (the passkey store) → `holder`, `handleFor`, `passkey`, `activated`, `count`, `listed`, `renamed`, `writtenHolding`.
 - For the package's writes that change a list: the shapes read (`holderOf`, `keptOf`), the keys (`subjectKey`, `credentialKey`), a pending record by its write's token (`pendingOf`), the removed form (`removedOf`), `heldBy`, `stored` and `broken`.
 
 ## Invariants

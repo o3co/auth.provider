@@ -5,6 +5,7 @@ import { keptChallenges } from "./challenges/challenges.ts";
 import {
 	challengeStore,
 	passkeyHolders,
+	passkeyReading,
 	passkeyStore,
 	passkeys,
 	passkeyWitnessing,
@@ -73,6 +74,10 @@ export default defineModule({ name: "passkeys", section, replicaSafe: true }, (m
 			freshHandle: () => freshHandle(c.random.bytes),
 			settle: held.holding.settle,
 		});
+	}),
+	m.provide(passkeyReading).by(async (c) => {
+		const records = await passkeysOf(c);
+		return { writtenHolding: (subject) => records.writtenHolding(subject) };
 	}),
 	m.provide(passkeyHolders).by(async (c) => {
 		const held = await holdingOf(c);

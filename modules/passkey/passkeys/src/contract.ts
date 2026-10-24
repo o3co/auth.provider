@@ -99,6 +99,17 @@ export const passkeyHolders = contract<PasskeyHolders>("passkeys.holders", {
 	takenBy: ["login-passkey", "passkey-reset"],
 });
 
+/** What the subject holds as written, not judged against the witness: read anew each time. */
+export interface PasskeyReading {
+	/** `passkey` where its list names a passkey of the subject, `pending` where it names only pending ones, `none` where it names neither; unavailable where the store cannot tell. */
+	writtenHolding(subject: string): Promise<"passkey" | "pending" | "none">;
+}
+
+/** Taken by the witnessing alone, for its backfill. */
+export const passkeyReading = contract<PasskeyReading>("passkeys.reading", {
+	takenBy: ["passkey-witnessing"],
+});
+
 /** Where a settle was asked, as an inconsistency found there is recorded. */
 export type Asked = "held" | "registration" | "removal" | "reset" | "settle";
 

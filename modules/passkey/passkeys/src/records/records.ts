@@ -154,6 +154,18 @@ export function recordsOver(store: PasskeyStore) {
 			const before = changed && passkeyOf(judged.id, changed.before)?.credential.signCount;
 			return before === judged.signCount ? "counted" : "raced";
 		},
+		/** What the subject's list names as written: `passkey` where one is the subject's passkey, `pending` where only pending ones are, `none` otherwise. */
+		writtenHolding: async (subject: string): Promise<"passkey" | "pending" | "none"> => {
+			let held: "passkey" | "pending" | "none" = "none";
+			for (const id of (await holder(subject))?.credentials ?? []) {
+				const record = await store.credentials.read(credentialKey(id));
+				const kept = record && keptOf(record);
+				if (kept === undefined || kept.kind === "removed" || kept.subject !== subject) continue;
+				if (kept.kind === "passkey") return "passkey";
+				held = "pending";
+			}
+			return held;
+		},
 		/** The passkeys the subject's holder lists, as listed, in its order; one not held by it is left out. */
 		listed: async (subject: string): Promise<readonly RegisteredPasskey[]> => {
 			const ids = (await holder(subject))?.credentials ?? [];
