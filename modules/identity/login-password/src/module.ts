@@ -72,124 +72,129 @@ const attributesOf = (user: User) => ({
 	values: acceptedAttributes(user.attributes),
 });
 
-export default defineModule({ name: "login-password", section }, (m) => [
-	m.contribute(amrSources).by(() => ({ name: "login-password", amr: proves })),
-	m.contribute(routes).by(async (c) => {
-		const known = await c.get(users);
-		const gates = await c.get(logins);
-		const recorded = await c.get(audit);
-		const recordLogin = (
-			request: HttpRequest,
-			outcome: "succeeded" | "held" | "failed",
-			subject?: string,
-		) => {
-			const source = determinedSource(request);
-			declaredAudit(recorded, events).record(`login.${outcome}`, {
-				...(subject === undefined ? {} : { subject }),
-				attributes: { method: "password", ...(source === undefined ? {} : { source }) },
-			});
-		};
-		const window = { limit: c.section.attempts, ms: c.section.window * 1000 };
-		const budgets = await c.get(lockouts);
-		const windowMs = c.section["account-window"] * 1000;
-		// Waits double from a second to the longest; no budget or hard limit ever holds one for good.
-		const policy: LockoutPolicy = {
-			threshold: c.section["account-attempts"],
-			backoffMs: 1000,
-			maxBackoffMs: c.section["account-max-wait"] * 1000,
-			budget: Number.MAX_SAFE_INTEGER,
-			budgetWindowMs: windowMs,
-			hardLimit: Number.MAX_SAFE_INTEGER,
-			memoryMs: windowMs,
-		};
-		const problem = lockoutProblem(policy);
-		if (problem) return c.refuse("login-password", `attempts per account: ${problem}`);
-		const login = async (request: HttpRequest): Promise<HttpResponse> => {
-			if (request.fields.repeated().length > 0) {
-				return answer(400, { error: "repeated_parameter" });
-			}
-			const field = (name: string) => request.fields.single(name);
-			const destination = field("redirect_to");
-			// A JSON destination that is not a string is refused; null is none.
-			const mistyped = request.mistyped?.has("redirect_to") && request.json?.redirect_to !== null;
-			if (mistyped) return answer(400, { error: "invalid_redirect" });
-			if (destination !== undefined && !gates.returnAllowed(destination)) {
-				return answer(400, { error: "invalid_redirect" });
-			}
-			const username = field("username");
-			const password = field("password");
-			if (!username || !password) return answer(400, { error: "invalid_request" });
-			const key = accountKey(username);
-			const reserved = await budgets.reserve(accountAttempts, key, policy).catch((error) => {
-				if (isUnavailable(error)) return undefined;
-				throw error;
-			});
-			if (!reserved) return answer(503, { error: "service_unavailable" });
-			if (reserved.kind === "held") {
-				const seconds = Math.max(1, Math.ceil((reserved.retryAfterMs ?? windowMs) / 1000));
-				return jsonAnswer(
-					429,
-					{ error: "too_many_attempts" },
-					{ headers: { "retry-after": String(seconds) } },
-				);
-			}
-			const verified = await known.verify(username, password).catch(async (error) => {
-				// A guess never judged is handed back; the run goes on without it.
-				if (isUnavailable(error))
-					await budgets.abandoned(accountAttempts, key, policy, reserved.reservation);
-				throw error;
-			});
-			// When the password was proved: the login's authentication time, whatever a gate holds after.
-			const verifiedAt = c.clock.now();
-			if (verified.kind !== "user") {
-				recordLogin(request, "failed");
-				return answer(401, { error: "invalid_credentials" });
-			}
-			// A gate that holds the login answers this once it lets the login through.
-			const done = destination === undefined ? {} : { redirect_to: destination };
-			const facts = {
-				subject: verified.user.subject,
-				amr: proves,
-				authenticatedAt: verifiedAt,
-				attributes: attributesOf(verified.user),
+export default defineModule(
+	{ name: "login-password", section, takes: [audit, logins, lockouts, users] },
+	(m) => [
+		m.contribute(amrSources).by(() => ({ name: "login-password", amr: proves })),
+		m.contribute(routes).by(async (c) => {
+			const known = await c.get(users);
+			const gates = await c.get(logins);
+			const recorded = await c.get(audit);
+			const recordLogin = (
+				request: HttpRequest,
+				outcome: "succeeded" | "held" | "failed",
+				subject?: string,
+			) => {
+				const source = determinedSource(request);
+				declaredAudit(recorded, events).record(`login.${outcome}`, {
+					...(subject === undefined ? {} : { subject }),
+					attributes: { method: "password", ...(source === undefined ? {} : { source }) },
+				});
 			};
-			const outcome = await gates.login(request, facts, done).catch(async (error) => {
-				// A gate that cannot tell judged nothing either: the guess is handed back.
-				if (isUnavailable(error))
-					await budgets.abandoned(accountAttempts, key, policy, reserved.reservation);
-				throw error;
-			});
-			// A login a gate refused fails as a wrong password does, in its answer and its count alike.
-			if (outcome.kind === "refused") {
-				recordLogin(request, "failed");
-				return answer(401, { error: "invalid_credentials" });
-			}
-			// The login is open or held already: a run that cannot be ended stays counted, the safe side, and the login is answered.
-			await budgets.succeeded(accountAttempts, key, policy, reserved.reservation).catch((error) => {
-				if (!isUnavailable(error)) throw error;
-				c.log.warn("login-password.run_unended", {});
-			});
-			if (outcome.kind === "held") {
-				recordLogin(request, "held", facts.subject);
-				return answer(403, outcome.answer, outcome.cookies);
-			}
-			recordLogin(request, "succeeded", facts.subject);
-			return answer(200, done, outcome.cookies);
-		};
-		return {
-			method: "POST",
-			path: "/session/login",
-			takes: ["form", "json"],
-			// The count comes after the CSRF check, before the handler judges the request: a malformed one counts too.
-			uses: [use(csrfChecked), use(attemptsPerSource, { name: "login-password", window })],
-			handle: async (request) => {
-				try {
-					return await login(request);
-				} catch (error) {
-					if (isUnavailable(error)) return answer(503, { error: "temporarily_unavailable" });
-					throw error;
+			const window = { limit: c.section.attempts, ms: c.section.window * 1000 };
+			const budgets = await c.get(lockouts);
+			const windowMs = c.section["account-window"] * 1000;
+			// Waits double from a second to the longest; no budget or hard limit ever holds one for good.
+			const policy: LockoutPolicy = {
+				threshold: c.section["account-attempts"],
+				backoffMs: 1000,
+				maxBackoffMs: c.section["account-max-wait"] * 1000,
+				budget: Number.MAX_SAFE_INTEGER,
+				budgetWindowMs: windowMs,
+				hardLimit: Number.MAX_SAFE_INTEGER,
+				memoryMs: windowMs,
+			};
+			const problem = lockoutProblem(policy);
+			if (problem) return c.refuse("login-password", `attempts per account: ${problem}`);
+			const login = async (request: HttpRequest): Promise<HttpResponse> => {
+				if (request.fields.repeated().length > 0) {
+					return answer(400, { error: "repeated_parameter" });
 				}
-			},
-		};
-	}),
-]);
+				const field = (name: string) => request.fields.single(name);
+				const destination = field("redirect_to");
+				// A JSON destination that is not a string is refused; null is none.
+				const mistyped = request.mistyped?.has("redirect_to") && request.json?.redirect_to !== null;
+				if (mistyped) return answer(400, { error: "invalid_redirect" });
+				if (destination !== undefined && !gates.returnAllowed(destination)) {
+					return answer(400, { error: "invalid_redirect" });
+				}
+				const username = field("username");
+				const password = field("password");
+				if (!username || !password) return answer(400, { error: "invalid_request" });
+				const key = accountKey(username);
+				const reserved = await budgets.reserve(accountAttempts, key, policy).catch((error) => {
+					if (isUnavailable(error)) return undefined;
+					throw error;
+				});
+				if (!reserved) return answer(503, { error: "service_unavailable" });
+				if (reserved.kind === "held") {
+					const seconds = Math.max(1, Math.ceil((reserved.retryAfterMs ?? windowMs) / 1000));
+					return jsonAnswer(
+						429,
+						{ error: "too_many_attempts" },
+						{ headers: { "retry-after": String(seconds) } },
+					);
+				}
+				const verified = await known.verify(username, password).catch(async (error) => {
+					// A guess never judged is handed back; the run goes on without it.
+					if (isUnavailable(error))
+						await budgets.abandoned(accountAttempts, key, policy, reserved.reservation);
+					throw error;
+				});
+				// When the password was proved: the login's authentication time, whatever a gate holds after.
+				const verifiedAt = c.clock.now();
+				if (verified.kind !== "user") {
+					recordLogin(request, "failed");
+					return answer(401, { error: "invalid_credentials" });
+				}
+				// A gate that holds the login answers this once it lets the login through.
+				const done = destination === undefined ? {} : { redirect_to: destination };
+				const facts = {
+					subject: verified.user.subject,
+					amr: proves,
+					authenticatedAt: verifiedAt,
+					attributes: attributesOf(verified.user),
+				};
+				const outcome = await gates.login(request, facts, done).catch(async (error) => {
+					// A gate that cannot tell judged nothing either: the guess is handed back.
+					if (isUnavailable(error))
+						await budgets.abandoned(accountAttempts, key, policy, reserved.reservation);
+					throw error;
+				});
+				// A login a gate refused fails as a wrong password does, in its answer and its count alike.
+				if (outcome.kind === "refused") {
+					recordLogin(request, "failed");
+					return answer(401, { error: "invalid_credentials" });
+				}
+				// The login is open or held already: a run that cannot be ended stays counted, the safe side, and the login is answered.
+				await budgets
+					.succeeded(accountAttempts, key, policy, reserved.reservation)
+					.catch((error) => {
+						if (!isUnavailable(error)) throw error;
+						c.log.warn("login-password.run_unended", {});
+					});
+				if (outcome.kind === "held") {
+					recordLogin(request, "held", facts.subject);
+					return answer(403, outcome.answer, outcome.cookies);
+				}
+				recordLogin(request, "succeeded", facts.subject);
+				return answer(200, done, outcome.cookies);
+			};
+			return {
+				method: "POST",
+				path: "/session/login",
+				takes: ["form", "json"],
+				// The count comes after the CSRF check, before the handler judges the request: a malformed one counts too.
+				uses: [use(csrfChecked), use(attemptsPerSource, { name: "login-password", window })],
+				handle: async (request) => {
+					try {
+						return await login(request);
+					} catch (error) {
+						if (isUnavailable(error)) return answer(503, { error: "temporarily_unavailable" });
+						throw error;
+					}
+				},
+			};
+		}),
+	],
+);
