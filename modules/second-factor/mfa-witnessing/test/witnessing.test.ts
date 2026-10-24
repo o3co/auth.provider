@@ -16,7 +16,7 @@ import { witnessBackfill } from "../src/contract.ts";
 import bridge from "../src/module.ts";
 
 const seen = contract<readonly Witnessing[]>("seen");
-const reader = defineModule({ name: "reader" }, (m) => [
+const reader = defineModule({ name: "reader", takes: [witnessing] }, (m) => [
 	m.provide(seen).by(async (c) => c.collect(witnessing)),
 ]);
 /**
@@ -25,7 +25,7 @@ const reader = defineModule({ name: "reader" }, (m) => [
  */
 const holding = (held: Record<string, string[]>, afterRead?: (n: number) => void) => {
 	let reads = 0;
-	return defineModule({ name: "factors-stand-in" }, (m) => [
+	return defineModule({ name: "factors-stand-in", takes: [] }, (m) => [
 		m.provide(factorReading).by(
 			() =>
 				({

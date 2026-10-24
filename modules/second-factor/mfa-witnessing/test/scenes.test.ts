@@ -1,4 +1,5 @@
 import { BootRefused, defineModule, isUnavailable } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
 import { factorKinds } from "@mod/mfa-extensions";
 import { witnessStandIn } from "@mod/mfa-witness/testing";
 import { expect, it } from "vitest";
@@ -6,7 +7,7 @@ import { witnessBackfill } from "../src/contract.ts";
 import { witnessed } from "./harness.ts";
 
 /** A counting kind whose first proof names a credential no two factors may hold. */
-const card = defineModule({ name: "kind-card" }, (m) => [
+const card = defineModule({ name: "kind-card", takes: [] }, (m) => [
 	m.contribute(factorKinds).by(() => ({
 		kind: "card",
 		amr: ["hwk"],
@@ -208,4 +209,9 @@ it("judges whether a counting factor is held against the witness, recording wher
 		["mfa.enrollment_inconsistent", { at: "credentials" }],
 		["mfa.enrollment_inconsistent", { at: "binding" }],
 	]);
+});
+
+it("takes all it names, with mfa and a witness in memory", async () => {
+	const h = await witnessed();
+	expect(await takesUnused(h.input)).toEqual({});
 });
