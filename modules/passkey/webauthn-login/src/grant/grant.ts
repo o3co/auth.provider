@@ -44,6 +44,9 @@ export interface LoginParts {
 }
 
 /** The passkey login grant: an assertion of a kept passkey for the client's tokens. */
+/** What `passkeyGrantIn` takes from the build context. */
+export const grantTakes = [passkeys, lineage, subjectRevocation, audit, issuer] as const;
+
 /** The grant over the contracts the assembly gives. */
 export const passkeyGrantIn = async (c: BuildContext<unknown>) =>
 	passkeyGrant({

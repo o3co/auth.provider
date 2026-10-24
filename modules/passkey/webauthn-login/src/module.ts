@@ -1,11 +1,14 @@
 import { grants } from "@mod/grants";
 import { routes } from "@mod/http";
 import { defineModule } from "@mod/kernel";
-import { passkeyGrantIn } from "./grant/grant.ts";
-import { optionsRouteIn } from "./options/options.ts";
+import { grantTakes, passkeyGrantIn } from "./grant/grant.ts";
+import { optionsRouteIn, optionsTakes } from "./options/options.ts";
 import { section } from "./section.ts";
 
-export default defineModule({ name: "webauthn-login", section, replicaSafe: true }, (m) => [
+/** What the module takes: its helpers' (`passkeyGrantIn`, `optionsRouteIn`). */
+const takes = [...grantTakes, ...optionsTakes];
+
+export default defineModule({ name: "webauthn-login", section, replicaSafe: true, takes }, (m) => [
 	m.contribute(grants).by(passkeyGrantIn),
 	m.contribute(routes).by(optionsRouteIn),
 ]);

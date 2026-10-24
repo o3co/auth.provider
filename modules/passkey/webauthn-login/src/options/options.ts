@@ -12,6 +12,9 @@ function requesterOf({ fields, mistyped }: HttpRequest): string | false {
 }
 
 /** Request options the same for everyone, whose challenge only the client named redeems. */
+/** What `optionsRouteIn` takes from the build context. */
+export const optionsTakes = [passkeys] as const;
+
 /** The options route over the assembly's passkeys, limited per source as the package's section says. */
 export const optionsRouteIn = async (c: BuildContext<Settings>) =>
 	optionsRoute(await c.get(passkeys), { limit: c.section.requests, ms: c.section.window * 1000 });
