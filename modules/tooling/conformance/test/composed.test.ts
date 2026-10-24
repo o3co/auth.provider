@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { area, type NewPart, onNew, sceneOf } from "../src/areas.ts";
 import { appConfig } from "../src/drivers/app.ts";
 import { composition } from "../src/drivers/composed.ts";
+
+// Its first test lists the workspace's packages through pnpm (`pnpm ls -r`, run once per process
+// by the composition it reads): pnpm's own start takes 2.5 to 4 seconds on a busy machine, the most
+// of the default five, so the tests here are given the time that listing takes.
+vi.setConfig({ testTimeout: 30_000 });
 
 const probe = area<NewPart>("composed-probe");
 onNew(probe, (part, _, modules) => ({
