@@ -114,7 +114,8 @@ What each module contains is described by that module's contract card (each modu
 | Apple upstreams | contribution / setting | idp-apple |
 | Keeping a federation login's upstream tokens, handing them to receiving clients, logging a session out of one upstream, and the end of session of a session's first upstream | contract / setting | federation-tokens |
 | Receiving upstream tokens, returns after an upstream logout (client metadata fields) | vocabulary / setting | federation-tokens |
-| Holding upstream credentials for clients apart from sessions: intents, the user's connection, the upstream token, status, renewal, revocation | contract / setting | federation-grants |
+| Holding upstream credentials for clients apart from sessions: intents and their steps, the browser routes, the upstream token, status, renewal, revocation | contract / setting | federation-grants |
+| The browser half of federation grants: the link, the question, the decision and the upstream's callback over federation-grants' intent steps, whose upstream account a callback reached, and its pages and identity check | contribution / setting | federation-grants-connect |
 | The connections a client may ask for, where its browser is sent back (client metadata fields) | vocabulary / setting | federation-grants |
 | The IdPs, their types and settings, and how each one's amr maps to ours | setting | federation |
 | Looking up and authenticating clients | contract | clients |
