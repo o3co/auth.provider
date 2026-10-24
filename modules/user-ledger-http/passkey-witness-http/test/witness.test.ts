@@ -20,8 +20,8 @@ import {
 	policyOf,
 	policySettings,
 } from "@mod/outbound-policy";
-import { type PasskeyWitness, passkeyWitnesses } from "@mod/passkeys";
-import { passkeyWitnessContract, passkeyWitnessProblems } from "@mod/passkeys/testing";
+import { type PasskeyWitness, passkeyWitnesses } from "@mod/passkey-witness";
+import { passkeyWitnessContract, passkeyWitnessProblems } from "@mod/passkey-witness/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import witnessHttp from "../src/module.ts";
 

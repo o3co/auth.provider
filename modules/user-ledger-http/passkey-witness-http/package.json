@@ -12,9 +12,9 @@
 	"dependencies": {
 		"@mod/kernel": "workspace:*",
 		"@mod/keys": "workspace:*",
-		"@mod/passkeys": "workspace:*",
 		"@mod/outbound": "workspace:*",
 		"@mod/outbound-policy": "workspace:*",
+		"@mod/passkey-witness": "workspace:*",
 		"@mod/url-setting": "workspace:*",
 		"zod": "4.6.7"
 	},

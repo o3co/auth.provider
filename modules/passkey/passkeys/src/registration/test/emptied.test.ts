@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { isUnavailable, Unavailable } from "@mod/kernel";
 import { recordingLog } from "@mod/kernel/testing";
+import type { PasskeyWitness } from "@mod/passkey-witness";
 import {
 	type CreationOptions,
 	testCeremonies as ceremoniesFor,
@@ -13,7 +14,6 @@ import { keptChallenges } from "../../challenges/challenges.ts";
 import { type Asked, holdersOver } from "../../holders/holders.ts";
 import { type KeptPasskeys, keptPasskeys } from "../../records.ts";
 import { passkeyWitnessStandIn } from "../../testing.ts";
-import type { PasskeyWitness } from "../../witness.ts";
 import { registrationsOver } from "../registrations.ts";
 
 const fresh = () => randomBytes(32).toString("base64url");

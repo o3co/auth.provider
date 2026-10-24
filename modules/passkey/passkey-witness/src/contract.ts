@@ -17,7 +17,7 @@ export interface PasskeyWitness {
 	markedWith(subject: string): Promise<string | undefined>;
 }
 
-/** At most one witness: passkeys refuses to start with two. */
+/** At most one witness: the module that asks it refuses to start with two. */
 export const passkeyWitnesses = extensionPoint<PasskeyWitness>("passkeys.witnesses", {
 	multiplicity: "many",
 });

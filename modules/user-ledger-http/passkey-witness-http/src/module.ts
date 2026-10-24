@@ -7,7 +7,7 @@ import {
 	outboundLimits,
 	outboundRefusals,
 } from "@mod/outbound-policy";
-import { passkeyWitnesses } from "@mod/passkeys";
+import { passkeyWitnesses } from "@mod/passkey-witness";
 import { section } from "./section.ts";
 import { witnessAt } from "./witness.ts";
 

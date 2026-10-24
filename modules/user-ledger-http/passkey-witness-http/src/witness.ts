@@ -6,7 +6,7 @@ import {
 	type Narrower,
 	type Outbound,
 } from "@mod/outbound";
-import type { PasskeyWitness } from "@mod/passkeys";
+import type { PasskeyWitness } from "@mod/passkey-witness";
 import { z } from "zod";
 
 export interface WitnessParts {

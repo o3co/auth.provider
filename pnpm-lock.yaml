@@ -2222,6 +2222,16 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
+  modules/passkey/passkey-witness:
+    dependencies:
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+    devDependencies:
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
   modules/passkey/passkeys:
     dependencies:
       '@mod/audit':
@@ -2230,6 +2240,9 @@ importers:
       '@mod/kernel':
         specifier: workspace:*
         version: link:../../foundation/kernel
+      '@mod/passkey-witness':
+        specifier: workspace:*
+        version: link:../passkey-witness
       '@mod/webauthn':
         specifier: workspace:*
         version: link:../webauthn
@@ -4469,9 +4482,9 @@ importers:
       '@mod/outbound-policy':
         specifier: workspace:*
         version: link:../../foundation/outbound-policy
-      '@mod/passkeys':
+      '@mod/passkey-witness':
         specifier: workspace:*
-        version: link:../../passkey/passkeys
+        version: link:../../passkey/passkey-witness
       '@mod/url-setting':
         specifier: workspace:*
         version: link:../../foundation/url-setting

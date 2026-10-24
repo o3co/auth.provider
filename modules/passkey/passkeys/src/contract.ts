@@ -99,5 +99,5 @@ export const passkeyHolders = contract<PasskeyHolders>("passkeys.holders", {
 	takenBy: ["login-passkey", "passkey-reset"],
 });
 
+export { type PasskeyWitness, passkeyWitnesses } from "@mod/passkey-witness";
 export * from "./store.ts";
-export * from "./witness.ts";

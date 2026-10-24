@@ -15,12 +15,12 @@
   - The caller answers for who the subject is: only a module that authenticated it may ask.
   - A registration answers when its challenge was made (`challengedAt`). `listed` (id, nickname, transports, backup state, and when registered where kept), `renamed` (`renamed` / `unknown`) and `removed` (`removed`: this call ended it; `empty`: none left) take only the subject's own.
 - `passkeyHolders`, taken only by `login-passkey` and `passkey-reset`: `held` (settled first), `cleared` (ends every passkey of the subject, making its holder where it has none, and has its mark go → how many it ended), `settle`, and `witnessed` (whether a witness is composed).
-- Extension point `passkeyWitnesses` (at most one, two refusing boot): `read`, `enroll` (set-if-absent by token), `withdraw` (only that token's mark) and `markedWith` (the mark's token). Audit event `passkey.enrollment_inconsistent` (`at`), declared in `./audit-events`.
+- `passkey-witness`'s extension point `passkeyWitnesses` and `PasskeyWitness`, under the same names (at most one, two refusing boot). Audit event `passkey.enrollment_inconsistent` (`at`), declared in `./audit-events`.
 - Store interfaces, which the assembly wires. The store never sees what a record holds.
   - Passkeys: credentials and subjects, each by a key passkeys makes, saved once, read, changed from what they hold, kept without end; records of both spaces and the ones a change watches from them changed as one (`updateTogether`), which boot requires. Needs: no eviction, survives a crash, never rolled back by failover, confirmed reads.
   - Challenges: opened for a lifetime, taken by putting a mark in place. Needs: survives a crash, never rolled back by failover, names derived from the challenge.
 - Operator section: `user-verification` (default `preferred`), `max-credentials` (per subject, default 10).
-- `./testing`: the section's test configuration builder, the contract tests of both store interfaces, a witness in memory (`passkeyWitnessStandIn`) and the witness's contract test (`passkeyWitnessContract`).
+- `./testing`: the section's test configuration builder, the contract tests of both store interfaces, a witness in memory (`passkeyWitnessStandIn`, contributing to `passkey-witness`'s point) and the witness's contract test (`passkeyWitnessContract`).
 
 ## Invariants
 - A challenge is taken once, within `webauthn`'s `lifetimeMs` on `kernel`'s clock, whatever the store's expiry. An assertion's challenge is redeemed by its requester alone; any other is `challenge`, after the challenge is taken. Its record keeps the requester's SHA-256, never the requester: the assertion makes the digest and compares it.
@@ -37,7 +37,7 @@
 - Passkeys and subjects through the passkey store; challenges through the challenge store. Their keys are the ones `webauthn` made before this package, so the records kept stay readable.
 
 ## Depends on
-- `kernel`, `audit`, `webauthn` (the ceremonies, the credential's form)
+- `kernel`, `audit`, `webauthn` (the ceremonies, the credential's form), `passkey-witness` (the witness)
 
 ## Vocabulary
 - holder: a subject's user handle, the ids of its passkeys, and its fence, which each write that empties the list moves on, never back. passkey: a credential this package keeps for a subject.

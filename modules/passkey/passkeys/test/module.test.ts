@@ -8,6 +8,8 @@ import {
 	Unavailable,
 } from "@mod/kernel";
 import { quietRuntime } from "@mod/kernel/testing";
+import { passkeyWitnesses as witnesses } from "@mod/passkey-witness";
+import { passkeyWitnessStandIn as witnessStandIn } from "@mod/passkey-witness/testing";
 import webauthn from "@mod/webauthn/module";
 import {
 	type CreationOptions,
@@ -19,6 +21,7 @@ import {
 import { expect, it } from "vitest";
 import {
 	challengeStore,
+	passkeyWitnesses as ownWitnesses,
 	passkeyHolders,
 	passkeyStore,
 	passkeys,
@@ -438,4 +441,12 @@ it("ends only its own write where a removal and another registration of the id l
 	expect([await signsIn(one), await signsIn(two)]).toEqual(["refused", "sam"]);
 	expect((await kept.listed?.("sam"))?.map((p) => p.id)).toEqual([one.response.id]);
 	await app.stop(1000);
+});
+
+it("offers the witness's extension point as passkey-witness holds it, so a witness contributed through either name reaches it", async () => {
+	expect(ownWitnesses).toBe(witnesses);
+	// One through each name is two witnesses at the one point.
+	await expect(boot([passkeyWitnessStandIn("one"), witnessStandIn("two")])).rejects.toBeInstanceOf(
+		BootRefused,
+	);
 });

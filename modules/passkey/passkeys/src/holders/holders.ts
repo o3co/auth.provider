@@ -1,9 +1,9 @@
 import { type Audit, declaredAudit } from "@mod/audit";
 import { isUnavailable, type Log, Unavailable } from "@mod/kernel";
+import type { PasskeyWitness } from "@mod/passkey-witness";
 import events from "../audit-events.ts";
 import type { PasskeyHolders } from "../contract.ts";
 import type { Emptied, KeptPasskeys } from "../records.ts";
-import type { PasskeyWitness } from "../witness.ts";
 
 export interface HolderParts {
 	readonly records: KeptPasskeys;
