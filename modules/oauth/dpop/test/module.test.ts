@@ -12,7 +12,7 @@ import {
 	isUnavailable,
 	kernelConfig,
 } from "@mod/kernel";
-import { quietRuntime, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import { memoryRecords } from "@mod/records/testing";
 import { type SenderBinding, senderBinding, senderBindings } from "@mod/sender-binding";
 import senderBindingModule from "@mod/sender-binding/module";
@@ -33,7 +33,7 @@ function spentInMemory() {
 	const stand = memoryRecords<true>(() => runtime.clock.now(), { shards: 1, perShard: 1 });
 	const lifetimes: number[] = [];
 	const down = unavailableSwitch<SpentProofs>("spent proofs");
-	const module = defineModule({ name: "spent-proofs" }, (m) => [
+	const module = defineModule({ name: "spent-proofs", takes: [] }, (m) => [
 		m.provide(spentProofs).by(() =>
 			down.wrap({
 				save: (name: string, lifetimeMs: number) => {
@@ -48,23 +48,25 @@ function spentInMemory() {
 
 const published = contract<readonly MetadataItem[]>("published");
 const kinds = contract<readonly SenderBinding[]>("kinds");
-const reader = defineModule({ name: "reader" }, (m) => [
+const reader = defineModule({ name: "reader", takes: [metadata, senderBindings] }, (m) => [
 	m.provide(published).by((c) => c.collect(metadata)),
 	m.provide(kinds).by((c) => c.collect(senderBindings)),
 ]);
 
+/** The assembly of a composition with dpop, its section where given, and the issuer at `at`. */
+const assembly = (dpopSection?: unknown, spent = spentInMemory(), at = issuer) => ({
+	modules: [http, issuerModule, senderBindingModule, dpop, reader, spent.module],
+	config: {
+		...kernelConfig(),
+		...httpConfig(),
+		...issuerConfig({ url: at }),
+		...(dpopSection === undefined ? {} : { dpop: dpopSection }),
+	},
+	runtime,
+});
+
 /** A composition with dpop, its section where given, and the issuer at `at`. */
-const boot = (dpopSection?: unknown, spent = spentInMemory(), at = issuer) =>
-	assemble({
-		modules: [http, issuerModule, senderBindingModule, dpop, reader, spent.module],
-		config: {
-			...kernelConfig(),
-			...httpConfig(),
-			...issuerConfig({ url: at }),
-			...(dpopSection === undefined ? {} : { dpop: dpopSection }),
-		},
-		runtime,
-	});
+const boot = (...given: Parameters<typeof assembly>) => assemble(assembly(...given));
 
 const publishedAlgorithms = async (dpopSection?: unknown) =>
 	(await boot(dpopSection))
@@ -307,4 +309,11 @@ describe("server nonces (RFC 9449 §8)", () => {
 		}
 		await expect(boot({ nonce: { required: "never" } })).resolves.toBeDefined();
 	});
+});
+
+it("takes all it names, asking nonces or not", async () => {
+	const nonce = { required: "as", ttl: "300s", secret: randomBytes(32).toString("base64") };
+	for (const section of [undefined, { nonce }]) {
+		expect(await takesUnused(assembly(section)), JSON.stringify(section)).toEqual({});
+	}
 });
