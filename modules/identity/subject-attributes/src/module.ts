@@ -20,7 +20,7 @@ const fromLogin = (subject: string, entry: Entry): AttributesAnswer => {
 			};
 };
 
-export default defineModule({ name: "subject-attributes" }, (m) => [
+export default defineModule({ name: "subject-attributes", takes: [sessions, users] }, (m) => [
 	m.provide(subjectAttributes).by(async (c) => {
 		const known = await c.get(users);
 		const open = await c.get(sessions);
