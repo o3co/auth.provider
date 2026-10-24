@@ -13,7 +13,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import { loginSource } from "@mod/login-attributes";
 import { type LoginGate, loginGates, logins } from "@mod/login-gates";
 import gatesModule from "@mod/login-gates/module";
@@ -48,7 +48,7 @@ import loginModule from "../src/module.ts";
 
 /** The gates composed, collected as login-gates sees them. */
 const collectedGates = contract<readonly LoginGate[]>("test.gates");
-const gatesProbe = defineModule({ name: "gates-probe" }, (m) => [
+const gatesProbe = defineModule({ name: "gates-probe", takes: [loginGates] }, (m) => [
 	m.provide(collectedGates).by((c) => c.collect(loginGates)),
 ]);
 
@@ -76,7 +76,7 @@ interface Setup {
 async function serve(setup: Setup = {}) {
 	const audit = auditStandIn();
 	const seen: LoginFacts[] = [];
-	const gate = defineModule({ name: "test-gate" }, (m) => [
+	const gate = defineModule({ name: "test-gate", takes: [] }, (m) => [
 		m.contribute(loginGates).by(() => ({
 			name: "test",
 			hold: async (_request, facts) => {
@@ -85,7 +85,7 @@ async function serve(setup: Setup = {}) {
 			},
 		})),
 	]);
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			gatesModule,
@@ -121,7 +121,8 @@ async function serve(setup: Setup = {}) {
 			"login-passkey": setup.section ?? {},
 		},
 		runtime: quietRuntime(),
-	});
+	};
+	const app = await assemble(input);
 	await app.start();
 	stop = () => app.stop(1000);
 	const base = `http://127.0.0.1:${app.get(listening).port()}`;
@@ -186,6 +187,7 @@ async function serve(setup: Setup = {}) {
 		cookies.some((c) => /^(__Host-)?session=[^;]+/.test(c));
 	return {
 		app,
+		input,
 		post,
 		registered,
 		options,
@@ -261,7 +263,7 @@ describe("a passkey login", () => {
 		const unknown = await s.login(key);
 		expect({ status: unknown.status, body: unknown.body }).toEqual(failed);
 		expect(s.events).toContainEqual(refusedBy("unknown_user"));
-		const unanswerable = defineModule({ name: "users-stub" }, (m) => [
+		const unanswerable = defineModule({ name: "users-stub", takes: [] }, (m) => [
 			m.provide(users).by(() => ({ bySubject: async () => ({ kind: "unanswerable" }) }) as never),
 		]);
 		const u = await serve({ users: unanswerable });
@@ -320,7 +322,7 @@ describe("a revocation of the subject since the challenge was made", () => {
 
 	it("closes a session opened meanwhile before its cookie goes out (step 6)", async () => {
 		const closed: string[] = [];
-		const opening = defineModule({ name: "session" }, (m) => [
+		const opening = defineModule({ name: "session", takes: [] }, (m) => [
 			m.provide(sessions).by(() =>
 				stubSessions({
 					complete: async () => ({
@@ -369,7 +371,7 @@ describe("the requests it takes", () => {
 			expect(endsRequester(answered.cookies), JSON.stringify(body)).toBe(true);
 		}
 		expect(endsRequester((await s.login(key)).cookies)).toBe(true);
-		const down = defineModule({ name: "users-stub" }, (m) => [
+		const down = defineModule({ name: "users-stub", takes: [] }, (m) => [
 			m.provide(users).by(
 				() =>
 					({
@@ -420,6 +422,14 @@ describe("the requests it takes", () => {
 
 /** A passkey witness and the witnessing that asks it, as `refused-when-held` needs. */
 const witnessed = () => [passkeyWitnessStandIn().module, witnessingModule];
+
+it("takes all it names, a passkey holder's password allowed or refused", async () => {
+	const allowed = await serve();
+	expect(await takesUnused(allowed.input)).toEqual({});
+	await stop();
+	const refused = await serve({ section: { password: "refused-when-held" }, extra: witnessed() });
+	expect(await takesUnused(refused.input)).toEqual({});
+});
 
 describe("the gate credential-policy", () => {
 	it("refuses to boot refused-when-held without a passkey witness, as a lost store would read as holding none", async () => {
