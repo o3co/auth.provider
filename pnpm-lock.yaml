@@ -169,6 +169,73 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
 
+  modules/delegation/federation-grants-connect:
+    dependencies:
+      '@mod/federation-grants':
+        specifier: workspace:*
+        version: link:../federation-grants
+      '@mod/http':
+        specifier: workspace:*
+        version: link:../../foundation/http
+      '@mod/kernel':
+        specifier: workspace:*
+        version: link:../../foundation/kernel
+      '@mod/request-source':
+        specifier: workspace:*
+        version: link:../../foundation/request-source
+      '@mod/session':
+        specifier: workspace:*
+        version: link:../../identity/session
+      '@mod/upstream-round-trip':
+        specifier: workspace:*
+        version: link:../../upstream-login/upstream-round-trip
+      '@mod/upstreams':
+        specifier: workspace:*
+        version: link:../../upstream-login/upstreams
+      '@mod/url-setting':
+        specifier: workspace:*
+        version: link:../../foundation/url-setting
+      '@mod/users':
+        specifier: workspace:*
+        version: link:../../identity/users
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@mod/audit':
+        specifier: workspace:*
+        version: link:../../foundation/audit
+      '@mod/clients':
+        specifier: workspace:*
+        version: link:../../identity/clients
+      '@mod/cookies':
+        specifier: workspace:*
+        version: link:../../foundation/cookies
+      '@mod/csrf':
+        specifier: workspace:*
+        version: link:../../identity/csrf
+      '@mod/rate-limit':
+        specifier: workspace:*
+        version: link:../../foundation/rate-limit
+      '@mod/records':
+        specifier: workspace:*
+        version: link:../../foundation/records
+      '@mod/seal':
+        specifier: workspace:*
+        version: link:../../foundation/seal
+      '@mod/secret-hash':
+        specifier: workspace:*
+        version: link:../../foundation/secret-hash
+      '@mod/session-requirements':
+        specifier: workspace:*
+        version: link:../../identity/session-requirements
+      '@mod/subject-revocation':
+        specifier: workspace:*
+        version: link:../../identity/subject-revocation
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(vite@8.3.3(@types/node@26.6.5)(yaml@2.9.1))
+
   modules/foundation/added-claims:
     devDependencies:
       vitest:
