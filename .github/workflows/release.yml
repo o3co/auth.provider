@@ -195,3 +195,16 @@ jobs:
           fi
           gh api --method PATCH "$endpoint" -F draft=false -F "prerelease=${PRERELEASE}" \
             --jq '"\(.tag_name): draft=\(.draft) prerelease=\(.prerelease) \(.html_url)"'
+
+  # After the packages are on npm, a release (never a prerelease) builds its
+  # API into the repository's pages. A failure leaves what was published as
+  # it is; the API site workflow runs again by hand with the tag.
+  api-docs:
+    name: API site
+    needs: publish
+    if: ${{ !contains(github.ref_name, '-') }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/api-docs.yml
+    with:
+      tag: ${{ github.ref_name }}

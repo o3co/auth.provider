@@ -1,0 +1,99 @@
+name: API site
+
+# A release's API, built from the bundles it published as an app installs
+# them (modules/tooling/api-docs), into its minor's dir of the repository's
+# pages. Called by the release after it publishes; run by hand with a
+# released tag to build one again.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'A released tag, e.g. v0.19.2 (no prerelease)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+# Two releases never write the pages at once; neither is cancelled.
+concurrency:
+  group: gh-pages
+  cancel-in-progress: false
+
+jobs:
+  site:
+    name: Build and publish the API site
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: The tag is a release
+        shell: bash
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::${TAG} is not a release's tag (vX.Y.Z); a prerelease has no API site"
+            exit 1
+          fi
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - run: pnpm install --frozen-lockfile
+
+      # The names the release published (published-packages.sh reads them
+      # from the build), each installed from npm at this version, so the site
+      # reads the very bytes an operator installs. npm may take a while to
+      # serve what was just published: a failed install is tried again.
+      - name: The published bundles, as an app installs them
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm bundles
+          project="$RUNNER_TEMP/api-project"
+          mkdir -p "$project"
+          echo '{ "private": true }' > "$project/package.json"
+          specs=()
+          while IFS=$'\t' read -r name _; do
+            specs+=("${name}@${VERSION}")
+          done < <(.github/scripts/published-packages.sh)
+          for attempt in 1 2 3 4 5; do
+            if (cd "$project" && npm install --ignore-scripts --no-audit --no-fund "${specs[@]}"); then
+              exit 0
+            fi
+            [ "$attempt" -lt 5 ] || exit 1
+            sleep 60
+          done
+
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: pages
+
+      # Only this minor's dir, the root and the list of releases change.
+      - name: Build this release's API into the pages
+        run: pnpm api-docs build "$RUNNER_TEMP/api-project" "$GITHUB_WORKSPACE/pages" "$VERSION"
+
+      - name: Publish the pages
+        shell: bash
+        working-directory: pages
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo "the API of v${VERSION} is on the pages already"
+            exit 0
+          fi
+          git commit -m "docs: API for v${VERSION}"
+          git push origin HEAD:gh-pages
