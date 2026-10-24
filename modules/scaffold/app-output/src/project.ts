@@ -74,15 +74,27 @@ export const mainSource = (modules: readonly string[], importOf = (name: string)
 
 /**
  * The app's entries besides `start`, each for an app that composes its package: the same modules,
- * built and never started, running what that package offers. The template's mark `entry` names it.
+ * built and never started, running what that package offers. The template's mark `entry` names it;
+ * a backfill's marks `contract` and `answers` name the contract it settles through and the answers
+ * it counts, in the order its line tells them.
  */
-const entries = [
+const entries: readonly {
+	readonly script: string;
+	readonly file: string;
+	readonly template: string;
+	readonly runs: string;
+	readonly fill?: Readonly<Record<string, string>>;
+}[] = [
 	{ script: "reseal", file: "src/reseal.ts", template: "reseal.ts.template", runs: "@mod/seal" },
 	{
 		script: "witness-backfill",
 		file: "src/witness-backfill.ts",
-		template: "witness-backfill.ts.template",
+		template: "backfill.ts.template",
 		runs: "@mod/mfa-witnessing",
+		fill: {
+			contract: "witnessBackfill",
+			answers: '"marked", "held", "none", "unclaimed", "inconsistent"',
+		},
 	},
 ];
 
@@ -99,6 +111,7 @@ export async function entriesOf(
 	const files: Record<string, string> = {};
 	for (const entry of called) {
 		files[entry.file] = await filled(entry.template, {
+			...entry.fill,
 			kernel: importOf(kernel),
 			configFiles: importOf(configFiles),
 			entry: importOf(entry.runs),

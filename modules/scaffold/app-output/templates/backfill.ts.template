@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { legacyVariablesCheck, loadConfig } from "{{configFiles}}";
 import { assemble, BootRefused, isUnavailable } from "{{kernel}}";
-import { witnessBackfill } from "{{entry}}";
+import { {{contract}} } from "{{entry}}";
 {{imports}}
 
 /** A refused boot: each refusal on its own line of standard error, then exit 78. */
@@ -65,31 +65,30 @@ const app = await loadConfig(source)
 		return assemble({ modules: [{{modules}}], config, runtime });
 	})
 	.catch(refused);
-const backfill = app.get(witnessBackfill);
-const counts = { marked: 0, held: 0, none: 0, unclaimed: 0, inconsistent: 0, unknown: 0, failed: 0 };
-// The answers counted by name; one this script does not know (a later release's) is counted as unknown.
-const answers = new Set(["marked", "held", "none", "unclaimed", "inconsistent"]);
+const backfill = app.get({{contract}});
+// The answers counted by name, in the order the line tells them; one this script does not know (a
+// later release's) is counted as unknown.
+const answers: readonly string[] = [{{answers}}];
+const counts = new Map([...answers, "unknown", "failed"].map((name) => [name, 0]));
+const count = (name: string) => counts.set(name, (counts.get(name) ?? 0) + 1);
 // One subject a line, used as sent; only an empty line is skipped. No subject is ever written out.
 for await (const subject of lines(process.stdin)) {
 	if (subject === "") continue;
 	if (subject === undefined) {
-		counts.failed += 1;
+		count("failed");
 		continue;
 	}
 	try {
 		const answer: string = await backfill.settle(subject);
-		if (answers.has(answer)) counts[answer as keyof typeof counts] += 1;
-		else counts.unknown += 1;
+		count(answers.includes(answer) ? answer : "unknown");
 	} catch (error) {
-		counts.failed += 1;
+		count("failed");
 		// Anything but an outage may come again for every subject, and may carry one: stop, telling none of it.
 		if (!isUnavailable(error)) break;
 	}
 }
-process.stdout.write(
-	`marked ${counts.marked} held ${counts.held} none ${counts.none} unclaimed ${counts.unclaimed} inconsistent ${counts.inconsistent} unknown ${counts.unknown} failed ${counts.failed}\n`,
-);
+process.stdout.write(`${[...counts].map(([name, n]) => `${name} ${n}`).join(" ")}\n`);
 // Stopped, though never started, so its stop hooks run; a stop that fails keeps the code.
 await app.stop().catch(() => undefined);
-// An inconsistent or unclaimed subject is counted, not failed: a subject that could not be settled, or an answer not known, is 1.
-process.exit(counts.failed === 0 && counts.unknown === 0 ? 0 : 1);
+// A subject settled with any answer it knows is counted, not failed: one that could not be settled, or an answer not known, is 1.
+process.exit(counts.get("failed") === 0 && counts.get("unknown") === 0 ? 0 : 1);
