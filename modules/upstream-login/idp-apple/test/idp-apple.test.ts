@@ -119,7 +119,7 @@ async function open(
 	};
 	const app = await assemble({
 		modules: [
-			defineModule({ name: "outbound" }, (m) => [m.provide(outbound).by(() => stub)]),
+			defineModule({ name: "outbound", takes: [] }, (m) => [m.provide(outbound).by(() => stub)]),
 			externalJwtModule,
 		],
 		config: kernelConfig(),
@@ -568,13 +568,15 @@ describe("idp-apple", () => {
 		};
 		const app = await assemble({
 			modules: [
-				defineModule({ name: "outbound" }, (m) => [
+				defineModule({ name: "outbound", takes: [] }, (m) => [
 					m.provide(outbound).by(() => unused),
 					m.provide(outboundRefusals).by(() => policyRefusing()),
 				]),
 				externalJwtModule,
 				idpApple,
-				defineModule({ name: "types" }, (m) => [m.provide(types).by((c) => c.collect(idpTypes))]),
+				defineModule({ name: "types", takes: [idpTypes] }, (m) => [
+					m.provide(types).by((c) => c.collect(idpTypes)),
+				]),
 			],
 			config: kernelConfig(),
 			runtime,
