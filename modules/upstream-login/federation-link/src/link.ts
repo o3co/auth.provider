@@ -45,6 +45,9 @@ const raisedAt = (stepUp: NonNullable<LinkParts["stepUp"]>, requirement: string,
 	return raise.href;
 };
 
+/** What `linkIn` takes from the build context. */
+export const linkTakes = [site, originEvidence, sessions, users, audit, handoff] as const;
+
 export async function linkIn(c: BuildContext<Settings>): Promise<UpstreamContinuation> {
 	const page = c.section["step-up-page"];
 	const origin = (await c.get(site)).origin;
