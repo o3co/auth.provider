@@ -19,8 +19,7 @@ import {
 	grantsBrowsers,
 	type IntentRef,
 } from "../browser.ts";
-import { browserBase } from "../intents/intents.ts";
-import { connectionName, name, type Settings } from "../section.ts";
+import { name, type Settings } from "../section.ts";
 import {
 	type UpstreamAccounts,
 	upstreamAccountOver,
@@ -358,8 +357,8 @@ export function connectWith(p: ConnectParts) {
 		question: guarded(question),
 		decide: guarded(decide),
 		callback: guarded(async (request) => {
-			const name = request.path.slice(`${browserBase}/callback/`.length);
-			if (!connectionName.safeParse(name).success) return plain(404, "Not found.");
+			const name = intents.callbackOf(request.path);
+			if (name === undefined) return plain(404, "Not found.");
 			// Taken before any code is used, and only at the connection it was made for.
 			const state = request.query.single("state");
 			const taken = await p.trips.take(request, tripName(name), state);

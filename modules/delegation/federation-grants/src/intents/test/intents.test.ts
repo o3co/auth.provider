@@ -17,6 +17,15 @@ describe("the link and the question", () => {
 		expect((await h.intents.linked(late.link)).kind).toBe("stale");
 		const { challenge } = await h.questioned();
 		expect((await h.intents.linked(challenge)).kind).toBe("stale");
+		expect(h.intents.connected).toBe(true);
+		expect(h.intents.callbackOf("/session/federation-grants/callback/cal")).toBe("cal");
+		for (const path of [
+			"/session/federation-grants/callback/Cal",
+			"/session/federation-grants/callback/a/b",
+			"/elsewhere/callback/cal",
+		])
+			expect(h.intents.callbackOf(path), path).toBeUndefined();
+		expect((await intents({ settings: { connections: {} } })).intents.connected).toBe(false);
 		expect(h.intents.connectUrl("abc")).toBe(
 			`${origin}/session/federation-grants/connect?request=abc`,
 		);
