@@ -1,6 +1,6 @@
 import { defineModule } from "@mod/kernel";
-import { handoff, handoffIn } from "./handoff.ts";
+import { handoff, handoffIn, handoffTakes } from "./handoff.ts";
 
-export default defineModule({ name: "upstream-handoff" }, (m) => [
+export default defineModule({ name: "upstream-handoff", takes: handoffTakes }, (m) => [
 	m.provide(handoff).by((c) => handoffIn(c)),
 ]);

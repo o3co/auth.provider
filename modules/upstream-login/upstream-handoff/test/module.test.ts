@@ -1,5 +1,5 @@
 import { assemble, BootRefused, defineModule, kernelConfig, type Module } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import type { Seal } from "@mod/seal";
 import sealModule from "@mod/seal/module";
 import { sealConfig } from "@mod/seal/testing";
@@ -9,7 +9,7 @@ import { handoff, handoffSealing, heldLoginStore, noHandoff } from "../src/contr
 import handoffModule from "../src/module.ts";
 
 const runtime = quietRuntime({ clock: { now: () => 0 } });
-const unusedStore = defineModule({ name: "held" }, (m) => [
+const unusedStore = defineModule({ name: "held", takes: [] }, (m) => [
 	m.provide(heldLoginStore).by(() => ({
 		save: async () => "created" as const,
 		update: async () => undefined,
@@ -18,7 +18,7 @@ const unusedStore = defineModule({ name: "held" }, (m) => [
 ]);
 /** A receiver of upstream tokens, recording each access token it is told. */
 const receiving = (told: string[] = []) =>
-	defineModule({ name: "receiver" }, (m) => [
+	defineModule({ name: "receiver", takes: [] }, (m) => [
 		m.contribute(upstreamLoginReceivers).by(() => ({
 			name: "one",
 			received: async (at) => void told.push(at.tokens.accessToken),
@@ -34,10 +34,21 @@ const recording = (sealed: string[]): Seal => ({
 	open: (value) => ({ kind: "opened", plain: value }),
 });
 const sealing = (name: string, value: Seal) =>
-	defineModule({ name }, (m) => [m.contribute(handoffSealing).by(() => value)]);
+	defineModule({ name, takes: [] }, (m) => [m.contribute(handoffSealing).by(() => value)]);
 const tokens = { accessToken: "a", tokenType: "Bearer", scope: [] };
-const boot = (modules: readonly Module[]) =>
-	assemble({ modules: [unusedStore, ...modules, handoffModule], config: kernelConfig(), runtime });
+const composition = (modules: readonly Module[]) => ({
+	modules: [unusedStore, ...modules, handoffModule],
+	config: kernelConfig(),
+	runtime,
+});
+const boot = (modules: readonly Module[]) => assemble(composition(modules));
+
+it("takes all it names, a module receiving upstream tokens or none", async () => {
+	expect(await takesUnused(composition([]))).toEqual({});
+	expect(await takesUnused(composition([receiving(), sealing("sealing", recording([]))]))).toEqual(
+		{},
+	);
+});
 
 it("is no handoff where no module receives upstream tokens, asking for no seal", async () => {
 	const app = await boot([]);
