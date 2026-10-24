@@ -1,6 +1,6 @@
 import { auditEvents } from "@mod/audit";
 
-/** What passkeys records, with the subject; never a token or a credential id. */
+/** What the witnessing records, with the subject; never a token or a credential id. */
 export default auditEvents({
 	"passkey.enrollment_inconsistent": {
 		attributes: ["at"],

@@ -134,7 +134,7 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 |---|---|---|
 | `passkey.reset` | `by`, `count`, `sessions`, `sessionsAgain`, `complete`, `requestedBy` | an operator's passkey reset gets past its input, finished or not (`complete`) |
 
-## @mod/passkeys
+## @mod/passkey-witnessing
 
 | Kind | Attributes | Recorded when |
 |---|---|---|

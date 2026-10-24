@@ -3,7 +3,7 @@
 ## Responsibilities
 - Keeps passkeys: each subject's user handle, and the credentials registered for it; its internal module `registration` registers them, `records` reads and writes them in the shape written, and `joint` changes a list and its records as one.
 - Answers assertions by the passkeys it keeps, through `webauthn`'s ceremonies; its internal module `challenges` keeps the challenges both answer.
-- Keeps a witness's mark in line with whether each subject holds a passkey, so losing the store never reads as holding none; its internal module `holders` settles them.
+- Asks the witnessing contributed, if any, where it settles, handing what it reads anew, so a passkey witness's mark is kept in line by `passkey-witnessing`; its internal module `holders` asks it.
 
 ## Not here
 - The ceremonies and the relying party: `webauthn`. What an assertion leads to, and the amr it adds (the login and second-factor modules). The routes that register passkeys, and who may register.
@@ -15,12 +15,12 @@
   - The caller answers for who the subject is: only a module that authenticated it may ask.
   - A registration answers when its challenge was made (`challengedAt`). `listed` (id, nickname, transports, backup state, and when registered where kept), `renamed` (`renamed` / `unknown`) and `removed` (`removed`: this call ended it; `empty`: none left) take only the subject's own.
 - `passkeyHolders`, taken only by `login-passkey` and `passkey-reset`: `held` (settled first), `cleared` (ends every passkey of the subject, making its holder where it has none, and has its mark go → how many it ended), `settle`, and `witnessed` (whether a witness is composed).
-- `passkey-witness`'s extension point `passkeyWitnesses` and `PasskeyWitness`, under the same names (at most one, two refusing boot). Audit event `passkey.enrollment_inconsistent` (`at`), declared in `./audit-events`.
+- Extension point `passkeyWitnessing` (at most one, two refusing boot), for `passkey-witnessing`: `settle` and `emptied`, asked where this package settles, handed reads anew that write nothing (`holds`, and after a write that emptied the list `after`, an `AfterRemoval`: the mark goes only on `none`).
 - Store interfaces, which the assembly wires. The store never sees what a record holds.
   - Passkeys: credentials and subjects, each by a key passkeys makes, saved once, read, changed from what they hold, kept without end; records of both spaces and the ones a change watches from them changed as one (`updateTogether`), which boot requires. Needs: no eviction, survives a crash, never rolled back by failover, confirmed reads.
   - Challenges: opened for a lifetime, taken by putting a mark in place. Needs: survives a crash, never rolled back by failover, names derived from the challenge.
 - Operator section: `user-verification` (default `preferred`), `max-credentials` (per subject, default 10).
-- `./testing`: the section's test configuration builder, the contract tests of both store interfaces, a witness in memory (`passkeyWitnessStandIn`, contributing to `passkey-witness`'s point) and the witness's contract test (`passkeyWitnessContract`).
+- `./testing`: the section's test configuration builder, and the contract tests of both store interfaces.
 
 ## Invariants
 - A challenge is taken once, within `webauthn`'s `lifetimeMs` on `kernel`'s clock, whatever the store's expiry. An assertion's challenge is redeemed by its requester alone; any other is `challenge`, after the challenge is taken. Its record keeps the requester's SHA-256, never the requester: the assertion makes the digest and compares it.
@@ -30,14 +30,14 @@
 - The count is written only over the count judged; a lost race is `raced`.
 - A pending record is no passkey to every read: none to assert (`unknown-credential`), list, rename or count.
 - A removed passkey leaves its holder's list, which ends its use. Every read takes it as removed: no passkey (`unknown-credential`), a count `raced`, an id a new registration may take over.
-- A store that cannot tell is unavailable (`passkeys`), never a refusal; so is a witness that cannot read or write, wherever a settle runs.
-- With a witness, a registration and a removal settle after their write: a registration whose settle fails keeps the passkey written and answers unavailable. A mark beside no passkey goes only by the call that emptied the list (a last removal, an end, `cleared`), as the internal module `holders` says; anywhere else it is recorded as inconsistent and unavailable, as the store may have lost them.
+- A store that cannot tell is unavailable (`passkeys`), never a refusal; so is the witnessing, wherever a settle runs.
+- With a witnessing, a registration and a removal settle after their write: a registration whose settle fails keeps the passkey written and answers unavailable. A passkey witness composed with no witnessing to ask it refuses boot: a lost store would read as holding none.
 
 ## Data
 - Passkeys and subjects through the passkey store; challenges through the challenge store. Their keys are the ones `webauthn` made before this package, so the records kept stay readable.
 
 ## Depends on
-- `kernel`, `audit`, `webauthn` (the ceremonies, the credential's form), `passkey-witness` (the witness)
+- `kernel`, `webauthn` (the ceremonies, the credential's form), `passkey-witness` (whether a witness is composed)
 
 ## Vocabulary
 - holder: a subject's user handle, the ids of its passkeys, and its fence, which each write that empties the list moves on, never back. passkey: a credential this package keeps for a subject.

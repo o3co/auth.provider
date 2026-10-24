@@ -1,5 +1,5 @@
-import { audit } from "@mod/audit";
 import { type BuildContext, contract, defineModule } from "@mod/kernel";
+import { passkeyWitnesses } from "@mod/passkey-witness";
 import { ceremonies, freshHandle } from "@mod/webauthn";
 import { keptChallenges } from "./challenges/challenges.ts";
 import {
@@ -7,7 +7,7 @@ import {
 	passkeyHolders,
 	passkeyStore,
 	passkeys,
-	passkeyWitnesses,
+	passkeyWitnessing,
 	registrations,
 } from "./contract.ts";
 import { holdersOver } from "./holders/holders.ts";
@@ -25,20 +25,23 @@ const passkeysOf = (c: Context) => c.get(kept);
 // A challenge lives as long as the relying party lets one be answered.
 const challengesOf = async (c: Context) =>
 	keptChallenges(await c.get(challengeStore), c.clock.now, (await c.get(ceremonies)).lifetimeMs);
-/** The holdings over the one witness composed, if any; two refuse boot. */
+/** The holdings over the one witnessing contributed, if any; two, or a witness with none, refuse boot. */
 const holdingOf = async (c: Context) => {
-	const [witness, ...more] = await c.collect(passkeyWitnesses);
-	if (more.length > 0) return undefined;
-	return holdersOver({
+	const [witnessing, ...others] = await c.collect(passkeyWitnessing);
+	if (others.length > 0) {
+		return { refused: "more than one passkey witnessing is contributed" } as const;
+	}
+	// A witness nothing asks would leave a lost store to read as holding none: never silently.
+	if (!witnessing && (await c.collect(passkeyWitnesses)).length > 0) {
+		return { refused: "a passkey witness is composed without passkey-witnessing" } as const;
+	}
+	const holding = holdersOver({
 		records: await passkeysOf(c),
-		witness,
-		audit: await c.get(audit),
-		log: c.log,
-		token: tokenOf(c),
+		witnessing,
 		handle: () => freshHandle(c.random.bytes),
 	});
+	return { holding } as const;
 };
-const twoWitnesses = "more than one passkey witness is composed";
 
 export default defineModule({ name: "passkeys", section, replicaSafe: true }, (m) => [
 	// Over a store that changes both its spaces as one: typed as required, and checked here for a
@@ -59,8 +62,8 @@ export default defineModule({ name: "passkeys", section, replicaSafe: true }, (m
 		}),
 	),
 	m.provide(registrations).by(async (c) => {
-		const holding = await holdingOf(c);
-		if (!holding) return c.refuse("passkeys", twoWitnesses);
+		const held = await holdingOf(c);
+		if ("refused" in held) return c.refuse("passkeys", held.refused);
 		return registrationsOver({
 			ceremonies: await c.get(ceremonies),
 			records: await passkeysOf(c),
@@ -68,12 +71,12 @@ export default defineModule({ name: "passkeys", section, replicaSafe: true }, (m
 			verification: c.section["user-verification"],
 			max: c.section["max-credentials"],
 			freshHandle: () => freshHandle(c.random.bytes),
-			settle: holding.settle,
+			settle: held.holding.settle,
 		});
 	}),
 	m.provide(passkeyHolders).by(async (c) => {
-		const holding = await holdingOf(c);
-		if (!holding) return c.refuse("passkeys", twoWitnesses);
-		return holding.holders;
+		const held = await holdingOf(c);
+		if ("refused" in held) return c.refuse("passkeys", held.refused);
+		return held.holding.holders;
 	}),
 ]);

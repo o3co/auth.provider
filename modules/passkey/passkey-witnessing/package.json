@@ -1,0 +1,28 @@
+{
+	"name": "@mod/passkey-witnessing",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"kind": "feature",
+	"optIn": true,
+	"joins": [
+		"@mod/passkeys",
+		"@mod/passkey-witness-http"
+	],
+	"exports": {
+		"./module": "./src/module.ts",
+		"./audit-events": "./src/audit-events.ts"
+	},
+	"dependencies": {
+		"@mod/audit": "workspace:*",
+		"@mod/kernel": "workspace:*",
+		"@mod/passkey-witness": "workspace:*",
+		"@mod/passkeys": "workspace:*"
+	},
+	"devDependencies": {
+		"@mod/store": "workspace:*",
+		"@mod/webauthn": "workspace:*",
+		"@mod/webauthn-store": "workspace:*",
+		"vitest": "5.0.5"
+	}
+}
