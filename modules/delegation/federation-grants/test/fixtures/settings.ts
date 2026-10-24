@@ -35,6 +35,8 @@ export const bootCases = [
 	{
 		name: "connections without the page that asks the user",
 		settings: { page: undefined },
+		// federation-grants' own browser half checks it, until it moves out (TODO 96).
+		browserHalf: null,
 		refused: "federation-grants: connections need the page that asks the user",
 	},
 	{

@@ -38,6 +38,8 @@ import {
 	upstreams,
 } from "@mod/upstreams";
 import { type Users, users } from "@mod/users";
+import { grantIntents, grantsBrowsers } from "../src/contract.ts";
+import { browserStandIn } from "../src/intents/test/stand-in.ts";
 import federationGrants from "../src/module.ts";
 import { type FederationGrantsSettings, federationGrantsConfig } from "../src/testing.ts";
 import { memoryStores } from "./stores.ts";
@@ -90,6 +92,20 @@ export const upstreamLogin = (tokens: unknown = upstreamTokens(), subject = "u-a
 
 const probed = contract<readonly Route[]>("test.routes");
 
+const unanswered = async (): Promise<HttpResponse> => ({ status: 501, headers: {} });
+/**
+ * The browser half contributed, so the browser routes answer without federation-grants' own: each a
+ * plain 501. The harness walks intents with `intents`' `browserStandIn` instead.
+ */
+const unansweredBrowser = defineModule({ name: "browser-stand-in" }, (m) => [
+	m.contribute(grantsBrowsers).by(() => ({
+		connect: unanswered,
+		question: unanswered,
+		decide: unanswered,
+		callback: unanswered,
+	})),
+]);
+
 type Answer = {
 	status: number;
 	headers: Record<string, string>;
@@ -134,6 +150,8 @@ export async function harness(
 		readonly seal?: Readonly<Record<string, unknown>>;
 		/** Modules composed beside federation-grants. */
 		readonly modules?: readonly Module[];
+		/** The module contributing the browser half, the stand-in unless said; none for `null`. */
+		readonly browserHalf?: Module | null;
 	} = {},
 ) {
 	let now = 1_800_000_000_000;
@@ -221,6 +239,7 @@ export async function harness(
 			stores.module,
 			stubs,
 			federationGrants,
+			...(options.browserHalf === null ? [] : [options.browserHalf ?? unansweredBrowser]),
 			...(options.modules ?? []),
 		],
 		config: {
@@ -299,6 +318,7 @@ export async function harness(
 			.complete(testRequest(), { subject, amr: ["pwd"], authenticatedAt: runtime.clock.now() });
 		return (done.cookies[0] ?? "").split(";")[0] ?? "";
 	};
+	/** A browser's request to a route, with its cookie and its query or form. */
 	const browse = async (
 		method: "GET" | "POST",
 		path: string,
@@ -314,32 +334,21 @@ export async function harness(
 		});
 		return read(await routeOf(method, path).handle(request));
 	};
-	const location = (answer: Answer) => new URL(answer.headers.location ?? "", origin);
-
-	/** Opens a lodged grant's link in a browser: the link, the answer, and the challenge it carries. */
+	const intents = app.get(grantIntents);
+	const walk = browserStandIn(intents, {
+		delegation,
+		page: `${origin}/consent-page`,
+		exchange: (code) => script.exchange({ code } as DelegatedExchange),
+	});
+	/** Opens the link a client's call answered in a browser, binding the intent to its session: the answer, and the challenge. */
 	const open = async (lodged: Answer, cookie: string) => {
 		const link = new URL(String(lodged.json?.connect_uri));
-		const request = link.searchParams.get("request") ?? "";
-		const opened = await browse("GET", link.pathname, cookie, { request });
-		return {
-			link,
-			request,
-			opened,
-			challenge: location(opened).searchParams.get("challenge") ?? "",
-		};
+		const carrying = testRequest({ headers: new Map([["cookie", cookie]]) });
+		const session = await app.get(sessions).enter(carrying);
+		return { link, ...(await walk.open(link.searchParams.get("request") ?? "", session?.id)) };
 	};
-	/** The round trip's cookie each browser holds, by its session cookie, as a browser keeps the last set. */
-	const jar = new Map<string, string>();
-	/** Decides a challenge in a browser: the answer, and the upstream state it carries. */
-	const decide = async (challenge: string, cookie: string, decision = "accept") => {
-		const answered = await browse("POST", "/session/federation-grants/consent", cookie, {
-			challenge,
-			decision,
-		});
-		const set = answered.cookies.find((c) => c.includes("federation-grants."));
-		if (set) jar.set(cookie, set.split(";")[0] ?? "");
-		return { answered, state: location(answered).searchParams.get("state") ?? "" };
-	};
+	const decide = (challenge: string, _cookie: string, decision = "accept") =>
+		walk.decide(challenge, decision);
 
 	/** Lodges an intent, and walks a browser of `subject` through the link and the question to the upstream. */
 	const started = async (more: Record<string, unknown> = {}, cookie?: string) => {
@@ -351,13 +360,7 @@ export async function harness(
 		return { id, browser, lodged, opened, challenge, answered, state };
 	};
 	/** The upstream's return to the callback, as the browser brings it. */
-	const callback = (state: string, browser: string, code = "code-1") =>
-		browse(
-			"GET",
-			"/session/federation-grants/callback/cal",
-			[browser, jar.get(browser) ?? ""].filter(Boolean).join("; "),
-			{ state, code },
-		);
+	const callback = (state: string, _browser: string, code = "code-1") => walk.callback(state, code);
 	/** A grant made active: the whole flow with what the upstream's exchange answers. */
 	const connected = async (tokens: Partial<Record<keyof UpstreamTokens, unknown>> = {}) => {
 		script.exchange = async () => upstreamLogin(upstreamTokens(tokens));
@@ -365,10 +368,12 @@ export async function harness(
 		const done = await callback(flow.state, flow.browser);
 		return { ...flow, done };
 	};
+	const location = (answer: Answer) => new URL(answer.headers.location ?? "", origin);
 
 	return {
 		app,
 		stores,
+		intents,
 		script,
 		asked,
 		events: recorded.events,

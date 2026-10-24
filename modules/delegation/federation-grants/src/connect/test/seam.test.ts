@@ -22,10 +22,11 @@ it("serves the browser routes through a contributed browser half, and refuses tw
 				callback: async () => answer,
 			})),
 		]);
-	const h = await harness({ modules: [contributing("browser-half")] });
+	const h = await harness({ browserHalf: contributing("browser-half") });
 	expect((await h.browse("GET", "/session/federation-grants/connect", "", {})).status).toBe(299);
 	const refused = await harness({
-		modules: [contributing("browser-half"), contributing("another-half")],
+		browserHalf: contributing("browser-half"),
+		modules: [contributing("another-half")],
 	}).catch((error: unknown) => error);
 	expect(refused).toBeInstanceOf(BootRefused);
 });
@@ -40,9 +41,11 @@ it("boots a contributed browser half with connections and no page of the package
 			callback: async () => answer,
 		})),
 	]);
-	const h = await harness({ settings: { page: undefined }, modules: [contributed] });
+	const h = await harness({ settings: { page: undefined }, browserHalf: contributed });
 	expect((await h.browse("GET", "/session/federation-grants/connect", "", {})).status).toBe(299);
 	// With none contributed, the package's own still needs it.
-	const refused = await harness({ settings: { page: undefined } }).catch((error: unknown) => error);
+	const refused = await harness({ settings: { page: undefined }, browserHalf: null }).catch(
+		(error: unknown) => error,
+	);
 	expect(refused).toBeInstanceOf(BootRefused);
 });
