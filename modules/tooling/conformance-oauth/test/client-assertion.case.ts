@@ -28,6 +28,16 @@ const scene = oauthScene({
 			scopes: ["read"],
 			defaultScopes: ["read"],
 		},
+		{
+			id: "loose",
+			kind: "confidential",
+			method: "private_key_jwt",
+			keys: [{ ...clientKey.publicKey.export({ format: "jwk" }), kid: "k1", use: "sig" }],
+			looseAudience: true,
+			grants: ["client_credentials"],
+			scopes: ["read"],
+			defaultScopes: ["read"],
+		},
 	],
 	introspection: true,
 });
@@ -51,7 +61,7 @@ const claims = (extra: Record<string, unknown> = {}): JWTPayload =>
 		Object.entries({
 			iss: "app",
 			sub: "app",
-			aud: tokenUrl,
+			aud: issuer,
 			exp: now() + 60,
 			iat: now(),
 			jti: `j-${Math.random()}`,
@@ -81,10 +91,30 @@ const refused = async (answer: Promise<{ status: number; body: Record<string, un
 };
 
 describe("client authentication by private_key_jwt", () => {
-	it("authenticates a client by an assertion signed with its key, for the token endpoint or the issuer", async () => {
+	it("authenticates a client by an assertion signed with its key, for the issuer", async () => {
 		expect((await token(await sign(claims()))).status).toBe(200);
-		expect((await token(await sign(claims({ aud: issuer })))).status).toBe(200);
 		expect((await token(await sign(claims()), { client_id: "app" })).status).toBe(200);
+	});
+
+	it.skipIf(areaTarget().differs("assertion-audience-beside-issuer"))(
+		"refuses an assertion for the token endpoint, or naming its audience in a list, and spends none",
+		async () => {
+			const jti = `j-${Math.random()}`;
+			for (const aud of [tokenUrl, [issuer], ["x", issuer], [issuer, tokenUrl]]) {
+				expect(await refused(token(await sign(claims({ aud, jti })))), JSON.stringify(aud)).toEqual(
+					[401, "invalid_client"],
+				);
+			}
+			expect((await token(await sign(claims({ jti })))).status).toBe(200);
+		},
+	);
+
+	it("takes an assertion for the token endpoint, or naming its audience in a list, from a client accepting a loose audience", async () => {
+		const loose = (aud: unknown) => sign(claims({ iss: "loose", sub: "loose", aud }));
+		for (const aud of [tokenUrl, [tokenUrl], ["x", issuer], issuer]) {
+			expect((await token(await loose(aud))).status, JSON.stringify(aud)).toBe(200);
+		}
+		expect(await refused(token(await loose(`${issuer}/other`)))).toEqual([401, "invalid_client"]);
 	});
 
 	it("authenticates a client at introspection too", async () => {
