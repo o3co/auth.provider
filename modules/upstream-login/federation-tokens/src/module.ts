@@ -6,18 +6,24 @@ import { participants } from "@mod/session-participants";
 import { upstreamLoginReceivers, upstreams } from "@mod/upstreams";
 import { upstreamEndSessions } from "./contract.ts";
 import { endSessionAt } from "./end-session.ts";
-import { type Renewal, renewalIn } from "./renewal/renewal.ts";
-import { clientSection, routesIn } from "./routes/routes.ts";
+import { type Renewal, renewalIn, renewalTakes } from "./renewal/renewal.ts";
+import { clientSection, routesIn, routesTakes } from "./routes/routes.ts";
 import { section } from "./section.ts";
 import { upstreamTokenStore } from "./store.ts";
 import { resealerOver } from "./vault/resealer.ts";
-import { vaultFrom } from "./vault/vault.ts";
+import { vaultFrom, vaultTakes } from "./vault/vault.ts";
 
 const name = "federation-tokens";
 /** The one keeper the routes, the receiver and the participant share, built once. */
 const kept = contract<Renewal>("federation-tokens.kept");
 
-export default defineModule({ name, section }, (m) => [
+/**
+ * What the module takes: the store its resealer reads and `upstreams` for the end of session, and
+ * its helpers' (`vaultFrom`, `renewalIn`, `routesIn`); its own `kept` is not named.
+ */
+const takes = [upstreamTokenStore, upstreams, ...vaultTakes, ...renewalTakes, ...routesTakes];
+
+export default defineModule({ name, section, takes }, (m) => [
 	m.contribute(metadataSections).by(() => clientSection),
 	m
 		.contribute(resealers)
