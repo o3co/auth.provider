@@ -11,9 +11,11 @@ Internal module of `guard`: G26, how product code may reach the network, and G27
 - Reaching the network in ways a file's syntax does not show: code run by `eval` or a `Worker`, a native addon, a function handed in from elsewhere, the global object reached under another name, or a property named at run time. Review judges those.
 
 ## Offers
-- `networkRules` (G26, G27) and `reachesOf` (a file's places that reach the network).
+- `networkRules` (G26, G27), `helpersOf` (the plain helpers the packages' `forks` name, which the run's shared analysis reads beside the sources), `reachesIn` (a file's facts → the places it reaches the network) and `reachesOf` (a file read on its own).
 
 ## Invariants
+- It reads each file's `facts` (`guard-imports`), a fork's helper's too from the same shared analysis: an import's and a re-export's bindings (a default taken by name is a value the import names), a module loaded (`import()`, a loader's call, `import = require`), and a name or a property read with what it is bound to.
+- A name, or the owner of a property read, counts only as a value (its role `value`: never in a type or an ambient context). So a shorthand property and a local export read the global they name, and `require` in parentheses, or a loader `createRequire` made, loads as `require` does.
 - An import and a re-export are read alike: a default, a namespace or `export *` binds a module whole, a name binds that name, and one binding types alone reaches nothing.
 - A place reaches the network where shipped code does one of these:
   - Imports or re-exports, not as a type alone, a name that opens a connection or a server from `node:http`, `node:https`, `node:net`, `node:tls`, `node:dgram` or `node:http2`, or one that asks a resolver from `node:dns` or `node:dns/promises`, or one of those modules whole. Functions that reach nothing, such as `isIP` and `BlockList`, are not counted.
@@ -26,6 +28,7 @@ Internal module of `guard`: G26, how product code may reach the network, and G27
   - `outbound`: `node:http`'s and `node:https`'s `request` and `Agent`, `node:net`'s and `node:tls`'s `connect`, and `lookup` from `node:dns` and `node:dns/promises`.
   - `redis`: the `ioredis` client.
   - `smtp`: `node:net`'s and `node:tls`'s `connect`, and `nodemailer`.
+- A starter and its helper are read through their facts (`fork`, `join` and `lookup` by the bindings they import and the reads of them, `process` unbound); a call named `require`, or `import()`, counts as a load whatever binds it, as the launch form's own strictness asks, beside every loader the facts read.
 - A package declaring `outbound` may name in `forks` one shipped source this rule reads (the starter, a plain file, never a link) and its helper, a plain `.mjs` file beside it; `forks` naming more is refused. The starter's `node:child_process` is let through only where all of these hold; else it is refused with the condition it misses:
   - It imports `fork` alone by name and reaches `node:child_process` (under either name) no other way: no other import, no re-export, no `import()` or `require` of it, nor of a module named at run time alone.
   - It reads that binding in one call (a read in a type or a type-only export aside), and names the helper as `join(import.meta.dirname, "<helper>")` with `join` imported from `node:path`, giving it a list. Names are read by binding: one shadowing `fork`, `join` or `process` is another, and a shorthand property or an export naming `fork` is a read of it.

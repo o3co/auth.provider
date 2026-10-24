@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import type { Pkg } from "@mod/guard-imports";
-import ts from "typescript";
+import { type Edge, type FileFacts, lexicalAnalysis, type Pkg } from "@mod/guard-imports";
+import type ts from "typescript";
 import { budgetsAsTest, type Scope } from "../units.ts";
 import { forksOf, importsLookupAlone, isPlainHelper, launchRefusal } from "./forks.ts";
 
@@ -68,159 +68,83 @@ const nodeName = (specifier: string) =>
 const clientOf = (specifier: string) =>
 	clients.find((c) => specifier === c || specifier.startsWith(`${c}/`));
 
-/** Whether an identifier is read as a value: not a property's name, a declaration's name, or in a type. */
-function referenced(node: ts.Identifier): boolean {
-	const parent = node.parent;
-	if (ts.isPropertyAccessExpression(parent) && parent.name === node) return false;
-	if (
-		(ts.isPropertyAssignment(parent) ||
-			ts.isPropertyDeclaration(parent) ||
-			ts.isPropertySignature(parent) ||
-			ts.isMethodDeclaration(parent) ||
-			ts.isMethodSignature(parent) ||
-			ts.isImportSpecifier(parent) ||
-			ts.isExportSpecifier(parent)) &&
-		parent.name === node
-	) {
-		return false;
-	}
-	for (let at: ts.Node = parent; !ts.isSourceFile(at); at = at.parent) {
-		if (ts.isTypeNode(at)) return false;
-	}
-	return true;
-}
-
-/** What an import or a re-export binds of a module: all of it, or values and types by name. */
-interface Bound {
-	readonly specifier: string;
-	/** A default, a namespace, or `export *`: the module whole. */
-	readonly whole: boolean;
-	readonly named: readonly { readonly name: string; readonly typeOnly: boolean }[];
-}
-
-/** The binding of an import or a re-export, read alike as the card says; none for a type-only one or another statement. */
-function boundOf(statement: ts.Statement): Bound | undefined {
-	if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
-		const clause = statement.importClause;
-		if (!clause || clause.isTypeOnly) return undefined;
-		const bindings = clause.namedBindings;
-		return {
-			specifier: statement.moduleSpecifier.text,
-			whole:
-				clause.name !== undefined || (bindings !== undefined && ts.isNamespaceImport(bindings)),
-			named:
-				bindings && ts.isNamedImports(bindings)
-					? bindings.elements.map((e) => ({
-							name: (e.propertyName ?? e.name).text,
-							typeOnly: e.isTypeOnly,
-						}))
-					: [],
-		};
-	}
-	if (
-		ts.isExportDeclaration(statement) &&
-		!statement.isTypeOnly &&
-		statement.moduleSpecifier !== undefined &&
-		ts.isStringLiteral(statement.moduleSpecifier)
-	) {
-		const clause = statement.exportClause;
-		const elements =
-			clause && ts.isNamedExports(clause)
-				? clause.elements.map((e) => ({
-						name: (e.propertyName ?? e.name).text,
-						typeOnly: e.isTypeOnly,
-					}))
-				: [];
-		return {
-			specifier: statement.moduleSpecifier.text,
-			whole:
-				clause === undefined ||
-				ts.isNamespaceExport(clause) ||
-				elements.some((e) => e.name === "default" && !e.typeOnly),
-			named: elements.filter((e) => e.name !== "default"),
-		};
-	}
-	return undefined;
-}
-
-/** What a binding reaches: a client or a process, a module whole, or each value named; nothing where it binds types alone. */
-function reachedBy(bound: Bound): string[] {
-	const values = bound.named.filter((n) => !n.typeOnly).map((n) => n.name);
-	if (!bound.whole && values.length === 0) return [];
-	const client = clientOf(bound.specifier);
+/** What an import or a re-export reaches: a client or a process, a module whole (a default, a namespace, `export *`, a re-exported default), or each value named; nothing where it binds types alone. */
+function reachedByBindings(edge: Edge): string[] {
+	const specifier = edge.specifier.text ?? "";
+	const values = edge.bindings.filter((b) => !b.typeOnly);
+	const reexported = edge.form === "export-from";
+	const whole = values.some((b) => b.form !== "named" || (reexported && b.imported === "default"));
+	const named = values
+		.filter((b) => b.form === "named" && !(reexported && b.imported === "default"))
+		.map((b) => b.imported);
+	if (!whole && named.length === 0) return [];
+	const client = clientOf(specifier);
 	if (client) return [client];
-	const module = nodeName(bound.specifier);
+	const module = nodeName(specifier);
 	if (processes.includes(module)) return [module];
 	const names = reaching[module];
 	if (!names) return [];
 	return [
-		...(bound.whole ? [module] : []),
-		...values.filter((v) => names.includes(v)).map((v) => `${module} ${v}`),
+		...(whole ? [module] : []),
+		...named.filter((v) => names.includes(v)).map((v) => `${module} ${v}`),
 	];
 }
 
-/** Each place a file reaches the network, as `module name`, `module` (imported whole), a client, or a global. */
-export function reachesOf(path: string): string[] {
-	// The file alone, bound by the compiler: a name resolves to the declaration in scope where it is used.
-	// JavaScript sources too: a `.mjs` file is read as a `.ts` one is.
-	const program = ts.createProgram([path], {
-		noLib: true,
-		noResolve: true,
-		types: [],
-		allowJs: true,
-	});
-	const file = program.getSourceFile(path) as ts.SourceFile;
-	const checker = program.getTypeChecker();
-	const found: string[] = [];
-	/** Whether the name used here is declared in this file, so not the global. */
-	const local = (name: ts.Identifier) =>
-		checker.getSymbolAtLocation(name)?.declarations?.some((d) => d.getSourceFile() === file) ===
-		true;
-	for (const statement of file.statements) {
-		const bound = boundOf(statement);
-		if (bound !== undefined) found.push(...reachedBy(bound));
-	}
-	/** A module loaded by `import()` or `require` reaches as one imported whole; one named at run time, unknown. */
-	const loaded = (specifier: ts.Expression | undefined) => {
-		if (!specifier || !ts.isStringLiteralLike(specifier)) return "import()";
-		const client = clientOf(specifier.text);
-		const module = nodeName(specifier.text);
-		return client ?? (reaching[module] || processes.includes(module) ? module : undefined);
-	};
-	/** A network global named as a property of the global object, by a dot or a string literal. */
-	const globalReached = (node: ts.Node) => {
-		const owner =
-			ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)
-				? node.expression
-				: undefined;
-		if (!owner || !ts.isIdentifier(owner) || !globalObjects.includes(owner.text) || local(owner))
-			return undefined;
-		const name = ts.isPropertyAccessExpression(node)
-			? node.name.text
-			: ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)
-				? node.argumentExpression.text
-				: undefined;
-		return name && globals.includes(name) ? name : undefined;
-	};
-	const uses = (node: ts.Node): void => {
-		if (ts.isCallExpression(node)) {
-			const callee = node.expression;
-			const requiring = ts.isIdentifier(callee) && callee.text === "require" && !local(callee);
-			if (callee.kind === ts.SyntaxKind.ImportKeyword || requiring) {
-				const reach = loaded(node.arguments[0]);
-				if (reach) found.push(reach);
-			}
-		}
-		const reached = globalReached(node);
-		if (reached) found.push(reached);
-		if (ts.isIdentifier(node) && globals.includes(node.text) && !local(node) && referenced(node)) {
-			found.push(node.text);
-		}
-		ts.forEachChild(node, uses);
-	};
-	uses(file);
-	return found;
+/** What a module loaded whole reaches (`import()`, a loader's call, `import = require`); one named at run time, unknown. */
+function reachedByLoad(edge: Edge): string | undefined {
+	const specifier = edge.specifier.text;
+	if (specifier === undefined) return "import()";
+	const module = nodeName(specifier);
+	return (
+		clientOf(specifier) ?? (reaching[module] || processes.includes(module) ? module : undefined)
+	);
 }
+
+/** Each place a file's facts reach the network (its imports and re-exports, then the rest as written), as `module name`, `module` (imported whole), a client, or a global. */
+export function reachesIn(facts: FileFacts): string[] {
+	const bound = facts.edges
+		.filter((e) => (e.form === "import" || e.form === "export-from") && e.loads)
+		.flatMap(reachedByBindings);
+	const at = (node: ts.Node, rank: number) => ({ start: node.getStart(), rank });
+	const placed: { start: number; rank: number; reach: string }[] = [];
+	for (const edge of facts.edges) {
+		if (edge.form !== "dynamic-import" && edge.form !== "require" && edge.form !== "import-equals")
+			continue;
+		if (!edge.loads) continue;
+		const reach = reachedByLoad(edge);
+		if (reach) placed.push({ ...at(edge.node, 0), reach });
+	}
+	for (const member of facts.members) {
+		const owner = member.object;
+		const global =
+			owner.role === "value" &&
+			owner.binding?.kind === "unbound" &&
+			globalObjects.includes(owner.node.text);
+		if (global && member.name && globals.includes(member.name)) {
+			placed.push({ ...at(member.node, 1), reach: member.name });
+		}
+	}
+	for (const reference of facts.references) {
+		if (reference.role !== "value" || reference.binding?.kind !== "unbound") continue;
+		if (globals.includes(reference.node.text)) {
+			placed.push({ ...at(reference.node, 2), reach: reference.node.text });
+		}
+	}
+	placed.sort((a, b) => a.start - b.start || a.rank - b.rank);
+	return [...bound, ...placed.map((p) => p.reach)];
+}
+
+/** Each place a file reaches the network, read on its own. */
+export const reachesOf = (path: string): string[] =>
+	reachesIn(lexicalAnalysis([path]).factsOf(path));
+
+/** The plain helpers each package's `forks` names, by path: files a run reads beside the sources. */
+export const helpersOf = (packages: readonly Pkg[]) =>
+	packages.flatMap((p) =>
+		[...(forksOf(p.manifest.forks)?.values() ?? [])]
+			.map((helper) => join(p.dir, helper))
+			.filter(isPlainHelper),
+	);
 
 /** Whether a declared word lets a package reach this; a module imported whole needs a word that names it. */
 const covers = (allowed: readonly string[], reach: string) =>
@@ -247,14 +171,14 @@ export function networkRules(s: Scope, p: Pkg) {
 		if (helper === undefined) return "forks does not name it";
 		if (!known.includes("outbound")) return "forks needs the word outbound";
 		if (!oneStarter) return "forks names one starter and its helper";
-		return launchRefusal(p.dir, file, helper);
+		return launchRefusal(s.factsOf(p, file), p.dir, file, helper);
 	};
 	const reached = new Set<string>();
 	/** The starters already held to the form, by what they reach. */
 	const checked = new Set<string>();
 	for (const file of s.sources(p)) {
 		if (s.isTest(file) || budgetsAsTest(s, p, file)) continue;
-		const reaches = reachesOf(join(p.dir, file));
+		const reaches = reachesIn(s.factsOf(p, file));
 		for (const reach of reaches) {
 			reached.add(reach);
 			if (reach === "node:child_process") {
@@ -288,9 +212,10 @@ export function networkRules(s: Scope, p: Pkg) {
 			s.report(rule, `${p.name}/${helper}`, "(forks names it, but it is no plain .mjs file)");
 			continue;
 		}
-		const reaches = reachesOf(path);
+		const facts = s.factsOf(p, helper);
+		const reaches = reachesIn(facts);
 		for (const reach of reaches) reached.add(reach);
-		if (!importsLookupAlone(path, reaches)) {
+		if (!importsLookupAlone(facts, reaches)) {
 			s.report(rule, `${p.name}/${helper}`, "(imports node:dns/promises' lookup alone)");
 		}
 	}

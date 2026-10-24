@@ -1,7 +1,8 @@
 import { join } from "node:path";
 import ts from "typescript";
+import { valuesTaken } from "../rules.ts";
 import type { Scope } from "../scope.ts";
-import { parse, valuesFrom } from "../source.ts";
+import { parse } from "../source.ts";
 import type { Pkg } from "../workspace.ts";
 
 const isStrings = (value: unknown): value is string[] =>
@@ -123,7 +124,7 @@ export function takenByRules(s: Scope) {
 		for (const p of s.packages) {
 			if (p === owner) continue;
 			for (const path of shipped(s, p)) {
-				const taken = valuesFrom(path, owner.name);
+				const taken = valuesTaken(s.factsOf(p, path.slice(p.dir.length + 1)), owner.name);
 				for (const [name, takers] of allowed) {
 					if (takers.includes(p.name)) continue;
 					if (taken.includes(name) || taken.includes("*")) {

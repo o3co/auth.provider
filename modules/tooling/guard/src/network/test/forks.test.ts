@@ -63,6 +63,22 @@ describe("G26: the one starter forks declares, starting its helper as written", 
 		expect(said(starting())).toEqual([]);
 	});
 
+	it("reads a helper the workspace's scan leaves out, as the shared analysis takes the helpers checked", () => {
+		const p = starting(undefined, undefined, `@t/unscanned${Math.random()}`);
+		const unscanned = { ...p, files: p.files.filter((f) => f !== helper) };
+		expect(said(unscanned)).toEqual([]);
+	});
+
+	it("takes join imported beside another of node:path's functions, by another import", () => {
+		const split = launch((t) =>
+			t.replace(
+				'import { join } from "node:path";',
+				'import { join } from "node:path";\nimport { basename } from "node:path";\nexport const named = basename("x");',
+			),
+		);
+		expect(said(starting({ [starter]: split }, undefined, `@t/split${Math.random()}`))).toEqual([]);
+	});
+
 	it("refuses a process started by a file forks does not name, or in a package not declaring outbound", () => {
 		expect(said(starting({}, { forks: {} }))).toEqual([
 			`${starter} node:child_process (forks does not name it)`,
