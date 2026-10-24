@@ -37,6 +37,7 @@ import {
 	secretFrom,
 } from "../grant/grant.ts";
 import { shared } from "../grant/shared.ts";
+import { browserBase } from "../intents/intents.ts";
 import { connectionName, type Settings } from "../section.ts";
 import {
 	type GrantStore,
@@ -71,7 +72,7 @@ export interface ConnectParts {
 	readonly log: Log;
 }
 
-export const browserBase = "/session/federation-grants";
+export { browserBase } from "../intents/intents.ts";
 
 const plain = (status: number, text: string): HttpResponse => ({
 	status,
