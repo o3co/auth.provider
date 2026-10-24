@@ -253,3 +253,4 @@ What each module contains is described by that module's contract card (each modu
 | What is composed together by default (a feature's wiring, the bridges between features), a selection's composition (what it needs to run, each axis's adapter), the full template, and the features that opt in | contract | combinations |
 | Declaring that a feature's store interfaces must be wired (`storeWiring` in the feature's package.json, checked by guard) | setting | the feature whose store interfaces must be wired |
 | How distribution is bundled | setting | distribution |
+| The API site: a release's API built from the shipped bundles, by public name, one dir per minor, and the site's root and list of releases | contract | api-docs |

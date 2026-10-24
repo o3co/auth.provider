@@ -60,6 +60,17 @@ jobs:
           restore-keys: pnpm-store-
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      # The API site builds from the bundles as they stand, before a release
+      # does it from what it published; nothing is written to the pages.
+      - name: The API site builds from the bundles
+        if: matrix.node == '26'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm bundles
+          version="$(node -p "require('./package.json').version.split('-')[0]")"
+          pnpm api-docs link "$PWD/dist/bundles" "$RUNNER_TEMP/api-project"
+          pnpm api-docs build "$RUNNER_TEMP/api-project" "$RUNNER_TEMP/api-site" "$version"
       - name: No cross-project references or agent-workspace paths
         run: |
           set -euo pipefail

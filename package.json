@@ -33,6 +33,7 @@
 		"distribution": "pnpm --filter @mod/distribution run check",
 		"test:integration": "vitest run --config vitest.integration.config.ts",
 		"bundles": "pnpm --filter @mod/distribution run bundles",
+		"api-docs": "pnpm --filter @mod/api-docs run api-docs",
 		"release:check": "pnpm --filter @mod/distribution run release-check",
 		"release:pack": "pnpm --filter @mod/distribution run release-pack",
 		"release:published": "pnpm --filter @mod/distribution run release-published"
