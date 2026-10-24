@@ -50,10 +50,10 @@ const jwksUri = () => `http://127.0.0.1:${port}/jwks`;
 /** Clients over outbound reaching the key set server alone; `section` is the client's own. */
 async function boot(section: Record<string, unknown>, reach = true) {
 	const stand = memoryRecords<true>(() => Date.now(), { shards: 1, perShard: 1 });
-	const location = defineModule({ name: "token-endpoint" }, (m) => [
+	const location = defineModule({ name: "token-endpoint", takes: [] }, (m) => [
 		m.provide(tokenEndpointLocation).by(() => ({ url: tokenUrl })),
 	]);
-	const spent = defineModule({ name: "spent" }, (m) => [
+	const spent = defineModule({ name: "spent", takes: [] }, (m) => [
 		m
 			.provide(spentAssertions)
 			.by(() => ({ save: (name, lifetimeMs) => stand.records.create(name, true, lifetimeMs) })),

@@ -13,7 +13,7 @@ import { httpConfig, testRequest } from "@mod/http/testing";
 import issuerModule from "@mod/issuer/module";
 import { issuerConfig } from "@mod/issuer/testing";
 import { assemble, BootRefused, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
-import { quietRuntime, recordingLog, unavailableSwitch } from "@mod/kernel/testing";
+import { quietRuntime, recordingLog, takesUnused, unavailableSwitch } from "@mod/kernel/testing";
 import outboundModule from "@mod/outbound/module";
 import { memoryRecords } from "@mod/records/testing";
 import secretHashModule from "@mod/secret-hash/module";
@@ -67,10 +67,10 @@ async function boot({
 } = {}) {
 	const stand = memoryRecords<true>(() => now, { shards: 1, perShard: 1 });
 	const down = unavailableSwitch<SpentAssertions>("spent assertions");
-	const location = defineModule({ name: "token-endpoint" }, (m) => [
+	const location = defineModule({ name: "token-endpoint", takes: [] }, (m) => [
 		m.provide(tokenEndpointLocation).by(() => ({ url: tokenEndpoint ?? undefined })),
 	]);
-	const source = defineModule({ name: "source" }, (m) => [
+	const source = defineModule({ name: "source", takes: [] }, (m) => [
 		m.contribute(clientSources).by(() => ({
 			find: async (id) => {
 				looked.push(id);
@@ -78,7 +78,7 @@ async function boot({
 			},
 		})),
 	]);
-	const spent = defineModule({ name: "spent" }, (m) => [
+	const spent = defineModule({ name: "spent", takes: [] }, (m) => [
 		m
 			.provide(spentAssertions)
 			.by(() =>
@@ -95,7 +95,7 @@ async function boot({
 			? { id, kind: "confidential" as const, method, sections }
 			: confidentialClient({ id, method, sections });
 	};
-	const app = await assemble({
+	const input = {
 		modules: [
 			http,
 			outboundModule,
@@ -122,8 +122,9 @@ async function boot({
 			]),
 		},
 		runtime,
-	});
-	return { c: app.get(clients), down };
+	};
+	const app = await assemble(input);
+	return { c: app.get(clients), down, input };
 }
 
 /** The claims of a good assertion, changed as given; a claim given as undefined is left out. */
@@ -586,4 +587,8 @@ describe("private_key_jwt", () => {
 		expect(section.parse({})).toEqual({ "max-lifetime": 3600, "clock-skew": 30 });
 		expect(takes({ other: 1 })).toBe(false);
 	});
+});
+
+it("takes all it names", async () => {
+	expect(await takesUnused((await boot()).input)).toEqual({});
 });

@@ -3,12 +3,15 @@ import { externalJwt } from "@mod/external-jwt";
 import { issuer } from "@mod/issuer";
 import { defineModule } from "@mod/kernel";
 import { tokenEndpointLocation } from "@mod/token-endpoint";
-import { clientKeysIn } from "./keys/keys.ts";
+import { clientKeysIn, keysTakes } from "./keys/keys.ts";
 import { assertionMethod } from "./method.ts";
 import { section } from "./section.ts";
 import { spentAssertions } from "./store.ts";
 
-export default defineModule({ name: "client-assertion", section }, (m) => [
+/** What the module takes: `clientKeysIn`'s, and what the method is built over. */
+const takes = [...keysTakes, tokenEndpointLocation, spentAssertions, externalJwt, issuer];
+
+export default defineModule({ name: "client-assertion", section, takes }, (m) => [
 	m.contribute(metadataSections).by((c) => clientKeysIn(c)),
 	m.contribute(authMethods).by(async (c) => {
 		const { url } = await c.get(tokenEndpointLocation);
