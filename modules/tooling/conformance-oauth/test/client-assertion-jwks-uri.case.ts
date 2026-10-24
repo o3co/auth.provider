@@ -7,7 +7,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { oauthScene } from "../src/main.ts";
 
 const issuer = "https://issuer.example";
-const tokenUrl = `${issuer}/oauth/token`;
 const signing = generateKeyPairSync("ed25519");
 const clientKey = generateKeyPairSync("ec", { namedCurve: "P-256" });
 
@@ -61,7 +60,7 @@ const now = () => Math.floor(Date.now() / 1000);
 const claims = (extra: Record<string, unknown> = {}): JWTPayload => ({
 	iss: "app",
 	sub: "app",
-	aud: tokenUrl,
+	aud: issuer,
 	exp: now() + 60,
 	iat: now(),
 	jti: `j-${Math.random()}`,
