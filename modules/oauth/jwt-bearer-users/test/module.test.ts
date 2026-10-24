@@ -14,6 +14,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
+import { takesUnused } from "@mod/kernel/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { type Ledger, ledgers, type UpstreamNames, upstreamNames, type Verified } from "@mod/users";
 import usersModule from "@mod/users/module";
@@ -26,7 +27,7 @@ const devices = { upstream: "device", issuer: "app.devices" };
 const seen = contract<{ resolvers: readonly LinkedSubjects[]; names: readonly UpstreamNames[] }>(
 	"seen",
 );
-const reader = defineModule({ name: "reader" }, (m) => [
+const reader = defineModule({ name: "reader", takes: [linkedSubjects, upstreamNames] }, (m) => [
 	m.provide(seen).by(async (c) => ({
 		resolvers: await c.collect(linkedSubjects),
 		names: await c.collect(upstreamNames),
@@ -34,30 +35,34 @@ const reader = defineModule({ name: "reader" }, (m) => [
 ]);
 /** Stands for jwt-bearer's list of linked issuers. */
 const linked = (issuers: LinkedIssuers) =>
-	defineModule({ name: "jwt-bearer" }, (m) => [m.provide(linkedIssuers).by(() => issuers)]);
+	defineModule({ name: "jwt-bearer", takes: [] }, (m) => [
+		m.provide(linkedIssuers).by(() => issuers),
+	]);
 const ledgerAnswering = (answer: () => Promise<Verified>): Ledger => ({
 	verify: async () => ({ kind: "none" }),
 	bySubject: async () => ({ kind: "none" }),
 	byUpstream: answer,
 });
 
-async function boot(answer: () => Promise<Verified>, issuers = [devices], extra: Module[] = []) {
-	const app = await assemble({
-		modules: [
-			usersModule,
-			secretHashModule,
-			memoryUsersStores().module,
-			defineModule({ name: "ledger" }, (m) => [
-				m.contribute(ledgers).by(() => ledgerAnswering(answer)),
-			]),
-			linked(issuers),
-			bridge,
-			reader,
-			...extra,
-		],
-		config: { ...kernelConfig(), users: {} },
-	});
-	return app.get(seen);
+/** users with a ledger answering `answer`, these linked issuers, the bridge and a reader. */
+const assembly = (answer: () => Promise<Verified>, issuers = [devices], extra: Module[] = []) => ({
+	modules: [
+		usersModule,
+		secretHashModule,
+		memoryUsersStores().module,
+		defineModule({ name: "ledger", takes: [] }, (m) => [
+			m.contribute(ledgers).by(() => ledgerAnswering(answer)),
+		]),
+		linked(issuers),
+		bridge,
+		reader,
+		...extra,
+	],
+	config: { ...kernelConfig(), users: {} },
+});
+
+async function boot(...args: Parameters<typeof assembly>) {
+	return (await assemble(assembly(...args))).get(seen);
 }
 
 it("resolves a linked signer to the subject of the user users finds, none where it finds none, unavailable where it cannot tell", async () => {
@@ -89,7 +94,7 @@ it("declares each linked issuer's name in one list, an empty one where none is l
 });
 
 it("lets users refuse boot on a linked name another module declares for another issuer", async () => {
-	const other = defineModule({ name: "federation" }, (m) => [
+	const other = defineModule({ name: "federation", takes: [] }, (m) => [
 		m.contribute(upstreamNames).by(() => ({
 			declaredBy: "federation",
 			names: [{ name: "device", issuer: "https://elsewhere.example" }],
@@ -101,4 +106,8 @@ it("lets users refuse boot on a linked name another module declares for another 
 	expect((refused as BootRefused).refusals.map((r) => r.reason).join("; ")).toContain(
 		"jwt-bearer-users",
 	);
+});
+
+it("takes all it names", async () => {
+	expect(await takesUnused(assembly(async () => ({ kind: "none" })))).toEqual({});
 });
