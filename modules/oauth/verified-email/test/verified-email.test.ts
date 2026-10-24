@@ -6,7 +6,7 @@ import {
 	type Module,
 	Unavailable,
 } from "@mod/kernel";
-import { quietRuntime } from "@mod/kernel/testing";
+import { quietRuntime, takesUnused } from "@mod/kernel/testing";
 import secretHashModule from "@mod/secret-hash/module";
 import { type AuthContext, sessions } from "@mod/session";
 import { stubSessions } from "@mod/session/testing";
@@ -44,7 +44,7 @@ const verified = (value: unknown) => ({ [userAttribute.emailVerified]: value });
 /** Tokens with the policy over a reader answering `answer`; `reads` lists each subject and handle read. */
 async function over(answer: () => Promise<AttributesAnswer>) {
 	const reads: (readonly [string, string | undefined])[] = [];
-	const reader = defineModule({ name: "subject-attributes" }, (m) => [
+	const reader = defineModule({ name: "subject-attributes", takes: [] }, (m) => [
 		m.provide(subjectAttributes).by(() => ({
 			of: async (subject, handle) => {
 				reads.push([subject, handle]);
@@ -52,12 +52,13 @@ async function over(answer: () => Promise<AttributesAnswer>) {
 			},
 		})),
 	]);
-	const app = await assemble({
+	const input = {
 		modules: [tokensStandIn(), reader, verifiedEmail],
 		config: kernelConfig(),
 		runtime,
-	});
-	return { admits: (request: IssuanceRequest) => app.get(tokens).admits(request), reads };
+	};
+	const app = await assemble(input);
+	return { admits: (request: IssuanceRequest) => app.get(tokens).admits(request), reads, input };
 }
 
 describe("what counts as verified", () => {
@@ -137,7 +138,7 @@ describe("over users and the session's login", () => {
 		attributes: { source, values: { [userAttribute.emailVerified]: true } },
 	});
 	/** A ledger that cannot look users up by subject. */
-	const unanswering = defineModule({ name: "ledger" }, (m) => [
+	const unanswering = defineModule({ name: "ledger", takes: [] }, (m) => [
 		m.contribute(ledgers).by(() => ({
 			verify: async () => ({ kind: "none" }),
 			bySubject: async () => ({ kind: "unanswerable" }),
@@ -150,7 +151,7 @@ describe("over users and the session's login", () => {
 				memoryUsersStores().module,
 				...parts.users,
 				secretHashModule,
-				defineModule({ name: "sessions" }, (m) => [
+				defineModule({ name: "sessions", takes: [tokens] }, (m) => [
 					// Sessions that reach tokens as they are built, as a composition's closing tokens does.
 					m.provide(sessions).by(async (c) => {
 						await c.get(tokens);
@@ -198,4 +199,9 @@ describe("over users and the session's login", () => {
 		const upstream = await boot({ users, config: {}, login: login("federation:acme") });
 		expect(await upstream.get(tokens).admits(asked("session", "h1"))).toEqual(refused);
 	});
+});
+
+it("takes all it names", async () => {
+	const { input } = await over(async () => known(verified(true)));
+	expect(await takesUnused(input)).toEqual({});
 });
