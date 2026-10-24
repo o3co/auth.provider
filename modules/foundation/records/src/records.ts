@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { type Clock, isUnavailable, type Log, type Random, Unavailable } from "@mod/kernel";
+import {
+	BuildRefused,
+	type Clock,
+	isUnavailable,
+	type Log,
+	type Random,
+	Unavailable,
+} from "@mod/kernel";
 import {
 	type BatchWrite,
 	codePointOrder,
@@ -128,7 +135,8 @@ function claim(place: Place, kind: "records" | "secret records") {
 	openedFor.set(place.store, kinds);
 	const held = kinds.get(place.space.name);
 	if (held !== undefined && held !== kind) {
-		throw new Error(`a space holds records or secret records, not both: ${place.space.name}`);
+		// A refusal of the boot, named by the space, so the operator reads why.
+		throw new BuildRefused(place.space.name, "a space holds records or secret records, not both");
 	}
 	kinds.set(place.space.name, kind);
 }

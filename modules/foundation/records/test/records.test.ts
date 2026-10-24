@@ -1,5 +1,12 @@
 import { randomBytes } from "node:crypto";
-import { assemble, contract, defineModule, isUnavailable, kernelConfig } from "@mod/kernel";
+import {
+	assemble,
+	BuildRefused,
+	contract,
+	defineModule,
+	isUnavailable,
+	kernelConfig,
+} from "@mod/kernel";
 import { quietRuntime, recordingLog } from "@mod/kernel/testing";
 import { type Space, type Store, spaces, store } from "@mod/store";
 import { type SimulatedStore, simulatedStore } from "@mod/store/testing";
@@ -878,16 +885,28 @@ it("looks up any string under a secret, empty or odd, and refuses none for its s
 });
 
 it("refuses a space opened for records and for secret records on one store, in either order", async () => {
-	const refusal = "a space holds records or secret records, not both: records-test";
+	// The boot's refusal, named by the space: assembly reports its where and reason as written.
+	const refusedBy = (opening: () => unknown) => {
+		try {
+			opening();
+		} catch (error) {
+			return BuildRefused.is(error) ? { where: error.where, reason: error.reason } : error;
+		}
+		return undefined;
+	};
+	const refusal = {
+		where: "records-test",
+		reason: "a space holds records or secret records, not both",
+	};
 	const first = await open();
 	recordsIn<Counted>(first.place);
 	recordsIn<Counted>(first.place);
-	expect(() => secretRecordsIn<Counted>(first.place)).toThrow(refusal);
+	expect(refusedBy(() => secretRecordsIn<Counted>(first.place))).toEqual(refusal);
 	const second = await open();
 	// Secret records keep their names as records of the same space: that is not a second kind.
 	secretRecordsIn<Counted>(second.place).named;
 	secretRecordsIn<Counted>(second.place);
-	expect(() => recordsIn<Counted>(second.place)).toThrow(refusal);
+	expect(refusedBy(() => recordsIn<Counted>(second.place))).toEqual(refusal);
 	// Another store, or another space, holds its own kind.
 	secretRecordsIn<Counted>((await open()).place);
 	recordsIn<Counted>({ ...second.place, space: { ...space, name: "records-test.other" } });
