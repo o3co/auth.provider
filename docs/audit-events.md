@@ -71,6 +71,15 @@ Every event carries its kind and the time `kernel`'s clock gives it, and a subje
 | `federation.token.failed` | `idp`, `client`, `reason`, `source` | the calling client is refused the upstream token (`reason`); not when unlinked, limited or a 503 |
 | `federation.token.succeeded` | `idp`, `client`, `refreshed`, `source` | the calling client is handed the upstream token, refreshed first or not (`refreshed`) |
 
+## @mod/login-passkey
+
+| Kind | Attributes | Recorded when |
+|---|---|---|
+| `passkey.password_refused` | `source` | a password login of a subject holding a passkey is refused (`password = refused-when-held`) |
+| `passkey.session.held` | `source` | a passkey login is held by a gate before its session opens |
+| `passkey.session.opened` | `source` | a passkey login opens a session |
+| `passkey.session.refused` | `reason`, `source` | a passkey login is refused: `reason` is the assertion's refusal, `unknown_user`, `revoked` or `gate_refused` |
+
 ## @mod/login-password
 
 | Kind | Attributes | Recorded when |

@@ -303,6 +303,18 @@ From `@mod/login-gates`.
 |---|---|---|---|---|---|---|
 | `login-gates.return-targets` | list of string | `[]` |  |  |  | The https URLs (http only on a loopback host), matched as written, a login may return to besides the return paths modules contribute. |
 
+## login-passkey
+
+From `@mod/login-passkey`.
+
+| Key | Type | Default | Required | Variable | Example | Description |
+|---|---|---|---|---|---|---|
+| `login-passkey.counts-as-mfa` | boolean | `true` |  |  |  | Whether a passkey login whose user was verified proves a second factor too (amr `mfa`). |
+| `login-passkey.attempts` | integer (1–100) | `20` |  |  |  | Requests allowed per source in each window, on each of the two routes. |
+| `login-passkey.window` | string | `15m` |  |  |  | The window `attempts` is counted over, from 1m to 1d. |
+| `login-passkey.password` | allowed \| refused-when-held | `allowed` |  |  |  | `refused-when-held`: a password login of a subject holding a passkey is refused, but in `password-exempt-group`. |
+| `login-passkey.password-exempt-group` | string |  |  |  |  | A group of users whose password logins `refused-when-held` lets through. |
+
 ## login-password
 
 From `@mod/login-password`.

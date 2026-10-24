@@ -45,6 +45,8 @@ Marks and reasons say where a guarantee is kept and where it is not: a mark is i
 | GET | `/session/federation-grants/consent` | `@mod/federation-grants` | form | `rate-limit.requests-per-source` | no |  | `rate-limit.requests-per-source` |  |
 | POST | `/session/federation-grants/consent` | `@mod/federation-grants` | form | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | POST | `/session/login` | `@mod/login-password` | form, json | `csrf`, `rate-limit.attempts-per-source` | yes | `csrf` | `rate-limit.attempts-per-source` |  |
+| POST | `/session/login/passkey` | `@mod/login-passkey` | json | `csrf`, `rate-limit.attempts-per-source` | yes | `csrf` | `rate-limit.attempts-per-source` |  |
+| POST | `/session/login/passkey/options` | `@mod/login-passkey` | json, form, none | `csrf`, `rate-limit.attempts-per-source` | yes | `csrf` | `rate-limit.attempts-per-source` |  |
 | POST | `/session/logout` | `@mod/logout` | form, json, none | `csrf` | yes | `csrf` | It closes only the requester's own session; there is nothing to guess or spend. |  |
 | POST | `/session/mfa/challenge` | `@mod/mfa-flows` | form, json | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
 | POST | `/session/mfa/enrollment` | `@mod/mfa-flows` | form, json | `csrf`, `rate-limit.requests-per-source` | yes | `csrf` | `rate-limit.requests-per-source` |  |
